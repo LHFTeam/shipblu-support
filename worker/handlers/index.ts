@@ -1,5 +1,7 @@
 import type { ClaimedJob, JobType } from '@/lib/queue';
 import { cleanup } from './cleanup';
+import { processWebhook } from './process-webhook';
+import { sendEmail } from './send-email';
 
 export type JobHandler = (job: ClaimedJob) => Promise<void>;
 
@@ -8,10 +10,13 @@ export type JobHandler = (job: ClaimedJob) => Promise<void>;
  * type has no handler fails loudly rather than being silently dropped, so a
  * half-deployed rename shows up immediately in the dead queue.
  *
- * Phase 1 (email) and Phase 2 (WhatsApp) register their handlers here.
+ * Phase 2 (WhatsApp) registers send_whatsapp, download_media and
+ * sync_whatsapp_templates here.
  */
 export const handlers: Partial<Record<JobType, JobHandler>> = {
   cleanup,
+  process_webhook: processWebhook,
+  send_email: sendEmail,
 };
 
 export function resolveHandler(type: string): JobHandler {
