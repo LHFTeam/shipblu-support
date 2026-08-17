@@ -68,8 +68,19 @@ async function main() {
   console.log('[worker] listening for job_enqueued');
 
   // A deploy kills the previous worker mid-job; return those rows to the queue.
-  const reclaimed = await reclaimStalledJobs();
-  if (reclaimed > 0) console.log(`[worker] reclaimed ${reclaimed} stalled job(s)`);
+  //
+  // Deliberately non-fatal. This used to run unguarded, so a database that was
+  // briefly unreachable at boot took the whole process down — and because Render
+  // restarts a dead worker immediately, a transient blip became a crash loop
+  // that looked far worse than the underlying problem. The main loop below
+  // already retries with a backoff, and it re-runs this sweep every five
+  // minutes, so failing here costs nothing but a short delay.
+  try {
+    const reclaimed = await reclaimStalledJobs();
+    if (reclaimed > 0) console.log(`[worker] reclaimed ${reclaimed} stalled job(s)`);
+  } catch (error) {
+    console.error('[worker] startup reclaim failed, continuing', error);
+  }
 
   const shutdown = (signal: string) => {
     console.log(`[worker] ${signal} received, finishing current batch`);

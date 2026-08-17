@@ -3,7 +3,7 @@ import type { NextConfig } from 'next';
 const nextConfig: NextConfig = {
   // The worker and job runner import the same `db/` and `lib/` modules as the app.
   // Keeping these external stops Next from trying to bundle native/node-only deps.
-  serverExternalPackages: ['postgres', '@node-rs/argon2', 'mailparser'],
+  serverExternalPackages: ['postgres', '@node-rs/argon2'],
 
   // Support tickets contain customer PII; never leak details through error pages.
   poweredByHeader: false,
