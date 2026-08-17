@@ -212,7 +212,7 @@ services:
     # 02:00 Africa/Cairo = 00:00 UTC. Render cron schedules are UTC.
     schedule: '0 0 * * *'
     buildCommand: npm ci --include=dev
-    startCommand: npm run job -- rollup_metrics && npm run job -- cleanup
+    startCommand: npm run job -- cleanup && npm run job -- rollup_metrics
     envVars:
       - fromGroup: shipblu-shared
       - key: DATABASE_URL

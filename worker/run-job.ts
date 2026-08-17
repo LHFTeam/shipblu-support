@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { closeDb } from '@/db/client';
 import type { ClaimedJob, JobType } from '@/lib/queue';
-import { resolveHandler } from './handlers';
+import { isPlannedButUnimplemented, resolveHandler } from './handlers';
 
 /**
  * One-shot job runner, invoked by Render cron jobs as `npm run job -- <type>`.
@@ -19,6 +19,15 @@ async function main() {
   if (!type) {
     console.error('Usage: npm run job -- <job_type>');
     process.exit(1);
+  }
+
+  // The Blueprint provisions every cron job up front, so schedules for later
+  // phases fire before their handler exists. Exit 0 rather than failing the run:
+  // a cron that "fails" on every firing by design teaches people to ignore cron
+  // failures, and then a real one goes unnoticed.
+  if (isPlannedButUnimplemented(type)) {
+    console.log(`[job] ${type} is scheduled but not implemented yet — skipping`);
+    return;
   }
 
   const handler = resolveHandler(type);
