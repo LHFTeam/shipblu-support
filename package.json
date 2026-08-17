@@ -1,0 +1,59 @@
+{
+  "name": "shipblu-support",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "NODE_ENV=production next build",
+    "start": "next start -p ${PORT:-3000}",
+    "worker": "tsx worker/index.ts",
+    "worker:dev": "tsx watch worker/index.ts",
+    "job": "tsx worker/run-job.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx db/migrate.ts",
+    "db:studio": "drizzle-kit studio",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@node-rs/argon2": "2.1.0",
+    "drizzle-orm": "0.45.2",
+    "html-to-text": "9.0.5",
+    "luxon": "3.7.2",
+    "mailparser": "3.9.15",
+    "next": "16.3.1",
+    "postgres": "3.4.9",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "sanitize-html": "2.17.7",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/html-to-text": "9.0.4",
+    "@types/luxon": "3.7.4",
+    "@types/mailparser": "3.4.6",
+    "@types/node": "22.20.1",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@types/sanitize-html": "2.16.1",
+    "dotenv": "^17.4.2",
+    "drizzle-kit": "0.31.10",
+    "eslint": "9.39.5",
+    "eslint-config-next": "16.3.1",
+    "prettier": "3.9.6",
+    "tailwindcss": "4.3.3",
+    "tsx": "4.23.12",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}

@@ -1,0 +1,46 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-brand-50: oklch(0.97 0.02 240);
+  --color-brand-100: oklch(0.93 0.04 240);
+  --color-brand-500: oklch(0.62 0.16 245);
+  --color-brand-600: oklch(0.54 0.16 245);
+  --color-brand-700: oklch(0.46 0.14 245);
+}
+
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.21 0.01 250);
+  --muted: oklch(0.97 0.005 250);
+  --border: oklch(0.92 0.005 250);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: oklch(0.18 0.01 250);
+    --foreground: oklch(0.96 0.005 250);
+    --muted: oklch(0.24 0.01 250);
+    --border: oklch(0.3 0.01 250);
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    'Helvetica Neue',
+    Arial,
+    'Noto Sans Arabic',
+    sans-serif;
+}
+
+/* The KB and customer portal render Arabic; agent-authored content can mix
+   directions, so let the browser resolve direction per block. */
+[dir='rtl'] {
+  text-align: right;
+}

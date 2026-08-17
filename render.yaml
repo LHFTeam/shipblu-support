@@ -1,0 +1,218 @@
+# Render Blueprint — ShipBlu Support
+#
+# Frankfurt throughout, to sit next to the Supabase project in eu-central-1. A
+# console page issues 10-30 queries, so app-to-database round trips dominate
+# page latency; colocation keeps them at ~1-3ms instead of ~30-50ms.
+
+previewsEnabled: false
+
+envVarGroups:
+  # Shared, non-secret settings. Secrets (database URLs, provider tokens) are set
+  # per-service in the dashboard and deliberately not committed here.
+  - name: shipblu-shared
+    envVars:
+      - key: NODE_VERSION
+        value: '22'
+      - key: EMAIL_FROM_NAME
+        value: ShipBlu Support
+      - key: SUPABASE_STORAGE_BUCKET
+        value: attachments
+
+services:
+  # ---------------------------------------------------------------- production
+  - type: web
+    name: shipblu-support
+    runtime: node
+    region: frankfurt
+    plan: standard # 2GB RAM / 1 CPU
+    branch: main
+    buildCommand: npm ci && npm run build
+    # Runs after build, before traffic shifts. Migrations are idempotent, so a
+    # rolled-back deploy re-running them is safe.
+    preDeployCommand: npm run db:migrate
+    startCommand: npm run start
+    healthCheckPath: /api/health
+    scaling:
+      minInstances: 1
+      maxInstances: 3
+      targetCPUPercent: 70
+    envVars:
+      - fromGroup: shipblu-shared
+      - key: NODE_ENV
+        value: production
+      - key: APP_URL
+        sync: false
+      - key: APP_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_URL_SESSION
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: EMAIL_PROVIDER
+        sync: false
+      - key: EMAIL_API_KEY
+        sync: false
+      - key: EMAIL_WEBHOOK_SECRET
+        sync: false
+      - key: EMAIL_FROM_ADDRESS
+        sync: false
+      - key: EMAIL_REPLY_DOMAIN
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_WABA_ID
+        sync: false
+      - key: WHATSAPP_ACCESS_TOKEN
+        sync: false
+      - key: WHATSAPP_APP_SECRET
+        sync: false
+      - key: WHATSAPP_VERIFY_TOKEN
+        sync: false
+
+  - type: worker
+    name: shipblu-support-worker
+    runtime: node
+    region: frankfurt
+    plan: starter # 512MB / 0.5 CPU — the worker is I/O bound, not CPU bound
+    branch: main
+    buildCommand: npm ci && npm run build
+    startCommand: npm run worker
+    envVars:
+      - fromGroup: shipblu-shared
+      - key: NODE_ENV
+        value: production
+      - key: APP_URL
+        sync: false
+      - key: APP_SECRET
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_URL_SESSION
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: EMAIL_PROVIDER
+        sync: false
+      - key: EMAIL_API_KEY
+        sync: false
+      - key: EMAIL_FROM_ADDRESS
+        sync: false
+      - key: EMAIL_REPLY_DOMAIN
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_ACCESS_TOKEN
+        sync: false
+
+  # -------------------------------------------------------------- staging
+  - type: web
+    name: shipblu-support-staging
+    runtime: node
+    region: frankfurt
+    plan: starter
+    branch: claude/shipblu-support-app-03p2we
+    buildCommand: npm ci && npm run build
+    preDeployCommand: npm run db:migrate
+    startCommand: npm run start
+    healthCheckPath: /api/health
+    envVars:
+      - fromGroup: shipblu-shared
+      - key: NODE_ENV
+        value: production
+      - key: APP_URL
+        sync: false
+      - key: APP_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_URL_SESSION
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      # Staging never sends real mail.
+      - key: EMAIL_PROVIDER
+        value: local
+
+  # ------------------------------------------------------------- cron jobs
+  # These run `npm run job -- <type>` directly rather than hitting an HTTP
+  # endpoint: the cron run's exit code then reflects whether the work actually
+  # succeeded, and there is no shared secret or request timeout involved.
+
+  - type: cron
+    name: shipblu-sla-sweep
+    runtime: node
+    region: frankfurt
+    plan: starter
+    branch: main
+    schedule: '*/5 * * * *' # SLA breaches need minute-ish resolution
+    buildCommand: npm ci
+    startCommand: npm run job -- sla_sweep
+    envVars:
+      - fromGroup: shipblu-shared
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_URL_SESSION
+        sync: false
+      - key: APP_URL
+        sync: false
+
+  - type: cron
+    name: shipblu-time-automations
+    runtime: node
+    region: frankfurt
+    plan: starter
+    branch: main
+    schedule: '*/15 * * * *'
+    buildCommand: npm ci
+    startCommand: npm run job -- run_time_automations
+    envVars:
+      - fromGroup: shipblu-shared
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_URL_SESSION
+        sync: false
+
+  - type: cron
+    name: shipblu-whatsapp-template-sync
+    runtime: node
+    region: frankfurt
+    plan: starter
+    branch: main
+    schedule: '0 * * * *'
+    buildCommand: npm ci
+    startCommand: npm run job -- sync_whatsapp_templates
+    envVars:
+      - fromGroup: shipblu-shared
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_URL_SESSION
+        sync: false
+      - key: WHATSAPP_WABA_ID
+        sync: false
+      - key: WHATSAPP_ACCESS_TOKEN
+        sync: false
+
+  - type: cron
+    name: shipblu-nightly
+    runtime: node
+    region: frankfurt
+    plan: starter
+    branch: main
+    # 02:00 Africa/Cairo = 00:00 UTC. Render cron schedules are UTC.
+    schedule: '0 0 * * *'
+    buildCommand: npm ci
+    startCommand: npm run job -- rollup_metrics && npm run job -- cleanup
+    envVars:
+      - fromGroup: shipblu-shared
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_URL_SESSION
+        sync: false
