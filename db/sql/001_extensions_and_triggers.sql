@@ -62,12 +62,22 @@ END $$;
 -- Applied by looping over every table that has an updated_at column, so new
 -- tables pick this up automatically on the next migrate run.
 -- --------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION touch_updated_at() RETURNS trigger AS $$
+-- SET search_path = '' on every function below.
+--
+-- Without it the search_path is whatever the calling role has set, so anyone who
+-- can create objects in an earlier schema could shadow a function or operator
+-- these bodies rely on and have it run with the definer's reach. Everything
+-- referenced here lives in pg_catalog, which is always searched implicitly, so
+-- pinning the path costs nothing.
+CREATE OR REPLACE FUNCTION touch_updated_at() RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
 BEGIN
   NEW.updated_at = now();
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 DO $$
 DECLARE
@@ -101,7 +111,10 @@ END $$;
 -- authorised query path so the stream can never leak a ticket to an agent who
 -- is not allowed to see it.
 -- --------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION notify_conversation_change() RETURNS trigger AS $$
+CREATE OR REPLACE FUNCTION notify_conversation_change() RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
 DECLARE
   conversation_id uuid;
   payload text;
@@ -123,7 +136,7 @@ BEGIN
   PERFORM pg_notify('conversation_changed', payload);
   RETURN NULL;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 DROP TRIGGER IF EXISTS notify_change ON messages;
 CREATE TRIGGER notify_change
@@ -142,14 +155,17 @@ CREATE TRIGGER notify_change
 -- an agent sends goes out immediately rather than up to a poll interval later.
 -- The worker still polls on a timer as a backstop for scheduled (run_at) jobs.
 -- --------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION notify_job_enqueued() RETURNS trigger AS $$
+CREATE OR REPLACE FUNCTION notify_job_enqueued() RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
 BEGIN
   IF NEW.status = 'pending' AND NEW.run_at <= now() THEN
     PERFORM pg_notify('job_enqueued', NEW.type);
   END IF;
   RETURN NULL;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 DROP TRIGGER IF EXISTS notify_enqueued ON jobs;
 CREATE TRIGGER notify_enqueued
