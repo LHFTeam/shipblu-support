@@ -7,8 +7,8 @@
 previewsEnabled: false
 
 envVarGroups:
-  # Shared, non-secret settings. Secrets (database URLs, provider tokens) are set
-  # per-service in the dashboard and deliberately not committed here.
+  # Shared settings. Provider secrets and database URLs are set per-service in
+  # the dashboard and deliberately not committed here.
   - name: shipblu-shared
     envVars:
       - key: NODE_VERSION
@@ -17,6 +17,15 @@ envVarGroups:
         value: ShipBlu Support
       - key: SUPABASE_STORAGE_BUCKET
         value: attachments
+      # APP_SECRET MUST be identical across every service. It signs the email
+      # reply tokens (support+c42.<sig>@): the worker generates one when sending
+      # and verifies it when the customer replies. If the values differ, every
+      # reply fails verification and silently opens a new ticket instead of
+      # threading. It lives in the shared group precisely so there is exactly
+      # one value — per-service generateValue would produce a different secret
+      # for each service.
+      - key: APP_SECRET
+        generateValue: true
 
 services:
   # ---------------------------------------------------------------- production
@@ -26,7 +35,7 @@ services:
     region: frankfurt
     plan: standard # 2GB RAM / 1 CPU
     branch: main
-    buildCommand: npm ci && npm run build
+    buildCommand: npm ci --include=dev && npm run build
     # Runs after build, before traffic shifts. Migrations are idempotent, so a
     # rolled-back deploy re-running them is safe.
     preDeployCommand: npm run db:migrate
@@ -42,8 +51,6 @@ services:
         value: production
       - key: APP_URL
         sync: false
-      - key: APP_SECRET
-        generateValue: true
       - key: DATABASE_URL
         sync: false
       - key: DATABASE_URL_SESSION
@@ -79,15 +86,13 @@ services:
     region: frankfurt
     plan: starter # 512MB / 0.5 CPU — the worker is I/O bound, not CPU bound
     branch: main
-    buildCommand: npm ci && npm run build
+    buildCommand: npm ci --include=dev && npm run build
     startCommand: npm run worker
     envVars:
       - fromGroup: shipblu-shared
       - key: NODE_ENV
         value: production
       - key: APP_URL
-        sync: false
-      - key: APP_SECRET
         sync: false
       - key: DATABASE_URL
         sync: false
@@ -117,7 +122,7 @@ services:
     region: frankfurt
     plan: starter
     branch: claude/shipblu-support-app-03p2we
-    buildCommand: npm ci && npm run build
+    buildCommand: npm ci --include=dev && npm run build
     preDeployCommand: npm run db:migrate
     startCommand: npm run start
     healthCheckPath: /api/health
@@ -127,8 +132,6 @@ services:
         value: production
       - key: APP_URL
         sync: false
-      - key: APP_SECRET
-        generateValue: true
       - key: DATABASE_URL
         sync: false
       - key: DATABASE_URL_SESSION
@@ -153,7 +156,7 @@ services:
     plan: starter
     branch: main
     schedule: '*/5 * * * *' # SLA breaches need minute-ish resolution
-    buildCommand: npm ci
+    buildCommand: npm ci --include=dev
     startCommand: npm run job -- sla_sweep
     envVars:
       - fromGroup: shipblu-shared
@@ -171,7 +174,7 @@ services:
     plan: starter
     branch: main
     schedule: '*/15 * * * *'
-    buildCommand: npm ci
+    buildCommand: npm ci --include=dev
     startCommand: npm run job -- run_time_automations
     envVars:
       - fromGroup: shipblu-shared
@@ -187,7 +190,7 @@ services:
     plan: starter
     branch: main
     schedule: '0 * * * *'
-    buildCommand: npm ci
+    buildCommand: npm ci --include=dev
     startCommand: npm run job -- sync_whatsapp_templates
     envVars:
       - fromGroup: shipblu-shared
@@ -208,7 +211,7 @@ services:
     branch: main
     # 02:00 Africa/Cairo = 00:00 UTC. Render cron schedules are UTC.
     schedule: '0 0 * * *'
-    buildCommand: npm ci
+    buildCommand: npm ci --include=dev
     startCommand: npm run job -- rollup_metrics && npm run job -- cleanup
     envVars:
       - fromGroup: shipblu-shared
