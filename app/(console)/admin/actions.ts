@@ -9,7 +9,7 @@ import { normaliseEmail } from '@/lib/auth/normalise';
 import { generateToken, hashToken } from '@/lib/auth/tokens';
 import { destroyAllSessionsForAgent } from '@/lib/auth/session';
 import { enqueue } from '@/lib/queue';
-import { env } from '@/lib/env';
+import { appUrl } from '@/lib/env';
 
 export type AdminState = { error: string | null; inviteUrl?: string };
 
@@ -59,7 +59,7 @@ export async function createInvite(_state: AdminState, formData: FormData): Prom
 
   revalidatePath('/admin/agents');
 
-  return { error: null, inviteUrl: `${env().APP_URL.replace(/\/$/, '')}/invite/${token}` };
+  return { error: null, inviteUrl: `${appUrl()}/invite/${token}` };
 }
 
 export async function setAgentActive(_state: AdminState, formData: FormData): Promise<AdminState> {

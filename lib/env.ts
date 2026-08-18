@@ -20,7 +20,18 @@ const schema = z.object({
    */
   DATABASE_URL_SESSION: z.string().min(1).optional(),
 
-  APP_URL: z.url(),
+  /**
+   * Absolute base URL for links we put in front of a person — an invite, a
+   * survey. Optional here and required by `appUrl()` at the point of use.
+   *
+   * It was required, and that made it a prerequisite for opening a database
+   * connection, because `db/client.ts` validates the whole schema before
+   * connecting. The cron services have no URL of their own and were never given
+   * one, so every job that touched the database died at validation with a
+   * message about a variable it had no use for. A background job that never
+   * builds a link should not need to know the site's address.
+   */
+  APP_URL: z.url().optional(),
 
   /** Guards the cron/job endpoints and signs CSRF tokens. */
   APP_SECRET: z.string().min(32, 'APP_SECRET must be at least 32 characters'),
@@ -108,6 +119,21 @@ export function env(): Env {
 export function sessionDatabaseUrl(): string {
   const e = env();
   return e.DATABASE_URL_SESSION ?? e.DATABASE_URL;
+}
+
+/**
+ * The site's own base URL, for building an absolute link.
+ *
+ * Throws where it is genuinely needed rather than at startup everywhere, so the
+ * error names the thing that could not be built instead of appearing in a job
+ * that only wanted a database connection.
+ */
+export function appUrl(): string {
+  const value = env().APP_URL;
+  if (!value) {
+    throw new Error('APP_URL must be set to build an absolute link back to this site');
+  }
+  return value.replace(/\/$/, '');
 }
 
 /** Domain that plus-addressed reply tokens are built against. */

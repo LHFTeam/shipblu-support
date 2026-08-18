@@ -224,6 +224,13 @@ services:
   # These run `npm run job -- <type>` directly rather than hitting an HTTP
   # endpoint: the cron run's exit code then reflects whether the work actually
   # succeeded, and there is no shared secret or request timeout involved.
+  #
+  # None of them declares APP_URL. A cron has no address of its own and builds
+  # no links, and `appUrl()` now asks for the variable only where a link is
+  # actually constructed. sla-sweep used to declare it with `sync: false`, which
+  # meant "a human will set this in the dashboard" — nobody ever did, so the
+  # value was undefined and every job that opened a database connection failed
+  # validation on a variable it had no use for.
 
   - type: cron
     name: shipblu-sla-sweep
@@ -236,8 +243,6 @@ services:
     startCommand: npm run job -- sla_sweep
     envVars:
       - fromGroup: shipblu-shared
-      - key: APP_URL
-        sync: false
 
   - type: cron
     name: shipblu-time-automations
