@@ -1,0 +1,62 @@
+import { sql } from 'drizzle-orm';
+import { db } from '@/db/client';
+import { whatsappTemplates } from '@/db/schema';
+import { listTemplates } from '@/lib/whatsapp/client';
+
+/**
+ * Hourly sync of the WABA's approved templates.
+ *
+ * Templates are edited and approved in Meta's Business Manager, not here, so
+ * the console's list would otherwise drift — an agent picking a template Meta
+ * has since rejected gets an opaque send failure. Upsert on (name, language)
+ * because that pair, not Meta's id, is what a send actually references.
+ */
+export async function syncWhatsAppTemplates(): Promise<void> {
+  const templates = await listTemplates();
+
+  if (templates.length === 0) {
+    // Deliberately not treated as "delete everything": an API hiccup returning
+    // an empty page must not wipe the templates agents are relying on.
+    console.warn('[sync_whatsapp_templates] Meta returned no templates, leaving existing rows');
+    return;
+  }
+
+  const now = new Date();
+
+  for (const template of templates) {
+    await db
+      .insert(whatsappTemplates)
+      .values({
+        metaTemplateId: template.id,
+        name: template.name,
+        language: template.language,
+        category: template.category,
+        components: template.components ?? [],
+        status: template.status,
+        syncedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [whatsappTemplates.name, whatsappTemplates.language],
+        set: {
+          metaTemplateId: sql`excluded.meta_template_id`,
+          category: sql`excluded.category`,
+          components: sql`excluded.components`,
+          status: sql`excluded.status`,
+          syncedAt: now,
+        },
+      });
+  }
+
+  // Templates deleted in Meta stop being returned. Marking rather than deleting
+  // keeps the name resolvable for messages already sent with it.
+  const stale = await db
+    .update(whatsappTemplates)
+    .set({ status: 'DELETED' })
+    .where(sql`${whatsappTemplates.syncedAt} < ${now} AND ${whatsappTemplates.status} <> 'DELETED'`)
+    .returning({ id: whatsappTemplates.id });
+
+  console.log(
+    `[sync_whatsapp_templates] synced ${templates.length}` +
+      (stale.length ? `, marked ${stale.length} deleted` : ''),
+  );
+}

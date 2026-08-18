@@ -1,7 +1,10 @@
 import type { ClaimedJob, JobType } from '@/lib/queue';
 import { cleanup } from './cleanup';
+import { downloadMediaJob } from './download-media';
 import { processWebhook } from './process-webhook';
 import { sendEmail } from './send-email';
+import { sendWhatsApp } from './send-whatsapp';
+import { syncWhatsAppTemplates } from './sync-whatsapp-templates';
 
 export type JobHandler = (job: ClaimedJob) => Promise<void>;
 
@@ -10,13 +13,16 @@ export type JobHandler = (job: ClaimedJob) => Promise<void>;
  * type has no handler fails loudly rather than being silently dropped, so a
  * half-deployed rename shows up immediately in the dead queue.
  *
- * Phase 2 (WhatsApp) registers send_whatsapp, download_media and
- * sync_whatsapp_templates here.
+ * Phase 3 (SLA, automations, CSAT, reporting) registers sla_sweep,
+ * run_time_automations, send_csat and rollup_metrics here.
  */
 export const handlers: Partial<Record<JobType, JobHandler>> = {
   cleanup,
+  download_media: downloadMediaJob,
   process_webhook: processWebhook,
   send_email: sendEmail,
+  send_whatsapp: sendWhatsApp,
+  sync_whatsapp_templates: () => syncWhatsAppTemplates(),
 };
 
 /**
@@ -36,9 +42,7 @@ export const PLANNED_JOB_TYPES = new Set<JobType>([
   'sla_sweep',
   'run_time_automations',
   'rollup_metrics',
-  'sync_whatsapp_templates',
-  'send_whatsapp',
-  'download_media',
+  'send_csat',
 ]);
 
 export function isPlannedButUnimplemented(type: string): boolean {

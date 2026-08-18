@@ -4,6 +4,7 @@ import { webhookEvents } from '@/db/schema';
 import { emailProvider } from '@/lib/email/providers';
 import type { ClaimedJob } from '@/lib/queue';
 import { ingestInboundEmail } from '@/lib/tickets/ingest';
+import { processWhatsAppWebhook } from './process-whatsapp-webhook';
 
 /**
  * Processes a stored webhook payload into a ticket.
@@ -44,6 +45,17 @@ export async function processWebhook(job: ClaimedJob): Promise<void> {
     .where(eq(webhookEvents.id, webhookEventId));
 
   try {
+    // One entry point for every channel, so webhook storage, replay and
+    // idempotency behave identically no matter who sent the payload.
+    if (event.channel === 'whatsapp') {
+      await processWhatsAppWebhook({ id: event.id, payload: event.payload });
+      await db
+        .update(webhookEvents)
+        .set({ processedAt: new Date() })
+        .where(eq(webhookEvents.id, webhookEventId));
+      return;
+    }
+
     if (event.channel !== 'email') {
       throw new Error(`unsupported webhook channel "${event.channel}"`);
     }
