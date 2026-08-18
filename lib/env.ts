@@ -33,6 +33,14 @@ const schema = z.object({
    */
   KB_PUBLIC_HOST: z.string().optional(),
 
+  /**
+   * Comma-separated origins permitted to embed the chat widget, e.g.
+   * "https://support.shipblu.com,https://app.shipblu.com". Our own origin is
+   * always allowed. Everything outside this list is refused by
+   * `frame-ancestors`.
+   */
+  WIDGET_ALLOWED_ORIGINS: z.string().optional(),
+
   SUPABASE_URL: z.url().optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
   SUPABASE_STORAGE_BUCKET: z.string().default('attachments'),

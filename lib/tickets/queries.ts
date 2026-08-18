@@ -25,7 +25,7 @@ import { can } from '@/lib/auth/permissions';
 export type InboxFilters = {
   view: 'all' | 'mine' | 'unassigned';
   statusCategory: 'open' | 'pending' | 'resolved' | 'closed' | 'all' | 'unresolved';
-  channel: 'all' | 'email' | 'whatsapp';
+  channel: 'all' | 'email' | 'whatsapp' | 'webchat';
   q: string;
   page: number;
 };
@@ -52,7 +52,8 @@ export function parseFilters(params: Record<string, string | string[] | undefine
       statusCategory === 'all'
         ? statusCategory
         : 'unresolved',
-    channel: channel === 'email' || channel === 'whatsapp' ? channel : 'all',
+    channel:
+      channel === 'email' || channel === 'whatsapp' || channel === 'webchat' ? channel : 'all',
     q: (one('q') ?? '').trim(),
     page: Math.max(1, Number(one('page') ?? '1') || 1),
   };

@@ -92,7 +92,9 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
   const address = String(formData.get('address') ?? '').trim();
 
   if (!name) return { error: 'Give the channel a name' };
-  if (type !== 'email' && type !== 'whatsapp') return { error: 'Unknown channel type' };
+  if (type !== 'email' && type !== 'whatsapp' && type !== 'webchat') {
+    return { error: 'Unknown channel type' };
+  }
 
   // Non-secret settings only. Access tokens and app secrets stay in the
   // environment, so a database dump never contains a usable credential.
