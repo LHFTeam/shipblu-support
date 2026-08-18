@@ -1,5 +1,22 @@
 import type { NextConfig } from 'next';
 
+/**
+ * Origins allowed to embed the chat widget.
+ *
+ * Read from the environment rather than hard-coded, because the widget goes on
+ * the help centre, the merchant dashboard and eventually the marketing site,
+ * and each is a different origin. Empty means the widget is embeddable only
+ * from our own origin, which is the safe default for a fresh deploy.
+ */
+function widgetFrameAncestors(): string {
+  const configured = (process.env.WIDGET_ALLOWED_ORIGINS ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  return ["'self'", ...configured].join(' ');
+}
+
 const nextConfig: NextConfig = {
   // The worker and job runner import the same `db/` and `lib/` modules as the app.
   // Keeping these external stops Next from trying to bundle native/node-only deps.
@@ -15,6 +32,26 @@ const nextConfig: NextConfig = {
         headers: [
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'X-Frame-Options', value: 'DENY' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+        ],
+      },
+      {
+        // The widget exists to be framed, so the blanket DENY above cannot
+        // apply to it. It is replaced with an explicit allowlist rather than
+        // dropped: `frame-ancestors` is the modern control and, unlike
+        // X-Frame-Options, it takes a list of origins.
+        //
+        // This is the only route where framing is permitted. The console and
+        // the help centre keep DENY, so neither can be put inside an attacker's
+        // page and clickjacked.
+        source: '/widget/:path*',
+        headers: [
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'X-Frame-Options', value: '' },
+          {
+            key: 'Content-Security-Policy',
+            value: `frame-ancestors ${widgetFrameAncestors()};`,
+          },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
         ],
       },

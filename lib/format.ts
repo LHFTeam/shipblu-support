@@ -47,7 +47,7 @@ export function formatBytes(bytes: number): string {
 }
 
 export function channelLabel(channel: string): string {
-  return { email: 'Email', whatsapp: 'WhatsApp', webchat: 'Chat' }[channel] ?? channel;
+  return { email: 'Email', whatsapp: 'WhatsApp', webchat: 'Web chat' }[channel] ?? channel;
 }
 
 export function initials(name: string | null): string {

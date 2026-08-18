@@ -54,6 +54,7 @@ export function InboxList({
             <option value="all">All channels</option>
             <option value="email">Email</option>
             <option value="whatsapp">WhatsApp</option>
+            <option value="webchat">Web chat</option>
           </Select>
         </div>
       </div>

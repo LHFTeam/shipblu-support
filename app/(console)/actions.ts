@@ -108,6 +108,7 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
   }
 
   const isEmail = conversation.channel === 'email';
+  const isWebchat = conversation.channel === 'webchat';
   const html = isEmail ? sanitiseEmailHtml(textToHtml(body)) : null;
 
   const parentMessageId = await lastInboundChannelMessageId(conversationId);
@@ -123,7 +124,12 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
       bodyHtml: html,
       toAddresses: isEmail && row.requesterEmail ? [row.requesterEmail] : [],
       inReplyTo: parentMessageId,
-      deliveryStatus: 'pending',
+      // Web chat has no outbound provider: writing the row *is* delivery,
+      // because the visitor's open stream reads the same table. Marking it
+      // pending would leave a permanent "sending…" badge on a message the
+      // customer is already looking at.
+      deliveryStatus: isWebchat ? 'delivered' : 'pending',
+      ...(isWebchat ? { deliveredAt: new Date() } : {}),
       meta: conversation.channel === 'whatsapp' ? { sendKind: 'text' } : {},
     })
     .returning({ id: messages.id });
@@ -135,13 +141,15 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
     .set({ lastMessageAt: new Date(), lastAgentMessageAt: new Date() })
     .where(eq(conversations.id, conversationId));
 
-  await enqueue(
-    conversation.channel === 'whatsapp' ? 'send_whatsapp' : 'send_email',
-    { messageId },
-    // dedupeKey on the message id: a double-submit or a retried action can
-    // never queue the same reply twice.
-    { priority: 10, dedupeKey: `send:${messageId}` },
-  );
+  if (!isWebchat) {
+    await enqueue(
+      conversation.channel === 'whatsapp' ? 'send_whatsapp' : 'send_email',
+      { messageId },
+      // dedupeKey on the message id: a double-submit or a retried action can
+      // never queue the same reply twice.
+      { priority: 10, dedupeKey: `send:${messageId}` },
+    );
+  }
 
   if (resolveAfter) {
     await applyStatusCategory(agent, conversation.id, 'resolved');

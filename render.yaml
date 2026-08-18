@@ -75,6 +75,13 @@ envVarGroups:
       - key: KB_PUBLIC_HOST
         sync: false
 
+      # Origins allowed to embed the chat widget, comma separated. Everything
+      # else keeps X-Frame-Options: DENY, so only this route can be framed and
+      # only by these sites — an omission here means the widget silently fails
+      # to load rather than being embeddable by anyone.
+      - key: WIDGET_ALLOWED_ORIGINS
+        sync: false
+
       # Meta Cloud API. Split across three services by need — the web service
       # verifies inbound webhooks (app secret, verify token), the worker sends
       # and downloads media (phone number id, access token), and the template

@@ -9,7 +9,7 @@ const INITIAL: AdminState = { error: null };
 
 export function ChannelForm({ groups }: { groups: { id: string; name: string }[] }) {
   const [state, action] = useActionState(saveChannel, INITIAL);
-  const [type, setType] = useState<'email' | 'whatsapp'>('email');
+  const [type, setType] = useState<'email' | 'whatsapp' | 'webchat'>('email');
 
   return (
     <form
@@ -23,10 +23,11 @@ export function ChannelForm({ groups }: { groups: { id: string; name: string }[]
             id="type"
             name="type"
             value={type}
-            onChange={(e) => setType(e.target.value as 'email' | 'whatsapp')}
+            onChange={(e) => setType(e.target.value as 'email' | 'whatsapp' | 'webchat')}
           >
             <option value="email">Email</option>
             <option value="whatsapp">WhatsApp</option>
+            <option value="webchat">Web chat</option>
           </Select>
         </div>
 
@@ -36,7 +37,11 @@ export function ChannelForm({ groups }: { groups: { id: string; name: string }[]
         </div>
 
         <div className="flex-1">
-          {type === 'whatsapp' ? (
+          {type === 'webchat' ? (
+            <p className="pt-6 text-xs opacity-50">
+              The widget needs no address — only a default group.
+            </p>
+          ) : type === 'whatsapp' ? (
             <>
               <Label htmlFor="phoneNumberId">Phone number ID</Label>
               <Input id="phoneNumberId" name="phoneNumberId" placeholder="1234567890" />

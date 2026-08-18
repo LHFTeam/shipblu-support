@@ -26,6 +26,11 @@ const PUBLIC_PREFIXES = [
   '/api/health',
   '/api/auth',
   '/api/kb',
+  // The widget page and every endpoint it calls. Both halves are needed: the
+  // iframe loads /widget, then fetches /api/widget/* with no session cookie,
+  // and a missing entry here turns each of those calls into a redirect to
+  // /login that the widget cannot follow.
+  '/api/widget',
   '/widget',
   '/robots.txt',
   '/sitemap.xml',
