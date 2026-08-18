@@ -15,6 +15,9 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         <Link href="/admin/channels" className="rounded px-2 py-1.5 hover:bg-[var(--muted)]">
           Channels &amp; groups
         </Link>
+        <Link href="/admin/import" className="rounded px-2 py-1.5 hover:bg-[var(--muted)]">
+          Freshdesk import
+        </Link>
       </nav>
       <div className="min-w-0 flex-1">{children}</div>
     </div>

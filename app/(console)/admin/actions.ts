@@ -1,13 +1,14 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { agents, channels, groups, invites } from '@/db/schema';
+import { agents, channels, groups, invites, jobs } from '@/db/schema';
 import { requirePermission } from '@/lib/auth/guard';
 import { normaliseEmail } from '@/lib/auth/normalise';
 import { generateToken, hashToken } from '@/lib/auth/tokens';
 import { destroyAllSessionsForAgent } from '@/lib/auth/session';
+import { enqueue } from '@/lib/queue';
 import { env } from '@/lib/env';
 
 export type AdminState = { error: string | null; inviteUrl?: string };
@@ -122,5 +123,55 @@ export async function createGroup(_state: AdminState, formData: FormData): Promi
   await db.insert(groups).values({ name }).onConflictDoNothing({ target: groups.name });
 
   revalidatePath('/admin/channels');
+  return { error: null };
+}
+
+/**
+ * Queues a Freshdesk knowledge base import.
+ *
+ * The job runs on the worker, which is where the Freshdesk credentials live —
+ * the web service cannot see them, so this deliberately does not try to
+ * pre-validate the configuration. An unconfigured worker fails the job with a
+ * clear message, which the run list below the button shows.
+ */
+export async function startFreshdeskImport(
+  _state: AdminState,
+  _formData: FormData,
+): Promise<AdminState> {
+  await requirePermission('admin.agents');
+
+  // A second import running against the same rows would not corrupt anything —
+  // every write is idempotent — but it would double the API calls against
+  // Freshdesk's per-minute rate limit and make the logs unreadable.
+  const running = await db
+    .select({ id: jobs.id })
+    .from(jobs)
+    .where(
+      sql`${jobs.type} = 'import_freshdesk_kb' and ${jobs.status} in ('pending', 'processing')`,
+    )
+    .limit(1);
+
+  if (running.length > 0) {
+    return { error: 'An import is already queued or running.' };
+  }
+
+  await enqueue(
+    'import_freshdesk_kb',
+    {},
+    {
+      priority: 50,
+      // Bucketed to the minute rather than a fixed key: a fixed one would be
+      // taken forever by the first run, since completed jobs keep their dedupe
+      // key for seven days. This swallows a double-click and still allows a
+      // re-run a minute later.
+      dedupeKey: `import_freshdesk_kb:${Math.floor(Date.now() / 60_000)}`,
+      // The importer is idempotent, so a retry resumes rather than duplicates —
+      // but three is enough to ride out a rate limit without hammering
+      // Freshdesk for an hour on a bad API key.
+      maxAttempts: 3,
+    },
+  );
+
+  revalidatePath('/admin/import');
   return { error: null };
 }
