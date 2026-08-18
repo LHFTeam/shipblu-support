@@ -29,8 +29,13 @@ import { slugify, uniqueSlug } from '@/lib/kb/slug';
 export async function importFreshdeskKb(): Promise<void> {
   const e = env();
   if (!e.FRESHDESK_DOMAIN || !e.FRESHDESK_API_KEY) {
-    console.log('[import_freshdesk_kb] FRESHDESK_DOMAIN / FRESHDESK_API_KEY not set — skipping');
-    return;
+    // Thrown rather than skipped. Nothing schedules this job — it is always
+    // started by hand from the console or the shell — so a silent success is
+    // just a person watching an empty knowledge base and wondering why. A
+    // failed job puts the reason on the row, where the console shows it.
+    throw new Error(
+      'FRESHDESK_DOMAIN and FRESHDESK_API_KEY must be set on the worker service before importing',
+    );
   }
 
   const started = Date.now();
