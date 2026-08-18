@@ -64,6 +64,14 @@ const schema = z.object({
   WHATSAPP_APP_SECRET: z.string().optional(),
   WHATSAPP_VERIFY_TOKEN: z.string().optional(),
 
+  /**
+   * Freshdesk, for the knowledge base importer only. Unset means the import
+   * job skips rather than fails, so the cron that runs it is green before the
+   * migration is scheduled.
+   */
+  FRESHDESK_DOMAIN: z.string().optional(),
+  FRESHDESK_API_KEY: z.string().optional(),
+
   /** Worker tuning. */
   WORKER_CONCURRENCY: z.coerce.number().int().positive().default(5),
   WORKER_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(1000),

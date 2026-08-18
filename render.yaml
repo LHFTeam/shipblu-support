@@ -138,6 +138,15 @@ services:
       - key: EMAIL_WEBHOOK_SECRET
         sync: false
       # EMAIL_*, WHATSAPP_* and the database URLs come from shipblu-shared.
+      #
+      # Freshdesk credentials are read only by the knowledge base importer,
+      # which runs as a queued job on this worker and nowhere else — so by the
+      # rule above they stay here rather than going in the group. They can be
+      # removed once the migration is done.
+      - key: FRESHDESK_DOMAIN
+        sync: false
+      - key: FRESHDESK_API_KEY
+        sync: false
       # Re-declaring any of them here would shadow the group and take the
       # service value instead.
 

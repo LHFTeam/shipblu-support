@@ -12,6 +12,7 @@ export type JobType =
   | 'run_time_automations'
   | 'send_csat'
   | 'rollup_metrics'
+  | 'import_freshdesk_kb'
   | 'cleanup';
 
 export type EnqueueOptions = {
