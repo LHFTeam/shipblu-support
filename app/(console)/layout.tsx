@@ -38,6 +38,7 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
           <NavLink href="/inbox?view=unassigned">
             Unassigned <Count value={counts.unassigned} />
           </NavLink>
+          {can(agent, 'kb.view') ? <NavLink href="/kb">Knowledge base</NavLink> : null}
           {can(agent, 'admin.agents') ? <NavLink href="/admin/agents">Admin</NavLink> : null}
         </nav>
 

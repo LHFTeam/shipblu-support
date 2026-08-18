@@ -18,7 +18,7 @@ import { SESSION_COOKIE } from '@/lib/auth/cookie';
 
 /** Paths that are public on every hostname. */
 const PUBLIC_PREFIXES = [
-  '/kb',
+  '/help',
   '/login',
   '/setup',
   '/invite',
@@ -41,6 +41,9 @@ const PUBLIC_PREFIXES = [
  * the title, so it was never a reliable key.
  */
 const LEGACY_ARTICLE = /\/solutions\/articles\/(\d+)/;
+
+/** `/en`, `/ar`, and anything beneath them. Kept in step with LOCALES. */
+const LOCALE_PREFIX = /^\/(en|ar)(\/|$)/;
 const LEGACY_FOLDER = /\/solutions\/folders\/(\d+)/;
 
 function isPublic(pathname: string): boolean {
@@ -61,7 +64,7 @@ export default function proxy(request: NextRequest) {
 
   if (legacyArticle || legacyFolder) {
     const url = request.nextUrl.clone();
-    url.pathname = '/kb/legacy';
+    url.pathname = '/help/legacy';
     url.search = `?path=${encodeURIComponent(pathname)}`;
     return NextResponse.rewrite(url);
   }
@@ -75,7 +78,17 @@ export default function proxy(request: NextRequest) {
     }
 
     const url = request.nextUrl.clone();
-    url.pathname = pathname === '/' ? '/kb' : `/kb${pathname}`;
+    url.pathname = pathname === '/' ? '/help' : `/help${pathname}`;
+    return NextResponse.rewrite(url);
+  }
+
+  // A locale-prefixed path is a help centre URL wherever it arrives. Without
+  // this the public site would only work once the custom domain is live, which
+  // makes it unreviewable on the Render URL and unbrowsable in development.
+  // `/en` and `/ar` are not console routes, so nothing collides.
+  if (LOCALE_PREFIX.test(pathname)) {
+    const url = request.nextUrl.clone();
+    url.pathname = `/help${pathname}`;
     return NextResponse.rewrite(url);
   }
 
