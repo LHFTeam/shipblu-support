@@ -53,14 +53,19 @@ envVarGroups:
       - key: APP_SECRET
         generateValue: true
 
-      # Amazon SES. eu-central-1 for both sending and receiving — SES inbound is
-      # available in Frankfurt, so mail never leaves the region the services and
-      # database are in.
-      - key: AWS_REGION
+      # Postmark. The server token is used by the worker to send and by the web
+      # service to construct the driver that parses inbound, so it is shared.
+      #
+      # EMAIL_WEBHOOK_SECRET is deliberately *not* here — only the web service
+      # receives webhooks, and a secret with one consumer belongs on that one
+      # service rather than on all seven.
+      - key: EMAIL_PROVIDER
+        value: postmark
+      - key: EMAIL_API_KEY
         sync: false
-      - key: AWS_ACCESS_KEY_ID
+      - key: EMAIL_FROM_ADDRESS
         sync: false
-      - key: AWS_SECRET_ACCESS_KEY
+      - key: EMAIL_REPLY_DOMAIN
         sync: false
 
       # Meta Cloud API. Split across three services by need — the web service
@@ -80,17 +85,15 @@ envVarGroups:
       - key: WHATSAPP_VERIFY_TOKEN
         sync: false
 
-  # Still per-service, and inconsistent with the rule above: SUPABASE_URL,
-  # SUPABASE_SERVICE_ROLE_KEY, EMAIL_API_KEY, EMAIL_WEBHOOK_SECRET,
-  # EMAIL_FROM_ADDRESS and EMAIL_REPLY_DOMAIN are identical on the web service
-  # and the worker.
+  # Still per-service, and inconsistent with the rule above: SUPABASE_URL and
+  # SUPABASE_SERVICE_ROLE_KEY are identical on the web service and the worker.
   #
   # They are not moved here yet because they already hold live values at service
   # level. Removing a declaration from this file can drop the value on the next
-  # Blueprint sync, so the move has to be sequenced: set each value in the group
-  # first, confirm it, then delete the per-service entries. The WhatsApp and AWS
-  # keys above had no values anywhere yet, which is why they could move in one
-  # step.
+  # Blueprint sync, so that move has to be sequenced: set each value in the
+  # group first, confirm it, then delete the per-service entries. The EMAIL_*
+  # keys moved in one step because they had never been set — the SES switch was
+  # abandoned before any value was entered.
   #
   # APP_URL stays per-service permanently — it genuinely differs between
   # production and staging.
@@ -123,18 +126,13 @@ services:
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
-      - key: EMAIL_PROVIDER
-        sync: false
-      - key: EMAIL_API_KEY
-        sync: false
+      # Only the web service receives inbound webhooks, so the Basic Auth
+      # password Postmark presents lives here rather than in the group.
       - key: EMAIL_WEBHOOK_SECRET
         sync: false
-      - key: EMAIL_FROM_ADDRESS
-        sync: false
-      - key: EMAIL_REPLY_DOMAIN
-        sync: false
-      # AWS_* and WHATSAPP_* come from shipblu-shared. Re-declaring them here
-      # would shadow the group and take the service value instead.
+      # EMAIL_*, WHATSAPP_* and the database URLs come from shipblu-shared.
+      # Re-declaring any of them here would shadow the group and take the
+      # service value instead.
 
   - type: worker
     name: shipblu-support-worker
@@ -154,15 +152,7 @@ services:
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
-      - key: EMAIL_PROVIDER
-        sync: false
-      - key: EMAIL_API_KEY
-        sync: false
-      - key: EMAIL_FROM_ADDRESS
-        sync: false
-      - key: EMAIL_REPLY_DOMAIN
-        sync: false
-      # AWS_* and WHATSAPP_* come from shipblu-shared.
+      # EMAIL_*, WHATSAPP_* and the database URLs come from shipblu-shared.
 
   # -------------------------------------------------------------- staging
   - type: web
@@ -191,9 +181,9 @@ services:
         sync: false
       # Staging never reaches a real customer.
       #
-      # EMAIL_PROVIDER=local writes to disk instead of calling SES, which also
-      # makes the inherited AWS_* credentials inert — the driver is never
-      # constructed.
+      # EMAIL_PROVIDER=local writes to .mail-outbox/ instead of calling
+      # Postmark, which also makes the inherited server token inert — the
+      # Postmark driver is never constructed.
       #
       # WhatsApp has no such switch, so the token is blanked explicitly. It is
       # inherited from the group, and Meta's API has no test mode: a send from

@@ -30,8 +30,15 @@ const schema = z.object({
   SUPABASE_STORAGE_BUCKET: z.string().default('attachments'),
 
   /** Which driver lib/email/providers resolves. `local` writes to .mail-outbox/. */
-  EMAIL_PROVIDER: z.enum(['local', 'ses', 'postmark', 'mailgun']).default('local'),
+  EMAIL_PROVIDER: z.enum(['local', 'postmark', 'mailgun']).default('local'),
+  /** Postmark server token. */
   EMAIL_API_KEY: z.string().optional(),
+  /**
+   * Password half of the Basic Auth credential on the inbound webhook URL.
+   * Postmark does not sign inbound payloads, so this is the whole of the
+   * authentication — an unset value leaves the endpoint open, which the driver
+   * warns about loudly rather than failing closed on.
+   */
   EMAIL_WEBHOOK_SECRET: z.string().optional(),
   /** Envelope sender, e.g. support@shipblu.com */
   EMAIL_FROM_ADDRESS: z.email().optional(),
@@ -41,13 +48,6 @@ const schema = z.object({
    * (support+<token>@shipblu.com). Defaults to the EMAIL_FROM_ADDRESS domain.
    */
   EMAIL_REPLY_DOMAIN: z.string().optional(),
-
-  /** Amazon SES. Credentials are omitted when an instance role supplies them. */
-  AWS_REGION: z.string().optional(),
-  AWS_ACCESS_KEY_ID: z.string().optional(),
-  AWS_SECRET_ACCESS_KEY: z.string().optional(),
-  /** Optional SES configuration set, for per-stream event publishing. */
-  SES_CONFIGURATION_SET: z.string().optional(),
 
   WHATSAPP_PHONE_NUMBER_ID: z.string().optional(),
   WHATSAPP_WABA_ID: z.string().optional(),

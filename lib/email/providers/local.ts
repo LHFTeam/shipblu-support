@@ -38,7 +38,7 @@ export class LocalEmailProvider implements EmailProvider {
     );
 
     console.log(`[email:local] wrote ${safeName}.json to ${this.outboxDir}`);
-    return { providerMessageId: id, accepted: true };
+    return { providerMessageId: id, rfcMessageId: email.messageId, accepted: true };
   }
 
   /** Nothing to verify locally; the endpoint is not reachable from outside. */
