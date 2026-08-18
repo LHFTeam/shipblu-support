@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { isLocale, t } from '@/lib/kb/locale';
 import { getFolder } from '@/lib/kb/queries';
+import { decodeSlugParam } from '@/lib/kb/slug';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,10 +12,12 @@ export async function generateMetadata({
 }: {
   params: Promise<{ locale: string; category: string; folder: string }>;
 }): Promise<Metadata> {
-  const { locale, category, folder: folderSlug } = await params;
+  const { locale, category, folder: folderParam } = await params;
+  const categorySlug = decodeSlugParam(category);
+  const folderSlug = decodeSlugParam(folderParam);
   if (!isLocale(locale)) return {};
 
-  const folder = await getFolder(locale, category, folderSlug);
+  const folder = await getFolder(locale, categorySlug, folderSlug);
   if (!folder) return {};
 
   return {
@@ -28,10 +31,12 @@ export default async function FolderPage({
 }: {
   params: Promise<{ locale: string; category: string; folder: string }>;
 }) {
-  const { locale, category, folder: folderSlug } = await params;
+  const { locale, category, folder: folderParam } = await params;
+  const categorySlug = decodeSlugParam(category);
+  const folderSlug = decodeSlugParam(folderParam);
   if (!isLocale(locale)) notFound();
 
-  const folder = await getFolder(locale, category, folderSlug);
+  const folder = await getFolder(locale, categorySlug, folderSlug);
   if (!folder) notFound();
 
   return (

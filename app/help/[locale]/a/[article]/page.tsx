@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { formatArticleDate, isLocale, LOCALE_NAMES, t, type Locale } from '@/lib/kb/locale';
 import { getArticle, relatedArticles, translationsOf } from '@/lib/kb/queries';
+import { decodeSlugParam } from '@/lib/kb/slug';
 import { ArticleFeedback } from './feedback';
 import { ViewBeacon } from './view-beacon';
 
@@ -13,7 +14,8 @@ export async function generateMetadata({
 }: {
   params: Promise<{ locale: string; article: string }>;
 }): Promise<Metadata> {
-  const { locale, article: slug } = await params;
+  const { locale, article: articleParam } = await params;
+  const slug = decodeSlugParam(articleParam);
   if (!isLocale(locale)) return {};
 
   const article = await getArticle(locale, slug);
@@ -47,7 +49,8 @@ export default async function ArticlePage({
 }: {
   params: Promise<{ locale: string; article: string }>;
 }) {
-  const { locale, article: slug } = await params;
+  const { locale, article: articleParam } = await params;
+  const slug = decodeSlugParam(articleParam);
   if (!isLocale(locale)) notFound();
 
   const article = await getArticle(locale, slug);

@@ -22,7 +22,7 @@ export async function GET() {
   LOCALES.forEach((locale, index) => {
     urls.push({ loc: `${base}/${locale}`, priority: '1.0' });
     for (const category of categoriesByLocale[index] ?? []) {
-      urls.push({ loc: `${base}/${locale}/c/${category.slug}`, priority: '0.7' });
+      urls.push({ loc: `${base}/${locale}/c/${encodeURI(category.slug)}`, priority: '0.7' });
     }
   });
 
