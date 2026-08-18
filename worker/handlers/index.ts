@@ -3,6 +3,7 @@ import { cleanup } from './cleanup';
 import { downloadMediaJob } from './download-media';
 import { importFreshdeskKb } from './import-freshdesk-kb';
 import { processWebhook } from './process-webhook';
+import { rollupMetrics } from './rollup-metrics';
 import { runTimeAutomations } from './run-time-automations';
 import { sendCsat } from './send-csat';
 import { sendEmail } from './send-email';
@@ -25,6 +26,7 @@ export const handlers: Partial<Record<JobType, JobHandler>> = {
   download_media: downloadMediaJob,
   import_freshdesk_kb: () => importFreshdeskKb(),
   process_webhook: processWebhook,
+  rollup_metrics: (job) => rollupMetrics(job),
   run_time_automations: () => runTimeAutomations(),
   send_csat: sendCsat,
   send_email: sendEmail,
@@ -37,16 +39,18 @@ export const handlers: Partial<Record<JobType, JobHandler>> = {
  * Job types whose cron schedule is already provisioned but whose implementing
  * phase has not landed yet.
  *
- * The Render Blueprint creates every cron job up front, so these fire on
- * schedule before their handler exists. Without this list each firing is a
- * failed cron run — noise that trains everyone to ignore cron failures, which
- * is precisely when a real one gets missed.
+ * Empty as of phase 3: every job the Render Blueprint schedules now has a
+ * handler. The mechanism stays because the situation recurs — the blueprint
+ * creates cron jobs up front, so the next phase's schedule will fire before its
+ * handler exists, and without this each firing is a failed cron run. That noise
+ * trains everyone to ignore cron failures, which is precisely when a real one
+ * gets missed.
  *
  * Deliberately an explicit allowlist rather than "tolerate anything unknown":
  * a typo or a renamed job still fails loudly, which is the property that makes
  * `resolveHandler` worth having.
  */
-export const PLANNED_JOB_TYPES = new Set<JobType>(['rollup_metrics']);
+export const PLANNED_JOB_TYPES = new Set<JobType>([]);
 
 export function isPlannedButUnimplemented(type: string): boolean {
   return !handlers[type as JobType] && PLANNED_JOB_TYPES.has(type as JobType);
