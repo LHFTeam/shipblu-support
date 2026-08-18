@@ -9,15 +9,21 @@ previewsEnabled: false
 envVarGroups:
   # Shared settings. Secret *values* are set in the dashboard, never committed.
   #
-  # DATABASE_URL and DATABASE_URL_SESSION belong here, not on each service.
-  # They were previously declared per-service with `sync: false`, and because
-  # Render gives service-level variables precedence over group values, those
-  # stale per-service entries silently shadowed the group — updating the group
-  # appeared to do nothing, on every service at once. Declaring them in one
-  # place removes that failure mode entirely.
+  # The rule: any value that is the same on more than one service is declared
+  # here and nowhere else.
   #
-  # Staging is the one deliberate exception: it overrides both at service level
-  # so its migrations run against its own database rather than production's.
+  # Render gives service-level variables precedence over group values, so a key
+  # declared in both places takes the service value and the group is silently
+  # ignored. DATABASE_URL was declared per-service with `sync: false` on all
+  # seven services and did exactly that — editing the group appeared to do
+  # nothing, everywhere at once. One declaration site removes the failure mode.
+  #
+  # Rotation is the other reason. A Meta access token or an AWS key pasted into
+  # three services is a rotation you have to remember to do three times, and
+  # forgetting leaves a half-working system rather than a clean break.
+  #
+  # Service-level overrides are therefore deliberate exceptions, and each one
+  # below says why it exists.
   - name: shipblu-shared
     envVars:
       - key: NODE_VERSION
@@ -26,6 +32,17 @@ envVarGroups:
         value: ShipBlu Support
       - key: SUPABASE_STORAGE_BUCKET
         value: attachments
+
+      # Supavisor pooler URLs. Already group-managed in the dashboard; declared
+      # here so the Blueprint documents them rather than only describing them in
+      # a comment. `sync: false` means the value stays dashboard-owned.
+      #
+      # Staging overrides both at service level so its migrations run against
+      # its own database rather than production's.
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_URL_SESSION
+        sync: false
       # APP_SECRET MUST be identical across every service. It signs the email
       # reply tokens (support+c42.<sig>@): the worker generates one when sending
       # and verifies it when the customer replies. If the values differ, every
@@ -35,6 +52,48 @@ envVarGroups:
       # for each service.
       - key: APP_SECRET
         generateValue: true
+
+      # Amazon SES. eu-central-1 for both sending and receiving — SES inbound is
+      # available in Frankfurt, so mail never leaves the region the services and
+      # database are in.
+      - key: AWS_REGION
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+
+      # Meta Cloud API. Split across three services by need — the web service
+      # verifies inbound webhooks (app secret, verify token), the worker sends
+      # and downloads media (phone number id, access token), and the template
+      # sync cron lists templates (WABA id, access token). The access token is
+      # wanted by two of them and the region by three, which is what makes this
+      # a group rather than a per-service concern.
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_WABA_ID
+        sync: false
+      - key: WHATSAPP_ACCESS_TOKEN
+        sync: false
+      - key: WHATSAPP_APP_SECRET
+        sync: false
+      - key: WHATSAPP_VERIFY_TOKEN
+        sync: false
+
+  # Still per-service, and inconsistent with the rule above: SUPABASE_URL,
+  # SUPABASE_SERVICE_ROLE_KEY, EMAIL_API_KEY, EMAIL_WEBHOOK_SECRET,
+  # EMAIL_FROM_ADDRESS and EMAIL_REPLY_DOMAIN are identical on the web service
+  # and the worker.
+  #
+  # They are not moved here yet because they already hold live values at service
+  # level. Removing a declaration from this file can drop the value on the next
+  # Blueprint sync, so the move has to be sequenced: set each value in the group
+  # first, confirm it, then delete the per-service entries. The WhatsApp and AWS
+  # keys above had no values anywhere yet, which is why they could move in one
+  # step.
+  #
+  # APP_URL stays per-service permanently — it genuinely differs between
+  # production and staging.
 
 services:
   # ---------------------------------------------------------------- production
@@ -74,25 +133,8 @@ services:
         sync: false
       - key: EMAIL_REPLY_DOMAIN
         sync: false
-      # Amazon SES. eu-central-1 for both sending and receiving — SES inbound
-      # is available in Frankfurt, so mail never leaves the region the database
-      # and services are in.
-      - key: AWS_REGION
-        sync: false
-      - key: AWS_ACCESS_KEY_ID
-        sync: false
-      - key: AWS_SECRET_ACCESS_KEY
-        sync: false
-      - key: WHATSAPP_PHONE_NUMBER_ID
-        sync: false
-      - key: WHATSAPP_WABA_ID
-        sync: false
-      - key: WHATSAPP_ACCESS_TOKEN
-        sync: false
-      - key: WHATSAPP_APP_SECRET
-        sync: false
-      - key: WHATSAPP_VERIFY_TOKEN
-        sync: false
+      # AWS_* and WHATSAPP_* come from shipblu-shared. Re-declaring them here
+      # would shadow the group and take the service value instead.
 
   - type: worker
     name: shipblu-support-worker
@@ -120,16 +162,7 @@ services:
         sync: false
       - key: EMAIL_REPLY_DOMAIN
         sync: false
-      - key: AWS_REGION
-        sync: false
-      - key: AWS_ACCESS_KEY_ID
-        sync: false
-      - key: AWS_SECRET_ACCESS_KEY
-        sync: false
-      - key: WHATSAPP_PHONE_NUMBER_ID
-        sync: false
-      - key: WHATSAPP_ACCESS_TOKEN
-        sync: false
+      # AWS_* and WHATSAPP_* come from shipblu-shared.
 
   # -------------------------------------------------------------- staging
   - type: web
@@ -156,9 +189,23 @@ services:
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
-      # Staging never sends real mail.
+      # Staging never reaches a real customer.
+      #
+      # EMAIL_PROVIDER=local writes to disk instead of calling SES, which also
+      # makes the inherited AWS_* credentials inert — the driver is never
+      # constructed.
+      #
+      # WhatsApp has no such switch, so the token is blanked explicitly. It is
+      # inherited from the group, and Meta's API has no test mode: a send from
+      # staging would arrive on a real customer's phone. Blank makes the client
+      # throw "WHATSAPP_ACCESS_TOKEN is not configured" instead. Today staging
+      # has no worker to run a send job at all, but that is an accident of the
+      # current topology rather than a guarantee, and this does not depend on
+      # it staying true.
       - key: EMAIL_PROVIDER
         value: local
+      - key: WHATSAPP_ACCESS_TOKEN
+        value: ''
 
   # ------------------------------------------------------------- cron jobs
   # These run `npm run job -- <type>` directly rather than hitting an HTTP
@@ -201,11 +248,11 @@ services:
     buildCommand: npm ci --include=dev
     startCommand: npm run job -- sync_whatsapp_templates
     envVars:
+      # WHATSAPP_WABA_ID and WHATSAPP_ACCESS_TOKEN come from shipblu-shared.
+      # The handler skips cleanly while they are unset, so this cron is green
+      # from the day the Blueprint creates it rather than red until Meta is
+      # configured.
       - fromGroup: shipblu-shared
-      - key: WHATSAPP_WABA_ID
-        sync: false
-      - key: WHATSAPP_ACCESS_TOKEN
-        sync: false
 
   - type: cron
     name: shipblu-nightly
