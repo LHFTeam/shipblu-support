@@ -56,26 +56,14 @@ export async function POST(request: Request, context: { params: Promise<{ provid
     );
   }
 
+  // Verification needs the credential, so it reads the unredacted headers —
+  // separate from the map persisted above, which deliberately drops it.
   const authHeaders: Record<string, string> = {};
   request.headers.forEach((value, key) => {
     authHeaders[key.toLowerCase()] = value;
   });
 
-  // SES signs through SNS with RSA over a canonical string, which needs the
-  // signing certificate fetched over the network — so a provider may supply an
-  // async check instead of the synchronous HMAC one.
-  const signatureVerified = provider.verifyWebhook
-    ? await provider.verifyWebhook(rawBody, authHeaders)
-    : provider.verifySignature(rawBody, authHeaders);
-
-  // Control messages (an SNS subscription confirmation) carry no email and must
-  // be answered rather than queued. Handled only after verification, so this is
-  // never a way to make the service fetch an attacker-chosen URL.
-  if (signatureVerified && provider.handleControlMessage) {
-    if (await provider.handleControlMessage(payload, authHeaders)) {
-      return NextResponse.json({ status: 'control message handled' }, { status: 200 });
-    }
-  }
+  const signatureVerified = provider.verifySignature(rawBody, authHeaders);
 
   const inserted = await db
     .insert(webhookEvents)
@@ -120,7 +108,6 @@ function extractProviderEventId(payload: unknown): string | null {
   if (typeof payload !== 'object' || payload === null) return null;
   const p = payload as Record<string, unknown>;
 
-  // 'MessageId' also covers SNS, whose envelope carries one per delivery.
   for (const key of ['MessageID', 'MessageId', 'message-id', 'id', 'event-id']) {
     const value = p[key];
     if (typeof value === 'string' && value) return value;

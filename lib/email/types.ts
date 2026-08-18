@@ -81,8 +81,24 @@ export type OutboundEmail = {
 };
 
 export type SendResult = {
-  /** Provider's id for the accepted message, when it returns one. */
+  /**
+   * The provider's own id for the accepted message — a Postmark UUID, an SES
+   * message id. Useful for looking the send up in their dashboard, and nothing
+   * else: it is not an RFC 5322 Message-ID and will never appear in a reply's
+   * In-Reply-To.
+   */
   providerMessageId: string | null;
+
+  /**
+   * The Message-ID header the recipient will actually see, when the provider
+   * replaces the one we set. Null means ours survived.
+   *
+   * These are two different things and conflating them silently breaks
+   * threading: storing a Postmark UUID as the message's channel id would leave
+   * the References lookup matching against an id no mail client has ever seen.
+   */
+  rfcMessageId?: string | null;
+
   accepted: boolean;
 };
 
@@ -96,22 +112,6 @@ export interface EmailProvider {
    * is still stored (for forensics) but never processed into a ticket.
    */
   verifySignature(rawBody: string, headers: Record<string, string>): boolean;
-
-  /**
-   * Asynchronous verification, for providers that cannot answer synchronously.
-   *
-   * SES signs through SNS with RSA over a canonical string, and checking it
-   * needs the signing certificate fetched over the network. When present this
-   * is used instead of `verifySignature`.
-   */
-  verifyWebhook?(rawBody: string, headers: Record<string, string>): Promise<boolean>;
-
-  /**
-   * Handle a provider control message — an SNS subscription confirmation, for
-   * example — that carries no email. Returning true means the payload is fully
-   * dealt with and must not be queued for ingestion.
-   */
-  handleControlMessage?(payload: unknown, headers: Record<string, string>): Promise<boolean>;
 
   parseInbound(payload: unknown): Promise<ParsedInboundEmail>;
 }

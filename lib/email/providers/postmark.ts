@@ -114,7 +114,12 @@ export class PostmarkEmailProvider implements EmailProvider {
     }
 
     const result = (await response.json()) as { MessageID?: string };
-    return { providerMessageId: result.MessageID ?? null, accepted: true };
+
+    // Postmark's MessageID is its own UUID, not the Message-ID header it
+    // stamps on the wire, so it is deliberately not reported as rfcMessageId.
+    // The header we set above is normally honoured; when it is not, our id is
+    // still in References, which Postmark leaves alone.
+    return { providerMessageId: result.MessageID ?? null, rfcMessageId: null, accepted: true };
   }
 
   verifySignature(_rawBody: string, headers: Record<string, string>): boolean {
@@ -174,7 +179,12 @@ export class PostmarkEmailProvider implements EmailProvider {
     const deliveredTo = p.OriginalRecipient ? [p.OriginalRecipient] : undefined;
 
     return {
-      messageId: normaliseMessageId(p.MessageID ?? headers['message-id'] ?? `pm-${Date.now()}`),
+      // The sender's real Message-ID first, Postmark's internal id only as a
+      // fallback. This is stored as the message's channel id and is what a
+      // later reply's References will quote — Postmark's UUID appears in no
+      // mail client anywhere, so preferring it would break threading onto any
+      // inbound message.
+      messageId: normaliseMessageId(headers['message-id'] ?? p.MessageID ?? `pm-${Date.now()}`),
       inReplyTo,
       references,
       from,

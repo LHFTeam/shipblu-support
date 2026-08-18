@@ -58,7 +58,7 @@ export async function sendEmail(job: ClaimedJob): Promise<void> {
   const domain = replyDomain();
   const mailbox = e.EMAIL_FROM_ADDRESS.split('@')[0] ?? 'support';
 
-  const references = buildReferences(row.message.inReplyTo);
+  const references = buildReferences(row.message.inReplyTo, generatedMessageId(row, domain));
 
   const signature = row.agent?.signature ?? null;
   const textBody = [row.message.bodyText, '', REPLY_ABOVE_MARKER, signature ? `\n${signature}` : '']
@@ -84,7 +84,7 @@ export async function sendEmail(job: ClaimedJob): Promise<void> {
     subject: buildReplySubject(row.conversation.subject, row.conversation.number, e.APP_SECRET),
     textBody,
     htmlBody,
-    messageId: row.message.channelMessageId ?? `${row.message.id}@${domain}`,
+    messageId: generatedMessageId(row, domain),
     inReplyTo: row.message.inReplyTo ?? undefined,
     references,
   };
@@ -92,19 +92,15 @@ export async function sendEmail(job: ClaimedJob): Promise<void> {
   try {
     const result = await emailProvider().send(outbound);
 
-    // Prefer the provider's id when it supplies one.
-    //
-    // SES overwrites Message-ID on send, so the id that actually reaches the
-    // customer — and comes back in their reply's In-Reply-To — is theirs, not
-    // ours. Storing theirs makes the References lookup match on the primary
-    // signal; ours is still appended to References by the driver, so a client
-    // that echoes the chain resolves either way. Our generated id is kept in
-    // meta so the two can always be tied together.
+    // channelMessageId must hold an RFC 5322 Message-ID, because that is what a
+    // reply's In-Reply-To and References will quote. Only `rfcMessageId` is one
+    // — `providerMessageId` is the vendor's internal handle (a Postmark UUID)
+    // and matching against it would never hit.
     await db
       .update(messages)
       .set({
         deliveryStatus: 'sent',
-        channelMessageId: result.providerMessageId ?? outbound.messageId,
+        channelMessageId: result.rfcMessageId ?? outbound.messageId,
         deliveryError: null,
         meta: {
           ...(row.message.meta as Record<string, unknown>),
@@ -131,9 +127,27 @@ export async function sendEmail(job: ClaimedJob): Promise<void> {
   }
 }
 
-/** Rebuilds the References chain from the parent message id. */
-function buildReferences(inReplyTo: string | null): string[] {
-  return inReplyTo ? [inReplyTo] : [];
+/**
+ * The References chain: the parent, then this message's own id.
+ *
+ * Including our own id is a deliberate belt against providers that replace the
+ * Message-ID header — Postmark and SES both reserve the right to, and neither
+ * announces it. References is left alone by every provider we have used, so an
+ * id that appears there is still findable when the customer replies, even if
+ * the header we set never reached them.
+ */
+function buildReferences(inReplyTo: string | null, ownMessageId: string): string[] {
+  const chain = inReplyTo ? [inReplyTo] : [];
+  if (!chain.includes(ownMessageId)) chain.push(ownMessageId);
+  return chain;
+}
+
+/** Stable per message, so the id in References matches the one in the header. */
+function generatedMessageId(
+  row: { message: { channelMessageId: string | null; id: string } },
+  domain: string,
+): string {
+  return row.message.channelMessageId ?? `${row.message.id}@${domain}`;
 }
 
 function escapeHtml(text: string): string {
