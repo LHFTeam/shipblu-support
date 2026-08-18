@@ -25,6 +25,14 @@ const schema = z.object({
   /** Guards the cron/job endpoints and signs CSRF tokens. */
   APP_SECRET: z.string().min(32, 'APP_SECRET must be at least 32 characters'),
 
+  /**
+   * Hostname the public help centre is served on, e.g. support.shipblu.com.
+   * The proxy rewrites requests arriving here under /kb, and canonical and
+   * sitemap URLs are built from it. Unset means the help centre is only
+   * reachable at /kb on the console's own hostname.
+   */
+  KB_PUBLIC_HOST: z.string().optional(),
+
   SUPABASE_URL: z.url().optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
   SUPABASE_STORAGE_BUCKET: z.string().default('attachments'),
@@ -55,6 +63,14 @@ const schema = z.object({
   /** Used to verify X-Hub-Signature-256 on inbound Meta webhooks. */
   WHATSAPP_APP_SECRET: z.string().optional(),
   WHATSAPP_VERIFY_TOKEN: z.string().optional(),
+
+  /**
+   * Freshdesk, for the knowledge base importer only. Unset means the import
+   * job skips rather than fails, so the cron that runs it is green before the
+   * migration is scheduled.
+   */
+  FRESHDESK_DOMAIN: z.string().optional(),
+  FRESHDESK_API_KEY: z.string().optional(),
 
   /** Worker tuning. */
   WORKER_CONCURRENCY: z.coerce.number().int().positive().default(5),

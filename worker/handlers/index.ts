@@ -1,6 +1,7 @@
 import type { ClaimedJob, JobType } from '@/lib/queue';
 import { cleanup } from './cleanup';
 import { downloadMediaJob } from './download-media';
+import { importFreshdeskKb } from './import-freshdesk-kb';
 import { processWebhook } from './process-webhook';
 import { sendEmail } from './send-email';
 import { sendWhatsApp } from './send-whatsapp';
@@ -19,6 +20,7 @@ export type JobHandler = (job: ClaimedJob) => Promise<void>;
 export const handlers: Partial<Record<JobType, JobHandler>> = {
   cleanup,
   download_media: downloadMediaJob,
+  import_freshdesk_kb: () => importFreshdeskKb(),
   process_webhook: processWebhook,
   send_email: sendEmail,
   send_whatsapp: sendWhatsApp,

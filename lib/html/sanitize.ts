@@ -149,3 +149,94 @@ export function preview(text: string, maxLength = 140): string {
   const collapsed = text.replace(/\s+/g, ' ').trim();
   return collapsed.length <= maxLength ? collapsed : `${collapsed.slice(0, maxLength - 1)}…`;
 }
+
+/**
+ * Knowledge base articles.
+ *
+ * More permissive than the email sanitiser, and deliberately so: articles are
+ * authored by agents and imported from Freshdesk, so they carry headings,
+ * tables, code samples, screenshots and the occasional embedded video, and a
+ * stripped article is a useless article.
+ *
+ * It is still a sanitiser, not a passthrough. Articles render on the public
+ * site under our own domain, so a script that survived here would run for every
+ * customer — and imported HTML is only as trustworthy as whoever pasted it into
+ * Freshdesk years ago.
+ */
+const ARTICLE_TAGS = [...ALLOWED_TAGS, 'figure', 'figcaption', 'iframe', 'details', 'summary'];
+
+/**
+ * Hosts whose iframes may render. Video embeds are common in support articles
+ * and there is no way to keep them without an iframe — but an unrestricted
+ * iframe is a full page under someone else's control, so the src is checked
+ * against this list and anything else is dropped.
+ */
+const EMBED_HOSTS = [
+  'www.youtube.com',
+  'youtube.com',
+  'www.youtube-nocookie.com',
+  'player.vimeo.com',
+  'www.loom.com',
+];
+
+function isAllowedEmbed(src: string | undefined): boolean {
+  if (!src) return false;
+  try {
+    const url = new URL(src, 'https://placeholder.invalid');
+    return url.protocol === 'https:' && EMBED_HOSTS.includes(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+export function sanitiseArticleHtml(html: string): string {
+  return sanitizeHtml(html, {
+    allowedTags: ARTICLE_TAGS,
+    allowedAttributes: {
+      a: ['href', 'name', 'target', 'rel', 'title', 'id'],
+      img: ['src', 'alt', 'title', 'width', 'height', 'loading'],
+      iframe: ['src', 'width', 'height', 'title', 'allow', 'allowfullscreen', 'loading'],
+      // id carries anchor links and the table of contents; dir and lang matter
+      // because articles mix English and Arabic inside one page.
+      '*': ['style', 'align', 'dir', 'lang', 'id', 'class'],
+      table: ['border', 'cellpadding', 'cellspacing', 'width'],
+      td: ['colspan', 'rowspan', 'width', 'height', 'valign'],
+      th: ['colspan', 'rowspan', 'width', 'height', 'valign', 'scope'],
+      col: ['span', 'width'],
+      ol: ['start', 'type'],
+    },
+
+    allowedSchemes: ['http', 'https', 'mailto', 'tel'],
+    allowProtocolRelative: false,
+
+    allowedStyles: {
+      '*': {
+        color: [/^.*$/],
+        'background-color': [/^.*$/],
+        'text-align': [/^(left|right|center|justify|start|end)$/],
+        'font-size': [/^\d+(?:\.\d+)?(?:px|em|rem|pt|%)$/],
+        'font-weight': [/^(normal|bold|[1-9]00)$/],
+        'font-style': [/^(normal|italic)$/],
+        'text-decoration': [/^[a-z- ]+$/],
+        margin: [/^[\d\s.a-z%-]+$/],
+        padding: [/^[\d\s.a-z%-]+$/],
+        border: [/^[\d\s.a-z#()%,-]+$/],
+        width: [/^[\d.]+(?:px|em|rem|%)$/],
+        height: [/^[\d.]+(?:px|em|rem|%)$/],
+        direction: [/^(ltr|rtl)$/],
+        // position, z-index and transform stay absent for the same reason as in
+        // email: nothing in an article may lift itself out of the article.
+      },
+    },
+
+    transformTags: {
+      a: sanitizeHtml.simpleTransform('a', { rel: 'noopener noreferrer' }),
+      img: sanitizeHtml.simpleTransform('img', { loading: 'lazy' }),
+    },
+
+    exclusiveFilter: (frame) => frame.tag === 'iframe' && !isAllowedEmbed(frame.attribs.src),
+
+    nonTextTags: ['style', 'script', 'textarea', 'option', 'noscript', 'title'],
+    disallowedTagsMode: 'discard',
+  });
+}
