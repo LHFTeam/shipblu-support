@@ -67,6 +67,30 @@ function credentials() {
   };
 }
 
+/** Returns null on 404 instead of throwing, for endpoints that may not exist. */
+async function getOptional<T>(path: string): Promise<T | null> {
+  const { base, auth } = credentials();
+
+  const response = await fetch(`${base}${path}`, {
+    headers: { Authorization: auth, Accept: 'application/json' },
+  });
+
+  // 404 is the normal answer for "this item has no translation in that
+  // language", so it is a result rather than a failure.
+  if (response.status === 404) return null;
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new FreshdeskError(
+      `Freshdesk ${path} failed (${response.status}): ${text.slice(0, 300)}`,
+      response.status,
+      response.status === 429 || response.status >= 500,
+    );
+  }
+
+  return (await response.json()) as T;
+}
+
 async function get<T>(path: string): Promise<T> {
   const { base, auth } = credentials();
 
@@ -147,4 +171,64 @@ export function mapVisibility(
 /** 2 is published in Freshdesk; everything else is a draft. */
 export function mapStatus(status: number | undefined): 'draft' | 'published' {
   return status === 2 ? 'published' : 'draft';
+}
+
+// --- Translations -----------------------------------------------------------
+//
+// Freshdesk serves a translated item by appending a language code to the item's
+// own URL. There is deliberately no "list articles in language X" endpoint —
+// the client library that documents this API has list methods only for the
+// primary language — so translations are fetched one item at a time, by id.
+
+export async function getTranslatedCategory(
+  id: number,
+  code: string,
+): Promise<FreshdeskCategory | null> {
+  return getOptional<FreshdeskCategory>(`/solutions/categories/${id}/${code}`);
+}
+
+export async function getTranslatedFolder(
+  id: number,
+  code: string,
+): Promise<FreshdeskFolder | null> {
+  return getOptional<FreshdeskFolder>(`/solutions/folders/${id}/${code}`);
+}
+
+export async function getTranslatedArticle(
+  id: number,
+  code: string,
+): Promise<FreshdeskArticle | null> {
+  return getOptional<FreshdeskArticle>(`/solutions/articles/${id}/${code}`);
+}
+
+/**
+ * Language codes to try for each of our locales.
+ *
+ * Freshdesk accounts are configured with either a short code or a regional one,
+ * and there is no endpoint that lists which. Trying the short form first
+ * matches the common case; the regional forms are the fallback. Freshdesk
+ * writes regional codes with a dash, not an underscore.
+ */
+export const LANGUAGE_CODE_CANDIDATES: Record<string, string[]> = {
+  en: ['en', 'en-US', 'en-GB'],
+  ar: ['ar', 'ar-SA', 'ar-EG'],
+};
+
+/**
+ * Finds the code this account actually uses for a locale, by asking for one
+ * real category in each candidate until one answers.
+ *
+ * Done once per run against a single category rather than guessed per request:
+ * a wrong code returns 404 for every item, which is indistinguishable from
+ * "nothing is translated" and would make the import quietly find nothing.
+ */
+export async function discoverLanguageCode(
+  sampleCategoryId: number,
+  locale: string,
+): Promise<string | null> {
+  for (const code of LANGUAGE_CODE_CANDIDATES[locale] ?? [locale]) {
+    const translated = await getTranslatedCategory(sampleCategoryId, code);
+    if (translated) return code;
+  }
+  return null;
 }
