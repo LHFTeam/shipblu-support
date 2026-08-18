@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { isLocale, t } from '@/lib/kb/locale';
 import { getCategory } from '@/lib/kb/queries';
+import { decodeSlugParam } from '@/lib/kb/slug';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,7 +12,8 @@ export async function generateMetadata({
 }: {
   params: Promise<{ locale: string; category: string }>;
 }): Promise<Metadata> {
-  const { locale, category: slug } = await params;
+  const { locale, category: categoryParam } = await params;
+  const slug = decodeSlugParam(categoryParam);
   if (!isLocale(locale)) return {};
 
   const category = await getCategory(locale, slug);
@@ -28,7 +30,8 @@ export default async function CategoryPage({
 }: {
   params: Promise<{ locale: string; category: string }>;
 }) {
-  const { locale, category: slug } = await params;
+  const { locale, category: categoryParam } = await params;
+  const slug = decodeSlugParam(categoryParam);
   if (!isLocale(locale)) notFound();
 
   const category = await getCategory(locale, slug);
