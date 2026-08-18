@@ -30,7 +30,7 @@ const schema = z.object({
   SUPABASE_STORAGE_BUCKET: z.string().default('attachments'),
 
   /** Which driver lib/email/providers resolves. `local` writes to .mail-outbox/. */
-  EMAIL_PROVIDER: z.enum(['local', 'postmark', 'mailgun']).default('local'),
+  EMAIL_PROVIDER: z.enum(['local', 'ses', 'postmark', 'mailgun']).default('local'),
   EMAIL_API_KEY: z.string().optional(),
   EMAIL_WEBHOOK_SECRET: z.string().optional(),
   /** Envelope sender, e.g. support@shipblu.com */
@@ -41,6 +41,13 @@ const schema = z.object({
    * (support+<token>@shipblu.com). Defaults to the EMAIL_FROM_ADDRESS domain.
    */
   EMAIL_REPLY_DOMAIN: z.string().optional(),
+
+  /** Amazon SES. Credentials are omitted when an instance role supplies them. */
+  AWS_REGION: z.string().optional(),
+  AWS_ACCESS_KEY_ID: z.string().optional(),
+  AWS_SECRET_ACCESS_KEY: z.string().optional(),
+  /** Optional SES configuration set, for per-stream event publishing. */
+  SES_CONFIGURATION_SET: z.string().optional(),
 
   WHATSAPP_PHONE_NUMBER_ID: z.string().optional(),
   WHATSAPP_WABA_ID: z.string().optional(),

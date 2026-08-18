@@ -2,9 +2,10 @@ import { cookies } from 'next/headers';
 import { and, eq, gt, lt } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agents, sessions } from '@/db/schema';
+import { SESSION_COOKIE } from './cookie';
 import { generateToken, hashToken } from './tokens';
 
-export const SESSION_COOKIE = 'shipblu_session';
+export { SESSION_COOKIE };
 
 /** Sliding window: a session survives 30 days, refreshed on use. */
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;

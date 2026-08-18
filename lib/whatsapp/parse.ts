@@ -1,0 +1,222 @@
+import type {
+  NormalisedInboundMessage,
+  NormalisedMedia,
+  NormalisedStatus,
+  NormalisedWebhook,
+  WhatsAppInboundMessage,
+  WhatsAppMediaObject,
+  WhatsAppStatus,
+  WhatsAppWebhookPayload,
+} from './types';
+
+/**
+ * Flattens Meta's nested webhook envelope into the messages and statuses the
+ * ingest pipeline cares about.
+ *
+ * One batch can carry several entries, several changes per entry, and both
+ * inbound messages and delivery statuses in the same change — so this returns
+ * lists, not a single message. Nothing here throws: a payload we cannot read is
+ * an empty result, because a throw in the webhook path makes Meta redeliver the
+ * whole batch, including the parts we did understand.
+ */
+
+const MEDIA_TYPES = ['image', 'video', 'audio', 'document', 'sticker'] as const;
+
+export function parseWebhook(payload: unknown): NormalisedWebhook {
+  const result: NormalisedWebhook = { messages: [], statuses: [], errors: [] };
+
+  if (!isObject(payload)) return result;
+  const body = payload as WhatsAppWebhookPayload;
+
+  for (const entry of body.entry ?? []) {
+    for (const change of entry.changes ?? []) {
+      const value = change.value;
+      if (!value) continue;
+
+      const phoneNumberId = value.metadata?.phone_number_id ?? null;
+
+      // Meta sends the profile name once per batch in `contacts`, keyed by the
+      // customer's number, not on the message itself.
+      const profileNames = new Map<string, string>();
+      for (const contact of value.contacts ?? []) {
+        if (contact.wa_id && contact.profile?.name) {
+          profileNames.set(contact.wa_id, contact.profile.name);
+        }
+      }
+
+      for (const message of value.messages ?? []) {
+        const normalised = normaliseMessage(message, phoneNumberId, profileNames);
+        if (normalised) result.messages.push(normalised);
+      }
+
+      for (const status of value.statuses ?? []) {
+        const normalised = normaliseStatus(status);
+        if (normalised) result.statuses.push(normalised);
+      }
+
+      for (const error of value.errors ?? []) {
+        result.errors.push(
+          `${error.code}: ${error.title}${error.message ? ` — ${error.message}` : ''}`,
+        );
+      }
+    }
+  }
+
+  return result;
+}
+
+function normaliseMessage(
+  message: WhatsAppInboundMessage,
+  phoneNumberId: string | null,
+  profileNames: Map<string, string>,
+): NormalisedInboundMessage | null {
+  // Without a wamid there is no idempotency key, and ingesting it would risk
+  // duplicating the message on every redelivery. Dropping is the safer failure.
+  if (!message?.id || !message.from) return null;
+
+  const media = extractMedia(message);
+
+  return {
+    wamid: message.id,
+    from: message.from,
+    phoneNumberId,
+    profileName: profileNames.get(message.from) ?? null,
+    sentAt: parseTimestamp(message.timestamp),
+    type: message.type ?? 'unsupported',
+    text: displayText(message),
+    media,
+    replyToWamid: message.context?.id ?? null,
+    raw: message as unknown as Record<string, unknown>,
+  };
+}
+
+/**
+ * What the agent sees in the conversation list.
+ *
+ * Every message type resolves to *something* readable — an agent scanning the
+ * inbox should never see a blank row and have to open it to find out it was a
+ * location pin.
+ */
+export function displayText(message: WhatsAppInboundMessage): string {
+  switch (message.type) {
+    case 'text':
+      return message.text?.body ?? '';
+
+    case 'image':
+    case 'video':
+    case 'audio':
+    case 'document':
+    case 'sticker': {
+      const media = message[message.type as (typeof MEDIA_TYPES)[number]];
+      const caption = media?.caption?.trim();
+      if (caption) return caption;
+      if (message.type === 'document' && media?.filename) return `[document: ${media.filename}]`;
+      if (message.type === 'audio' && media?.voice) return '[voice note]';
+      return `[${message.type}]`;
+    }
+
+    case 'location': {
+      const { latitude, longitude, name, address } = message.location ?? {};
+      const label = [name, address].filter(Boolean).join(', ');
+      const coords = latitude != null && longitude != null ? `${latitude}, ${longitude}` : '';
+      return `[location${label ? `: ${label}` : ''}${coords ? ` (${coords})` : ''}]`;
+    }
+
+    case 'contacts':
+      return `[shared ${message.contacts?.length ?? 0} contact card(s)]`;
+
+    case 'reaction':
+      return `[reacted ${message.reaction?.emoji ?? ''}]`.replace(' ]', ']');
+
+    case 'button':
+      return message.button?.text ?? '[button reply]';
+
+    case 'interactive':
+      return (
+        message.interactive?.button_reply?.title ??
+        message.interactive?.list_reply?.title ??
+        '[interactive reply]'
+      );
+
+    case 'order':
+      return '[order]';
+
+    case 'system':
+      return message.system?.body ?? '[system message]';
+
+    default: {
+      // `unsupported` carries an error explaining what Meta refused to deliver;
+      // showing it beats an opaque placeholder when a customer says "I sent it".
+      const error = message.errors?.[0];
+      if (error) return `[unsupported message: ${error.title}]`;
+      return `[unsupported message type: ${message.type}]`;
+    }
+  }
+}
+
+function extractMedia(message: WhatsAppInboundMessage): NormalisedMedia | null {
+  for (const type of MEDIA_TYPES) {
+    const media = message[type] as WhatsAppMediaObject | undefined;
+    if (media?.id) {
+      return {
+        mediaId: media.id,
+        mimeType: normaliseMime(media.mime_type),
+        // Meta only sends a filename for documents; the rest get one at download
+        // time from the mime type, so the object key always has an extension.
+        filename: media.filename ?? null,
+        sha256: media.sha256 ?? null,
+        isVoice: media.voice === true,
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * Meta appends codec parameters, e.g. `audio/ogg; codecs=opus`. Storage and the
+ * Content-Type header want the bare type.
+ */
+function normaliseMime(mime: string | undefined): string | null {
+  if (!mime) return null;
+  return mime.split(';')[0]!.trim().toLowerCase() || null;
+}
+
+function normaliseStatus(status: WhatsAppStatus): NormalisedStatus | null {
+  if (!status?.id || !status.status) return null;
+  if (!['sent', 'delivered', 'read', 'failed'].includes(status.status)) return null;
+
+  const error = status.errors?.[0];
+
+  return {
+    wamid: status.id,
+    status: status.status as NormalisedStatus['status'],
+    at: parseTimestamp(status.timestamp),
+    recipientId: status.recipient_id,
+    error: error
+      ? `${error.code}: ${error.title}${error.error_data?.details ? ` — ${error.error_data.details}` : ''}`
+      : null,
+    conversationExpiresAt: status.conversation?.expiration_timestamp
+      ? parseTimestamp(status.conversation.expiration_timestamp)
+      : null,
+  };
+}
+
+/**
+ * Meta sends Unix *seconds* as a string. Treating it as milliseconds — the easy
+ * mistake — dates every message to 1970 and silently breaks the 24-hour window,
+ * so an unparseable value falls back to now rather than to the epoch.
+ */
+export function parseTimestamp(timestamp: string | undefined): Date {
+  const seconds = Number(timestamp);
+  if (!Number.isFinite(seconds) || seconds <= 0) return new Date();
+  return new Date(seconds * 1000);
+}
+
+/** Meta's own signal for whether this delivery was a status-only batch. */
+export function isStatusOnly(webhook: NormalisedWebhook): boolean {
+  return webhook.messages.length === 0 && webhook.statuses.length > 0;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
