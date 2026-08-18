@@ -2,6 +2,7 @@ import { env } from '@/lib/env';
 import type { EmailProvider } from '../types';
 import { LocalEmailProvider } from './local';
 import { PostmarkEmailProvider } from './postmark';
+import { SesEmailProvider } from './ses';
 
 /**
  * Resolves the configured driver. This function is the entire cost of changing
@@ -16,6 +17,16 @@ export function emailProvider(): EmailProvider {
   const e = env();
 
   switch (e.EMAIL_PROVIDER) {
+    case 'ses': {
+      if (!e.AWS_REGION) throw new Error('EMAIL_PROVIDER=ses requires AWS_REGION');
+      cached = new SesEmailProvider({
+        region: e.AWS_REGION,
+        accessKeyId: e.AWS_ACCESS_KEY_ID,
+        secretAccessKey: e.AWS_SECRET_ACCESS_KEY,
+        configurationSet: e.SES_CONFIGURATION_SET,
+      });
+      break;
+    }
     case 'postmark': {
       if (!e.EMAIL_API_KEY) {
         throw new Error('EMAIL_PROVIDER=postmark requires EMAIL_API_KEY');
@@ -44,4 +55,4 @@ export function resetEmailProviderCache(): void {
   cached = null;
 }
 
-export { LocalEmailProvider, PostmarkEmailProvider };
+export { LocalEmailProvider, PostmarkEmailProvider, SesEmailProvider };

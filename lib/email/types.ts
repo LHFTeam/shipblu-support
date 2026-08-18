@@ -97,5 +97,21 @@ export interface EmailProvider {
    */
   verifySignature(rawBody: string, headers: Record<string, string>): boolean;
 
+  /**
+   * Asynchronous verification, for providers that cannot answer synchronously.
+   *
+   * SES signs through SNS with RSA over a canonical string, and checking it
+   * needs the signing certificate fetched over the network. When present this
+   * is used instead of `verifySignature`.
+   */
+  verifyWebhook?(rawBody: string, headers: Record<string, string>): Promise<boolean>;
+
+  /**
+   * Handle a provider control message — an SNS subscription confirmation, for
+   * example — that carries no email. Returning true means the payload is fully
+   * dealt with and must not be queued for ingestion.
+   */
+  handleControlMessage?(payload: unknown, headers: Record<string, string>): Promise<boolean>;
+
   parseInbound(payload: unknown): Promise<ParsedInboundEmail>;
 }

@@ -74,6 +74,15 @@ services:
         sync: false
       - key: EMAIL_REPLY_DOMAIN
         sync: false
+      # Amazon SES. eu-central-1 for both sending and receiving — SES inbound
+      # is available in Frankfurt, so mail never leaves the region the database
+      # and services are in.
+      - key: AWS_REGION
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
       - key: WHATSAPP_PHONE_NUMBER_ID
         sync: false
       - key: WHATSAPP_WABA_ID
@@ -110,6 +119,12 @@ services:
       - key: EMAIL_FROM_ADDRESS
         sync: false
       - key: EMAIL_REPLY_DOMAIN
+        sync: false
+      - key: AWS_REGION
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
         sync: false
       - key: WHATSAPP_PHONE_NUMBER_ID
         sync: false

@@ -92,15 +92,24 @@ export async function sendEmail(job: ClaimedJob): Promise<void> {
   try {
     const result = await emailProvider().send(outbound);
 
+    // Prefer the provider's id when it supplies one.
+    //
+    // SES overwrites Message-ID on send, so the id that actually reaches the
+    // customer — and comes back in their reply's In-Reply-To — is theirs, not
+    // ours. Storing theirs makes the References lookup match on the primary
+    // signal; ours is still appended to References by the driver, so a client
+    // that echoes the chain resolves either way. Our generated id is kept in
+    // meta so the two can always be tied together.
     await db
       .update(messages)
       .set({
         deliveryStatus: 'sent',
-        channelMessageId: outbound.messageId,
+        channelMessageId: result.providerMessageId ?? outbound.messageId,
         deliveryError: null,
         meta: {
           ...(row.message.meta as Record<string, unknown>),
           providerMessageId: result.providerMessageId,
+          generatedMessageId: outbound.messageId,
           sentAt: new Date().toISOString(),
         },
       })
