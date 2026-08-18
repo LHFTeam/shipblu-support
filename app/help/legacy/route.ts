@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, like, or } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { kbArticles, kbFolders, kbRedirects } from '@/db/schema';
 import { DEFAULT_LOCALE } from '@/lib/kb/locale';
@@ -40,13 +40,35 @@ export async function GET(request: Request) {
 
   const freshdeskId = freshdeskArticleId(path);
   if (freshdeskId) {
-    const byExternalId = await db
+    // External ids are scoped by language — "72000123456:ar" — because one
+    // Freshdesk article becomes one row per language here. The legacy path
+    // carries no language, so this matches any of them.
+    //
+    // Freshdesk does put a language in the portal URL (`/en/support/...`), so
+    // that is preferred when present; otherwise the default locale wins, and
+    // failing that whichever translation exists. The article page carries a
+    // language switcher either way, so a reader who lands on the wrong one is
+    // one click from the right one rather than at a dead end.
+    const preferred = /^\/([a-z]{2})(-[A-Za-z]{2})?\//.exec(path)?.[1];
+
+    const rows = await db
       .select({ slug: kbArticles.slug, locale: kbArticles.locale })
       .from(kbArticles)
-      .where(and(eq(kbArticles.sourceSystem, 'freshdesk'), eq(kbArticles.externalId, freshdeskId)))
-      .limit(1);
+      .where(
+        and(
+          eq(kbArticles.sourceSystem, 'freshdesk'),
+          or(
+            eq(kbArticles.externalId, freshdeskId),
+            like(kbArticles.externalId, `${freshdeskId}:%`),
+          ),
+        ),
+      );
 
-    const article = byExternalId[0];
+    const article =
+      rows.find((row) => row.locale === preferred) ??
+      rows.find((row) => row.locale === DEFAULT_LOCALE) ??
+      rows[0];
+
     if (article) return permanent(request, `/${article.locale}/a/${article.slug}`);
   }
 
@@ -55,7 +77,12 @@ export async function GET(request: Request) {
     const byFolder = await db
       .select({ slug: kbFolders.slug })
       .from(kbFolders)
-      .where(and(eq(kbFolders.sourceSystem, 'freshdesk'), eq(kbFolders.externalId, folderId)))
+      .where(
+        and(
+          eq(kbFolders.sourceSystem, 'freshdesk'),
+          or(eq(kbFolders.externalId, folderId), like(kbFolders.externalId, `${folderId}:%`)),
+        ),
+      )
       .limit(1);
 
     // Folder URLs need their category to be addressable, and a folder that

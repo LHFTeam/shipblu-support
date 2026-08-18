@@ -1,64 +1,91 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, or } from 'drizzle-orm';
+import type { PgColumn } from 'drizzle-orm/pg-core';
 import { db } from '@/db/client';
 import { kbArticles, kbCategories, kbFolders, kbRedirects } from '@/db/schema';
 import { env } from '@/lib/env';
 import {
+  discoverLanguageCode,
+  getTranslatedArticle,
+  getTranslatedCategory,
+  getTranslatedFolder,
   listArticles,
   listCategories,
   listFolders,
   mapStatus,
   mapVisibility,
   type FreshdeskArticle,
+  type FreshdeskCategory,
   type FreshdeskFolder,
 } from '@/lib/freshdesk/client';
 import { htmlToText, preview, sanitiseArticleHtml } from '@/lib/html/sanitize';
 import { detectCategoryLocale } from '@/lib/kb/language';
-import type { Locale } from '@/lib/kb/locale';
+import { LOCALES, type Locale } from '@/lib/kb/locale';
 import { slugify, uniqueSlug } from '@/lib/kb/slug';
 
 /**
- * Imports the Freshdesk knowledge base.
+ * Imports the Freshdesk knowledge base, in every language it is published in.
  *
- * Idempotent on `(source_system, external_id)` throughout, so this is safe to
- * run repeatedly — which is the point. A migration is never one clean run: it
- * is a rehearsal weeks early, several more as content changes, and a final one
- * on cutover day. Anything that could only be run once would have to be undone
- * by hand between attempts.
+ * Freshdesk models translations as one item with several language versions, and
+ * exposes them only per item, by id — its list endpoints return the account's
+ * primary language and nothing else. So the shape of this import is: walk the
+ * primary tree, then for every category, folder and article ask for each other
+ * language by id.
+ *
+ * Idempotent on `(source_system, external_id)` throughout, so it is safe to run
+ * repeatedly — which is the point. A migration is never one clean run: it is a
+ * rehearsal weeks early, several more as content changes, and a final pass on
+ * cutover day.
  *
  * Locally-authored articles are never touched: every write is scoped to rows
- * whose `source_system` is 'freshdesk', so a re-run cannot overwrite something
- * the team wrote here.
+ * whose `source_system` is 'freshdesk'.
  */
 export async function importFreshdeskKb(): Promise<void> {
   const e = env();
   if (!e.FRESHDESK_DOMAIN || !e.FRESHDESK_API_KEY) {
     // Thrown rather than skipped. Nothing schedules this job — it is always
     // started by hand from the console or the shell — so a silent success is
-    // just a person watching an empty knowledge base and wondering why. A
-    // failed job puts the reason on the row, where the console shows it.
+    // just a person watching an empty knowledge base and wondering why.
     throw new Error(
       'FRESHDESK_DOMAIN and FRESHDESK_API_KEY must be set on the worker service before importing',
     );
   }
 
   const started = Date.now();
+  const failures: string[] = [];
   let categoryCount = 0;
   let folderCount = 0;
   let articleCount = 0;
-  const failures: string[] = [];
+  let translatedCount = 0;
 
   const categories = await listCategories();
+  if (categories.length === 0) {
+    console.warn('[import_freshdesk_kb] Freshdesk returned no categories');
+    return;
+  }
+
+  // Which code this account uses for each language, asked once against a real
+  // category. A wrong code 404s on every item, which is indistinguishable from
+  // "nothing is translated" — so guessing it would make the import quietly find
+  // nothing and still report success.
+  const codes = new Map<Locale, string>();
+  for (const locale of LOCALES) {
+    const code = await discoverLanguageCode(categories[0]!.id, locale);
+    if (code) codes.set(locale, code);
+  }
+
+  console.log(
+    `[import_freshdesk_kb] language codes: ${
+      [...codes].map(([locale, code]) => `${locale}=${code}`).join(', ') || 'none found'
+    }`,
+  );
 
   for (const category of categories) {
     try {
       const folders = await listFolders(category.id);
 
-      // The whole category is fetched before anything is written, because its
-      // locale is decided by its articles and every article is then filed under
-      // it. Writing as we go would mean guessing the locale from the first
-      // article and correcting it afterwards.
+      // The whole category is read before anything is written, because its
+      // locale is decided by its articles and every article is filed under it.
       const contents: { folder: FreshdeskFolder; articles: FreshdeskArticle[] }[] = [];
-
       for (const folder of folders) {
         try {
           contents.push({ folder, articles: await listArticles(folder.id) });
@@ -71,31 +98,36 @@ export async function importFreshdeskKb(): Promise<void> {
         articles.map((article) => `${article.title} ${article.description_text ?? ''}`),
       );
 
-      const { locale, disagreements } = detectCategoryLocale(category.name, samples);
+      const { locale: primaryLocale, disagreements } = detectCategoryLocale(category.name, samples);
 
       if (disagreements > 0) {
-        // Not an error: a category really can hold both languages. But every
-        // article inherits the category's locale, so the minority ones end up
-        // filed under a language they are not written in, and only a person can
-        // decide how to split them.
+        // A category really can hold both languages, but every article inherits
+        // the category's locale, so the minority ones end up filed under a
+        // language they are not written in. Only a person can decide how to
+        // split them, and this is how they find out.
         console.warn(
-          `[import_freshdesk_kb] category "${category.name}" imported as ${locale}, ` +
-            `but ${disagreements} of ${samples.length} article(s) look like the other ` +
-            `language — they may need moving`,
+          `[import_freshdesk_kb] category "${category.name}" imported as ${primaryLocale}, ` +
+            `but ${disagreements} of ${samples.length} article(s) look like the other language`,
         );
       }
 
-      const categoryId = await upsertCategory(category, locale);
+      // --- primary language ------------------------------------------------
+
+      const primaryCategory = await upsertCategory(category, primaryLocale);
       categoryCount += 1;
+
+      const articleGroups = new Map<number, string>();
 
       for (const { folder, articles } of contents) {
         try {
-          const folderId = await upsertFolder(folder, categoryId);
+          const folderId = await upsertFolder(folder, primaryCategory.id, primaryLocale);
           folderCount += 1;
 
           for (const article of articles) {
             try {
-              await upsertArticle(article, folderId, locale);
+              const result = await upsertArticle(article, folderId, primaryLocale);
+              articleGroups.set(article.id, result.translationGroupId);
+              await writeRedirects(article.id, result.id);
               articleCount += 1;
             } catch (error) {
               failures.push(`article ${article.id}: ${message(error)}`);
@@ -105,6 +137,60 @@ export async function importFreshdeskKb(): Promise<void> {
           failures.push(`folder ${folder.id}: ${message(error)}`);
         }
       }
+
+      // --- every other language --------------------------------------------
+
+      for (const [locale, code] of codes) {
+        if (locale === primaryLocale) continue;
+
+        try {
+          const translatedCategory = await getTranslatedCategory(category.id, code);
+          // No translated category means this whole branch is untranslated —
+          // its folders and articles would have nowhere to live.
+          if (!translatedCategory) continue;
+
+          const categoryRow = await upsertCategory(
+            { ...translatedCategory, id: category.id },
+            locale,
+            primaryCategory.translationGroupId,
+          );
+          categoryCount += 1;
+
+          for (const { folder, articles } of contents) {
+            const translatedFolder = await getTranslatedFolder(folder.id, code);
+            if (!translatedFolder) continue;
+
+            const folderId = await upsertFolder(
+              // Visibility comes from the primary folder: it is an access rule,
+              // not translated content, and a translation that omitted it would
+              // silently widen who can see the articles.
+              { ...translatedFolder, id: folder.id, visibility: folder.visibility },
+              categoryRow.id,
+              locale,
+            );
+            folderCount += 1;
+
+            for (const article of articles) {
+              try {
+                const translatedArticle = await getTranslatedArticle(article.id, code);
+                if (!translatedArticle) continue;
+
+                await upsertArticle(
+                  { ...translatedArticle, id: article.id, status: article.status },
+                  folderId,
+                  locale,
+                  articleGroups.get(article.id),
+                );
+                translatedCount += 1;
+              } catch (error) {
+                failures.push(`article ${article.id} (${locale}): ${message(error)}`);
+              }
+            }
+          }
+        } catch (error) {
+          failures.push(`category ${category.id} (${locale}): ${message(error)}`);
+        }
+      }
     } catch (error) {
       failures.push(`category ${category.id}: ${message(error)}`);
     }
@@ -112,13 +198,12 @@ export async function importFreshdeskKb(): Promise<void> {
 
   console.log(
     `[import_freshdesk_kb] ${categoryCount} categories, ${folderCount} folders, ` +
-      `${articleCount} articles in ${Math.round((Date.now() - started) / 1000)}s` +
+      `${articleCount} articles, ${translatedCount} translations in ` +
+      `${Math.round((Date.now() - started) / 1000)}s` +
       (failures.length ? `, ${failures.length} failed` : ''),
   );
 
   if (failures.length) {
-    // Logged individually, then thrown as a summary: a partial import is
-    // recoverable by re-running, but it must not look like a success.
     for (const failure of failures.slice(0, 20)) {
       console.error(`[import_freshdesk_kb] ${failure}`);
     }
@@ -127,42 +212,63 @@ export async function importFreshdeskKb(): Promise<void> {
 }
 
 /**
- * Locale is read off the content, not assumed.
+ * External ids are scoped by locale — `"72000123456:ar"`.
  *
- * The first version of this importer filed everything under the default locale
- * and left moving the Arabic tree as a manual step. ShipBlu's knowledge base is
- * entirely Arabic, so that meant 58 Arabic articles served as English, laid out
- * left-to-right, with the Arabic help centre empty. Arabic and English use
- * different scripts, so detecting this is a script test rather than a guess —
- * see lib/kb/language.ts.
+ * One Freshdesk article becomes one row per language here, and they cannot all
+ * claim the same external id: the unique index is on
+ * `(source_system, external_id)`.
  */
+function externalIdFor(freshdeskId: number, locale: Locale): string {
+  return `${freshdeskId}:${locale}`;
+}
+
+/**
+ * Matches the locale-scoped id, or the bare one an earlier version wrote.
+ *
+ * This is what lets a re-run adopt and repair the rows already imported rather
+ * than creating a second copy beside them.
+ */
+function matchesExternalId(column: PgColumn, id: number, locale: Locale) {
+  return or(eq(column, externalIdFor(id, locale)), eq(column, String(id)))!;
+}
 
 async function upsertCategory(
-  category: { id: number; name: string; description?: string | null },
+  category: FreshdeskCategory,
   locale: Locale,
-): Promise<string> {
-  const externalId = String(category.id);
+  translationGroupId?: string,
+): Promise<{ id: string; translationGroupId: string }> {
+  const externalId = externalIdFor(category.id, locale);
 
   const existing = await db
-    .select({ id: kbCategories.id })
+    .select({ id: kbCategories.id, translationGroupId: kbCategories.translationGroupId })
     .from(kbCategories)
-    .where(eq(kbCategories.externalId, externalId))
+    .where(
+      and(
+        eq(kbCategories.sourceSystem, 'freshdesk'),
+        matchesExternalId(kbCategories.externalId, category.id, locale),
+      ),
+    )
     .limit(1);
 
   if (existing[0]) {
-    // Locale is corrected on re-import, not just set on first import. That is
-    // what lets a re-run repair a category that an earlier version of this
-    // importer filed under the wrong language.
+    // Locale and external id are both corrected on re-import, not only set on
+    // insert — that is what repairs rows written by an earlier version.
     await db
       .update(kbCategories)
       .set({
         name: category.name,
         description: category.description ?? null,
         locale,
+        externalId,
+        ...(translationGroupId ? { translationGroupId } : {}),
         updatedAt: new Date(),
       })
       .where(eq(kbCategories.id, existing[0].id));
-    return existing[0].id;
+
+    return {
+      id: existing[0].id,
+      translationGroupId: translationGroupId ?? existing[0].translationGroupId,
+    };
   }
 
   const taken = await db
@@ -175,30 +281,37 @@ async function upsertCategory(
     .values({
       name: category.name,
       slug: uniqueSlug(
-        slugify(category.name, `category-${externalId}`),
+        slugify(category.name, `category-${category.id}`),
         taken.map((row) => row.slug),
       ),
       description: category.description ?? null,
       locale,
+      ...(translationGroupId ? { translationGroupId } : {}),
       sourceSystem: 'freshdesk',
       externalId,
     })
-    .returning({ id: kbCategories.id });
+    .returning({ id: kbCategories.id, translationGroupId: kbCategories.translationGroupId });
 
-  return inserted[0]!.id;
+  return inserted[0]!;
 }
 
 async function upsertFolder(
-  folder: { id: number; name: string; description?: string | null; visibility?: number },
+  folder: FreshdeskFolder,
   categoryId: string,
+  locale: Locale,
 ): Promise<string> {
-  const externalId = String(folder.id);
+  const externalId = externalIdFor(folder.id, locale);
   const visibility = mapVisibility(folder.visibility);
 
   const existing = await db
     .select({ id: kbFolders.id })
     .from(kbFolders)
-    .where(eq(kbFolders.externalId, externalId))
+    .where(
+      and(
+        eq(kbFolders.sourceSystem, 'freshdesk'),
+        matchesExternalId(kbFolders.externalId, folder.id, locale),
+      ),
+    )
     .limit(1);
 
   if (existing[0]) {
@@ -209,6 +322,7 @@ async function upsertFolder(
         description: folder.description ?? null,
         visibility,
         categoryId,
+        externalId,
         updatedAt: new Date(),
       })
       .where(eq(kbFolders.id, existing[0].id));
@@ -225,7 +339,7 @@ async function upsertFolder(
     .values({
       name: folder.name,
       slug: uniqueSlug(
-        slugify(folder.name, `folder-${externalId}`),
+        slugify(folder.name, `folder-${folder.id}`),
         taken.map((row) => row.slug),
       ),
       description: folder.description ?? null,
@@ -240,26 +354,17 @@ async function upsertFolder(
 }
 
 async function upsertArticle(
-  article: {
-    id: number;
-    title: string;
-    description?: string | null;
-    status?: number;
-    seo_data?: { meta_title?: string; meta_description?: string };
-    tags?: string[];
-    hits?: number;
-    thumbs_up?: number;
-    thumbs_down?: number;
-  },
+  article: FreshdeskArticle,
   folderId: string,
   locale: Locale,
-): Promise<void> {
-  const externalId = String(article.id);
+  translationGroupId?: string,
+): Promise<{ id: string; translationGroupId: string }> {
+  const externalId = externalIdFor(article.id, locale);
 
   // Freshdesk HTML is years of accumulated pastes from Word, other help desks
   // and hand-written markup, so it goes through the same sanitiser as anything
-  // an agent writes. Sanitising at import rather than at render means the
-  // stored row is safe for every consumer.
+  // an agent writes. Sanitising at import rather than at render keeps the
+  // stored row safe for every consumer.
   const bodyHtml = sanitiseArticleHtml(article.description ?? '');
   const bodyText = htmlToText(bodyHtml);
 
@@ -269,6 +374,7 @@ async function upsertArticle(
     bodyText,
     excerpt: preview(bodyText, 200),
     folderId,
+    locale,
     status: mapStatus(article.status),
     tags: article.tags ?? [],
     seo: {
@@ -282,66 +388,80 @@ async function upsertArticle(
     viewCount: article.hits ?? 0,
     helpfulCount: article.thumbs_up ?? 0,
     unhelpfulCount: article.thumbs_down ?? 0,
-    // Included in the update path as well as the insert, so a re-run moves an
-    // article that a previous import filed under the wrong language.
-    locale,
     updatedAt: new Date(),
   };
 
   const existing = await db
-    .select({ id: kbArticles.id, slug: kbArticles.slug })
+    .select({ id: kbArticles.id, translationGroupId: kbArticles.translationGroupId })
     .from(kbArticles)
-    .where(eq(kbArticles.externalId, externalId))
+    .where(
+      and(
+        eq(kbArticles.sourceSystem, 'freshdesk'),
+        matchesExternalId(kbArticles.externalId, article.id, locale),
+      ),
+    )
     .limit(1);
 
-  let articleId: string;
-  let slug: string;
-
   if (existing[0]) {
-    // The slug is deliberately not recomputed on re-import. It is the public
-    // URL, and a title tweak in Freshdesk between rehearsal and cutover must
-    // not silently move a page that is already linked to.
-    articleId = existing[0].id;
-    slug = existing[0].slug;
-    await db.update(kbArticles).set(values).where(eq(kbArticles.id, articleId));
-  } else {
-    const taken = await db
-      .select({ slug: kbArticles.slug })
-      .from(kbArticles)
-      .where(eq(kbArticles.locale, locale));
-
-    slug = uniqueSlug(
-      slugify(article.title, `article-${externalId}`),
-      taken.map((row) => row.slug),
-    );
-
-    const inserted = await db
-      .insert(kbArticles)
-      .values({
+    // The slug is deliberately not recomputed. It is the public URL, and a
+    // title tweak in Freshdesk between rehearsal and cutover must not silently
+    // move a page that is already linked to.
+    await db
+      .update(kbArticles)
+      .set({
         ...values,
-        slug,
-        // Freshdesk's folder visibility is the real gate; an article inherits
-        // it, and the folder check on the public side enforces it again.
-        visibility: 'public',
-        sourceSystem: 'freshdesk',
         externalId,
+        ...(translationGroupId ? { translationGroupId } : {}),
       })
-      .returning({ id: kbArticles.id });
+      .where(eq(kbArticles.id, existing[0].id));
 
-    articleId = inserted[0]!.id;
+    return {
+      id: existing[0].id,
+      translationGroupId: translationGroupId ?? existing[0].translationGroupId,
+    };
   }
 
-  // Redirects for every URL shape a Freshdesk account can serve. The article's
-  // external_id also resolves these at request time, so these rows are belt to
-  // that brace — they cost nothing and they survive the article being
-  // re-sourced later.
-  const legacyPaths = [
-    `/support/solutions/articles/${externalId}`,
-    `/solutions/articles/${externalId}`,
-    `/a/solutions/articles/${externalId}`,
+  const taken = await db
+    .select({ slug: kbArticles.slug })
+    .from(kbArticles)
+    .where(eq(kbArticles.locale, locale));
+
+  const inserted = await db
+    .insert(kbArticles)
+    .values({
+      ...values,
+      slug: uniqueSlug(
+        slugify(article.title, `article-${article.id}`),
+        taken.map((row) => row.slug),
+      ),
+      // Freshdesk's folder visibility is the real gate; an article inherits it,
+      // and the folder check on the public side enforces it again.
+      visibility: 'public',
+      ...(translationGroupId ? { translationGroupId } : {}),
+      sourceSystem: 'freshdesk',
+      externalId,
+    })
+    .returning({ id: kbArticles.id, translationGroupId: kbArticles.translationGroupId });
+
+  return inserted[0]!;
+}
+
+/**
+ * Redirects for every URL shape a Freshdesk account can serve.
+ *
+ * Written for the primary-language article only: the legacy paths carry no
+ * language, and the article page offers a language switcher. The article's
+ * external id also resolves these at request time, so these rows are belt to
+ * that brace.
+ */
+async function writeRedirects(freshdeskId: number, articleId: string): Promise<void> {
+  const paths = [
+    `/support/solutions/articles/${freshdeskId}`,
+    `/solutions/articles/${freshdeskId}`,
+    `/a/solutions/articles/${freshdeskId}`,
   ];
 
-  for (const fromPath of legacyPaths) {
+  for (const fromPath of paths) {
     await db
       .insert(kbRedirects)
       .values({ fromPath, articleId })
