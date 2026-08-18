@@ -68,6 +68,13 @@ envVarGroups:
       - key: EMAIL_REPLY_DOMAIN
         sync: false
 
+      # Hostname the public help centre answers on. The proxy rewrites requests
+      # arriving here under /kb, and canonical and sitemap URLs are built from
+      # it — a sitemap advertising the Render service URL would get that
+      # hostname indexed and split the site's search ranking across two domains.
+      - key: KB_PUBLIC_HOST
+        sync: false
+
       # Meta Cloud API. Split across three services by need — the web service
       # verifies inbound webhooks (app secret, verify token), the worker sends
       # and downloads media (phone number id, access token), and the template

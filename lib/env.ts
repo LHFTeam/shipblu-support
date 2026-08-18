@@ -25,6 +25,14 @@ const schema = z.object({
   /** Guards the cron/job endpoints and signs CSRF tokens. */
   APP_SECRET: z.string().min(32, 'APP_SECRET must be at least 32 characters'),
 
+  /**
+   * Hostname the public help centre is served on, e.g. support.shipblu.com.
+   * The proxy rewrites requests arriving here under /kb, and canonical and
+   * sitemap URLs are built from it. Unset means the help centre is only
+   * reachable at /kb on the console's own hostname.
+   */
+  KB_PUBLIC_HOST: z.string().optional(),
+
   SUPABASE_URL: z.url().optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
   SUPABASE_STORAGE_BUCKET: z.string().default('attachments'),

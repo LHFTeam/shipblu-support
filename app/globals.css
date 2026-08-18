@@ -44,3 +44,90 @@ body {
 [dir='rtl'] {
   text-align: right;
 }
+
+/* Knowledge base article typography.
+   Article HTML comes from the console editor and the Freshdesk importer, so it
+   arrives as plain semantic tags with no classes of its own — the styling has
+   to hang off the element names. Scoped to .kb-article so nothing here can
+   reach the agent console. */
+.kb-article {
+  line-height: 1.7;
+}
+.kb-article > * + * {
+  margin-top: 1rem;
+}
+.kb-article h2,
+.kb-article h3,
+.kb-article h4 {
+  font-weight: 600;
+  line-height: 1.3;
+  margin-top: 2rem;
+}
+.kb-article h2 {
+  font-size: 1.25rem;
+}
+.kb-article h3 {
+  font-size: 1.1rem;
+}
+.kb-article a {
+  color: var(--color-brand-600);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.kb-article ul,
+.kb-article ol {
+  /* Logical padding, so lists indent from the right in Arabic. */
+  padding-inline-start: 1.5rem;
+}
+.kb-article ul {
+  list-style: disc;
+}
+.kb-article ol {
+  list-style: decimal;
+}
+.kb-article li + li {
+  margin-top: 0.35rem;
+}
+.kb-article blockquote {
+  border-inline-start: 3px solid var(--border);
+  padding-inline-start: 1rem;
+  opacity: 0.85;
+}
+.kb-article pre {
+  background: var(--muted);
+  padding: 0.875rem 1rem;
+  border-radius: 0.5rem;
+  overflow-x: auto;
+  font-size: 0.875rem;
+}
+.kb-article code {
+  font-size: 0.9em;
+}
+.kb-article :not(pre) > code {
+  background: var(--muted);
+  padding: 0.1rem 0.3rem;
+  border-radius: 0.25rem;
+}
+.kb-article img,
+.kb-article iframe {
+  max-width: 100%;
+  height: auto;
+  border-radius: 0.5rem;
+}
+.kb-article table {
+  width: 100%;
+  border-collapse: collapse;
+  /* Wide tables scroll inside the article rather than widening the page. */
+  display: block;
+  overflow-x: auto;
+}
+.kb-article th,
+.kb-article td {
+  border: 1px solid var(--border);
+  padding: 0.5rem 0.75rem;
+  text-align: start;
+}
+.kb-article th {
+  background: var(--muted);
+  font-weight: 600;
+}
