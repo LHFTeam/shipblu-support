@@ -50,11 +50,28 @@ type MetaErrorBody = {
   };
 };
 
-function credentials() {
+/**
+ * `phoneNumberId` overrides the configured default.
+ *
+ * The 24-hour window belongs to a *pair* — one business number and one
+ * customer — not to the business as a whole. Replying from a different number
+ * than the one the customer wrote to is therefore a re-engagement message to
+ * someone who never engaged, and Meta rejects it with 131047 whose text reads
+ * "more than 24 hours have passed since the customer last replied **to this
+ * number**". The API call itself succeeds and the rejection only arrives on a
+ * later status webhook, so nothing upstream can catch it.
+ *
+ * Callers therefore pass the number the conversation actually arrived on, and
+ * the environment default is only a fallback for sends with no inbound history.
+ */
+function credentials(phoneNumberId?: string | null) {
   const e = env();
   if (!e.WHATSAPP_ACCESS_TOKEN) throw new Error('WHATSAPP_ACCESS_TOKEN is not configured');
-  if (!e.WHATSAPP_PHONE_NUMBER_ID) throw new Error('WHATSAPP_PHONE_NUMBER_ID is not configured');
-  return { token: e.WHATSAPP_ACCESS_TOKEN, phoneNumberId: e.WHATSAPP_PHONE_NUMBER_ID };
+
+  const resolved = phoneNumberId ?? e.WHATSAPP_PHONE_NUMBER_ID;
+  if (!resolved) throw new Error('WHATSAPP_PHONE_NUMBER_ID is not configured');
+
+  return { token: e.WHATSAPP_ACCESS_TOKEN, phoneNumberId: resolved };
 }
 
 async function graph<T>(
@@ -115,9 +132,14 @@ type SendResponse = {
 export async function sendText(
   to: string,
   body: string,
-  options: { previewUrl?: boolean; replyToWamid?: string | null } = {},
+  options: {
+    previewUrl?: boolean;
+    replyToWamid?: string | null;
+    /** The business number to send from. See `credentials`. */
+    phoneNumberId?: string | null;
+  } = {},
 ): Promise<SendResult> {
-  const { token, phoneNumberId } = credentials();
+  const { token, phoneNumberId } = credentials(options.phoneNumberId);
 
   const response = await graph<SendResponse>(`${phoneNumberId}/messages`, {
     method: 'POST',
@@ -141,8 +163,9 @@ export async function sendTemplate(
   name: string,
   language: string,
   components: WhatsAppTemplateComponent[] = [],
+  options: { phoneNumberId?: string | null } = {},
 ): Promise<SendResult> {
-  const { token, phoneNumberId } = credentials();
+  const { token, phoneNumberId } = credentials(options.phoneNumberId);
 
   const response = await graph<SendResponse>(`${phoneNumberId}/messages`, {
     method: 'POST',
@@ -168,8 +191,8 @@ export async function sendTemplate(
  * the customer sees in WhatsApp. Best-effort: failing to tick a message blue is
  * never worth failing a job over.
  */
-export async function markRead(wamid: string): Promise<void> {
-  const { token, phoneNumberId } = credentials();
+export async function markRead(wamid: string, from?: string | null): Promise<void> {
+  const { token, phoneNumberId } = credentials(from);
   await graph(`${phoneNumberId}/messages`, {
     method: 'POST',
     token,

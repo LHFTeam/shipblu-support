@@ -2,7 +2,9 @@ import { and, desc, eq, isNull } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels, conversationEvents, conversations, messages, ticketStatuses } from '@/db/schema';
 import { enqueue } from '@/lib/queue';
+import { explainDeliveryError } from '@/lib/whatsapp/errors';
 import type { NormalisedInboundMessage, NormalisedStatus } from '@/lib/whatsapp/types';
+import { windowState } from '@/lib/whatsapp/window';
 import { resolveContact } from './contacts';
 
 /**
@@ -191,8 +193,15 @@ const STATUS_RANK: Record<string, number> = { pending: 0, sent: 1, delivered: 2,
 
 export async function applyWhatsAppStatus(status: NormalisedStatus): Promise<boolean> {
   const rows = await db
-    .select({ id: messages.id, deliveryStatus: messages.deliveryStatus, meta: messages.meta })
+    .select({
+      id: messages.id,
+      conversationId: messages.conversationId,
+      deliveryStatus: messages.deliveryStatus,
+      meta: messages.meta,
+      lastCustomerMessageAt: conversations.lastCustomerMessageAt,
+    })
     .from(messages)
+    .innerJoin(conversations, eq(conversations.id, messages.conversationId))
     .where(eq(messages.channelMessageId, status.wamid))
     .limit(1);
 
@@ -202,11 +211,15 @@ export async function applyWhatsAppStatus(status: NormalisedStatus): Promise<boo
   if (!message) return false;
 
   if (status.status === 'failed') {
+    // Meta's own wording for 131047 contradicts a window we can see is open,
+    // so the stored error explains the real cause rather than repeating it.
+    const explained = await explainFailure(message, status);
+
     await db
       .update(messages)
       .set({
         deliveryStatus: 'failed',
-        deliveryError: status.error,
+        deliveryError: explained,
         meta: { ...(message.meta as Record<string, unknown>), failedAt: status.at.toISOString() },
       })
       .where(eq(messages.id, message.id));
@@ -229,6 +242,41 @@ export async function applyWhatsAppStatus(status: NormalisedStatus): Promise<boo
     .where(eq(messages.id, message.id));
 
   return true;
+}
+
+/**
+ * Builds the stored failure text, comparing the number the reply went out from
+ * against the number the conversation arrived on.
+ */
+async function explainFailure(
+  message: {
+    conversationId: string;
+    meta: unknown;
+    lastCustomerMessageAt: Date | null;
+  },
+  status: NormalisedStatus,
+): Promise<string | null> {
+  if (!status.error) return null;
+
+  const code = Number(status.error.split(':')[0]);
+  const sentFrom = (message.meta as { phoneNumberId?: unknown }).phoneNumberId;
+
+  const inbound = await db
+    .select({ meta: messages.meta })
+    .from(messages)
+    .where(
+      and(eq(messages.conversationId, message.conversationId), eq(messages.direction, 'inbound')),
+    )
+    .orderBy(desc(messages.createdAt))
+    .limit(1);
+
+  const arrivedOn = (inbound[0]?.meta as { phoneNumberId?: unknown } | undefined)?.phoneNumberId;
+
+  return explainDeliveryError(Number.isFinite(code) ? code : null, status.error, {
+    windowOpen: windowState(message.lastCustomerMessageAt, status.at).isOpen,
+    inboundPhoneNumberId: typeof arrivedOn === 'string' ? arrivedOn : null,
+    sentFromPhoneNumberId: typeof sentFrom === 'string' ? sentFrom : null,
+  });
 }
 
 type LiveConversation = {
