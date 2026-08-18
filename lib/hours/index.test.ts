@@ -1,7 +1,13 @@
 import { DateTime } from 'luxon';
 import { describe, expect, it } from 'vitest';
 import type { WeeklySchedule } from '@/db/schema/config';
-import { isWithinBusinessHours, nextOpeningAt, type HoursConfig } from './index';
+import {
+  addBusinessMinutes,
+  businessMinutesBetween,
+  isWithinBusinessHours,
+  nextOpeningAt,
+  type HoursConfig,
+} from './index';
 
 /** ShipBlu's actual week: Sunday–Thursday, 09:00–17:00 Cairo. */
 const CAIRO: WeeklySchedule = {
@@ -154,5 +160,113 @@ describe('nextOpeningAt', () => {
       schedule: { sun: [], mon: [], tue: [], wed: [], thu: [], fri: [], sat: [] },
     };
     expect(nextOpeningAt(never, at('2026-08-17T12:00'))).toBeNull();
+  });
+});
+
+describe('addBusinessMinutes', () => {
+  it('adds within a single working day', () => {
+    expect(inCairo(addBusinessMinutes(config, at('2026-08-17T10:00'), 120))).toBe(
+      '2026-08-17T12:00',
+    );
+  });
+
+  it('carries the remainder into the next working day', () => {
+    // 16:00 Monday + 4 working hours: one hour left on Monday, three on Tuesday.
+    expect(inCairo(addBusinessMinutes(config, at('2026-08-17T16:00'), 240))).toBe(
+      '2026-08-18T12:00',
+    );
+  });
+
+  it('does not spend the weekend', () => {
+    // The case that makes this worth having: 16:00 Thursday + 4 hours is noon
+    // on Sunday, not the small hours of Friday when nobody could have replied.
+    expect(inCairo(addBusinessMinutes(config, at('2026-08-20T16:00'), 240))).toBe(
+      '2026-08-23T12:00',
+    );
+  });
+
+  it('starts the clock at opening when the ticket arrives out of hours', () => {
+    expect(inCairo(addBusinessMinutes(config, at('2026-08-17T03:00'), 60))).toBe(
+      '2026-08-17T10:00',
+    );
+    expect(inCairo(addBusinessMinutes(config, at('2026-08-17T22:00'), 60))).toBe(
+      '2026-08-18T10:00',
+    );
+  });
+
+  it('skips a holiday', () => {
+    const withHoliday: HoursConfig = { ...config, holidays: [{ date: '2026-08-18' }] };
+    expect(inCairo(addBusinessMinutes(withHoliday, at('2026-08-17T16:00'), 240))).toBe(
+      '2026-08-19T12:00',
+    );
+  });
+
+  it('crosses a lunch break without counting it', () => {
+    const split: HoursConfig = {
+      ...config,
+      schedule: {
+        ...CAIRO,
+        mon: [
+          { start: '09:00', end: '13:00' },
+          { start: '14:00', end: '18:00' },
+        ],
+      },
+    };
+    // 12:00 + 2 working hours: one hour to 13:00, the rest from 14:00.
+    expect(inCairo(addBusinessMinutes(split, at('2026-08-17T12:00'), 120))).toBe(
+      '2026-08-17T15:00',
+    );
+  });
+
+  it('resolves a zero target to the next open instant', () => {
+    expect(inCairo(addBusinessMinutes(config, at('2026-08-17T10:00'), 0))).toBe('2026-08-17T10:00');
+    expect(inCairo(addBusinessMinutes(config, at('2026-08-17T03:00'), 0))).toBe('2026-08-17T09:00');
+  });
+
+  it('returns null rather than a date a year out when nothing is scheduled', () => {
+    const never: HoursConfig = {
+      ...config,
+      schedule: { sun: [], mon: [], tue: [], wed: [], thu: [], fri: [], sat: [] },
+    };
+    expect(addBusinessMinutes(never, at('2026-08-17T12:00'), 60)).toBeNull();
+    expect(addBusinessMinutes({ ...config, timezone: 'Not/AZone' }, new Date(), 60)).toBeNull();
+  });
+});
+
+describe('businessMinutesBetween', () => {
+  it('counts only open time', () => {
+    expect(businessMinutesBetween(config, at('2026-08-17T10:00'), at('2026-08-17T12:30'))).toBe(
+      150,
+    );
+  });
+
+  it('ignores the overnight gap', () => {
+    // Answered at 09:10 the next morning after arriving at 16:50: twenty
+    // minutes of response time, not seventeen hours.
+    expect(businessMinutesBetween(config, at('2026-08-17T16:50'), at('2026-08-18T09:10'))).toBe(20);
+  });
+
+  it('ignores the weekend and holidays', () => {
+    expect(businessMinutesBetween(config, at('2026-08-20T16:00'), at('2026-08-23T10:00'))).toBe(
+      120,
+    );
+
+    const withHoliday: HoursConfig = { ...config, holidays: [{ date: '2026-08-18' }] };
+    expect(
+      businessMinutesBetween(withHoliday, at('2026-08-17T16:00'), at('2026-08-19T10:00')),
+    ).toBe(120);
+  });
+
+  it('is zero for a backwards or empty range', () => {
+    expect(businessMinutesBetween(config, at('2026-08-17T12:00'), at('2026-08-17T12:00'))).toBe(0);
+    expect(businessMinutesBetween(config, at('2026-08-17T12:00'), at('2026-08-17T10:00'))).toBe(0);
+    // Entirely outside working hours.
+    expect(businessMinutesBetween(config, at('2026-08-21T10:00'), at('2026-08-21T16:00'))).toBe(0);
+  });
+
+  it('round-trips with addBusinessMinutes', () => {
+    const from = at('2026-08-20T16:00');
+    const due = addBusinessMinutes(config, from, 240)!;
+    expect(businessMinutesBetween(config, from, due)).toBe(240);
   });
 });

@@ -48,6 +48,11 @@ const STRINGS = {
     feedbackPlaceholder: 'What were you looking for?',
     notFound: 'That page does not exist.',
     notFoundHint: 'It may have moved. Try searching for it.',
+    csatQuestion: 'How did we do?',
+    csatCommentPrompt: 'Anything you would like to add? (optional)',
+    csatThanks: 'Thank you.',
+    csatRecorded: 'Your feedback has been passed to the team.',
+    csatAlreadyAnswered: 'You have already answered this survey.',
   },
   ar: {
     title: 'مركز مساعدة شيب بلو',
@@ -71,6 +76,11 @@ const STRINGS = {
     feedbackPlaceholder: 'عمّ كنت تبحث؟',
     notFound: 'هذه الصفحة غير موجودة.',
     notFoundHint: 'ربما تم نقلها. جرّب البحث عنها.',
+    csatQuestion: 'كيف كان تعاملنا معك؟',
+    csatCommentPrompt: 'هل تود إضافة شيء؟ (اختياري)',
+    csatThanks: 'شكرًا لك.',
+    csatRecorded: 'تم إرسال رأيك إلى الفريق.',
+    csatAlreadyAnswered: 'لقد أجبت على هذا الاستطلاع بالفعل.',
   },
 } as const;
 

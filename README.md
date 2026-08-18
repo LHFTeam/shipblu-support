@@ -3,8 +3,10 @@
 A self-hosted replacement for Freshdesk + Freshchat: email ticketing, WhatsApp, and
 (in later phases) Facebook/Instagram, a web chat widget, and a bilingual knowledge base.
 
-**Status: Phase 0 complete** — foundation, schema, auth primitives, job queue and worker.
-Phase 1 (email ticketing) and Phase 2 (WhatsApp) are next.
+**Status: phases 0–3 complete.** Foundation and job queue; email ticketing; WhatsApp;
+the agent console; the bilingual knowledge base, Freshdesk import and chat widget; and
+SLA policies, automation rules, CSAT and reporting. Facebook and Instagram are the
+remaining channels.
 
 ## Architecture
 
@@ -38,6 +40,20 @@ Design decisions worth knowing before changing things:
   needs a _session_ connection, which `sessionSql()` opens separately.
 - **Server-side sessions, not JWTs.** Deactivating an agent takes effect on their next
   request. Only a SHA-256 of each token is stored.
+- **One condition language for SLA policies and automation rules.** Both store the same
+  `conditions` jsonb and go through `lib/rules`, so a condition written for one reads the
+  same in the other. A malformed condition never matches, so a corrupt policy cannot
+  become the one that applies to everything.
+- **SLA clocks are measured in working time**, not wall-clock, and a status flagged
+  `stops_sla_clock` pauses them — recorded as a conversation event, so the timeline
+  explains why a due date moved. Breaches are found by a five-minute sweep that re-reads
+  current due dates rather than by a timer per ticket, because due dates move.
+- **Automations never trigger automations.** Rule actions write to the ticket directly
+  instead of re-entering the engine, which is what stops two rules from triggering each
+  other forever.
+- **Reporting reads only `metrics_daily`.** The nightly rollup stores four slices per day
+  — totals, by group, by agent, by channel — so the reports page never aggregates over
+  the full message history, and today's figures appear tomorrow.
 - **One `conversations` table** with a `channel` discriminator backs both the
   Freshdesk-style ticket list and the Freshchat-style inbox. `contact_identities` maps
   one customer across email, WhatsApp and later social IDs.

@@ -16,6 +16,7 @@ import type { ParsedInboundEmail } from '@/lib/email/types';
 import { htmlToText, sanitiseEmailHtml } from '@/lib/html/sanitize';
 import { buildAttachmentPath, uploadObject } from '@/lib/storage';
 import { resolveContact } from './contacts';
+import { afterInboundMessage } from './lifecycle';
 
 export type IngestResult = {
   conversationId: string;
@@ -194,6 +195,8 @@ export async function ingestInboundEmail(email: ParsedInboundEmail): Promise<Ing
   // Attachments are uploaded after the transaction commits: a slow or failing
   // upload must not roll back the message, which is the part that matters.
   await storeAttachments(result.conversationId, result.messageId, email);
+
+  await afterInboundMessage(result.conversationId, result.createdConversation, email.receivedAt);
 
   return {
     ...result,

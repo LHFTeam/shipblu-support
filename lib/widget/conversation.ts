@@ -11,6 +11,7 @@ import {
 } from '@/db/schema';
 import { normaliseEmail } from '@/lib/auth/normalise';
 import { preview } from '@/lib/html/sanitize';
+import { afterInboundMessage } from '@/lib/tickets/lifecycle';
 import { findLiveConversation, webchatChannel } from './session';
 
 /**
@@ -86,7 +87,7 @@ export async function appendVisitorMessage(
   const channel = await webchatChannel();
   const now = new Date();
 
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     let conversationId = existing;
     let createdConversation = false;
 
@@ -148,6 +149,10 @@ export async function appendVisitorMessage(
 
     return { conversationId, messageId: inserted[0]!.id, createdConversation };
   });
+
+  await afterInboundMessage(result.conversationId, result.createdConversation, now);
+
+  return result;
 }
 
 /** Records the email a visitor leaves when nobody is available. */

@@ -16,6 +16,8 @@ import { can } from '@/lib/auth/permissions';
 import type { SessionAgent } from '@/lib/auth/session';
 import { htmlToText, sanitiseEmailHtml } from '@/lib/html/sanitize';
 import { enqueue } from '@/lib/queue';
+import { onAgentReply, onStatusChanged } from '@/lib/sla';
+import { afterTicketResolved, afterTicketUpdate } from '@/lib/tickets/lifecycle';
 import {
   buildTemplateComponents,
   renderTemplatePreview,
@@ -141,6 +143,11 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
     .set({ lastMessageAt: new Date(), lastAgentMessageAt: new Date() })
     .where(eq(conversations.id, conversationId));
 
+  // The clock stops when the agent writes, not when the provider accepts the
+  // message: the delay is ours to own, and a send that fails is visible on the
+  // timeline anyway.
+  await onAgentReply(conversationId);
+
   if (!isWebchat) {
     await enqueue(
       conversation.channel === 'whatsapp' ? 'send_whatsapp' : 'send_email',
@@ -262,6 +269,8 @@ export async function sendTemplateReply(
     .set({ lastMessageAt: new Date(), lastAgentMessageAt: new Date() })
     .where(eq(conversations.id, conversationId));
 
+  await onAgentReply(conversationId);
+
   await enqueue('send_whatsapp', { messageId }, { priority: 10, dedupeKey: `send:${messageId}` });
 
   refresh(row.conversation.number);
@@ -287,6 +296,7 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
           id: ticketStatuses.id,
           name: ticketStatuses.name,
           category: ticketStatuses.category,
+          stopsSlaClock: ticketStatuses.stopsSlaClock,
         })
         .from(ticketStatuses)
         .where(eq(ticketStatuses.id, value))
@@ -312,6 +322,9 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
           data: { to: status.name, category: status.category },
         });
       });
+
+      await onStatusChanged(conversationId, status.stopsSlaClock);
+      if (status.category === 'resolved') await afterTicketResolved(conversationId);
       break;
     }
 
@@ -383,6 +396,11 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
       return { error: `Unknown field "${field}"` };
   }
 
+  // Observer rules see the ticket as the agent has just left it. Actions taken
+  // by a rule write to the ticket directly and do not come back through here,
+  // so a rule cannot trigger itself.
+  await afterTicketUpdate(conversationId);
+
   refresh(row.conversation.number);
   return ok();
 }
@@ -394,7 +412,11 @@ async function applyStatusCategory(
   category: 'open' | 'pending' | 'resolved' | 'closed',
 ): Promise<void> {
   const rows = await db
-    .select({ id: ticketStatuses.id, name: ticketStatuses.name })
+    .select({
+      id: ticketStatuses.id,
+      name: ticketStatuses.name,
+      stopsSlaClock: ticketStatuses.stopsSlaClock,
+    })
     .from(ticketStatuses)
     .where(eq(ticketStatuses.category, category))
     .orderBy(ticketStatuses.position)
@@ -420,6 +442,9 @@ async function applyStatusCategory(
       data: { to: status.name, category, via: 'reply_and_resolve' },
     });
   });
+
+  await onStatusChanged(conversationId, status.stopsSlaClock);
+  if (category === 'resolved') await afterTicketResolved(conversationId);
 }
 
 /** The parent for threading: the customer's most recent message. */
