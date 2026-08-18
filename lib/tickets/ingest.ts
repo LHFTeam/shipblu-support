@@ -14,9 +14,9 @@ import { stripQuotedHtml, stripQuotedText } from '@/lib/email/quote-strip';
 import { resolveThread, stripSubjectPrefixes } from '@/lib/email/threading';
 import type { ParsedInboundEmail } from '@/lib/email/types';
 import { htmlToText, sanitiseEmailHtml } from '@/lib/html/sanitize';
-import { onInboundMessage } from '@/lib/sla';
 import { buildAttachmentPath, uploadObject } from '@/lib/storage';
 import { resolveContact } from './contacts';
+import { afterInboundMessage } from './lifecycle';
 
 export type IngestResult = {
   conversationId: string;
@@ -196,7 +196,7 @@ export async function ingestInboundEmail(email: ParsedInboundEmail): Promise<Ing
   // upload must not roll back the message, which is the part that matters.
   await storeAttachments(result.conversationId, result.messageId, email);
 
-  await onInboundMessage(result.conversationId, result.createdConversation, email.receivedAt);
+  await afterInboundMessage(result.conversationId, result.createdConversation, email.receivedAt);
 
   return {
     ...result,

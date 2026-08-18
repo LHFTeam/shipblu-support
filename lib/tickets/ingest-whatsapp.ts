@@ -2,7 +2,7 @@ import { and, desc, eq, isNull } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels, conversationEvents, conversations, messages, ticketStatuses } from '@/db/schema';
 import { enqueue } from '@/lib/queue';
-import { onInboundMessage } from '@/lib/sla';
+import { afterInboundMessage } from '@/lib/tickets/lifecycle';
 import { explainDeliveryError } from '@/lib/whatsapp/errors';
 import type { NormalisedInboundMessage, NormalisedStatus } from '@/lib/whatsapp/types';
 import { windowState } from '@/lib/whatsapp/window';
@@ -180,7 +180,7 @@ export async function ingestWhatsAppMessage(
     );
   }
 
-  await onInboundMessage(result.conversationId, result.createdConversation, message.sentAt);
+  await afterInboundMessage(result.conversationId, result.createdConversation, message.sentAt);
 
   return { ...result, duplicate: false };
 }

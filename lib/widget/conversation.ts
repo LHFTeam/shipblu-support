@@ -11,7 +11,7 @@ import {
 } from '@/db/schema';
 import { normaliseEmail } from '@/lib/auth/normalise';
 import { preview } from '@/lib/html/sanitize';
-import { onInboundMessage } from '@/lib/sla';
+import { afterInboundMessage } from '@/lib/tickets/lifecycle';
 import { findLiveConversation, webchatChannel } from './session';
 
 /**
@@ -150,7 +150,7 @@ export async function appendVisitorMessage(
     return { conversationId, messageId: inserted[0]!.id, createdConversation };
   });
 
-  await onInboundMessage(result.conversationId, result.createdConversation, now);
+  await afterInboundMessage(result.conversationId, result.createdConversation, now);
 
   return result;
 }

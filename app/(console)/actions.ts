@@ -17,6 +17,7 @@ import type { SessionAgent } from '@/lib/auth/session';
 import { htmlToText, sanitiseEmailHtml } from '@/lib/html/sanitize';
 import { enqueue } from '@/lib/queue';
 import { onAgentReply, onStatusChanged } from '@/lib/sla';
+import { afterTicketUpdate } from '@/lib/tickets/lifecycle';
 import {
   buildTemplateComponents,
   renderTemplatePreview,
@@ -393,6 +394,11 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
     default:
       return { error: `Unknown field "${field}"` };
   }
+
+  // Observer rules see the ticket as the agent has just left it. Actions taken
+  // by a rule write to the ticket directly and do not come back through here,
+  // so a rule cannot trigger itself.
+  await afterTicketUpdate(conversationId);
 
   refresh(row.conversation.number);
   return ok();
