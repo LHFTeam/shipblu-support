@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { closeDb, sessionSql } from '@/db/client';
 import { env } from '@/lib/env';
 import { claimJobs, completeJob, failJob, reclaimStalledJobs } from '@/lib/queue';
+import { backoffMs, classifyFailure } from '@/lib/queue/backoff';
 import { resolveHandler } from './handlers';
 
 /**
@@ -15,24 +16,36 @@ import { resolveHandler } from './handlers';
 const workerId = `${process.env.RENDER_INSTANCE_ID ?? 'local'}-${randomUUID().slice(0, 8)}`;
 
 let shuttingDown = false;
-let wake: (() => void) | null = null;
 
-function wakeUp() {
-  wake?.();
+/** Cut short by an arriving job. Not registered during an error backoff. */
+let wakeOnJob: (() => void) | null = null;
+/** Always registered, so shutdown is prompt even mid-backoff. */
+let wakeOnShutdown: (() => void) | null = null;
+
+function jobArrived() {
+  wakeOnJob?.();
 }
 
-/** Resolves on a job notification or after `ms`, whichever comes first. */
-function sleep(ms: number): Promise<void> {
+/**
+ * Resolves after `ms`, or early when woken.
+ *
+ * `interruptibleByJobs` is false during error backoff. Otherwise a steady
+ * trickle of new jobs would cut every backoff short and keep hammering a
+ * database that is rejecting us — which is exactly how the auth circuit breaker
+ * gets tripped, and what the backoff exists to prevent. Shutdown always
+ * interrupts, so a SIGTERM during a ten-minute backoff still exits promptly.
+ */
+function sleep(ms: number, { interruptibleByJobs = true } = {}): Promise<void> {
   return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      wake = null;
-      resolve();
-    }, ms);
-    wake = () => {
+    const finish = () => {
       clearTimeout(timer);
-      wake = null;
+      wakeOnJob = null;
+      wakeOnShutdown = null;
       resolve();
     };
+    const timer = setTimeout(finish, ms);
+    if (interruptibleByJobs) wakeOnJob = finish;
+    wakeOnShutdown = finish;
   });
 }
 
@@ -63,9 +76,26 @@ async function runOnce(): Promise<number> {
 async function main() {
   console.log(`[worker] starting as ${workerId}`);
 
-  const listener = sessionSql();
-  await listener.listen('job_enqueued', () => wakeUp());
-  console.log('[worker] listening for job_enqueued');
+  // LISTEN is an optimisation, not a requirement: it lets a queued job start
+  // within milliseconds instead of waiting for the next poll. The loop polls
+  // regardless, so if the session connection is unavailable the worker degrades
+  // to poll-only rather than dying.
+  //
+  // This was previously unguarded, which meant a bad DATABASE_URL_SESSION threw
+  // out of main() and exited the process — the same crash-loop that the startup
+  // reclaim below already had to be fixed for.
+  let listener: ReturnType<typeof sessionSql> | null = null;
+  try {
+    listener = sessionSql();
+    await listener.listen('job_enqueued', () => jobArrived());
+    console.log('[worker] listening for job_enqueued');
+  } catch (error) {
+    console.error(
+      '[worker] could not LISTEN (check DATABASE_URL_SESSION) — falling back to polling',
+      error,
+    );
+    listener = null;
+  }
 
   // A deploy kills the previous worker mid-job; return those rows to the queue.
   //
@@ -85,16 +115,18 @@ async function main() {
   const shutdown = (signal: string) => {
     console.log(`[worker] ${signal} received, finishing current batch`);
     shuttingDown = true;
-    wakeUp();
+    wakeOnShutdown?.();
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
 
   let sinceReclaim = Date.now();
+  let consecutiveFailures = 0;
 
   while (!shuttingDown) {
     try {
       const processed = await runOnce();
+      consecutiveFailures = 0;
 
       // Only idle-wait when the queue is empty; otherwise drain it promptly.
       if (processed === 0) await sleep(env().WORKER_POLL_INTERVAL_MS);
@@ -104,15 +136,36 @@ async function main() {
         sinceReclaim = Date.now();
       }
     } catch (error) {
-      // A failure here is the loop itself (usually the database being
-      // unreachable), not a job. Back off rather than spinning.
-      console.error('[worker] loop error', error);
-      await sleep(5000);
+      // A failure here is the loop itself — the database being unreachable or
+      // refusing us — not a job.
+      //
+      // The delay depends on *why* it failed. Retrying a wrong password every
+      // few seconds achieves nothing and trips Supavisor's shared auth circuit
+      // breaker, which then locks the other services out of the database too.
+      // A misconfigured worker must degrade quietly, not take the project down.
+      consecutiveFailures += 1;
+      const kind = classifyFailure(error);
+      const delay = backoffMs(kind, consecutiveFailures);
+
+      console.error(
+        `[worker] loop error (${kind}, attempt ${consecutiveFailures}), ` +
+          `retrying in ${Math.round(delay / 1000)}s`,
+        error,
+      );
+
+      if (kind === 'auth' && consecutiveFailures === 1) {
+        console.error(
+          '[worker] authentication is failing — check DATABASE_URL. Retries will ' +
+            'not fix this, so the worker will back off rather than keep trying.',
+        );
+      }
+
+      await sleep(delay, { interruptibleByJobs: false });
     }
   }
 
   console.log('[worker] shutting down');
-  await listener.end();
+  if (listener) await listener.end();
   await closeDb();
   process.exit(0);
 }
