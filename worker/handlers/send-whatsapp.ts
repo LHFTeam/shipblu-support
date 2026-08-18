@@ -1,6 +1,6 @@
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { contactIdentities, conversations, messages } from '@/db/schema';
+import { channels, contactIdentities, conversations, messages } from '@/db/schema';
 import type { ClaimedJob } from '@/lib/queue';
 import { WhatsAppApiError, sendTemplate, sendText } from '@/lib/whatsapp/client';
 import type { WhatsAppTemplateComponent } from '@/lib/whatsapp/templates';
@@ -51,6 +51,8 @@ export async function sendWhatsApp(job: ClaimedJob): Promise<void> {
   const to = await recipientNumber(row.conversation.requesterContactId, row.message.toAddresses);
   if (!to) throw new Error(`no WhatsApp number for conversation ${row.conversation.number}`);
 
+  const from = await sendingNumber(row.conversation.id, row.conversation.channelId);
+
   const meta = row.message.meta as SendMeta & Record<string, unknown>;
   const kind = meta.sendKind ?? 'text';
 
@@ -73,9 +75,10 @@ export async function sendWhatsApp(job: ClaimedJob): Promise<void> {
   try {
     const result =
       kind === 'template'
-        ? await sendTemplateMessage(to, meta)
+        ? await sendTemplateMessage(to, meta, from)
         : await sendText(to, row.message.bodyText, {
             replyToWamid: meta.replyToWamid ?? null,
+            phoneNumberId: from,
           });
 
     await db
@@ -88,6 +91,10 @@ export async function sendWhatsApp(job: ClaimedJob): Promise<void> {
           ...(row.message.meta as Record<string, unknown>),
           wamid: result.wamid,
           recipientId: result.recipientId,
+          // Recorded because a send can still be rejected asynchronously, and
+          // the number it went out from is the first thing worth knowing when
+          // that happens.
+          phoneNumberId: from,
           sentAt: new Date().toISOString(),
         },
       })
@@ -121,12 +128,57 @@ export async function sendWhatsApp(job: ClaimedJob): Promise<void> {
   }
 }
 
-async function sendTemplateMessage(to: string, meta: SendMeta) {
+async function sendTemplateMessage(to: string, meta: SendMeta, from: string | null) {
   const template = meta.template;
   if (!template?.name || !template.language) {
     throw new Error('send_whatsapp with sendKind=template requires template name and language');
   }
-  return sendTemplate(to, template.name, template.language, template.components ?? []);
+  return sendTemplate(to, template.name, template.language, template.components ?? [], {
+    phoneNumberId: from,
+  });
+}
+
+/**
+ * The business number to reply from: the one this conversation arrived on.
+ *
+ * Meta's 24-hour window belongs to a (business number, customer) pair, not to
+ * the business. Replying from a different number is a re-engagement message to
+ * someone who never engaged, and Meta rejects it with 131047 — but only on a
+ * later status webhook, after the send API has already returned a message id.
+ * Nothing upstream can catch that, so the number has to be right here.
+ *
+ * Falling back to the environment default rather than failing is deliberate: a
+ * conversation with no inbound history is an outbound-first template send,
+ * which is exactly the case the default exists for.
+ */
+async function sendingNumber(
+  conversationId: string,
+  channelId: string | null,
+): Promise<string | null> {
+  const inbound = await db
+    .select({ meta: messages.meta })
+    .from(messages)
+    .where(and(eq(messages.conversationId, conversationId), eq(messages.direction, 'inbound')))
+    .orderBy(desc(messages.createdAt))
+    .limit(1);
+
+  const fromInbound = inbound[0]?.meta as { phoneNumberId?: unknown } | undefined;
+  if (typeof fromInbound?.phoneNumberId === 'string' && fromInbound.phoneNumberId) {
+    return fromInbound.phoneNumberId;
+  }
+
+  if (channelId) {
+    const channel = await db
+      .select({ config: channels.config })
+      .from(channels)
+      .where(eq(channels.id, channelId))
+      .limit(1);
+
+    const configured = channel[0]?.config?.phoneNumberId;
+    if (typeof configured === 'string' && configured) return configured;
+  }
+
+  return null;
 }
 
 async function markFailed(messageId: string, existingMeta: unknown, error: string): Promise<void> {
