@@ -1,4 +1,5 @@
 import { runAutomations } from '@/lib/automations';
+import { scheduleSurvey } from '@/lib/csat';
 import { onInboundMessage } from '@/lib/sla';
 
 /**
@@ -28,4 +29,16 @@ export async function afterInboundMessage(
 /** An agent changed something in the console. */
 export async function afterTicketUpdate(conversationId: string): Promise<void> {
   await runAutomations('on_update', conversationId);
+}
+
+/**
+ * A ticket reached a resolved status, however it got there — an agent, "reply
+ * and resolve", or an automation.
+ *
+ * Only the survey hangs off this today. It is scheduled rather than sent, so a
+ * customer who reopens the ticket in the next half hour gets their answer
+ * instead of a satisfaction survey.
+ */
+export async function afterTicketResolved(conversationId: string): Promise<void> {
+  await scheduleSurvey(conversationId);
 }

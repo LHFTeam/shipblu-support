@@ -10,6 +10,7 @@ import {
   messages,
   ticketStatuses,
 } from '@/db/schema';
+import { scheduleSurvey } from '@/lib/csat';
 import { enqueue } from '@/lib/queue';
 import { matches } from '@/lib/rules/conditions';
 import { conversationFacts } from '@/lib/rules/facts';
@@ -201,6 +202,9 @@ async function applyAction(action: Action, ticket: TicketRow, ruleName: string):
       // agent doing it by hand, or an automation that parks tickets in Pending
       // would quietly stop every clock without recording the pause.
       await onStatusChanged(conversationId, status.stopsSlaClock);
+      // A rule that resolves a ticket should survey the customer exactly as an
+      // agent resolving it by hand does.
+      if (action.category === 'resolved') await scheduleSurvey(conversationId);
       return;
     }
 

@@ -4,6 +4,7 @@ import { downloadMediaJob } from './download-media';
 import { importFreshdeskKb } from './import-freshdesk-kb';
 import { processWebhook } from './process-webhook';
 import { runTimeAutomations } from './run-time-automations';
+import { sendCsat } from './send-csat';
 import { sendEmail } from './send-email';
 import { sendWhatsApp } from './send-whatsapp';
 import { slaSweep } from './sla-sweep';
@@ -25,6 +26,7 @@ export const handlers: Partial<Record<JobType, JobHandler>> = {
   import_freshdesk_kb: () => importFreshdeskKb(),
   process_webhook: processWebhook,
   run_time_automations: () => runTimeAutomations(),
+  send_csat: sendCsat,
   send_email: sendEmail,
   send_whatsapp: sendWhatsApp,
   sla_sweep: () => slaSweep(),
@@ -44,7 +46,7 @@ export const handlers: Partial<Record<JobType, JobHandler>> = {
  * a typo or a renamed job still fails loudly, which is the property that makes
  * `resolveHandler` worth having.
  */
-export const PLANNED_JOB_TYPES = new Set<JobType>(['rollup_metrics', 'send_csat']);
+export const PLANNED_JOB_TYPES = new Set<JobType>(['rollup_metrics']);
 
 export function isPlannedButUnimplemented(type: string): boolean {
   return !handlers[type as JobType] && PLANNED_JOB_TYPES.has(type as JobType);

@@ -17,7 +17,7 @@ import type { SessionAgent } from '@/lib/auth/session';
 import { htmlToText, sanitiseEmailHtml } from '@/lib/html/sanitize';
 import { enqueue } from '@/lib/queue';
 import { onAgentReply, onStatusChanged } from '@/lib/sla';
-import { afterTicketUpdate } from '@/lib/tickets/lifecycle';
+import { afterTicketResolved, afterTicketUpdate } from '@/lib/tickets/lifecycle';
 import {
   buildTemplateComponents,
   renderTemplatePreview,
@@ -324,6 +324,7 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
       });
 
       await onStatusChanged(conversationId, status.stopsSlaClock);
+      if (status.category === 'resolved') await afterTicketResolved(conversationId);
       break;
     }
 
@@ -443,6 +444,7 @@ async function applyStatusCategory(
   });
 
   await onStatusChanged(conversationId, status.stopsSlaClock);
+  if (category === 'resolved') await afterTicketResolved(conversationId);
 }
 
 /** The parent for threading: the customer's most recent message. */
