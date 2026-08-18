@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { whatsappTemplates } from '@/db/schema';
+import { env } from '@/lib/env';
 import { listTemplates } from '@/lib/whatsapp/client';
 
 /**
@@ -12,6 +13,19 @@ import { listTemplates } from '@/lib/whatsapp/client';
  * because that pair, not Meta's id, is what a send actually references.
  */
 export async function syncWhatsAppTemplates(): Promise<void> {
+  // The cron runs hourly from the moment the Blueprint creates it, which is
+  // before anyone has pasted the Meta credentials in. Skipping quietly beats
+  // failing every hour: a cron that is always red is a cron nobody reads, and
+  // then the first real failure goes unnoticed.
+  const e = env();
+  if (!e.WHATSAPP_WABA_ID || !e.WHATSAPP_ACCESS_TOKEN) {
+    console.log(
+      '[sync_whatsapp_templates] WhatsApp is not configured yet (WHATSAPP_WABA_ID / ' +
+        'WHATSAPP_ACCESS_TOKEN) — skipping',
+    );
+    return;
+  }
+
   const templates = await listTemplates();
 
   if (templates.length === 0) {
