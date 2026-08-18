@@ -7,8 +7,17 @@
 previewsEnabled: false
 
 envVarGroups:
-  # Shared settings. Provider secrets and database URLs are set per-service in
-  # the dashboard and deliberately not committed here.
+  # Shared settings. Secret *values* are set in the dashboard, never committed.
+  #
+  # DATABASE_URL and DATABASE_URL_SESSION belong here, not on each service.
+  # They were previously declared per-service with `sync: false`, and because
+  # Render gives service-level variables precedence over group values, those
+  # stale per-service entries silently shadowed the group — updating the group
+  # appeared to do nothing, on every service at once. Declaring them in one
+  # place removes that failure mode entirely.
+  #
+  # Staging is the one deliberate exception: it overrides both at service level
+  # so its migrations run against its own database rather than production's.
   - name: shipblu-shared
     envVars:
       - key: NODE_VERSION
@@ -51,10 +60,6 @@ services:
         value: production
       - key: APP_URL
         sync: false
-      - key: DATABASE_URL
-        sync: false
-      - key: DATABASE_URL_SESSION
-        sync: false
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
@@ -93,10 +98,6 @@ services:
       - key: NODE_ENV
         value: production
       - key: APP_URL
-        sync: false
-      - key: DATABASE_URL
-        sync: false
-      - key: DATABASE_URL_SESSION
         sync: false
       - key: SUPABASE_URL
         sync: false
@@ -160,10 +161,6 @@ services:
     startCommand: npm run job -- sla_sweep
     envVars:
       - fromGroup: shipblu-shared
-      - key: DATABASE_URL
-        sync: false
-      - key: DATABASE_URL_SESSION
-        sync: false
       - key: APP_URL
         sync: false
 
@@ -178,10 +175,6 @@ services:
     startCommand: npm run job -- run_time_automations
     envVars:
       - fromGroup: shipblu-shared
-      - key: DATABASE_URL
-        sync: false
-      - key: DATABASE_URL_SESSION
-        sync: false
 
   - type: cron
     name: shipblu-whatsapp-template-sync
@@ -194,10 +187,6 @@ services:
     startCommand: npm run job -- sync_whatsapp_templates
     envVars:
       - fromGroup: shipblu-shared
-      - key: DATABASE_URL
-        sync: false
-      - key: DATABASE_URL_SESSION
-        sync: false
       - key: WHATSAPP_WABA_ID
         sync: false
       - key: WHATSAPP_ACCESS_TOKEN
@@ -215,7 +204,3 @@ services:
     startCommand: npm run job -- cleanup && npm run job -- rollup_metrics
     envVars:
       - fromGroup: shipblu-shared
-      - key: DATABASE_URL
-        sync: false
-      - key: DATABASE_URL_SESSION
-        sync: false
