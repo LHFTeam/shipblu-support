@@ -5,6 +5,7 @@ import { importFreshdeskKb } from './import-freshdesk-kb';
 import { processWebhook } from './process-webhook';
 import { sendEmail } from './send-email';
 import { sendWhatsApp } from './send-whatsapp';
+import { slaSweep } from './sla-sweep';
 import { syncWhatsAppTemplates } from './sync-whatsapp-templates';
 
 export type JobHandler = (job: ClaimedJob) => Promise<void>;
@@ -14,7 +15,7 @@ export type JobHandler = (job: ClaimedJob) => Promise<void>;
  * type has no handler fails loudly rather than being silently dropped, so a
  * half-deployed rename shows up immediately in the dead queue.
  *
- * Phase 3 (SLA, automations, CSAT, reporting) registers sla_sweep,
+ * The rest of phase 3 (automations, CSAT, reporting) registers
  * run_time_automations, send_csat and rollup_metrics here.
  */
 export const handlers: Partial<Record<JobType, JobHandler>> = {
@@ -24,6 +25,7 @@ export const handlers: Partial<Record<JobType, JobHandler>> = {
   process_webhook: processWebhook,
   send_email: sendEmail,
   send_whatsapp: sendWhatsApp,
+  sla_sweep: () => slaSweep(),
   sync_whatsapp_templates: () => syncWhatsAppTemplates(),
 };
 
@@ -41,7 +43,6 @@ export const handlers: Partial<Record<JobType, JobHandler>> = {
  * `resolveHandler` worth having.
  */
 export const PLANNED_JOB_TYPES = new Set<JobType>([
-  'sla_sweep',
   'run_time_automations',
   'rollup_metrics',
   'send_csat',
