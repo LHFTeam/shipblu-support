@@ -8,9 +8,12 @@ import {
   listFolders,
   mapStatus,
   mapVisibility,
+  type FreshdeskArticle,
+  type FreshdeskFolder,
 } from '@/lib/freshdesk/client';
 import { htmlToText, preview, sanitiseArticleHtml } from '@/lib/html/sanitize';
-import { DEFAULT_LOCALE } from '@/lib/kb/locale';
+import { detectCategoryLocale } from '@/lib/kb/language';
+import type { Locale } from '@/lib/kb/locale';
 import { slugify, uniqueSlug } from '@/lib/kb/slug';
 
 /**
@@ -48,21 +51,51 @@ export async function importFreshdeskKb(): Promise<void> {
 
   for (const category of categories) {
     try {
-      const categoryId = await upsertCategory(category);
-      categoryCount += 1;
-
       const folders = await listFolders(category.id);
 
+      // The whole category is fetched before anything is written, because its
+      // locale is decided by its articles and every article is then filed under
+      // it. Writing as we go would mean guessing the locale from the first
+      // article and correcting it afterwards.
+      const contents: { folder: FreshdeskFolder; articles: FreshdeskArticle[] }[] = [];
+
       for (const folder of folders) {
+        try {
+          contents.push({ folder, articles: await listArticles(folder.id) });
+        } catch (error) {
+          failures.push(`folder ${folder.id}: ${message(error)}`);
+        }
+      }
+
+      const samples = contents.flatMap(({ articles }) =>
+        articles.map((article) => `${article.title} ${article.description_text ?? ''}`),
+      );
+
+      const { locale, disagreements } = detectCategoryLocale(category.name, samples);
+
+      if (disagreements > 0) {
+        // Not an error: a category really can hold both languages. But every
+        // article inherits the category's locale, so the minority ones end up
+        // filed under a language they are not written in, and only a person can
+        // decide how to split them.
+        console.warn(
+          `[import_freshdesk_kb] category "${category.name}" imported as ${locale}, ` +
+            `but ${disagreements} of ${samples.length} article(s) look like the other ` +
+            `language — they may need moving`,
+        );
+      }
+
+      const categoryId = await upsertCategory(category, locale);
+      categoryCount += 1;
+
+      for (const { folder, articles } of contents) {
         try {
           const folderId = await upsertFolder(folder, categoryId);
           folderCount += 1;
 
-          const articles = await listArticles(folder.id);
-
           for (const article of articles) {
             try {
-              await upsertArticle(article, folderId);
+              await upsertArticle(article, folderId, locale);
               articleCount += 1;
             } catch (error) {
               failures.push(`article ${article.id}: ${message(error)}`);
@@ -94,18 +127,20 @@ export async function importFreshdeskKb(): Promise<void> {
 }
 
 /**
- * Freshdesk's own language, which we cannot read per-category through this
- * endpoint. Everything imports into the default locale and the team moves the
- * Arabic tree afterwards — guessing from the text would file articles wrongly,
- * and a wrong locale makes an article unreachable rather than merely untidy.
+ * Locale is read off the content, not assumed.
+ *
+ * The first version of this importer filed everything under the default locale
+ * and left moving the Arabic tree as a manual step. ShipBlu's knowledge base is
+ * entirely Arabic, so that meant 58 Arabic articles served as English, laid out
+ * left-to-right, with the Arabic help centre empty. Arabic and English use
+ * different scripts, so detecting this is a script test rather than a guess —
+ * see lib/kb/language.ts.
  */
-const IMPORT_LOCALE = DEFAULT_LOCALE;
 
-async function upsertCategory(category: {
-  id: number;
-  name: string;
-  description?: string | null;
-}): Promise<string> {
+async function upsertCategory(
+  category: { id: number; name: string; description?: string | null },
+  locale: Locale,
+): Promise<string> {
   const externalId = String(category.id);
 
   const existing = await db
@@ -115,11 +150,15 @@ async function upsertCategory(category: {
     .limit(1);
 
   if (existing[0]) {
+    // Locale is corrected on re-import, not just set on first import. That is
+    // what lets a re-run repair a category that an earlier version of this
+    // importer filed under the wrong language.
     await db
       .update(kbCategories)
       .set({
         name: category.name,
         description: category.description ?? null,
+        locale,
         updatedAt: new Date(),
       })
       .where(eq(kbCategories.id, existing[0].id));
@@ -129,7 +168,7 @@ async function upsertCategory(category: {
   const taken = await db
     .select({ slug: kbCategories.slug })
     .from(kbCategories)
-    .where(eq(kbCategories.locale, IMPORT_LOCALE));
+    .where(eq(kbCategories.locale, locale));
 
   const inserted = await db
     .insert(kbCategories)
@@ -140,7 +179,7 @@ async function upsertCategory(category: {
         taken.map((row) => row.slug),
       ),
       description: category.description ?? null,
-      locale: IMPORT_LOCALE,
+      locale,
       sourceSystem: 'freshdesk',
       externalId,
     })
@@ -213,6 +252,7 @@ async function upsertArticle(
     thumbs_down?: number;
   },
   folderId: string,
+  locale: Locale,
 ): Promise<void> {
   const externalId = String(article.id);
 
@@ -242,6 +282,9 @@ async function upsertArticle(
     viewCount: article.hits ?? 0,
     helpfulCount: article.thumbs_up ?? 0,
     unhelpfulCount: article.thumbs_down ?? 0,
+    // Included in the update path as well as the insert, so a re-run moves an
+    // article that a previous import filed under the wrong language.
+    locale,
     updatedAt: new Date(),
   };
 
@@ -265,7 +308,7 @@ async function upsertArticle(
     const taken = await db
       .select({ slug: kbArticles.slug })
       .from(kbArticles)
-      .where(eq(kbArticles.locale, IMPORT_LOCALE));
+      .where(eq(kbArticles.locale, locale));
 
     slug = uniqueSlug(
       slugify(article.title, `article-${externalId}`),
@@ -277,7 +320,6 @@ async function upsertArticle(
       .values({
         ...values,
         slug,
-        locale: IMPORT_LOCALE,
         // Freshdesk's folder visibility is the real gate; an article inherits
         // it, and the folder check on the public side enforces it again.
         visibility: 'public',
