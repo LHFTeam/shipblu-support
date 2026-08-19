@@ -154,6 +154,26 @@ those with `word_similarity` (`'query' <% column`) or `ILIKE` — **not** the pl
 operator, which compares whole strings and will match nothing for short queries against
 long text.
 
+The inbox search also takes two prefixes, `track:` and `sbid:` (with `tracking:`, `awb:`
+and `account:` as aliases). A prefix **narrows** the search to that one clause rather
+than adding to the others, which is what makes it worth typing: `track:SB123456789`
+becomes a single probe of the unique index on `shipments.tracking_number` instead of a
+query that still considers every message body. An unprefixed query that is exactly one
+reference sets the same field without narrowing, so the usual clauses still run.
+
+What those clauses add over the existing body-text search is every ticket that is
+_about_ a shipment rather than one that quotes it — the follow-up reply, the one an agent
+linked by hand, the one where the number appeared only in a private note. The SBID clause
+has a second branch for the same reason: a merchant's tickets almost never mention their
+own account number.
+
+Both the prefixes and the automatic linking go through one detector,
+`lib/shipments/detect.ts`. Its patterns are a **conservative guess** — the real ShipBlu
+formats were not settled when this landed — and are overridable per environment with
+`SHIPMENT_TRACKING_PATTERN`, `SHIPMENT_SBID_PATTERN` and `SHIPMENT_IGNORE`. Correcting a
+pattern only affects new messages; run the shipment backfill from `/admin/import` to
+reach history.
+
 ## The customer portal
 
 A customer who has ever emailed or messaged support already exists in `contacts` and
