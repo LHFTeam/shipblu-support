@@ -136,3 +136,29 @@ export const sourceSystemEnum = pgEnum('source_system', [
   'freshchat',
   'import',
 ]);
+
+/**
+ * How much we actually know about a shipment or a shipping account.
+ *
+ * A row is created the moment a tracking number or an SBID is seen in a message,
+ * long before anything authoritative is known about it. `stub` says so out loud:
+ * the row exists to hang links off, and every other column on it is null.
+ *
+ * `not_found` is the value that earns its place. It is what a detection false
+ * positive becomes once the platform has been asked, which is what makes one
+ * cleanable — nulls alone cannot tell "we have not asked" apart from "we asked
+ * and there is nothing there", and those are different sentences to put in front
+ * of an agent.
+ */
+export const shipmentSyncStateEnum = pgEnum('shipment_sync_state', ['stub', 'synced', 'not_found']);
+
+/**
+ * Who asserted a link.
+ *
+ * Kept on every link table because the three carry very different weight:
+ * `platform` is authoritative, `manual` is an agent taking responsibility, and
+ * `detected` is a regular expression's opinion. Only the last is ever removed in
+ * bulk when a pattern turns out to have been wrong, which is the whole reason
+ * the column exists.
+ */
+export const linkSourceEnum = pgEnum('link_source', ['detected', 'manual', 'platform']);

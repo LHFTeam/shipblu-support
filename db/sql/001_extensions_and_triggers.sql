@@ -49,6 +49,25 @@ CREATE INDEX IF NOT EXISTS companies_name_trgm_idx
 CREATE INDEX IF NOT EXISTS kb_articles_title_trgm_idx
   ON kb_articles USING gin (title gin_trgm_ops);
 
+-- Shipments and shipping accounts. The unique btree on each canonical value
+-- carries every exact lookup — the sidebar, the shipment page, `track:` search,
+-- and the future platform endpoint. These carry the other half: the partial
+-- number an agent types from memory ("...8154?"), which a btree cannot serve.
+--
+-- Do NOT reach for CREATE INDEX CONCURRENTLY here. db/migrate.ts sends each file
+-- as one sql.unsafe(contents), which wraps it in an implicit transaction, and
+-- CONCURRENTLY cannot run inside one. These three build on tables that are empty
+-- at first deploy so the blocking build costs nothing; an index on a table the
+-- size of `messages` needs its own migration, not this file.
+CREATE INDEX IF NOT EXISTS shipments_tracking_trgm_idx
+  ON shipments USING gin (tracking_number gin_trgm_ops);
+
+CREATE INDEX IF NOT EXISTS shipping_accounts_sbid_trgm_idx
+  ON shipping_accounts USING gin (sbid gin_trgm_ops);
+
+CREATE INDEX IF NOT EXISTS shipping_accounts_name_trgm_idx
+  ON shipping_accounts USING gin (name gin_trgm_ops);
+
 -- --------------------------------------------------------------------------
 -- Deferred foreign key
 --

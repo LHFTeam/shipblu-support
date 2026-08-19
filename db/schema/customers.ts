@@ -58,6 +58,24 @@ export const contacts = pgTable(
     /** Excluded from the inbox and never auto-replied to. */
     isBlocked: boolean('is_blocked').notNull().default(false),
 
+    /**
+     * Which side of a parcel this person is usually on. Both can be true — a
+     * merchant who also receives returns is both, and that is the common case
+     * for anyone who ships at all.
+     *
+     * Maintained by `refreshContactRoles()` from the relationship tables (you
+     * are a shipper because you hold a shipping account, a recipient because a
+     * shipment names you), and settable by an agent on the contact page.
+     * Automatic maintenance is deliberately **additive**: it turns a flag on
+     * when it can prove it and never off, so a platform sync can never silently
+     * undo a designation a person made.
+     *
+     * A cache, not the truth. The relationship rows are the truth, and every
+     * screen that shows detail shows them.
+     */
+    isShipper: boolean('is_shipper').notNull().default(false),
+    isRecipient: boolean('is_recipient').notNull().default(false),
+
     sourceSystem: sourceSystemEnum('source_system').notNull().default('native'),
     externalId: text('external_id'),
 
