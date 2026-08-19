@@ -45,6 +45,23 @@ const TRANSIENT_CODES = new Set([1, 2, 4, 17, 613, 201600, 201601]);
 export const OUTSIDE_WINDOW_CODE = 10;
 export const ACCESS_TOKEN_CODE = 190;
 
+/**
+ * An expired or revoked page token (190) is retried, unlike the other codes
+ * outside `TRANSIENT_CODES`.
+ *
+ * Those describe the request — a recipient who cannot be messaged, a comment
+ * already replied to — and are final because the same call will be rejected
+ * forever. 190 describes the credential, and it stops being true as soon as the
+ * token is rotated.
+ *
+ * Treating it as final silently discarded recoverable work: an attachment
+ * download would give up on a customer's photo, and a reply would be marked
+ * permanently failed, both while the only thing wrong was a token nobody had
+ * replaced yet. Retrying lets the job exhaust its attempts into 'dead', where it
+ * remains visible and replayable afterwards.
+ */
+const RETRYABLE_AFTER_HUMAN_FIX = new Set([ACCESS_TOKEN_CODE]);
+
 function pageToken(): string {
   const token = env().META_PAGE_ACCESS_TOKEN;
   if (!token) {
@@ -122,7 +139,8 @@ async function graph<T>(
       code,
       body?.error?.error_subcode ?? null,
       // 5xx is transient regardless of code: Meta returns them without one.
-      (code !== null && TRANSIENT_CODES.has(code)) || response.status >= 500,
+      (code !== null && (TRANSIENT_CODES.has(code) || RETRYABLE_AFTER_HUMAN_FIX.has(code))) ||
+        response.status >= 500,
     );
   }
 

@@ -1,4 +1,5 @@
 import { env } from '@/lib/env';
+import { ACCESS_TOKEN_CODE } from './errors';
 import type { WhatsAppTemplateComponent } from './templates';
 
 /**
@@ -39,6 +40,30 @@ export class WhatsAppApiError extends Error {
  *   133016    number temporarily blocked (restore in progress)
  */
 const TRANSIENT_CODES = new Set([1, 2, 4, 80007, 131000, 131016, 131056, 133016]);
+
+/**
+ * An expired or revoked token (190) is retryable too, for a different reason.
+ *
+ * It will not fix itself — but it is a property of the *credential*, not of the
+ * request, and it stops being true the moment someone rotates the token. Every
+ * other non-transient code means "this particular call is wrong and always will
+ * be", which is why the handlers treat them as final: they record the reason and
+ * consume the job.
+ *
+ * Doing that with 190 threw away work that was still perfectly good. A media
+ * download would mark the message undownloadable and return, so the customer's
+ * photo was gone for good even though Meta keeps media for 30 days and the
+ * fetch would have succeeded on the next attempt after a rotation. A send would
+ * be marked permanently failed, so an agent's reply was dropped rather than
+ * delivered late.
+ *
+ * Retrying instead lets the job exhaust its attempts and land in 'dead', where
+ * it stays inspectable and can be replayed once the token is replaced. The
+ * retries themselves are cheap — five attempts against an endpoint that answers
+ * 401 immediately — and the explanation in `explainAuthError` still reaches the
+ * agent through the recorded delivery error.
+ */
+const RETRYABLE_AFTER_HUMAN_FIX = new Set([ACCESS_TOKEN_CODE]);
 
 type MetaErrorBody = {
   error?: {
@@ -102,7 +127,7 @@ async function graph<T>(
     const transient =
       response.status >= 500 ||
       response.status === 429 ||
-      (code !== null && TRANSIENT_CODES.has(code));
+      (code !== null && (TRANSIENT_CODES.has(code) || RETRYABLE_AFTER_HUMAN_FIX.has(code)));
 
     throw new WhatsAppApiError(
       parsed.error?.message ?? `WhatsApp API ${response.status}: ${text.slice(0, 300)}`,
