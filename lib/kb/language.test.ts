@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { arabicRatio, countLetters, detectCategoryLocale, detectLocale } from './language';
+import {
+  arabicRatio,
+  countLetters,
+  detectCategoryLocale,
+  detectLocale,
+  looksUntranslated,
+} from './language';
 
 describe('countLetters', () => {
   it('ignores digits, punctuation and whitespace', () => {
@@ -93,5 +99,42 @@ describe('detectCategoryLocale', () => {
   it('falls back to the name when a category has no articles', () => {
     expect(detectCategoryLocale('عملاء شيب بلو', []).locale).toBe('ar');
     expect(detectCategoryLocale('ShipBlu partners', []).locale).toBe('en');
+  });
+});
+
+describe('looksUntranslated', () => {
+  it('catches a translation saved with the body left alone', () => {
+    // The real one: Freshdesk article 154000223977, whose Arabic version has
+    // the title ماجنتو and 2619 characters of the English Magento guide. Script
+    // detection called it English and suggested it was in the wrong category; it
+    // was in the right category and had never been translated.
+    const body =
+      'INSTALL PLUGIN\n\nClick Magento Plugin to download.\n\nRequirements\n * PHP >= 7.0';
+    expect(looksUntranslated(body, body)).toBe(true);
+  });
+
+  it('ignores whitespace the editor rewrites on save', () => {
+    expect(looksUntranslated('one  two\r\nthree', 'one two\nthree ')).toBe(true);
+  });
+
+  it('accepts a real translation', () => {
+    expect(looksUntranslated('Track your shipment', 'تتبع شحنتك')).toBe(false);
+  });
+
+  it('does not flag a technical Arabic article that is mostly Latin', () => {
+    // The case that makes body comparison the right test rather than script
+    // counting: this is genuinely translated, and a script check would not
+    // believe it.
+    expect(
+      looksUntranslated(
+        'Set PHP >= 7.0 then run composer install',
+        'اضبط PHP >= 7.0 ثم شغّل composer install',
+      ),
+    ).toBe(false);
+  });
+
+  it('says nothing about an empty original, having nothing to compare', () => {
+    expect(looksUntranslated('', '')).toBe(false);
+    expect(looksUntranslated(null, undefined)).toBe(false);
   });
 });
