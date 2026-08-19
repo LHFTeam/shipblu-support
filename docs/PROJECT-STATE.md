@@ -210,6 +210,25 @@ customer-facing table carries those two columns for exactly this reason.
   cannot carry a payload (`run-job.ts` passes `{}`), so the queue is the route
   for anything other than the default three-day window.
 
+- **Connections are being left mid-transaction, and it is not yet explained.**
+  Backends sit in `ClientRead` inside an open transaction, holding their locks
+  until killed; on 2026-08-19 two had been on `agents` for six hours and blocked
+  every deploy (§6). Killing them is a stopgap — fresh ones appeared within
+  four minutes. Observed queries were all ordinary console reads
+  (`listActiveAgents`, the ticket timeline, the session lookup, reports'
+  `byChannel`), which suggests aborted server renders rather than one bad query:
+  the console calls `router.refresh()` on every SSE `conversation` event, and
+  the WhatsApp bot channel now drives thousands of those a day. Find them with:
+
+  ```sql
+  select pid, state, wait_event, now() - xact_start as age, left(query, 80)
+  from pg_stat_activity
+  where xact_start < now() - interval '5 minutes' and pid <> pg_backend_pid();
+  ```
+
+  Deploys no longer depend on this being clean, but the leaked backends still
+  hold locks and consume pooler slots.
+
 ---
 
 ## 6. Traps that have already bitten us
@@ -269,6 +288,21 @@ Each cost real time. Most are also comments in the code.
     and looked clean. Counts that can hide a systematic gap should be broken
     down along the dimension that can fail — per language, per channel, per
     account.
+
+15. **Replaying `db/sql/` took an ACCESS EXCLUSIVE lock on every busy table.**
+    The file dropped and recreated identical triggers on each deploy, so a
+    deploy needed an exclusive lock on `agents`, `conversations`, `messages` and
+    the rest to do nothing at all — and any concurrent _reader_ blocked it. On
+    2026-08-19 two connections left mid-transaction on `agents` sat in
+    `ClientRead` for six hours, and every deploy from 16:45 onward died on
+    `DROP TRIGGER IF EXISTS touch_updated_at ON agents` after burning the full
+    two-minute `statement_timeout` — reporting only "canceling statement due to
+    statement timeout", which points at the migration rather than at the
+    connection actually responsible. The trigger DDL is now skipped when the
+    trigger already exists, so the steady state takes no locks, and
+    `db/migrate.ts` sets `lock_timeout = 10s` and prints the `pg_stat_activity`
+    query to run when it does hit one. **Connections left mid-transaction are a
+    live problem in their own right** — new ones appear within minutes; see §5.4.
 
 ---
 
