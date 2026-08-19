@@ -1,10 +1,11 @@
+import Link from 'next/link';
 import { asc } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels, groups } from '@/db/schema';
 import { ChannelBadge } from '@/components/channel';
 import { Badge, PageHeader } from '@/components/ui';
 import { requirePermission } from '@/lib/auth/guard';
-import { ChannelForm, GroupForm } from './forms';
+import { ChannelForm } from './forms';
 
 export const dynamic = 'force-dynamic';
 
@@ -62,9 +63,22 @@ export default async function ChannelsPage() {
         <ChannelForm groups={groupList} />
       </section>
 
+      {/* The groups that the default-group picker above chooses between, listed
+          so that "which group?" can be answered without leaving the page.
+          Creating and editing them is the Groups page's job — a group there
+          also carries a description and its own business hours, and a second
+          form that could only set the name would quietly make half a group. */}
       <section>
-        <h2 className="mb-3 text-lg font-semibold">Groups</h2>
-        <ul className="mb-4 divide-y divide-[var(--border)] rounded-lg border border-[var(--border)] text-sm">
+        <div className="mb-3 flex items-center gap-3">
+          <h2 className="text-lg font-semibold">Groups</h2>
+          <Link
+            href="/admin/groups"
+            className="ms-auto text-sm text-brand-600 hover:underline dark:text-brand-300"
+          >
+            Manage groups
+          </Link>
+        </div>
+        <ul className="divide-y divide-[var(--border)] rounded-lg border border-[var(--border)] text-sm">
           {groupList.length === 0 ? (
             <li className="px-3 py-2.5 opacity-50">No groups yet.</li>
           ) : null}
@@ -74,8 +88,6 @@ export default async function ChannelsPage() {
             </li>
           ))}
         </ul>
-
-        <GroupForm />
       </section>
     </div>
   );

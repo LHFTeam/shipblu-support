@@ -69,11 +69,16 @@ export function ChartIcon(props: IconProps) {
   );
 }
 
+/**
+ * A gear, drawn as eight teeth on a 45-degree spacing rather than as spokes
+ * around a hub: at rail size the spokes of the older mark read as a sun, and
+ * "settings" is the one icon that has to be unmistakable at a glance.
+ */
 export function SettingsIcon(props: IconProps) {
   return (
     <Icon {...props}>
-      <circle cx="12" cy="12" r="3" />
-      <path d="M12 3.5v2M12 18.5v2M20.5 12h-2M5.5 12h-2M17.9 6.1l-1.4 1.4M7.5 16.5l-1.4 1.4M17.9 17.9l-1.4-1.4M7.5 7.5 6.1 6.1" />
+      <path d="M21 10.1 21 13.9 18.7 14.4 18.4 15 19.7 17 17 19.7 15 18.4 14.4 18.7 13.9 21 10.1 21 9.6 18.7 9 18.4 7 19.7 4.3 17 5.6 15 5.3 14.4 3 13.9 3 10.1 5.3 9.6 5.6 9 4.3 7 7 4.3 9 5.6 9.6 5.3 10.1 3 13.9 3 14.4 5.3 15 5.6 17 4.3 19.7 7 18.4 9 18.7 9.6Z" />
+      <circle cx="12" cy="12" r="3.1" />
     </Icon>
   );
 }

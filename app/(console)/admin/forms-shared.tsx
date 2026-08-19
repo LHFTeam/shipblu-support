@@ -96,8 +96,10 @@ export function Disclosure({
     );
   }
 
+  // `data-expanded` is what a page header keys off to give the open form the
+  // whole row instead of the corner it puts the button in.
   return (
-    <Card className="border-brand-500/30">
+    <Card data-expanded className="w-full border-brand-500/30">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-sm font-semibold">{label}</h2>
         <button

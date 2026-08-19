@@ -192,13 +192,11 @@ export function Card({
   children,
   className = '',
   padded = true,
-}: {
-  children: ReactNode;
-  className?: string;
-  padded?: boolean;
-}) {
+  ...props
+}: ComponentProps<'div'> & { padded?: boolean }) {
   return (
     <div
+      {...props}
       className={`rounded-xl border border-[var(--border)] bg-[var(--surface)] ${padded ? 'p-4' : ''} ${className}`}
     >
       {children}
@@ -206,6 +204,15 @@ export function Card({
   );
 }
 
+/**
+ * A page title with its actions on the same line.
+ *
+ * An action may expand into a form in place — "New group" opens the editor
+ * right here — and a form squeezed into the sliver of row left over beside a
+ * two-line description is unusable. So an expanded action (anything marked
+ * `data-expanded`) takes the whole width and drops onto its own row, which is
+ * what `flex-wrap` on a full-width item does.
+ */
 export function PageHeader({
   title,
   description,
@@ -223,7 +230,11 @@ export function PageHeader({
           <p className="mt-0.5 max-w-2xl text-sm text-[var(--muted-foreground)]">{description}</p>
         ) : null}
       </div>
-      {actions ? <div className="ms-auto flex items-center gap-2">{actions}</div> : null}
+      {actions ? (
+        <div className="ms-auto flex items-center gap-2 has-[[data-expanded]]:w-full">
+          {actions}
+        </div>
+      ) : null}
     </header>
   );
 }
