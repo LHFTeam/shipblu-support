@@ -89,6 +89,23 @@ BEGIN
 END;
 $$;
 
+-- Only tables that do not already have the trigger.
+--
+-- This file is replayed on every deploy, and trigger DDL — DROP or CREATE alike
+-- — needs ACCESS EXCLUSIVE on the table. Dropping and recreating an identical
+-- trigger every time therefore asked for an exclusive lock on every busy table
+-- in the schema to do nothing, and any concurrent *reader* was enough to make
+-- it wait: on 2026-08-19 two connections left mid-transaction on `agents` held
+-- AccessShareLock for six hours and every deploy in between failed on
+-- `DROP TRIGGER IF EXISTS touch_updated_at ON agents`.
+--
+-- Checking first makes the steady state lock-free: a table that already has the
+-- trigger is skipped without touching it. New tables still pick it up, which is
+-- what the loop is for.
+--
+-- The trade: changing the trigger's *definition* is no longer picked up by a
+-- replay, because only its presence is checked. Drop it explicitly (or give the
+-- new one a different name) when that day comes.
 DO $$
 DECLARE
   t text;
@@ -101,8 +118,17 @@ BEGIN
     WHERE c.table_schema = 'public'
       AND c.column_name = 'updated_at'
       AND tb.table_type = 'BASE TABLE'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM pg_trigger tg
+        JOIN pg_class cl ON cl.oid = tg.tgrelid
+        JOIN pg_namespace n ON n.oid = cl.relnamespace
+        WHERE n.nspname = c.table_schema
+          AND cl.relname = c.table_name
+          AND tg.tgname = 'touch_updated_at'
+          AND NOT tg.tgisinternal
+      )
   LOOP
-    EXECUTE format('DROP TRIGGER IF EXISTS touch_updated_at ON %I', t);
     EXECUTE format(
       'CREATE TRIGGER touch_updated_at BEFORE UPDATE ON %I
          FOR EACH ROW EXECUTE FUNCTION touch_updated_at()', t);
@@ -148,15 +174,39 @@ BEGIN
 END;
 $$;
 
-DROP TRIGGER IF EXISTS notify_change ON messages;
-CREATE TRIGGER notify_change
-  AFTER INSERT OR UPDATE ON messages
-  FOR EACH ROW EXECUTE FUNCTION notify_conversation_change();
+-- Guarded rather than dropped and recreated, for the lock reason above.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_trigger tg
+    JOIN pg_class cl ON cl.oid = tg.tgrelid
+    JOIN pg_namespace n ON n.oid = cl.relnamespace
+    WHERE n.nspname = 'public' AND cl.relname = 'messages'
+      AND tg.tgname = 'notify_change' AND NOT tg.tgisinternal
+  ) THEN
+    CREATE TRIGGER notify_change
+      AFTER INSERT OR UPDATE ON messages
+      FOR EACH ROW EXECUTE FUNCTION notify_conversation_change();
+  END IF;
+END $$;
 
-DROP TRIGGER IF EXISTS notify_change ON conversations;
-CREATE TRIGGER notify_change
-  AFTER INSERT OR UPDATE ON conversations
-  FOR EACH ROW EXECUTE FUNCTION notify_conversation_change();
+-- Guarded rather than dropped and recreated, for the lock reason above.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_trigger tg
+    JOIN pg_class cl ON cl.oid = tg.tgrelid
+    JOIN pg_namespace n ON n.oid = cl.relnamespace
+    WHERE n.nspname = 'public' AND cl.relname = 'conversations'
+      AND tg.tgname = 'notify_change' AND NOT tg.tgisinternal
+  ) THEN
+    CREATE TRIGGER notify_change
+      AFTER INSERT OR UPDATE ON conversations
+      FOR EACH ROW EXECUTE FUNCTION notify_conversation_change();
+  END IF;
+END $$;
 
 -- --------------------------------------------------------------------------
 -- Job queue wake-up
@@ -177,7 +227,19 @@ BEGIN
 END;
 $$;
 
-DROP TRIGGER IF EXISTS notify_enqueued ON jobs;
-CREATE TRIGGER notify_enqueued
-  AFTER INSERT ON jobs
-  FOR EACH ROW EXECUTE FUNCTION notify_job_enqueued();
+-- Guarded rather than dropped and recreated, for the lock reason above.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_trigger tg
+    JOIN pg_class cl ON cl.oid = tg.tgrelid
+    JOIN pg_namespace n ON n.oid = cl.relnamespace
+    WHERE n.nspname = 'public' AND cl.relname = 'jobs'
+      AND tg.tgname = 'notify_enqueued' AND NOT tg.tgisinternal
+  ) THEN
+    CREATE TRIGGER notify_enqueued
+      AFTER INSERT ON jobs
+      FOR EACH ROW EXECUTE FUNCTION notify_job_enqueued();
+  END IF;
+END $$;
