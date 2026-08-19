@@ -14,10 +14,11 @@ Last updated: 2026-08-19, against `main` at `04b5c60`.
 Every phase of the original plan except migration importers is **built and
 merged**: email ticketing, WhatsApp, Facebook and Instagram, the agent console,
 the bilingual knowledge base with its Freshdesk importer, the chat widget, SLA
-policies, automation rules, CSAT and reporting. Since then the **customer
-portal** has landed too — the bare domain now opens the Arabic help centre, and
-one Sign in button authenticates customers and agents alike. Production is
-healthy on `04b5c60`, 4 ms database latency, empty job queue, no dead jobs.
+policies, automation rules, CSAT and reporting, and a live dashboard for admins
+at `/admin/dashboard`. Since then the **customer portal** has landed too — the
+bare domain now opens the Arabic help centre, and one Sign in button
+authenticates customers and agents alike. Production is healthy on `04b5c60`,
+4 ms database latency, empty job queue, no dead jobs.
 
 **But almost none of it is configured.** The database holds 1 agent, 0 channel
 rows, 0 SLA policies and 0 automation rules. The remaining work is mostly not
@@ -194,6 +195,14 @@ customer-facing table carries those two columns for exactly this reason.
   for the category in their own language — never the status's own name. That
   field has no per-locale variant, so setting it pins one language for every
   reader; leaving it null is usually the better answer.
+- **`metrics_daily` rows written before the totals-slice fix are inflated.** The
+  fix (`slicesFor`) stops new rows being wrong; it does not repair the ones
+  already stored, and the nightly job only recomputes the last three days. Any
+  older day still reads high — a totals row above the sum of its own
+  breakdowns. Recompute per day with
+  `npm run job -- rollup_metrics` against a `{"day":"YYYY-MM-DD"}` payload. Not
+  urgent while nothing is configured and the archive is nearly empty, but it has
+  to happen before anyone trusts a figure older than three days.
 
 ---
 

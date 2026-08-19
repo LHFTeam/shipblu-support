@@ -1,6 +1,6 @@
 'use client';
 
-import { useSyncExternalStore } from 'react';
+import { useMemo, useSyncExternalStore } from 'react';
 
 /**
  * A clock that ticks, without a hydration mismatch.
@@ -18,21 +18,31 @@ import { useSyncExternalStore } from 'react';
 
 const TICK_MS = 30_000;
 
-function subscribe(onChange: () => void): () => void {
-  const timer = setInterval(onChange, TICK_MS);
-  return () => clearInterval(timer);
-}
-
-function getSnapshot(): number {
-  return Math.floor(Date.now() / TICK_MS) * TICK_MS;
-}
-
 function getServerSnapshot(): number | null {
   return null;
 }
 
-/** Null until mounted, then the current time rounded down to the last tick. */
-export function useNow(): Date | null {
-  const bucket = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+/**
+ * Null until mounted, then the current time rounded down to the last tick.
+ *
+ * The interval is the resolution the caller needs, not a refresh rate to be
+ * generous with: every tick re-renders whatever reads it. Half a minute suits a
+ * ticket timeline; a "seconds ago" readout is the case for anything shorter.
+ */
+export function useNow(tickMs: number = TICK_MS): Date | null {
+  const store = useMemo(
+    () => ({
+      subscribe(onChange: () => void): () => void {
+        const timer = setInterval(onChange, tickMs);
+        return () => clearInterval(timer);
+      },
+      getSnapshot(): number {
+        return Math.floor(Date.now() / tickMs) * tickMs;
+      },
+    }),
+    [tickMs],
+  );
+
+  const bucket = useSyncExternalStore(store.subscribe, store.getSnapshot, getServerSnapshot);
   return bucket === null ? null : new Date(bucket);
 }

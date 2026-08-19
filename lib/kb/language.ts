@@ -109,3 +109,31 @@ export function detectCategoryLocale(
 
   return { locale, disagreements: votes.filter((vote) => vote !== locale).length };
 }
+
+/**
+ * Whether a "translation" is a translation at all.
+ *
+ * Freshdesk lets a translation be saved with only the title changed, and the
+ * result is a record that claims to be Arabic and carries the English body
+ * verbatim. That is not something script detection can be trusted to catch: an
+ * Arabic article legitimately runs to mostly Latin characters when it is a
+ * technical walkthrough full of code, paths and product names, which is exactly
+ * the kind of article most likely to be left untranslated. Comparing the two
+ * bodies is decisive where counting letters is a guess — identical text has not
+ * been translated, whatever it is written in.
+ *
+ * Whitespace is normalised first, because the editor rewrites line endings and
+ * indentation on save without anybody typing a word.
+ */
+export function looksUntranslated(
+  primary: string | null | undefined,
+  translated: string | null | undefined,
+): boolean {
+  const a = normalise(primary);
+  const b = normalise(translated);
+  return a.length > 0 && a === b;
+}
+
+function normalise(text: string | null | undefined): string {
+  return (text ?? '').replace(/\s+/g, ' ').trim();
+}

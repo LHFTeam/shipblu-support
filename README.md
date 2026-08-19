@@ -7,8 +7,8 @@ Facebook and Instagram, a web chat widget, and a bilingual knowledge base.
 email ticketing; WhatsApp; the agent console; the bilingual knowledge base, Freshdesk
 import and chat widget; SLA policies, automation rules, CSAT and reporting; Facebook and
 Instagram — direct messages and public comments — with admin screens for every piece of
-configuration; and a signed-in customer portal behind one sign-in shared with the
-console.
+configuration and a live dashboard at `/admin/dashboard`; and a signed-in customer portal
+behind one sign-in shared with the console.
 
 ## Architecture
 
@@ -80,6 +80,14 @@ Design decisions worth knowing before changing things:
 - **Reporting reads only `metrics_daily`.** The nightly rollup stores four slices per day
   — totals, by group, by agent, by channel — so the reports page never aggregates over
   the full message history, and today's figures appear tomorrow.
+- **The live dashboard and the nightly rollup share one definition of a day.**
+  `lib/reports/rollup` computes a day's figures; the worker stores what it returns and
+  the dashboard runs it against today and throws the result away. "Resolved today" on
+  the dashboard and "resolved" in tomorrow's report are therefore the same measurement,
+  working-hours response times included, rather than two definitions that drift.
+  Everything else on that page is a live read bounded to the open backlog — the queue,
+  who is holding what, what is about to breach — because a page that refreshes itself
+  every twenty seconds must never run an aggregate over the archive.
 - **Social messages and comments thread differently.** A Facebook or Instagram DM
   threads on the customer, like WhatsApp — one live ticket per person per platform. A
   comment threads on the root of its reply chain, so a customer commenting on two posts
