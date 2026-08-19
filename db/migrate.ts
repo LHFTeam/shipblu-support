@@ -40,11 +40,40 @@ if (!url) {
  */
 const LOCK_TIMEOUT = '10s';
 
+/**
+ * Migrations opt out of the account-wide `transaction_timeout`.
+ *
+ * That setting exists to reap connections left mid-transaction by the pooler,
+ * which otherwise hold their locks indefinitely — two sat on `agents` for six
+ * hours on 2026-08-19 and blocked every deploy. It is set on the role, so it
+ * applies to this session too, and a migration is the one thing here that
+ * legitimately runs long: building an index over a large table can take
+ * minutes, and being killed halfway through leaves the deploy failing for a
+ * reason that has nothing to do with the migration.
+ *
+ * A session-level SET overrides the role default, so this is the exemption.
+ *
+ * `transaction_timeout` is PostgreSQL 17 and later. Setting it on an older
+ * server is not a no-op — it fails the statement outright and takes the whole
+ * migration with it — so the version is checked first rather than the error
+ * swallowed. Production and staging are 17; a contributor on 16 has no
+ * role-level timeout to opt out of anyway.
+ */
+const TRANSACTION_TIMEOUT = '0';
+const TRANSACTION_TIMEOUT_MIN_MAJOR = 17;
+
 async function main() {
   const sql = postgres(url!, { max: 1, prepare: false, onnotice: () => {} });
 
   try {
     await sql.unsafe(`SET lock_timeout = '${LOCK_TIMEOUT}'`);
+
+    const [version] = await sql<{ major: number }[]>`
+      SELECT current_setting('server_version_num')::int / 10000 AS major
+    `;
+    if ((version?.major ?? 0) >= TRANSACTION_TIMEOUT_MIN_MAJOR) {
+      await sql.unsafe(`SET transaction_timeout = '${TRANSACTION_TIMEOUT}'`);
+    }
 
     console.log('Applying drizzle migrations...');
     await migrate(drizzle(sql), { migrationsFolder: path.join(process.cwd(), 'db/migrations') });

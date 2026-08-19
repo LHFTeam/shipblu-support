@@ -210,24 +210,40 @@ customer-facing table carries those two columns for exactly this reason.
   cannot carry a payload (`run-job.ts` passes `{}`), so the queue is the route
   for anything other than the default three-day window.
 
-- **Connections are being left mid-transaction, and it is not yet explained.**
-  Backends sit in `ClientRead` inside an open transaction, holding their locks
-  until killed; on 2026-08-19 two had been on `agents` for six hours and blocked
-  every deploy (§6). Killing them is a stopgap — fresh ones appeared within
-  four minutes. Observed queries were all ordinary console reads
-  (`listActiveAgents`, the ticket timeline, the session lookup, reports'
-  `byChannel`), which suggests aborted server renders rather than one bad query:
-  the console calls `router.refresh()` on every SSE `conversation` event, and
-  the WhatsApp bot channel now drives thousands of those a day. Find them with:
+- **Connections are left mid-transaction by the pooler. Reaped, not solved.**
+  Backends appear as `state=active` + `wait_event=ClientRead` with an open
+  transaction — the extended query protocol interrupted after Execute and
+  before Sync, i.e. a client that stopped mid-statement. They hold their locks
+  and a `max_connections` slot (60) until killed; on 2026-08-19 two sat on
+  `agents` for six hours and blocked every deploy (§6).
+
+  What was ruled out, with evidence:
+
+  - _Deploys and instance restarts._ No deploy ran at either leak onset.
+  - _Aborted server renders._ 60 console requests killed 40 ms in, mid-render,
+    against plain Postgres: zero stuck backends. The pooler has to be in the
+    path.
+  - _The client library._ postgres.js defers `end()` while a query is in flight
+    and sends a proper Terminate; it never closes mid-query.
+
+  What triggers it inside Supavisor (or the Render↔Supabase network) is **not
+  established** — it cannot be instrumented from the app side.
+
+  So it is reaped rather than prevented: `transaction_timeout = '5min'` is set
+  on the `postgres` role, which terminates any transaction spanning longer than
+  that, including the implicit single-statement kind these are (verified on
+  17.6: `25P04`). `idle_in_transaction_session_timeout` would _not_ catch them,
+  because they report `active` rather than `idle in transaction`. Migrations opt
+  out in `db/migrate.ts` — building an index legitimately runs long.
+
+  If the leak rate ever rises enough to matter before the reaper fires, find
+  them with:
 
   ```sql
   select pid, state, wait_event, now() - xact_start as age, left(query, 80)
   from pg_stat_activity
   where xact_start < now() - interval '5 minutes' and pid <> pg_backend_pid();
   ```
-
-  Deploys no longer depend on this being clean, but the leaked backends still
-  hold locks and consume pooler slots.
 
 ---
 
