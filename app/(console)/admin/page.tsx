@@ -90,6 +90,14 @@ export default async function AdminIndexPage() {
       <PageHeader
         title="Settings"
         description="How work reaches your team, what it promises the customer, and what the customer sees."
+        actions={
+          <Link
+            href="/admin/dashboard"
+            className="text-sm text-brand-600 hover:underline dark:text-brand-300"
+          >
+            Live dashboard →
+          </Link>
+        }
       />
 
       <div className="flex flex-col gap-2">

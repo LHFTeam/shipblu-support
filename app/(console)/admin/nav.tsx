@@ -17,6 +17,10 @@ import { usePathname } from 'next/navigation';
 
 const SECTIONS: { title: string; links: { href: string; label: string }[] }[] = [
   {
+    title: 'Overview',
+    links: [{ href: '/admin/dashboard', label: 'Dashboard' }],
+  },
+  {
     title: 'Team',
     links: [
       { href: '/admin/agents', label: 'Agents' },
