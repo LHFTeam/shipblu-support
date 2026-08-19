@@ -71,6 +71,39 @@ export function ImportForm({
               </div>
             ))}
           </dl>
+
+          {/*
+            Per language, because the totals above cannot show the failure this
+            import is most prone to: Freshdesk serves translations only one item
+            at a time, so a language can be missed entirely while everything
+            else succeeds. An empty language reads as an alert, not a statistic.
+          */}
+          <dl className="mt-4 grid grid-cols-2 gap-2 border-t border-[var(--border)] pt-3 text-sm">
+            {[
+              ['English', counts.articles_en, counts.categories_en],
+              ['Arabic', counts.articles_ar, counts.categories_ar],
+            ].map(([label, articles, categories]) => (
+              <div key={String(label)}>
+                <dt className="text-xs opacity-60">{label}</dt>
+                <dd
+                  className={Number(articles) === 0 ? 'font-medium text-amber-600' : 'font-medium'}
+                >
+                  {articles} {Number(articles) === 1 ? 'article' : 'articles'}
+                  <span className="opacity-60">
+                    {' '}
+                    in {categories} {Number(categories) === 1 ? 'category' : 'categories'}
+                  </span>
+                </dd>
+              </div>
+            ))}
+          </dl>
+
+          {counts.articles_en === 0 || counts.articles_ar === 0 ? (
+            <p className="mt-3 text-xs text-amber-700 dark:text-amber-400">
+              One language has nothing in it. If Freshdesk does hold articles in it, the run log on
+              the worker names which language codes were found and which were not.
+            </p>
+          ) : null}
         </section>
       ) : null}
 

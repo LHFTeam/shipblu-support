@@ -214,21 +214,36 @@ export const LANGUAGE_CODE_CANDIDATES: Record<string, string[]> = {
   ar: ['ar', 'ar-SA', 'ar-EG'],
 };
 
+/** Ids to try when working out which code an account uses for a language. */
+export type LanguageProbe = { categoryIds: number[]; articleIds: number[] };
+
 /**
- * Finds the code this account actually uses for a locale, by asking for one
- * real category in each candidate until one answers.
+ * Finds the code this account actually uses for a locale, by asking for real
+ * items in each candidate until one answers.
  *
- * Done once per run against a single category rather than guessed per request:
- * a wrong code returns 404 for every item, which is indistinguishable from
- * "nothing is translated" and would make the import quietly find nothing.
+ * Done once per run rather than guessed per request: a wrong code returns 404
+ * for every item, which is indistinguishable from "nothing is translated" and
+ * would make the import quietly find nothing.
+ *
+ * Several ids are probed, not one, and articles as well as categories. Probing
+ * a single category was a real bug: ShipBlu's first category is an internal
+ * staff guide that nobody had translated, so `en` 404'd there, was never
+ * discovered, and every English article in the account was skipped while the
+ * import reported success. One untranslated item must not be able to hide a
+ * whole language — and because a category can be left untranslated while the
+ * articles beneath it are not, the articles have to be askable too.
  */
 export async function discoverLanguageCode(
-  sampleCategoryId: number,
   locale: string,
+  probe: LanguageProbe,
 ): Promise<string | null> {
   for (const code of LANGUAGE_CODE_CANDIDATES[locale] ?? [locale]) {
-    const translated = await getTranslatedCategory(sampleCategoryId, code);
-    if (translated) return code;
+    for (const id of probe.categoryIds) {
+      if (await getTranslatedCategory(id, code)) return code;
+    }
+    for (const id of probe.articleIds) {
+      if (await getTranslatedArticle(id, code)) return code;
+    }
   }
   return null;
 }
