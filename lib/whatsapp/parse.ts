@@ -141,6 +141,7 @@ function normaliseEcho(
     text: displayText(echo),
     media: extractMedia(echo),
     replyToWamid: echo.context?.id ?? null,
+    creationType: echo.message_creation_type ?? null,
     raw: echo as unknown as Record<string, unknown>,
   };
 }
