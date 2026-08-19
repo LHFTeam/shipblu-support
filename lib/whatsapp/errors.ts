@@ -12,6 +12,30 @@
 /** Sending from a business number the customer has no open window with. */
 export const RE_ENGAGEMENT_CODE = 131047;
 
+/**
+ * An access token that has expired or been revoked.
+ *
+ * Meta reports the fact — "Session has expired on Tuesday, 18-Aug-26" — and not
+ * the cause, which is almost always that the token in the environment is a
+ * short-lived user token rather than a permanent System User one. Every
+ * WhatsApp call fails identically until it is replaced, so saying that once, in
+ * the error itself, is the difference between a five-minute fix and an
+ * afternoon spent reading Meta's documentation.
+ */
+export const ACCESS_TOKEN_CODE = 190;
+
+/** How to get out of an expired-token state, appended to Meta's own wording. */
+export function explainAuthError(code: number | null, message: string): string {
+  if (code !== ACCESS_TOKEN_CODE) return message;
+
+  return (
+    `${message}\n\nWHATSAPP_ACCESS_TOKEN is expired or revoked, so every ` +
+    `WhatsApp call fails until it is replaced. Short-lived user tokens last ` +
+    `about 24 hours; issue a System User token in Meta Business Manager, which ` +
+    `does not expire, and set it in the shipblu-shared environment group.`
+  );
+}
+
 export type ErrorContext = {
   /** Our own view of the window, from the customer's last inbound message. */
   windowOpen: boolean;
@@ -32,6 +56,11 @@ export function explainDeliveryError(
   message: string,
   context: ErrorContext,
 ): string {
+  // An expired token fails every send identically, so an agent looking at a
+  // failed message should be told it is a credential rather than anything they
+  // did or the customer did.
+  if (code === ACCESS_TOKEN_CODE) return explainAuthError(code, message);
+
   if (code !== RE_ENGAGEMENT_CODE) return message;
 
   const mismatched =
