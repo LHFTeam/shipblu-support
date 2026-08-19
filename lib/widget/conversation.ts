@@ -11,7 +11,7 @@ import {
 } from '@/db/schema';
 import { normaliseEmail } from '@/lib/auth/normalise';
 import { preview } from '@/lib/html/sanitize';
-import { afterInboundMessage } from '@/lib/tickets/lifecycle';
+import { afterInboundMessage, afterMessageStored } from '@/lib/tickets/lifecycle';
 import { findLiveConversation, webchatChannel } from './session';
 
 /**
@@ -148,6 +148,13 @@ export async function appendVisitorMessage(
       .where(eq(conversations.id, conversationId));
 
     return { conversationId, messageId: inserted[0]!.id, createdConversation };
+  });
+
+  await afterMessageStored({
+    conversationId: result.conversationId,
+    messageId: result.messageId,
+    bodyText: body,
+    kind: 'reply',
   });
 
   await afterInboundMessage(result.conversationId, result.createdConversation, now);

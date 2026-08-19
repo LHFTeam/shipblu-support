@@ -9,7 +9,7 @@ import type {
 } from '@/lib/meta/types';
 import { enqueue } from '@/lib/queue';
 import { resolveContact } from './contacts';
-import { afterInboundMessage } from './lifecycle';
+import { afterInboundMessage, afterMessageStored } from './lifecycle';
 
 /**
  * Inbound Facebook and Instagram → conversations.
@@ -135,6 +135,14 @@ export async function ingestMetaMessage(
   });
 
   await queueAttachments(result.messageId, message.attachments);
+
+  await afterMessageStored({
+    conversationId: result.conversationId,
+    messageId: result.messageId,
+    bodyText: message.text,
+    kind: 'reply',
+  });
+
   await afterInboundMessage(result.conversationId, result.createdConversation, message.sentAt);
 
   return { ...result, duplicate: false };
@@ -246,6 +254,13 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
       messageId: insertedMessage[0]!.id,
       createdConversation,
     };
+  });
+
+  await afterMessageStored({
+    conversationId: result.conversationId,
+    messageId: result.messageId,
+    bodyText: comment.text,
+    kind: 'reply',
   });
 
   await afterInboundMessage(result.conversationId, result.createdConversation, comment.createdAt);

@@ -441,6 +441,23 @@ function describeEvent(type: string, data: Record<string, unknown>): string {
       return 'paused the SLA clock';
     case 'sla_resumed':
       return `resumed the SLA clock after ${String(data.pausedMinutes ?? 0)} minutes`;
+    case 'shipments_detected': {
+      const tracking = Array.isArray(data.trackingNumbers) ? data.trackingNumbers : [];
+      const sbids = Array.isArray(data.sbids) ? data.sbids : [];
+      const parts = [
+        tracking.length ? `shipment${tracking.length > 1 ? 's' : ''} ${tracking.join(', ')}` : null,
+        sbids.length ? `account${sbids.length > 1 ? 's' : ''} ${sbids.join(', ')}` : null,
+      ].filter(Boolean);
+      return `linked ${parts.join(' and ')} from a message`;
+    }
+    case 'shipment_linked':
+      return `linked shipment ${String(data.trackingNumber ?? '')}`;
+    case 'shipment_unlinked':
+      return `unlinked shipment ${String(data.trackingNumber ?? '')}`;
+    case 'shipping_account_linked':
+      return `linked account ${String(data.sbid ?? '')}`;
+    case 'shipping_account_unlinked':
+      return `unlinked account ${String(data.sbid ?? '')}`;
     case 'sla_recalculated':
       return data.reason === 'group_hours'
         ? "re-counted the due dates on the new group's business hours"
