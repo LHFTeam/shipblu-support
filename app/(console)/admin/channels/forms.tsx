@@ -3,7 +3,7 @@
 import { useActionState, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Button, ErrorText, Field, Input, Select } from '@/components/ui';
-import { createGroup, saveChannel, type AdminState } from '../actions';
+import { saveChannel, type AdminState } from '../actions';
 
 const INITIAL: AdminState = { error: null };
 
@@ -71,23 +71,6 @@ export function ChannelForm({ groups }: { groups: { id: string; name: string }[]
 
       <ErrorText>{state.error}</ErrorText>
       <SubmitButton className="self-start" idle="Add channel" busy="Saving…" />
-    </form>
-  );
-}
-
-export function GroupForm() {
-  const [state, action] = useActionState(createGroup, INITIAL);
-
-  return (
-    <form
-      action={action}
-      className="flex items-end gap-3 rounded-lg border border-[var(--border)] p-4"
-    >
-      <Field label="Group name" className="flex-1">
-        <Input name="name" placeholder="Deliveries" required />
-      </Field>
-      <SubmitButton idle="Add group" busy="Saving…" />
-      <ErrorText>{state.error}</ErrorText>
     </form>
   );
 }

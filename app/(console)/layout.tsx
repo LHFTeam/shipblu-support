@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { ShipBluLogo } from '@/components/brand';
 import { LiveUpdates } from '@/components/live-updates';
 import { requireAgent } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
@@ -44,20 +45,17 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
       <Rail
         items={items}
         brand={
-          <Link
-            href="/inbox"
-            aria-label="ShipBlu Support"
-            className="flex size-9 items-center justify-center rounded-lg bg-white/10 text-sm font-bold text-white"
-          >
-            SB
+          <Link href="/inbox" aria-label="ShipBlu Support">
+            <ShipBluLogo className="size-9" />
           </Link>
         }
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-12 shrink-0 items-center gap-3 border-b border-[var(--border)] bg-[var(--surface)] px-3 md:px-4">
-          <Link href="/inbox" className="text-sm font-semibold md:hidden">
-            ShipBlu Support
+          <Link href="/inbox" className="flex items-center gap-2 md:hidden">
+            <ShipBluLogo className="size-7" />
+            <span className="text-sm font-semibold">ShipBlu Support</span>
           </Link>
 
           <div className="ms-auto flex items-center gap-3">
