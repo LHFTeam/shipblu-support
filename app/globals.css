@@ -1,26 +1,70 @@
 @import 'tailwindcss';
 
+/**
+ * ShipBlu Support design tokens.
+ *
+ * The palette is taken from ShipBlu's own brand: a navy blue that carries the
+ * identity, and a warm coral used only where the eye should land — a primary
+ * action, an SLA about to breach. Coral is deliberately scarce; an interface
+ * where everything is urgent has no way left to say that something is.
+ *
+ * Everything is oklch so that a step in lightness looks like a step in
+ * lightness, which is what keeps the dark theme from turning muddy when the
+ * same scale is reused at different ends.
+ */
 @theme {
-  --color-brand-50: oklch(0.97 0.02 240);
-  --color-brand-100: oklch(0.93 0.04 240);
-  --color-brand-500: oklch(0.62 0.16 245);
-  --color-brand-600: oklch(0.54 0.16 245);
-  --color-brand-700: oklch(0.46 0.14 245);
+  --color-brand-50: oklch(0.97 0.015 250);
+  --color-brand-100: oklch(0.93 0.032 250);
+  --color-brand-200: oklch(0.87 0.055 251);
+  --color-brand-300: oklch(0.78 0.085 252);
+  --color-brand-400: oklch(0.66 0.12 253);
+  --color-brand-500: oklch(0.56 0.15 255);
+  --color-brand-600: oklch(0.47 0.15 257);
+  --color-brand-700: oklch(0.39 0.13 258);
+  --color-brand-800: oklch(0.31 0.1 258);
+  --color-brand-900: oklch(0.24 0.07 258);
+
+  --color-accent-400: oklch(0.78 0.14 45);
+  --color-accent-500: oklch(0.7 0.17 42);
+  --color-accent-600: oklch(0.63 0.19 40);
+  --color-accent-700: oklch(0.55 0.18 38);
+
+  --color-positive: oklch(0.62 0.15 150);
+  --color-caution: oklch(0.75 0.15 85);
+  --color-critical: oklch(0.58 0.2 25);
 }
 
 :root {
-  --background: oklch(1 0 0);
+  --background: oklch(0.985 0.003 250);
+  --surface: oklch(1 0 0);
+  --surface-2: oklch(0.975 0.004 250);
   --foreground: oklch(0.21 0.01 250);
-  --muted: oklch(0.97 0.005 250);
-  --border: oklch(0.92 0.005 250);
+  --muted: oklch(0.96 0.005 250);
+  --muted-foreground: oklch(0.52 0.015 250);
+  --border: oklch(0.91 0.006 250);
+  --border-strong: oklch(0.84 0.01 250);
+  --ring: oklch(0.56 0.15 255);
+
+  /* One rail colour rather than a gradient: it sits behind the whole app and a
+     gradient at that size shifts perceptibly between viewport heights. */
+  --rail: oklch(0.24 0.07 258);
+  --rail-foreground: oklch(0.93 0.02 250);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: oklch(0.18 0.01 250);
+    --background: oklch(0.17 0.012 255);
+    --surface: oklch(0.21 0.014 255);
+    --surface-2: oklch(0.24 0.015 255);
     --foreground: oklch(0.96 0.005 250);
-    --muted: oklch(0.24 0.01 250);
-    --border: oklch(0.3 0.01 250);
+    --muted: oklch(0.25 0.014 255);
+    --muted-foreground: oklch(0.72 0.012 250);
+    --border: oklch(0.31 0.014 255);
+    --border-strong: oklch(0.4 0.016 255);
+    --ring: oklch(0.66 0.12 253);
+
+    --rail: oklch(0.15 0.014 258);
+    --rail-foreground: oklch(0.9 0.02 250);
   }
 }
 
@@ -37,6 +81,36 @@ body {
     Arial,
     'Noto Sans Arabic',
     sans-serif;
+  /* Tabular figures in the console keep ticket numbers and counts from jittering
+     as they change. */
+  font-variant-numeric: tabular-nums;
+}
+
+/* A single visible focus treatment, so keyboard users get the same affordance
+   on a button, a link and a table row. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: 0.25rem;
+}
+
+/* The console is a dense, scrolling application; the default scrollbar is wide
+   enough to be furniture in a three-pane layout. */
+@media (pointer: fine) {
+  .app-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+  .app-scroll::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  .app-scroll::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 999px;
+  }
 }
 
 /* The KB and customer portal render Arabic; agent-authored content can mix

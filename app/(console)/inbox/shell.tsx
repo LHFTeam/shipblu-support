@@ -3,12 +3,17 @@ import { listInbox, parseFilters } from '@/lib/tickets/queries';
 import { InboxList } from './list';
 
 /**
- * The two-pane inbox frame, rendered by both `/inbox` and `/inbox/[number]`.
+ * The inbox frame, rendered by both `/inbox` and `/inbox/[number]`.
  *
  * A layout would keep the list mounted across navigations, but Next does not
  * pass searchParams to layouts and the list is filter-driven, so the frame is a
  * shared component instead. Client-side navigation still makes moving between
  * tickets a soft transition.
+ *
+ * On a phone the two panes become one screen at a time — list, then ticket —
+ * because 24rem of list beside a conversation on a 390px screen leaves room for
+ * neither. Which pane shows is decided by whether a ticket is open, so the back
+ * link out of a ticket is just a link to the inbox.
  */
 export async function InboxShell({
   searchParams,
@@ -23,12 +28,23 @@ export async function InboxShell({
   const filters = parseFilters(searchParams);
   const { rows, hasMore } = await listInbox(agent, filters);
 
+  const viewingTicket = activeNumber !== undefined;
+
   return (
     <div className="flex h-full">
-      <aside className="flex w-[24rem] shrink-0 flex-col border-r border-[var(--border)]">
+      <aside
+        className={`w-full shrink-0 flex-col border-e border-[var(--border)] md:flex md:w-[22rem] lg:w-[24rem] ${
+          viewingTicket ? 'hidden md:flex' : 'flex'
+        }`}
+      >
         <InboxList rows={rows} hasMore={hasMore} filters={filters} activeNumber={activeNumber} />
       </aside>
-      <section className="min-w-0 flex-1 overflow-hidden">{children}</section>
+
+      <section
+        className={`min-w-0 flex-1 overflow-hidden ${viewingTicket ? 'block' : 'hidden md:block'}`}
+      >
+        {children}
+      </section>
     </div>
   );
 }

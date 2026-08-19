@@ -2,10 +2,14 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { ChannelBadge } from '@/components/channel';
+import { ChevronLeftIcon } from '@/components/icons';
 import { Badge, Select } from '@/components/ui';
 import { useNow } from '@/components/use-now';
-import { channelLabel, formatBytes, formatDateTime, formatRelative } from '@/lib/format';
+import { formatBytes, formatDateTime, formatRelative } from '@/lib/format';
 import type { ConversationDetail } from '@/lib/tickets/queries';
+import { describeWindow, metaWindowState } from '@/lib/meta/window';
 import { formatRemaining, windowState } from '@/lib/whatsapp/window';
 import { updateTicket } from '../../actions';
 import { Composer } from './composer';
@@ -38,7 +42,7 @@ export function ConversationView({
       <div className="flex min-w-0 flex-1 flex-col">
         <Header conversation={conversation} />
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+        <div className="app-scroll min-h-0 flex-1 overflow-y-auto px-4 py-4">
           <Timeline conversation={conversation} />
         </div>
 
@@ -57,26 +61,39 @@ export function ConversationView({
 }
 
 function Header({ conversation }: { conversation: ConversationDetail }) {
+  const isMeta = conversation.channel === 'facebook' || conversation.channel === 'instagram';
+  const isComment = Boolean(conversation.externalId?.includes(':comment:'));
+
   return (
-    <header className="shrink-0 border-b border-[var(--border)] px-4 py-3">
-      <div className="flex items-baseline gap-2">
+    <header className="shrink-0 border-b border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 md:px-4">
+      <div className="flex items-center gap-2">
+        {/* On a phone the list and the ticket are separate screens, so the
+            ticket needs a way back. */}
+        <Link
+          href="/inbox"
+          aria-label="Back to the inbox"
+          className="-ms-1 rounded-md p-1 hover:bg-[var(--muted)] md:hidden"
+        >
+          <ChevronLeftIcon size={18} />
+        </Link>
+
         <h1 className="truncate text-base font-semibold">
           {conversation.subject ?? '(no subject)'}
         </h1>
-        <span className="shrink-0 text-sm opacity-50">#{conversation.number}</span>
+        <span className="shrink-0 text-sm text-[var(--muted-foreground)]">
+          #{conversation.number}
+        </span>
       </div>
 
-      <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs opacity-70">
+      <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-[var(--muted-foreground)]">
         <Badge tone={conversation.statusCategory}>{conversation.statusName}</Badge>
-        <span>{channelLabel(conversation.channel)}</span>
-        <span>·</span>
-        <span>
+        <ChannelBadge channel={conversation.channel} />
+        {isComment ? <Badge tone="warning">public comment</Badge> : null}
+        <span className="truncate">
           {conversation.requester.name ?? 'Unknown'}{' '}
-          <span className="opacity-60">
-            {conversation.requester.email ?? conversation.requester.phone ?? ''}
-          </span>
+          {conversation.requester.email ?? conversation.requester.phone ?? ''}
         </span>
-        <span>·</span>
+        <span aria-hidden>·</span>
         <span>opened {formatRelative(conversation.createdAt)} ago</span>
         {conversation.reopenCount > 0 ? (
           <Badge tone="warning">reopened ×{conversation.reopenCount}</Badge>
@@ -84,8 +101,32 @@ function Header({ conversation }: { conversation: ConversationDetail }) {
         {conversation.channel === 'whatsapp' ? (
           <WindowIndicator lastCustomerMessageAt={conversation.lastCustomerMessageAt} />
         ) : null}
+        {isMeta && !isComment ? (
+          <MetaWindowIndicator lastCustomerMessageAt={conversation.lastCustomerMessageAt} />
+        ) : null}
       </div>
     </header>
+  );
+}
+
+/** The Messenger and Instagram windows, in the agent's terms. */
+function MetaWindowIndicator({
+  lastCustomerMessageAt,
+}: {
+  lastCustomerMessageAt: Date | string | null;
+}) {
+  const now = useNow();
+  if (!now) return null;
+
+  const state = metaWindowState(
+    lastCustomerMessageAt ? new Date(lastCustomerMessageAt) : null,
+    now,
+  );
+
+  return (
+    <Badge tone={state.isOpen ? 'open' : state.needsHumanAgentTag ? 'warning' : 'closed'}>
+      {describeWindow(state)}
+    </Badge>
   );
 }
 
@@ -125,6 +166,8 @@ function Timeline({ conversation }: { conversation: ConversationDetail }) {
       {conversation.messages.map((message) => {
         const isNote = message.kind === 'note';
         const isInbound = message.direction === 'inbound';
+        const meta = (message.meta ?? {}) as { metaKind?: string; isPublic?: boolean };
+        const isPublicComment = meta.metaKind === 'comment';
 
         return (
           <li
@@ -133,14 +176,27 @@ function Timeline({ conversation }: { conversation: ConversationDetail }) {
               isNote
                 ? 'border-amber-500/30 bg-amber-500/10'
                 : isInbound
-                  ? 'border-[var(--border)] bg-[var(--muted)]'
-                  : 'ml-auto border-brand-500/30 bg-brand-500/5'
+                  ? 'border-[var(--border)] bg-[var(--surface)]'
+                  : 'ms-auto border-brand-500/30 bg-brand-500/8'
             }`}
           >
-            <div className="mb-1.5 flex items-baseline gap-2 text-xs opacity-60">
-              <span className="font-medium">{message.authorName ?? 'Unknown'}</span>
+            <div className="mb-1.5 flex items-baseline gap-2 text-xs text-[var(--muted-foreground)]">
+              <span className="font-medium">
+                {message.authorName ?? (isInbound ? 'Customer' : 'Automation')}
+              </span>
               {isNote ? <Badge tone="warning">private note</Badge> : null}
-              <span className="ml-auto">{formatDateTime(message.createdAt)}</span>
+              {/* Whether a reply was public is the thing an agent most needs to
+                  be sure of on a social ticket, so it is stated rather than
+                  implied by which column the bubble is in. */}
+              {isPublicComment ? (
+                <Badge tone={isInbound ? 'neutral' : 'warning'}>
+                  {isInbound ? 'public comment' : 'posted publicly'}
+                </Badge>
+              ) : null}
+              {!isInbound && !isNote && meta.metaKind === 'direct_message' ? (
+                <Badge tone="neutral">direct message</Badge>
+              ) : null}
+              <span className="ms-auto">{formatDateTime(message.createdAt)}</span>
             </div>
 
             <MessageBody message={message} />
@@ -150,12 +206,19 @@ function Timeline({ conversation }: { conversation: ConversationDetail }) {
                 {message.attachments.map((file) => (
                   <li
                     key={file.id}
-                    className="rounded border border-[var(--border)] px-2 py-1 text-xs"
+                    className="rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs"
                   >
-                    <a href={`/api/attachments/${file.id}`} target="_blank" rel="noreferrer">
+                    <a
+                      href={`/api/attachments/${file.id}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="hover:underline"
+                    >
                       {file.filename}
                     </a>
-                    <span className="ml-1.5 opacity-50">{formatBytes(file.sizeBytes)}</span>
+                    <span className="ms-1.5 text-[var(--muted-foreground)]">
+                      {formatBytes(file.sizeBytes)}
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -205,7 +268,7 @@ function DeliveryState({ message }: { message: ConversationDetail['messages'][nu
   }
 
   return (
-    <p className="mt-1.5 text-xs opacity-40">
+    <p className="mt-1.5 text-xs text-[var(--muted-foreground)]/80">
       {message.deliveryStatus === 'pending' ? 'sending…' : message.deliveryStatus}
     </p>
   );
@@ -225,7 +288,7 @@ function Sidebar({
   currentAgentId: string;
 }) {
   return (
-    <aside className="w-64 shrink-0 overflow-y-auto border-l border-[var(--border)] p-3">
+    <aside className="app-scroll hidden w-64 shrink-0 overflow-y-auto border-s border-[var(--border)] bg-[var(--surface)] p-3 xl:block">
       <Field label="Status">
         <FieldSelect
           conversationId={conversation.id}

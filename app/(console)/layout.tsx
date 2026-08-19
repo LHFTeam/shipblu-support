@@ -4,79 +4,86 @@ import { requireAgent } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
 import { inboxCounts } from '@/lib/tickets/queries';
 import { initials } from '@/lib/format';
+import { Rail, type NavItem } from './nav';
 
 export const dynamic = 'force-dynamic';
 
 /**
  * Console shell.
  *
- * `requireAgent()` here is the real access check — middleware only sees the
+ * `requireAgent()` here is the real access check — the proxy only sees the
  * cookie. Every page nested under this layout is therefore behind a database
  * session lookup, which is what makes deactivating an agent take effect on
  * their next request rather than in thirty days.
+ *
+ * The frame is a fixed rail plus a scrolling content column, so the inbox can
+ * own the full height and manage its own panes rather than the page scrolling
+ * as one long document.
  */
 export default async function ConsoleLayout({ children }: { children: React.ReactNode }) {
   const agent = await requireAgent();
   const counts = await inboxCounts(agent);
 
+  const items: NavItem[] = [
+    { href: '/inbox', label: 'Inbox', icon: 'inbox', badge: counts.all },
+    ...(can(agent, 'kb.view')
+      ? [{ href: '/kb', label: 'Knowledge base', icon: 'kb' } as const]
+      : []),
+    ...(can(agent, 'report.view')
+      ? [{ href: '/reports', label: 'Reports', icon: 'reports' } as const]
+      : []),
+    ...(can(agent, 'admin.agents')
+      ? [{ href: '/admin', label: 'Admin', icon: 'admin' } as const]
+      : []),
+  ];
+
   return (
-    <div className="flex h-dvh flex-col">
+    <div className="flex h-dvh overflow-hidden">
       <LiveUpdates />
 
-      <header className="flex shrink-0 items-center gap-6 border-b border-[var(--border)] px-4 py-2">
-        <Link href="/inbox" className="text-sm font-semibold">
-          ShipBlu Support
-        </Link>
-
-        <nav className="flex items-center gap-1 text-sm">
-          <NavLink href="/inbox?view=all">
-            All open <Count value={counts.all} />
-          </NavLink>
-          <NavLink href="/inbox?view=mine">
-            Mine <Count value={counts.mine} />
-          </NavLink>
-          <NavLink href="/inbox?view=unassigned">
-            Unassigned <Count value={counts.unassigned} />
-          </NavLink>
-          {can(agent, 'kb.view') ? <NavLink href="/kb">Knowledge base</NavLink> : null}
-          {can(agent, 'report.view') ? <NavLink href="/reports">Reports</NavLink> : null}
-          {can(agent, 'admin.agents') ? <NavLink href="/admin/agents">Admin</NavLink> : null}
-        </nav>
-
-        <div className="ml-auto flex items-center gap-3">
-          <span
-            title={agent.email}
-            className="flex size-7 items-center justify-center rounded-full bg-brand-600 text-xs font-medium text-white"
+      <Rail
+        items={items}
+        brand={
+          <Link
+            href="/inbox"
+            aria-label="ShipBlu Support"
+            className="flex size-9 items-center justify-center rounded-lg bg-white/10 text-sm font-bold text-white"
           >
-            {initials(agent.name)}
-          </span>
-          <form action="/api/auth/logout" method="post">
-            <button type="submit" className="text-xs opacity-60 hover:opacity-100">
-              Sign out
-            </button>
-          </form>
-        </div>
-      </header>
+            SB
+          </Link>
+        }
+      />
 
-      <div className="min-h-0 flex-1">{children}</div>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex h-12 shrink-0 items-center gap-3 border-b border-[var(--border)] bg-[var(--surface)] px-3 md:px-4">
+          <Link href="/inbox" className="text-sm font-semibold md:hidden">
+            ShipBlu Support
+          </Link>
+
+          <div className="ms-auto flex items-center gap-3">
+            <span className="hidden text-xs text-[var(--muted-foreground)] sm:block">
+              {agent.name ?? agent.email}
+            </span>
+            <span
+              title={agent.email}
+              className="flex size-7 items-center justify-center rounded-full bg-brand-600 text-xs font-medium text-white"
+            >
+              {initials(agent.name)}
+            </span>
+            <form action="/api/auth/logout" method="post">
+              <button
+                type="submit"
+                className="text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+              >
+                Sign out
+              </button>
+            </form>
+          </div>
+        </header>
+
+        {/* pb-14 on mobile clears the bottom navigation bar. */}
+        <div className="min-h-0 flex-1 pb-14 md:pb-0">{children}</div>
+      </div>
     </div>
-  );
-}
-
-function NavLink({ href, children }: { href: string; children: React.ReactNode }) {
-  return (
-    <Link
-      href={href}
-      className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 hover:bg-[var(--muted)]"
-    >
-      {children}
-    </Link>
-  );
-}
-
-function Count({ value }: { value: number }) {
-  if (!value) return null;
-  return (
-    <span className="rounded bg-[var(--muted)] px-1.5 py-0.5 text-xs opacity-70">{value}</span>
   );
 }
