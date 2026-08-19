@@ -60,6 +60,11 @@ const schema = z.object({
    * These exist because the real ShipBlu formats were not settled when the
    * feature landed, and changing a pattern should not need a deploy. The
    * defaults are still the source of truth — set these only to correct them.
+   *
+   * Declared here so this file stays the catalogue of everything the system
+   * reads, but read straight from `process.env` by `detect.ts`: that module is
+   * reachable from the inbox search parser, and validating this whole schema on
+   * that path would fail a search on a variable a search has no use for.
    */
   SHIPMENT_TRACKING_PATTERN: z.string().optional(),
   SHIPMENT_SBID_PATTERN: z.string().optional(),

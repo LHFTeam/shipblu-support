@@ -31,6 +31,7 @@ import {
   restrictedChannels,
   type FilterableChannel,
 } from './channel-policy';
+import { sbidMatches, trackingMatches } from '@/lib/shipments/queries';
 import { parseSearchTerm } from './search';
 
 /**
@@ -98,6 +99,29 @@ export type InboxRow = {
   preview: string | null;
 };
 
+/**
+ * Who may see which conversations, as SQL.
+ *
+ * Exported because the customer, account and shipment pages list conversations
+ * too, and re-implementing this rule in four more files is how a bot transcript
+ * eventually leaks through a side door. Visibility is enforced in the query and
+ * never in the template: an agent who can only see their own tickets must not be
+ * able to reach another's by URL, and filtering after the fact would still have
+ * loaded the row.
+ */
+export function conversationVisibility(agent: SessionAgent): SQL[] {
+  const where: SQL[] = [isNull(conversations.deletedAt), isNull(conversations.mergedIntoId)];
+
+  if (!can(agent, 'ticket.view.all')) {
+    where.push(eq(conversations.assigneeAgentId, agent.id));
+  }
+
+  const hidden = hiddenChannels(agent);
+  if (hidden.length) where.push(notInArray(conversations.channel, hidden));
+
+  return where;
+}
+
 export async function listInbox(
   agent: SessionAgent,
   filters: InboxFilters,
@@ -141,28 +165,46 @@ export async function listInbox(
   }
 
   if (filters.q) {
-    const { pattern, number, phonePattern } = parseSearchTerm(filters.q);
+    const { pattern, number, phonePattern, trackingNumber, sbid, scope } = parseSearchTerm(
+      filters.q,
+    );
 
-    const clauses: SQL[] = [
-      ilike(conversations.subject, pattern),
-      ilike(contacts.name, pattern),
-      ilike(contacts.primaryEmail, pattern),
-      ilike(contacts.primaryPhone, pattern),
-      // What was actually said. Subjects on the messaging channels are picked
-      // from a short list of canned categories, so hundreds of tickets share
-      // one — searching them finds a category, never a conversation. The
-      // tracking number or the sentence the agent half-remembers is in the
-      // messages, which is where a search of a chat has to look.
-      sql`EXISTS (
-        SELECT 1 FROM ${messages} m
-        WHERE m.conversation_id = ${conversations.id} AND m.body_text ILIKE ${pattern}
-      )`,
-    ];
+    // A prefixed query is narrowed to its one clause. That is what makes typing
+    // `track:` worth doing — the alternative ORs it into a list that still has
+    // to consider every message body in the account.
+    if (scope === 'tracking' && trackingNumber) {
+      where.push(trackingMatches(trackingNumber));
+    } else if (scope === 'sbid' && sbid) {
+      where.push(sbidMatches(sbid));
+    } else {
+      const clauses: SQL[] = [
+        ilike(conversations.subject, pattern),
+        ilike(contacts.name, pattern),
+        ilike(contacts.primaryEmail, pattern),
+        ilike(contacts.primaryPhone, pattern),
+        // What was actually said. Subjects on the messaging channels are picked
+        // from a short list of canned categories, so hundreds of tickets share
+        // one — searching them finds a category, never a conversation. The
+        // tracking number or the sentence the agent half-remembers is in the
+        // messages, which is where a search of a chat has to look.
+        sql`EXISTS (
+          SELECT 1 FROM ${messages} m
+          WHERE m.conversation_id = ${conversations.id} AND m.body_text ILIKE ${pattern}
+        )`,
+      ];
 
-    if (number !== null) clauses.push(eq(conversations.number, number));
-    if (phonePattern) clauses.push(ilike(contacts.primaryPhone, phonePattern));
+      if (number !== null) clauses.push(eq(conversations.number, number));
+      if (phonePattern) clauses.push(ilike(contacts.primaryPhone, phonePattern));
 
-    where.push(or(...clauses)!);
+      // The body search above already finds tickets that *mention* a number.
+      // These two add every ticket that is *about* the shipment: the reply that
+      // never quoted it, the one an agent linked by hand, the one where it
+      // appeared only in a private note.
+      if (trackingNumber) clauses.push(trackingMatches(trackingNumber));
+      if (sbid) clauses.push(sbidMatches(sbid));
+
+      where.push(or(...clauses)!);
+    }
   }
 
   const rows = await db

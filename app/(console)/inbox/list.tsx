@@ -220,7 +220,7 @@ function SearchBox({ initial, onSearch }: { initial: string; onSearch: (value: s
       <input
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        placeholder="Search #number, name, phone, message…"
+        placeholder="Search #number, track:, sbid:, name, phone…"
         aria-label="Search tickets and chats"
         className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] py-1.5 pe-2.5 ps-7 text-sm outline-none focus:border-brand-500"
       />
