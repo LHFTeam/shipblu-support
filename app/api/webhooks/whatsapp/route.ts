@@ -71,12 +71,16 @@ export async function POST(request: Request) {
     headers[name] = value;
   });
 
+  // An unverified payload is stored as evidence but never under a delivery id.
+  // Sharing the id with the genuine delivery would let anyone who learns a
+  // wamid post an unsigned payload naming it, take the id first, and have the
+  // real message arrive later and be dropped as a duplicate.
   const inserted = await db
     .insert(webhookEvents)
     .values({
       provider: 'whatsapp',
       channel: 'whatsapp',
-      providerEventId: deliveryId(payload),
+      providerEventId: signatureVerified ? deliveryId(payload) : null,
       payload,
       headers,
       signatureVerified,
@@ -84,19 +88,19 @@ export async function POST(request: Request) {
     .onConflictDoNothing({ target: [webhookEvents.provider, webhookEvents.providerEventId] })
     .returning({ id: webhookEvents.id });
 
+  if (!signatureVerified) {
+    console.warn('[webhook:whatsapp] stored an unverified payload');
+    // 403, not 200: an unsigned payload is either a misconfigured app secret or
+    // a forgery, and both should be loud.
+    return NextResponse.json({ error: 'signature verification failed' }, { status: 403 });
+  }
+
   if (inserted.length === 0) {
     // Already have this delivery. 200 so Meta stops retrying.
     return NextResponse.json({ status: 'duplicate' }, { status: 200 });
   }
 
   const eventId = inserted[0]!.id;
-
-  if (!signatureVerified) {
-    console.warn(`[webhook:whatsapp] stored unverified payload ${eventId}`);
-    // 403, not 200: an unsigned payload is either a misconfigured app secret or
-    // a forgery, and both should be loud.
-    return NextResponse.json({ error: 'signature verification failed' }, { status: 403 });
-  }
 
   await enqueue(
     'process_webhook',

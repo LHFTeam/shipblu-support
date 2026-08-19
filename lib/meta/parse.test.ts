@@ -1,0 +1,286 @@
+import { describe, expect, it } from 'vitest';
+import { parseMetaWebhook } from './parse';
+
+/** A Messenger batch, in the shape Meta actually posts. */
+function messengerPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    object: 'page',
+    entry: [
+      {
+        id: '111222333',
+        time: 1_755_000_000_000,
+        messaging: [
+          {
+            sender: { id: 'psid-1' },
+            recipient: { id: '111222333' },
+            timestamp: 1_755_000_000_000,
+            message: { mid: 'm_abc', text: 'Where is my shipment?' },
+            ...overrides,
+          },
+        ],
+      },
+    ],
+  };
+}
+
+describe('parseMetaWebhook', () => {
+  it('reads a Messenger direct message', () => {
+    const parsed = parseMetaWebhook(messengerPayload());
+
+    expect(parsed.messages).toHaveLength(1);
+    expect(parsed.messages[0]).toMatchObject({
+      platform: 'facebook',
+      mid: 'm_abc',
+      from: 'psid-1',
+      accountId: '111222333',
+      text: 'Where is my shipment?',
+    });
+  });
+
+  it('reads an Instagram direct message', () => {
+    const parsed = parseMetaWebhook({
+      object: 'instagram',
+      entry: [
+        {
+          id: 'ig-account',
+          messaging: [
+            {
+              sender: { id: 'igsid-9', username: 'shopper' },
+              recipient: { id: 'ig-account' },
+              timestamp: 1_755_000_000_000,
+              message: { mid: 'ig_1', text: 'hello' },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(parsed.messages[0]).toMatchObject({
+      platform: 'instagram',
+      mid: 'ig_1',
+      senderName: 'shopper',
+    });
+  });
+
+  it('ignores echoes of our own outbound messages', () => {
+    // The bug this prevents: filing our own agent reply as if the customer had
+    // written it, and then replying to ourselves forever.
+    const parsed = parseMetaWebhook(
+      messengerPayload({ message: { mid: 'm_echo', text: 'our reply', is_echo: true } }),
+    );
+
+    expect(parsed.messages).toHaveLength(0);
+    expect(parsed.echoes).toBe(1);
+  });
+
+  it('drops a message with no id, which could not be deduplicated', () => {
+    const parsed = parseMetaWebhook(messengerPayload({ message: { text: 'no id' } }));
+    expect(parsed.messages).toHaveLength(0);
+  });
+
+  it('describes an attachment-only message instead of leaving it blank', () => {
+    const parsed = parseMetaWebhook(
+      messengerPayload({
+        message: {
+          mid: 'm_img',
+          attachments: [{ type: 'image', payload: { url: 'https://cdn.example/1.jpg' } }],
+        },
+      }),
+    );
+
+    expect(parsed.messages[0]?.text).toBe('[image]');
+    expect(parsed.messages[0]?.attachments).toEqual([
+      { type: 'image', url: 'https://cdn.example/1.jpg', title: null },
+    ]);
+  });
+
+  it('reads a Facebook comment and knows a top-level one from a reply', () => {
+    const top = parseMetaWebhook({
+      object: 'page',
+      entry: [
+        {
+          id: 'page-1',
+          changes: [
+            {
+              field: 'feed',
+              value: {
+                item: 'comment',
+                verb: 'add',
+                comment_id: 'c_1',
+                post_id: 'p_1',
+                parent_id: 'p_1',
+                created_time: 1_755_000_000,
+                from: { id: 'user-1', name: 'Mona' },
+                message: 'Is delivery free?',
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(top.comments[0]).toMatchObject({
+      platform: 'facebook',
+      commentId: 'c_1',
+      // parent_id equals post_id, so this starts a thread rather than joining one.
+      parentCommentId: null,
+      postId: 'p_1',
+      fromName: 'Mona',
+    });
+
+    const reply = parseMetaWebhook({
+      object: 'page',
+      entry: [
+        {
+          id: 'page-1',
+          changes: [
+            {
+              field: 'feed',
+              value: {
+                item: 'comment',
+                verb: 'add',
+                comment_id: 'c_2',
+                post_id: 'p_1',
+                parent_id: 'c_1',
+                from: { id: 'user-1' },
+                message: 'still waiting',
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(reply.comments[0]?.parentCommentId).toBe('c_1');
+  });
+
+  it('ignores the page commenting on its own post', () => {
+    // That is our agent's public reply coming back to us.
+    const parsed = parseMetaWebhook({
+      object: 'page',
+      entry: [
+        {
+          id: 'page-1',
+          changes: [
+            {
+              field: 'feed',
+              value: {
+                item: 'comment',
+                verb: 'add',
+                comment_id: 'c_3',
+                post_id: 'p_1',
+                from: { id: 'page-1', name: 'ShipBlu' },
+                message: 'Thanks for asking!',
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(parsed.comments).toHaveLength(0);
+  });
+
+  it('ignores likes, shares and edits, which are not tickets', () => {
+    const parsed = parseMetaWebhook({
+      object: 'page',
+      entry: [
+        {
+          id: 'page-1',
+          changes: [
+            { field: 'feed', value: { item: 'like', verb: 'add', post_id: 'p_1' } },
+            { field: 'feed', value: { item: 'comment', verb: 'edited', comment_id: 'c_9' } },
+            { field: 'feed', value: { item: 'comment', verb: 'remove', comment_id: 'c_8' } },
+          ],
+        },
+      ],
+    });
+
+    expect(parsed.comments).toHaveLength(0);
+  });
+
+  it('reads an Instagram comment', () => {
+    const parsed = parseMetaWebhook({
+      object: 'instagram',
+      entry: [
+        {
+          id: 'ig-account',
+          changes: [
+            {
+              field: 'comments',
+              value: {
+                id: 'igc_1',
+                text: 'How much to Alexandria?',
+                from: { id: 'igu_1', username: 'mona' },
+                media: { id: 'igm_1' },
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(parsed.comments[0]).toMatchObject({
+      platform: 'instagram',
+      commentId: 'igc_1',
+      postId: 'igm_1',
+      fromName: 'mona',
+      text: 'How much to Alexandria?',
+    });
+  });
+
+  it('reads delivery and read receipts', () => {
+    const parsed = parseMetaWebhook({
+      object: 'page',
+      entry: [
+        {
+          id: 'page-1',
+          messaging: [
+            { sender: { id: 'psid-1' }, delivery: { mids: ['m_1'], watermark: 1_755_000_000_000 } },
+            { sender: { id: 'psid-1' }, read: { mids: ['m_1'], watermark: 1_755_000_000_000 } },
+          ],
+        },
+      ],
+    });
+
+    expect(parsed.receipts.map((r) => r.kind)).toEqual(['delivered', 'read']);
+  });
+
+  it('returns nothing rather than throwing on rubbish', () => {
+    // A throw makes Meta redeliver the whole batch, including the parts we
+    // understood, and repeated failures disable the subscription.
+    expect(parseMetaWebhook(null).messages).toEqual([]);
+    expect(parseMetaWebhook('nope').comments).toEqual([]);
+    expect(parseMetaWebhook({ object: 'whatsapp_business_account' }).messages).toEqual([]);
+    expect(parseMetaWebhook({ object: 'page', entry: [{}] }).messages).toEqual([]);
+  });
+
+  it('reads both second and millisecond timestamps', () => {
+    // Comments arrive in seconds, messaging events in milliseconds, with
+    // nothing in the payload to say which.
+    const seconds = parseMetaWebhook({
+      object: 'page',
+      entry: [
+        {
+          id: 'page-1',
+          changes: [
+            {
+              field: 'feed',
+              value: {
+                item: 'comment',
+                verb: 'add',
+                comment_id: 'c_t',
+                created_time: 1_755_000_000,
+                from: { id: 'u' },
+                message: 'x',
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(seconds.comments[0]?.createdAt.getUTCFullYear()).toBe(2025);
+    expect(parseMetaWebhook(messengerPayload()).messages[0]?.sentAt.getUTCFullYear()).toBe(2025);
+  });
+});

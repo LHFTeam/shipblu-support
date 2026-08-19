@@ -6,6 +6,7 @@ export type JobType =
   | 'process_webhook'
   | 'send_email'
   | 'send_whatsapp'
+  | 'send_meta'
   | 'download_media'
   | 'sync_whatsapp_templates'
   | 'sla_sweep'

@@ -76,6 +76,23 @@ const schema = z.object({
    */
   EMAIL_REPLY_DOMAIN: z.string().optional(),
 
+  /**
+   * Facebook and Instagram.
+   *
+   * One page access token covers both: an Instagram professional account is
+   * reached through the Facebook Page it is linked to, so there is no separate
+   * Instagram credential to configure.
+   *
+   * The app secret and verify token fall back to the WhatsApp ones because a
+   * single Meta app usually serves all three products — but they are separate
+   * keys so that a second app can be used without contorting the first.
+   */
+  META_APP_SECRET: z.string().optional(),
+  META_VERIFY_TOKEN: z.string().optional(),
+  META_PAGE_ACCESS_TOKEN: z.string().optional(),
+  FACEBOOK_PAGE_ID: z.string().optional(),
+  INSTAGRAM_ACCOUNT_ID: z.string().optional(),
+
   WHATSAPP_PHONE_NUMBER_ID: z.string().optional(),
   WHATSAPP_WABA_ID: z.string().optional(),
   WHATSAPP_ACCESS_TOKEN: z.string().optional(),
@@ -134,6 +151,24 @@ export function appUrl(): string {
     throw new Error('APP_URL must be set to build an absolute link back to this site');
   }
   return value.replace(/\/$/, '');
+}
+
+/**
+ * The app secret Meta signs Facebook and Instagram webhooks with.
+ *
+ * Falls back to the WhatsApp secret: one Meta app commonly serves all three
+ * products, and requiring the same value to be pasted twice is how one of them
+ * ends up stale.
+ */
+export function metaAppSecret(): string | undefined {
+  const e = env();
+  return e.META_APP_SECRET ?? e.WHATSAPP_APP_SECRET;
+}
+
+/** Same reasoning for the subscription handshake token. */
+export function metaVerifyToken(): string | undefined {
+  const e = env();
+  return e.META_VERIFY_TOKEN ?? e.WHATSAPP_VERIFY_TOKEN;
 }
 
 /** Domain that plus-addressed reply tokens are built against. */

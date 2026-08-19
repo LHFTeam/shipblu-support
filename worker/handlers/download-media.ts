@@ -1,8 +1,9 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { attachments, messages } from '@/db/schema';
 import type { ClaimedJob } from '@/lib/queue';
 import { buildAttachmentPath, uploadObject } from '@/lib/storage';
+import { downloadAttachment, MetaApiError } from '@/lib/meta/client';
 import { WhatsAppApiError, downloadMedia, getMediaUrl } from '@/lib/whatsapp/client';
 
 /**
@@ -35,10 +36,22 @@ const EXTENSIONS: Record<string, string> = {
 
 export async function downloadMediaJob(job: ClaimedJob): Promise<void> {
   const messageId = job.payload.messageId;
-  const mediaId = job.payload.mediaId;
+  if (typeof messageId !== 'string') {
+    throw new Error('download_media requires a messageId');
+  }
 
-  if (typeof messageId !== 'string' || typeof mediaId !== 'string') {
-    throw new Error('download_media requires messageId and mediaId');
+  // Facebook and Instagram hand over a URL directly; WhatsApp hands over an id
+  // that has to be exchanged for one. Same job, because what happens after —
+  // download, store, attach, mark — is identical, and two jobs would mean two
+  // places to fix when storage changes.
+  if (job.payload.source === 'meta') {
+    await downloadMetaAttachment(job, messageId);
+    return;
+  }
+
+  const mediaId = job.payload.mediaId;
+  if (typeof mediaId !== 'string') {
+    throw new Error('download_media requires a mediaId for WhatsApp media');
   }
 
   const rows = await db
@@ -114,4 +127,76 @@ export async function downloadMediaJob(job: ClaimedJob): Promise<void> {
   });
 
   console.log(`[download_media] ${mediaId} → ${stored.path} (${stored.sizeBytes} bytes)`);
+}
+
+/**
+ * The Facebook and Instagram half.
+ *
+ * Meta's CDN URLs are signed and short-lived, so this runs at high priority the
+ * moment the message is ingested. A message can carry several attachments, and
+ * each gets its own job keyed on its index, so one failed photo does not cost
+ * the others.
+ */
+async function downloadMetaAttachment(job: ClaimedJob, messageId: string): Promise<void> {
+  const url = job.payload.url;
+  const index = typeof job.payload.index === 'number' ? job.payload.index : 0;
+
+  if (typeof url !== 'string' || !url) {
+    throw new Error('download_media requires a url for Meta attachments');
+  }
+
+  const rows = await db
+    .select({ id: messages.id, conversationId: messages.conversationId })
+    .from(messages)
+    .where(eq(messages.id, messageId))
+    .limit(1);
+
+  const message = rows[0];
+  if (!message) throw new Error(`message ${messageId} not found`);
+
+  // Already stored: the attachment row is the record, so a re-run is a no-op
+  // rather than a second copy of the same photo.
+  const existing = await db
+    .select({ id: attachments.id })
+    .from(attachments)
+    .where(and(eq(attachments.messageId, messageId), eq(attachments.contentId, `meta:${index}`)))
+    .limit(1);
+
+  if (existing[0]) {
+    console.log(`[download_media] meta attachment ${index} of ${messageId} already stored`);
+    return;
+  }
+
+  let content: Buffer;
+  let contentType: string;
+
+  try {
+    const downloaded = await downloadAttachment(url);
+    content = downloaded.content;
+    contentType = downloaded.contentType;
+  } catch (error) {
+    if (error instanceof MetaApiError && !error.isTransient) {
+      console.error(`[download_media] meta attachment ${index} unrecoverable: ${error.message}`);
+      return;
+    }
+    throw error;
+  }
+
+  const filename = `${messageId}-${index}.${EXTENSIONS[contentType] ?? 'bin'}`;
+  const path = buildAttachmentPath(message.conversationId, `${messageId}-${index}`, filename);
+  const stored = await uploadObject(path, content, contentType);
+
+  await db.insert(attachments).values({
+    messageId,
+    storagePath: stored.path,
+    filename,
+    contentType,
+    sizeBytes: stored.sizeBytes,
+    checksum: stored.checksum,
+    // Doubles as the idempotency key for the check above.
+    contentId: `meta:${index}`,
+    isInline: false,
+  });
+
+  console.log(`[download_media] meta ${index} → ${stored.path} (${stored.sizeBytes} bytes)`);
 }

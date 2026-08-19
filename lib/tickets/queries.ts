@@ -216,6 +216,12 @@ export type ConversationDetail = {
   lastCustomerMessageAt: Date | null;
   createdAt: Date;
   reopenCount: number;
+  /**
+   * Set for tickets that came from somewhere with its own identifier — today
+   * that is a Facebook or Instagram comment thread, keyed on its root comment,
+   * which is what tells the composer to write in public rather than in private.
+   */
+  externalId: string | null;
   messages: TimelineMessage[];
   events: {
     id: string;
@@ -316,6 +322,7 @@ export async function getConversation(
     number: row.conversation.number,
     subject: row.conversation.subject,
     channel: row.conversation.channel,
+    externalId: row.conversation.externalId,
     priority: row.conversation.priority,
     type: row.conversation.type,
     statusId: row.conversation.statusId,
