@@ -18,7 +18,7 @@ import {
   type FreshdeskFolder,
 } from '@/lib/freshdesk/client';
 import { htmlToText, preview, sanitiseArticleHtml } from '@/lib/html/sanitize';
-import { detectCategoryLocale } from '@/lib/kb/language';
+import { detectCategoryLocale, detectLocale, looksUntranslated } from '@/lib/kb/language';
 import { LOCALES, LOCALE_NAMES, type Locale } from '@/lib/kb/locale';
 import { slugify, uniqueSlug } from '@/lib/kb/slug';
 
@@ -84,6 +84,8 @@ export async function importFreshdeskKb(): Promise<void> {
   let categoryCount = 0;
   let folderCount = 0;
   const articlesByLocale = new Map<Locale, number>(LOCALES.map((locale) => [locale, 0]));
+  /** Translations that carry the original text unchanged — see `looksUntranslated`. */
+  const untranslated: string[] = [];
 
   const categories = await listCategories();
   if (categories.length === 0) {
@@ -123,19 +125,35 @@ export async function importFreshdeskKb(): Promise<void> {
       // The category's locale is decided by its articles, and every article
       // inherits it, so it has to be settled before the first write.
       const samples = contents.flatMap(({ articles }) =>
-        articles.map((article) => `${article.title} ${article.description_text ?? ''}`),
+        articles.map((article) => ({
+          article,
+          sample: `${article.title} ${article.description_text ?? ''}`,
+        })),
       );
 
-      const { locale: primaryLocale, disagreements } = detectCategoryLocale(category.name, samples);
+      const { locale: primaryLocale } = detectCategoryLocale(
+        category.name,
+        samples.map(({ sample }) => sample),
+      );
 
-      if (disagreements > 0) {
-        // A category really can hold both languages, but every article inherits
-        // the category's locale, so the minority ones end up filed under a
-        // language they are not written in. Only a person can decide how to
-        // split them, and this is how they find out.
+      const odd = samples.filter(({ sample }) => detectLocale(sample) !== primaryLocale);
+
+      if (odd.length > 0) {
+        // Named, not counted. This warning used to report "1 of 47 article(s)
+        // look like the other language", which reads as a filing mistake and
+        // sent someone hunting for an article to move. The one it was pointing
+        // at was in the right category and had simply never been translated —
+        // Arabic title, English body. Both explanations are real and they need
+        // opposite actions, so name the articles and let a person look.
         console.warn(
-          `[import_freshdesk_kb] category "${category.name}" imported as ${primaryLocale}, ` +
-            `but ${disagreements} of ${samples.length} article(s) look like the other language`,
+          `[import_freshdesk_kb] category "${category.name}" imported as ${primaryLocale}, but ` +
+            `${odd.length} of ${samples.length} article(s) are written in the other language: ` +
+            `${odd
+              .slice(0, 5)
+              .map(({ article }) => `${article.id} "${article.title}"`)
+              .join(', ')}${odd.length > 5 ? ', …' : ''}. Either they are filed under the wrong ` +
+            `category in Freshdesk, or their translation was never written — the summary below ` +
+            `counts the second kind.`,
         );
       }
 
@@ -272,6 +290,15 @@ export async function importFreshdeskKb(): Promise<void> {
                 folderCount += 1;
               }
 
+              if (looksUntranslated(article.description_text, translatedArticle.description_text)) {
+                // Imported anyway. It is a real record in Freshdesk, an agent
+                // searching for it should find it, and removing it would take
+                // the article out of this language's listings on the strength of
+                // a guess about someone's intent. Reported so the gap is
+                // someone's decision rather than a silent half-translation.
+                untranslated.push(`${article.id} "${article.title}"`);
+              }
+
               await upsertArticle(
                 { ...translatedArticle, id: article.id, status: article.status },
                 folderRowId,
@@ -296,6 +323,15 @@ export async function importFreshdeskKb(): Promise<void> {
       `articles in ${Math.round((Date.now() - started) / 1000)}s` +
       (failures.length ? `, ${failures.length} failed` : ''),
   );
+
+  if (untranslated.length) {
+    console.warn(
+      `[import_freshdesk_kb] ${untranslated.length} translated article(s) carry the original text ` +
+        `unchanged, so they read in the wrong language: ${untranslated.slice(0, 10).join(', ')}` +
+        `${untranslated.length > 10 ? ', …' : ''}. Translating the body in Freshdesk is the fix; ` +
+        `the next import will pick it up.`,
+    );
+  }
 
   if (failures.length) {
     for (const failure of failures.slice(0, 20)) {
