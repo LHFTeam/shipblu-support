@@ -24,6 +24,7 @@ import {
   templateShape,
   TemplateParameterError,
 } from '@/lib/whatsapp/templates';
+import { metaWindowState } from '@/lib/meta/window';
 import { windowState } from '@/lib/whatsapp/window';
 
 /**
@@ -109,6 +110,30 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
     }
   }
 
+  const isMeta = conversation.channel === 'facebook' || conversation.channel === 'instagram';
+  const isCommentThread = Boolean(conversation.externalId?.includes(':comment:'));
+
+  // A comment ticket can be answered in public, or taken private exactly once.
+  // A direct-message ticket only has the one option.
+  const requestedSendKind = String(formData.get('metaSendKind') ?? '');
+  const metaSendKind: 'dm' | 'comment_reply' | 'private_reply' = !isCommentThread
+    ? 'dm'
+    : requestedSendKind === 'private_reply'
+      ? 'private_reply'
+      : 'comment_reply';
+
+  if (isMeta && metaSendKind === 'dm') {
+    const state = metaWindowState(conversation.lastCustomerMessageAt);
+    if (state.isClosed) {
+      return {
+        error:
+          state.reason === 'never_opened'
+            ? 'This customer has never messaged us, so there is no thread to reply in.'
+            : 'The 7-day messaging window has closed. Only the customer can reopen this conversation.',
+      };
+    }
+  }
+
   const isEmail = conversation.channel === 'email';
   const isWebchat = conversation.channel === 'webchat';
   const html = isEmail ? sanitiseEmailHtml(textToHtml(body)) : null;
@@ -132,7 +157,19 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
       // customer is already looking at.
       deliveryStatus: isWebchat ? 'delivered' : 'pending',
       ...(isWebchat ? { deliveredAt: new Date() } : {}),
-      meta: conversation.channel === 'whatsapp' ? { sendKind: 'text' } : {},
+      meta:
+        conversation.channel === 'whatsapp'
+          ? { sendKind: 'text' }
+          : isMeta
+            ? {
+                metaKind: isCommentThread ? 'comment' : 'direct_message',
+                platform: conversation.channel,
+                sendKind: metaSendKind,
+                // A public reply is on the record for everyone who can see the
+                // post, so the timeline says which of the two this was.
+                isPublic: metaSendKind === 'comment_reply',
+              }
+            : {},
     })
     .returning({ id: messages.id });
 
@@ -150,7 +187,7 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
 
   if (!isWebchat) {
     await enqueue(
-      conversation.channel === 'whatsapp' ? 'send_whatsapp' : 'send_email',
+      conversation.channel === 'whatsapp' ? 'send_whatsapp' : isMeta ? 'send_meta' : 'send_email',
       { messageId },
       // dedupeKey on the message id: a double-submit or a retried action can
       // never queue the same reply twice.

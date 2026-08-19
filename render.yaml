@@ -53,6 +53,23 @@ envVarGroups:
       - key: APP_SECRET
         generateValue: true
 
+      # Facebook and Instagram. One Page token serves Messenger, Instagram
+      # Direct and both comment streams, and the worker sends with it while the
+      # web service verifies webhooks — so all of it is shared rather than
+      # per-service.
+      - key: META_PAGE_ACCESS_TOKEN
+        sync: false
+      - key: FACEBOOK_PAGE_ID
+        sync: false
+      - key: INSTAGRAM_ACCOUNT_ID
+        sync: false
+      # Left unset when one Meta app serves WhatsApp too, in which case the
+      # WhatsApp app secret and verify token are used.
+      - key: META_APP_SECRET
+        sync: false
+      - key: META_VERIFY_TOKEN
+        sync: false
+
       # Postmark. The server token is used by the worker to send and by the web
       # service to construct the driver that parses inbound, so it is shared.
       #

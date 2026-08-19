@@ -4,6 +4,7 @@ import { webhookEvents } from '@/db/schema';
 import { emailProvider } from '@/lib/email/providers';
 import type { ClaimedJob } from '@/lib/queue';
 import { ingestInboundEmail } from '@/lib/tickets/ingest';
+import { processMetaWebhook } from './process-meta-webhook';
 import { processWhatsAppWebhook } from './process-whatsapp-webhook';
 
 /**
@@ -49,6 +50,15 @@ export async function processWebhook(job: ClaimedJob): Promise<void> {
     // idempotency behave identically no matter who sent the payload.
     if (event.channel === 'whatsapp') {
       await processWhatsAppWebhook({ id: event.id, payload: event.payload });
+      await db
+        .update(webhookEvents)
+        .set({ processedAt: new Date() })
+        .where(eq(webhookEvents.id, webhookEventId));
+      return;
+    }
+
+    if (event.channel === 'facebook' || event.channel === 'instagram') {
+      await processMetaWebhook({ id: event.id, payload: event.payload });
       await db
         .update(webhookEvents)
         .set({ processedAt: new Date() })

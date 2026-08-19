@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Button, ErrorText, Input, Label, Select, Textarea } from '@/components/ui';
 import { useNow } from '@/components/use-now';
 import type { ConversationDetail } from '@/lib/tickets/queries';
+import { describeWindow, metaWindowState } from '@/lib/meta/window';
 import { renderTemplatePreview, templateShape } from '@/lib/whatsapp/templates';
 import { formatRemaining, windowState } from '@/lib/whatsapp/window';
 import { addNote, sendReply, sendTemplateReply, type ActionState } from '../../actions';
@@ -23,6 +24,11 @@ export function Composer({
   templates: TemplateOption[];
 }) {
   const isWhatsApp = conversation.channel === 'whatsapp';
+  const isMeta = conversation.channel === 'facebook' || conversation.channel === 'instagram';
+  // A comment ticket carries the root comment in its external id; a direct
+  // message ticket has none. That is what decides whether the agent is writing
+  // in public or in private.
+  const isCommentThread = Boolean(conversation.externalId?.includes(':comment:'));
   const now = useNow();
 
   const state = windowState(
@@ -34,6 +40,14 @@ export function Composer({
   // frame — a false "closed" reads as broken, whereas a false "open" corrects
   // itself on the first tick and the send path re-checks regardless.
   const windowOpen = !isWhatsApp || now === null || state.isOpen;
+
+  const metaState = metaWindowState(
+    conversation.lastCustomerMessageAt ? new Date(conversation.lastCustomerMessageAt) : null,
+    now ?? undefined,
+  );
+  // Comments are public and have no messaging window at all, so only a direct
+  // message ticket can be locked out.
+  const metaSendable = !isMeta || isCommentThread || now === null || !metaState.isClosed;
 
   const [requestedTab, setRequestedTab] = useState<Tab>('reply');
 
@@ -48,9 +62,9 @@ export function Composer({
         <TabButton
           active={tab === 'reply'}
           onClick={() => setRequestedTab('reply')}
-          disabled={!windowOpen}
+          disabled={!windowOpen || !metaSendable}
         >
-          Reply
+          {isCommentThread ? 'Reply publicly' : 'Reply'}
         </TabButton>
         <TabButton active={tab === 'note'} onClick={() => setRequestedTab('note')}>
           Private note
@@ -68,10 +82,22 @@ export function Composer({
               : 'Window closed — approved templates only'}
           </span>
         ) : null}
+
+        {isMeta && !isCommentThread && now !== null ? (
+          <span className="ml-auto text-xs opacity-60">{describeWindow(metaState)}</span>
+        ) : null}
+
+        {isCommentThread ? (
+          <span className="ml-auto text-xs opacity-60">
+            Public comment thread — anyone who can see the post can read your reply
+          </span>
+        ) : null}
       </div>
 
       <div className="p-3">
-        {tab === 'reply' ? <ReplyForm conversationId={conversation.id} /> : null}
+        {tab === 'reply' ? (
+          <ReplyForm conversationId={conversation.id} isCommentThread={isCommentThread} />
+        ) : null}
         {tab === 'note' ? <NoteForm conversationId={conversation.id} /> : null}
         {tab === 'template' ? (
           <TemplateForm conversationId={conversation.id} templates={templates} />
@@ -121,15 +147,56 @@ function useRefreshOnSuccess(state: ActionState) {
   }, [state, router]);
 }
 
-function ReplyForm({ conversationId }: { conversationId: string }) {
+function ReplyForm({
+  conversationId,
+  isCommentThread = false,
+}: {
+  conversationId: string;
+  isCommentThread?: boolean;
+}) {
   const [state, action] = useActionState(sendReply, INITIAL);
+  const [privately, setPrivately] = useState(false);
   useRefreshOnSuccess(state);
 
   return (
     <form key={state.nonce ?? 0} action={action} className="flex flex-col gap-2">
       <input type="hidden" name="conversationId" value={conversationId} />
+      <input
+        type="hidden"
+        name="metaSendKind"
+        value={privately ? 'private_reply' : 'comment_reply'}
+      />
 
-      <Textarea name="body" rows={4} placeholder="Write a reply to the customer…" required />
+      <Textarea
+        name="body"
+        rows={4}
+        placeholder={
+          isCommentThread
+            ? privately
+              ? 'Send this privately to the commenter — one chance per comment.'
+              : 'Reply under the comment, where everyone can see it…'
+            : 'Write a reply to the customer…'
+        }
+        required
+      />
+
+      {isCommentThread ? (
+        <label className="flex items-start gap-2 rounded-md border border-[var(--border)] p-2 text-xs">
+          <input
+            type="checkbox"
+            checked={privately}
+            onChange={(event) => setPrivately(event.target.checked)}
+            className="mt-0.5"
+          />
+          <span>
+            <span className="font-medium">Reply privately instead</span>
+            <span className="block opacity-60">
+              Moves the conversation into the direct message inbox. Meta allows this once per
+              comment, so it cannot be undone or repeated.
+            </span>
+          </span>
+        </label>
+      ) : null}
 
       <ErrorText>{state.error}</ErrorText>
 

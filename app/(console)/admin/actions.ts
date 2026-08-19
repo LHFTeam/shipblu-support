@@ -93,13 +93,21 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
   const address = String(formData.get('address') ?? '').trim();
 
   if (!name) return { error: 'Give the channel a name' };
-  if (type !== 'email' && type !== 'whatsapp' && type !== 'webchat') {
+  if (!['email', 'whatsapp', 'webchat', 'facebook', 'instagram'].includes(type)) {
     return { error: 'Unknown channel type' };
   }
 
   // Non-secret settings only. Access tokens and app secrets stay in the
   // environment, so a database dump never contains a usable credential.
-  const config = type === 'whatsapp' ? { phoneNumberId } : { address };
+  // Facebook and Instagram are addressed by ids that live in the environment
+  // beside the token they are useless without, so their row carries routing
+  // only.
+  const config =
+    type === 'whatsapp'
+      ? { phoneNumberId }
+      : type === 'facebook' || type === 'instagram'
+        ? {}
+        : { address };
 
   if (id) {
     await db
@@ -107,7 +115,12 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
       .set({ name, defaultGroupId, config, updatedAt: new Date() })
       .where(eq(channels.id, id));
   } else {
-    await db.insert(channels).values({ type, name, defaultGroupId, config });
+    await db.insert(channels).values({
+      type: type as (typeof channels.$inferInsert)['type'],
+      name,
+      defaultGroupId,
+      config,
+    });
   }
 
   revalidatePath('/admin/channels');

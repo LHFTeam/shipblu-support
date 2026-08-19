@@ -1,25 +1,26 @@
-import Link from 'next/link';
 import { requirePermission } from '@/lib/auth/guard';
+import { AdminNav } from './nav';
 
 export const dynamic = 'force-dynamic';
 
+/**
+ * Admin shell.
+ *
+ * A section list beside the content, grouped by what an admin is actually
+ * trying to do — set up who works here, how work is routed, and what the
+ * customer sees — rather than by which table each setting happens to live in.
+ */
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   await requirePermission('admin.agents');
 
   return (
-    <div className="mx-auto flex h-full max-w-4xl gap-8 overflow-y-auto p-6">
-      <nav className="flex w-40 shrink-0 flex-col gap-1 text-sm">
-        <Link href="/admin/agents" className="rounded px-2 py-1.5 hover:bg-[var(--muted)]">
-          Agents
-        </Link>
-        <Link href="/admin/channels" className="rounded px-2 py-1.5 hover:bg-[var(--muted)]">
-          Channels &amp; groups
-        </Link>
-        <Link href="/admin/import" className="rounded px-2 py-1.5 hover:bg-[var(--muted)]">
-          Freshdesk import
-        </Link>
-      </nav>
-      <div className="min-w-0 flex-1">{children}</div>
+    <div className="flex h-full min-h-0">
+      <AdminNav />
+      <div className="app-scroll min-w-0 flex-1 overflow-y-auto">
+        {/* pt-12 clears the horizontal section strip that replaces the
+            sidebar below `lg`. */}
+        <div className="mx-auto max-w-5xl p-4 pt-14 md:p-6 lg:pt-6">{children}</div>
+      </div>
     </div>
   );
 }

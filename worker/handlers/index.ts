@@ -7,6 +7,7 @@ import { rollupMetrics } from './rollup-metrics';
 import { runTimeAutomations } from './run-time-automations';
 import { sendCsat } from './send-csat';
 import { sendEmail } from './send-email';
+import { sendMeta } from './send-meta';
 import { sendWhatsApp } from './send-whatsapp';
 import { slaSweep } from './sla-sweep';
 import { syncWhatsAppTemplates } from './sync-whatsapp-templates';
@@ -30,6 +31,7 @@ export const handlers: Partial<Record<JobType, JobHandler>> = {
   run_time_automations: () => runTimeAutomations(),
   send_csat: sendCsat,
   send_email: sendEmail,
+  send_meta: sendMeta,
   send_whatsapp: sendWhatsApp,
   sla_sweep: () => slaSweep(),
   sync_whatsapp_templates: () => syncWhatsAppTemplates(),

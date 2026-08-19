@@ -1,5 +1,6 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
+import { ChannelBadge } from '@/components/channel';
 import { EmptyState } from '@/components/ui';
 import { requireAgent } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
@@ -123,6 +124,12 @@ export default async function ReportsPage({
           <Breakdown
             title="By channel"
             rows={channelRows.map((row) => ({ ...row, label: channelLabel(row.label) }))}
+            marks={Object.fromEntries(
+              channelRows.map((row) => [
+                channelLabel(row.label),
+                <ChannelBadge key={row.label} channel={row.label} />,
+              ]),
+            )}
           />
 
           <section className="mb-8">
@@ -159,7 +166,16 @@ function Stat({ label, value, hint }: { label: string; value: string; hint?: str
   );
 }
 
-function Breakdown({ title, rows }: { title: string; rows: Row[] }) {
+function Breakdown({
+  title,
+  rows,
+  marks,
+}: {
+  title: string;
+  rows: Row[];
+  /** Optional per-row element shown instead of the plain label. */
+  marks?: Record<string, React.ReactNode>;
+}) {
   if (rows.length === 0) return null;
 
   return (
@@ -168,7 +184,7 @@ function Breakdown({ title, rows }: { title: string; rows: Row[] }) {
       <Table
         head={['', 'Created', 'Resolved', 'First response', 'Within SLA', 'CSAT']}
         rows={rows.map((row) => [
-          row.label,
+          marks?.[row.label] ?? row.label,
           row.ticketsCreated.toLocaleString(),
           row.ticketsResolved.toLocaleString(),
           formatDuration(averageSeconds(row.firstResponseSecondsSum, row.firstResponseCount)),
@@ -180,7 +196,7 @@ function Breakdown({ title, rows }: { title: string; rows: Row[] }) {
   );
 }
 
-function Table({ head, rows }: { head: string[]; rows: string[][] }) {
+function Table({ head, rows }: { head: string[]; rows: React.ReactNode[][] }) {
   return (
     <div className="overflow-x-auto rounded-lg border border-[var(--border)]">
       <table className="w-full text-sm">
@@ -194,8 +210,8 @@ function Table({ head, rows }: { head: string[]; rows: string[][] }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
-            <tr key={row[0]} className="border-b border-[var(--border)] last:border-0">
+          {rows.map((row, index) => (
+            <tr key={index} className="border-b border-[var(--border)] last:border-0">
               {row.map((cell, index) => (
                 <td key={index} className={`px-3 py-2 ${index === 0 ? 'font-medium' : ''}`}>
                   {cell}
