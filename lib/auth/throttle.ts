@@ -16,7 +16,7 @@ const MAX_ATTEMPTS = 10;
 type Bucket = { count: number; resetAt: number };
 const buckets = new Map<string, Bucket>();
 
-function hit(key: string): boolean {
+function hit(key: string, max: number = MAX_ATTEMPTS): boolean {
   const now = Date.now();
   const bucket = buckets.get(key);
 
@@ -26,7 +26,7 @@ function hit(key: string): boolean {
   }
 
   bucket.count += 1;
-  return bucket.count <= MAX_ATTEMPTS;
+  return bucket.count <= max;
 }
 
 export function allowLoginAttempt(email: string, ip: string | null): boolean {
@@ -34,6 +34,31 @@ export function allowLoginAttempt(email: string, ip: string | null): boolean {
   // traffic against the other.
   const byEmail = hit(`email:${email}`);
   const byIp = ip ? hit(`ip:${ip}`) : true;
+  return byEmail && byIp;
+}
+
+/**
+ * Budget for anything that makes us send an email to an address somebody typed
+ * into a form — portal registration and password-reset requests.
+ *
+ * A different concern from sign-in: a failed sign-in costs an attacker a guess,
+ * while these cost a *third party* an unwanted email. So the per-address budget
+ * is the tight one — five links to the same inbox in a quarter of an hour is
+ * already generous for a person who mistyped their password.
+ *
+ * The per-source budget is deliberately much looser. Most ShipBlu customers
+ * reach us over Egyptian mobile networks, where carrier-grade NAT puts a large
+ * number of unrelated people behind one address; a tight IP cap there does not
+ * stop an attacker (who has more than one address) and does stop a genuine
+ * customer whose neighbour signed up first. It exists to blunt a single host
+ * spraying thousands of addresses, and that is all it is sized for.
+ */
+const EMAIL_MAX_PER_ADDRESS = 5;
+const EMAIL_MAX_PER_SOURCE = 60;
+
+export function allowEmailDispatch(email: string, ip: string | null): boolean {
+  const byEmail = hit(`mail:${email}`, EMAIL_MAX_PER_ADDRESS);
+  const byIp = ip ? hit(`mailip:${ip}`, EMAIL_MAX_PER_SOURCE) : true;
   return byEmail && byIp;
 }
 

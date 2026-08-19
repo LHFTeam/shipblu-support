@@ -14,9 +14,13 @@ import type { Locale } from './locale';
  */
 
 /**
- * Published *and* public. `logged_in` and `selected_companies` are not served
- * at all yet — there is no customer sign-in, so there is no way to evaluate
- * them, and treating an unevaluable rule as "allow" is how they leak.
+ * Published *and* public.
+ *
+ * `logged_in` and `selected_companies` are still not served at all, even though
+ * customers can now sign in. Wiring them up means threading the viewer through
+ * every query below and getting it right in all of them; until that is done,
+ * the honest reading of an unevaluated rule is "deny". Treating it as "allow"
+ * is how an internal runbook ends up in Google's index.
  */
 function publiclyVisible(): SQL {
   return and(eq(kbArticles.status, 'published'), eq(kbArticles.visibility, 'public'))!;

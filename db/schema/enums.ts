@@ -111,6 +111,16 @@ export const kbVisibilityEnum = pgEnum('kb_visibility', [
 export const kbArticleStatusEnum = pgEnum('kb_article_status', ['draft', 'published', 'archived']);
 
 /**
+ * Single-use links emailed to a customer setting up, or recovering, their
+ * portal sign-in. One table covers both because the lifecycle is identical —
+ * issue, email, redeem once, expire — and only the effect of redeeming differs.
+ */
+export const contactTokenPurposeEnum = pgEnum('contact_token_purpose', [
+  'verify_email',
+  'reset_password',
+]);
+
+/**
  * Recorded on every imported row so Freshdesk/Freshchat importers can be
  * re-run idempotently against `(source_system, external_id)`.
  */

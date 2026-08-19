@@ -98,6 +98,14 @@ export default function proxy(request: NextRequest) {
   }
 
   // --- Console auth --------------------------------------------------------
+
+  // The bare domain is the help centre's front door on every hostname, so it is
+  // public even though nothing beneath it is: `app/page.tsx` redirects it to the
+  // default locale, which the locale rule above then rewrites under /help. Left
+  // to the check below it would redirect to /login instead, and the front door
+  // of a public support site would ask for a password.
+  if (pathname === '/') return NextResponse.next();
+
   if (isPublic(pathname)) return NextResponse.next();
 
   if (request.cookies.get(SESSION_COOKIE)?.value) return NextResponse.next();

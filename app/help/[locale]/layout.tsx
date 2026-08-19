@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { DEFAULT_LOCALE, direction, isLocale, LOCALES, LOCALE_NAMES, t } from '@/lib/kb/locale';
+import { AccountNav } from './account-nav';
 import { SearchBox } from './search-box';
 
 export const dynamic = 'force-dynamic';
@@ -52,6 +53,8 @@ export default async function KbLayout({
               </Link>
             ))}
           </nav>
+
+          <AccountNav locale={locale} />
         </div>
       </header>
 

@@ -15,8 +15,10 @@ Every phase of the original plan except migration importers is **built and
 merged**: email ticketing, WhatsApp, Facebook and Instagram, the agent console,
 the bilingual knowledge base with its Freshdesk importer, the chat widget, SLA
 policies, automation rules, CSAT and reporting, and a live dashboard for admins
-at `/admin/dashboard`. Production is healthy on
-`04b5c60`, 4 ms database latency, empty job queue, no dead jobs.
+at `/admin/dashboard`. Since then the **customer portal** has landed too — the
+bare domain now opens the Arabic help centre, and one Sign in button
+authenticates customers and agents alike. Production is healthy on `04b5c60`,
+4 ms database latency, empty job queue, no dead jobs.
 
 **But almost none of it is configured.** The database holds 1 agent, 0 channel
 rows, 0 SLA policies and 0 automation rules. The remaining work is mostly not
@@ -137,7 +139,8 @@ is code:
 - **Channel rows.** `channels` is empty. Email mailboxes, the WhatsApp business
   number, the Facebook page and Instagram account, and a `webchat` channel each
   need a row. The env vars are the credentials; the rows are what the app
-  routes on.
+  routes on. A `portal` row is worth adding too: without one, tickets opened
+  from the customer portal land with no default group, so nothing routes them.
 - **Agents.** One account exists. The team needs inviting, and `groups` (3 rows)
   needs its membership.
 - **SLA policies and automation rules are both empty**, so the sweep and the
@@ -162,6 +165,14 @@ provider. Each is a round trip somebody has to actually watch:
   redirect. 174 `kb_redirects` rows exist and none has been followed in anger.
 - **A WhatsApp template send outside the 24-hour window** — the one path the
   end-to-end test in §7 could not cover.
+- **The portal's verification and reset emails through Postmark.** The whole
+  flow has been driven end to end against a local Postgres with
+  `EMAIL_PROVIDER=local`, so the links, the tokens and the single-use rules are
+  exercised — but nothing has yet been delivered by a real provider to a real
+  inbox. Watch two things in particular: that the link survives corporate link
+  scanners (verification tolerates a replayed token for exactly this reason, a
+  reset deliberately does not), and that `Auto-Submitted: auto-generated` keeps
+  autoresponders from opening a ticket per verification email.
 
 ### 5.3 Phase 7 — ticket, conversation and contact importers
 
@@ -175,6 +186,15 @@ customer-facing table carries those two columns for exactly this reason.
 - One imported article's detected language disagrees with its category. The
   importer counts and reports these rather than silently refiling them; someone
   who reads Arabic should look at it.
+- `logged_in` and `selected_companies` knowledge base articles are still not
+  served, even though customers can now sign in. Wiring them up means threading
+  the viewer through every query in `lib/kb/queries.ts`; until then
+  `publiclyVisible()` treats an unevaluated rule as deny, which is the safe
+  reading but means the two visibility levels are inert in the editor.
+- Ticket statuses show customers the configured `customer_label` or a plain word
+  for the category in their own language — never the status's own name. That
+  field has no per-locale variant, so setting it pins one language for every
+  reader; leaving it null is usually the better answer.
 - **`metrics_daily` rows written before the totals-slice fix are inflated.** The
   fix (`slicesFor`) stops new rows being wrong; it does not repair the ones
   already stored, and the nightly job only recomputes the last three days. Any
