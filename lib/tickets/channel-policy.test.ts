@@ -7,6 +7,7 @@ import {
   isRestrictedChannel,
   readOnlyChannels,
   readOnlyReason,
+  restrictedChannels,
 } from './channel-policy';
 
 function agent(role: SessionAgent['role'], permissions: Record<string, boolean> = {}) {
@@ -28,6 +29,23 @@ describe('read-only channels', () => {
 
   it('lists itself for excluding from a query', () => {
     expect(readOnlyChannels()).toEqual(['whatsapp_bot']);
+  });
+});
+
+describe('restricted channels are opt-in, separately from permission', () => {
+  it('lists the channel whoever is asking', () => {
+    // The distinction that matters: `hiddenChannels` answers "may this person
+    // see it", `restrictedChannels` answers "is it part of all channels". An
+    // admin may see the bot channel and still should not have it in their
+    // working queue.
+    expect(restrictedChannels()).toEqual(['whatsapp_bot']);
+    expect(hiddenChannels(agent('admin'))).toEqual([]);
+  });
+
+  it('is not narrowed by holding the permission', () => {
+    const trusted = agent('supervisor', { 'ticket.view.bot': true });
+    expect(hiddenChannels(trusted)).toEqual([]);
+    expect(restrictedChannels()).toEqual(['whatsapp_bot']);
   });
 });
 

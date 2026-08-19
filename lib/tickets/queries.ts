@@ -25,7 +25,12 @@ import {
 } from '@/db/schema';
 import type { SessionAgent } from '@/lib/auth/session';
 import { can } from '@/lib/auth/permissions';
-import { FILTERABLE_CHANNELS, hiddenChannels, type FilterableChannel } from './channel-policy';
+import {
+  FILTERABLE_CHANNELS,
+  hiddenChannels,
+  restrictedChannels,
+  type FilterableChannel,
+} from './channel-policy';
 import { parseSearchTerm } from './search';
 
 /**
@@ -106,11 +111,21 @@ export async function listInbox(
     where.push(eq(conversations.assigneeAgentId, agent.id));
   }
 
-  // A restricted channel is excluded here rather than left to the filter, so it
-  // is absent from the default view, from every other filter, and from search —
-  // "view.all" is about the team's tickets, and a bot transcript is not one.
-  const hidden = hiddenChannels(agent);
-  if (hidden.length) where.push(notInArray(conversations.channel, hidden));
+  // Restricted channels are excluded in the query, for two different reasons
+  // that happen to use the same clause.
+  //
+  // Permission is the first: an agent without `ticket.view.bot` must not reach
+  // one however they ask, which is why forcing `?channel=whatsapp_bot` returns
+  // nothing rather than working.
+  //
+  // The second is that the inbox is a working queue. These channels are opt-in:
+  // absent from "all channels" even for an admin who may see them, and reached
+  // by naming them in the filter. Without that, one number the team does not
+  // answer buried the tickets that were actually waiting under nineteen hundred
+  // transcripts. Search follows the same rule, so finding a bot conversation
+  // means filtering to the channel first.
+  const excluded = filters.channel === 'all' ? restrictedChannels() : hiddenChannels(agent);
+  if (excluded.length) where.push(notInArray(conversations.channel, excluded));
 
   if (filters.view === 'mine') where.push(eq(conversations.assigneeAgentId, agent.id));
   if (filters.view === 'unassigned') where.push(isNull(conversations.assigneeAgentId));
@@ -447,8 +462,10 @@ export async function inboxCounts(agent: SessionAgent) {
     base.push(eq(conversations.assigneeAgentId, agent.id));
   }
 
-  const hidden = hiddenChannels(agent);
-  if (hidden.length) base.push(notInArray(conversations.channel, hidden));
+  // The nav badge counts what is waiting on the team, so a restricted channel is
+  // out of it for everyone — an admin's inbox count is not a traffic meter for a
+  // number nobody answers.
+  base.push(notInArray(conversations.channel, restrictedChannels()));
 
   const rows = await db
     .select({
