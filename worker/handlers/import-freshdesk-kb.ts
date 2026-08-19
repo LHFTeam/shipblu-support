@@ -19,7 +19,7 @@ import {
 } from '@/lib/freshdesk/client';
 import { htmlToText, preview, sanitiseArticleHtml } from '@/lib/html/sanitize';
 import { detectCategoryLocale } from '@/lib/kb/language';
-import { LOCALES, type Locale } from '@/lib/kb/locale';
+import { LOCALES, LOCALE_NAMES, type Locale } from '@/lib/kb/locale';
 import { slugify, uniqueSlug } from '@/lib/kb/slug';
 
 /**
@@ -38,7 +38,36 @@ import { slugify, uniqueSlug } from '@/lib/kb/slug';
  *
  * Locally-authored articles are never touched: every write is scoped to rows
  * whose `source_system` is 'freshdesk'.
+ *
+ * The primary tree is read in full before anything is written, because the
+ * language codes are discovered from it and a code cannot be trusted to the
+ * first category alone — see `discoverLanguageCode`.
  */
+
+/**
+ * How many items to probe when working out a language code.
+ *
+ * More than one, because a single untranslated item hid an entire language
+ * before; bounded, because on a large account this is otherwise a crawl of
+ * everything before the import proper has started.
+ */
+const PROBE_CATEGORIES = 10;
+const PROBE_ARTICLES = 10;
+
+/** One category's primary-language contents, read before anything is written. */
+type Branch = {
+  category: FreshdeskCategory;
+  contents: { folder: FreshdeskFolder; articles: FreshdeskArticle[] }[];
+};
+
+/** What the primary pass made of a branch, needed again by the translations. */
+type Imported = {
+  primaryLocale: Locale;
+  categoryTranslationGroupId: string;
+  /** Freshdesk article id → translation group, so a translation joins its original. */
+  articleGroups: Map<number, string>;
+};
+
 export async function importFreshdeskKb(): Promise<void> {
   const e = env();
   if (!e.FRESHDESK_DOMAIN || !e.FRESHDESK_API_KEY) {
@@ -54,8 +83,7 @@ export async function importFreshdeskKb(): Promise<void> {
   const failures: string[] = [];
   let categoryCount = 0;
   let folderCount = 0;
-  let articleCount = 0;
-  let translatedCount = 0;
+  const articlesByLocale = new Map<Locale, number>(LOCALES.map((locale) => [locale, 0]));
 
   const categories = await listCategories();
   if (categories.length === 0) {
@@ -63,29 +91,15 @@ export async function importFreshdeskKb(): Promise<void> {
     return;
   }
 
-  // Which code this account uses for each language, asked once against a real
-  // category. A wrong code 404s on every item, which is indistinguishable from
-  // "nothing is translated" — so guessing it would make the import quietly find
-  // nothing and still report success.
-  const codes = new Map<Locale, string>();
-  for (const locale of LOCALES) {
-    const code = await discoverLanguageCode(categories[0]!.id, locale);
-    if (code) codes.set(locale, code);
-  }
+  // --- read the primary tree ------------------------------------------------
 
-  console.log(
-    `[import_freshdesk_kb] language codes: ${
-      [...codes].map(([locale, code]) => `${locale}=${code}`).join(', ') || 'none found'
-    }`,
-  );
+  const tree: Branch[] = [];
 
   for (const category of categories) {
     try {
       const folders = await listFolders(category.id);
+      const contents: Branch['contents'] = [];
 
-      // The whole category is read before anything is written, because its
-      // locale is decided by its articles and every article is filed under it.
-      const contents: { folder: FreshdeskFolder; articles: FreshdeskArticle[] }[] = [];
       for (const folder of folders) {
         try {
           contents.push({ folder, articles: await listArticles(folder.id) });
@@ -94,6 +108,20 @@ export async function importFreshdeskKb(): Promise<void> {
         }
       }
 
+      tree.push({ category, contents });
+    } catch (error) {
+      failures.push(`category ${category.id}: ${message(error)}`);
+    }
+  }
+
+  // --- write the primary language -------------------------------------------
+
+  const imported = new Map<number, Imported>();
+
+  for (const { category, contents } of tree) {
+    try {
+      // The category's locale is decided by its articles, and every article
+      // inherits it, so it has to be settled before the first write.
       const samples = contents.flatMap(({ articles }) =>
         articles.map((article) => `${article.title} ${article.description_text ?? ''}`),
       );
@@ -111,8 +139,6 @@ export async function importFreshdeskKb(): Promise<void> {
         );
       }
 
-      // --- primary language ------------------------------------------------
-
       const primaryCategory = await upsertCategory(category, primaryLocale);
       categoryCount += 1;
 
@@ -128,7 +154,7 @@ export async function importFreshdeskKb(): Promise<void> {
               const result = await upsertArticle(article, folderId, primaryLocale);
               articleGroups.set(article.id, result.translationGroupId);
               await writeRedirects(article.id, result.id);
-              articleCount += 1;
+              count(articlesByLocale, primaryLocale);
             } catch (error) {
               failures.push(`article ${article.id}: ${message(error)}`);
             }
@@ -138,68 +164,136 @@ export async function importFreshdeskKb(): Promise<void> {
         }
       }
 
-      // --- every other language --------------------------------------------
-
-      for (const [locale, code] of codes) {
-        if (locale === primaryLocale) continue;
-
-        try {
-          const translatedCategory = await getTranslatedCategory(category.id, code);
-          // No translated category means this whole branch is untranslated —
-          // its folders and articles would have nowhere to live.
-          if (!translatedCategory) continue;
-
-          const categoryRow = await upsertCategory(
-            { ...translatedCategory, id: category.id },
-            locale,
-            primaryCategory.translationGroupId,
-          );
-          categoryCount += 1;
-
-          for (const { folder, articles } of contents) {
-            const translatedFolder = await getTranslatedFolder(folder.id, code);
-            if (!translatedFolder) continue;
-
-            const folderId = await upsertFolder(
-              // Visibility comes from the primary folder: it is an access rule,
-              // not translated content, and a translation that omitted it would
-              // silently widen who can see the articles.
-              { ...translatedFolder, id: folder.id, visibility: folder.visibility },
-              categoryRow.id,
-              locale,
-            );
-            folderCount += 1;
-
-            for (const article of articles) {
-              try {
-                const translatedArticle = await getTranslatedArticle(article.id, code);
-                if (!translatedArticle) continue;
-
-                await upsertArticle(
-                  { ...translatedArticle, id: article.id, status: article.status },
-                  folderId,
-                  locale,
-                  articleGroups.get(article.id),
-                );
-                translatedCount += 1;
-              } catch (error) {
-                failures.push(`article ${article.id} (${locale}): ${message(error)}`);
-              }
-            }
-          }
-        } catch (error) {
-          failures.push(`category ${category.id} (${locale}): ${message(error)}`);
-        }
-      }
+      imported.set(category.id, {
+        primaryLocale,
+        categoryTranslationGroupId: primaryCategory.translationGroupId,
+        articleGroups,
+      });
     } catch (error) {
       failures.push(`category ${category.id}: ${message(error)}`);
     }
   }
 
+  // --- work out which code this account uses for each language --------------
+
+  const probe = {
+    categoryIds: tree.map(({ category }) => category.id).slice(0, PROBE_CATEGORIES),
+    articleIds: tree
+      .flatMap(({ contents }) => contents.flatMap(({ articles }) => articles.map((a) => a.id)))
+      .slice(0, PROBE_ARTICLES),
+  };
+
+  const codes = new Map<Locale, string>();
+  for (const locale of LOCALES) {
+    const code = await discoverLanguageCode(locale, probe);
+    if (code) codes.set(locale, code);
+  }
+
+  console.log(
+    `[import_freshdesk_kb] language codes: ${LOCALES.map(
+      (locale) => `${locale}=${codes.get(locale) ?? 'not found'}`,
+    ).join(
+      ', ',
+    )} (probed ${probe.categoryIds.length} categories, ${probe.articleIds.length} articles)`,
+  );
+
+  // A language nobody publishes in is a legitimate answer, but so is a wrong
+  // code, and the two look identical from here. Say which languages produced
+  // nothing rather than reporting a clean run — that silence is what let an
+  // account's whole English tree go missing without anyone noticing.
+  for (const locale of LOCALES) {
+    if (codes.has(locale)) continue;
+    console.warn(
+      `[import_freshdesk_kb] no ${LOCALE_NAMES[locale]} content found. Either the Freshdesk ` +
+        `account publishes nothing in it, or its language code is not one this import knows ` +
+        `for ${locale}.`,
+    );
+  }
+
+  // --- write every other language ------------------------------------------
+
+  for (const { category, contents } of tree) {
+    const state = imported.get(category.id);
+    if (!state) continue;
+
+    for (const [locale, code] of codes) {
+      if (locale === state.primaryLocale) continue;
+
+      try {
+        // Containers are created from the first translated article found beneath
+        // them, rather than up front. Two reasons, both learned the hard way: a
+        // branch with nothing translated must not leave an empty category behind
+        // in a language it has no content in, and a category whose own name was
+        // never translated must not take its articles down with it — Freshdesk
+        // lets you translate an article and leave its category alone, and
+        // dropping the branch on that basis lost every article under it.
+        let categoryRow: { id: string; translationGroupId: string } | null = null;
+
+        for (const { folder, articles } of contents) {
+          let folderRowId: string | null = null;
+
+          for (const article of articles) {
+            try {
+              const translatedArticle = await getTranslatedArticle(article.id, code);
+              if (!translatedArticle) continue;
+
+              if (!categoryRow) {
+                const translatedCategory = await getTranslatedCategory(category.id, code);
+                if (!translatedCategory) {
+                  console.warn(
+                    `[import_freshdesk_kb] category "${category.name}" has ${locale} articles but ` +
+                      `no ${locale} name; keeping the original name for it`,
+                  );
+                }
+
+                categoryRow = await upsertCategory(
+                  { ...(translatedCategory ?? category), id: category.id },
+                  locale,
+                  state.categoryTranslationGroupId,
+                );
+                categoryCount += 1;
+              }
+
+              if (!folderRowId) {
+                const translatedFolder = await getTranslatedFolder(folder.id, code);
+
+                folderRowId = await upsertFolder(
+                  {
+                    ...(translatedFolder ?? folder),
+                    id: folder.id,
+                    // Visibility comes from the primary folder: it is an access
+                    // rule, not translated content, and a translation that
+                    // omitted it would silently widen who can see the articles.
+                    visibility: folder.visibility,
+                  },
+                  categoryRow.id,
+                  locale,
+                );
+                folderCount += 1;
+              }
+
+              await upsertArticle(
+                { ...translatedArticle, id: article.id, status: article.status },
+                folderRowId,
+                locale,
+                state.articleGroups.get(article.id),
+              );
+              count(articlesByLocale, locale);
+            } catch (error) {
+              failures.push(`article ${article.id} (${locale}): ${message(error)}`);
+            }
+          }
+        }
+      } catch (error) {
+        failures.push(`category ${category.id} (${locale}): ${message(error)}`);
+      }
+    }
+  }
+
   console.log(
     `[import_freshdesk_kb] ${categoryCount} categories, ${folderCount} folders, ` +
-      `${articleCount} articles, ${translatedCount} translations in ` +
-      `${Math.round((Date.now() - started) / 1000)}s` +
+      `${LOCALES.map((locale) => `${articlesByLocale.get(locale) ?? 0} ${locale}`).join(', ')} ` +
+      `articles in ${Math.round((Date.now() - started) / 1000)}s` +
       (failures.length ? `, ${failures.length} failed` : ''),
   );
 
@@ -209,6 +303,10 @@ export async function importFreshdeskKb(): Promise<void> {
     }
     throw new Error(`${failures.length} item(s) failed to import`);
   }
+}
+
+function count(counts: Map<Locale, number>, locale: Locale): void {
+  counts.set(locale, (counts.get(locale) ?? 0) + 1);
 }
 
 /**

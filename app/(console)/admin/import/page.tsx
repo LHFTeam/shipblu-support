@@ -24,19 +24,32 @@ export default async function ImportPage() {
       .orderBy(desc(jobs.createdAt))
       .limit(10),
 
-    // One round trip rather than four, and it returns a row even when every
+    // One round trip rather than seven, and it returns a row even when every
     // table is empty — which is exactly the state this page exists to explain.
+    //
+    // Broken down by language, not just totalled. A total is what hid a real
+    // failure here: the import found no English at all, and "3 categories, 12
+    // folders, 58 articles" read as a clean run rather than as half a knowledge
+    // base. A zero against a language is the thing worth seeing.
     db.execute<{
       categories: number;
       folders: number;
       articles: number;
       redirects: number;
+      categories_en: number;
+      articles_en: number;
+      categories_ar: number;
+      articles_ar: number;
     }>(sql`
       SELECT
         (SELECT count(*)::int FROM kb_categories) AS categories,
         (SELECT count(*)::int FROM kb_folders)    AS folders,
         (SELECT count(*)::int FROM kb_articles)   AS articles,
-        (SELECT count(*)::int FROM kb_redirects)  AS redirects
+        (SELECT count(*)::int FROM kb_redirects)  AS redirects,
+        (SELECT count(*)::int FROM kb_categories WHERE locale = 'en') AS categories_en,
+        (SELECT count(*)::int FROM kb_articles   WHERE locale = 'en') AS articles_en,
+        (SELECT count(*)::int FROM kb_categories WHERE locale = 'ar') AS categories_ar,
+        (SELECT count(*)::int FROM kb_articles   WHERE locale = 'ar') AS articles_ar
     `),
   ]);
 
