@@ -1,5 +1,6 @@
 import type { SlaEscalation, SlaTarget, SlaTargets } from '@/db/schema/config';
 import { addBusinessMinutes, type HoursConfig } from '@/lib/hours';
+import type { HoursSource } from '@/lib/hours/resolve';
 import { matches, type Facts } from '@/lib/rules/conditions';
 
 /**
@@ -19,8 +20,13 @@ export type LoadedPolicy = {
   escalations: { firstResponse?: SlaEscalation; resolution?: SlaEscalation };
   position: number;
   isDefault: boolean;
-  /** Null means round-the-clock: the clock never pauses for out-of-hours. */
-  hours: HoursConfig | null;
+  /**
+   * Which calendar the targets count against. The schedule itself is not held
+   * here: it depends on the ticket's group, so it is resolved per ticket by
+   * `lib/hours/resolve.ts` and passed in to the functions below.
+   */
+  hoursSource: HoursSource;
+  businessHoursId: string | null;
 };
 
 export type Priority = keyof SlaTargets;
@@ -69,13 +75,18 @@ export function targetFor(policy: LoadedPolicy, priority: Priority): SlaTarget {
  * response target is the one that applies. Setting both at creation would show
  * two competing countdowns on a brand new ticket.
  */
-export function dueDatesOnCreate(policy: LoadedPolicy, priority: Priority, from: Date): DueDates {
+export function dueDatesOnCreate(
+  policy: LoadedPolicy,
+  priority: Priority,
+  from: Date,
+  hours: HoursConfig | null,
+): DueDates {
   const target = targetFor(policy, priority);
 
   return {
-    firstResponseDueAt: dueAt(policy, target.firstResponseMins, from),
+    firstResponseDueAt: dueAt(hours, target.firstResponseMins, from),
     nextResponseDueAt: null,
-    resolutionDueAt: dueAt(policy, target.resolutionMins, from),
+    resolutionDueAt: dueAt(hours, target.resolutionMins, from),
   };
 }
 
@@ -90,25 +101,30 @@ export function nextResponseDueAt(
   policy: LoadedPolicy,
   priority: Priority,
   from: Date,
+  hours: HoursConfig | null,
 ): Date | null {
   const target = targetFor(policy, priority);
-  return dueAt(policy, target.nextResponseMins ?? target.firstResponseMins, from);
+  return dueAt(hours, target.nextResponseMins ?? target.firstResponseMins, from);
 }
 
 /**
- * Adds a target to an instant, in working time when the policy has business
- * hours and in wall-clock time when it does not.
+ * Adds a target to an instant, in working time when a schedule applies and in
+ * wall-clock time when none does.
+ *
+ * Takes the resolved schedule rather than the policy because which schedule
+ * applies is a fact about the *ticket* — its group may keep its own hours — and
+ * this is the one place that arithmetic happens.
  *
  * A null target means "no commitment on this dimension" and must stay null
  * rather than becoming "due immediately" — an absent target that reads as a
  * breach would put every ticket in the breached bucket the moment a policy is
  * half-configured.
  */
-export function dueAt(policy: LoadedPolicy, minutes: number | null, from: Date): Date | null {
+export function dueAt(hours: HoursConfig | null, minutes: number | null, from: Date): Date | null {
   if (minutes === null || minutes === undefined) return null;
   if (!Number.isFinite(minutes) || minutes < 0) return null;
 
-  if (!policy.hours) return new Date(from.getTime() + minutes * 60_000);
+  if (!hours) return new Date(from.getTime() + minutes * 60_000);
 
-  return addBusinessMinutes(policy.hours, from, minutes);
+  return addBusinessMinutes(hours, from, minutes);
 }

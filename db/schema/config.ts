@@ -15,6 +15,7 @@ import {
   automationTriggerEnum,
   cannedVisibilityEnum,
   channelEnum,
+  slaHoursSourceEnum,
   statusCategoryEnum,
   ticketFieldTypeEnum,
 } from './enums';
@@ -31,6 +32,15 @@ export type WeeklySchedule = {
   sun: TimeRange[];
 };
 
+/**
+ * One calendar: a timezone, the operating days and hours in it, and — via
+ * `holidays` — the days it is shut regardless.
+ *
+ * There is a global default (`isDefault`), and a group may point at a different
+ * one. Both SLA arithmetic and reporting resolve a ticket's calendar the same
+ * way, in `lib/hours/resolve.ts`, so a due date and the report measuring it
+ * never disagree about which days counted.
+ */
 export const businessHours = pgTable(
   'business_hours',
   {
@@ -47,6 +57,11 @@ export const businessHours = pgTable(
   (t) => [uniqueIndex('business_hours_name_idx').on(t.name)],
 );
 
+/**
+ * Days a calendar is shut. Attached to a schedule rather than global, which is
+ * what lets a group keep its own holiday list: a group pointing at its own
+ * schedule gets that schedule's holidays and none of the default one's.
+ */
 export const holidays = pgTable(
   'holidays',
   {
@@ -132,7 +147,18 @@ export const slaPolicies = pgTable(
     conditions: jsonb('conditions').$type<unknown>().notNull().default({}),
     targets: jsonb('targets').$type<SlaTargets>().notNull(),
 
-    /** Null means 24/7 — the clock never pauses for out-of-hours. */
+    /**
+     * Which calendar the targets are counted against.
+     *
+     * `group` — the default — is what makes a team's own operating days and
+     * holidays apply to its tickets: the group's schedule wins, and the global
+     * default schedule covers every group that has not set one. `schedule`
+     * pins the policy to `businessHoursId` regardless of group, and
+     * `round_the_clock` counts wall-clock time.
+     */
+    hoursSource: slaHoursSourceEnum('hours_source').notNull().default('group'),
+
+    /** The schedule used when `hoursSource` is `schedule`. */
     businessHoursId: uuid('business_hours_id').references(() => businessHours.id, {
       onDelete: 'set null',
     }),

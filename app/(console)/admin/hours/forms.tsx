@@ -78,7 +78,7 @@ function Fields({ schedule }: { schedule?: Schedule }) {
       <Toggle
         name="isDefault"
         label="Use this schedule by default"
-        hint="Reporting measures response times against the default when a ticket's policy has no schedule of its own."
+        hint="The company schedule: every group that has not been put on its own works these hours, and reporting measures against it."
         defaultChecked={schedule?.isDefault ?? false}
       />
     </>
@@ -97,7 +97,13 @@ export function NewSchedule() {
   );
 }
 
-export function HoursEditor({ schedule }: { schedule: Schedule }) {
+export function HoursEditor({
+  schedule,
+  groupNames,
+}: {
+  schedule: Schedule;
+  groupNames: string[];
+}) {
   const [editing, setEditing] = useState(false);
 
   if (editing) {
@@ -119,6 +125,13 @@ export function HoursEditor({ schedule }: { schedule: Schedule }) {
             {schedule.timezone}
           </span>
         </h2>
+        <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+          {groupNames.length
+            ? `Groups on this schedule: ${groupNames.join(', ')}`
+            : schedule.isDefault
+              ? 'Every group that has not been put on its own schedule.'
+              : 'No group is on this schedule yet, so it only applies where an SLA policy names it.'}
+        </p>
         <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5 text-xs">
           {DAYS.map((day) => {
             const range = schedule.schedule?.[day.key]?.[0];

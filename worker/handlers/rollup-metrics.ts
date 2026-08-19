@@ -1,16 +1,12 @@
 import { DateTime } from 'luxon';
-import { and, eq, gte, isNull, lt, sql } from 'drizzle-orm';
+import { and, eq, gte, isNull, lt } from 'drizzle-orm';
 import { db } from '@/db/client';
-import {
-  businessHours,
-  conversationEvents,
-  conversations,
-  csatSurveys,
-  metricsDaily,
-} from '@/db/schema';
+import { conversationEvents, conversations, csatSurveys, metricsDaily } from '@/db/schema';
 import { businessMinutesBetween, type HoursConfig } from '@/lib/hours';
+import { loadHoursCatalog } from '@/lib/hours/catalog';
+import { defaultHours, ticketHours, type HoursCatalog } from '@/lib/hours/resolve';
 import type { ClaimedJob } from '@/lib/queue';
-import { loadPolicies } from '@/lib/sla';
+import { loadPolicies, type LoadedPolicy } from '@/lib/sla';
 
 /**
  * Nightly rollup into `metrics_daily`. The reports page reads only from here,
@@ -28,6 +24,12 @@ import { loadPolicies } from '@/lib/sla';
  * A report where "yesterday" ends at 2am Cairo would put the last two hours of
  * every evening shift on the wrong date, which is exactly the sort of quiet
  * wrongness that makes a team stop trusting a dashboard.
+ *
+ * The day boundaries come from the default schedule's zone, and deliberately
+ * from that one zone even though groups may keep their own. `metrics_daily`
+ * has a single `day` per row, so bucketing a group's tickets by its own midnight
+ * would mean the totals no longer equalled the sum of the slices. Which hours
+ * *count* is per group; which day a ticket lands on is the company's.
  */
 const FALLBACK_ZONE = 'Africa/Cairo';
 
@@ -42,7 +44,13 @@ const RECOMPUTE_DAYS = 3;
 
 export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
   const requested = (job?.payload as { day?: string } | undefined)?.day;
-  const zone = await reportingZone();
+
+  // Schedules, holidays, group overrides and policies read once for the whole
+  // run rather than once per day: they are a dozen rows that every ticket in
+  // every day of the window is measured against.
+  const [catalog, policies] = await Promise.all([loadHoursCatalog(), loadPolicies()]);
+  const zone = defaultHours(catalog)?.timezone ?? FALLBACK_ZONE;
+  const hoursFor = hoursResolver(catalog, policies);
 
   const days = requested
     ? [requested]
@@ -54,22 +62,31 @@ export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
       );
 
   for (const day of days) {
-    const rows = await rollupDay(day, zone);
+    const rows = await rollupDay(day, zone, hoursFor);
     console.log(`[rollup_metrics] ${day}: ${rows} rows`);
   }
 }
 
-async function reportingZone(): Promise<string> {
-  const rows = await db
-    .select({ timezone: businessHours.timezone })
-    .from(businessHours)
-    .orderBy(sql`${businessHours.isDefault} desc`)
-    .limit(1);
-
-  return rows[0]?.timezone ?? FALLBACK_ZONE;
-}
-
 type Dimensions = { groupId: string | null; agentId: string | null; channel: string | null };
+
+/**
+ * The rows one ticket's numbers belong in: the totals, plus one row per
+ * dimension the ticket actually has.
+ *
+ * A ticket with no assignee counts in the totals but not in a "by agent" row,
+ * which would otherwise read as an agent called null. Exported because getting
+ * this wrong is invisible in the output — it inflates every figure rather than
+ * producing an obviously broken one — so it is worth a test of its own.
+ */
+export function slicesFor(dims: Dimensions): Dimensions[] {
+  const slices: Dimensions[] = [{ groupId: null, agentId: null, channel: null }];
+
+  if (dims.groupId) slices.push({ groupId: dims.groupId, agentId: null, channel: null });
+  if (dims.agentId) slices.push({ groupId: null, agentId: dims.agentId, channel: null });
+  if (dims.channel) slices.push({ groupId: null, agentId: null, channel: dims.channel });
+
+  return slices;
+}
 
 type Bucket = {
   ticketsCreated: number;
@@ -105,7 +122,10 @@ function empty(): Bucket {
   };
 }
 
-async function rollupDay(day: string, zone: string): Promise<number> {
+/** The schedule a ticket is measured against, given its policy and its group. */
+type HoursFor = (policyId: string | null, groupId: string | null) => HoursConfig | null;
+
+async function rollupDay(day: string, zone: string, hoursFor: HoursFor): Promise<number> {
   const start = DateTime.fromISO(day, { zone });
   if (!start.isValid) {
     console.warn(`[rollup_metrics] ignoring an unparseable day "${day}"`);
@@ -119,25 +139,8 @@ async function rollupDay(day: string, zone: string): Promise<number> {
 
   /** Adds one fact to the totals and to each single-dimension slice. */
   const add = (dims: Dimensions, apply: (bucket: Bucket) => void) => {
-    const slices: Dimensions[] = [
-      { groupId: null, agentId: null, channel: null },
-      { groupId: dims.groupId, agentId: null, channel: null },
-      { groupId: null, agentId: dims.agentId, channel: null },
-      { groupId: null, agentId: null, channel: dims.channel },
-    ];
-
-    for (const slice of slices) {
-      // A ticket with no group contributes to the totals but not to a
-      // "by group" row, which would otherwise read as a group called null.
-      if (slice.groupId === null && slice.agentId === null && slice.channel === null) {
-        apply(bucketFor(buckets, slice));
-        continue;
-      }
-      if (slice.groupId ?? slice.agentId ?? slice.channel) apply(bucketFor(buckets, slice));
-    }
+    for (const slice of slicesFor(dims)) apply(bucketFor(buckets, slice));
   };
-
-  const hoursFor = await hoursResolver();
 
   // --- Created --------------------------------------------------------------
   const created = await db
@@ -184,7 +187,11 @@ async function rollupDay(day: string, zone: string): Promise<number> {
     );
 
   for (const row of responded) {
-    const seconds = elapsedSeconds(hoursFor(row.slaPolicyId), row.createdAt, row.firstRespondedAt!);
+    const seconds = elapsedSeconds(
+      hoursFor(row.slaPolicyId, row.groupId),
+      row.createdAt,
+      row.firstRespondedAt!,
+    );
     const met = row.firstResponseDueAt
       ? row.firstRespondedAt!.getTime() <= row.firstResponseDueAt.getTime()
       : null;
@@ -219,7 +226,11 @@ async function rollupDay(day: string, zone: string): Promise<number> {
     );
 
   for (const row of resolved) {
-    const seconds = elapsedSeconds(hoursFor(row.slaPolicyId), row.createdAt, row.resolvedAt!);
+    const seconds = elapsedSeconds(
+      hoursFor(row.slaPolicyId, row.groupId),
+      row.createdAt,
+      row.resolvedAt!,
+    );
     const met = row.resolutionDueAt
       ? row.resolvedAt!.getTime() <= row.resolutionDueAt.getTime()
       : null;
@@ -324,31 +335,24 @@ function bucketFor(buckets: Map<string, Bucket>, dims: Dimensions): Bucket {
 }
 
 /**
- * Business hours per SLA policy, resolved once per run.
+ * The working hours a given ticket is measured against, resolved once per run.
  *
  * Response times are measured in working time for the same reason the SLA
  * clocks are: a ticket that arrived at 17:01 and was answered at 09:02 was
  * answered in a minute, and a report that calls it sixteen hours is measuring
  * the office being shut.
+ *
+ * Keyed on the group as well as the policy, and through the same resolver the
+ * SLA engine uses, so a team with its own operating days and holidays is
+ * reported on its own calendar — and reported the same way its due dates were
+ * computed. A ticket whose policy has since been deleted still gets measured
+ * against its group's hours rather than falling back to wall-clock time.
  */
-async function hoursResolver(): Promise<(policyId: string | null) => HoursConfig | null> {
-  const policies = await loadPolicies();
-  const byPolicy = new Map(policies.map((policy) => [policy.id, policy.hours]));
+function hoursResolver(catalog: HoursCatalog, policies: LoadedPolicy[]): HoursFor {
+  const byPolicy = new Map(policies.map((policy) => [policy.id, policy]));
 
-  const rows = await db
-    .select({ schedule: businessHours.schedule, timezone: businessHours.timezone })
-    .from(businessHours)
-    .orderBy(sql`${businessHours.isDefault} desc`)
-    .limit(1);
-
-  const fallback: HoursConfig | null = rows[0]
-    ? { schedule: rows[0].schedule, timezone: rows[0].timezone }
-    : null;
-
-  // A ticket with no policy still gets measured against the office's hours;
-  // otherwise the same overnight wait would count differently depending on
-  // whether anyone had configured an SLA for it.
-  return (policyId) => (policyId ? (byPolicy.get(policyId) ?? fallback) : fallback);
+  return (policyId, groupId) =>
+    ticketHours(catalog, groupId, (policyId ? byPolicy.get(policyId) : null) ?? null);
 }
 
 function elapsedSeconds(hours: HoursConfig | null, from: Date, to: Date): number {

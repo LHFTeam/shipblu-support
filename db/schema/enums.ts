@@ -62,6 +62,23 @@ export const automationTriggerEnum = pgEnum('automation_trigger', [
   'time_based',
 ]);
 
+/**
+ * Which calendar an SLA policy counts its targets against.
+ *
+ *  - `group`            the ticket's group's own schedule, falling back to the
+ *                       default one. This is the flexible setting: a team with
+ *                       its own operating days and holidays gets them without a
+ *                       policy per team.
+ *  - `schedule`         the one schedule named on the policy, whatever group the
+ *                       ticket is in — an explicit opt out of the group override.
+ *  - `round_the_clock`  no schedule at all: a 4-hour target means 4 real hours.
+ */
+export const slaHoursSourceEnum = pgEnum('sla_hours_source', [
+  'group',
+  'schedule',
+  'round_the_clock',
+]);
+
 export const cannedVisibilityEnum = pgEnum('canned_visibility', ['personal', 'group', 'global']);
 
 export const ticketFieldTypeEnum = pgEnum('ticket_field_type', [

@@ -14,7 +14,7 @@ import { scheduleSurvey } from '@/lib/csat';
 import { enqueue } from '@/lib/queue';
 import { matches } from '@/lib/rules/conditions';
 import { conversationFacts } from '@/lib/rules/facts';
-import { onAgentReply, onStatusChanged } from '@/lib/sla';
+import { onAgentReply, onGroupChanged, onStatusChanged } from '@/lib/sla';
 import { windowState } from '@/lib/whatsapp/window';
 import { parseActions, type Action } from './actions';
 
@@ -222,6 +222,9 @@ async function applyAction(action: Action, ticket: TicketRow, ruleName: string):
         .set({ groupId: action.groupId })
         .where(eq(conversations.id, conversationId));
       await record('group_changed', { to: action.groupId });
+      // The new group may work different hours, in which case the clocks move.
+      // A no-op on a brand new ticket, whose SLA has not been applied yet.
+      await onGroupChanged(conversationId);
       return;
 
     case 'add_tags': {

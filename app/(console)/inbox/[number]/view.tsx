@@ -369,6 +369,14 @@ function describeEvent(type: string, data: Record<string, unknown>): string {
       return 'unassigned the ticket';
     case 'reopened':
       return 'reopened the ticket';
+    case 'sla_paused':
+      return 'paused the SLA clock';
+    case 'sla_resumed':
+      return `resumed the SLA clock after ${String(data.pausedMinutes ?? 0)} minutes`;
+    case 'sla_recalculated':
+      return data.reason === 'group_hours'
+        ? "re-counted the due dates on the new group's business hours"
+        : 're-counted the due dates';
     default:
       return type.replace(/_/g, ' ');
   }

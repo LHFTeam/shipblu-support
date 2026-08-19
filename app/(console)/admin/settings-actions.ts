@@ -72,17 +72,36 @@ export async function saveGroup(_state: SettingsState, formData: FormData): Prom
   const name = text(formData, 'name');
   const description = text(formData, 'description') || null;
 
+  // Null means "work the default schedule" rather than "no hours at all", which
+  // is why an empty select clears the override instead of being rejected.
+  const businessHoursId = text(formData, 'businessHoursId') || null;
+
   if (!name) return { error: 'Give the group a name' };
 
+  if (businessHoursId) {
+    const schedule = await db
+      .select({ id: businessHours.id })
+      .from(businessHours)
+      .where(eq(businessHours.id, businessHoursId))
+      .limit(1);
+    if (!schedule.length) return { error: 'That schedule no longer exists' };
+  }
+
   if (id) {
-    await db.update(groups).set({ name, description }).where(eq(groups.id, id));
+    await db
+      .update(groups)
+      .set({ name, description, businessHoursId, updatedAt: new Date() })
+      .where(eq(groups.id, id));
   } else {
     const existing = await db.select({ id: groups.id }).from(groups).where(eq(groups.name, name));
     if (existing.length) return { error: 'A group with that name already exists' };
-    await db.insert(groups).values({ name, description });
+    await db.insert(groups).values({ name, description, businessHoursId });
   }
 
+  // A group's hours are the arithmetic behind every due date on its tickets, so
+  // the SLA and reports pages are showing stale wording until they re-read.
   refresh('/admin/groups');
+  refresh('/admin/hours');
   return ok();
 }
 
@@ -432,6 +451,23 @@ export async function deleteHoliday(
 
 const PRIORITIES = ['low', 'medium', 'high', 'urgent'] as const;
 
+const HOURS_SOURCES = ['group', 'schedule', 'round_the_clock'] as const;
+type HoursSourceValue = (typeof HOURS_SOURCES)[number];
+
+/**
+ * Which calendar the policy counts against.
+ *
+ * Falls back to `group` rather than erroring: that is the setting that respects
+ * both the company schedule and a team's own, so an unrecognised value lands on
+ * the safe answer instead of quietly making the policy round-the-clock.
+ */
+function hoursSourceOf(formData: FormData): HoursSourceValue {
+  const value = text(formData, 'hoursSource');
+  return (HOURS_SOURCES as readonly string[]).includes(value)
+    ? (value as HoursSourceValue)
+    : 'group';
+}
+
 export async function saveSlaPolicy(
   _state: SettingsState,
   formData: FormData,
@@ -441,12 +477,26 @@ export async function saveSlaPolicy(
   const id = text(formData, 'id');
   const name = text(formData, 'name');
   const description = text(formData, 'description') || null;
-  const businessHoursId = text(formData, 'businessHoursId') || null;
   const position = int(formData, 'position');
   const isDefault = formData.get('isDefault') === 'on';
   const isActive = formData.get('isActive') !== 'off';
 
   if (!name) return { error: 'Give the policy a name' };
+
+  const hoursSource = hoursSourceOf(formData);
+  const businessHoursId = hoursSource === 'schedule' ? text(formData, 'businessHoursId') : '';
+  if (hoursSource === 'schedule') {
+    if (!businessHoursId) return { error: 'Pick the schedule this policy counts against' };
+
+    // Checked here so a deleted schedule comes back as a sentence rather than a
+    // foreign key violation thrown out of a server action.
+    const schedule = await db
+      .select({ id: businessHours.id })
+      .from(businessHours)
+      .where(eq(businessHours.id, businessHoursId))
+      .limit(1);
+    if (!schedule.length) return { error: 'That schedule no longer exists' };
+  }
 
   // Validated with the engine's own parser, so a policy that saves is a policy
   // that will actually match something.
@@ -488,7 +538,11 @@ export async function saveSlaPolicy(
     conditions,
     targets,
     escalations,
-    businessHoursId,
+    hoursSource,
+    // Cleared unless a schedule is actually named, so a policy switched to the
+    // group's hours does not keep a stale schedule that a later switch back
+    // would silently resurrect.
+    businessHoursId: businessHoursId || null,
     position,
     isDefault,
     isActive,

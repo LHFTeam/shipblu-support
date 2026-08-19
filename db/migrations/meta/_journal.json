@@ -12,8 +12,15 @@
     {
       "idx": 1,
       "version": "7",
-      "when": 1787122196670,
-      "tag": "0001_customer_portal_accounts",
+      "when": 1787122494722,
+      "tag": "0001_faithful_zaladane",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787142703825,
+      "tag": "0002_customer_portal_accounts",
       "breakpoints": true
     }
   ]

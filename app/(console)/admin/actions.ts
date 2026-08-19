@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { agents, channels, groups, invites, jobs } from '@/db/schema';
+import { agents, channels, invites, jobs } from '@/db/schema';
 import { requirePermission } from '@/lib/auth/guard';
 import { normaliseEmail } from '@/lib/auth/normalise';
 import { generateToken, hashToken } from '@/lib/auth/tokens';
@@ -122,18 +122,6 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
       config,
     });
   }
-
-  revalidatePath('/admin/channels');
-  return { error: null };
-}
-
-export async function createGroup(_state: AdminState, formData: FormData): Promise<AdminState> {
-  await requirePermission('admin.groups');
-
-  const name = String(formData.get('name') ?? '').trim();
-  if (!name) return { error: 'Give the group a name' };
-
-  await db.insert(groups).values({ name }).onConflictDoNothing({ target: groups.name });
 
   revalidatePath('/admin/channels');
   return { error: null };
