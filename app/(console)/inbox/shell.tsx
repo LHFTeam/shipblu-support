@@ -1,4 +1,5 @@
 import { requireAgent } from '@/lib/auth/guard';
+import { can } from '@/lib/auth/permissions';
 import { listInbox, parseFilters } from '@/lib/tickets/queries';
 import { InboxList } from './list';
 
@@ -37,7 +38,13 @@ export async function InboxShell({
           viewingTicket ? 'hidden md:flex' : 'flex'
         }`}
       >
-        <InboxList rows={rows} hasMore={hasMore} filters={filters} activeNumber={activeNumber} />
+        <InboxList
+          rows={rows}
+          hasMore={hasMore}
+          filters={filters}
+          activeNumber={activeNumber}
+          canSeeBot={can(agent, 'ticket.view.bot')}
+        />
       </aside>
 
       <section

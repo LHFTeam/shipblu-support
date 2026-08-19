@@ -3,11 +3,12 @@
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { ChannelBadge } from '@/components/channel';
+import { ChannelBadge, channelInfo } from '@/components/channel';
 import { SearchIcon } from '@/components/icons';
 import { Badge, Select } from '@/components/ui';
 import { formatRelative } from '@/lib/format';
 import type { InboxFilters, InboxRow } from '@/lib/tickets/queries';
+import { FILTERABLE_CHANNELS, isRestrictedChannel } from '@/lib/tickets/channel-policy';
 import { metaWindowState } from '@/lib/meta/window';
 import { formatRemaining, windowState } from '@/lib/whatsapp/window';
 
@@ -24,11 +25,13 @@ export function InboxList({
   hasMore,
   filters,
   activeNumber,
+  canSeeBot = false,
 }: {
   rows: InboxRow[];
   hasMore: boolean;
   filters: InboxFilters;
   activeNumber?: number;
+  canSeeBot?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -68,11 +71,18 @@ export function InboxList({
             aria-label="Channel"
           >
             <option value="all">All channels</option>
-            <option value="email">Email</option>
-            <option value="whatsapp">WhatsApp</option>
-            <option value="webchat">Web chat</option>
-            <option value="facebook">Facebook</option>
-            <option value="instagram">Instagram</option>
+            {/*
+              Built from the list the parser accepts, and labelled from the same
+              place as the badges, so an option cannot exist that the filter
+              ignores or that reads differently here than on the row.
+            */}
+            {FILTERABLE_CHANNELS.filter(
+              (channel) => canSeeBot || !isRestrictedChannel(channel),
+            ).map((channel) => (
+              <option key={channel} value={channel}>
+                {channelInfo(channel).label}
+              </option>
+            ))}
           </Select>
         </div>
       </div>

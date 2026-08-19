@@ -11,6 +11,8 @@ export const PERMISSIONS = [
   'ticket.view.all',
   'ticket.view.group',
   'ticket.view.assigned',
+  /** Conversations on a channel owned by another service — the customer bot. */
+  'ticket.view.bot',
   'ticket.reply',
   'ticket.note',
   'ticket.assign',
@@ -59,6 +61,11 @@ const SUPERVISOR: Permission[] = [
 
 const ADMIN: Permission[] = [
   ...SUPERVISOR,
+  // Deliberately not on SUPERVISOR. Bot transcripts are conversations nobody on
+  // the team took part in, kept for oversight rather than for working, so they
+  // are off the shop floor by default. It is a plain permission, so a single
+  // supervisor can be given it without being promoted.
+  'ticket.view.bot',
   'contact.delete',
   'admin.agents',
   'admin.groups',

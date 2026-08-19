@@ -36,6 +36,22 @@ const CHANNELS: Record<string, { label: string; className: string; mark: ReactNo
       </svg>
     ),
   },
+  whatsapp_bot: {
+    // Its own label and colour, not a variant of the WhatsApp badge. An agent
+    // scanning a list has to be able to tell at a glance that a row is a
+    // transcript they cannot answer from one that is waiting on them, and a
+    // green badge with different wording is not that glance.
+    label: 'Customer bot',
+    className: 'bg-violet-500/15 text-violet-700 dark:text-violet-300',
+    mark: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="size-3">
+        <rect x="4" y="8" width="16" height="11" rx="3" />
+        <path d="M12 8V4.5" />
+        <circle cx="9" cy="13.5" r="1.1" fill="currentColor" stroke="none" />
+        <circle cx="15" cy="13.5" r="1.1" fill="currentColor" stroke="none" />
+      </svg>
+    ),
+  },
   webchat: {
     label: 'Web chat',
     className: 'bg-brand-500/15 text-brand-700 dark:text-brand-300',

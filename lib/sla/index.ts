@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, notInArray } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   conversationEvents,
@@ -11,6 +11,7 @@ import type { HoursConfig } from '@/lib/hours';
 import { loadHoursCatalog } from '@/lib/hours/catalog';
 import { ticketHours, type HoursCatalog } from '@/lib/hours/resolve';
 import { conversationFacts } from '@/lib/rules/facts';
+import { readOnlyChannels } from '@/lib/tickets/channel-policy';
 import {
   dueAt,
   dueDatesOnCreate,
@@ -476,6 +477,10 @@ export function liveTicketsFilter() {
     isNull(conversations.deletedAt),
     eq(conversations.isSpam, false),
     eq(ticketStatuses.stopsSlaClock, false),
+    // A read-only channel never gets a due date in the first place, so this is
+    // belt to that brace — and it is the brace that would be easy to lose. A
+    // ticket nobody is allowed to answer must not be able to hold a clock.
+    notInArray(conversations.channel, readOnlyChannels()),
     inArray(ticketStatuses.category, ['open', 'pending']),
   );
 }

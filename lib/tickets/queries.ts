@@ -1,4 +1,16 @@
-import { and, asc, desc, eq, ilike, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNull,
+  notInArray,
+  or,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   agents,
@@ -13,6 +25,7 @@ import {
 } from '@/db/schema';
 import type { SessionAgent } from '@/lib/auth/session';
 import { can } from '@/lib/auth/permissions';
+import { FILTERABLE_CHANNELS, hiddenChannels, type FilterableChannel } from './channel-policy';
 
 /**
  * Read models for the console.
@@ -25,7 +38,7 @@ import { can } from '@/lib/auth/permissions';
 export type InboxFilters = {
   view: 'all' | 'mine' | 'unassigned';
   statusCategory: 'open' | 'pending' | 'resolved' | 'closed' | 'all' | 'unresolved';
-  channel: 'all' | 'email' | 'whatsapp' | 'webchat';
+  channel: 'all' | 'email' | 'whatsapp' | 'webchat' | 'facebook' | 'instagram' | 'whatsapp_bot';
   q: string;
   page: number;
 };
@@ -52,8 +65,11 @@ export function parseFilters(params: Record<string, string | string[] | undefine
       statusCategory === 'all'
         ? statusCategory
         : 'unresolved',
-    channel:
-      channel === 'email' || channel === 'whatsapp' || channel === 'webchat' ? channel : 'all',
+    // Every value the dropdown offers has to be listed, or selecting it falls
+    // through to 'all' and the filter silently does nothing.
+    channel: FILTERABLE_CHANNELS.includes(channel as FilterableChannel)
+      ? (channel as FilterableChannel)
+      : 'all',
     q: (one('q') ?? '').trim(),
     page: Math.max(1, Number(one('page') ?? '1') || 1),
   };
@@ -88,6 +104,12 @@ export async function listInbox(
   if (!can(agent, 'ticket.view.all')) {
     where.push(eq(conversations.assigneeAgentId, agent.id));
   }
+
+  // A restricted channel is excluded here rather than left to the filter, so it
+  // is absent from the default view, from every other filter, and from search —
+  // "view.all" is about the team's tickets, and a bot transcript is not one.
+  const hidden = hiddenChannels(agent);
+  if (hidden.length) where.push(notInArray(conversations.channel, hidden));
 
   if (filters.view === 'mine') where.push(eq(conversations.assigneeAgentId, agent.id));
   if (filters.view === 'unassigned') where.push(isNull(conversations.assigneeAgentId));
@@ -240,6 +262,11 @@ export async function getConversation(
   if (!can(agent, 'ticket.view.all')) {
     where.push(eq(conversations.assigneeAgentId, agent.id));
   }
+
+  // In the query, not after it: a ticket the agent may not see must not be
+  // loaded and then hidden, or reachable by typing its number into the URL.
+  const hidden = hiddenChannels(agent);
+  if (hidden.length) where.push(notInArray(conversations.channel, hidden));
 
   const rows = await db
     .select({
@@ -411,6 +438,9 @@ export async function inboxCounts(agent: SessionAgent) {
   if (!can(agent, 'ticket.view.all')) {
     base.push(eq(conversations.assigneeAgentId, agent.id));
   }
+
+  const hidden = hiddenChannels(agent);
+  if (hidden.length) base.push(notInArray(conversations.channel, hidden));
 
   const rows = await db
     .select({

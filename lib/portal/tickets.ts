@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull, notInArray, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   agents,
@@ -10,6 +10,7 @@ import {
   ticketStatuses,
 } from '@/db/schema';
 import { preview } from '@/lib/html/sanitize';
+import { readOnlyChannels } from '@/lib/tickets/channel-policy';
 import { afterInboundMessage } from '@/lib/tickets/lifecycle';
 
 /**
@@ -35,6 +36,16 @@ export type PortalTicket = {
   createdAt: Date;
 };
 
+/**
+ * Read-only channels are excluded from all three of the queries below.
+ *
+ * The portal scopes by contact, and a customer bot transcript belongs to the
+ * customer's own contact — so without this a customer who registers on the
+ * portal sees their WhatsApp bot conversation in "my tickets" and can reply into
+ * it. That is worse than it sounds: the reply lands in a mirror of somebody
+ * else's conversation, and no agent is allowed to answer it, so the customer has
+ * written into a thread nobody will ever read.
+ */
 export async function listTickets(contactId: string, limit = 100): Promise<PortalTicket[]> {
   return db
     .select({
@@ -61,6 +72,7 @@ export async function listTickets(contactId: string, limit = 100): Promise<Porta
         isNull(conversations.deletedAt),
         isNull(conversations.mergedIntoId),
         eq(conversations.isSpam, false),
+        notInArray(conversations.channel, readOnlyChannels()),
       ),
     )
     .orderBy(desc(conversations.lastMessageAt))
@@ -107,6 +119,7 @@ export async function getTicket(
         eq(conversations.requesterContactId, contactId),
         isNull(conversations.deletedAt),
         eq(conversations.isSpam, false),
+        notInArray(conversations.channel, readOnlyChannels()),
       ),
     )
     .limit(1);
@@ -234,6 +247,7 @@ export async function appendReply(
           eq(conversations.requesterContactId, contactId),
           isNull(conversations.deletedAt),
           eq(conversations.isSpam, false),
+          notInArray(conversations.channel, readOnlyChannels()),
         ),
       )
       .limit(1);

@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { contacts, conversations, messages, ticketStatuses } from '@/db/schema';
 import { createSurvey, recentlySurveyed } from '@/lib/csat';
+import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
 import { enqueue, type ClaimedJob } from '@/lib/queue';
 import { windowState } from '@/lib/whatsapp/window';
 
@@ -67,6 +68,15 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
   }
 
   if (ticket.deletedAt || ticket.isSpam) return;
+
+  // A read-only channel is a record of a conversation the team never had. Asking
+  // the customer to rate our support on the strength of it would be asking about
+  // someone else's work — and the survey would go out from a number they have
+  // not been talking to.
+  if (isReadOnlyChannel(ticket.channel)) {
+    console.log(`[send_csat] #${ticket.number} is on a read-only channel — no survey`);
+    return;
+  }
 
   if (await recentlySurveyed(conversationId)) {
     console.log(`[send_csat] #${ticket.number} was surveyed recently — skipping`);

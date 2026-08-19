@@ -258,5 +258,12 @@ export const channels = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('channels_type_idx').on(t.type, t.isActive)],
+  (t) => [
+    index('channels_type_idx').on(t.type, t.isActive),
+    // Unique, like the other configuration tables. Two channels sharing a name
+    // is indistinguishable in every list that shows them, and it is the natural
+    // conflict target that lets the seed be re-run without making a second copy
+    // of the bot channel.
+    uniqueIndex('channels_name_idx').on(t.name),
+  ],
 );

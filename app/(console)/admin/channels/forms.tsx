@@ -7,7 +7,7 @@ import { saveChannel, type AdminState } from '../actions';
 
 const INITIAL: AdminState = { error: null };
 
-type ChannelType = 'email' | 'whatsapp' | 'webchat' | 'facebook' | 'instagram';
+type ChannelType = 'email' | 'whatsapp' | 'webchat' | 'facebook' | 'instagram' | 'whatsapp_bot';
 
 export function ChannelForm({ groups }: { groups: { id: string; name: string }[] }) {
   const [state, action] = useActionState(saveChannel, INITIAL);
@@ -26,6 +26,7 @@ export function ChannelForm({ groups }: { groups: { id: string; name: string }[]
             <option value="webchat">Web chat</option>
             <option value="facebook">Facebook</option>
             <option value="instagram">Instagram</option>
+            <option value="whatsapp_bot">WhatsApp — customer bot</option>
           </Select>
         </Field>
 
@@ -38,7 +39,7 @@ export function ChannelForm({ groups }: { groups: { id: string; name: string }[]
             <p className="pt-6 text-xs text-[var(--muted-foreground)]">
               The widget needs no address — only a default group.
             </p>
-          ) : type === 'whatsapp' ? (
+          ) : type === 'whatsapp' || type === 'whatsapp_bot' ? (
             <Field label="Phone number ID">
               <Input name="phoneNumberId" placeholder="1234567890" />
             </Field>
