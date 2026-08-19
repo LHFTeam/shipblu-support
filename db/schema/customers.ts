@@ -9,7 +9,7 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
-import { channelEnum, sourceSystemEnum } from './enums';
+import { channelEnum, contactTokenPurposeEnum, sourceSystemEnum } from './enums';
 
 export const companies = pgTable(
   'companies',
@@ -98,6 +98,20 @@ export const contactIdentities = pgTable(
     /** True once the customer has proven control (clicked a verification link). */
     isVerified: boolean('is_verified').notNull().default(false),
 
+    /**
+     * argon2id, for the customer portal. Null on nearly every row: a person who
+     * has only ever emailed support has an identity here and no sign-in, and
+     * only ever needs one if they want to read their tickets on the web.
+     *
+     * The credential hangs off the *identity* rather than the contact because
+     * that is what it proves — control of one address. `is_verified` above is
+     * the other half: a password on an unverified identity cannot sign in, so
+     * registering with a stranger's address gets an attacker nothing.
+     */
+    passwordHash: text('password_hash'),
+    passwordSetAt: timestamp('password_set_at', { withTimezone: true }),
+    lastSignInAt: timestamp('last_sign_in_at', { withTimezone: true }),
+
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -105,6 +119,55 @@ export const contactIdentities = pgTable(
     // claim the same WhatsApp number or email address.
     uniqueIndex('contact_identities_channel_identifier_idx').on(t.channel, t.identifier),
     index('contact_identities_contact_idx').on(t.contactId),
+  ],
+);
+
+/**
+ * Customer portal sessions.
+ *
+ * A separate table and a separate cookie from `sessions`, which is the agent
+ * console's. Two populations with different lifetimes, different revocation
+ * rules and very different blast radius should not share a row space where one
+ * missed `where` clause turns a customer's cookie into an agent's — and keeping
+ * them apart means a person who is both (a colleague who also emails support)
+ * can hold both at once without either signing the other out.
+ */
+export const contactSessions = pgTable(
+  'contact_sessions',
+  {
+    /** SHA-256 of the cookie value. The raw token is never stored. */
+    tokenHash: text('token_hash').primaryKey(),
+    identityId: uuid('identity_id')
+      .notNull()
+      .references(() => contactIdentities.id, { onDelete: 'cascade' }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }).notNull().defaultNow(),
+    userAgent: text('user_agent'),
+    ip: text('ip'),
+  },
+  (t) => [
+    index('contact_sessions_identity_idx').on(t.identityId),
+    index('contact_sessions_expires_idx').on(t.expiresAt),
+  ],
+);
+
+/** Single-use email-verification and password-reset links for the portal. */
+export const contactTokens = pgTable(
+  'contact_tokens',
+  {
+    tokenHash: text('token_hash').primaryKey(),
+    identityId: uuid('identity_id')
+      .notNull()
+      .references(() => contactIdentities.id, { onDelete: 'cascade' }),
+    purpose: contactTokenPurposeEnum('purpose').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    usedAt: timestamp('used_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('contact_tokens_identity_idx').on(t.identityId, t.purpose),
+    index('contact_tokens_expires_idx').on(t.expiresAt),
   ],
 );
 
@@ -117,6 +180,14 @@ export const contactsRelations = relations(contacts, ({ one, many }) => ({
   identities: many(contactIdentities),
 }));
 
-export const contactIdentitiesRelations = relations(contactIdentities, ({ one }) => ({
+export const contactIdentitiesRelations = relations(contactIdentities, ({ one, many }) => ({
   contact: one(contacts, { fields: [contactIdentities.contactId], references: [contacts.id] }),
+  sessions: many(contactSessions),
+}));
+
+export const contactSessionsRelations = relations(contactSessions, ({ one }) => ({
+  identity: one(contactIdentities, {
+    fields: [contactSessions.identityId],
+    references: [contactIdentities.id],
+  }),
 }));

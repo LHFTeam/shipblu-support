@@ -8,6 +8,13 @@
       "when": 1786969332531,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1787122196670,
+      "tag": "0001_customer_portal_accounts",
+      "breakpoints": true
     }
   ]
 }

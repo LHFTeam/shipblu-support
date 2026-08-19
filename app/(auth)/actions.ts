@@ -5,12 +5,17 @@ import { redirect } from 'next/navigation';
 import { and, eq, gt, isNull } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agents, groupMembers, invites } from '@/db/schema';
+import { createCustomerSession } from '@/lib/auth/customer-session';
 import { needsBootstrap } from '@/lib/auth/guard';
+import { authenticate } from '@/lib/auth/identity';
+import { safePath } from '@/lib/auth/next-path';
 import { normaliseEmail } from '@/lib/auth/normalise';
-import { hashPassword, validatePasswordStrength, verifyPassword } from '@/lib/auth/password';
+import { hashPassword, validatePasswordStrength } from '@/lib/auth/password';
 import { createSession } from '@/lib/auth/session';
-import { allowLoginAttempt, clearLoginAttempts } from '@/lib/auth/throttle';
+import { allowEmailDispatch, allowLoginAttempt, clearLoginAttempts } from '@/lib/auth/throttle';
 import { hashToken } from '@/lib/auth/tokens';
+import { DEFAULT_LOCALE } from '@/lib/kb/locale';
+import { recordSignIn, requestPasswordReset } from '@/lib/portal/accounts';
 
 export type AuthFormState = { error: string | null };
 
@@ -25,17 +30,10 @@ async function requestMeta() {
   };
 }
 
-/** Redirect target, restricted to same-site paths so `next` cannot be an open redirect. */
-function safeNext(next: FormDataEntryValue | null): string {
-  const value = typeof next === 'string' ? next : '';
-  if (!value.startsWith('/') || value.startsWith('//')) return '/inbox';
-  return value;
-}
-
 export async function signIn(_state: AuthFormState, formData: FormData): Promise<AuthFormState> {
   const email = normaliseEmail(String(formData.get('email') ?? ''));
   const password = String(formData.get('password') ?? '');
-  const next = safeNext(formData.get('next'));
+  const next = safePath(formData.get('next'), '/inbox');
 
   if (!email || !password) return { error: 'Enter your email and password' };
 
@@ -45,36 +43,33 @@ export async function signIn(_state: AuthFormState, formData: FormData): Promise
     return { error: 'Too many attempts. Try again in a few minutes.' };
   }
 
-  const rows = await db
-    .select({
-      id: agents.id,
-      passwordHash: agents.passwordHash,
-      isActive: agents.isActive,
-    })
-    .from(agents)
-    .where(eq(agents.email, email))
-    .limit(1);
+  // The same check the help centre's Sign in runs. One form for both
+  // populations means a customer who followed a link into the console — or who
+  // simply knows this URL — is signed in and sent to their tickets, rather than
+  // being told their own password is wrong.
+  const principal = await authenticate(email, password);
 
-  const agent = rows[0];
-
-  // One message for every failure mode. Distinguishing "no such agent" from
+  // One message for every failure mode. Distinguishing "no such account" from
   // "wrong password" tells an attacker which addresses are real.
-  const invalid = { error: 'Email or password is incorrect' };
+  if (principal.kind === 'invalid') return { error: 'Email or password is incorrect' };
 
-  if (!agent?.passwordHash || !agent.isActive) {
-    // Spend the same ~50ms an argon2 verify costs, so an absent or deactivated
-    // account is not identifiable by how quickly the request comes back.
-    // Hashing rather than verifying a dummy digest, because verify() rejects a
-    // malformed hash immediately and would give the timing away.
-    await hashPassword(password);
-    return invalid;
+  if (principal.kind === 'unverified') {
+    if (allowEmailDispatch(email, ip)) await requestPasswordReset(email, DEFAULT_LOCALE);
+    return { error: 'Confirm your email address first — check your inbox for the link we sent.' };
   }
 
-  if (!(await verifyPassword(agent.passwordHash, password))) return invalid;
-
   clearLoginAttempts(email, ip);
-  await createSession(agent.id, { ip, userAgent });
-  await db.update(agents).set({ lastSeenAt: new Date() }).where(eq(agents.id, agent.id));
+
+  if (principal.kind === 'customer') {
+    await createCustomerSession(principal.identityId, { ip, userAgent });
+    await recordSignIn(principal.identityId);
+    // `next` here is a console path — that is the only kind this page is
+    // reached with — and a customer cannot use it.
+    redirect(`/${DEFAULT_LOCALE}/portal`);
+  }
+
+  await createSession(principal.agentId, { ip, userAgent });
+  await db.update(agents).set({ lastSeenAt: new Date() }).where(eq(agents.id, principal.agentId));
 
   redirect(next);
 }
