@@ -1,12 +1,12 @@
 # ShipBlu Support
 
-A self-hosted replacement for Freshdesk + Freshchat: email ticketing, WhatsApp, and
-(in later phases) Facebook/Instagram, a web chat widget, and a bilingual knowledge base.
+A self-hosted replacement for Freshdesk + Freshchat: email ticketing, WhatsApp,
+Facebook and Instagram, a web chat widget, and a bilingual knowledge base.
 
-**Status: phases 0–3 complete.** Foundation and job queue; email ticketing; WhatsApp;
-the agent console; the bilingual knowledge base, Freshdesk import and chat widget; and
-SLA policies, automation rules, CSAT and reporting. Facebook and Instagram are the
-remaining channels.
+**Status: phases 0–4 complete.** Foundation and job queue; email ticketing; WhatsApp;
+the agent console; the bilingual knowledge base, Freshdesk import and chat widget; SLA
+policies, automation rules, CSAT and reporting; and Facebook and Instagram — direct
+messages and public comments — with admin screens for every piece of configuration.
 
 ## Architecture
 
@@ -15,9 +15,10 @@ Supabase Postgres project in **eu-central-1**. Colocation is deliberate: a conso
 issues 10–30 queries, so app↔database round trips dominate page latency.
 
 ```
-Meta Cloud API ──webhook──┐                    ┌──▶ Supabase Postgres
-Email provider ──webhook──┼──▶ Next.js web ────┤
-Agent browsers ──SSE──────┘                    └──▶ Supabase Storage
+WhatsApp Cloud ──webhook──┐                    ┌──▶ Supabase Postgres
+Messenger / IG ──webhook──┼──▶ Next.js web ────┤
+Email provider ──webhook──┤                    └──▶ Supabase Storage
+Agent browsers ──SSE──────┘
                                     │
                              jobs (Postgres queue)
                                     ▼
@@ -54,9 +55,17 @@ Design decisions worth knowing before changing things:
 - **Reporting reads only `metrics_daily`.** The nightly rollup stores four slices per day
   — totals, by group, by agent, by channel — so the reports page never aggregates over
   the full message history, and today's figures appear tomorrow.
+- **Social messages and comments thread differently.** A Facebook or Instagram DM
+  threads on the customer, like WhatsApp — one live ticket per person per platform. A
+  comment threads on the root of its reply chain, so a customer commenting on two posts
+  gets two tickets, each needing its own public answer. Meta echoes our own outbound
+  messages back to us, and dropping those is what stops an agent replying to themselves.
+- **Configuration is validated by the engines that consume it.** The admin screens parse
+  conditions and actions with `lib/rules` and `lib/automations` before storing them, so a
+  rule that saves is a rule that will run rather than one the sweep silently ignores.
 - **One `conversations` table** with a `channel` discriminator backs both the
   Freshdesk-style ticket list and the Freshchat-style inbox. `contact_identities` maps
-  one customer across email, WhatsApp and later social IDs.
+  one customer across email, WhatsApp and the social platforms.
 
 ## Local development
 
