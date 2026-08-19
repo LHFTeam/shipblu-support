@@ -10,8 +10,15 @@ import { useNow } from '@/components/use-now';
 import { formatBytes, formatDateTime, formatRelative } from '@/lib/format';
 import type { ConversationDetail } from '@/lib/tickets/queries';
 import { describeWindow, metaWindowState } from '@/lib/meta/window';
+import { describeRequesterRole } from '@/lib/shipments/roles';
 import { formatRemaining, windowState } from '@/lib/whatsapp/window';
-import { updateTicket } from '../../actions';
+import {
+  linkShipment,
+  linkShippingAccount,
+  unlinkShipment,
+  unlinkShippingAccount,
+  updateTicket,
+} from '../../actions';
 import { readOnlyReason } from '@/lib/tickets/channel-policy';
 import { Composer } from './composer';
 
@@ -406,6 +413,9 @@ function Sidebar({
         <TagField conversationId={conversation.id} tags={conversation.tags} />
       </Field>
 
+      <ShipmentsField conversation={conversation} />
+      <ShippingAccountsField conversation={conversation} />
+
       <div className="mt-5 border-t border-[var(--border)] pt-3">
         <h2 className="mb-2 text-xs font-medium opacity-70">Activity</h2>
         <ol className="flex flex-col gap-1.5 text-xs opacity-60">
@@ -554,5 +564,230 @@ function TagField({ conversationId, tags }: { conversationId: string; tags: stri
       placeholder="comma, separated"
       className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-sm outline-none focus:border-brand-500"
     />
+  );
+}
+
+/**
+ * The parcels a ticket is about.
+ *
+ * An unsynced shipment says so rather than showing a row of blanks: it was
+ * created from a number somebody wrote down and nothing has confirmed it exists,
+ * which is a different thing from a shipment with no shipper.
+ *
+ * The add control is a plain input saved on Enter, matching `TagField` above.
+ * This codebase has no modals, and a dialog that scrolls inside a scrolling page
+ * would be the first one.
+ */
+function ShipmentsField({ conversation }: { conversation: ConversationDetail }) {
+  return (
+    <Field label="Shipments">
+      <ul className="mb-2 flex flex-col gap-2">
+        {conversation.shipments.map((shipment) => (
+          <li key={shipment.shipmentId} className="text-xs">
+            <div className="flex items-start justify-between gap-2">
+              <Link
+                href={`/customers/shipments/${encodeURIComponent(shipment.trackingNumber)}`}
+                className="font-medium break-all hover:underline"
+              >
+                {shipment.trackingNumber}
+              </Link>
+              <UnlinkButton
+                action={unlinkShipment}
+                fields={{
+                  conversationId: conversation.id,
+                  shipmentId: shipment.shipmentId,
+                  trackingNumber: shipment.trackingNumber,
+                }}
+                label={`Unlink ${shipment.trackingNumber}`}
+              />
+            </div>
+
+            <p className="mt-0.5 opacity-60">
+              {shipment.syncState === 'synced'
+                ? (shipment.statusLabel ?? 'No status yet')
+                : shipment.syncState === 'not_found'
+                  ? 'Not a shipment on the platform'
+                  : 'Not synced yet'}
+            </p>
+            <p className="opacity-60">{describeRequesterRole(shipment.requesterRole)}</p>
+
+            <div className="mt-1 flex flex-wrap items-center gap-1">
+              {shipment.sbid ? (
+                <Link href={`/customers/accounts/${encodeURIComponent(shipment.sbid)}`}>
+                  <Badge>SBID {shipment.sbid}</Badge>
+                </Link>
+              ) : null}
+              {shipment.linkSource === 'detected' ? <Badge>auto</Badge> : null}
+            </div>
+          </li>
+        ))}
+        {conversation.shipments.length === 0 ? (
+          <li className="text-xs opacity-50">None linked.</li>
+        ) : null}
+      </ul>
+
+      <LinkInput
+        action={linkShipment}
+        conversationId={conversation.id}
+        name="trackingNumber"
+        placeholder="Add a tracking number"
+      />
+    </Field>
+  );
+}
+
+/**
+ * SBIDs this ticket names.
+ *
+ * A mention, not a membership. Somebody quoting an account number in a message
+ * says the number came up here; saying they belong to that account is a claim
+ * about their identity and is made on the customer's own page instead.
+ */
+function ShippingAccountsField({ conversation }: { conversation: ConversationDetail }) {
+  return (
+    <Field label="Shipping accounts">
+      <ul className="mb-2 flex flex-col gap-1.5">
+        {conversation.shippingAccounts.map((account) => (
+          <li key={account.shippingAccountId} className="flex items-center justify-between gap-2">
+            <Link
+              href={`/customers/accounts/${encodeURIComponent(account.sbid)}`}
+              className="text-xs font-medium hover:underline"
+            >
+              {account.name ?? `SBID ${account.sbid}`}
+            </Link>
+            <div className="flex items-center gap-1">
+              {account.linkSource === 'detected' ? <Badge>auto</Badge> : null}
+              <UnlinkButton
+                action={unlinkShippingAccount}
+                fields={{
+                  conversationId: conversation.id,
+                  shippingAccountId: account.shippingAccountId,
+                  sbid: account.sbid,
+                }}
+                label={`Unlink ${account.sbid}`}
+              />
+            </div>
+          </li>
+        ))}
+        {conversation.shippingAccounts.length === 0 ? (
+          <li className="text-xs opacity-50">None linked.</li>
+        ) : null}
+      </ul>
+
+      <LinkInput
+        action={linkShippingAccount}
+        conversationId={conversation.id}
+        name="sbid"
+        placeholder="Add an SBID"
+      />
+    </Field>
+  );
+}
+
+type LinkAction = (
+  state: { error: string | null },
+  formData: FormData,
+) => Promise<{ error: string | null }>;
+
+function LinkInput({
+  action,
+  conversationId,
+  name,
+  placeholder,
+}: {
+  action: LinkAction;
+  conversationId: string;
+  name: string;
+  placeholder: string;
+}) {
+  const router = useRouter();
+  const [value, setValue] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save() {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+
+    setSaving(true);
+    const formData = new FormData();
+    formData.set('conversationId', conversationId);
+    formData.set(name, trimmed);
+
+    const result = await action({ error: null }, formData);
+    setSaving(false);
+
+    if (result.error) {
+      setError(result.error);
+      return;
+    }
+
+    setError(null);
+    setValue('');
+    router.refresh();
+  }
+
+  return (
+    <div>
+      <input
+        value={value}
+        disabled={saving}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            void save();
+          }
+        }}
+        onBlur={() => void save()}
+        placeholder={placeholder}
+        aria-label={placeholder}
+        className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-xs outline-none focus:border-brand-500"
+      />
+      {error ? <p className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</p> : null}
+    </div>
+  );
+}
+
+/**
+ * Two-click removal, inline rather than importing `DangerAction` from the admin
+ * forms. Reaching into admin internals from the inbox would couple two areas
+ * that have stayed apart; promoting that component into `components/ui.tsx` is
+ * the better move and a wider change than this feature should carry.
+ */
+function UnlinkButton({
+  action,
+  fields,
+  label,
+}: {
+  action: LinkAction;
+  fields: Record<string, string>;
+  label: string;
+}) {
+  const router = useRouter();
+  const [armed, setArmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  async function remove() {
+    setBusy(true);
+    const formData = new FormData();
+    for (const [key, value] of Object.entries(fields)) formData.set(key, value);
+    await action({ error: null }, formData);
+    setBusy(false);
+    setArmed(false);
+    router.refresh();
+  }
+
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      aria-label={label}
+      onClick={() => (armed ? void remove() : setArmed(true))}
+      onBlur={() => setArmed(false)}
+      className="shrink-0 rounded px-1 text-xs opacity-50 hover:opacity-100"
+    >
+      {armed ? 'Sure?' : '\u00d7'}
+    </button>
   );
 }

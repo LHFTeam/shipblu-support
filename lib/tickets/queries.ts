@@ -31,7 +31,14 @@ import {
   restrictedChannels,
   type FilterableChannel,
 } from './channel-policy';
-import { sbidMatches, trackingMatches } from '@/lib/shipments/queries';
+import {
+  sbidMatches,
+  shipmentsForConversation,
+  shippingAccountsForConversation,
+  trackingMatches,
+  type LinkedShipment,
+  type LinkedShippingAccount,
+} from '@/lib/shipments/queries';
 import { parseSearchTerm } from './search';
 
 /**
@@ -309,6 +316,9 @@ export type ConversationDetail = {
    * which is what tells the composer to write in public rather than in private.
    */
   externalId: string | null;
+  /** Parcels this ticket is about, and the accounts it names. */
+  shipments: LinkedShipment[];
+  shippingAccounts: LinkedShippingAccount[];
   messages: TimelineMessage[];
   events: {
     id: string;
@@ -356,7 +366,7 @@ export async function getConversation(
   const row = rows[0];
   if (!row) return null;
 
-  const [timeline, files, events] = await Promise.all([
+  const [timeline, files, events, shipments, accounts] = await Promise.all([
     db
       .select({
         message: messages,
@@ -395,6 +405,9 @@ export async function getConversation(
       .where(eq(conversationEvents.conversationId, row.conversation.id))
       .orderBy(desc(conversationEvents.createdAt))
       .limit(50),
+
+    shipmentsForConversation(row.conversation.id, row.conversation.requesterContactId),
+    shippingAccountsForConversation(row.conversation.id),
   ]);
 
   const filesByMessage = new Map<string, ConversationDetail['messages'][number]['attachments']>();
@@ -415,6 +428,8 @@ export async function getConversation(
     subject: row.conversation.subject,
     channel: row.conversation.channel,
     externalId: row.conversation.externalId,
+    shipments,
+    shippingAccounts: accounts,
     priority: row.conversation.priority,
     type: row.conversation.type,
     statusId: row.conversation.statusId,
