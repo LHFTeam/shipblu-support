@@ -62,9 +62,28 @@ export function isRestrictedChannel(channel: string): boolean {
   return (RESTRICTED as readonly string[]).includes(channel);
 }
 
-/** The restricted channels this agent may not see. Empty for an admin. */
+/**
+ * The restricted channels this agent may not see. Empty for an admin.
+ *
+ * The permission question: may this person ever open one of these at all.
+ */
 export function hiddenChannels(agent: SessionAgent): ConversationChannel[] {
   return can(agent, 'ticket.view.bot') ? [] : [...RESTRICTED];
+}
+
+/**
+ * Every restricted channel, whoever is asking.
+ *
+ * A separate question from `hiddenChannels`, and the two are easy to confuse.
+ * That one is about permission. This one is about the inbox being a working
+ * queue: a restricted channel is opt-in, absent from "all channels" even for an
+ * admin who is allowed to see it, and reached by choosing it in the filter.
+ *
+ * Without that, one number the team does not answer put nineteen hundred
+ * transcripts in front of the two tickets that were actually waiting.
+ */
+export function restrictedChannels(): ConversationChannel[] {
+  return [...RESTRICTED];
 }
 
 export function canSeeChannel(agent: SessionAgent, channel: string): boolean {
