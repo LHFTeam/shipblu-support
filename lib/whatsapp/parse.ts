@@ -1,8 +1,10 @@
 import type {
+  NormalisedEcho,
   NormalisedInboundMessage,
   NormalisedMedia,
   NormalisedStatus,
   NormalisedWebhook,
+  WhatsAppEcho,
   WhatsAppInboundMessage,
   WhatsAppMediaObject,
   WhatsAppStatus,
@@ -23,7 +25,7 @@ import type {
 const MEDIA_TYPES = ['image', 'video', 'audio', 'document', 'sticker'] as const;
 
 export function parseWebhook(payload: unknown): NormalisedWebhook {
-  const result: NormalisedWebhook = { messages: [], statuses: [], errors: [] };
+  const result: NormalisedWebhook = { messages: [], echoes: [], statuses: [], errors: [] };
 
   if (!isObject(payload)) return result;
   const body = payload as WhatsAppWebhookPayload;
@@ -44,7 +46,33 @@ export function parseWebhook(payload: unknown): NormalisedWebhook {
         }
       }
 
+      // Our own number, for telling an echo from a customer message. Meta
+      // formats it for display — "+20 100 123 4567" — so both sides of the
+      // comparison are reduced to digits.
+      const businessNumber = digits(value.metadata?.display_phone_number);
+
+      // The only customer in the batch, when there is exactly one. An echo that
+      // arrives without a `to` has no other way to name who it went to, and
+      // guessing between several would attach it to the wrong conversation.
+      const soleContact = value.contacts?.length === 1 ? value.contacts[0]!.wa_id : null;
+
+      for (const echo of value.message_echoes ?? []) {
+        const normalised = normaliseEcho(echo, phoneNumberId, soleContact);
+        if (normalised) result.echoes.push(normalised);
+      }
+
       for (const message of value.messages ?? []) {
+        // A message from our own number is an echo wherever it arrives. Meta
+        // delivers echoes under `message_echoes`, but treating `messages` as
+        // unconditionally inbound is what would file our own outbound as a
+        // customer message — inventing a contact for our own phone number and
+        // opening a ticket from ourselves.
+        if (businessNumber && digits(message.from) === businessNumber) {
+          const normalised = normaliseEcho(message, phoneNumberId, soleContact);
+          if (normalised) result.echoes.push(normalised);
+          continue;
+        }
+
         const normalised = normaliseMessage(message, phoneNumberId, profileNames);
         if (normalised) result.messages.push(normalised);
       }
@@ -88,6 +116,40 @@ function normaliseMessage(
     replyToWamid: message.context?.id ?? null,
     raw: message as unknown as Record<string, unknown>,
   };
+}
+
+function normaliseEcho(
+  echo: WhatsAppEcho,
+  phoneNumberId: string | null,
+  soleContact: string | null,
+): NormalisedEcho | null {
+  if (!echo?.id) return null;
+
+  // Without a recipient there is no conversation to file this under. Dropping is
+  // right: the alternative is attaching one side of somebody's chat to whichever
+  // conversation happened to be nearby.
+  const to = echo.to ?? soleContact;
+  if (!to) return null;
+
+  return {
+    wamid: echo.id,
+    to,
+    from: echo.from ?? null,
+    phoneNumberId,
+    sentAt: parseTimestamp(echo.timestamp),
+    type: echo.type ?? 'unsupported',
+    text: displayText(echo),
+    media: extractMedia(echo),
+    replyToWamid: echo.context?.id ?? null,
+    raw: echo as unknown as Record<string, unknown>,
+  };
+}
+
+/** Phone numbers for comparison only — Meta formats them for display. */
+function digits(value: string | undefined | null): string | null {
+  if (!value) return null;
+  const stripped = value.replace(/\D/g, '');
+  return stripped || null;
 }
 
 /**
@@ -214,7 +276,9 @@ export function parseTimestamp(timestamp: string | undefined): Date {
 
 /** Meta's own signal for whether this delivery was a status-only batch. */
 export function isStatusOnly(webhook: NormalisedWebhook): boolean {
-  return webhook.messages.length === 0 && webhook.statuses.length > 0;
+  return (
+    webhook.messages.length === 0 && webhook.echoes.length === 0 && webhook.statuses.length > 0
+  );
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

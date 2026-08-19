@@ -48,7 +48,7 @@ export default async function ChannelsPage() {
               <span className="font-medium">{channel.name}</span>
               {!channel.isActive ? <Badge tone="neutral">inactive</Badge> : null}
               <span className="ms-auto text-xs text-[var(--muted-foreground)]">
-                {channel.type === 'whatsapp'
+                {channel.type === 'whatsapp' || channel.type === 'whatsapp_bot'
                   ? (channel.config.phoneNumberId as string) || 'no phone number id'
                   : channel.type === 'facebook' || channel.type === 'instagram'
                     ? 'configured in the environment'

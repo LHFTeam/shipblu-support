@@ -1,11 +1,12 @@
 import { DateTime } from 'luxon';
-import { and, eq, gte, isNull, lt } from 'drizzle-orm';
+import { and, eq, gte, isNull, lt, notInArray } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversationEvents, conversations, csatSurveys, metricsDaily } from '@/db/schema';
 import { businessMinutesBetween, type HoursConfig } from '@/lib/hours';
 import { loadHoursCatalog } from '@/lib/hours/catalog';
 import { defaultHours, ticketHours, type HoursCatalog } from '@/lib/hours/resolve';
 import { loadPolicies, type LoadedPolicy } from '@/lib/sla';
+import { readOnlyChannels } from '@/lib/tickets/channel-policy';
 
 /**
  * One day of figures, computed from the source tables.
@@ -150,6 +151,17 @@ export async function computeDay(
     for (const slice of slicesFor(dims)) apply(bucketFor(buckets, slice));
   };
 
+  /**
+   * Conversations the team actually worked.
+   *
+   * Applied to every query below rather than subtracted from the totals
+   * afterwards. A read-only channel has no first response and no SLA by
+   * construction, so leaving it in would not add a channel row to the report —
+   * it would quietly lower the response and resolution rates for every channel
+   * that does have them, by counting tickets that could never have either.
+   */
+  const worked = notInArray(conversations.channel, readOnlyChannels());
+
   // --- Created --------------------------------------------------------------
   const created = await db
     .select({
@@ -164,6 +176,7 @@ export async function computeDay(
         lt(conversations.createdAt, to),
         isNull(conversations.deletedAt),
         eq(conversations.isSpam, false),
+        worked,
       ),
     );
 
@@ -191,6 +204,7 @@ export async function computeDay(
         lt(conversations.firstRespondedAt, to),
         isNull(conversations.deletedAt),
         eq(conversations.isSpam, false),
+        worked,
       ),
     );
 
@@ -230,6 +244,7 @@ export async function computeDay(
         lt(conversations.resolvedAt, to),
         isNull(conversations.deletedAt),
         eq(conversations.isSpam, false),
+        worked,
       ),
     );
 
@@ -268,6 +283,7 @@ export async function computeDay(
         eq(conversationEvents.type, 'reopened'),
         gte(conversationEvents.createdAt, from),
         lt(conversationEvents.createdAt, to),
+        worked,
       ),
     );
 
@@ -287,7 +303,7 @@ export async function computeDay(
     })
     .from(csatSurveys)
     .innerJoin(conversations, eq(conversations.id, csatSurveys.conversationId))
-    .where(and(gte(csatSurveys.respondedAt, from), lt(csatSurveys.respondedAt, to)));
+    .where(and(gte(csatSurveys.respondedAt, from), lt(csatSurveys.respondedAt, to), worked));
 
   for (const row of surveys) {
     if (row.rating === null) continue;

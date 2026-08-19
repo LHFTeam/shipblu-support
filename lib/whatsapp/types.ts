@@ -66,6 +66,20 @@ export type WhatsAppInboundMessage = {
   context?: { from?: string; id?: string; forwarded?: boolean; frequently_forwarded?: boolean };
 };
 
+/**
+ * An echo of a message sent *from* our own number.
+ *
+ * Meta delivers these under the `message_echoes` webhook field, which exists for
+ * exactly the case where more than one application sends on a number: the
+ * business number appears as `from` and the customer as `to`. Structurally it is
+ * an ordinary message, so it reuses the same content fields and the same
+ * `displayText`.
+ */
+export type WhatsAppEcho = WhatsAppInboundMessage & {
+  /** The customer the message went to. Absent on `messages`-array echoes. */
+  to?: string;
+};
+
 export type WhatsAppStatus = {
   /** The wamid of the *outbound* message this status refers to. */
   id: string;
@@ -88,6 +102,7 @@ export type WhatsAppValue = {
   metadata?: { display_phone_number?: string; phone_number_id?: string };
   contacts?: WhatsAppContactProfile[];
   messages?: WhatsAppInboundMessage[];
+  message_echoes?: WhatsAppEcho[];
   statuses?: WhatsAppStatus[];
   errors?: { code: number; title: string; message?: string }[];
 };
@@ -134,6 +149,30 @@ export type NormalisedInboundMessage = {
   raw: Record<string, unknown>;
 };
 
+/**
+ * A message the bot sent, normalised.
+ *
+ * Separate from `NormalisedInboundMessage` because the customer is on the other
+ * side of it: `to` identifies the contact rather than `from`, and treating the
+ * two shapes as one is how an echo ends up filed as a message from our own
+ * phone number.
+ */
+export type NormalisedEcho = {
+  wamid: string;
+  /** The customer this went to — who the conversation belongs to. */
+  to: string;
+  /** Our own number it was sent from, as Meta reports it. */
+  from: string | null;
+  phoneNumberId: string | null;
+  sentAt: Date;
+
+  type: WhatsAppMessageType | string;
+  text: string;
+  media: NormalisedMedia | null;
+  replyToWamid: string | null;
+  raw: Record<string, unknown>;
+};
+
 export type NormalisedStatus = {
   wamid: string;
   status: 'sent' | 'delivered' | 'read' | 'failed';
@@ -147,6 +186,8 @@ export type NormalisedStatus = {
 
 export type NormalisedWebhook = {
   messages: NormalisedInboundMessage[];
+  /** Messages sent from our own number, by us or by another service on it. */
+  echoes: NormalisedEcho[];
   statuses: NormalisedStatus[];
   /** Account-level errors Meta reports outside any message. */
   errors: string[];

@@ -283,3 +283,128 @@ describe('parseTimestamp', () => {
     expect(parsed.getTime()).toBeGreaterThanOrEqual(before);
   });
 });
+
+describe('parseWebhook: echoes', () => {
+  it('normalises an echo, taking the customer from `to`', () => {
+    const parsed = parseWebhook(
+      envelope({
+        message_echoes: [
+          {
+            id: 'wamid.echo1',
+            from: '201000000000',
+            to: '201001234567',
+            timestamp: '1755500000',
+            type: 'text',
+            text: { body: 'Your parcel is on its way' },
+          },
+        ],
+      }),
+    );
+
+    expect(parsed.messages).toHaveLength(0);
+    expect(parsed.echoes).toHaveLength(1);
+    expect(parsed.echoes[0]).toMatchObject({
+      wamid: 'wamid.echo1',
+      to: '201001234567',
+      from: '201000000000',
+      phoneNumberId: '1234',
+      text: 'Your parcel is on its way',
+    });
+  });
+
+  it('reads media and reply context on an echo like any other message', () => {
+    const parsed = parseWebhook(
+      envelope({
+        message_echoes: [
+          {
+            id: 'wamid.echo2',
+            from: '201000000000',
+            to: '201001234567',
+            timestamp: '1755500000',
+            type: 'document',
+            document: { id: 'media-9', mime_type: 'application/pdf', filename: 'label.pdf' },
+            context: { id: 'wamid.customer1' },
+          },
+        ],
+      }),
+    );
+
+    expect(parsed.echoes[0]).toMatchObject({
+      text: '[document: label.pdf]',
+      replyToWamid: 'wamid.customer1',
+    });
+    expect(parsed.echoes[0]!.media).toMatchObject({ mediaId: 'media-9', filename: 'label.pdf' });
+  });
+
+  it('treats a message from our own number as an echo, not as a customer writing in', () => {
+    // The defensive half. If Meta ever delivers an echo in `messages` — or the
+    // field is named differently than assumed — the alternative is a contact
+    // invented for our own phone number and a ticket we opened against
+    // ourselves. The display number is formatted, so the match is on digits.
+    const parsed = parseWebhook(
+      envelope({
+        contacts: [{ wa_id: '201001234567' }],
+        messages: [
+          {
+            id: 'wamid.echo3',
+            from: '+20 100 000 0000',
+            timestamp: '1755500000',
+            type: 'text',
+            text: { body: 'Sent by the bot' },
+          },
+        ],
+      }),
+    );
+
+    expect(parsed.messages).toHaveLength(0);
+    expect(parsed.echoes).toHaveLength(1);
+    expect(parsed.echoes[0]).toMatchObject({ to: '201001234567', text: 'Sent by the bot' });
+  });
+
+  it('drops an echo it cannot attribute to one customer', () => {
+    // Two contacts in the batch and no `to`: filing it would attach one side of
+    // somebody's conversation to the wrong person.
+    const parsed = parseWebhook(
+      envelope({
+        contacts: [{ wa_id: '201001234567' }, { wa_id: '201007654321' }],
+        messages: [
+          { id: 'wamid.echo4', from: '201000000000', timestamp: '1755500000', type: 'text' },
+        ],
+      }),
+    );
+
+    expect(parsed.echoes).toHaveLength(0);
+    expect(parsed.messages).toHaveLength(0);
+  });
+
+  it('keeps customer messages and echoes apart in one batch', () => {
+    const parsed = parseWebhook(
+      envelope({
+        contacts: [{ profile: { name: 'Nour' }, wa_id: '201001234567' }],
+        messages: [
+          {
+            id: 'wamid.in1',
+            from: '201001234567',
+            timestamp: '1755500000',
+            type: 'text',
+            text: { body: 'where is my order' },
+          },
+        ],
+        message_echoes: [
+          {
+            id: 'wamid.echo5',
+            from: '201000000000',
+            to: '201001234567',
+            timestamp: '1755500060',
+            type: 'text',
+            text: { body: 'Let me check that for you' },
+          },
+        ],
+      }),
+    );
+
+    expect(parsed.messages.map((m) => m.wamid)).toEqual(['wamid.in1']);
+    expect(parsed.messages[0]!.profileName).toBe('Nour');
+    expect(parsed.echoes.map((e) => e.wamid)).toEqual(['wamid.echo5']);
+  });
+});

@@ -42,3 +42,14 @@ describe('permissions', () => {
     expect(can({ role: 'account_admin', permissions: {} }, 'admin.billing')).toBe(true);
   });
 });
+
+describe('ticket.view.bot', () => {
+  it('is off for agents and supervisors, on for admins', () => {
+    // The customer bot channel is oversight, not work in progress, so it does
+    // not appear on the shop floor.
+    expect(can({ role: 'agent', permissions: {} }, 'ticket.view.bot')).toBe(false);
+    expect(can({ role: 'supervisor', permissions: {} }, 'ticket.view.bot')).toBe(false);
+    expect(can({ role: 'admin', permissions: {} }, 'ticket.view.bot')).toBe(true);
+    expect(can({ role: 'account_admin', permissions: {} }, 'ticket.view.bot')).toBe(true);
+  });
+});

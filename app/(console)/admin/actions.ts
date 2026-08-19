@@ -93,8 +93,15 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
   const address = String(formData.get('address') ?? '').trim();
 
   if (!name) return { error: 'Give the channel a name' };
-  if (!['email', 'whatsapp', 'webchat', 'facebook', 'instagram'].includes(type)) {
+  if (!['email', 'whatsapp', 'webchat', 'facebook', 'instagram', 'whatsapp_bot'].includes(type)) {
     return { error: 'Unknown channel type' };
+  }
+
+  // The phone number id is what routes an inbound event to this channel, so a
+  // bot channel without one would match nothing and its messages would arrive as
+  // ordinary WhatsApp tickets the team can reply to. Required, not defaulted.
+  if (type === 'whatsapp_bot' && !phoneNumberId) {
+    return { error: 'A customer bot channel needs the phone number ID it receives on' };
   }
 
   // Non-secret settings only. Access tokens and app secrets stay in the
@@ -103,7 +110,7 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
   // beside the token they are useless without, so their row carries routing
   // only.
   const config =
-    type === 'whatsapp'
+    type === 'whatsapp' || type === 'whatsapp_bot'
       ? { phoneNumberId }
       : type === 'facebook' || type === 'instagram'
         ? {}

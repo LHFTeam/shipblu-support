@@ -13,6 +13,7 @@ import {
 } from '@/db/schema';
 import { requireAgent } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
+import { canSeeChannel, readOnlyReason } from '@/lib/tickets/channel-policy';
 import type { SessionAgent } from '@/lib/auth/session';
 import { htmlToText, sanitiseEmailHtml } from '@/lib/html/sanitize';
 import { enqueue } from '@/lib/queue';
@@ -73,7 +74,21 @@ async function loadConversation(agent: SessionAgent, conversationId: string) {
     return null;
   }
 
+  if (!canSeeChannel(agent, row.conversation.channel)) return null;
+
   return row;
+}
+
+/**
+ * Refuses a write to a channel the platform only observes.
+ *
+ * Checked in the actions rather than only in the composer: hiding the textarea
+ * stops the honest path, and this stops the other ones — a stale tab open from
+ * before the channel existed, a resubmitted form, a hand-made POST.
+ */
+function refuseIfReadOnly(channel: string): ActionState | null {
+  const reason = readOnlyReason(channel);
+  return reason ? { error: reason } : null;
 }
 
 function refresh(number: number) {
@@ -97,6 +112,9 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
   if (!row) return { error: 'Ticket not found' };
 
   const conversation = row.conversation;
+
+  const readOnly = refuseIfReadOnly(conversation.channel);
+  if (readOnly) return readOnly;
 
   if (conversation.channel === 'whatsapp') {
     // Checked before the row is written, so an agent is told the window closed
@@ -214,6 +232,13 @@ export async function addNote(_state: ActionState, formData: FormData): Promise<
   const row = await loadConversation(agent, conversationId);
   if (!row) return { error: 'Ticket not found' };
 
+  // A note is internal and never reaches the customer, so this is the one
+  // refusal here that is not about protecting them. It is about the channel
+  // being a record of somebody else's conversation: an observed transcript that
+  // accumulates our commentary stops being a faithful copy of what happened.
+  const readOnly = refuseIfReadOnly(row.conversation.channel);
+  if (readOnly) return readOnly;
+
   await db.insert(messages).values({
     conversationId,
     direction: 'outbound',
@@ -245,6 +270,13 @@ export async function sendTemplateReply(
 
   const row = await loadConversation(agent, conversationId);
   if (!row) return { error: 'Ticket not found' };
+
+  // Before the channel check below, so the bot channel is refused for the real
+  // reason rather than told that templates are WhatsApp only — which, on a
+  // WhatsApp number, would read as a bug.
+  const readOnly = refuseIfReadOnly(row.conversation.channel);
+  if (readOnly) return readOnly;
+
   if (row.conversation.channel !== 'whatsapp') return { error: 'Templates are WhatsApp only' };
 
   const templates = await db

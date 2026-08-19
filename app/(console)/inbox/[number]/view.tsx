@@ -12,7 +12,37 @@ import type { ConversationDetail } from '@/lib/tickets/queries';
 import { describeWindow, metaWindowState } from '@/lib/meta/window';
 import { formatRemaining, windowState } from '@/lib/whatsapp/window';
 import { updateTicket } from '../../actions';
+import { readOnlyReason } from '@/lib/tickets/channel-policy';
 import { Composer } from './composer';
+
+/**
+ * What sits where the composer would be, on a channel we only observe.
+ *
+ * A disabled textarea was the other option and is worse: it invites the agent to
+ * try, and leaves them guessing why nothing happens. Saying plainly that the
+ * conversation is not ours to answer is shorter and answers the question they
+ * were about to ask.
+ */
+function ReadOnlyNotice({ reason }: { reason: string }) {
+  return (
+    <div className="shrink-0 border-t border-[var(--border)] bg-[var(--muted)] px-4 py-3">
+      <p className="flex items-start gap-2 text-xs text-[var(--muted-foreground)]">
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          aria-hidden="true"
+          className="mt-0.5 size-4 shrink-0"
+        >
+          <rect x="4" y="10.5" width="16" height="10" rx="2" />
+          <path d="M8 10.5V7a4 4 0 0 1 8 0v3.5" />
+        </svg>
+        <span>{reason}</span>
+      </p>
+    </div>
+  );
+}
 
 export type TemplateOption = {
   id: string;
@@ -46,7 +76,11 @@ export function ConversationView({
           <Timeline conversation={conversation} />
         </div>
 
-        <Composer conversation={conversation} templates={templates} />
+        {readOnlyReason(conversation.channel) ? (
+          <ReadOnlyNotice reason={readOnlyReason(conversation.channel)!} />
+        ) : (
+          <Composer conversation={conversation} templates={templates} />
+        )}
       </div>
 
       <Sidebar
@@ -166,7 +200,11 @@ function Timeline({ conversation }: { conversation: ConversationDetail }) {
       {conversation.messages.map((message) => {
         const isNote = message.kind === 'note';
         const isInbound = message.direction === 'inbound';
-        const meta = (message.meta ?? {}) as { metaKind?: string; isPublic?: boolean };
+        const meta = (message.meta ?? {}) as {
+          metaKind?: string;
+          isPublic?: boolean;
+          echo?: boolean;
+        };
         const isPublicComment = meta.metaKind === 'comment';
 
         return (
@@ -182,7 +220,14 @@ function Timeline({ conversation }: { conversation: ConversationDetail }) {
           >
             <div className="mb-1.5 flex items-baseline gap-2 text-xs text-[var(--muted-foreground)]">
               <span className="font-medium">
-                {message.authorName ?? (isInbound ? 'Customer' : 'Automation')}
+                {/*
+                  An echo has no author on either side: no agent wrote it and the
+                  customer did not send it. "Automation" would be technically
+                  true and useless — it was the customer bot, and on a channel
+                  that mirrors two parties, saying which one matters most.
+                */}
+                {message.authorName ??
+                  (meta.echo ? 'Customer bot' : isInbound ? 'Customer' : 'Automation')}
               </span>
               {isNote ? <Badge tone="warning">private note</Badge> : null}
               {/* Whether a reply was public is the thing an agent most needs to

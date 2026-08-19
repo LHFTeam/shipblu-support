@@ -1,11 +1,16 @@
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels, conversationEvents, conversations, messages, ticketStatuses } from '@/db/schema';
 import { enqueue } from '@/lib/queue';
 import { afterInboundMessage } from '@/lib/tickets/lifecycle';
 import { explainDeliveryError } from '@/lib/whatsapp/errors';
-import type { NormalisedInboundMessage, NormalisedStatus } from '@/lib/whatsapp/types';
+import type {
+  NormalisedEcho,
+  NormalisedInboundMessage,
+  NormalisedStatus,
+} from '@/lib/whatsapp/types';
 import { windowState } from '@/lib/whatsapp/window';
+import { isReadOnlyChannel } from './channel-policy';
 import { resolveContact } from './contacts';
 
 /**
@@ -58,8 +63,8 @@ export async function ingestWhatsAppMessage(
     displayName: message.profileName,
   });
 
-  const channel = await whatsappChannel(message.phoneNumberId);
-  const existing = await findLiveConversation(contactId);
+  const channel = await resolveWhatsAppChannel(message.phoneNumberId);
+  const existing = await findLiveConversation(contactId, channel.kind);
 
   const result = await db.transaction(async (tx) => {
     let conversationId: string;
@@ -99,14 +104,14 @@ export async function ingestWhatsAppMessage(
       const inserted = await tx
         .insert(conversations)
         .values({
-          channel: 'whatsapp',
-          channelId: channel?.id ?? null,
+          channel: channel.kind,
+          channelId: channel.id,
           statusId,
           // WhatsApp has no subject line. Seeding it from the first message
           // keeps the ticket list scannable instead of a column of "WhatsApp".
           subject: subjectFrom(message.text),
           requesterContactId: contactId,
-          groupId: channel?.defaultGroupId ?? null,
+          groupId: channel.defaultGroupId,
           lastMessageAt: message.sentAt,
           lastCustomerMessageAt: message.sentAt,
         })
@@ -180,9 +185,181 @@ export async function ingestWhatsAppMessage(
     );
   }
 
-  await afterInboundMessage(result.conversationId, result.createdConversation, message.sentAt);
+  // Deliberately not run for a read-only channel. Everything downstream assumes
+  // a ticket the team is working: the SLA would start a first-response clock
+  // nobody is allowed to stop, the sweep would raise breaches every five
+  // minutes for the rest of time, automations could assign it to a person who
+  // cannot answer it, and CSAT would ask the customer to rate a conversation
+  // they had with a bot.
+  if (!isReadOnlyChannel(channel.kind)) {
+    await afterInboundMessage(result.conversationId, result.createdConversation, message.sentAt);
+  }
 
   return { ...result, duplicate: false };
+}
+
+/**
+ * A message the bot sent, mirrored onto the conversation it belongs to.
+ *
+ * Filed as outbound with no author, because nobody here wrote it — the timeline
+ * labels it as the bot. It can arrive before any inbound message, since the bot
+ * often opens the conversation, so this creates the conversation when needed
+ * rather than assuming one exists.
+ */
+export type WhatsAppEchoResult = {
+  conversationId: string | null;
+  conversationNumber: number;
+  messageId: string | null;
+  createdConversation: boolean;
+  duplicate: boolean;
+  /** True when the echo was for a channel we do not mirror. */
+  ignored: boolean;
+};
+
+const IGNORED: WhatsAppEchoResult = {
+  conversationId: null,
+  conversationNumber: 0,
+  messageId: null,
+  createdConversation: false,
+  duplicate: false,
+  ignored: true,
+};
+
+export async function ingestWhatsAppEcho(echo: NormalisedEcho): Promise<WhatsAppEchoResult> {
+  const channel = await resolveWhatsAppChannel(echo.phoneNumberId);
+
+  // An echo from the support number is our own outbound message coming back. We
+  // already wrote that row when we sent it, and the delivery status webhook
+  // maintains it, so there is nothing to add. Mirroring it would double every
+  // reply the team sends.
+  if (!isReadOnlyChannel(channel.kind)) return IGNORED;
+
+  const seen = await db
+    .select({ id: messages.id, conversationId: messages.conversationId })
+    .from(messages)
+    .where(eq(messages.channelMessageId, echo.wamid))
+    .limit(1);
+
+  if (seen[0]) {
+    const existing = await db
+      .select({ number: conversations.number })
+      .from(conversations)
+      .where(eq(conversations.id, seen[0].conversationId))
+      .limit(1);
+
+    return {
+      conversationId: seen[0].conversationId,
+      conversationNumber: existing[0]?.number ?? 0,
+      messageId: seen[0].id,
+      createdConversation: false,
+      duplicate: true,
+      ignored: false,
+    };
+  }
+
+  // The identity is still a WhatsApp one: it is the same person and the same
+  // phone number whichever of our numbers they wrote to, so they resolve to one
+  // contact and both conversations show on their record.
+  const { contactId } = await resolveContact({ channel: 'whatsapp', identifier: echo.to });
+
+  const existing = await findLiveConversation(contactId, channel.kind);
+
+  const result = await db.transaction(async (tx) => {
+    let conversationId: string;
+    let conversationNumber: number;
+    let createdConversation = false;
+
+    if (existing) {
+      conversationId = existing.id;
+      conversationNumber = existing.number;
+    } else {
+      const statusId = await defaultOpenStatusId(tx);
+      if (!statusId) {
+        throw new Error('No default open ticket status configured — run `npm run db:seed`');
+      }
+
+      const inserted = await tx
+        .insert(conversations)
+        .values({
+          channel: channel.kind,
+          channelId: channel.id,
+          statusId,
+          subject: subjectFrom(echo.text),
+          requesterContactId: contactId,
+          groupId: channel.defaultGroupId,
+          lastMessageAt: echo.sentAt,
+        })
+        .returning({ id: conversations.id, number: conversations.number });
+
+      conversationId = inserted[0]!.id;
+      conversationNumber = inserted[0]!.number;
+      createdConversation = true;
+    }
+
+    const insertedMessage = await tx
+      .insert(messages)
+      .values({
+        conversationId,
+        direction: 'outbound',
+        kind: 'reply',
+        // No author on either side: no agent wrote it and the customer did not
+        // send it. The channel is what tells the timeline to label it as the bot.
+        bodyText: echo.text,
+        bodyHtml: null,
+        rawBody: JSON.stringify(echo.raw),
+        channelMessageId: echo.wamid,
+        inReplyTo: echo.replyToWamid,
+        fromAddress: echo.from,
+        toAddresses: [echo.to],
+        // Meta only echoes what it accepted for delivery, and no status webhook
+        // will follow for a message another service sent, so 'sent' is as much
+        // as can honestly be claimed.
+        deliveryStatus: 'sent',
+        meta: {
+          whatsappType: echo.type,
+          phoneNumberId: echo.phoneNumberId,
+          echo: true,
+          ...(echo.media
+            ? {
+                media: {
+                  mediaId: echo.media.mediaId,
+                  mimeType: echo.media.mimeType,
+                  filename: echo.media.filename,
+                  isVoice: echo.media.isVoice,
+                  downloaded: false,
+                },
+              }
+            : {}),
+        },
+        createdAt: echo.sentAt,
+      })
+      .returning({ id: messages.id });
+
+    // lastCustomerMessageAt is deliberately untouched: the bot writing does not
+    // open a 24-hour window for us, and this channel cannot be replied to
+    // anyway.
+    await tx
+      .update(conversations)
+      .set({ lastMessageAt: echo.sentAt })
+      .where(eq(conversations.id, conversationId));
+
+    return {
+      conversationId,
+      conversationNumber,
+      messageId: insertedMessage[0]!.id,
+      createdConversation,
+    };
+  });
+
+  if (echo.media) {
+    await enqueue(
+      'download_media',
+      { messageId: result.messageId, mediaId: echo.media.mediaId },
+      { priority: 5, dedupeKey: `download_media:${echo.media.mediaId}` },
+    );
+  }
+
+  return { ...result, duplicate: false, ignored: false };
 }
 
 /**
@@ -297,7 +474,10 @@ type LiveConversation = {
  * the new question under old history. Resolved is different — that is a
  * pending-confirmation state, so a reply reopens it.
  */
-async function findLiveConversation(contactId: string): Promise<LiveConversation | null> {
+async function findLiveConversation(
+  contactId: string,
+  channel: 'whatsapp' | 'whatsapp_bot',
+): Promise<LiveConversation | null> {
   const rows = await db
     .select({
       id: conversations.id,
@@ -310,7 +490,7 @@ async function findLiveConversation(contactId: string): Promise<LiveConversation
     .where(
       and(
         eq(conversations.requesterContactId, contactId),
-        eq(conversations.channel, 'whatsapp'),
+        eq(conversations.channel, channel),
         isNull(conversations.deletedAt),
         isNull(conversations.mergedIntoId),
       ),
@@ -343,17 +523,57 @@ async function defaultOpenStatusId(tx: typeof db): Promise<string | null> {
   return fallback[0]?.id ?? null;
 }
 
-/** Matches the configured number when we can, else any active WhatsApp channel. */
-async function whatsappChannel(phoneNumberId: string | null) {
+export type ResolvedChannel = {
+  id: string | null;
+  defaultGroupId: string | null;
+  /** The conversation channel to file under — `whatsapp` or `whatsapp_bot`. */
+  kind: 'whatsapp' | 'whatsapp_bot';
+};
+
+/**
+ * Which of our numbers this event arrived on, and therefore what kind of
+ * conversation it belongs to.
+ *
+ * Driven by the channels table rather than a constant, so another bot number is
+ * a row an admin adds rather than a deploy. A number with no row at all falls
+ * back to ordinary WhatsApp: the same behaviour as before this channel existed,
+ * which is the right way to be wrong — a missing row must not turn the support
+ * number into a read-only one and stop the team replying.
+ */
+export async function resolveWhatsAppChannel(
+  phoneNumberId: string | null,
+): Promise<ResolvedChannel> {
   const rows = await db
-    .select({ id: channels.id, defaultGroupId: channels.defaultGroupId, config: channels.config })
+    .select({
+      id: channels.id,
+      type: channels.type,
+      defaultGroupId: channels.defaultGroupId,
+      config: channels.config,
+    })
     .from(channels)
-    .where(and(eq(channels.type, 'whatsapp'), eq(channels.isActive, true)));
+    .where(and(inArray(channels.type, ['whatsapp', 'whatsapp_bot']), eq(channels.isActive, true)));
 
-  if (rows.length === 0) return null;
-  if (!phoneNumberId) return rows[0]!;
+  const byNumber = phoneNumberId
+    ? rows.find((c) => c.config?.phoneNumberId === phoneNumberId)
+    : undefined;
 
-  return rows.find((c) => c.config?.phoneNumberId === phoneNumberId) ?? rows[0]!;
+  if (byNumber) {
+    return {
+      id: byNumber.id,
+      defaultGroupId: byNumber.defaultGroupId,
+      kind: byNumber.type === 'whatsapp_bot' ? 'whatsapp_bot' : 'whatsapp',
+    };
+  }
+
+  // No row for this number. Only ever the support channel — a bot number is
+  // known by its row, and inferring "bot" from the absence of one would hide
+  // real customer messages from the team.
+  const support = rows.find((c) => c.type === 'whatsapp');
+  return {
+    id: support?.id ?? null,
+    defaultGroupId: support?.defaultGroupId ?? null,
+    kind: 'whatsapp',
+  };
 }
 
 /** First line, trimmed to something that fits a ticket list. */

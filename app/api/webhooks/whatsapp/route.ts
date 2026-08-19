@@ -115,7 +115,7 @@ export async function POST(request: Request) {
  * Delivery-level idempotency key.
  *
  * Meta sends no event id of its own, so one is derived from the batch contents:
- * the wamids of every message and status in it, which is stable across
+ * the wamids of every message, echo and status in it, which is stable across
  * redeliveries of the same batch and differs between distinct ones. Returning
  * null for an empty batch is deliberate — the unique index treats nulls as
  * distinct, so contentless deliveries are stored rather than colliding.
@@ -127,6 +127,9 @@ function deliveryId(payload: WhatsAppWebhookPayload): string | null {
     for (const change of entry.changes ?? []) {
       for (const message of change.value?.messages ?? []) {
         if (message.id) parts.push(`m:${message.id}`);
+      }
+      for (const echo of change.value?.message_echoes ?? []) {
+        if (echo.id) parts.push(`e:${echo.id}`);
       }
       for (const status of change.value?.statuses ?? []) {
         if (status.id) parts.push(`s:${status.id}:${status.status}`);

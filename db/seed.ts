@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { closeDb, db } from './client';
-import { businessHours, groups, ticketStatuses } from './schema';
+import { businessHours, channels, groups, ticketStatuses } from './schema';
 import type { WeeklySchedule } from './schema/config';
 
 /**
@@ -89,6 +89,25 @@ async function main() {
     .returning({ id: groups.id });
 
   console.log(group.length ? '  group: created' : '  group: already present');
+
+  // The customer bot's number.
+  //
+  // Seeded rather than left to the admin screen because the row is what routes
+  // an inbound event to the read-only channel. Until it exists, messages from
+  // this number arrive as ordinary WhatsApp tickets that the team can reply to —
+  // straight into a conversation the bot is running. The name is the conflict
+  // target, so re-running this never makes a second one.
+  const bot = await db
+    .insert(channels)
+    .values({
+      type: 'whatsapp_bot',
+      name: 'WhatsApp Customer Bot',
+      config: { phoneNumberId: '128318316834446' },
+    })
+    .onConflictDoNothing({ target: channels.name })
+    .returning({ id: channels.id });
+
+  console.log(bot.length ? '  customer bot channel: created' : '  customer bot channel: present');
 
   const counts = await db.execute<{ statuses: number }>(
     sql`select count(*)::int as statuses from ticket_statuses`,

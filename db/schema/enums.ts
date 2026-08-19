@@ -13,6 +13,12 @@ export const channelEnum = pgEnum('channel', [
   'instagram',
   'portal',
   'api',
+  // A WhatsApp number owned by another service — today the customer bot. Its
+  // own value rather than `whatsapp` with a flag, because the discriminator is
+  // what every read, filter and report already keys on, and because threading
+  // is per channel: sharing `whatsapp` would collapse a customer's bot
+  // transcript and their support ticket into one conversation.
+  'whatsapp_bot',
 ]);
 
 export const directionEnum = pgEnum('direction', ['inbound', 'outbound']);
