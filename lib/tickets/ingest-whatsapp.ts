@@ -319,6 +319,7 @@ export async function ingestWhatsAppEcho(echo: NormalisedEcho): Promise<WhatsApp
           whatsappType: echo.type,
           phoneNumberId: echo.phoneNumberId,
           echo: true,
+          ...(echo.creationType ? { creationType: echo.creationType } : {}),
           ...(echo.media
             ? {
                 media: {

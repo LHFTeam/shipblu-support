@@ -78,6 +78,16 @@ export type WhatsAppInboundMessage = {
 export type WhatsAppEcho = WhatsAppInboundMessage & {
   /** The customer the message went to. Absent on `messages`-array echoes. */
   to?: string;
+  /**
+   * How the message came to be — Meta sends e.g. `created_by_1p_bot`.
+   *
+   * Worth keeping on a mirrored number, where it is the only thing in the
+   * payload that says whether the bot generated this or a person in the other
+   * service typed it. Stored verbatim rather than interpreted: the value set is
+   * Meta's and undocumented enough that mapping it to our own words would be
+   * guessing.
+   */
+  message_creation_type?: string;
 };
 
 export type WhatsAppStatus = {
@@ -170,6 +180,8 @@ export type NormalisedEcho = {
   text: string;
   media: NormalisedMedia | null;
   replyToWamid: string | null;
+  /** Meta's own account of how the message was created, when it sends one. */
+  creationType: string | null;
   raw: Record<string, unknown>;
 };
 

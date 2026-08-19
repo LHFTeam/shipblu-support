@@ -377,6 +377,56 @@ describe('parseWebhook: echoes', () => {
     expect(parsed.messages).toHaveLength(0);
   });
 
+  it("parses Meta's own sample payload, field name and all", () => {
+    // Copied from a real delivery: Meta's "Send test" for the `message_echoes`
+    // subscription, which is what confirmed the field name and shape this was
+    // written against. Kept verbatim — placeholder numbers, 2017 timestamp and
+    // all — so a change to our parsing is checked against Meta's document
+    // rather than against our own idea of it.
+    const parsed = parseWebhook({
+      object: 'whatsapp_business_account',
+      entry: [
+        {
+          id: '0',
+          changes: [
+            {
+              field: 'message_echoes',
+              value: {
+                messaging_product: 'whatsapp',
+                metadata: {
+                  phone_number_id: '123456123',
+                  display_phone_number: '16505551111',
+                },
+                message_echoes: [
+                  {
+                    id: 'ABGGFlA5Fpa',
+                    to: '11234567890',
+                    from: '16315551181',
+                    text: { body: 'this is a text message' },
+                    type: 'text',
+                    timestamp: '1504902988',
+                    message_creation_type: 'created_by_1p_bot',
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(parsed.messages).toHaveLength(0);
+    expect(parsed.echoes).toHaveLength(1);
+    expect(parsed.echoes[0]).toMatchObject({
+      wamid: 'ABGGFlA5Fpa',
+      to: '11234567890',
+      from: '16315551181',
+      phoneNumberId: '123456123',
+      text: 'this is a text message',
+      creationType: 'created_by_1p_bot',
+    });
+  });
+
   it('keeps customer messages and echoes apart in one batch', () => {
     const parsed = parseWebhook(
       envelope({
