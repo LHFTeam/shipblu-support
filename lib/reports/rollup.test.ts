@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { slicesFor } from './rollup';
+import { emptyBucket, reconciles, slicesFor, type Slice } from './rollup';
 
 /**
  * `metrics_daily` stores four slices per day — the totals, and then by group, by
@@ -40,5 +40,46 @@ describe('slicesFor', () => {
       expect(slice.groupId).toBeNull();
       expect(slice.channel).toBeNull();
     }
+  });
+});
+
+/**
+ * The invariant the double-counted totals slice broke: every countable fact
+ * carries a channel, so the totals row must equal the sum of the channel rows.
+ */
+describe('reconciles', () => {
+  const slice = (channel: string | null, created: number): Slice => ({
+    groupId: null,
+    agentId: null,
+    channel,
+    bucket: { ...emptyBucket(), ticketsCreated: created },
+  });
+
+  it('accepts a day whose totals equal the sum of its channel rows', () => {
+    expect(reconciles([slice(null, 5), slice('email', 3), slice('whatsapp', 2)])).toBe(true);
+  });
+
+  it('rejects the inflated totals the old slicing produced', () => {
+    // Production's 2026-08-18: four tickets with neither group nor assignee
+    // counted three times each, one with an assignee counted twice — a totals
+    // row of 14 over five real tickets.
+    expect(reconciles([slice(null, 14), slice('email', 3), slice('whatsapp', 2)])).toBe(false);
+  });
+
+  it('accepts a day on which nothing happened', () => {
+    expect(reconciles([])).toBe(true);
+    expect(reconciles([slice(null, 0)])).toBe(true);
+  });
+
+  it('ignores the group and agent rows, which legitimately do not sum to the totals', () => {
+    // An unassigned ticket is in the totals and in no "by agent" row at all, so
+    // only the channel rows can be checked against the totals.
+    const withAgent: Slice = {
+      groupId: null,
+      agentId: 'agent-1',
+      channel: null,
+      bucket: { ...emptyBucket(), ticketsCreated: 1 },
+    };
+    expect(reconciles([slice(null, 5), slice('email', 5), withAgent])).toBe(true);
   });
 });

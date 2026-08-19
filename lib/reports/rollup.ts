@@ -1,5 +1,5 @@
 import { DateTime } from 'luxon';
-import { and, eq, gte, isNull, lt, notInArray } from 'drizzle-orm';
+import { and, eq, gte, isNull, lt, notInArray, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversationEvents, conversations, csatSurveys, metricsDaily } from '@/db/schema';
 import { businessMinutesBetween, type HoursConfig } from '@/lib/hours';
@@ -63,6 +63,39 @@ export async function reportingContext(): Promise<ReportingContext> {
 /** The team's current date, which is what "today" means everywhere below. */
 export function todayIn(zone: string): string {
   return DateTime.now().setZone(zone).toISODate()!;
+}
+
+/**
+ * The first day any figure could exist for, as the team's date.
+ *
+ * A survey or a resolution always belongs to a ticket that predates it, so the
+ * oldest ticket is a safe lower bound for the whole archive — which is what
+ * lets a backfill say "everything" without an operator having to know when the
+ * company started.
+ *
+ * Filtered to the channels the team actually works, for the same reason
+ * `computeDay` is: a read-only channel contributes nothing to any figure, so
+ * starting a rebuild at one would just walk empty days.
+ *
+ * Null when there is nothing countable at all, which is a real answer: there is
+ * nothing to rebuild.
+ */
+export async function earliestDay(zone: string): Promise<string | null> {
+  const rows = await db
+    .select({ first: sql<string | null>`min(${conversations.createdAt})` })
+    .from(conversations)
+    .where(
+      and(
+        isNull(conversations.deletedAt),
+        eq(conversations.isSpam, false),
+        notInArray(conversations.channel, readOnlyChannels()),
+      ),
+    );
+
+  const first = rows[0]?.first;
+  if (!first) return null;
+
+  return DateTime.fromJSDate(new Date(first), { zone }).toISODate();
 }
 
 export type Dimensions = { groupId: string | null; agentId: string | null; channel: string | null };
@@ -319,6 +352,34 @@ export async function computeDay(
     const [groupId, agentId, channel] = key.split('|');
     return { groupId: groupId || null, agentId: agentId || null, channel: channel || null, bucket };
   });
+}
+
+/**
+ * Whether a day's slices agree with each other.
+ *
+ * Every countable fact carries a channel — `conversations.channel` is NOT NULL —
+ * so each one lands in exactly one channel slice, and the totals row must equal
+ * the sum of them. That equality is precisely what the double-counted totals
+ * slice broke, and it is cheap enough to assert on every write.
+ *
+ * Checked rather than assumed because the failure is invisible in the output: a
+ * totals row that reads high looks like a busy day, not like a bug.
+ */
+export function reconciles(slices: Slice[]): boolean {
+  const totals = totalsOf(slices);
+  const byChannel = slices.filter((slice) => slice.channel !== null);
+
+  const sum = (pick: (bucket: Bucket) => number) =>
+    byChannel.reduce((running, slice) => running + pick(slice.bucket), 0);
+
+  return (
+    totals.ticketsCreated === sum((b) => b.ticketsCreated) &&
+    totals.ticketsResolved === sum((b) => b.ticketsResolved) &&
+    totals.ticketsReopened === sum((b) => b.ticketsReopened) &&
+    totals.firstResponseCount === sum((b) => b.firstResponseCount) &&
+    totals.resolutionCount === sum((b) => b.resolutionCount) &&
+    totals.csatResponseCount === sum((b) => b.csatResponseCount)
+  );
 }
 
 /** The all-dimensions-null slice, which is the one a dashboard leads with. */

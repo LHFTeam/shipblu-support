@@ -195,14 +195,20 @@ customer-facing table carries those two columns for exactly this reason.
   for the category in their own language — never the status's own name. That
   field has no per-locale variant, so setting it pins one language for every
   reader; leaving it null is usually the better answer.
-- **`metrics_daily` rows written before the totals-slice fix are inflated.** The
-  fix (`slicesFor`) stops new rows being wrong; it does not repair the ones
-  already stored, and the nightly job only recomputes the last three days. Any
-  older day still reads high — a totals row above the sum of its own
-  breakdowns. Recompute per day with
-  `npm run job -- rollup_metrics` against a `{"day":"YYYY-MM-DD"}` payload. Not
-  urgent while nothing is configured and the archive is nearly empty, but it has
-  to happen before anyone trusts a figure older than three days.
+- ~~`metrics_daily` rows written before the totals-slice fix are inflated.~~
+  Repaired. `rollup_metrics` now takes a range (`{"from","to"}`, `{"days":N}`)
+  and rebuilds those days from the source tables, and every write asserts that
+  the totals row equals the sum of its channel rows — the invariant the bug
+  broke — failing the run if it does not. To rebuild history after any future
+  change to the figures, enqueue a job row rather than waiting for the nightly:
+
+  ```sql
+  insert into jobs (type, payload) values ('rollup_metrics', '{"days": 90}');
+  ```
+
+  The running worker claims it within seconds. `npm run job -- rollup_metrics`
+  cannot carry a payload (`run-job.ts` passes `{}`), so the queue is the route
+  for anything other than the default three-day window.
 
 ---
 
