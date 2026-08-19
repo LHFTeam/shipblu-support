@@ -2,7 +2,8 @@ import { sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { whatsappTemplates } from '@/db/schema';
 import { env } from '@/lib/env';
-import { listTemplates } from '@/lib/whatsapp/client';
+import { listTemplates, WhatsAppApiError } from '@/lib/whatsapp/client';
+import { explainAuthError } from '@/lib/whatsapp/errors';
 
 /**
  * Hourly sync of the WABA's approved templates.
@@ -26,7 +27,19 @@ export async function syncWhatsAppTemplates(): Promise<void> {
     return;
   }
 
-  const templates = await listTemplates();
+  let templates;
+  try {
+    templates = await listTemplates();
+  } catch (error) {
+    // Still fails the run — an expired credential is a real problem and a green
+    // cron would hide it. What changes is that the log names the remedy instead
+    // of only reporting Meta's "session has expired", which says what happened
+    // but not what to do about it.
+    if (error instanceof WhatsAppApiError) {
+      console.error(`[sync_whatsapp_templates] ${explainAuthError(error.code, error.message)}`);
+    }
+    throw error;
+  }
 
   if (templates.length === 0) {
     // Deliberately not treated as "delete everything": an API hiccup returning
