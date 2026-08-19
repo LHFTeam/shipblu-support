@@ -2,14 +2,16 @@
 
 import { useActionState, useState } from 'react';
 import { useFormStatus } from 'react-dom';
-import { Button, ErrorText, Input, Label, Select } from '@/components/ui';
+import { Button, ErrorText, Field, Input, Select } from '@/components/ui';
 import { createGroup, saveChannel, type AdminState } from '../actions';
 
 const INITIAL: AdminState = { error: null };
 
+type ChannelType = 'email' | 'whatsapp' | 'webchat' | 'facebook' | 'instagram';
+
 export function ChannelForm({ groups }: { groups: { id: string; name: string }[] }) {
   const [state, action] = useActionState(saveChannel, INITIAL);
-  const [type, setType] = useState<'email' | 'whatsapp' | 'webchat'>('email');
+  const [type, setType] = useState<ChannelType>('email');
 
   return (
     <form
@@ -17,46 +19,46 @@ export function ChannelForm({ groups }: { groups: { id: string; name: string }[]
       className="flex flex-col gap-3 rounded-lg border border-[var(--border)] p-4"
     >
       <div className="flex gap-3">
-        <div className="w-40">
-          <Label htmlFor="type">Type</Label>
-          <Select
-            id="type"
-            name="type"
-            value={type}
-            onChange={(e) => setType(e.target.value as 'email' | 'whatsapp' | 'webchat')}
-          >
+        <Field label="Type" className="w-40">
+          <Select name="type" value={type} onChange={(e) => setType(e.target.value as ChannelType)}>
             <option value="email">Email</option>
             <option value="whatsapp">WhatsApp</option>
             <option value="webchat">Web chat</option>
+            <option value="facebook">Facebook</option>
+            <option value="instagram">Instagram</option>
           </Select>
-        </div>
+        </Field>
 
-        <div className="flex-1">
-          <Label htmlFor="name">Name</Label>
-          <Input id="name" name="name" placeholder="Support mailbox" required />
-        </div>
+        <Field label="Name" className="flex-1">
+          <Input name="name" placeholder="Support mailbox" required />
+        </Field>
 
         <div className="flex-1">
           {type === 'webchat' ? (
-            <p className="pt-6 text-xs opacity-50">
+            <p className="pt-6 text-xs text-[var(--muted-foreground)]">
               The widget needs no address — only a default group.
             </p>
           ) : type === 'whatsapp' ? (
-            <>
-              <Label htmlFor="phoneNumberId">Phone number ID</Label>
-              <Input id="phoneNumberId" name="phoneNumberId" placeholder="1234567890" />
-            </>
+            <Field label="Phone number ID">
+              <Input name="phoneNumberId" placeholder="1234567890" />
+            </Field>
+          ) : type === 'facebook' || type === 'instagram' ? (
+            // The page and account ids live in the environment, because they are
+            // paired with a token that must never be in the database. This row
+            // is routing only: which group a message from here lands in.
+            <p className="pt-6 text-xs text-[var(--muted-foreground)]">
+              Configured by {type === 'facebook' ? 'FACEBOOK_PAGE_ID' : 'INSTAGRAM_ACCOUNT_ID'} in
+              the environment. This row only sets the default group.
+            </p>
           ) : (
-            <>
-              <Label htmlFor="address">Address</Label>
-              <Input id="address" name="address" type="email" placeholder="support@shipblu.com" />
-            </>
+            <Field label="Address">
+              <Input name="address" type="email" placeholder="support@shipblu.com" />
+            </Field>
           )}
         </div>
 
-        <div className="w-40">
-          <Label htmlFor="defaultGroupId">Default group</Label>
-          <Select id="defaultGroupId" name="defaultGroupId" defaultValue="">
+        <Field label="Default group" className="w-40">
+          <Select name="defaultGroupId" defaultValue="">
             <option value="">None</option>
             {groups.map((group) => (
               <option key={group.id} value={group.id}>
@@ -64,7 +66,7 @@ export function ChannelForm({ groups }: { groups: { id: string; name: string }[]
               </option>
             ))}
           </Select>
-        </div>
+        </Field>
       </div>
 
       <ErrorText>{state.error}</ErrorText>
@@ -81,10 +83,9 @@ export function GroupForm() {
       action={action}
       className="flex items-end gap-3 rounded-lg border border-[var(--border)] p-4"
     >
-      <div className="flex-1">
-        <Label htmlFor="groupName">Group name</Label>
-        <Input id="groupName" name="name" placeholder="Deliveries" required />
-      </div>
+      <Field label="Group name" className="flex-1">
+        <Input name="name" placeholder="Deliveries" required />
+      </Field>
       <SubmitButton idle="Add group" busy="Saving…" />
       <ErrorText>{state.error}</ErrorText>
     </form>
