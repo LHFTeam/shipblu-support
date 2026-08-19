@@ -1,13 +1,44 @@
 'use client';
 
 import { useState } from 'react';
-import { Field, Input } from '@/components/ui';
+import { Field, Input, Select } from '@/components/ui';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
 import { deleteGroup, saveGroup } from '../settings-actions';
 
-type Group = { id: string; name: string; description: string | null };
+type Group = {
+  id: string;
+  name: string;
+  description: string | null;
+  businessHoursId: string | null;
+};
 
-export function NewGroup() {
+type Choice = { value: string; label: string };
+
+/**
+ * The hours picker is the group's whole override: a schedule carries a timezone,
+ * the operating days and its own holidays, so "this team works different days"
+ * and "this team takes different holidays" are one choice rather than three
+ * settings that can disagree.
+ */
+function HoursField({ group, schedules }: { group?: Group; schedules: Choice[] }) {
+  return (
+    <Field
+      label="Business hours"
+      hint="The team's own operating days, hours and holidays. Leave on the default and this group works the company schedule."
+    >
+      <Select name="businessHoursId" defaultValue={group?.businessHoursId ?? ''}>
+        <option value="">Default schedule</option>
+        {schedules.map((schedule) => (
+          <option key={schedule.value} value={schedule.value}>
+            {schedule.label}
+          </option>
+        ))}
+      </Select>
+    </Field>
+  );
+}
+
+export function NewGroup({ schedules }: { schedules: Choice[] }) {
   return (
     <Disclosure label="New group">
       {(close) => (
@@ -18,13 +49,22 @@ export function NewGroup() {
           <Field label="Description" hint="Shown to admins only.">
             <Input name="description" placeholder="Handles delivery and tracking questions" />
           </Field>
+          <HoursField schedules={schedules} />
         </EditorForm>
       )}
     </Disclosure>
   );
 }
 
-export function GroupEditor({ group, deleteOnly = false }: { group: Group; deleteOnly?: boolean }) {
+export function GroupEditor({
+  group,
+  schedules,
+  deleteOnly = false,
+}: {
+  group: Group;
+  schedules: Choice[];
+  deleteOnly?: boolean;
+}) {
   const [editing, setEditing] = useState(false);
 
   if (deleteOnly) return <DangerAction action={deleteGroup} id={group.id} />;
@@ -45,6 +85,7 @@ export function GroupEditor({ group, deleteOnly = false }: { group: Group; delet
       <input type="hidden" name="id" value={group.id} />
       <Input name="name" defaultValue={group.name} required />
       <Input name="description" defaultValue={group.description ?? ''} placeholder="Description" />
+      <HoursField group={group} schedules={schedules} />
     </EditorForm>
   );
 }

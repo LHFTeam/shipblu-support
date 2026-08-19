@@ -1,21 +1,22 @@
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
-  businessHours,
   conversationEvents,
   conversations,
   contacts,
-  holidays,
   slaPolicies,
   ticketStatuses,
 } from '@/db/schema';
 import type { HoursConfig } from '@/lib/hours';
+import { loadHoursCatalog } from '@/lib/hours/catalog';
+import { ticketHours, type HoursCatalog } from '@/lib/hours/resolve';
 import { conversationFacts } from '@/lib/rules/facts';
 import {
   dueAt,
   dueDatesOnCreate,
   nextResponseDueAt,
   selectPolicy,
+  targetFor,
   type LoadedPolicy,
   type Priority,
 } from './policy';
@@ -46,50 +47,29 @@ export async function loadPolicies(): Promise<LoadedPolicy[]> {
       escalations: slaPolicies.escalations,
       position: slaPolicies.position,
       isDefault: slaPolicies.isDefault,
+      hoursSource: slaPolicies.hoursSource,
       businessHoursId: slaPolicies.businessHoursId,
-      timezone: businessHours.timezone,
-      schedule: businessHours.schedule,
     })
     .from(slaPolicies)
-    .leftJoin(businessHours, eq(businessHours.id, slaPolicies.businessHoursId))
     .where(eq(slaPolicies.isActive, true))
     .orderBy(slaPolicies.position);
 
-  if (rows.length === 0) return [];
+  return rows;
+}
 
-  // Holidays for every schedule in one query rather than one per policy: half a
-  // dozen policies commonly share a single calendar.
-  const scheduleIds = [...new Set(rows.map((row) => row.businessHoursId).filter(Boolean))];
-  const holidayRows = scheduleIds.length
-    ? await db
-        .select({
-          businessHoursId: holidays.businessHoursId,
-          date: holidays.date,
-          name: holidays.name,
-        })
-        .from(holidays)
-        .where(inArray(holidays.businessHoursId, scheduleIds as string[]))
-    : [];
-
-  return rows.map((row) => ({
-    id: row.id,
-    name: row.name,
-    conditions: row.conditions,
-    targets: row.targets,
-    escalations: row.escalations,
-    position: row.position,
-    isDefault: row.isDefault,
-    hours:
-      row.businessHoursId && row.schedule && row.timezone
-        ? ({
-            schedule: row.schedule,
-            timezone: row.timezone,
-            holidays: holidayRows
-              .filter((holiday) => holiday.businessHoursId === row.businessHoursId)
-              .map((holiday) => ({ date: holiday.date, name: holiday.name })),
-          } satisfies HoursConfig)
-        : null,
-  }));
+/**
+ * The schedule one ticket's clocks run on.
+ *
+ * The group override lives here rather than on the policy because it is a fact
+ * about who handles the ticket: move a ticket to a team that works Saturdays and
+ * Saturday starts counting. `lib/hours/resolve.ts` owns the precedence.
+ */
+export function hoursForTicket(
+  catalog: HoursCatalog,
+  groupId: string | null,
+  policy: LoadedPolicy | null,
+): HoursConfig | null {
+  return ticketHours(catalog, groupId, policy);
 }
 
 type ConversationRow = {
@@ -140,10 +120,12 @@ export async function applySlaOnCreate(conversationId: string): Promise<void> {
     const policy = selectPolicy(policies, conversationFacts(row));
     if (!policy) return;
 
+    const catalog = await loadHoursCatalog();
     const due = dueDatesOnCreate(
       policy,
       row.conversation.priority as Priority,
       row.conversation.createdAt,
+      hoursForTicket(catalog, row.conversation.groupId, policy),
     );
 
     await db
@@ -197,10 +179,17 @@ export async function onCustomerReply(
     const policy = await policyFor(row.conversation.slaPolicyId);
     if (!policy) return;
 
+    const catalog = await loadHoursCatalog();
+
     await db
       .update(conversations)
       .set({
-        nextResponseDueAt: nextResponseDueAt(policy, row.conversation.priority as Priority, at),
+        nextResponseDueAt: nextResponseDueAt(
+          policy,
+          row.conversation.priority as Priority,
+          at,
+          hoursForTicket(catalog, row.conversation.groupId, policy),
+        ),
       })
       .where(eq(conversations.id, conversationId));
   } catch (error) {
@@ -255,6 +244,8 @@ export async function onStatusChanged(
     if (!row) return;
 
     const policy = await policyFor(row.conversation.slaPolicyId);
+    const catalog = await loadHoursCatalog();
+    const hours = hoursForTicket(catalog, row.conversation.groupId, policy);
     const pausedMinutes = Math.max(0, Math.round((at.getTime() - pausedSince.getTime()) / 60_000));
 
     // Push each live clock forward by the time the ticket spent parked. Clocks
@@ -264,8 +255,7 @@ export async function onStatusChanged(
     const conversation = row.conversation;
     const shift = (due: Date | null, satisfied: Date | null): Date | null => {
       if (!due || satisfied) return due;
-      if (!policy) return new Date(due.getTime() + pausedMinutes * 60_000);
-      return dueAt(policy, pausedMinutes, due);
+      return dueAt(hours, pausedMinutes, due);
     };
 
     await db
@@ -286,6 +276,174 @@ export async function onStatusChanged(
   } catch (error) {
     console.error(`[sla] could not pause or resume the clock on ${conversationId}`, error);
   }
+}
+
+/**
+ * The ticket moved to another group: its clocks move with it.
+ *
+ * Groups can keep their own operating days, hours and holidays, so the same
+ * four-hour target lands on a different instant in a team that works Saturdays
+ * than in one that does not. Leaving the due date where it was would mean a
+ * ticket handed to the weekend team is still due on a day that team is shut,
+ * while reporting — which measures working time against the ticket's *current*
+ * group — would already be counting the new calendar. Two answers to one
+ * question is worse than either of them.
+ *
+ * Only the clocks that are still owed are recomputed, from the same anchors they
+ * were first set from, carrying forward whatever time the ticket has already
+ * spent parked on a status that stops the clock. The policy itself is not
+ * re-selected: which targets a ticket is held to is what an agent was told when
+ * it arrived, and quietly retargeting a ticket because it was routed elsewhere
+ * is a different feature from honouring a team's calendar.
+ *
+ * Best-effort like the rest of this file, and a no-op when nothing would change
+ * — a policy pinned to one schedule or counting round the clock resolves to the
+ * same hours in every group.
+ */
+export async function onGroupChanged(conversationId: string): Promise<void> {
+  try {
+    const row = await loadConversation(conversationId);
+    if (!row) return;
+
+    const conversation = row.conversation;
+
+    // Nothing owed, nothing to move.
+    if (
+      !conversation.firstResponseDueAt &&
+      !conversation.nextResponseDueAt &&
+      !conversation.resolutionDueAt
+    ) {
+      return;
+    }
+
+    const policy = await policyFor(conversation.slaPolicyId);
+    if (!policy) return;
+
+    const catalog = await loadHoursCatalog();
+    const hours = hoursForTicket(catalog, conversation.groupId, policy);
+    const paused = await pausedMinutesTotal(conversationId);
+    const priority = conversation.priority as Priority;
+    const target = targetFor(policy, priority);
+
+    /** The target plus the time already excused, in the new group's hours. */
+    const recompute = (
+      minutes: number | null,
+      from: Date | null,
+      satisfied: Date | null,
+      existing: Date | null,
+    ): Date | null => {
+      if (satisfied || !existing) return existing;
+      if (minutes === null || !from) return existing;
+      return dueAt(hours, minutes + paused, from);
+    };
+
+    const firstResponse = recompute(
+      target.firstResponseMins,
+      conversation.createdAt,
+      conversation.firstRespondedAt,
+      conversation.firstResponseDueAt,
+    );
+    const resolution = recompute(
+      target.resolutionMins,
+      conversation.createdAt,
+      conversation.resolvedAt,
+      conversation.resolutionDueAt,
+    );
+    const nextResponse = recompute(
+      target.nextResponseMins ?? target.firstResponseMins,
+      conversation.lastCustomerMessageAt ?? conversation.createdAt,
+      null,
+      conversation.nextResponseDueAt,
+    );
+
+    const moved =
+      !sameInstant(firstResponse, conversation.firstResponseDueAt) ||
+      !sameInstant(resolution, conversation.resolutionDueAt) ||
+      !sameInstant(nextResponse, conversation.nextResponseDueAt);
+
+    if (!moved) return;
+
+    await db
+      .update(conversations)
+      .set({
+        firstResponseDueAt: firstResponse,
+        nextResponseDueAt: nextResponse,
+        resolutionDueAt: resolution,
+      })
+      .where(eq(conversations.id, conversationId));
+
+    // On the timeline for the same reason a pause is: an agent who sees a due
+    // date jump is owed the reason, and "the new group keeps different hours" is
+    // not a guess anyone should have to make.
+    await db.insert(conversationEvents).values({
+      conversationId,
+      type: 'sla_recalculated',
+      actorLabel: 'sla',
+      data: {
+        reason: 'group_hours',
+        timezone: hours?.timezone ?? null,
+        firstResponseDueAt: firstResponse?.toISOString() ?? null,
+        nextResponseDueAt: nextResponse?.toISOString() ?? null,
+        resolutionDueAt: resolution?.toISOString() ?? null,
+      },
+    });
+  } catch (error) {
+    console.error(`[sla] could not move the clocks on ${conversationId}`, error);
+  }
+}
+
+function sameInstant(a: Date | null, b: Date | null): boolean {
+  if (!a || !b) return a === b;
+  return a.getTime() === b.getTime();
+}
+
+/**
+ * Every minute this ticket has spent on a clock-stopping status.
+ *
+ * Read back off the timeline rather than stored on the conversation: the pause
+ * events are already the record, and a recomputed due date that forgot them
+ * would hand back time the team was excused.
+ */
+async function pausedMinutesTotal(conversationId: string, at: Date = new Date()): Promise<number> {
+  const rows = await db
+    .select({
+      type: conversationEvents.type,
+      createdAt: conversationEvents.createdAt,
+      data: conversationEvents.data,
+    })
+    .from(conversationEvents)
+    .where(
+      and(
+        eq(conversationEvents.conversationId, conversationId),
+        inArray(conversationEvents.type, ['sla_paused', 'sla_resumed']),
+      ),
+    )
+    .orderBy(conversationEvents.createdAt);
+
+  let total = 0;
+  let openedAt: Date | null = null;
+
+  for (const row of rows) {
+    if (row.type === 'sla_paused') {
+      openedAt ??= row.createdAt;
+      continue;
+    }
+
+    const recorded = (row.data as { pausedMinutes?: unknown } | null)?.pausedMinutes;
+    if (typeof recorded === 'number' && Number.isFinite(recorded)) total += Math.max(0, recorded);
+    else if (openedAt) total += minutesBetween(openedAt, row.createdAt);
+    openedAt = null;
+  }
+
+  // Still parked: count the pause up to now, which is the same time the resume
+  // will credit when it happens.
+  if (openedAt) total += minutesBetween(openedAt, at);
+
+  return total;
+}
+
+function minutesBetween(from: Date, to: Date): number {
+  return Math.max(0, Math.round((to.getTime() - from.getTime()) / 60_000));
 }
 
 /** When the current pause began, or null if the clock is running. */
