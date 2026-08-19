@@ -106,15 +106,15 @@ export function ArticleEditor({
       </div>
 
       {/*
-        Only 'public' articles are served today — there is no customer sign-in,
-        so 'logged_in' cannot be evaluated and is treated as not-public. Saying
-        so here stops someone marking an article 'logged_in' and expecting
-        customers to see it.
+        Only 'public' articles are served today. Customers can sign in now, but
+        the public queries do not yet take the viewer into account, so
+        'logged_in' still evaluates to not-public. Saying so here stops someone
+        marking an article 'logged_in' and expecting customers to see it.
       */}
       <p className="-mt-2 text-xs opacity-50">
         Only public articles appear on the help centre. Agents-only and signed-in articles are
-        stored and searchable here, but are not served publicly while the customer portal is
-        unbuilt.
+        stored and searchable here, but are not served to customers yet — signed-in visibility is
+        not wired to the portal sign-in.
       </p>
 
       <div>

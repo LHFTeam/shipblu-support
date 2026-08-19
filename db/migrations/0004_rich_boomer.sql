@@ -1,1 +1,0 @@
-CREATE UNIQUE INDEX "channels_name_idx" ON "channels" USING btree ("name");

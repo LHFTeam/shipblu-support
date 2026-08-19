@@ -3,11 +3,12 @@
 A self-hosted replacement for Freshdesk + Freshchat: email ticketing, WhatsApp,
 Facebook and Instagram, a web chat widget, and a bilingual knowledge base.
 
-**Status: phases 0–4 complete.** Foundation and job queue; email ticketing; WhatsApp;
-the agent console; the bilingual knowledge base, Freshdesk import and chat widget; SLA
-policies, automation rules, CSAT and reporting; and Facebook and Instagram — direct
-messages and public comments — with admin screens for every piece of configuration and
-a live dashboard at `/admin/dashboard`.
+**Status: phases 0–4 complete, plus the customer portal.** Foundation and job queue;
+email ticketing; WhatsApp; the agent console; the bilingual knowledge base, Freshdesk
+import and chat widget; SLA policies, automation rules, CSAT and reporting; Facebook and
+Instagram — direct messages and public comments — with admin screens for every piece of
+configuration and a live dashboard at `/admin/dashboard`; and a signed-in customer portal
+behind one sign-in shared with the console.
 
 ## Architecture
 
@@ -41,7 +42,22 @@ Design decisions worth knowing before changing things:
   pooler (prepared statements disabled — the pooler multiplexes backends). `LISTEN`
   needs a _session_ connection, which `sessionSql()` opens separately.
 - **Server-side sessions, not JWTs.** Deactivating an agent takes effect on their next
-  request. Only a SHA-256 of each token is stored.
+  request. Only a SHA-256 of each token is stored. Customers get their own table and
+  their own cookie, so a colleague who also emails support can hold both at once and
+  neither population's session can be mistaken for the other's.
+- **One sign-in for customers and agents.** The Sign in button on the help centre and the
+  console's own `/login` run the same check: agents are looked up first and never fall
+  through, so a staff address that is also a contact always reaches the console. Nobody is
+  asked to say which kind of account they have.
+- **Portal credentials hang off the verified email identity, not the contact.** A password
+  proves control of one address, which is exactly what `contact_identities` already
+  modelled — and its `is_verified` flag is what makes the password inert until the customer
+  opens the link we emailed. Anyone can type anyone's address into the registration form;
+  that is why registering against an already-verified address sends a _reset_ link rather
+  than replacing the password.
+- **The front door is the Arabic help centre.** `/` lands on `/ar` on every hostname. The
+  console used to own the bare domain, which made the public site something you had to
+  already know the URL of.
 - **One condition language for SLA policies and automation rules.** Both store the same
   `conditions` jsonb and go through `lib/rules`, so a condition written for one reads the
   same in the other. A malformed condition never matches, so a corrupt policy cannot
@@ -137,6 +153,38 @@ config and are paired with `pg_trgm` indexes for fuzzy and substring matching. Q
 those with `word_similarity` (`'query' <% column`) or `ILIKE` — **not** the plain `%`
 operator, which compares whole strings and will match nothing for short queries against
 long text.
+
+## The customer portal
+
+A customer who has ever emailed or messaged support already exists in `contacts` and
+`contact_identities`. Registering does not create them — it attaches a password to the
+identity they already have, which is why their existing tickets are there the first time
+they sign in.
+
+```
+/ar                        help centre home (the bare domain redirects here)
+/ar/account/login          one form: agents go to /inbox, customers to /ar/portal
+/ar/account/register       sets a pending password, emails a 24-hour confirmation link
+/ar/account/forgot         emails a one-hour, single-use reset link
+/ar/portal                 the customer's tickets, across every channel
+/ar/portal/t/<number>      the thread, and a reply box
+/ar/portal/new             opens a ticket on the `portal` channel
+```
+
+A portal reply is recorded as an **inbound** message whatever channel the ticket arrived
+on: the customer said it, so it reopens a resolved ticket and moves the SLA clock exactly
+as an emailed reply would. Agents still answer over the ticket's own channel.
+
+Private notes are excluded in the query rather than filtered in the renderer, and every
+portal query is scoped by the contact id from the session cookie — a ticket number is
+guessable, so the number is never looked up on its own.
+
+Verification and reset links are sent by the `send_notification_email` job, which is the
+only outbound mail in the system that does not belong to a conversation.
+
+`logged_in` and `selected_companies` knowledge base articles are still not served: the
+public KB queries do not yet take the viewer into account, and an unevaluated visibility
+rule is treated as deny.
 
 ## Deployment
 

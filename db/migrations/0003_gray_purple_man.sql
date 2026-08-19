@@ -1,1 +1,0 @@
-ALTER TYPE "public"."channel" ADD VALUE 'whatsapp_bot';

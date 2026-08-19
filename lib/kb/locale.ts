@@ -9,7 +9,14 @@
 export const LOCALES = ['en', 'ar'] as const;
 export type Locale = (typeof LOCALES)[number];
 
-export const DEFAULT_LOCALE: Locale = 'en';
+/**
+ * Arabic. ShipBlu's customers are Egyptian merchants and their recipients, and
+ * the overwhelming majority of them read Arabic — so the front door of the help
+ * centre opens in Arabic, and English is one click away rather than the other
+ * way round. Every URL keeps its explicit locale segment; this only decides
+ * where an unprefixed request lands.
+ */
+export const DEFAULT_LOCALE: Locale = 'ar';
 
 export function isLocale(value: string | undefined): value is Locale {
   return LOCALES.includes(value as Locale);
@@ -53,6 +60,75 @@ const STRINGS = {
     csatThanks: 'Thank you.',
     csatRecorded: 'Your feedback has been passed to the team.',
     csatAlreadyAnswered: 'You have already answered this survey.',
+
+    // --- Sign-in and the customer portal ---------------------------------
+    signIn: 'Sign in',
+    signOut: 'Sign out',
+    signingIn: 'Signing in…',
+    signInTitle: 'Sign in',
+    signInIntro: 'Customers and ShipBlu staff sign in here with the same form.',
+    email: 'Email',
+    password: 'Password',
+    name: 'Name',
+    forgotPassword: 'Forgotten your password?',
+    createAccount: 'Create an account',
+    createAccountTitle: 'Create an account',
+    createAccountIntro:
+      'Use the email address you contact ShipBlu support from, so your existing tickets appear.',
+    noAccount: 'New here?',
+    haveAccount: 'Already have an account?',
+    submitting: 'Please wait…',
+
+    checkYourEmail: 'Check your email',
+    verificationSent:
+      'If that address can be registered, we have sent it a link to confirm it. The link is valid for 24 hours.',
+    verifySuccessTitle: 'Your email is confirmed',
+    verifySuccess: 'You can sign in now.',
+    verifyInvalidTitle: 'That link is no longer valid',
+    verifyInvalid:
+      'Confirmation links expire after 24 hours. Ask for a new one by signing up again.',
+
+    forgotTitle: 'Reset your password',
+    forgotIntro: 'We will email you a link to set a new password.',
+    resetSent:
+      'If that address has an account, we have sent it a link to set a new password. The link is valid for one hour.',
+    resetTitle: 'Choose a new password',
+    resetInvalidTitle: 'That link is no longer valid',
+    resetInvalid: 'Password links expire after one hour. Ask for a new one.',
+    resetSuccess: 'Your password has been changed. Sign in with it now.',
+    newPassword: 'New password',
+    savePassword: 'Save password',
+
+    myTickets: 'My tickets',
+    myTicketsIntro: 'Everything you have raised with ShipBlu support, on any channel.',
+    noTickets: 'You have not contacted support yet.',
+    ticketStatus: 'Status',
+    ticketUpdated: 'Updated',
+    openTicket: 'Contact support',
+    newTicketTitle: 'Contact support',
+    newTicketIntro: 'Tell us what you need and we will reply by email and here.',
+    subject: 'Subject',
+    message: 'Message',
+    createTicket: 'Send',
+    ticketCreated: 'Thanks — your request is with the team.',
+    backToTickets: 'Back to my tickets',
+    replyPlaceholder: 'Add to this conversation…',
+    reply: 'Reply',
+    replySent: 'Your reply has been added.',
+    you: 'You',
+    supportTeam: 'ShipBlu Support',
+    searchKb: 'Search the help centre first — most answers are already there.',
+
+    errorCredentials: 'Email or password is incorrect',
+    errorMissingFields: 'Fill in every field',
+    errorThrottled: 'Too many attempts. Try again in a few minutes.',
+    errorUnverified: 'Confirm your email address first — check your inbox for the link we sent.',
+    errorPasswordShort: 'Password must be at least 12 characters',
+    errorPasswordLong: 'Password must be at most 200 characters',
+    errorInvalidEmail: 'Enter a valid email address',
+    errorSubjectRequired: 'Give your request a subject',
+    errorMessageRequired: 'Write your message',
+    errorGeneric: 'Something went wrong. Try again.',
   },
   ar: {
     title: 'مركز مساعدة شيب بلو',
@@ -81,6 +157,75 @@ const STRINGS = {
     csatThanks: 'شكرًا لك.',
     csatRecorded: 'تم إرسال رأيك إلى الفريق.',
     csatAlreadyAnswered: 'لقد أجبت على هذا الاستطلاع بالفعل.',
+
+    // --- Sign-in and the customer portal ---------------------------------
+    signIn: 'تسجيل الدخول',
+    signOut: 'تسجيل الخروج',
+    signingIn: 'جارٍ تسجيل الدخول…',
+    signInTitle: 'تسجيل الدخول',
+    signInIntro: 'يسجّل العملاء وفريق شيب بلو الدخول من هنا بالنموذج نفسه.',
+    email: 'البريد الإلكتروني',
+    password: 'كلمة المرور',
+    name: 'الاسم',
+    forgotPassword: 'نسيت كلمة المرور؟',
+    createAccount: 'إنشاء حساب',
+    createAccountTitle: 'إنشاء حساب',
+    createAccountIntro:
+      'استخدم البريد الإلكتروني الذي تراسل منه دعم شيب بلو، حتى تظهر تذاكرك السابقة.',
+    noAccount: 'أول مرة هنا؟',
+    haveAccount: 'لديك حساب بالفعل؟',
+    submitting: 'برجاء الانتظار…',
+
+    checkYourEmail: 'راجع بريدك الإلكتروني',
+    verificationSent:
+      'إذا كان هذا البريد صالحًا للتسجيل فقد أرسلنا إليه رابطًا لتأكيده. الرابط صالح لمدة ٢٤ ساعة.',
+    verifySuccessTitle: 'تم تأكيد بريدك الإلكتروني',
+    verifySuccess: 'يمكنك تسجيل الدخول الآن.',
+    verifyInvalidTitle: 'هذا الرابط لم يعد صالحًا',
+    verifyInvalid:
+      'تنتهي صلاحية روابط التأكيد بعد ٢٤ ساعة. اطلب رابطًا جديدًا بإنشاء الحساب مرة أخرى.',
+
+    forgotTitle: 'إعادة تعيين كلمة المرور',
+    forgotIntro: 'سنرسل إليك رابطًا لتعيين كلمة مرور جديدة.',
+    resetSent:
+      'إذا كان لهذا البريد حساب فقد أرسلنا إليه رابطًا لتعيين كلمة مرور جديدة. الرابط صالح لمدة ساعة.',
+    resetTitle: 'اختر كلمة مرور جديدة',
+    resetInvalidTitle: 'هذا الرابط لم يعد صالحًا',
+    resetInvalid: 'تنتهي صلاحية روابط كلمة المرور بعد ساعة. اطلب رابطًا جديدًا.',
+    resetSuccess: 'تم تغيير كلمة المرور. سجّل الدخول بها الآن.',
+    newPassword: 'كلمة المرور الجديدة',
+    savePassword: 'حفظ كلمة المرور',
+
+    myTickets: 'تذاكري',
+    myTicketsIntro: 'كل ما راسلت به دعم شيب بلو، من أي قناة.',
+    noTickets: 'لم تتواصل مع الدعم بعد.',
+    ticketStatus: 'الحالة',
+    ticketUpdated: 'آخر تحديث',
+    openTicket: 'تواصل مع الدعم',
+    newTicketTitle: 'تواصل مع الدعم',
+    newTicketIntro: 'اكتب لنا ما تحتاجه وسنرد عليك بالبريد الإلكتروني وهنا.',
+    subject: 'الموضوع',
+    message: 'الرسالة',
+    createTicket: 'إرسال',
+    ticketCreated: 'شكرًا لك — طلبك الآن لدى الفريق.',
+    backToTickets: 'العودة إلى تذاكري',
+    replyPlaceholder: 'أضف إلى هذه المحادثة…',
+    reply: 'رد',
+    replySent: 'تمت إضافة ردك.',
+    you: 'أنت',
+    supportTeam: 'دعم شيب بلو',
+    searchKb: 'ابحث في مركز المساعدة أولًا — أغلب الإجابات موجودة بالفعل.',
+
+    errorCredentials: 'البريد الإلكتروني أو كلمة المرور غير صحيحة',
+    errorMissingFields: 'أكمل جميع الحقول',
+    errorThrottled: 'محاولات كثيرة. حاول مرة أخرى بعد دقائق.',
+    errorUnverified: 'أكّد بريدك الإلكتروني أولًا — ستجد الرابط في بريدك.',
+    errorPasswordShort: 'يجب ألا تقل كلمة المرور عن ١٢ حرفًا',
+    errorPasswordLong: 'يجب ألا تزيد كلمة المرور عن ٢٠٠ حرف',
+    errorInvalidEmail: 'أدخل بريدًا إلكترونيًا صحيحًا',
+    errorSubjectRequired: 'اكتب موضوعًا لطلبك',
+    errorMessageRequired: 'اكتب رسالتك',
+    errorGeneric: 'حدث خطأ ما. حاول مرة أخرى.',
   },
 } as const;
 

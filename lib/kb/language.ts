@@ -1,4 +1,4 @@
-import { DEFAULT_LOCALE, type Locale } from './locale';
+import type { Locale } from './locale';
 
 /**
  * Which language a piece of imported content is written in.
@@ -54,18 +54,29 @@ export function arabicRatio(text: string): number {
 }
 
 /**
+ * What an unreadable sample is filed as.
+ *
+ * Pinned to English rather than following DEFAULT_LOCALE. The site's default
+ * locale answers "which language does the front door open in", which is a
+ * product decision that has since changed; this answers "what do we call a
+ * Freshdesk article whose title is just a reference number", and re-filing
+ * years of imported content is not something a landing-page change should do.
+ */
+const UNREADABLE_FALLBACK: Locale = 'en';
+
+/**
  * The locale for a piece of content, from one or more samples.
  *
  * Samples are concatenated rather than voted on, so a short Arabic title with a
  * long Arabic body is judged on both. Text with no letters at all — a title
- * that is just a reference number — falls back to the default locale, which is
- * the only honest answer when there is nothing to read.
+ * that is just a reference number — falls back to English, which is the only
+ * honest answer when there is nothing to read.
  */
 export function detectLocale(...samples: (string | null | undefined)[]): Locale {
   const combined = samples.filter(Boolean).join(' ');
   const { arabic, latin } = countLetters(combined);
 
-  if (arabic + latin === 0) return DEFAULT_LOCALE;
+  if (arabic + latin === 0) return UNREADABLE_FALLBACK;
   return arabic / (arabic + latin) >= ARABIC_THRESHOLD ? 'ar' : 'en';
 }
 
