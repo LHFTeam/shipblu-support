@@ -26,6 +26,7 @@ import {
 import type { SessionAgent } from '@/lib/auth/session';
 import { can } from '@/lib/auth/permissions';
 import { FILTERABLE_CHANNELS, hiddenChannels, type FilterableChannel } from './channel-policy';
+import { parseSearchTerm } from './search';
 
 /**
  * Read models for the console.
@@ -125,20 +126,27 @@ export async function listInbox(
   }
 
   if (filters.q) {
-    const term = `%${filters.q}%`;
-    const asNumber = Number(filters.q.replace(/^#/, ''));
+    const { pattern, number, phonePattern } = parseSearchTerm(filters.q);
 
     const clauses: SQL[] = [
-      ilike(conversations.subject, term),
-      ilike(contacts.name, term),
-      ilike(contacts.primaryEmail, term),
-      ilike(contacts.primaryPhone, term),
+      ilike(conversations.subject, pattern),
+      ilike(contacts.name, pattern),
+      ilike(contacts.primaryEmail, pattern),
+      ilike(contacts.primaryPhone, pattern),
+      // What was actually said. Subjects on the messaging channels are picked
+      // from a short list of canned categories, so hundreds of tickets share
+      // one — searching them finds a category, never a conversation. The
+      // tracking number or the sentence the agent half-remembers is in the
+      // messages, which is where a search of a chat has to look.
+      sql`EXISTS (
+        SELECT 1 FROM ${messages} m
+        WHERE m.conversation_id = ${conversations.id} AND m.body_text ILIKE ${pattern}
+      )`,
     ];
-    // "#1234" is how the team refers to a ticket, so make it a direct hit
-    // rather than a substring search that happens to match the subject.
-    if (Number.isInteger(asNumber) && asNumber > 0) {
-      clauses.push(eq(conversations.number, asNumber));
-    }
+
+    if (number !== null) clauses.push(eq(conversations.number, number));
+    if (phonePattern) clauses.push(ilike(contacts.primaryPhone, phonePattern));
+
     where.push(or(...clauses)!);
   }
 

@@ -33,6 +33,16 @@ CREATE INDEX IF NOT EXISTS contacts_name_trgm_idx
 CREATE INDEX IF NOT EXISTS contacts_email_trgm_idx
   ON contacts USING gin (primary_email gin_trgm_ops);
 
+-- The inbox search reaches these two as well. Phone is how a WhatsApp customer
+-- is looked up at all — most of them have no email — and message text is the
+-- only place a chat's actual content lives, because the messaging channels give
+-- every ticket a subject picked from a short list of canned categories.
+CREATE INDEX IF NOT EXISTS contacts_phone_trgm_idx
+  ON contacts USING gin (primary_phone gin_trgm_ops);
+
+CREATE INDEX IF NOT EXISTS messages_body_trgm_idx
+  ON messages USING gin (body_text gin_trgm_ops);
+
 CREATE INDEX IF NOT EXISTS companies_name_trgm_idx
   ON companies USING gin (name gin_trgm_ops);
 

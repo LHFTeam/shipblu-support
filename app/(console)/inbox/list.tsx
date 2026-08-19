@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ChannelBadge, channelInfo } from '@/components/channel';
 import { SearchIcon } from '@/components/icons';
 import { Badge, Select } from '@/components/ui';
@@ -189,15 +189,28 @@ export function InboxList({
 /**
  * Debounced so typing a ticket number does not fire a query per keystroke —
  * each one is a full server render of the list.
+ *
+ * `onSearch` is held in a ref and kept out of the effect's dependencies, which
+ * is what makes the debounce survive a busy inbox. The console refreshes itself
+ * on every inbound message and every delivery receipt, and each refresh renders
+ * this component with a fresh `onSearch` closure. With that closure in the
+ * dependency array the effect tore down and rebuilt on every one of them,
+ * restarting the timer — and refreshes arrive closer together than 350ms when
+ * WhatsApp is busy, so the search fired late, erratically, or never.
  */
 function SearchBox({ initial, onSearch }: { initial: string; onSearch: (value: string) => void }) {
   const [value, setValue] = useState(initial);
 
+  const latest = useRef(onSearch);
+  useEffect(() => {
+    latest.current = onSearch;
+  });
+
   useEffect(() => {
     if (value === initial) return;
-    const timer = setTimeout(() => onSearch(value), 350);
+    const timer = setTimeout(() => latest.current(value), 350);
     return () => clearTimeout(timer);
-  }, [value, initial, onSearch]);
+  }, [value, initial]);
 
   return (
     <div className="relative">
@@ -207,8 +220,8 @@ function SearchBox({ initial, onSearch }: { initial: string; onSearch: (value: s
       <input
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        placeholder="Search #number, subject, customer…"
-        aria-label="Search tickets"
+        placeholder="Search #number, name, phone, message…"
+        aria-label="Search tickets and chats"
         className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] py-1.5 pe-2.5 ps-7 text-sm outline-none focus:border-brand-500"
       />
     </div>
