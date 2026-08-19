@@ -1,4 +1,5 @@
 import type { ClaimedJob, JobType } from '@/lib/queue';
+import { backfillShipmentLinks } from './backfill-shipment-links';
 import { cleanup } from './cleanup';
 import { downloadMediaJob } from './download-media';
 import { importFreshdeskKb } from './import-freshdesk-kb';
@@ -24,6 +25,7 @@ export type JobHandler = (job: ClaimedJob) => Promise<void>;
  * run_time_automations, send_csat and rollup_metrics here.
  */
 export const handlers: Partial<Record<JobType, JobHandler>> = {
+  backfill_shipment_links: (job) => backfillShipmentLinks(job),
   cleanup,
   download_media: downloadMediaJob,
   import_freshdesk_kb: () => importFreshdeskKb(),

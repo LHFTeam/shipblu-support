@@ -15,6 +15,7 @@ export type JobType =
   | 'send_csat'
   | 'rollup_metrics'
   | 'import_freshdesk_kb'
+  | 'backfill_shipment_links'
   | 'cleanup';
 
 export type EnqueueOptions = {
