@@ -123,6 +123,13 @@ export const conversations = pgTable(
     // Drives the SLA sweep: only rows with a live due date and no breach flag.
     index('conversations_sla_due_idx').on(t.resolutionDueAt),
     index('conversations_first_response_due_idx').on(t.firstResponseDueAt),
+
+    // The three timestamps a day of metrics is cut by. The nightly rollup could
+    // afford to scan for them; the live dashboard recomputes today on every
+    // refresh, which turns a nightly sequential scan into a continuous one.
+    index('conversations_created_idx').on(t.createdAt),
+    index('conversations_resolved_idx').on(t.resolvedAt),
+    index('conversations_first_responded_idx').on(t.firstRespondedAt),
   ],
 );
 
@@ -187,6 +194,9 @@ export const messages = pgTable(
     uniqueIndex('messages_external_idx').on(t.sourceSystem, t.externalId),
     index('messages_search_idx').using('gin', t.searchVector),
     index('messages_delivery_idx').on(t.deliveryStatus),
+    // Volume-through-the-day on the dashboard filters on nothing else, and this
+    // is the table that grows fastest.
+    index('messages_created_idx').on(t.createdAt),
   ],
 );
 
@@ -234,7 +244,12 @@ export const conversationEvents = pgTable(
 
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('conversation_events_conversation_idx').on(t.conversationId, t.createdAt)],
+  (t) => [
+    index('conversation_events_conversation_idx').on(t.conversationId, t.createdAt),
+    // Reopenings are counted by type across a date range, which the
+    // per-conversation index cannot serve.
+    index('conversation_events_type_idx').on(t.type, t.createdAt),
+  ],
 );
 
 export const conversationWatchers = pgTable(

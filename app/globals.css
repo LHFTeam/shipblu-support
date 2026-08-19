@@ -49,6 +49,16 @@
      gradient at that size shifts perceptibly between viewport heights. */
   --rail: oklch(0.24 0.07 258);
   --rail-foreground: oklch(0.93 0.02 250);
+
+  /* Chart series, in a fixed order that never gets cycled or reassigned: series
+     one is always the brand blue, series two always the coral. A colour that
+     moves between series when a filter changes is a chart that has to be read
+     twice. Both pairs are checked for colour-vision separation against the
+     surface they sit on, which is why the dark theme re-steps them rather than
+     reusing the light values. */
+  --series-1: var(--color-brand-500);
+  --series-2: var(--color-accent-600);
+  --chart-grid: var(--border);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -65,6 +75,11 @@
 
     --rail: oklch(0.15 0.014 258);
     --rail-foreground: oklch(0.9 0.02 250);
+
+    /* The same two hues, stepped for the dark surface. Coral holds; the blue
+       has to lighten or it disappears into the panel behind it. */
+    --series-1: var(--color-brand-400);
+    --series-2: var(--color-accent-600);
   }
 }
 

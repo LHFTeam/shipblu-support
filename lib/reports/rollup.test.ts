@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { slicesFor } from './rollup-metrics';
+import { slicesFor } from './rollup';
 
 /**
  * `metrics_daily` stores four slices per day — the totals, and then by group, by
