@@ -23,7 +23,7 @@ import { Composer } from './composer';
  * conversation is not ours to answer is shorter and answers the question they
  * were about to ask.
  */
-function ReadOnlyNotice({ reason }: { reason: string }) {
+function ReadOnlyNotice({ reason, oneSided }: { reason: string; oneSided: boolean }) {
   return (
     <div className="shrink-0 border-t border-[var(--border)] bg-[var(--muted)] px-4 py-3">
       <p className="flex items-start gap-2 text-xs text-[var(--muted-foreground)]">
@@ -40,6 +40,26 @@ function ReadOnlyNotice({ reason }: { reason: string }) {
         </svg>
         <span>{reason}</span>
       </p>
+
+      {/*
+        Said only when the other half is genuinely absent, and it disappears by
+        itself the moment an echo lands. Without it a transcript with no replies
+        in it reads as a customer talking to nobody — which is a different and
+        much more alarming thing than a delivery setting being off.
+      */}
+      {oneSided ? (
+        <p className="mt-2 flex items-start gap-2 text-xs text-amber-700 dark:text-amber-400">
+          <span aria-hidden="true" className="mt-0.5">
+            ⚠
+          </span>
+          <span>
+            Only the customer&apos;s side of this conversation is here. The bot&apos;s replies reach
+            us as Meta message echoes, and none have arrived — so the{' '}
+            <span className="font-medium">message_echoes</span> field is not subscribed for this
+            WhatsApp account.
+          </span>
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -77,7 +97,10 @@ export function ConversationView({
         </div>
 
         {readOnlyReason(conversation.channel) ? (
-          <ReadOnlyNotice reason={readOnlyReason(conversation.channel)!} />
+          <ReadOnlyNotice
+            reason={readOnlyReason(conversation.channel)!}
+            oneSided={!conversation.messages.some((m) => m.direction === 'outbound')}
+          />
         ) : (
           <Composer conversation={conversation} templates={templates} />
         )}
