@@ -16,6 +16,7 @@ type Policy = {
   conditions: unknown;
   targets: SlaTargets;
   escalations: { firstResponse?: { afterMins: number; agentIds: string[] } };
+  hoursSource: 'group' | 'schedule' | 'round_the_clock';
   businessHoursId: string | null;
   position: number;
   isDefault: boolean;
@@ -23,6 +24,17 @@ type Policy = {
 };
 
 const PRIORITIES = ['low', 'medium', 'high', 'urgent'] as const;
+
+/** Says which calendar a policy counts against, in the words the setting uses. */
+function describeHours(policy: Policy, scheduleName: string | null): string {
+  if (policy.hoursSource === 'round_the_clock') return 'Round the clock';
+  if (policy.hoursSource === 'schedule') {
+    return scheduleName
+      ? `Working hours: ${scheduleName}`
+      : 'Working hours: a schedule that no longer exists — falls back to the default';
+  }
+  return "Working hours: the ticket group's, or the default schedule";
+}
 
 /**
  * Targets are entered in minutes, which is what the engine stores. Hours would
@@ -129,11 +141,22 @@ function Fields({
 
       <div className="grid gap-3 sm:grid-cols-2">
         <Field
-          label="Business hours"
-          hint="Round the clock when unset — a 4-hour target then means 4 real hours, including overnight."
+          label="Count against"
+          hint="The ticket's group by default, so a team with its own operating days and holidays gets them without a policy of its own."
+        >
+          <Select name="hoursSource" defaultValue={policy?.hoursSource ?? 'group'}>
+            <option value="group">The ticket group&apos;s business hours</option>
+            <option value="schedule">One specific schedule</option>
+            <option value="round_the_clock">Round the clock</option>
+          </Select>
+        </Field>
+
+        <Field
+          label="Schedule"
+          hint="Used only when counting against one specific schedule, whatever group the ticket is in."
         >
           <Select name="businessHoursId" defaultValue={policy?.businessHoursId ?? ''}>
-            <option value="">Round the clock</option>
+            <option value="">—</option>
             {schedules.map((schedule) => (
               <option key={schedule.value} value={schedule.value}>
                 {schedule.label}
@@ -141,7 +164,9 @@ function Fields({
             ))}
           </Select>
         </Field>
+      </div>
 
+      <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Escalate after (minutes past the target)">
           <Input
             name="escalateAfter"
@@ -250,7 +275,7 @@ export function PolicyEditor({
         ) : null}
 
         <p className="mt-2 text-xs text-[var(--muted-foreground)]">
-          {scheduleName ? `Working hours: ${scheduleName}` : 'Round the clock'}
+          {describeHours(policy, scheduleName)}
         </p>
 
         <ul className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs">

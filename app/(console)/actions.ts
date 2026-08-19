@@ -16,7 +16,7 @@ import { can } from '@/lib/auth/permissions';
 import type { SessionAgent } from '@/lib/auth/session';
 import { htmlToText, sanitiseEmailHtml } from '@/lib/html/sanitize';
 import { enqueue } from '@/lib/queue';
-import { onAgentReply, onStatusChanged } from '@/lib/sla';
+import { onAgentReply, onGroupChanged, onStatusChanged } from '@/lib/sla';
 import { afterTicketResolved, afterTicketUpdate } from '@/lib/tickets/lifecycle';
 import {
   buildTemplateComponents,
@@ -390,6 +390,11 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
         .update(conversations)
         .set({ groupId: value || null })
         .where(eq(conversations.id, conversationId));
+
+      // Groups can keep their own operating days and holidays, so the due dates
+      // are re-counted on the new team's calendar rather than left pointing at
+      // hours that team does not work.
+      await onGroupChanged(conversationId);
       break;
     }
 

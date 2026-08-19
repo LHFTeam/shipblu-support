@@ -1,9 +1,10 @@
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { businessHours, holidays as holidaysTable } from '@/db/schema';
 import { channels, contactIdentities, conversations, ticketStatuses } from '@/db/schema';
 import { generateToken, hashToken } from '@/lib/auth/tokens';
 import type { HoursConfig } from '@/lib/hours';
+import { loadHoursCatalog } from '@/lib/hours/catalog';
+import { groupHours } from '@/lib/hours/resolve';
 import { resolveContact } from '@/lib/tickets/contacts';
 
 /**
@@ -91,34 +92,14 @@ export async function findLiveConversation(contactId: string): Promise<string | 
 /**
  * The schedule the widget is gated on.
  *
- * Prefers the webchat channel's own business hours, falling back to the default
- * schedule — so the chat widget can be staffed different hours from the
- * mailbox without a second concept.
+ * The hours of the group webchat tickets are routed to, falling back to the
+ * default schedule — so a team that answers chat on Saturdays shows "an agent is
+ * here" on a Saturday without a second concept, and the widget is never online
+ * on a day that team is shut. The group's holidays come with it.
  */
 export async function widgetHours(): Promise<HoursConfig | null> {
-  const rows = await db
-    .select({
-      id: businessHours.id,
-      schedule: businessHours.schedule,
-      timezone: businessHours.timezone,
-    })
-    .from(businessHours)
-    .where(eq(businessHours.isDefault, true))
-    .limit(1);
-
-  const hours = rows[0];
-  if (!hours) return null;
-
-  const days = await db
-    .select({ date: holidaysTable.date, name: holidaysTable.name })
-    .from(holidaysTable)
-    .where(eq(holidaysTable.businessHoursId, hours.id));
-
-  return {
-    schedule: hours.schedule,
-    timezone: hours.timezone,
-    holidays: days.map((day) => ({ date: day.date, name: day.name })),
-  };
+  const [catalog, channel] = await Promise.all([loadHoursCatalog(), webchatChannel()]);
+  return groupHours(catalog, channel?.defaultGroupId ?? null);
 }
 
 /** The configured webchat channel, for default routing. */

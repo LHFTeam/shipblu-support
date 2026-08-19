@@ -49,6 +49,14 @@ Design decisions worth knowing before changing things:
   `stops_sla_clock` pauses them — recorded as a conversation event, so the timeline
   explains why a due date moved. Breaches are found by a five-minute sweep that re-reads
   current due dates rather than by a timer per ticket, because due dates move.
+- **Business hours are global with a per-group override.** One schedule is the company
+  default; a group can be put on its own, which brings its timezone, operating days _and_
+  holiday list with it, because all three live on the same `business_hours` row. SLA due
+  dates, the breach sweep, the nightly rollup and the chat widget all resolve a ticket's
+  calendar through `lib/hours/resolve.ts`, so a due date and the report measuring it never
+  disagree about which hours counted. Moving a ticket to a group that works different days
+  re-counts its live due dates on the new calendar. An SLA policy can opt out of the group
+  override by naming one schedule, or out of business hours entirely (round the clock).
 - **Automations never trigger automations.** Rule actions write to the ticket directly
   instead of re-entering the engine, which is what stops two rules from triggering each
   other forever.

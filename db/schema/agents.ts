@@ -63,6 +63,13 @@ export const groups = pgTable(
     escalateAfterMins: integer('escalate_after_mins'),
 
     /**
+     * The group's own calendar: its operating days, hours and holidays.
+     *
+     * Null means the group works the global default schedule. Set, it overrides
+     * it — for both SLA due dates and the working time reporting measures — for
+     * every ticket in this group whose policy counts against the group's hours,
+     * which is the default for a policy.
+     *
      * FK to business_hours is added in SQL rather than here: config.ts imports
      * nothing from agents.ts and adding the reverse reference would make the two
      * modules circular.
