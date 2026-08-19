@@ -38,6 +38,7 @@ import {
   trackingMatches,
   type LinkedShipment,
   type LinkedShippingAccount,
+  type ReadScope,
 } from '@/lib/shipments/queries';
 import { parseSearchTerm } from './search';
 
@@ -127,6 +128,23 @@ export function conversationVisibility(agent: SessionAgent): SQL[] {
   if (hidden.length) where.push(notInArray(conversations.channel, hidden));
 
   return where;
+}
+
+/**
+ * The same rule as `conversationVisibility`, in the shape the shipment read
+ * model takes.
+ *
+ * `lib/shipments/queries.ts` deliberately knows nothing about agents — that is
+ * the seam the future platform endpoint sits on — so the console has to say what
+ * this agent may see. This is the one place that translation happens.
+ */
+export function scopeForAgent(agent: SessionAgent, overrides: ReadScope = {}): ReadScope {
+  return {
+    excludeChannels: hiddenChannels(agent),
+    onlyAssigneeAgentId: can(agent, 'ticket.view.all') ? undefined : agent.id,
+    includeClosed: true,
+    ...overrides,
+  };
 }
 
 export async function listInbox(
