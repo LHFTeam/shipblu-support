@@ -1,9 +1,31 @@
-import { sql } from 'drizzle-orm';
+import { and, lt, ne, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { whatsappTemplates } from '@/db/schema';
 import { env } from '@/lib/env';
 import { listTemplates, WhatsAppApiError } from '@/lib/whatsapp/client';
 import { explainAuthError } from '@/lib/whatsapp/errors';
+
+/**
+ * Rows this run did not refresh: templates deleted in Meta stop being returned.
+ * Marking rather than deleting keeps the name resolvable for messages already
+ * sent with it.
+ *
+ * Built from typed operators rather than a `sql` template on purpose, and
+ * exported so a test can assert that. A bare Date interpolated into a template
+ * arrives as an untyped parameter and postgres.js cannot serialise one — it
+ * assumes text and throws ERR_INVALID_ARG_TYPE on the Date. Drizzle only maps a
+ * Date when it knows the column it is being compared against, which is what
+ * `lt` supplies and a raw template cannot.
+ *
+ * This cost a day of red crons. The failure is invisible without a real
+ * database, and it sat here unreachable for weeks because an expired token was
+ * failing the run earlier, at `listTemplates`. `lib/reports/live.ts` hit the
+ * same wall and worked around it with an explicit `::timestamptz` cast; here no
+ * raw SQL is needed at all.
+ */
+export function staleTemplateFilter(now: Date) {
+  return and(lt(whatsappTemplates.syncedAt, now), ne(whatsappTemplates.status, 'DELETED'));
+}
 
 /**
  * Hourly sync of the WABA's approved templates.
@@ -74,12 +96,10 @@ export async function syncWhatsAppTemplates(): Promise<void> {
       });
   }
 
-  // Templates deleted in Meta stop being returned. Marking rather than deleting
-  // keeps the name resolvable for messages already sent with it.
   const stale = await db
     .update(whatsappTemplates)
     .set({ status: 'DELETED' })
-    .where(sql`${whatsappTemplates.syncedAt} < ${now} AND ${whatsappTemplates.status} <> 'DELETED'`)
+    .where(staleTemplateFilter(now))
     .returning({ id: whatsappTemplates.id });
 
   console.log(
