@@ -129,6 +129,57 @@ BEGIN
 END $$;
 
 -- --------------------------------------------------------------------------
+-- Row level security on the tables this file's schema added
+--
+-- Drizzle does not emit ENABLE ROW LEVEL SECURITY, so every table arriving
+-- through a generated migration lands without it — and Supabase grants `anon`
+-- and `authenticated` full DML on everything in `public` by default. RLS is the
+-- only thing between that grant and the data, so a new table is readable *and
+-- writable* with the anon key that ships in client bundles until somebody
+-- remembers.
+--
+-- `side_conversation_messages` is the worst table in this schema to leave open:
+-- it is the internal discussion *about* a customer, which is the one thing this
+-- whole feature exists to keep away from them.
+--
+-- Enabled with zero policies and never FORCE, matching every other table here.
+-- The app connects as `postgres`, the table owner, which bypasses RLS entirely —
+-- so this is a lockdown against direct PostgREST access, not an app-level
+-- authorisation mechanism. Authorisation lives in code. Adding FORCE would break
+-- every query in the app.
+--
+-- Named tables rather than a loop over everything in `public`. A loop is the
+-- better answer and is already in flight on its own branch; writing a second one
+-- here would be two sessions fixing the same thing twice, which this repo has
+-- paid for before. These three are what *this* change added, and they are this
+-- change's to close. When the loop lands it is a strict superset and these
+-- become no-ops.
+--
+-- Guarded on `relrowsecurity` because ENABLE takes ACCESS EXCLUSIVE on the
+-- table: checking first means the steady state re-applies with no locks at all,
+-- which is the rule the rest of this file follows.
+DO $$
+DECLARE
+  t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY[
+    'internal_recipients',
+    'side_conversations',
+    'side_conversation_messages'
+  ]
+  LOOP
+    IF NOT EXISTS (
+      SELECT 1
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relname = t AND c.relrowsecurity
+    ) THEN
+      EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', t);
+    END IF;
+  END LOOP;
+END $$;
+
+-- --------------------------------------------------------------------------
 -- updated_at maintenance
 --
 -- Applied by looping over every table that has an updated_at column, so new
