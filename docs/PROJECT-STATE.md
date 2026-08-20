@@ -85,9 +85,19 @@ tracks `main`.
 | Shipblu Support Staging | `funavpkflkhthegahuay` | staging    |
 
 Postgres 17.6. RLS is **enabled with zero policies and never `FORCE`**. The app
-connects as `postgres`, the table owner, which bypasses RLS — adding FORCE would
+connects as `postgres`, the table owner, which bypasses RLS — so adding FORCE would
 break every query in the app. This is a lockdown against direct PostgREST
 access, not an app-level authorisation mechanism; authorisation lives in code.
+
+**That invariant is now enforced by `db/sql/`, and it was not before.** Drizzle
+does not emit `ENABLE ROW LEVEL SECURITY`, so the enabled state on the original
+tables was set by hand and every table added since arrived without it. Seven
+reached production that way — the five from the shipment work and
+`contact_sessions` / `contact_tokens` from the customer portal before it. Since
+Supabase grants `anon` and `authenticated` full DML on everything in `public`,
+those seven were readable _and writable_ with the anon key that ships in client
+bundles. Fixed in production on 2026-08-20 and now re-applied by a loop on every
+deploy, so a new table is locked down whether or not anybody remembered.
 
 ### Environment variables — the rule
 

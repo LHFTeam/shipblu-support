@@ -154,53 +154,55 @@ BEGIN
 END $$;
 
 -- --------------------------------------------------------------------------
--- Row level security on the tables this file's schema added
+-- Row level security
 --
--- Drizzle does not emit ENABLE ROW LEVEL SECURITY, so every table arriving
--- through a generated migration lands without it — and Supabase grants `anon`
--- and `authenticated` full DML on everything in `public` by default. RLS is the
--- only thing between that grant and the data, so a new table is readable *and
--- writable* with the anon key that ships in client bundles until somebody
--- remembers.
+-- RLS enabled, zero policies, never FORCE. The app connects as `postgres`, the
+-- table owner, which bypasses RLS entirely — so an enabled-but-policy-less table
+-- is fully readable by the app and completely closed to everyone else. It is a
+-- lockdown against direct PostgREST access, not an app-level authorisation
+-- mechanism; authorisation lives in code. Adding FORCE would break every query
+-- in the app.
 --
--- `side_conversation_messages` is the worst table in this schema to leave open:
--- it is the internal discussion *about* a customer, which is the one thing this
--- whole feature exists to keep away from them.
+-- A loop over `public` rather than a list of table names, because Drizzle does
+-- not emit ENABLE ROW LEVEL SECURITY and nothing in this repo ever asked for it:
+-- the enabled state on the original tables was set by hand, outside the
+-- migrations, so a fresh `npm run db:migrate` against an empty Postgres produces
+-- every table with RLS *off*. Each table added since has drifted the same way.
+-- Seven reached production open — the five from the shipment work plus
+-- `contact_sessions` and `contact_tokens` from the customer portal — and since
+-- Supabase grants `anon` and `authenticated` full DML on everything in `public`
+-- by default, all seven were readable *and writable* with the anon key that
+-- ships in client bundles.
 --
--- Enabled with zero policies and never FORCE, matching every other table here.
--- The app connects as `postgres`, the table owner, which bypasses RLS entirely —
--- so this is a lockdown against direct PostgREST access, not an app-level
--- authorisation mechanism. Authorisation lives in code. Adding FORCE would break
--- every query in the app.
+-- This replaces a named three-table block added alongside the side conversations
+-- schema, whose own comment said the loop was the better answer and a strict
+-- superset of it. It is: `internal_recipients`, `side_conversations` and
+-- `side_conversation_messages` are covered here, and the last of those is the
+-- worst table in this schema to leave open — it is the internal discussion
+-- *about* a customer, which is the one thing that feature exists to keep away
+-- from them.
 --
--- Named tables rather than a loop over everything in `public`. A loop is the
--- better answer and is already in flight on its own branch; writing a second one
--- here would be two sessions fixing the same thing twice, which this repo has
--- paid for before. These three are what *this* change added, and they are this
--- change's to close. When the loop lands it is a strict superset and these
--- become no-ops.
+-- A list has the same gap one table later. The loop means the next table is
+-- locked down by the next deploy whether or not anybody remembered.
 --
--- Guarded on `relrowsecurity` because ENABLE takes ACCESS EXCLUSIVE on the
--- table: checking first means the steady state re-applies with no locks at all,
--- which is the rule the rest of this file follows.
+-- Enabling RLS takes ACCESS EXCLUSIVE on the table, so this only touches tables
+-- that do not already have it — the steady state takes no locks at all, which is
+-- the rule the rest of this file follows.
+-- --------------------------------------------------------------------------
 DO $$
 DECLARE
   t text;
 BEGIN
-  FOREACH t IN ARRAY ARRAY[
-    'internal_recipients',
-    'side_conversations',
-    'side_conversation_messages'
-  ]
+  FOR t IN
+    SELECT c.relname
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public'
+      AND c.relkind = 'r'
+      AND NOT c.relrowsecurity
   LOOP
-    IF NOT EXISTS (
-      SELECT 1
-      FROM pg_class c
-      JOIN pg_namespace n ON n.oid = c.relnamespace
-      WHERE n.nspname = 'public' AND c.relname = t AND c.relrowsecurity
-    ) THEN
-      EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', t);
-    END IF;
+    EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', t);
+    RAISE NOTICE 'enabled row level security on %', t;
   END LOOP;
 END $$;
 
