@@ -1,4 +1,4 @@
-import { and, asc, gt, gte, lte, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, eq, gt, gte, lte, or, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversations, messages } from '@/db/schema';
 import type { ClaimedJob } from '@/lib/queue';
@@ -80,10 +80,14 @@ export async function backfillShipmentLinks(job: ClaimedJob): Promise<void> {
       // Keyset paging on (created_at, id), served by messages_created_idx. An
       // OFFSET would re-read everything before it on every batch, which on this
       // table is the difference between minutes and hours.
+      // eq(), not a raw sql template. A bare `sql` fragment hands the Date to
+      // the driver without the column's type mapping, and postgres.js throws
+      // "must be of type string ... received an instance of Date" — at run time
+      // only, which tsc and eslint both wave through.
       where.push(
         or(
           gt(messages.createdAt, cursor.createdAt),
-          and(sql`${messages.createdAt} = ${cursor.createdAt}`, gt(messages.id, cursor.id)),
+          and(eq(messages.createdAt, cursor.createdAt), gt(messages.id, cursor.id)),
         )!,
       );
     }
@@ -98,7 +102,7 @@ export async function backfillShipmentLinks(job: ClaimedJob): Promise<void> {
         channel: conversations.channel,
       })
       .from(messages)
-      .innerJoin(conversations, sql`${conversations.id} = ${messages.conversationId}`)
+      .innerJoin(conversations, eq(conversations.id, messages.conversationId))
       .where(where.length ? and(...where) : undefined)
       .orderBy(asc(messages.createdAt), asc(messages.id))
       .limit(Math.min(BATCH, remaining));

@@ -276,7 +276,13 @@ handful of conversation ids. The SBID clause has two branches — conversations
 that mention the account, and conversations whose _requester belongs to_ it —
 and the second is what finds a merchant's tickets that never quoted the number.
 
-Every clause is an equality on an indexed column. Nothing scans.
+The SBID clause joins its two branches with a `UNION` inside one `IN`, not an
+`OR` of two `IN`s. The `OR` was written first and measured second: an `OR`
+across two different columns of `conversations` cannot be answered from an
+index, so the planner hashed both subqueries and sequentially scanned the whole
+table — 9.7 ms and 50,001 rows discarded at 50k conversations, against 0.37 ms
+and no scan for the `UNION`. Check this with `EXPLAIN ANALYZE` against the SQL
+the app actually emits, not a hand-written approximation of it.
 
 **No new URL parameters:** the prefixes live inside `q`, so `parseFilters` and
 `list.tsx`'s ref-held debounce (which exists because putting `onSearch` in the

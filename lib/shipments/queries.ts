@@ -234,25 +234,38 @@ export async function conversationsForSbid(
 /**
  * The SBID predicate, shared with the inbox search.
  *
- * Written as two `IN (…)` lists rather than correlated `EXISTS` so the plan
- * starts at the selective side: one unique-index probe for the account, then a
- * handful of conversation ids.
+ * Two ways a ticket belongs to an account: it names the account, or its
+ * requester is somebody who can speak for it. The second is the branch that
+ * earns its place — a merchant's tickets almost never quote their own account
+ * number, they just say "my parcels are stuck".
+ *
+ * Written as one `IN` over a `UNION` rather than the obvious `OR` of two `IN`s,
+ * and the difference is not stylistic. An `OR` across two different columns of
+ * `conversations` cannot be answered from an index: the planner hashes both
+ * subqueries and sequentially scans the whole conversation table to apply them.
+ * Measured on 50k conversations that was 9.7 ms and 50,001 rows discarded by the
+ * filter; the `UNION` collapses to a single id set and probes the primary key,
+ * for 0.37 ms and no scan. The gap grows with the archive, which is the wrong
+ * direction for the query behind a search box.
  */
 export function sbidMatches(canonicalSbid: string): SQL {
-  return or(
-    sql`${conversations.id} IN (
-      SELECT ${conversationShippingAccounts.conversationId}
-      FROM ${conversationShippingAccounts}
-      JOIN ${shippingAccounts} ON ${shippingAccounts.id} = ${conversationShippingAccounts.shippingAccountId}
-      WHERE ${shippingAccounts.sbid} = ${canonicalSbid}
-    )`,
-    sql`${conversations.requesterContactId} IN (
-      SELECT ${contactShippingAccounts.contactId}
-      FROM ${contactShippingAccounts}
-      JOIN ${shippingAccounts} ON ${shippingAccounts.id} = ${contactShippingAccounts.shippingAccountId}
-      WHERE ${shippingAccounts.sbid} = ${canonicalSbid}
-    )`,
-  )!;
+  return sql`${conversations.id} IN (
+    SELECT ca.conversation_id
+    FROM ${conversationShippingAccounts} ca
+    JOIN ${shippingAccounts} a ON a.id = ca.shipping_account_id
+    WHERE a.sbid = ${canonicalSbid}
+
+    UNION
+
+    SELECT sc.id
+    FROM ${conversations} sc
+    WHERE sc.requester_contact_id IN (
+      SELECT csa.contact_id
+      FROM ${contactShippingAccounts} csa
+      JOIN ${shippingAccounts} a2 ON a2.id = csa.shipping_account_id
+      WHERE a2.sbid = ${canonicalSbid}
+    )
+  )`;
 }
 
 /** The tracking-number predicate, shared with the inbox search. */
