@@ -1,5 +1,5 @@
 import { DateTime } from 'luxon';
-import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, notInArray, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   agents,
@@ -10,6 +10,7 @@ import {
   ticketStatuses,
   webhookEvents,
 } from '@/db/schema';
+import { readOnlyChannels } from '@/lib/tickets/channel-policy';
 import { computeDay, todayIn, totalsOf, type Bucket, type ReportingContext } from './rollup';
 
 /**
@@ -40,12 +41,23 @@ function asDate(value: unknown): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-/** Live tickets: not deleted, not merged away, not spam, not resolved/closed. */
+/**
+ * Live tickets: not deleted, not merged away, not spam, not resolved/closed, and
+ * on a channel the team actually works.
+ *
+ * The last one carries the most weight here. Every figure on this dashboard is a
+ * measure of the team — queue depth, who is loaded, what is breaching — and a
+ * channel nobody may reply to answers none of those questions while dominating
+ * all of them: nineteen hundred bot transcripts against three real tickets would
+ * report a backlog that does not exist and an unassigned count nobody can act
+ * on.
+ */
 function liveTickets() {
   return and(
     isNull(conversations.deletedAt),
     isNull(conversations.mergedIntoId),
     eq(conversations.isSpam, false),
+    notInArray(conversations.channel, readOnlyChannels()),
     inArray(ticketStatuses.category, ['open', 'pending']),
   );
 }
@@ -305,8 +317,19 @@ export async function todayByHour(zone: string, now: Date = new Date()): Promise
       outbound: sql<number>`count(*) filter (where ${messages.direction} = 'outbound')::int`,
     })
     .from(messages)
+    // Joined only to reach the channel. This is the one figure on the page
+    // counted from messages rather than tickets, so it needs the exclusion
+    // spelled out rather than inherited from `liveTickets` — and it needs it
+    // most: the bot's traffic outnumbers the team's several hundred to one, and
+    // the shape of its day is not the shape of theirs.
+    .innerJoin(conversations, eq(conversations.id, messages.conversationId))
     .where(
-      and(gte(messages.createdAt, from), lt(messages.createdAt, now), ne(messages.kind, 'note')),
+      and(
+        gte(messages.createdAt, from),
+        lt(messages.createdAt, now),
+        ne(messages.kind, 'note'),
+        notInArray(conversations.channel, readOnlyChannels()),
+      ),
     )
     .groupBy(sql`1`)
     .orderBy(sql`1`);
