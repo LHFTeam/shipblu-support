@@ -183,3 +183,51 @@ export async function startFreshdeskImport(
   revalidatePath('/admin/import');
   return { error: null };
 }
+
+/**
+ * Scans the archive for tracking numbers and SBIDs nobody has linked yet.
+ *
+ * Also the way a corrected detection pattern reaches history: the live path only
+ * ever sees new messages, so widening the pattern without re-running this leaves
+ * every ticket that arrived before the change unlinked.
+ *
+ * Whether a re-run finds anything new is the point, and it costs nothing when it
+ * does not — every write underneath is idempotent — so this is not guarded as
+ * tightly as the Freshdesk import, which spends someone else's rate limit.
+ */
+export async function startShipmentBackfill(
+  _state: AdminState,
+  _formData: FormData,
+): Promise<AdminState> {
+  await requirePermission('admin.agents');
+
+  const running = await db
+    .select({ id: jobs.id })
+    .from(jobs)
+    .where(
+      sql`${jobs.type} = 'backfill_shipment_links' and ${jobs.status} in ('pending', 'processing')`,
+    )
+    .limit(1);
+
+  if (running.length > 0) {
+    return { error: 'A backfill is already queued or running.' };
+  }
+
+  await enqueue(
+    'backfill_shipment_links',
+    {},
+    {
+      // Behind anything a customer is waiting on. This reads the whole message
+      // archive and there is no hurry about it.
+      priority: 80,
+      dedupeKey: `backfill_shipment_links:${Math.floor(Date.now() / 60_000)}`,
+      // It resumes from the start rather than from where it stopped, and every
+      // write is idempotent, so a retry is cheap — but a third attempt against a
+      // genuine bug is just three passes over the archive.
+      maxAttempts: 2,
+    },
+  );
+
+  revalidatePath('/admin/import');
+  return { error: null };
+}

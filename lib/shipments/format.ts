@@ -1,0 +1,49 @@
+/**
+ * Canonical forms for tracking numbers and SBIDs.
+ *
+ * These exist for the same reason `lib/auth/normalise.ts` does: the value is
+ * unique-indexed, so every path that writes or looks one up — the detector, the
+ * manual link action, the search parser, the backfill, the future platform API —
+ * has to agree on the canonical form or the index is unusable.
+ *
+ * Two of the transformations look like paranoia and are not:
+ *
+ * - **Arabic-Indic digits.** Roughly half the inbound volume is Arabic WhatsApp,
+ *   and customers type ٠١٢٣٤٥٦٧٨٩ as readily as 0123456789. `lib/kb/language.ts`
+ *   already had to reason about them for the opposite purpose.
+ * - **Bidi and zero-width marks.** A number copied out of an RTL message carries
+ *   a U+200F along with it. `'SB123\u200F' !== 'SB123'`, which silently defeats
+ *   the unique index and produces two shipments for one parcel — the same class
+ *   of bug `lib/kb/slug.ts` hit with Arabic slugs.
+ */
+
+/** Arabic-Indic (U+0660–0669) and Extended Arabic-Indic (U+06F0–06F9) → ASCII. */
+export function normaliseDigits(text: string): string {
+  return text.replace(/[\u0660-\u0669\u06F0-\u06F9]/g, (char) => {
+    const code = char.codePointAt(0)!;
+    const base = code >= 0x06f0 ? 0x06f0 : 0x0660;
+    return String((code - base) as number);
+  });
+}
+
+/** Bidi controls and zero-width characters, which paste along invisibly. */
+const INVISIBLE = /[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g;
+
+/** Punctuation people put inside an identifier when writing it down. */
+const SEPARATORS = /[\s\-_./\\:#]+/g;
+
+export function normaliseTrackingNumber(value: string): string {
+  return normaliseDigits(value).replace(INVISIBLE, '').replace(SEPARATORS, '').trim().toUpperCase();
+}
+
+/**
+ * The same, plus the SB/SBID prefix stripped.
+ *
+ * `SBID-4471`, `sbid 4471`, `SB4471` and a bare `4471` are one account, and an
+ * agent will type whichever they saw last. Stripping the prefix here rather than
+ * storing whichever form arrived first is what makes the unique index mean
+ * "one row per account" instead of "one row per way of writing it".
+ */
+export function normaliseSbid(value: string): string {
+  return normaliseTrackingNumber(value).replace(/^SB(?:ID)?/, '');
+}

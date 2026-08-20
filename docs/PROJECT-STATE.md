@@ -5,7 +5,7 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-08-19, against `main` at `04b5c60`.
+Last updated: 2026-08-19, against `main` at `62fbdaf`.
 
 ---
 
@@ -19,6 +19,12 @@ at `/admin/dashboard`. Since then the **customer portal** has landed too — the
 bare domain now opens the Arabic help centre, and one Sign in button
 authenticates customers and agents alike. Production is healthy on `04b5c60`,
 4 ms database latency, empty job queue, no dead jobs.
+
+Since then, **shipments**: tickets link to parcels and to shipping accounts,
+tracking numbers and SBIDs are detected in message text as it arrives, the inbox
+searches on both, and the console finally has customer, account and shipment
+pages — the first screens ever to use the `contact.view` and `contact.edit`
+permissions, which had been in the list and checked nowhere since the start.
 
 **But almost none of it is configured.** The database holds 1 agent, 0 channel
 rows, 0 SLA policies and 0 automation rules. The remaining work is mostly not
@@ -148,6 +154,23 @@ is code:
   Freshdesk enforces today needs transcribing.
 - **Unset config:** `EMAIL_API_KEY`, `EMAIL_FROM_ADDRESS`, `EMAIL_REPLY_DOMAIN`,
   `EMAIL_WEBHOOK_SECRET`, `KB_PUBLIC_HOST`, `WIDGET_ALLOWED_ORIGINS`.
+- **The shipment detection patterns are a guess and need confirming.**
+  `SHIPMENT_TRACKING_PATTERN` and `SHIPMENT_SBID_PATTERN` are unset, so the
+  defaults in `lib/shipments/detect.ts` are in force: a tracking number must
+  carry letters _and_ digits, and an SBID must be anchored on its keyword.
+  Nobody has told us the real formats. That is deliberate rather than an
+  oversight — the two failure modes are not symmetric, and an under-detection is
+  repaired by one agent click plus a backfill re-run, while an over-detection
+  puts junk shipments on real tickets and eventually out over an API. But it
+  does mean detection will find less than it should until someone checks. The
+  variables live in the `shipblu-shared` group because the web service and the
+  worker have to agree: the worker links on the pattern, the console searches on
+  it, and a service that disagreed would link a ticket the search could never
+  find again. After correcting one, run the backfill from `/admin/import` — the
+  live path only ever sees new messages.
+- **`/admin/import` now has a second card** whose figures answer whether the
+  pattern is right: it splits links into those the detector found and those
+  agents made by hand, and says so plainly when the second number is larger.
 
 ### 5.2 Live-provider verification
 
@@ -181,7 +204,32 @@ Not started. The KB importer is the working model: idempotent on
 it repairs its own earlier rows rather than duplicating them. Every
 customer-facing table carries those two columns for exactly this reason.
 
-### 5.4 Loose ends
+### 5.4 The shipping platform read API — designed, not built
+
+The queries the endpoint would call exist and are used by the console today, in
+`lib/shipments/queries.ts`: `conversationsForTrackingNumber`,
+`conversationsForSbid`, `getShipmentByTrackingNumber`, `getShippingAccountBySbid`
+and `contactsForSbid`. None of them takes a `SessionAgent`, which is the seam —
+the console wraps them with the agent's permissions and the endpoint would wrap
+them with the key's. Baking `can()` in would force the endpoint to invent a fake
+agent, which is how an API ends up reaching further than any human.
+
+What is left is the endpoint and its credential. There is still **no inbound API
+key mechanism anywhere in this system**: `lib/auth/tokens.ts` and the widget's
+visitor token (only the SHA-256 stored) are the precedent to extend, and a new
+`api_keys` table is the missing piece. Two things to decide before writing it,
+both much cheaper now than as a retrofit:
+
+- one server-to-server platform key, or per-merchant keys? It determines whether
+  `shipping_account_id` belongs on the key row.
+- the endpoint must pass `restrictedChannels()` in its scope. A bot transcript is
+  kept off the shop floor for the team; handing one to an external caller is
+  worse.
+
+Whatever it returns should stay conversation _summaries_ and a deep link, never
+message bodies — the same reasoning as the deliberately tiny `pg_notify` payload.
+
+### 5.5 Loose ends
 
 - One imported article's detected language disagrees with its category. The
   importer counts and reports these rather than silently refiling them; someone
@@ -318,7 +366,23 @@ Each cost real time. Most are also comments in the code.
     trigger already exists, so the steady state takes no locks, and
     `db/migrate.ts` sets `lock_timeout = 10s` and prints the `pg_stat_activity`
     query to run when it does hit one. **Connections left mid-transaction are a
-    live problem in their own right** — new ones appear within minutes; see §5.4.
+    live problem in their own right** — new ones appear within minutes; see §5.5.
+
+16. **`CREATE INDEX CONCURRENTLY` cannot go in `db/sql/`.** `db/migrate.ts`
+    sends each file as one `sql.unsafe(contents)`, which under the simple query
+    protocol wraps the whole file in an implicit transaction, and
+    `CONCURRENTLY` cannot run inside one. The three shipment trigram indexes
+    there build on tables that were empty at first deploy, so the blocking build
+    cost nothing — but an index on a table the size of `messages` needs its own
+    migration. There is a note to this effect in the file itself.
+
+17. **A module reachable from the search parser must not call `env()`.**
+    `lib/shipments/detect.ts` reads its three variables straight from
+    `process.env`, because `env()` validates the whole schema and the detector is
+    imported by `parseSearchTerm` — going through it made an inbox search fail on
+    a missing `DATABASE_URL` in any context without a database. Same shape as the
+    bug that made `APP_URL` optional. The variables are still declared in
+    `lib/env.ts` so that file stays the catalogue of what this system reads.
 
 ---
 

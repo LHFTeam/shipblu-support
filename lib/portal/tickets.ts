@@ -11,7 +11,7 @@ import {
 } from '@/db/schema';
 import { preview } from '@/lib/html/sanitize';
 import { readOnlyChannels } from '@/lib/tickets/channel-policy';
-import { afterInboundMessage } from '@/lib/tickets/lifecycle';
+import { afterInboundMessage, afterMessageStored } from '@/lib/tickets/lifecycle';
 
 /**
  * The customer's own view of their tickets.
@@ -168,7 +168,7 @@ export async function createTicket(
   const now = new Date();
   const portal = await portalChannel();
 
-  const conversationId = await db.transaction(async (tx) => {
+  const created = await db.transaction(async (tx) => {
     const statusId = await defaultOpenStatusId(tx);
     if (!statusId) {
       throw new Error('No default open ticket status configured — run `npm run db:seed`');
@@ -190,26 +190,36 @@ export async function createTicket(
 
     const id = inserted[0]!.id;
 
-    await tx.insert(messages).values({
-      conversationId: id,
-      direction: 'inbound',
-      kind: 'reply',
-      authorContactId: contactId,
-      bodyText: input.body,
-      deliveryStatus: 'delivered',
-      deliveredAt: now,
-      createdAt: now,
-    });
+    const insertedMessage = await tx
+      .insert(messages)
+      .values({
+        conversationId: id,
+        direction: 'inbound',
+        kind: 'reply',
+        authorContactId: contactId,
+        bodyText: input.body,
+        deliveryStatus: 'delivered',
+        deliveredAt: now,
+        createdAt: now,
+      })
+      .returning({ id: messages.id });
 
-    return id;
+    return { id, messageId: insertedMessage[0]!.id };
   });
 
-  await afterInboundMessage(conversationId, true, now);
+  await afterMessageStored({
+    conversationId: created.id,
+    messageId: created.messageId,
+    bodyText: input.body,
+    kind: 'reply',
+  });
+
+  await afterInboundMessage(created.id, true, now);
 
   const rows = await db
     .select({ number: conversations.number })
     .from(conversations)
-    .where(eq(conversations.id, conversationId))
+    .where(eq(conversations.id, created.id))
     .limit(1);
 
   return rows[0]!.number;
@@ -272,28 +282,38 @@ export async function appendReply(
       }
     }
 
-    await tx.insert(messages).values({
-      conversationId: ticket.id,
-      direction: 'inbound',
-      kind: 'reply',
-      authorContactId: contactId,
-      bodyText: body,
-      deliveryStatus: 'delivered',
-      deliveredAt: now,
-      createdAt: now,
-    });
+    const insertedMessage = await tx
+      .insert(messages)
+      .values({
+        conversationId: ticket.id,
+        direction: 'inbound',
+        kind: 'reply',
+        authorContactId: contactId,
+        bodyText: body,
+        deliveryStatus: 'delivered',
+        deliveredAt: now,
+        createdAt: now,
+      })
+      .returning({ id: messages.id });
 
     await tx
       .update(conversations)
       .set({ lastMessageAt: now, lastCustomerMessageAt: now })
       .where(eq(conversations.id, ticket.id));
 
-    return ticket.id;
+    return { id: ticket.id, messageId: insertedMessage[0]!.id };
   });
 
   if (!result) return { ok: false };
 
-  await afterInboundMessage(result, false, now);
+  await afterMessageStored({
+    conversationId: result.id,
+    messageId: result.messageId,
+    bodyText: body,
+    kind: 'reply',
+  });
+
+  await afterInboundMessage(result.id, false, now);
   return { ok: true };
 }
 

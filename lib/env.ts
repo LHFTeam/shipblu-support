@@ -52,6 +52,29 @@ const schema = z.object({
    */
   WIDGET_ALLOWED_ORIGINS: z.string().optional(),
 
+  /**
+   * Overrides for how a tracking number and an SBID are recognised in message
+   * text. Both are regular-expression sources; `lib/shipments/detect.ts` holds
+   * the defaults and falls back to them, loudly, if one does not compile.
+   *
+   * These exist because the real ShipBlu formats were not settled when the
+   * feature landed, and changing a pattern should not need a deploy. The
+   * defaults are still the source of truth — set these only to correct them.
+   *
+   * Declared here so this file stays the catalogue of everything the system
+   * reads, but read straight from `process.env` by `detect.ts`: that module is
+   * reachable from the inbox search parser, and validating this whole schema on
+   * that path would fail a search on a variable a search has no use for.
+   */
+  SHIPMENT_TRACKING_PATTERN: z.string().optional(),
+  SHIPMENT_SBID_PATTERN: z.string().optional(),
+  /**
+   * Comma-separated tracking numbers never to link. One specific hazard: a
+   * canned response or signature carrying a worked example would otherwise
+   * attach the same shipment to every ticket that used it.
+   */
+  SHIPMENT_IGNORE: z.string().optional(),
+
   SUPABASE_URL: z.url().optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
   SUPABASE_STORAGE_BUCKET: z.string().default('attachments'),

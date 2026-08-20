@@ -53,6 +53,21 @@ envVarGroups:
       - key: APP_SECRET
         generateValue: true
 
+      # Shipment reference detection. Shared rather than per-service because
+      # both halves have to agree on what a tracking number looks like: the web
+      # service applies the pattern when an agent searches `track:...`, the
+      # worker applies it to every inbound message, and a service that disagreed
+      # would link a ticket the search could never find again.
+      #
+      # Unset means the defaults in lib/shipments/detect.ts, which are
+      # deliberately conservative until the real ShipBlu formats are confirmed.
+      - key: SHIPMENT_TRACKING_PATTERN
+        sync: false
+      - key: SHIPMENT_SBID_PATTERN
+        sync: false
+      - key: SHIPMENT_IGNORE
+        sync: false
+
       # Facebook and Instagram. One Page token serves Messenger, Instagram
       # Direct and both comment streams, and the worker sends with it while the
       # web service verifies webhooks — so all of it is shared rather than

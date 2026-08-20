@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
-import { BookIcon, ChartIcon, InboxIcon, SettingsIcon } from '@/components/icons';
+import { BookIcon, ChartIcon, ContactsIcon, InboxIcon, SettingsIcon } from '@/components/icons';
 
 /**
  * The primary navigation rail.
@@ -21,12 +21,13 @@ import { BookIcon, ChartIcon, InboxIcon, SettingsIcon } from '@/components/icons
 export type NavItem = {
   href: string;
   label: string;
-  icon: 'inbox' | 'kb' | 'reports' | 'admin';
+  icon: 'inbox' | 'customers' | 'kb' | 'reports' | 'admin';
   badge?: number;
 };
 
 const ICONS = {
   inbox: InboxIcon,
+  customers: ContactsIcon,
   kb: BookIcon,
   reports: ChartIcon,
   admin: SettingsIcon,

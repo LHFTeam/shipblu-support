@@ -1,4 +1,5 @@
 import { runAutomations } from '@/lib/automations';
+import { linkShipmentsFromMessage } from '@/lib/shipments/links';
 import { scheduleSurvey } from '@/lib/csat';
 import { applySlaOnCreate, onCustomerReply } from '@/lib/sla';
 
@@ -57,4 +58,43 @@ export async function afterTicketUpdate(conversationId: string): Promise<void> {
  */
 export async function afterTicketResolved(conversationId: string): Promise<void> {
   await scheduleSurvey(conversationId);
+}
+
+/**
+ * A message was stored, whoever wrote it.
+ *
+ * A separate seam from `afterInboundMessage` rather than a fourth argument on
+ * it, for two reasons.
+ *
+ * `afterInboundMessage` is deliberately *skipped* on the `whatsapp_bot` channel:
+ * SLA clocks, automations and CSAT must not run on a conversation nobody on the
+ * team is working. None of that applies to linking a shipment — it is a
+ * read-model concern with no side effects — and bot transcripts are exactly
+ * where tracking numbers appear in bulk, and exactly what the future platform
+ * query wants to find. So this runs there and the other engines still do not.
+ *
+ * The other reason is that an optional argument silently no-opping at whichever
+ * call sites nobody updated is the shape of failure that reports success, which
+ * this project has been bitten by before.
+ *
+ * It runs on **outbound** replies and notes as well as inbound. The common
+ * sequence is a customer asking where their parcel is, an agent looking it up on
+ * the shipping platform, and the number arriving in the reply or a private note.
+ * Scanning only inbound would miss a large share of exactly the tickets worth
+ * linking.
+ *
+ * Failures are logged and swallowed. A detection bug must never fail an ingest
+ * job — the job would retry, re-running everything downstream of it.
+ */
+export async function afterMessageStored(message: {
+  conversationId: string;
+  messageId: string;
+  bodyText: string;
+  kind: string;
+}): Promise<void> {
+  try {
+    await linkShipmentsFromMessage(message);
+  } catch (error) {
+    console.error(`[lifecycle] shipment linking failed for message ${message.messageId}`, error);
+  }
 }

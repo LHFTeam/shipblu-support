@@ -31,6 +31,15 @@ import {
   restrictedChannels,
   type FilterableChannel,
 } from './channel-policy';
+import {
+  sbidMatches,
+  shipmentsForConversation,
+  shippingAccountsForConversation,
+  trackingMatches,
+  type LinkedShipment,
+  type LinkedShippingAccount,
+  type ReadScope,
+} from '@/lib/shipments/queries';
 import { parseSearchTerm } from './search';
 
 /**
@@ -98,6 +107,46 @@ export type InboxRow = {
   preview: string | null;
 };
 
+/**
+ * Who may see which conversations, as SQL.
+ *
+ * Exported because the customer, account and shipment pages list conversations
+ * too, and re-implementing this rule in four more files is how a bot transcript
+ * eventually leaks through a side door. Visibility is enforced in the query and
+ * never in the template: an agent who can only see their own tickets must not be
+ * able to reach another's by URL, and filtering after the fact would still have
+ * loaded the row.
+ */
+export function conversationVisibility(agent: SessionAgent): SQL[] {
+  const where: SQL[] = [isNull(conversations.deletedAt), isNull(conversations.mergedIntoId)];
+
+  if (!can(agent, 'ticket.view.all')) {
+    where.push(eq(conversations.assigneeAgentId, agent.id));
+  }
+
+  const hidden = hiddenChannels(agent);
+  if (hidden.length) where.push(notInArray(conversations.channel, hidden));
+
+  return where;
+}
+
+/**
+ * The same rule as `conversationVisibility`, in the shape the shipment read
+ * model takes.
+ *
+ * `lib/shipments/queries.ts` deliberately knows nothing about agents — that is
+ * the seam the future platform endpoint sits on — so the console has to say what
+ * this agent may see. This is the one place that translation happens.
+ */
+export function scopeForAgent(agent: SessionAgent, overrides: ReadScope = {}): ReadScope {
+  return {
+    excludeChannels: hiddenChannels(agent),
+    onlyAssigneeAgentId: can(agent, 'ticket.view.all') ? undefined : agent.id,
+    includeClosed: true,
+    ...overrides,
+  };
+}
+
 export async function listInbox(
   agent: SessionAgent,
   filters: InboxFilters,
@@ -141,28 +190,46 @@ export async function listInbox(
   }
 
   if (filters.q) {
-    const { pattern, number, phonePattern } = parseSearchTerm(filters.q);
+    const { pattern, number, phonePattern, trackingNumber, sbid, scope } = parseSearchTerm(
+      filters.q,
+    );
 
-    const clauses: SQL[] = [
-      ilike(conversations.subject, pattern),
-      ilike(contacts.name, pattern),
-      ilike(contacts.primaryEmail, pattern),
-      ilike(contacts.primaryPhone, pattern),
-      // What was actually said. Subjects on the messaging channels are picked
-      // from a short list of canned categories, so hundreds of tickets share
-      // one — searching them finds a category, never a conversation. The
-      // tracking number or the sentence the agent half-remembers is in the
-      // messages, which is where a search of a chat has to look.
-      sql`EXISTS (
-        SELECT 1 FROM ${messages} m
-        WHERE m.conversation_id = ${conversations.id} AND m.body_text ILIKE ${pattern}
-      )`,
-    ];
+    // A prefixed query is narrowed to its one clause. That is what makes typing
+    // `track:` worth doing — the alternative ORs it into a list that still has
+    // to consider every message body in the account.
+    if (scope === 'tracking' && trackingNumber) {
+      where.push(trackingMatches(trackingNumber));
+    } else if (scope === 'sbid' && sbid) {
+      where.push(sbidMatches(sbid));
+    } else {
+      const clauses: SQL[] = [
+        ilike(conversations.subject, pattern),
+        ilike(contacts.name, pattern),
+        ilike(contacts.primaryEmail, pattern),
+        ilike(contacts.primaryPhone, pattern),
+        // What was actually said. Subjects on the messaging channels are picked
+        // from a short list of canned categories, so hundreds of tickets share
+        // one — searching them finds a category, never a conversation. The
+        // tracking number or the sentence the agent half-remembers is in the
+        // messages, which is where a search of a chat has to look.
+        sql`EXISTS (
+          SELECT 1 FROM ${messages} m
+          WHERE m.conversation_id = ${conversations.id} AND m.body_text ILIKE ${pattern}
+        )`,
+      ];
 
-    if (number !== null) clauses.push(eq(conversations.number, number));
-    if (phonePattern) clauses.push(ilike(contacts.primaryPhone, phonePattern));
+      if (number !== null) clauses.push(eq(conversations.number, number));
+      if (phonePattern) clauses.push(ilike(contacts.primaryPhone, phonePattern));
 
-    where.push(or(...clauses)!);
+      // The body search above already finds tickets that *mention* a number.
+      // These two add every ticket that is *about* the shipment: the reply that
+      // never quoted it, the one an agent linked by hand, the one where it
+      // appeared only in a private note.
+      if (trackingNumber) clauses.push(trackingMatches(trackingNumber));
+      if (sbid) clauses.push(sbidMatches(sbid));
+
+      where.push(or(...clauses)!);
+    }
   }
 
   const rows = await db
@@ -267,6 +334,9 @@ export type ConversationDetail = {
    * which is what tells the composer to write in public rather than in private.
    */
   externalId: string | null;
+  /** Parcels this ticket is about, and the accounts it names. */
+  shipments: LinkedShipment[];
+  shippingAccounts: LinkedShippingAccount[];
   messages: TimelineMessage[];
   events: {
     id: string;
@@ -314,7 +384,7 @@ export async function getConversation(
   const row = rows[0];
   if (!row) return null;
 
-  const [timeline, files, events] = await Promise.all([
+  const [timeline, files, events, shipments, accounts] = await Promise.all([
     db
       .select({
         message: messages,
@@ -353,6 +423,9 @@ export async function getConversation(
       .where(eq(conversationEvents.conversationId, row.conversation.id))
       .orderBy(desc(conversationEvents.createdAt))
       .limit(50),
+
+    shipmentsForConversation(row.conversation.id, row.conversation.requesterContactId),
+    shippingAccountsForConversation(row.conversation.id),
   ]);
 
   const filesByMessage = new Map<string, ConversationDetail['messages'][number]['attachments']>();
@@ -373,6 +446,8 @@ export async function getConversation(
     subject: row.conversation.subject,
     channel: row.conversation.channel,
     externalId: row.conversation.externalId,
+    shipments,
+    shippingAccounts: accounts,
     priority: row.conversation.priority,
     type: row.conversation.type,
     statusId: row.conversation.statusId,

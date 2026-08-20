@@ -61,3 +61,62 @@ describe('the free-text pattern', () => {
     expect(parseSearchTerm('تأكيد').pattern).toBe('%تأكيد%');
   });
 });
+
+describe('parseSearchTerm — shipments', () => {
+  it('narrows to the shipment clause on a track: prefix', () => {
+    const term = parseSearchTerm('track:SB123456789');
+    expect(term.trackingNumber).toBe('SB123456789');
+    expect(term.scope).toBe('tracking');
+    // The residual pattern is built from the rest, not the whole string, or the
+    // literal "track:" gets searched in message bodies and matches nothing.
+    expect(term.pattern).toBe('%SB123456789%');
+  });
+
+  it('accepts the prefix in any case, and its aliases', () => {
+    for (const query of ['TRACK:SB123456789', 'Tracking:SB123456789', 'awb: SB123456789']) {
+      expect(parseSearchTerm(query).trackingNumber).toBe('SB123456789');
+    }
+  });
+
+  it('narrows to the account clause on an sbid: prefix', () => {
+    const term = parseSearchTerm('sbid:4471');
+    expect(term.sbid).toBe('4471');
+    expect(term.scope).toBe('sbid');
+  });
+
+  it('degrades to an ordinary search when a prefix has nothing after it', () => {
+    // Someone mid-typing should see their old results, not an empty inbox.
+    const term = parseSearchTerm('track:');
+    expect(term.trackingNumber).toBeNull();
+    expect(term.scope).toBe('any');
+  });
+
+  it('infers a bare tracking number without narrowing the search', () => {
+    const term = parseSearchTerm('SB123456789');
+    expect(term.trackingNumber).toBe('SB123456789');
+    expect(term.scope).toBe('any');
+    expect(term.pattern).toBe('%SB123456789%');
+  });
+
+  it('does not infer from a sentence that merely contains one', () => {
+    expect(parseSearchTerm('where is SB123456789').trackingNumber).toBeNull();
+  });
+
+  it('leaves a pasted phone number alone', () => {
+    const term = parseSearchTerm('+20 101 442 8154');
+    expect(term.trackingNumber).toBeNull();
+    expect(term.sbid).toBeNull();
+    expect(term.phonePattern).toBe('%201014428154%');
+  });
+
+  it('still reads a ticket reference as a ticket number', () => {
+    const term = parseSearchTerm('#812');
+    expect(term.number).toBe(812);
+    expect(term.trackingNumber).toBeNull();
+    expect(term.sbid).toBeNull();
+  });
+
+  it('escapes ILIKE wildcards in the residual pattern', () => {
+    expect(parseSearchTerm('track:50%').pattern).toBe('%50\\%%');
+  });
+});

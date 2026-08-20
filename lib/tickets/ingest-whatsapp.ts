@@ -2,7 +2,7 @@ import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels, conversationEvents, conversations, messages, ticketStatuses } from '@/db/schema';
 import { enqueue } from '@/lib/queue';
-import { afterInboundMessage } from '@/lib/tickets/lifecycle';
+import { afterInboundMessage, afterMessageStored } from '@/lib/tickets/lifecycle';
 import { explainDeliveryError } from '@/lib/whatsapp/errors';
 import type {
   NormalisedEcho,
@@ -185,6 +185,17 @@ export async function ingestWhatsAppMessage(
     );
   }
 
+  // Linking runs whatever the channel, deliberately outside the guard below.
+  // A bot transcript is not a ticket the team works — which is why the SLA and
+  // automations stay out of it — but it is full of tracking numbers, and it is
+  // exactly what a "conversations for this shipment" query should find.
+  await afterMessageStored({
+    conversationId: result.conversationId,
+    messageId: result.messageId,
+    bodyText: message.text,
+    kind: 'reply',
+  });
+
   // Deliberately not run for a read-only channel. Everything downstream assumes
   // a ticket the team is working: the SLA would start a first-response clock
   // nobody is allowed to stop, the sweep would raise breaches every five
@@ -359,6 +370,15 @@ export async function ingestWhatsAppEcho(echo: NormalisedEcho): Promise<WhatsApp
       { priority: 5, dedupeKey: `download_media:${echo.media.mediaId}` },
     );
   }
+
+  // The bot's own half of the transcript carries tracking numbers too, and is
+  // often the only half that does.
+  await afterMessageStored({
+    conversationId: result.conversationId,
+    messageId: result.messageId,
+    bodyText: echo.text,
+    kind: 'reply',
+  });
 
   return { ...result, duplicate: false, ignored: false };
 }

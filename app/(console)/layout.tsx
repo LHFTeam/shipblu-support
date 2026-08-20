@@ -27,6 +27,9 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
 
   const items: NavItem[] = [
     { href: '/inbox', label: 'Inbox', icon: 'inbox', badge: counts.all },
+    ...(can(agent, 'contact.view')
+      ? [{ href: '/customers', label: 'Customers', icon: 'customers' } as const]
+      : []),
     ...(can(agent, 'kb.view')
       ? [{ href: '/kb', label: 'Knowledge base', icon: 'kb' } as const]
       : []),

@@ -18,7 +18,11 @@ import type { SessionAgent } from '@/lib/auth/session';
 import { htmlToText, sanitiseEmailHtml } from '@/lib/html/sanitize';
 import { enqueue } from '@/lib/queue';
 import { onAgentReply, onGroupChanged, onStatusChanged } from '@/lib/sla';
-import { afterTicketResolved, afterTicketUpdate } from '@/lib/tickets/lifecycle';
+import {
+  afterMessageStored,
+  afterTicketResolved,
+  afterTicketUpdate,
+} from '@/lib/tickets/lifecycle';
 import {
   buildTemplateComponents,
   renderTemplatePreview,
@@ -26,6 +30,15 @@ import {
   TemplateParameterError,
 } from '@/lib/whatsapp/templates';
 import { metaWindowState } from '@/lib/meta/window';
+import {
+  attachShipment,
+  attachShippingAccount,
+  detachShipment,
+  detachShippingAccount,
+  upsertShipmentStub,
+  upsertShippingAccountStub,
+} from '@/lib/shipments/links';
+import { normaliseSbid, normaliseTrackingNumber } from '@/lib/shipments/format';
 import { windowState } from '@/lib/whatsapp/window';
 
 /**
@@ -213,6 +226,15 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
     );
   }
 
+  // An agent looks a parcel up on the shipping platform and pastes the number
+  // into their answer, which is why this runs on outbound as well as inbound.
+  await afterMessageStored({
+    conversationId,
+    messageId,
+    bodyText: isEmail && html ? htmlToText(html) : body,
+    kind: 'reply',
+  });
+
   if (resolveAfter) {
     await applyStatusCategory(agent, conversation.id, 'resolved');
   }
@@ -239,15 +261,27 @@ export async function addNote(_state: ActionState, formData: FormData): Promise<
   const readOnly = refuseIfReadOnly(row.conversation.channel);
   if (readOnly) return readOnly;
 
-  await db.insert(messages).values({
+  const note = await db
+    .insert(messages)
+    .values({
+      conversationId,
+      direction: 'outbound',
+      kind: 'note',
+      authorAgentId: agent.id,
+      bodyText: body,
+      // Notes are internal, so they are never queued for delivery. Marking them
+      // delivered keeps the timeline from showing a permanent "pending" badge.
+      deliveryStatus: 'delivered',
+    })
+    .returning({ id: messages.id });
+
+  // Notes are where an agent writes down what they found on the shipping
+  // platform, so they carry tracking numbers at least as often as replies do.
+  await afterMessageStored({
     conversationId,
-    direction: 'outbound',
-    kind: 'note',
-    authorAgentId: agent.id,
+    messageId: note[0]!.id,
     bodyText: body,
-    // Notes are internal, so they are never queued for delivery. Marking them
-    // delivered keeps the timeline from showing a permanent "pending" badge.
-    deliveryStatus: 'delivered',
+    kind: 'note',
   });
 
   refresh(row.conversation.number);
@@ -341,6 +375,16 @@ export async function sendTemplateReply(
   await onAgentReply(conversationId);
 
   await enqueue('send_whatsapp', { messageId }, { priority: 10, dedupeKey: `send:${messageId}` });
+
+  // The most predictable source of a tracking number in the whole system: the
+  // shipment_update template's body is "Hi {{1}}, your shipment {{2}} is out
+  // for delivery today", and {{2}} is filled in above.
+  await afterMessageStored({
+    conversationId,
+    messageId,
+    bodyText: rendered,
+    kind: 'reply',
+  });
 
   refresh(row.conversation.number);
   return ok();
@@ -545,4 +589,145 @@ function textToHtml(text: string): string {
     .split(/\n{2,}/)
     .map((paragraph) => `<p>${paragraph.replace(/\n/g, '<br>')}</p>`)
     .join('\n');
+}
+
+// --- Shipments --------------------------------------------------------------
+
+/**
+ * Attaching a parcel to a ticket by hand.
+ *
+ * Deliberately does *not* check the value against the detection pattern. An
+ * agent reading a number off a label or out of the shipping platform is more
+ * authoritative than our guess at the format — and the whole reason the pattern
+ * is configurable is that the guess is known to be incomplete. Refusing what an
+ * agent typed because a regular expression disagreed would be the tail wagging
+ * the dog.
+ */
+export async function linkShipment(_state: ActionState, formData: FormData): Promise<ActionState> {
+  const agent = await requireAgent();
+  if (!can(agent, 'ticket.edit_fields')) {
+    return { error: 'You do not have permission to change this ticket' };
+  }
+
+  const conversationId = String(formData.get('conversationId') ?? '');
+  const trackingNumber = normaliseTrackingNumber(String(formData.get('trackingNumber') ?? ''));
+  if (!trackingNumber) return { error: 'Enter a tracking number' };
+
+  const row = await loadConversation(agent, conversationId);
+  if (!row) return { error: 'Ticket not found' };
+
+  const shipmentId = await upsertShipmentStub(trackingNumber);
+  const created = await attachShipment({
+    conversationId,
+    shipmentId,
+    linkSource: 'manual',
+    linkedByAgentId: agent.id,
+  });
+
+  if (created) {
+    await db.insert(conversationEvents).values({
+      conversationId,
+      type: 'shipment_linked',
+      actorAgentId: agent.id,
+      data: { trackingNumber, shipmentId },
+    });
+  }
+
+  refresh(row.conversation.number);
+  return ok();
+}
+
+export async function unlinkShipment(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const agent = await requireAgent();
+  if (!can(agent, 'ticket.edit_fields')) {
+    return { error: 'You do not have permission to change this ticket' };
+  }
+
+  const conversationId = String(formData.get('conversationId') ?? '');
+  const shipmentId = String(formData.get('shipmentId') ?? '');
+  const trackingNumber = String(formData.get('trackingNumber') ?? '');
+
+  const row = await loadConversation(agent, conversationId);
+  if (!row) return { error: 'Ticket not found' };
+
+  await detachShipment(conversationId, shipmentId);
+
+  await db.insert(conversationEvents).values({
+    conversationId,
+    type: 'shipment_unlinked',
+    actorAgentId: agent.id,
+    data: { trackingNumber, shipmentId },
+  });
+
+  refresh(row.conversation.number);
+  return ok();
+}
+
+export async function linkShippingAccount(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const agent = await requireAgent();
+  if (!can(agent, 'ticket.edit_fields')) {
+    return { error: 'You do not have permission to change this ticket' };
+  }
+
+  const conversationId = String(formData.get('conversationId') ?? '');
+  const sbid = normaliseSbid(String(formData.get('sbid') ?? ''));
+  if (!sbid) return { error: 'Enter an SBID' };
+
+  const row = await loadConversation(agent, conversationId);
+  if (!row) return { error: 'Ticket not found' };
+
+  const shippingAccountId = await upsertShippingAccountStub(sbid);
+  const created = await attachShippingAccount({
+    conversationId,
+    shippingAccountId,
+    linkSource: 'manual',
+    linkedByAgentId: agent.id,
+  });
+
+  if (created) {
+    await db.insert(conversationEvents).values({
+      conversationId,
+      type: 'shipping_account_linked',
+      actorAgentId: agent.id,
+      data: { sbid, shippingAccountId },
+    });
+  }
+
+  refresh(row.conversation.number);
+  return ok();
+}
+
+export async function unlinkShippingAccount(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const agent = await requireAgent();
+  if (!can(agent, 'ticket.edit_fields')) {
+    return { error: 'You do not have permission to change this ticket' };
+  }
+
+  const conversationId = String(formData.get('conversationId') ?? '');
+  const shippingAccountId = String(formData.get('shippingAccountId') ?? '');
+  const sbid = String(formData.get('sbid') ?? '');
+
+  const row = await loadConversation(agent, conversationId);
+  if (!row) return { error: 'Ticket not found' };
+
+  await detachShippingAccount(conversationId, shippingAccountId);
+
+  await db.insert(conversationEvents).values({
+    conversationId,
+    type: 'shipping_account_unlinked',
+    actorAgentId: agent.id,
+    data: { sbid, shippingAccountId },
+  });
+
+  refresh(row.conversation.number);
+  return ok();
 }
