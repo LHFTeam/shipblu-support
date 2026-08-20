@@ -3,21 +3,21 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { setShipmentParty, type CustomerActionState } from '../../actions';
+import { setShipmentParty, type ContactActionState } from '../../actions';
 
-const INITIAL: CustomerActionState = { error: null };
+const INITIAL: ContactActionState = { error: null };
 
 /**
  * Naming one end of a parcel.
  *
- * This is the honest form of "designate customers as shippers or recipients":
+ * This is the honest form of "designate contacts as shippers or recipients":
  * the role is recorded against the shipment, where it actually lives, so every
  * ticket about this parcel derives the same answer. Recording it per ticket
  * would let two tickets about one shipment disagree.
  *
  * A contact id rather than a picker, deliberately. There is no contact search
  * component yet and inventing one here would be the third search box in this
- * feature; the id is copied from the customer page, which an agent is on anyway
+ * feature; the id is copied from the contact page, which an agent is on anyway
  * when they work out who this is.
  */
 export function PartyField({
@@ -57,7 +57,7 @@ export function PartyField({
     <div>
       {current ? (
         <div className="mb-2 text-sm">
-          <Link href={`/customers/${current.id}`} className="font-medium hover:underline">
+          <Link href={`/contacts/${current.id}`} className="font-medium hover:underline">
             {current.name ?? 'Unnamed'}
           </Link>
           {current.handle ? (
@@ -75,7 +75,7 @@ export function PartyField({
               value={value}
               disabled={busy}
               onChange={(event) => setValue(event.target.value)}
-              placeholder="Customer id"
+              placeholder="Contact id"
               aria-label={`Set the ${party}`}
               className="min-w-0 flex-1 rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-xs outline-none focus:border-brand-500"
             />

@@ -21,13 +21,13 @@ import { BookIcon, ChartIcon, ContactsIcon, InboxIcon, SettingsIcon } from '@/co
 export type NavItem = {
   href: string;
   label: string;
-  icon: 'inbox' | 'customers' | 'kb' | 'reports' | 'admin';
+  icon: 'inbox' | 'contacts' | 'kb' | 'reports' | 'admin';
   badge?: number;
 };
 
 const ICONS = {
   inbox: InboxIcon,
-  customers: ContactsIcon,
+  contacts: ContactsIcon,
   kb: BookIcon,
   reports: ChartIcon,
   admin: SettingsIcon,

@@ -1,13 +1,14 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { and, eq, ne, sql } from 'drizzle-orm';
+import { and, eq, ne, or, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   automationRules,
   businessHours,
   cannedResponses,
   holidays,
+  locations,
   slaPolicies,
   ticketFields,
   ticketStatuses,
@@ -16,7 +17,13 @@ import {
 } from '@/db/schema';
 import type { SlaTargets, WeeklySchedule } from '@/db/schema/config';
 import { requirePermission } from '@/lib/auth/guard';
+import { looksLikeEmail, normaliseEmail } from '@/lib/auth/normalise';
 import { parseActions } from '@/lib/automations/actions';
+import {
+  isValidLocationCode,
+  normaliseLocationCode,
+  LOCATION_CODE_MAX,
+} from '@/lib/locations/format';
 import { parseCondition } from '@/lib/rules/conditions';
 
 /**
@@ -125,6 +132,90 @@ export async function deleteGroup(
 
   await db.delete(groups).where(eq(groups.id, id));
   refresh('/admin/groups');
+  return ok();
+}
+
+// --- Locations --------------------------------------------------------------
+
+/**
+ * ShipBlu's own locations.
+ *
+ * Both identifiers are normalised before the uniqueness check, so `cai-1` and
+ * `CAI-1` collide instead of becoming two hubs — and they are checked here, with
+ * a sentence naming the location already using them, rather than left to the
+ * unique index. A 23505 reaching the form is a stack trace where an explanation
+ * belongs, and "which location has that code?" is the question an admin
+ * entering sixteen of them actually has.
+ */
+export async function saveLocation(
+  _state: SettingsState,
+  formData: FormData,
+): Promise<SettingsState> {
+  await requirePermission('admin.locations');
+
+  const id = text(formData, 'id');
+  const name = text(formData, 'name');
+  const code = normaliseLocationCode(text(formData, 'code'));
+  const email = normaliseEmail(text(formData, 'email'));
+  const isActive = formData.get('isActive') === 'on';
+
+  if (!name) return { error: 'Give the location a name' };
+  if (!isValidLocationCode(code)) {
+    return {
+      error: `A code is 2 to ${LOCATION_CODE_MAX} letters, digits or hyphens — for example CAI-1`,
+    };
+  }
+  if (!looksLikeEmail(email)) return { error: "Enter the location's email address" };
+
+  const clash = await db
+    .select({
+      id: locations.id,
+      name: locations.name,
+      code: locations.code,
+      email: locations.email,
+    })
+    .from(locations)
+    .where(or(eq(locations.code, code), eq(locations.email, email)));
+
+  const other = clash.find((row) => row.id !== id);
+  if (other) {
+    return {
+      error:
+        other.code === code
+          ? `${other.name} already uses the code ${code}`
+          : `${other.name} already uses ${email}`,
+    };
+  }
+
+  if (id) {
+    await db
+      .update(locations)
+      .set({ name, code, email, isActive, updatedAt: new Date() })
+      .where(eq(locations.id, id));
+  } else {
+    await db.insert(locations).values({ name, code, email, isActive });
+  }
+
+  refresh('/admin/locations');
+  return ok();
+}
+
+/**
+ * Deletes a location outright.
+ *
+ * Safe today only because nothing references a location yet: no agent carries
+ * one, no ticket is attributed to one. The moment something does, this needs the
+ * in-use guard `deleteGroup` has — and `is_active` is already the right answer
+ * for a hub that has closed but whose code appears in history.
+ */
+export async function deleteLocation(
+  _state: SettingsState,
+  formData: FormData,
+): Promise<SettingsState> {
+  await requirePermission('admin.locations');
+
+  await db.delete(locations).where(eq(locations.id, text(formData, 'id')));
+  refresh('/admin/locations');
   return ok();
 }
 

@@ -1,5 +1,6 @@
 export * from './enums';
 export * from './agents';
+export * from './locations';
 export * from './customers';
 export * from './config';
 export * from './conversations';

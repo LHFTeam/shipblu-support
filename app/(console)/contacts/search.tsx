@@ -5,14 +5,14 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { SearchIcon } from '@/components/icons';
 
 /**
- * The customer search box.
+ * The contact search box.
  *
  * Debounced, with the push held in a ref and kept out of the effect's
  * dependencies — the same shape as the inbox's `SearchBox`, and for the same
  * reason: a new closure on every render restarts the timer, so with it in the
  * deps array the search fires late, erratically, or never.
  */
-export function CustomerSearch({ initial }: { initial: string }) {
+export function ContactSearch({ initial }: { initial: string }) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -46,7 +46,7 @@ export function CustomerSearch({ initial }: { initial: string }) {
         value={value}
         onChange={(event) => setValue(event.target.value)}
         placeholder="Name, email, phone, SBID or tracking number"
-        aria-label="Search customers"
+        aria-label="Search contacts"
         className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] py-2 pe-3 ps-8 text-sm outline-none focus:border-brand-500"
       />
     </div>

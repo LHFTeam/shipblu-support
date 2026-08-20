@@ -53,3 +53,20 @@ describe('ticket.view.bot', () => {
     expect(can({ role: 'account_admin', permissions: {} }, 'ticket.view.bot')).toBe(true);
   });
 });
+
+describe('contact.merge', () => {
+  it('sits with ticket.merge rather than with contact.edit', () => {
+    // An agent can correct a contact; folding two people's histories together
+    // is a supervisor's call, and undoing it is not a click.
+    expect(can({ role: 'agent', permissions: {} }, 'contact.edit')).toBe(true);
+    expect(can({ role: 'agent', permissions: {} }, 'contact.merge')).toBe(false);
+    expect(can({ role: 'supervisor', permissions: {} }, 'contact.merge')).toBe(true);
+  });
+});
+
+describe('admin.locations', () => {
+  it('is an admin setting, like the rest of the register of who works where', () => {
+    expect(can({ role: 'supervisor', permissions: {} }, 'admin.locations')).toBe(false);
+    expect(can({ role: 'admin', permissions: {} }, 'admin.locations')).toBe(true);
+  });
+});

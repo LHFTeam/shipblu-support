@@ -1,8 +1,8 @@
 import Link from 'next/link';
 import { Badge, Card, Cell, EmptyState, PageHeader, Row, Table } from '@/components/ui';
 import { requirePermission } from '@/lib/auth/guard';
-import { searchCustomers } from '@/lib/shipments/queries';
-import { CustomerSearch } from './search';
+import { searchContacts } from '@/lib/shipments/queries';
+import { ContactSearch } from './search';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,10 +10,10 @@ export const dynamic = 'force-dynamic';
  * One search box over people, accounts and parcels.
  *
  * Three short tables rather than one merged list: an agent looking for a
- * customer and an agent looking for a tracking number want different things
+ * contact and an agent looking for a tracking number want different things
  * back, and a single ranked list would bury one under the other.
  */
-export default async function CustomersPage({
+export default async function ContactsPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -24,25 +24,25 @@ export default async function CustomersPage({
   const raw = params.q;
   const q = (Array.isArray(raw) ? raw[0] : raw)?.trim() ?? '';
 
-  const results = q ? await searchCustomers(q) : { contacts: [], accounts: [], shipments: [] };
+  const results = q ? await searchContacts(q) : { contacts: [], accounts: [], shipments: [] };
 
   const found = results.contacts.length + results.accounts.length + results.shipments.length;
 
   return (
     <div className="p-4 md:p-6">
       <PageHeader
-        title="Customers"
+        title="Contacts"
         description="People, shipping accounts and shipments. Search by name, email, phone, SBID or tracking number."
       />
 
       <div className="mb-5 max-w-md">
-        <CustomerSearch initial={q} />
+        <ContactSearch initial={q} />
       </div>
 
       {!q ? (
         <Card padded={false}>
           <EmptyState
-            title="Search for a customer"
+            title="Search for a contact"
             hint="A name, an email address, a phone number, an SBID or a tracking number."
           />
         </Card>
@@ -50,7 +50,7 @@ export default async function CustomersPage({
         <Card padded={false}>
           <EmptyState
             title="Nothing found"
-            hint={`No customer, account or shipment matches “${q}”.`}
+            hint={`No contact, account or shipment matches “${q}”.`}
           />
         </Card>
       ) : (
@@ -63,7 +63,7 @@ export default async function CustomersPage({
                   <Row key={contact.id}>
                     <Cell>
                       <Link
-                        href={`/customers/${contact.id}`}
+                        href={`/contacts/${contact.id}`}
                         className="font-medium hover:underline"
                       >
                         {contact.name ?? 'Unnamed'}
@@ -94,7 +94,7 @@ export default async function CustomersPage({
                   <Row key={account.id}>
                     <Cell>
                       <Link
-                        href={`/customers/accounts/${encodeURIComponent(account.sbid)}`}
+                        href={`/contacts/accounts/${encodeURIComponent(account.sbid)}`}
                         className="font-medium hover:underline"
                       >
                         {account.sbid}
@@ -118,7 +118,7 @@ export default async function CustomersPage({
                   <Row key={shipment.id}>
                     <Cell>
                       <Link
-                        href={`/customers/shipments/${encodeURIComponent(shipment.trackingNumber)}`}
+                        href={`/contacts/shipments/${encodeURIComponent(shipment.trackingNumber)}`}
                         className="font-medium hover:underline"
                       >
                         {shipment.trackingNumber}

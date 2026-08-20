@@ -9,13 +9,13 @@ import {
   linkContactToAccount,
   setContactRoles,
   unlinkContactFromAccount,
-  type CustomerActionState,
+  type ContactActionState,
 } from '../actions';
 
-const INITIAL: CustomerActionState = { error: null };
+const INITIAL: ContactActionState = { error: null };
 
 /**
- * The manual half of designating a customer as a shipper, a recipient, or both.
+ * The manual half of designating a contact as a shipper, a recipient, or both.
  *
  * Saved on change with no button, matching the ticket sidebar. Both can be on:
  * a merchant who also takes returns is both, and that is the common case for
@@ -108,7 +108,7 @@ export function AccountLinks({
         {accounts.map((account) => (
           <li key={account.shippingAccountId} className="flex items-center justify-between gap-2">
             <Link
-              href={`/customers/accounts/${encodeURIComponent(account.sbid)}`}
+              href={`/contacts/accounts/${encodeURIComponent(account.sbid)}`}
               className="font-medium hover:underline"
             >
               {account.sbid}

@@ -586,7 +586,7 @@ function ShipmentsField({ conversation }: { conversation: ConversationDetail }) 
           <li key={shipment.shipmentId} className="text-xs">
             <div className="flex items-start justify-between gap-2">
               <Link
-                href={`/customers/shipments/${encodeURIComponent(shipment.trackingNumber)}`}
+                href={`/contacts/shipments/${encodeURIComponent(shipment.trackingNumber)}`}
                 className="font-medium break-all hover:underline"
               >
                 {shipment.trackingNumber}
@@ -613,7 +613,7 @@ function ShipmentsField({ conversation }: { conversation: ConversationDetail }) 
 
             <div className="mt-1 flex flex-wrap items-center gap-1">
               {shipment.sbid ? (
-                <Link href={`/customers/accounts/${encodeURIComponent(shipment.sbid)}`}>
+                <Link href={`/contacts/accounts/${encodeURIComponent(shipment.sbid)}`}>
                   <Badge>SBID {shipment.sbid}</Badge>
                 </Link>
               ) : null}
@@ -650,7 +650,7 @@ function ShippingAccountsField({ conversation }: { conversation: ConversationDet
         {conversation.shippingAccounts.map((account) => (
           <li key={account.shippingAccountId} className="flex items-center justify-between gap-2">
             <Link
-              href={`/customers/accounts/${encodeURIComponent(account.sbid)}`}
+              href={`/contacts/accounts/${encodeURIComponent(account.sbid)}`}
               className="text-xs font-medium hover:underline"
             >
               {account.name ?? `SBID ${account.sbid}`}

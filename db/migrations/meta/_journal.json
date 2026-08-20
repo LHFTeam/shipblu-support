@@ -43,6 +43,13 @@
       "when": 1787182339291,
       "tag": "0005_shipments_and_shipping_accounts",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787212490199,
+      "tag": "0006_contact_merges_and_locations",
+      "breakpoints": true
     }
   ]
 }

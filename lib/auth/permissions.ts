@@ -21,6 +21,13 @@ export const PERMISSIONS = [
   'ticket.edit_fields',
   'contact.view',
   'contact.edit',
+  /**
+   * Folding one contact into another. Above `contact.edit` because it moves
+   * somebody else's tickets onto a contact and retires a record, which is the
+   * same weight as `ticket.merge` — and granted to the same roles for that
+   * reason.
+   */
+  'contact.merge',
   'contact.delete',
   'kb.view',
   'kb.edit',
@@ -28,6 +35,7 @@ export const PERMISSIONS = [
   'report.view',
   'admin.agents',
   'admin.groups',
+  'admin.locations',
   'admin.channels',
   'admin.automations',
   'admin.sla',
@@ -53,6 +61,7 @@ const SUPERVISOR: Permission[] = [
   ...AGENT,
   'ticket.view.all',
   'ticket.merge',
+  'contact.merge',
   'ticket.delete',
   'kb.edit',
   'kb.publish',
@@ -69,6 +78,7 @@ const ADMIN: Permission[] = [
   'contact.delete',
   'admin.agents',
   'admin.groups',
+  'admin.locations',
   'admin.channels',
   'admin.automations',
   'admin.sla',

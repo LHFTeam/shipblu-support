@@ -41,8 +41,8 @@ export default async function ShipmentPage({ params }: { params: Promise<{ track
         title={shipment.trackingNumber}
         description={shipment.statusLabel ?? undefined}
         actions={
-          <Link href="/customers" className="text-sm hover:underline">
-            All customers
+          <Link href="/contacts" className="text-sm hover:underline">
+            All contacts
           </Link>
         }
       />
@@ -68,7 +68,7 @@ export default async function ShipmentPage({ params }: { params: Promise<{ track
               <p>
                 Account:{' '}
                 <Link
-                  href={`/customers/accounts/${encodeURIComponent(shipment.sbid)}`}
+                  href={`/contacts/accounts/${encodeURIComponent(shipment.sbid)}`}
                   className="font-medium hover:underline"
                 >
                   SBID {shipment.sbid}

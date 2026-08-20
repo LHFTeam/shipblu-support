@@ -1,5 +1,6 @@
 import { relations } from 'drizzle-orm';
 import {
+  type AnyPgColumn,
   boolean,
   index,
   jsonb,
@@ -9,6 +10,7 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
+import { agents } from './agents';
 import { channelEnum, contactTokenPurposeEnum, sourceSystemEnum } from './enums';
 
 export const companies = pgTable(
@@ -79,6 +81,22 @@ export const contacts = pgTable(
     sourceSystem: sourceSystemEnum('source_system').notNull().default('native'),
     externalId: text('external_id'),
 
+    /**
+     * Set when this contact was merged into another one, which is the same row
+     * carrying `deletedAt`. A merged contact is a **tombstone**, not a deletion:
+     * everything that referenced it now references the survivor, and this
+     * pointer is what still answers "where did that person go?" for a
+     * bookmarked link, an imported id, or an agent who remembers the wrong one.
+     *
+     * `conversations.merged_into_id` is the precedent, and the reasoning is the
+     * same. Hard-deleting the loser instead would take its `(source_system,
+     * external_id)` with it, so the next importer run would recreate the
+     * duplicate we just merged away.
+     */
+    mergedIntoContactId: uuid('merged_into_contact_id').references((): AnyPgColumn => contacts.id, {
+      onDelete: 'set null',
+    }),
+
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
@@ -87,6 +105,71 @@ export const contacts = pgTable(
     index('contacts_company_idx').on(t.companyId),
     index('contacts_primary_email_idx').on(t.primaryEmail),
     uniqueIndex('contacts_external_idx').on(t.sourceSystem, t.externalId),
+    // "Which duplicates were folded into this person?" — asked by the contact
+    // page on every render, and by nothing else.
+    index('contacts_merged_into_idx').on(t.mergedIntoContactId),
+  ],
+);
+
+/**
+ * What one merge moved.
+ *
+ * Counts rather than ids: the row is there to say "this merge happened, by this
+ * person, and it was this big", which is what somebody reading a surprising
+ * contact history needs. The ids of everything that moved are recoverable from
+ * the rows themselves — they all point at the survivor now.
+ */
+export type MergedCounts = {
+  identities: number;
+  conversations: number;
+  messages: number;
+  shippingAccounts: number;
+  shipments: number;
+};
+
+/**
+ * The audit trail for contact merges.
+ *
+ * A merge is the one write in this system that moves another person's tickets
+ * onto a contact, so it gets a row of its own rather than only the tombstone
+ * pointer. `deletedAt` plus `merged_into_contact_id` says *that* it happened;
+ * this says who did it, when, and how much moved — the three questions asked
+ * when a merge turns out to have been wrong.
+ *
+ * Unique on `merged_contact_id`: a contact can be merged away exactly once,
+ * because the second attempt has nothing left to move. The index is the guard,
+ * not the check in `mergeContacts()`.
+ */
+export const contactMerges = pgTable(
+  'contact_merges',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+
+    survivorContactId: uuid('survivor_contact_id')
+      .notNull()
+      .references(() => contacts.id, { onDelete: 'cascade' }),
+    mergedContactId: uuid('merged_contact_id')
+      .notNull()
+      .references(() => contacts.id, { onDelete: 'cascade' }),
+
+    /** Null once the agent who did it has been deleted; the merge still stands. */
+    mergedByAgentId: uuid('merged_by_agent_id').references(() => agents.id, {
+      onDelete: 'set null',
+    }),
+
+    moved: jsonb('moved').$type<MergedCounts>().notNull().default({
+      identities: 0,
+      conversations: 0,
+      messages: 0,
+      shippingAccounts: 0,
+      shipments: 0,
+    }),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('contact_merges_merged_idx').on(t.mergedContactId),
+    index('contact_merges_survivor_idx').on(t.survivorContactId, t.createdAt),
   ],
 );
 

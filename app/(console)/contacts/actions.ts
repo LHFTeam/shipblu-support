@@ -6,6 +6,7 @@ import { db } from '@/db/client';
 import { contacts, shipments } from '@/db/schema';
 import { requireAgent } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
+import { mergeContacts, type MergeRefusal } from '@/lib/contacts/merge';
 import { normaliseSbid, normaliseTrackingNumber } from '@/lib/shipments/format';
 import {
   addContactToShippingAccount,
@@ -15,17 +16,20 @@ import {
 } from '@/lib/shipments/links';
 
 /**
- * Writes from the customer, account and shipment pages.
+ * Writes from the contact, account and shipment pages.
  *
- * Same shape as the ticket actions: authorise, write, revalidate. There is no
- * `conversation_events` row to write here — these are facts about a person or a
- * parcel rather than about one ticket, and inventing a per-ticket audit entry
- * for them would put the change on whichever ticket happened to be open.
+ * Same shape as the ticket actions: authorise, write, revalidate. Most of these
+ * write no `conversation_events` row — they are facts about a person or a parcel
+ * rather than about one ticket, and inventing a per-ticket audit entry for them
+ * would put the change on whichever ticket happened to be open.
+ *
+ * A merge is the exception, and it earns it: the ticket's requester genuinely
+ * changed, on every ticket that moved, so each one gets an entry of its own.
  */
 
-export type CustomerActionState = { error: string | null; ok?: boolean; nonce?: number };
+export type ContactActionState = { error: string | null; ok?: boolean; nonce?: number };
 
-function ok(): CustomerActionState {
+function ok(): ContactActionState {
   return { error: null, ok: true, nonce: Date.now() };
 }
 
@@ -37,12 +41,12 @@ function ok(): CustomerActionState {
  * an account number proves the number came up — not that it is yours.
  */
 export async function linkContactToAccount(
-  _state: CustomerActionState,
+  _state: ContactActionState,
   formData: FormData,
-): Promise<CustomerActionState> {
+): Promise<ContactActionState> {
   const agent = await requireAgent();
   if (!can(agent, 'contact.edit')) {
-    return { error: 'You do not have permission to edit customers' };
+    return { error: 'You do not have permission to edit contacts' };
   }
 
   const contactId = String(formData.get('contactId') ?? '');
@@ -57,18 +61,18 @@ export async function linkContactToAccount(
     linkedByAgentId: agent.id,
   });
 
-  revalidatePath(`/customers/${contactId}`);
-  revalidatePath(`/customers/accounts/${sbid}`);
+  revalidatePath(`/contacts/${contactId}`);
+  revalidatePath(`/contacts/accounts/${sbid}`);
   return ok();
 }
 
 export async function unlinkContactFromAccount(
-  _state: CustomerActionState,
+  _state: ContactActionState,
   formData: FormData,
-): Promise<CustomerActionState> {
+): Promise<ContactActionState> {
   const agent = await requireAgent();
   if (!can(agent, 'contact.edit')) {
-    return { error: 'You do not have permission to edit customers' };
+    return { error: 'You do not have permission to edit contacts' };
   }
 
   const contactId = String(formData.get('contactId') ?? '');
@@ -77,12 +81,12 @@ export async function unlinkContactFromAccount(
 
   await removeContactFromShippingAccount(contactId, shippingAccountId);
 
-  revalidatePath(`/customers/${contactId}`);
+  revalidatePath(`/contacts/${contactId}`);
   return ok();
 }
 
 /**
- * The manual half of "designate customers as shippers or recipients".
+ * The manual half of "designate contacts as shippers or recipients".
  *
  * The flags are also maintained automatically from the relationship rows, but
  * only additively — so this can turn one off, and the next sync will not turn it
@@ -90,16 +94,16 @@ export async function unlinkContactFromAccount(
  * before that merchant has shipped anything needs to be able to say so.
  */
 export async function setContactRoles(
-  _state: CustomerActionState,
+  _state: ContactActionState,
   formData: FormData,
-): Promise<CustomerActionState> {
+): Promise<ContactActionState> {
   const agent = await requireAgent();
   if (!can(agent, 'contact.edit')) {
-    return { error: 'You do not have permission to edit customers' };
+    return { error: 'You do not have permission to edit contacts' };
   }
 
   const contactId = String(formData.get('contactId') ?? '');
-  if (!contactId) return { error: 'Customer not found' };
+  if (!contactId) return { error: 'Contact not found' };
 
   await db
     .update(contacts)
@@ -109,7 +113,7 @@ export async function setContactRoles(
     })
     .where(eq(contacts.id, contactId));
 
-  revalidatePath(`/customers/${contactId}`);
+  revalidatePath(`/contacts/${contactId}`);
   return ok();
 }
 
@@ -121,12 +125,12 @@ export async function setContactRoles(
  * be open when somebody worked it out.
  */
 export async function setShipmentParty(
-  _state: CustomerActionState,
+  _state: ContactActionState,
   formData: FormData,
-): Promise<CustomerActionState> {
+): Promise<ContactActionState> {
   const agent = await requireAgent();
   if (!can(agent, 'contact.edit')) {
-    return { error: 'You do not have permission to edit customers' };
+    return { error: 'You do not have permission to edit contacts' };
   }
 
   const trackingNumber = normaliseTrackingNumber(String(formData.get('trackingNumber') ?? ''));
@@ -172,6 +176,56 @@ export async function setShipmentParty(
   );
   for (const id of touched) await refreshContactRoles(id);
 
-  revalidatePath(`/customers/shipments/${trackingNumber}`);
+  revalidatePath(`/contacts/shipments/${trackingNumber}`);
+  return ok();
+}
+
+/**
+ * Refusal reasons, in words an agent can act on.
+ *
+ * Every one of these is reachable by two people working the same duplicate at
+ * once, not just by a mistake — so they read as "this changed under you" rather
+ * than as validation errors.
+ */
+const MERGE_ERRORS: Record<MergeRefusal, string> = {
+  not_found: 'One of those contacts no longer exists',
+  same_contact: 'That is the same contact',
+  already_merged: 'That contact has already been merged into somebody else — reload the page',
+  target_merged: 'This contact has itself been merged away — open the surviving contact instead',
+  target_deleted: 'This contact has been deleted, so nothing can be merged into it',
+};
+
+/**
+ * Folds a duplicate into the contact whose page this is.
+ *
+ * The direction is fixed by the page rather than chosen in the form: an agent is
+ * looking at the record they mean to keep, and a form that could merge either
+ * way is a form that will one day retire the wrong one. `contact.merge` rather
+ * than `contact.edit`, because this moves another person's tickets and retires a
+ * record — the same weight as merging tickets.
+ */
+export async function mergeContactInto(
+  _state: ContactActionState,
+  formData: FormData,
+): Promise<ContactActionState> {
+  const agent = await requireAgent();
+  if (!can(agent, 'contact.merge')) {
+    return { error: 'You do not have permission to merge contacts' };
+  }
+
+  const survivorId = String(formData.get('survivorId') ?? '');
+  const loserId = String(formData.get('loserId') ?? '');
+  if (!survivorId || !loserId) return { error: 'Pick a contact to merge' };
+
+  const result = await mergeContacts({ survivorId, loserId, agentId: agent.id });
+  if (!result.ok) return { error: MERGE_ERRORS[result.reason] };
+
+  revalidatePath(`/contacts/${survivorId}`);
+  // The duplicate's own page is now a redirect to the survivor, and its tickets
+  // have moved — so the inbox, and any account page listing its people, are both
+  // stale.
+  revalidatePath(`/contacts/${loserId}`);
+  revalidatePath('/contacts');
+  revalidatePath('/inbox');
   return ok();
 }

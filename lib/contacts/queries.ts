@@ -13,7 +13,7 @@ import { conversationVisibility } from '@/lib/tickets/queries';
 import type { ConversationSummary } from '@/lib/shipments/queries';
 
 /**
- * The customer read model.
+ * The contact read model.
  *
  * There has been no contact page in this console since it was built —
  * `contact.view` and `contact.edit` have existed in the permission list from the
@@ -79,7 +79,7 @@ export async function getContact(contactId: string): Promise<ContactDetail | nul
 }
 
 /**
- * A customer's own tickets.
+ * A contact's own tickets.
  *
  * Scoped through `conversationVisibility` rather than a fresh set of clauses, so
  * this page cannot show an agent a ticket the inbox would have hidden from them.

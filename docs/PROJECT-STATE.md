@@ -5,7 +5,7 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-08-19, against `main` at `62fbdaf`.
+Last updated: 2026-08-20, against `main` at `45c30df`.
 
 ---
 
@@ -22,9 +22,19 @@ authenticates customers and agents alike. Production is healthy on `04b5c60`,
 
 Since then, **shipments**: tickets link to parcels and to shipping accounts,
 tracking numbers and SBIDs are detected in message text as it arrives, the inbox
-searches on both, and the console finally has customer, account and shipment
+searches on both, and the console finally has contact, account and shipment
 pages — the first screens ever to use the `contact.view` and `contact.edit`
 permissions, which had been in the list and checked nowhere since the start.
+
+And since **that**: **contact merging** and a **register of ShipBlu's sixteen
+locations**. The console section is now `/contacts` rather than `/customers`,
+matching the table name it has always had. A duplicate is folded into the record
+an agent is looking at — identities, tickets, messages, account memberships and
+parcel roles move, and the loser stays as a tombstone that redirects — behind a
+new `contact.merge` permission held by supervisors and above. `locations` holds a
+name, a unique code and a shared mailbox per hub, joined to nothing on purpose;
+see `plans/contact-merge-and-locations.md` for why, and §5.1 for the sixteen rows
+nobody has entered yet.
 
 **But almost none of it is configured.** The database holds 1 agent, 0 channel
 rows, 0 SLA policies and 0 automation rules. The remaining work is mostly not
@@ -149,6 +159,13 @@ is code:
   from the customer portal land with no default group, so nothing routes them.
 - **Agents.** One account exists. The team needs inviting, and `groups` (3 rows)
   needs its membership.
+- **Locations.** `locations` is empty, and there are sixteen of them. Nothing
+  routes on a location yet, so an empty table breaks nothing — but a register
+  entered to fourteen is worse than an empty one, because the two missing hubs
+  read as hubs that do not exist. `/admin/locations` states the count and the
+  settings overview carries the same check. No seed data was written: nobody has
+  given us the real names, codes and addresses, and inventing them would put
+  plausible-looking wrong codes in every environment.
 - **SLA policies and automation rules are both empty**, so the sweep and the
   time-based cron currently run over nothing every 5 and 15 minutes. Whatever
   Freshdesk enforces today needs transcribing.

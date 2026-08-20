@@ -48,8 +48,8 @@ export default async function ShippingAccountPage({
         title={account.name ?? `SBID ${account.sbid}`}
         description={account.name ? `SBID ${account.sbid}` : undefined}
         actions={
-          <Link href="/customers" className="text-sm hover:underline">
-            All customers
+          <Link href="/contacts" className="text-sm hover:underline">
+            All contacts
           </Link>
         }
       />
@@ -74,7 +74,7 @@ export default async function ShippingAccountPage({
           <ul className="flex flex-col gap-1.5 text-sm">
             {people.map((person) => (
               <li key={person.id} className="flex flex-wrap items-center gap-2">
-                <Link href={`/customers/${person.id}`} className="font-medium hover:underline">
+                <Link href={`/contacts/${person.id}`} className="font-medium hover:underline">
                   {person.name ?? person.email ?? person.phone ?? 'Unnamed'}
                 </Link>
                 <span className="text-xs opacity-60">{person.email ?? person.phone ?? ''}</span>
@@ -98,7 +98,7 @@ export default async function ShippingAccountPage({
             {parcels.map((parcel) => (
               <li key={parcel.id} className="flex flex-wrap items-center gap-2">
                 <Link
-                  href={`/customers/shipments/${encodeURIComponent(parcel.trackingNumber)}`}
+                  href={`/contacts/shipments/${encodeURIComponent(parcel.trackingNumber)}`}
                   className="font-medium hover:underline"
                 >
                   {parcel.trackingNumber}
