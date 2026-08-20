@@ -100,28 +100,35 @@ const schema = z.object({
   EMAIL_REPLY_DOMAIN: z.string().optional(),
 
   /**
-   * Facebook and Instagram.
+   * Meta: WhatsApp, Messenger and Instagram.
    *
-   * One page access token covers both: an Instagram professional account is
-   * reached through the Facebook Page it is linked to, so there is no separate
-   * Instagram credential to configure.
+   * One credential each, shared by all three products, because one Meta app
+   * serves all three.
    *
-   * The app secret and verify token fall back to the WhatsApp ones because a
-   * single Meta app usually serves all three products — but they are separate
-   * keys so that a second app can be used without contorting the first.
+   * There used to be a WHATSAPP_* set alongside these, with the Meta keys
+   * falling back to them — the idea being that a second app could serve
+   * WhatsApp separately. Nobody did that, and the duplication cost more than
+   * the flexibility was worth: the same token had to be pasted twice, which
+   * meant a rotation done once left the other copy stale, and the fallback made
+   * it ambiguous which of the two a given call had actually used.
+   *
+   * `META_PAGE_ACCESS_TOKEN` sends on every channel and lists WhatsApp
+   * templates. `META_APP_SECRET` verifies X-Hub-Signature-256 on every inbound
+   * webhook, and `META_VERIFY_TOKEN` answers Meta's subscription handshake for
+   * all of them.
+   *
+   * The remaining WHATSAPP_* keys below are ids, not credentials — they name
+   * which phone number and business account to use, and have no Meta-app
+   * equivalent to collapse into.
    */
+  META_PAGE_ACCESS_TOKEN: z.string().optional(),
   META_APP_SECRET: z.string().optional(),
   META_VERIFY_TOKEN: z.string().optional(),
-  META_PAGE_ACCESS_TOKEN: z.string().optional(),
   FACEBOOK_PAGE_ID: z.string().optional(),
   INSTAGRAM_ACCOUNT_ID: z.string().optional(),
 
   WHATSAPP_PHONE_NUMBER_ID: z.string().optional(),
   WHATSAPP_WABA_ID: z.string().optional(),
-  WHATSAPP_ACCESS_TOKEN: z.string().optional(),
-  /** Used to verify X-Hub-Signature-256 on inbound Meta webhooks. */
-  WHATSAPP_APP_SECRET: z.string().optional(),
-  WHATSAPP_VERIFY_TOKEN: z.string().optional(),
 
   /**
    * Freshdesk, for the knowledge base importer only. Unset means the import
@@ -177,21 +184,50 @@ export function appUrl(): string {
 }
 
 /**
- * The app secret Meta signs Facebook and Instagram webhooks with.
- *
- * Falls back to the WhatsApp secret: one Meta app commonly serves all three
- * products, and requiring the same value to be pasted twice is how one of them
- * ends up stale.
+ * The app secret every inbound Meta webhook is signed with — WhatsApp,
+ * Messenger and Instagram alike.
  */
 export function metaAppSecret(): string | undefined {
-  const e = env();
-  return e.META_APP_SECRET ?? e.WHATSAPP_APP_SECRET;
+  return env().META_APP_SECRET ?? warnIfOnlyLegacy('META_APP_SECRET', 'WHATSAPP_APP_SECRET');
 }
 
-/** Same reasoning for the subscription handshake token. */
+/** The token Meta echoes back during the subscription handshake. */
 export function metaVerifyToken(): string | undefined {
-  const e = env();
-  return e.META_VERIFY_TOKEN ?? e.WHATSAPP_VERIFY_TOKEN;
+  return env().META_VERIFY_TOKEN ?? warnIfOnlyLegacy('META_VERIFY_TOKEN', 'WHATSAPP_VERIFY_TOKEN');
+}
+
+/** Warned about at most once per key, so a busy webhook does not flood the log. */
+const warnedLegacyKeys = new Set<string>();
+
+/**
+ * Names the missed migration step when the retired WHATSAPP_* key is still set
+ * and its Meta replacement is not.
+ *
+ * Worth the few lines because of how this fails otherwise. A missing app secret
+ * does not error — it makes `verifySignature` return false, and the webhook
+ * route then stores the payload as unverified and answers 403. Every inbound
+ * WhatsApp message is dropped, the log says "stored an unverified payload", and
+ * that reads as a forgery or a wrong secret rather than as a value that needs
+ * copying from one environment variable to another. Meta eventually disables a
+ * subscription that keeps failing, so the quiet version of this is expensive.
+ *
+ * Deliberately does not *use* the legacy value: the point of collapsing the two
+ * sets is that there is one place to look, and silently reading the old key
+ * would leave a half-migrated environment working until the day someone
+ * rotated the credential and only updated the new one.
+ */
+function warnIfOnlyLegacy(current: string, legacy: string): undefined {
+  if (!process.env[legacy] || warnedLegacyKeys.has(legacy)) return undefined;
+
+  warnedLegacyKeys.add(legacy);
+  console.error(
+    `${current} is not set, but the retired ${legacy} still is. WhatsApp, ` +
+      `Messenger and Instagram now share one credential set: copy the value ` +
+      `into ${current} in the shipblu-shared environment group and remove ` +
+      `${legacy}. Until then every inbound Meta webhook fails verification.`,
+  );
+
+  return undefined;
 }
 
 /** Domain that plus-addressed reply tokens are built against. */
@@ -207,7 +243,15 @@ export function replyDomain(): string {
   return domain;
 }
 
-/** Only for tests, which mutate process.env between cases. */
+/**
+ * Only for tests, which mutate process.env between cases.
+ *
+ * Clears the warn-once record too: it is knowledge about the environment just
+ * as much as the parsed values are, and a case that expects the legacy warning
+ * would otherwise pass or fail on whether an earlier case had already tripped
+ * it.
+ */
 export function resetEnvCache(): void {
   cached = null;
+  warnedLegacyKeys.clear();
 }

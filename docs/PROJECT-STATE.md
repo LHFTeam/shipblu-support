@@ -81,8 +81,8 @@ debugging session on `DATABASE_URL`. Service-level entries now exist only as
 deliberate exceptions, each commented in `render.yaml`:
 
 - staging: `DATABASE_URL`, `DATABASE_URL_SESSION` (its own database),
-  `EMAIL_PROVIDER=local` and `WHATSAPP_ACCESS_TOKEN=''`, so staging cannot
-  reach a real customer;
+  `EMAIL_PROVIDER=local` and `META_PAGE_ACCESS_TOKEN=''`, so staging cannot
+  reach a real customer on any channel;
 - web service only: `EMAIL_WEBHOOK_SECRET`, which has exactly one consumer.
 
 When you add a variable, add it to `render.yaml` in the same commit. The

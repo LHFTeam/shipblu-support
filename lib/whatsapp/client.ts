@@ -91,12 +91,15 @@ type MetaErrorBody = {
  */
 function credentials(phoneNumberId?: string | null) {
   const e = env();
-  if (!e.WHATSAPP_ACCESS_TOKEN) throw new Error('WHATSAPP_ACCESS_TOKEN is not configured');
+  // The same page token Messenger and Instagram send with: one Meta app serves
+  // all three products, so there is one credential rather than a WhatsApp copy
+  // of it that has to be rotated in step.
+  if (!e.META_PAGE_ACCESS_TOKEN) throw new Error('META_PAGE_ACCESS_TOKEN is not configured');
 
   const resolved = phoneNumberId ?? e.WHATSAPP_PHONE_NUMBER_ID;
   if (!resolved) throw new Error('WHATSAPP_PHONE_NUMBER_ID is not configured');
 
-  return { token: e.WHATSAPP_ACCESS_TOKEN, phoneNumberId: resolved };
+  return { token: e.META_PAGE_ACCESS_TOKEN, phoneNumberId: resolved };
 }
 
 async function graph<T>(
@@ -297,9 +300,9 @@ export type MetaTemplate = {
 export async function listTemplates(): Promise<MetaTemplate[]> {
   const e = env();
   if (!e.WHATSAPP_WABA_ID) throw new Error('WHATSAPP_WABA_ID is not configured');
-  if (!e.WHATSAPP_ACCESS_TOKEN) throw new Error('WHATSAPP_ACCESS_TOKEN is not configured');
+  if (!e.META_PAGE_ACCESS_TOKEN) throw new Error('META_PAGE_ACCESS_TOKEN is not configured');
 
-  const token = e.WHATSAPP_ACCESS_TOKEN;
+  const token = e.META_PAGE_ACCESS_TOKEN;
   const collected: MetaTemplate[] = [];
   let path: string | null = `${e.WHATSAPP_WABA_ID}/message_templates?limit=100`;
 

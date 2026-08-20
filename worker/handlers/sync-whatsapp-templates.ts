@@ -19,10 +19,10 @@ export async function syncWhatsAppTemplates(): Promise<void> {
   // failing every hour: a cron that is always red is a cron nobody reads, and
   // then the first real failure goes unnoticed.
   const e = env();
-  if (!e.WHATSAPP_WABA_ID || !e.WHATSAPP_ACCESS_TOKEN) {
+  if (!e.WHATSAPP_WABA_ID || !e.META_PAGE_ACCESS_TOKEN) {
     console.log(
       '[sync_whatsapp_templates] WhatsApp is not configured yet (WHATSAPP_WABA_ID / ' +
-        'WHATSAPP_ACCESS_TOKEN) — skipping',
+        'META_PAGE_ACCESS_TOKEN) — skipping',
     );
     return;
   }

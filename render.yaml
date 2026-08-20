@@ -68,21 +68,30 @@ envVarGroups:
       - key: SHIPMENT_IGNORE
         sync: false
 
-      # Facebook and Instagram. One Page token serves Messenger, Instagram
-      # Direct and both comment streams, and the worker sends with it while the
-      # web service verifies webhooks — so all of it is shared rather than
-      # per-service.
+      # Meta, for all three channels. One app serves WhatsApp, Messenger and
+      # Instagram, so there is one credential set rather than a WhatsApp copy of
+      # each alongside it.
+      #
+      # The Page token sends on every channel — Messenger, Instagram Direct,
+      # both comment streams, WhatsApp — and lists WhatsApp templates. The app
+      # secret verifies X-Hub-Signature-256 on every inbound webhook and the
+      # verify token answers every subscription handshake.
+      #
+      # There used to be a WHATSAPP_ACCESS_TOKEN, WHATSAPP_APP_SECRET and
+      # WHATSAPP_VERIFY_TOKEN here too, with the code falling back to them. The
+      # duplication meant the same secret was pasted twice and a rotation done
+      # once left the other copy stale — which is exactly how the access token
+      # spent a day expired while nobody could tell which of the two names the
+      # failing call had read.
       - key: META_PAGE_ACCESS_TOKEN
+        sync: false
+      - key: META_APP_SECRET
+        sync: false
+      - key: META_VERIFY_TOKEN
         sync: false
       - key: FACEBOOK_PAGE_ID
         sync: false
       - key: INSTAGRAM_ACCOUNT_ID
-        sync: false
-      # Left unset when one Meta app serves WhatsApp too, in which case the
-      # WhatsApp app secret and verify token are used.
-      - key: META_APP_SECRET
-        sync: false
-      - key: META_VERIFY_TOKEN
         sync: false
 
       # Postmark. The server token is used by the worker to send and by the web
@@ -114,21 +123,16 @@ envVarGroups:
       - key: WIDGET_ALLOWED_ORIGINS
         sync: false
 
-      # Meta Cloud API. Split across three services by need — the web service
-      # verifies inbound webhooks (app secret, verify token), the worker sends
-      # and downloads media (phone number id, access token), and the template
-      # sync cron lists templates (WABA id, access token). The access token is
-      # wanted by two of them and the region by three, which is what makes this
-      # a group rather than a per-service concern.
+      # Which WhatsApp number and business account to use. Ids rather than
+      # credentials — the token, app secret and verify token they are used with
+      # are the Meta ones above.
+      #
+      # The worker sends and downloads media with the phone number id, and the
+      # template sync cron lists templates with the WABA id, which is what makes
+      # these a group rather than a per-service concern.
       - key: WHATSAPP_PHONE_NUMBER_ID
         sync: false
       - key: WHATSAPP_WABA_ID
-        sync: false
-      - key: WHATSAPP_ACCESS_TOKEN
-        sync: false
-      - key: WHATSAPP_APP_SECRET
-        sync: false
-      - key: WHATSAPP_VERIFY_TOKEN
         sync: false
 
   # Still per-service, and inconsistent with the rule above: SUPABASE_URL and
@@ -240,16 +244,22 @@ services:
       # Postmark, which also makes the inherited server token inert — the
       # Postmark driver is never constructed.
       #
-      # WhatsApp has no such switch, so the token is blanked explicitly. It is
+      # Meta has no such switch, so the token is blanked explicitly. It is
       # inherited from the group, and Meta's API has no test mode: a send from
       # staging would arrive on a real customer's phone. Blank makes the client
-      # throw "WHATSAPP_ACCESS_TOKEN is not configured" instead. Today staging
-      # has no worker to run a send job at all, but that is an accident of the
-      # current topology rather than a guarantee, and this does not depend on
-      # it staying true.
+      # throw "META_PAGE_ACCESS_TOKEN is not configured" instead.
+      #
+      # Blanking one key now covers all three channels rather than WhatsApp
+      # alone. That is a gain, not a side effect: staging could previously still
+      # reach a real person on Messenger or Instagram, because the token those
+      # sent with was a different variable that nothing here overrode.
+      #
+      # Today staging has no worker to run a send job at all, but that is an
+      # accident of the current topology rather than a guarantee, and this does
+      # not depend on it staying true.
       - key: EMAIL_PROVIDER
         value: local
-      - key: WHATSAPP_ACCESS_TOKEN
+      - key: META_PAGE_ACCESS_TOKEN
         value: ''
 
   # ------------------------------------------------------------- cron jobs
@@ -298,7 +308,7 @@ services:
     buildCommand: npm ci --include=dev
     startCommand: npm run job -- sync_whatsapp_templates
     envVars:
-      # WHATSAPP_WABA_ID and WHATSAPP_ACCESS_TOKEN come from shipblu-shared.
+      # WHATSAPP_WABA_ID and META_PAGE_ACCESS_TOKEN come from shipblu-shared.
       # The handler skips cleanly while they are unset, so this cron is green
       # from the day the Blueprint creates it rather than red until Meta is
       # configured.

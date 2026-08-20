@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/db/client';
 import { webhookEvents } from '@/db/schema';
-import { env } from '@/lib/env';
+import { metaAppSecret, metaVerifyToken } from '@/lib/env';
 import { enqueue } from '@/lib/queue';
 import { SIGNATURE_HEADER, verifyChallenge, verifySignature } from '@/lib/whatsapp/verify';
 import type { WhatsAppWebhookPayload } from '@/lib/whatsapp/types';
@@ -21,10 +21,10 @@ export const dynamic = 'force-dynamic';
 /** Meta's subscription handshake. */
 export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
-  const token = env().WHATSAPP_VERIFY_TOKEN;
+  const token = metaVerifyToken();
 
   if (!token) {
-    console.error('[webhook:whatsapp] WHATSAPP_VERIFY_TOKEN is not configured');
+    console.error('[webhook:whatsapp] META_VERIFY_TOKEN is not configured');
     return new NextResponse('not configured', { status: 500 });
   }
 
@@ -41,7 +41,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const appSecret = env().WHATSAPP_APP_SECRET;
+  const appSecret = metaAppSecret();
 
   // Read as text, not json(): the signature covers the exact bytes Meta sent,
   // and re-serialising a parsed object produces a different string.
