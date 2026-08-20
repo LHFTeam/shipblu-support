@@ -1,8 +1,9 @@
-import { asc, sql } from 'drizzle-orm';
+import { asc, notInArray, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { businessHours, conversations, groupMembers, groups } from '@/db/schema';
 import { Cell, PageHeader, Row, Table } from '@/components/ui';
 import { requirePermission } from '@/lib/auth/guard';
+import { readOnlyChannels } from '@/lib/tickets/channel-policy';
 import { GroupEditor, NewGroup } from './forms';
 
 export const dynamic = 'force-dynamic';
@@ -28,7 +29,29 @@ export default async function GroupsPage() {
         description: groups.description,
         businessHoursId: groups.businessHoursId,
         members: sql<number>`(select count(*)::int from ${groupMembers} gm where gm.group_id = ${groups.id})`,
-        tickets: sql<number>`(select count(*)::int from ${conversations} c where c.group_id = ${groups.id})`,
+        // Read-only channels excluded: this number is "how much work sits with
+        // this group", and a transcript nobody may answer is not work. It would
+        // only ever be wrong once someone set a default group on the bot
+        // channel, which is exactly the day nobody would think to check here.
+        /*
+         * How much work sits with this group. A transcript nobody may answer is
+         * not work, so read-only channels are out.
+         *
+         * Two things about the shape of this. The correlation is written
+         * `${groups}.id`, not `${groups.id}`: inside a select-clause subquery
+         * drizzle renders a column reference *unqualified*, so `${groups.id}`
+         * became a bare "id", which Postgres resolved against the innermost
+         * table — the subquery compared conversations.group_id to
+         * conversations.id and every group reported zero tickets. And the
+         * channel test uses drizzle's operator rather than `<> all(...)`,
+         * because a JS array interpolated into a `sql` template arrives as one
+         * scalar parameter that Postgres rejects as malformed array input.
+         */
+        tickets: sql<number>`(
+          select count(*)::int from ${conversations}
+          where ${conversations.groupId} = ${groups}.id
+            and ${notInArray(conversations.channel, readOnlyChannels())}
+        )`,
       })
       .from(groups)
       .orderBy(asc(groups.name)),
