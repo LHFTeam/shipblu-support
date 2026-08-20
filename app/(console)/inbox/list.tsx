@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChannelBadge, channelInfo } from '@/components/channel';
 import { SearchIcon } from '@/components/icons';
 import { Badge, Select } from '@/components/ui';
@@ -22,13 +22,13 @@ import { formatRemaining, windowState } from '@/lib/whatsapp/window';
  */
 export function InboxList({
   rows,
-  hasMore,
+  nextCursor,
   filters,
   activeNumber,
   canSeeBot = false,
 }: {
   rows: InboxRow[];
-  hasMore: boolean;
+  nextCursor: string | null;
   filters: InboxFilters;
   activeNumber?: number;
   canSeeBot?: boolean;
@@ -37,14 +37,32 @@ export function InboxList({
   const pathname = usePathname();
   const params = useSearchParams();
 
+  const {
+    rows: olderRows,
+    canLoadMore,
+    loading,
+    error,
+    loadMore,
+    sentinelRef,
+    scrollRef,
+  } = useOlderPages({ firstPage: rows, nextCursor, filters, params });
+
   function setParam(key: string, value: string) {
     const next = new URLSearchParams(params.toString());
     if (value) next.set(key, value);
     else next.delete(key);
-    // Any filter change invalidates the current page number.
+    // Strips the page number a bookmark or a still-open tab may carry from when
+    // this list was paged. It no longer means anything, and leaving it in the
+    // URL suggests it does.
     next.delete('page');
     router.push(`${pathname}?${next.toString()}`);
   }
+
+  // The server's first page is always the freshest view of the top of the
+  // queue, so it wins: anything the scroll had already loaded that has since
+  // moved up there is dropped from below rather than rendered twice.
+  const seen = new Set(rows.map((row) => row.id));
+  const visible = [...rows, ...olderRows.filter((row) => !seen.has(row.id))];
 
   return (
     <>
@@ -87,14 +105,14 @@ export function InboxList({
         </div>
       </div>
 
-      <ol className="app-scroll min-h-0 flex-1 overflow-y-auto">
-        {rows.length === 0 ? (
+      <ol ref={scrollRef} className="app-scroll min-h-0 flex-1 overflow-y-auto" aria-busy={loading}>
+        {visible.length === 0 ? (
           <li className="p-8 text-center text-sm text-[var(--muted-foreground)]">
             Nothing matches those filters.
           </li>
         ) : null}
 
-        {rows.map((row) => {
+        {visible.map((row) => {
           const active = row.number === activeNumber;
 
           return (
@@ -159,31 +177,205 @@ export function InboxList({
             </li>
           );
         })}
-      </ol>
 
-      {hasMore || filters.page > 1 ? (
-        <div className="flex shrink-0 items-center justify-between border-t border-[var(--border)] bg-[var(--surface)] p-2 text-xs">
-          <button
-            type="button"
-            disabled={filters.page <= 1}
-            onClick={() => setParam('page', String(filters.page - 1))}
-            className="rounded px-2 py-1 hover:bg-[var(--muted)] disabled:opacity-30"
-          >
-            ← Newer
-          </button>
-          <span className="text-[var(--muted-foreground)]">Page {filters.page}</span>
-          <button
-            type="button"
-            disabled={!hasMore}
-            onClick={() => setParam('page', String(filters.page + 1))}
-            className="rounded px-2 py-1 hover:bg-[var(--muted)] disabled:opacity-30"
-          >
-            Older →
-          </button>
-        </div>
-      ) : null}
+        {/*
+          The trigger sits inside the scrolling list rather than under it, so
+          the observer measures it against the same box the agent is scrolling.
+          It is only rendered while there is another page: no sentinel is what
+          stops the list at the end.
+        */}
+        {canLoadMore ? (
+          <li ref={sentinelRef} className="p-3 text-center text-xs text-[var(--muted-foreground)]">
+            {error ? (
+              <span className="flex flex-col items-center gap-1.5">
+                {/* Scrolling already failed once here, so the retry is a button:
+                    another scroll gesture would land on the same spot and look
+                    like nothing happened. */}
+                <span className="text-[var(--danger)]">{error}</span>
+                <button
+                  type="button"
+                  onClick={loadMore}
+                  className="rounded border border-[var(--border)] px-2 py-1 hover:bg-[var(--muted)]"
+                >
+                  Try again
+                </button>
+              </span>
+            ) : (
+              <span aria-live="polite">Loading older tickets…</span>
+            )}
+          </li>
+        ) : olderRows.length > 0 ? (
+          // Only worth saying once the agent has actually been scrolling. Under
+          // a first page that never filled, it would state the obvious.
+          <li className="p-3 text-center text-xs text-[var(--muted-foreground)]/70">
+            End of the list
+          </li>
+        ) : null}
+      </ol>
     </>
   );
+}
+
+/**
+ * Infinite scroll over the pages below the server-rendered first one.
+ *
+ * The first page stays a server render — it is the freshest data and costs no
+ * round trip — and this only accumulates what the agent scrolls past it.
+ *
+ * The hard part is that the console re-renders itself constantly: `LiveUpdates`
+ * calls `router.refresh()` on every inbound message and delivery receipt, which
+ * hands this component a brand new `rows` and `nextCursor` several times a
+ * minute on a busy queue. Resetting the accumulated pages on either of those
+ * would collapse the list back to thirty rows under an agent mid-scroll. So
+ * what resets is keyed on the *filters* instead, and the accumulated pages are
+ * tagged with the filter signature they were fetched under: a signature that no
+ * longer matches is discarded without an effect, a state update or a flash of
+ * the wrong rows.
+ *
+ * For the same reason the fetch cursor is only seeded from `nextCursor` while
+ * nothing has been loaded yet. After that the cursor comes from the last
+ * response, so a refresh reshuffling the top of the queue cannot rewind the
+ * scroll position to the end of page one.
+ */
+function useOlderPages({
+  firstPage,
+  nextCursor,
+  filters,
+  params,
+}: {
+  firstPage: InboxRow[];
+  nextCursor: string | null;
+  filters: InboxFilters;
+  params: URLSearchParams;
+}) {
+  const signature = `${filters.view}|${filters.statusCategory}|${filters.channel}|${filters.q}`;
+
+  const [loaded, setLoaded] = useState<{
+    signature: string;
+    rows: InboxRow[];
+    /** `undefined` until a page has been fetched; `null` once the end is known. */
+    cursor: string | null | undefined;
+  }>({ signature, rows: [], cursor: undefined });
+
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const current = loaded.signature === signature ? loaded : null;
+  const rows = current?.rows ?? [];
+  const cursor = current?.cursor === undefined ? nextCursor : current.cursor;
+
+  // Read at fetch time rather than closed over, so a response that arrives
+  // after the agent changed a filter can be recognised as stale and dropped.
+  const signatureRef = useRef(signature);
+  useEffect(() => {
+    signatureRef.current = signature;
+  });
+
+  // One request at a time. A single scroll can fire the observer repeatedly
+  // before the first response lands, and each duplicate would append the same
+  // page again.
+  const inFlight = useRef(false);
+
+  const search = params.toString();
+
+  const loadMore = useCallback(async () => {
+    if (!cursor || inFlight.current) return;
+
+    inFlight.current = true;
+    setLoading(true);
+    setError(null);
+
+    const requested = signatureRef.current;
+
+    try {
+      // Built from the live query string rather than from `filters`, so the
+      // request carries exactly what the page was rendered with and a filter
+      // added later needs no change here.
+      const query = new URLSearchParams(search);
+      query.set('cursor', cursor);
+
+      const response = await fetch(`/api/inbox?${query.toString()}`);
+      if (!response.ok) throw new Error(`inbox page request failed (${response.status})`);
+
+      const body = (await response.json()) as { rows: SerialisedRow[]; nextCursor: string | null };
+
+      if (signatureRef.current !== requested) return;
+
+      setLoaded((previous) => {
+        const base = previous.signature === requested ? previous.rows : [];
+        // Guard against a row arriving twice — it can have moved between pages
+        // while the agent was reading — so React never sees a duplicate key.
+        const known = new Set(base.map((row) => row.id));
+        const added = body.rows.filter((row) => !known.has(row.id)).map(reviveRow);
+
+        return { signature: requested, rows: [...base, ...added], cursor: body.nextCursor };
+      });
+    } catch {
+      if (signatureRef.current === requested) {
+        setError('Could not load older tickets.');
+      }
+    } finally {
+      inFlight.current = false;
+      setLoading(false);
+    }
+  }, [cursor, search]);
+
+  // Held in a ref so the observer below is not rebuilt on every live refresh —
+  // the same reasoning as `SearchBox`, and the same failure if it were not:
+  // an observer torn down and recreated mid-scroll can miss its intersection.
+  const latest = useRef(loadMore);
+  useEffect(() => {
+    latest.current = loadMore;
+  });
+
+  const sentinelRef = useRef<HTMLLIElement>(null);
+  const scrollRef = useRef<HTMLOListElement>(null);
+
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    const root = scrollRef.current;
+    if (!sentinel || !root || !cursor) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) latest.current();
+      },
+      // Fires before the sentinel is actually on screen, so the next page is
+      // usually already there by the time the agent scrolls to it.
+      { root, rootMargin: '400px' },
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+    // Re-observing when the cursor advances is what continues the sequence: the
+    // fresh observer immediately re-checks a sentinel that is still in view.
+  }, [cursor]);
+
+  return {
+    rows,
+    // The first page not filling a page-size means there is nothing below it,
+    // whatever the cursor says.
+    canLoadMore: Boolean(cursor) && (firstPage.length > 0 || rows.length > 0),
+    loading,
+    error,
+    loadMore,
+    sentinelRef,
+    scrollRef,
+  };
+}
+
+/** `InboxRow` as it survives JSON: the two timestamps arrive as strings. */
+type SerialisedRow = Omit<InboxRow, 'lastMessageAt' | 'lastCustomerMessageAt'> & {
+  lastMessageAt: string;
+  lastCustomerMessageAt: string | null;
+};
+
+function reviveRow(row: SerialisedRow): InboxRow {
+  return {
+    ...row,
+    lastMessageAt: new Date(row.lastMessageAt),
+    lastCustomerMessageAt: row.lastCustomerMessageAt ? new Date(row.lastCustomerMessageAt) : null,
+  };
 }
 
 /**
