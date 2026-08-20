@@ -82,8 +82,13 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
           </div>
         </header>
 
-        {/* pb-14 on mobile clears the bottom navigation bar. */}
-        <div className="min-h-0 flex-1 pb-14 md:pb-0">{children}</div>
+        {/* Clears the bottom navigation bar on mobile. The bar is 3.5rem plus
+            whatever the home indicator needs, and reserving only the 3.5rem
+            left it sitting on top of the composer's send button on any phone
+            with a safe area. */}
+        <div className="min-h-0 flex-1 pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">
+          {children}
+        </div>
       </div>
     </div>
   );
