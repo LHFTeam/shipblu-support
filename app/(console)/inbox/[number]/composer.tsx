@@ -9,7 +9,7 @@ import type { ConversationDetail } from '@/lib/tickets/queries';
 import { describeWindow, metaWindowState } from '@/lib/meta/window';
 import { renderTemplatePreview, templateShape } from '@/lib/whatsapp/templates';
 import { formatRemaining, windowState } from '@/lib/whatsapp/window';
-import type { InternalRecipient } from '@/lib/side-conversations/queries';
+import type { PickerEntry } from '@/lib/side-conversations/queries';
 import { addNote, sendReply, sendTemplateReply, type ActionState } from '../../actions';
 import { StartSideConversationForm } from './side-conversations';
 import type { TemplateOption } from './view';
@@ -26,7 +26,7 @@ export function Composer({
 }: {
   conversation: ConversationDetail;
   templates: TemplateOption[];
-  recipients: InternalRecipient[];
+  recipients: PickerEntry[];
   canSideConversation: boolean;
 }) {
   const isWhatsApp = conversation.channel === 'whatsapp';

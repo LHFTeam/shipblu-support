@@ -819,12 +819,15 @@ export async function saveInternalRecipient(
   if (!/^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/.test(email)) {
     return { error: 'Enter a valid email address' };
   }
-  if (!['hub', 'team', 'vendor'].includes(kind)) return { error: 'Unknown kind' };
+  // No 'hub'. A hub is a `locations` row, which is a register somebody else's
+  // screen owns; letting one be entered here would mean the Downtown hub's
+  // address is maintained in two places with nothing keeping them in step.
+  if (!['team', 'vendor'].includes(kind)) return { error: 'Unknown kind' };
 
   const values = {
     name,
     email,
-    kind: kind as 'hub' | 'team' | 'vendor',
+    kind: kind as 'team' | 'vendor',
     description,
     isActive,
   };

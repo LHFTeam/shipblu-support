@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation';
 import { requireAgent } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
-import { listInternalRecipients } from '@/lib/side-conversations/queries';
+import { listSideConversationRecipients } from '@/lib/side-conversations/queries';
 import {
   getConversation,
   listActiveAgents,
@@ -44,7 +44,7 @@ export default async function ConversationPage({
     // and the table is synced hourly, so this is a needless query otherwise.
     conversation.channel === 'whatsapp' ? listApprovedTemplates() : Promise.resolve([]),
     // Same reasoning: an agent who cannot start one has no picker to fill.
-    canSideConversation ? listInternalRecipients({ activeOnly: true }) : Promise.resolve([]),
+    canSideConversation ? listSideConversationRecipients() : Promise.resolve([]),
   ]);
 
   return (

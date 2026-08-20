@@ -1,9 +1,10 @@
-import { and, asc, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   agents,
   attachments,
   internalRecipients,
+  locations,
   sideConversationMessages,
   sideConversations,
 } from '@/db/schema';
@@ -44,7 +45,14 @@ export type SideConversationView = {
   subject: string;
   channel: string;
   state: 'open' | 'done';
-  /** The directory entry's name, or null when the agent typed an address. */
+  /**
+   * The directory entry's name, or null when the agent typed an address.
+   *
+   * One field whichever register it came from — a card saying "Downtown Hub"
+   * should not have to care that hubs live in `locations` and vendors do not.
+   * `recipientKind` carries the distinction for the one place that wants it, the
+   * grouping in the picker.
+   */
   recipientName: string | null;
   recipientKind: string | null;
   toAddresses: string[];
@@ -74,10 +82,13 @@ export async function sideConversationsForConversation(
       side: sideConversations,
       recipientName: internalRecipients.name,
       recipientKind: internalRecipients.kind,
+      locationName: locations.name,
+      locationCode: locations.code,
       createdByName: agents.name,
     })
     .from(sideConversations)
     .leftJoin(internalRecipients, eq(internalRecipients.id, sideConversations.recipientId))
+    .leftJoin(locations, eq(locations.id, sideConversations.locationId))
     .leftJoin(agents, eq(agents.id, sideConversations.createdByAgentId))
     .where(eq(sideConversations.conversationId, conversationId))
     .orderBy(asc(sideConversations.createdAt));
@@ -158,8 +169,10 @@ export async function sideConversationsForConversation(
       subject: row.side.subject,
       channel: row.side.channel,
       state: row.side.state,
-      recipientName: row.recipientName,
-      recipientKind: row.recipientKind,
+      // A location wins when both are somehow set. The CHECK in db/sql makes
+      // that impossible, so this is only about not writing `??` twice.
+      recipientName: row.locationName ?? row.recipientName,
+      recipientKind: row.locationName ? 'hub' : row.recipientKind,
       toAddresses: row.side.toAddresses,
       ccAddresses: row.side.ccAddresses,
       createdByName: row.createdByName,
@@ -188,10 +201,11 @@ export async function loadSideConversation(sideConversationId: string) {
   const rows = await db
     .select({
       side: sideConversations,
-      recipientName: internalRecipients.name,
+      recipientName: sql<string | null>`COALESCE(${locations.name}, ${internalRecipients.name})`,
     })
     .from(sideConversations)
     .leftJoin(internalRecipients, eq(internalRecipients.id, sideConversations.recipientId))
+    .leftJoin(locations, eq(locations.id, sideConversations.locationId))
     .where(eq(sideConversations.id, sideConversationId))
     .limit(1);
 
@@ -216,7 +230,7 @@ export type InternalRecipient = {
   id: string;
   name: string;
   email: string;
-  kind: 'hub' | 'team' | 'vendor';
+  kind: 'team' | 'vendor';
   description: string | null;
   isActive: boolean;
 };
@@ -238,4 +252,58 @@ export async function listInternalRecipients(
     .from(internalRecipients)
     .where(where.length ? and(...where) : undefined)
     .orderBy(asc(internalRecipients.kind), asc(internalRecipients.name));
+}
+
+/**
+ * What the picker offers, from both registers at once.
+ *
+ * The `source` field is what the server action needs to know which table an id
+ * belongs to, and the only reason the two are not simply concatenated. A hub
+ * shows its code beside its name because that is what people write on parcels
+ * and say to each other — "CAI-1", not "the one in Maadi".
+ */
+export type PickerEntry = {
+  source: 'location' | 'recipient';
+  id: string;
+  name: string;
+  email: string;
+  /** 'hub' for a location; 'team' or 'vendor' for the other register. */
+  kind: 'hub' | 'team' | 'vendor';
+  hint: string | null;
+};
+
+export async function listSideConversationRecipients(): Promise<PickerEntry[]> {
+  const [places, others] = await Promise.all([
+    db
+      .select({
+        id: locations.id,
+        name: locations.name,
+        email: locations.email,
+        code: locations.code,
+      })
+      .from(locations)
+      .where(eq(locations.isActive, true))
+      .orderBy(asc(locations.name)),
+
+    listInternalRecipients({ activeOnly: true }),
+  ]);
+
+  return [
+    ...places.map((place): PickerEntry => ({
+      source: 'location',
+      id: place.id,
+      name: place.name,
+      email: place.email,
+      kind: 'hub',
+      hint: place.code,
+    })),
+    ...others.map((other): PickerEntry => ({
+      source: 'recipient',
+      id: other.id,
+      name: other.name,
+      email: other.email,
+      kind: other.kind,
+      hint: other.description,
+    })),
+  ];
 }

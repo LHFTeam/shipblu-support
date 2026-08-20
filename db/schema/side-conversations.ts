@@ -12,6 +12,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import { agents } from './agents';
 import { conversations, messages, tsvector } from './conversations';
+import { locations } from './locations';
 import {
   channelEnum,
   deliveryStatusEnum,
@@ -62,14 +63,19 @@ import {
  */
 
 /**
- * The directory of internal parties an agent can write to.
+ * The parties an agent can write to that are **not** places.
  *
- * The alternative was a free-text address on every send, and the difference
- * between the two is the difference between a typo being a nuisance and a typo
- * being a data leak: `hub-downton@shipblu.com` reaches whoever registered that
- * domain, carrying a customer's address and their parcel history. A picker also
- * settles "which address is the Downtown hub?" once, in a place an admin can
- * correct, instead of once per agent in tribal memory.
+ * Finance, a courier partner, a customs broker. Hubs are deliberately absent:
+ * they are `locations` rows, and that register already holds the sixteen places
+ * ShipBlu works out of with the shared mailbox that reaches each one. The
+ * picker reads both tables and keeps them apart, because a single merged
+ * directory would mean a hub's address maintained in two admin screens with
+ * nothing keeping them in step — the failure `locations` was entered to prevent.
+ *
+ * Either way the point is a picker rather than a text box, and the difference is
+ * the difference between a typo being a nuisance and a typo being a data leak:
+ * `hub-downton@shipblu.com` reaches whoever registered that domain, carrying a
+ * customer's address and their parcel history.
  *
  * Free text is still allowed for the genuinely ad-hoc case, and is checked
  * against the ticket's own requester before it is accepted — see
@@ -88,7 +94,7 @@ export const internalRecipients = pgTable(
      */
     email: text('email').notNull(),
 
-    kind: internalRecipientKindEnum('kind').notNull().default('hub'),
+    kind: internalRecipientKindEnum('kind').notNull().default('team'),
     description: text('description'),
 
     /**
@@ -152,7 +158,24 @@ export const sideConversations = pgTable(
 
     state: sideConversationStateEnum('state').notNull().default('open'),
 
-    /** Null when the agent typed an address instead of picking from the list. */
+    /**
+     * Where the picker's choice came from. At most one is ever set, and both are
+     * null when the agent typed an address instead.
+     *
+     * Two columns rather than one polymorphic pair because the two directories
+     * answer different questions and are owned by different screens: `locations`
+     * is the register of places ShipBlu works out of, entered once and used by
+     * more than this feature; `internal_recipients` is this feature's own small
+     * list of parties that are not places. A single nullable id plus a "kind"
+     * discriminator would have bought one column and given up both foreign keys.
+     *
+     * The mutual exclusion is a CHECK in `db/sql/001_extensions_and_triggers.sql`
+     * — Drizzle's DSL cannot express it, and a row naming both would leave the
+     * card's title depending on which join the read model happened to try first.
+     */
+    locationId: uuid('location_id').references(() => locations.id, {
+      onDelete: 'set null',
+    }),
     recipientId: uuid('recipient_id').references(() => internalRecipients.id, {
       onDelete: 'set null',
     }),
@@ -162,8 +185,8 @@ export const sideConversations = pgTable(
      *
      * Denormalised deliberately: an admin correcting the Downtown hub's address
      * next month must not rewrite what last month's thread says it was sent to.
-     * The link to `internal_recipients` is for grouping and reporting; this is
-     * the record.
+     * The link to `locations` or `internal_recipients` is for grouping and
+     * reporting; this is the record.
      */
     toAddresses: text('to_addresses').array().notNull().default([]),
     ccAddresses: text('cc_addresses').array().notNull().default([]),
@@ -196,6 +219,7 @@ export const sideConversations = pgTable(
     // "What is still waiting on somebody", for the future internal-wait report.
     index('side_conversations_state_idx').on(t.state, t.lastMessageAt),
     index('side_conversations_recipient_idx').on(t.recipientId),
+    index('side_conversations_location_idx').on(t.locationId),
   ],
 );
 
@@ -276,6 +300,10 @@ export const sideConversationsRelations = relations(sideConversations, ({ one, m
   recipient: one(internalRecipients, {
     fields: [sideConversations.recipientId],
     references: [internalRecipients.id],
+  }),
+  location: one(locations, {
+    fields: [sideConversations.locationId],
+    references: [locations.id],
   }),
   createdBy: one(agents, {
     fields: [sideConversations.createdByAgentId],

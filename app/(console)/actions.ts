@@ -9,6 +9,7 @@ import {
   conversations,
   contacts,
   internalRecipients,
+  locations,
   messages,
   sideConversationMessages,
   sideConversations,
@@ -804,17 +805,42 @@ export async function startSideConversation(
 
   // --- Who it goes to ------------------------------------------------------
 
-  const recipientId = String(formData.get('recipientId') ?? '');
+  /*
+   * The picker offers two registers in one list, so its value carries which:
+   * `location:<uuid>` for one of the sixteen places ShipBlu works out of,
+   * `recipient:<uuid>` for a party that is not a place, `other` for free text.
+   *
+   * The address is re-read from the row here rather than taken from a hidden
+   * form field. A field would be an address the browser supplied, and the whole
+   * point of a directory is that the address comes from somewhere an admin
+   * controls — otherwise the picker is a text box wearing a dropdown.
+   */
+  const picked = String(formData.get('recipientId') ?? '');
   const typedAddress = String(formData.get('toAddress') ?? '');
 
   let toAddress: string;
   let resolvedRecipientId: string | null = null;
+  let resolvedLocationId: string | null = null;
 
-  if (recipientId && recipientId !== 'other') {
+  if (picked.startsWith('location:')) {
+    const id = picked.slice('location:'.length);
+    const rows = await db
+      .select({ id: locations.id, email: locations.email })
+      .from(locations)
+      .where(and(eq(locations.id, id), eq(locations.isActive, true)))
+      .limit(1);
+
+    const place = rows[0];
+    if (!place) return { error: 'That location is no longer available' };
+
+    resolvedLocationId = place.id;
+    toAddress = place.email;
+  } else if (picked.startsWith('recipient:')) {
+    const id = picked.slice('recipient:'.length);
     const rows = await db
       .select({ id: internalRecipients.id, email: internalRecipients.email })
       .from(internalRecipients)
-      .where(and(eq(internalRecipients.id, recipientId), eq(internalRecipients.isActive, true)))
+      .where(and(eq(internalRecipients.id, id), eq(internalRecipients.isActive, true)))
       .limit(1);
 
     const recipient = rows[0];
@@ -862,6 +888,7 @@ export async function startSideConversation(
         channel: 'email',
         subject,
         recipientId: resolvedRecipientId,
+        locationId: resolvedLocationId,
         toAddresses: [toAddress],
         ccAddresses,
         createdByAgentId: agent.id,

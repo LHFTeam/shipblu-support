@@ -129,6 +129,31 @@ BEGIN
 END $$;
 
 -- --------------------------------------------------------------------------
+-- A side conversation names at most one directory entry
+--
+-- The picker reads two registers and keeps them apart. `locations` is the sixteen
+-- places ShipBlu works out of, entered before anything used them;
+-- `internal_recipients` is the parties that are not places — Finance, a courier
+-- partner. A thread points at one or the other, or at neither when the agent
+-- typed an address by hand.
+--
+-- Both set is the state worth forbidding: the card's title, the sidebar entry and
+-- the reply box would each name whichever join their query reached first, so the
+-- same thread would appear to be addressed to two different people on two parts
+-- of one screen.
+-- --------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'side_conversations_one_directory'
+  ) THEN
+    ALTER TABLE side_conversations
+      ADD CONSTRAINT side_conversations_one_directory
+      CHECK (location_id IS NULL OR recipient_id IS NULL);
+  END IF;
+END $$;
+
+-- --------------------------------------------------------------------------
 -- Row level security on the tables this file's schema added
 --
 -- Drizzle does not emit ENABLE ROW LEVEL SECURITY, so every table arriving

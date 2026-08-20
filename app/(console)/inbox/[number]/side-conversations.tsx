@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Badge, Button, ErrorText, Input, Label, Select, Textarea } from '@/components/ui';
 import { formatBytes, formatDateTime, formatRelative } from '@/lib/format';
-import type { InternalRecipient, SideConversationView } from '@/lib/side-conversations/queries';
+import type { PickerEntry, SideConversationView } from '@/lib/side-conversations/queries';
 import { describeRecipient, trackingPrefill } from '@/lib/side-conversations/format';
 import type { ConversationDetail } from '@/lib/tickets/queries';
 import {
@@ -276,18 +276,27 @@ function StateButton({ side }: { side: SideConversationView }) {
  * customer's address and their parcel history. "Someone else" is still there for
  * the genuinely ad-hoc case, and the server refuses the customer's own addresses
  * whichever route the address came in by.
+ *
+ * One list over two registers. Hubs are `locations` rows — the register of
+ * places ShipBlu works out of, which already existed — and everything that is
+ * not a place comes from `internal_recipients`. An agent should not have to know
+ * which table a name lives in, so the only trace of the split is the group
+ * heading and the code shown beside a hub, which is what people actually say to
+ * each other: "CAI-1", not "the one in Maadi".
  */
 export function StartSideConversationForm({
   conversation,
   recipients,
 }: {
   conversation: ConversationDetail;
-  recipients: InternalRecipient[];
+  recipients: PickerEntry[];
 }) {
   const router = useRouter();
   const [state, setState] = useState<ActionState>(INITIAL);
   const [busy, setBusy] = useState(false);
-  const [recipientId, setRecipientId] = useState(recipients[0]?.id ?? 'other');
+  const [recipientId, setRecipientId] = useState(
+    recipients[0] ? `${recipients[0].source}:${recipients[0].id}` : 'other',
+  );
 
   // The last thing the customer actually said. Both the anchor the thread hangs
   // off and, optionally, the text quoted into the question.
@@ -305,15 +314,27 @@ export function StartSideConversationForm({
     if (result.ok) router.refresh();
   }
 
-  const byKind = new Map<string, InternalRecipient[]>();
-  for (const recipient of recipients) {
-    byKind.set(recipient.kind, [...(byKind.get(recipient.kind) ?? []), recipient]);
-  }
+  // Hubs first: they are what a late parcel is almost always about, and the
+  // sixteen of them dwarf the handful of teams and vendors.
+  const GROUPS: { kind: PickerEntry['kind']; label: string }[] = [
+    { kind: 'hub', label: 'Hubs and warehouses' },
+    { kind: 'team', label: 'Internal teams' },
+    { kind: 'vendor', label: 'Vendors' },
+  ];
 
   return (
     <form key={state.nonce ?? 0} action={submit} className="flex flex-col gap-2">
       <input type="hidden" name="conversationId" value={conversation.id} />
       <input type="hidden" name="anchorMessageId" value={anchor?.id ?? ''} />
+
+      {recipients.length === 0 ? (
+        <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
+          No hubs or teams have been entered yet, so there is nobody to pick. Add ShipBlu&apos;s
+          locations under <span className="font-medium">Settings → Locations</span>, and anyone who
+          is not a location under <span className="font-medium">Internal recipients</span>. Until
+          then you can still type an address by hand.
+        </p>
+      ) : null}
 
       <div className="grid gap-2 sm:grid-cols-2">
         <div>
@@ -324,15 +345,25 @@ export function StartSideConversationForm({
             value={recipientId}
             onChange={(event) => setRecipientId(event.target.value)}
           >
-            {[...byKind.entries()].map(([kind, entries]) => (
-              <optgroup key={kind} label={`${kind}s`}>
-                {entries.map((entry) => (
-                  <option key={entry.id} value={entry.id}>
-                    {entry.name}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
+            {GROUPS.map(({ kind, label }) => {
+              const entries = recipients.filter((entry) => entry.kind === kind);
+              if (entries.length === 0) return null;
+
+              return (
+                <optgroup key={kind} label={label}>
+                  {entries.map((entry) => (
+                    <option
+                      key={`${entry.source}:${entry.id}`}
+                      value={`${entry.source}:${entry.id}`}
+                    >
+                      {entry.hint && entry.kind === 'hub'
+                        ? `${entry.name} (${entry.hint})`
+                        : entry.name}
+                    </option>
+                  ))}
+                </optgroup>
+              );
+            })}
             <option value="other">Someone else…</option>
           </Select>
         </div>

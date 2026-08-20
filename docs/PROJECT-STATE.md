@@ -178,12 +178,14 @@ is code:
 - **SLA policies and automation rules are both empty**, so the sweep and the
   time-based cron currently run over nothing every 5 and 15 minutes. Whatever
   Freshdesk enforces today needs transcribing.
-- **Internal recipients.** `internal_recipients` is empty, so the side
-  conversation picker offers nothing but "Someone else…" and every agent will
-  type a hub address from memory — which is the exact failure the directory was
-  built to prevent, since a mistyped address delivers a customer's name, address
-  and complaint to whoever owns that domain. Every hub needs a row at
-  `/admin/recipients` before the feature is turned on for the team, not after.
+- **The side conversation picker's two registers.** Both are empty, so the
+  picker offers nothing but "Someone else…" and every agent will type an address
+  from memory — the exact failure it was built to prevent, since a mistyped
+  address delivers a customer's name, address and complaint to whoever owns that
+  domain. The hubs are the sixteen `locations` rows nobody has entered yet
+  (above); anything that is not a place — Finance, a courier partner — goes in
+  `internal_recipients` at `/admin/recipients`. Both need filling before the
+  feature is turned on for the team, not after.
 - **Unset config:** `EMAIL_API_KEY`, `EMAIL_FROM_ADDRESS`, `EMAIL_REPLY_DOMAIN`,
   `EMAIL_WEBHOOK_SECRET`, `KB_PUBLIC_HOST`, `WIDGET_ALLOWED_ORIGINS`.
 - **The shipment detection patterns are a guess and need confirming.**

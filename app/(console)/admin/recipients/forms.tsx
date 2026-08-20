@@ -15,25 +15,24 @@ function Fields({ recipient }: { recipient?: InternalRecipient }) {
           label="Name"
           hint="What an agent will look for in the picker under pressure. Use the name the team says out loud."
         >
-          <Input name="name" defaultValue={recipient?.name} required placeholder="Downtown Hub" />
+          <Input name="name" defaultValue={recipient?.name} required placeholder="Finance" />
         </Field>
 
         <Field
           label="Email address"
-          hint="Usually a forwarding list, so whoever is on shift can answer."
+          hint="Usually a shared mailbox or a forwarding list, so whoever is on shift can answer."
         >
           <Input
             name="email"
             type="email"
             defaultValue={recipient?.email}
             required
-            placeholder="hub-downtown@shipblu.com"
+            placeholder="finance@shipblu.com"
           />
         </Field>
 
         <Field label="Kind" hint="Only groups the picker. It changes nothing about the send.">
-          <Select name="kind" defaultValue={recipient?.kind ?? 'hub'}>
-            <option value="hub">Hub</option>
+          <Select name="kind" defaultValue={recipient?.kind ?? 'team'}>
             <option value="team">Internal team</option>
             <option value="vendor">Vendor</option>
           </Select>

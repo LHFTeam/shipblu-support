@@ -50,6 +50,13 @@
       "when": 1787212490199,
       "tag": "0006_contact_merges_and_locations",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1787222154747,
+      "tag": "0007_futuristic_talon",
+      "breakpoints": true
     }
   ]
 }

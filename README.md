@@ -229,7 +229,8 @@ the idea borrowed here as `side_conversations.anchor_message_id`.
 ```
 /inbox/<number>              the thread appears as a card in the timeline, in
                              chronological order among the messages
-/admin/recipients            the directory of hubs, teams and vendors
+/admin/locations             the hubs and warehouses the picker offers
+/admin/recipients            the teams and vendors it offers alongside them
 ```
 
 - **The recipient comes from a directory**, not a text box. `hub-downton@shipblu.com`
@@ -237,6 +238,12 @@ the idea borrowed here as `side_conversations.anchor_message_id`.
   address and complaint. A free-text address is still allowed, and every address is
   checked against the requester's own identities and our support mailbox before it is
   accepted — in the server action, not only in the composer.
+- **The picker reads two registers and keeps them apart.** Hubs and warehouses are
+  `locations` rows; Finance and a courier partner are `internal_recipients`. An agent
+  sees one list with three group headings and never has to know which table a name
+  lives in. `side_conversations` carries a `location_id` **or** a `recipient_id`, never
+  both, and the chosen row's address is re-read server-side rather than trusted from a
+  form field — otherwise the picker is a text box wearing a dropdown.
 - **Replies thread on an `s`-prefixed token**, `support+s4.<sig>@`, resolved _before_
   `resolveContact` in `lib/tickets/ingest.ts`. That ordering is the guarantee a hub
   employee never lands in `contacts`. The HMAC is domain-separated — the signed input

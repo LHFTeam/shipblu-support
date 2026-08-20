@@ -177,13 +177,15 @@ export const sideConversationStateEnum = pgEnum('side_conversation_state', ['ope
 /**
  * What kind of internal party a directory entry names.
  *
- * Only used to group the recipient picker. It is deliberately not a permission
- * or a routing rule — a hub and a vendor are written to identically, and the
- * only difference an agent cares about is finding the right one in a list that
- * will eventually hold every hub in the country.
+ * **No `hub`.** A hub is a `locations` row — that register already exists, holds
+ * the sixteen places ShipBlu works out of, and carries the shared mailbox that
+ * reaches whoever is there. Repeating hubs here would mean a hub's address is
+ * maintained in two admin screens with nothing keeping them in step, which is
+ * the exact failure `locations` was entered to prevent.
+ *
+ * What is left is everything that is not a place: Finance, a courier partner, a
+ * customs broker. Only used to group the picker — the two are written to
+ * identically, and the difference an agent cares about is finding the right one
+ * in a list.
  */
-export const internalRecipientKindEnum = pgEnum('internal_recipient_kind', [
-  'hub',
-  'team',
-  'vendor',
-]);
+export const internalRecipientKindEnum = pgEnum('internal_recipient_kind', ['team', 'vendor']);

@@ -20,7 +20,7 @@ import {
   updateTicket,
 } from '../../actions';
 import { readOnlyReason } from '@/lib/tickets/channel-policy';
-import type { InternalRecipient } from '@/lib/side-conversations/queries';
+import type { PickerEntry } from '@/lib/side-conversations/queries';
 import { Composer } from './composer';
 import { SideConversationCard, SideConversationsField } from './side-conversations';
 
@@ -97,7 +97,7 @@ export function ConversationView({
   groups: { id: string; name: string }[];
   templates: TemplateOption[];
   /** The internal directory, for the composer's side conversation tab. */
-  recipients: InternalRecipient[];
+  recipients: PickerEntry[];
   canSideConversation: boolean;
   currentAgentId: string;
 }) {
