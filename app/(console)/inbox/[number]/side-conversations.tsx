@@ -287,9 +287,12 @@ function StateButton({ side }: { side: SideConversationView }) {
 export function StartSideConversationForm({
   conversation,
   recipients,
+  onSent,
 }: {
   conversation: ConversationDetail;
   recipients: PickerEntry[];
+  /** Lets the composer put itself away on a phone once the thread is started. */
+  onSent?: () => void;
 }) {
   const router = useRouter();
   const [state, setState] = useState<ActionState>(INITIAL);
@@ -311,7 +314,10 @@ export function StartSideConversationForm({
     const result = await startSideConversation(INITIAL, formData);
     setBusy(false);
     setState(result);
-    if (result.ok) router.refresh();
+    if (result.ok) {
+      router.refresh();
+      onSent?.();
+    }
   }
 
   // Hubs first: they are what a late parcel is almost always about, and the
