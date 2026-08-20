@@ -7,6 +7,7 @@ import {
   replyToComment,
   sendDirectMessage,
 } from '@/lib/meta/client';
+import { explainMetaSendError } from '@/lib/meta/errors';
 import type { MetaPlatform } from '@/lib/meta/types';
 import { messagingTag, metaWindowState } from '@/lib/meta/window';
 import type { ClaimedJob } from '@/lib/queue';
@@ -81,9 +82,24 @@ export async function sendMeta(job: ClaimedJob): Promise<void> {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
 
+    // Meta answers a refused send with a sentence that names no rule — most of
+    // the time "An unknown error has occurred." — so what the timeline shows is
+    // that sentence plus what we know about the send it was refusing.
+    const explained =
+      error instanceof MetaApiError
+        ? explainMetaSendError(error, {
+            platform,
+            sendKind,
+            tag:
+              sendKind === 'dm'
+                ? messagingTag(metaWindowState(row.conversation.lastCustomerMessageAt))
+                : null,
+          })
+        : message;
+
     await db
       .update(messages)
-      .set({ deliveryStatus: 'failed', deliveryError: message.slice(0, 1000) })
+      .set({ deliveryStatus: 'failed', deliveryError: explained.slice(0, 2000) })
       .where(eq(messages.id, messageId));
 
     // A permanent failure is not worth four more attempts: the agent needs to
