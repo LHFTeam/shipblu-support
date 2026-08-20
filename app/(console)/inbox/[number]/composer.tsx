@@ -1,8 +1,9 @@
 'use client';
 
-import { useActionState, useEffect, useState } from 'react';
+import { useActionState, useCallback, useEffect, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { useRouter } from 'next/navigation';
+import { ChevronDownIcon, ChevronUpIcon } from '@/components/icons';
 import { Button, ErrorText, Input, Label, Select, Textarea } from '@/components/ui';
 import { useNow } from '@/components/use-now';
 import type { ConversationDetail } from '@/lib/tickets/queries';
@@ -17,6 +18,9 @@ import type { TemplateOption } from './view';
 const INITIAL: ActionState = { error: null };
 
 type Tab = 'reply' | 'note' | 'template' | 'side';
+
+/** Named so the collapsed bar and the collapse button can both point at it. */
+const PANEL_ID = 'composer-panel';
 
 export function Composer({
   conversation,
@@ -57,10 +61,39 @@ export function Composer({
 
   const [requestedTab, setRequestedTab] = useState<Tab>('reply');
 
+  /*
+    Collapsed to a single bar on a phone; never on a desktop.
+
+    Expanded, the composer takes two thirds of the pane — which it has to, or
+    the taller forms lose their send button — and that is two thirds of a phone
+    screen spent on a box the agent is not typing into yet. So it opens as a bar
+    and the conversation gets the rest, which is the shape every messaging app
+    on a phone already has.
+
+    The state only ever reaches the two `lg:hidden` controls and a `hidden
+    lg:flex` panel, so a desktop renders exactly what it rendered before and
+    cannot get stuck closed by a stale value from a narrow window.
+  */
+  const [collapsed, setCollapsed] = useState(true);
+
+  // Stable, because it is an effect dependency down in the forms: a fresh
+  // closure every render would re-run the refresh effect on its own output.
+  const onSent = useCallback(() => setCollapsed(true), [setCollapsed]);
+
   // Derived rather than forced through an effect: when free-form is impossible
   // the composer shows templates, and it goes back to the reply tab by itself
   // the moment the customer writes again.
   const tab: Tab = !windowOpen && requestedTab === 'reply' ? 'template' : requestedTab;
+
+  // What the bar says it will open. The tab is the composer's whole subject, and
+  // "Write a reply…" against "Write a private note…" is the difference the
+  // agent most needs to see before they start typing.
+  const prompt: string = {
+    reply: isCommentThread ? 'Reply publicly…' : 'Write a reply…',
+    note: 'Write a private note…',
+    template: 'Send an approved template…',
+    side: 'Ask a hub or an internal team…',
+  }[tab];
 
   // The note beside the tabs, if this channel has one to make.
   const notice =
@@ -87,55 +120,104 @@ export function Composer({
       messages of the conversation on screen while writing.
     */
     <div className="flex max-h-[65%] min-h-0 flex-col border-t border-[var(--border)]">
-      <div className="flex shrink-0 flex-col gap-1 px-3 pt-2 lg:flex-row lg:items-center lg:gap-2">
-        {/* One row that scrolls sideways rather than four tabs squeezed into a
-            phone's width — at 390px they wrapped onto two lines each and the
-            last one ran off the edge. The negative margin lets a tab scroll
-            under the padding instead of stopping short of it. */}
-        <div className="app-scroll -mx-3 flex items-center gap-1 overflow-x-auto px-3 lg:mx-0 lg:px-0">
-          <TabButton
-            active={tab === 'reply'}
-            onClick={() => setRequestedTab('reply')}
-            disabled={!windowOpen || !metaSendable}
-          >
-            {isCommentThread ? 'Reply publicly' : 'Reply'}
-          </TabButton>
-          <TabButton active={tab === 'note'} onClick={() => setRequestedTab('note')}>
-            Private note
-          </TabButton>
-          {isWhatsApp ? (
-            <TabButton active={tab === 'template'} onClick={() => setRequestedTab('template')}>
-              Template
-            </TabButton>
-          ) : null}
-          {/* Fourth, and last, so the two customer-facing tabs stay leftmost and
-              the muscle memory of "the first box is the one the customer reads"
-              keeps holding. */}
-          {canSideConversation ? (
-            <TabButton active={tab === 'side'} onClick={() => setRequestedTab('side')}>
-              Side conversation
-            </TabButton>
+      {/* Shaped like the field it opens, because that is what an agent reaching
+          for the bottom of the screen expects to be able to tap. */}
+      {collapsed ? (
+        <button
+          type="button"
+          onClick={() => setCollapsed(false)}
+          aria-expanded={false}
+          aria-controls={PANEL_ID}
+          className="flex items-center gap-2 px-3 py-2.5 text-[var(--muted-foreground)] lg:hidden"
+        >
+          <span className="min-w-0 flex-1 truncate rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-start text-base">
+            {prompt}
+          </span>
+          <ChevronUpIcon size={18} className="shrink-0 opacity-70" />
+        </button>
+      ) : null}
+
+      {/*
+        Hidden rather than unmounted, so a half-written reply survives being put
+        away — the fields are uncontrolled and their text lives in the DOM, and
+        an agent who collapses the composer to re-read what the customer said is
+        the exact case this feature is for.
+      */}
+      <div
+        id={PANEL_ID}
+        className={`${collapsed ? 'hidden' : 'flex'} min-h-0 flex-1 flex-col lg:flex`}
+      >
+        <div className="flex shrink-0 flex-col gap-1 px-3 pt-2 lg:flex-row lg:items-center lg:gap-2">
+          <div className="flex min-w-0 items-center gap-1">
+            {/* One row that scrolls sideways rather than four tabs squeezed into
+                a phone's width — at 390px they wrapped onto two lines each and
+                the last one ran off the edge. The negative margin lets a tab
+                scroll under the padding instead of stopping short of it. */}
+            <div className="app-scroll -ms-3 flex items-center gap-1 overflow-x-auto ps-3 lg:ms-0 lg:ps-0">
+              <TabButton
+                active={tab === 'reply'}
+                onClick={() => setRequestedTab('reply')}
+                disabled={!windowOpen || !metaSendable}
+              >
+                {isCommentThread ? 'Reply publicly' : 'Reply'}
+              </TabButton>
+              <TabButton active={tab === 'note'} onClick={() => setRequestedTab('note')}>
+                Private note
+              </TabButton>
+              {isWhatsApp ? (
+                <TabButton active={tab === 'template'} onClick={() => setRequestedTab('template')}>
+                  Template
+                </TabButton>
+              ) : null}
+              {/* Fourth, and last, so the two customer-facing tabs stay leftmost
+                  and the muscle memory of "the first box is the one the customer
+                  reads" keeps holding. */}
+              {canSideConversation ? (
+                <TabButton active={tab === 'side'} onClick={() => setRequestedTab('side')}>
+                  Side conversation
+                </TabButton>
+              ) : null}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setCollapsed(true)}
+              aria-expanded
+              aria-controls={PANEL_ID}
+              aria-label="Hide the composer"
+              className="ms-auto shrink-0 rounded-md p-1.5 text-[var(--muted-foreground)] hover:bg-[var(--muted)] lg:hidden"
+            >
+              <ChevronDownIcon size={18} />
+            </button>
+          </div>
+
+          {/* Its own line on a phone. Sharing the tab row left it four characters
+              wide and clipped; there is no width to spare down there. */}
+          {notice ? (
+            <span className="text-xs opacity-60 lg:ms-auto lg:shrink-0">{notice}</span>
           ) : null}
         </div>
 
-        {/* Its own line on a phone. Sharing the tab row left it four characters
-            wide and clipped; there is no width to spare down there. */}
-        {notice ? (
-          <span className="text-xs opacity-60 lg:ms-auto lg:shrink-0">{notice}</span>
-        ) : null}
-      </div>
-
-      <div className="app-scroll min-h-0 flex-1 overflow-y-auto p-3">
-        {tab === 'reply' ? (
-          <ReplyForm conversationId={conversation.id} isCommentThread={isCommentThread} />
-        ) : null}
-        {tab === 'note' ? <NoteForm conversationId={conversation.id} /> : null}
-        {tab === 'template' ? (
-          <TemplateForm conversationId={conversation.id} templates={templates} />
-        ) : null}
-        {tab === 'side' ? (
-          <StartSideConversationForm conversation={conversation} recipients={recipients} />
-        ) : null}
+        <div className="app-scroll min-h-0 flex-1 overflow-y-auto p-3">
+          {tab === 'reply' ? (
+            <ReplyForm
+              conversationId={conversation.id}
+              isCommentThread={isCommentThread}
+              onSent={onSent}
+            />
+          ) : null}
+          {tab === 'note' ? <NoteForm conversationId={conversation.id} onSent={onSent} /> : null}
+          {tab === 'template' ? (
+            <TemplateForm conversationId={conversation.id} templates={templates} onSent={onSent} />
+          ) : null}
+          {tab === 'side' ? (
+            <StartSideConversationForm
+              conversation={conversation}
+              recipients={recipients}
+              onSent={onSent}
+            />
+          ) : null}
+        </div>
       </div>
     </div>
   );
@@ -173,24 +255,34 @@ function TabButton({
  * The fields clear by remounting the form on `state.nonce` rather than by
  * resetting controlled state — the inputs stay uncontrolled, which is also what
  * lets the browser keep a draft through an accidental tab switch.
+ *
+ * `onSent` puts the composer away on a phone once the message is gone, which is
+ * what makes the message land where the agent is looking: the timeline is the
+ * thing they want to see after sending, not an empty box. It must be a stable
+ * reference — it is a dependency here, and a new closure each render would run
+ * this effect against its own refresh.
  */
-function useRefreshOnSuccess(state: ActionState) {
+function useRefreshOnSuccess(state: ActionState, onSent?: () => void) {
   const router = useRouter();
   useEffect(() => {
-    if (state.ok) router.refresh();
-  }, [state, router]);
+    if (!state.ok) return;
+    router.refresh();
+    onSent?.();
+  }, [state, router, onSent]);
 }
 
 function ReplyForm({
   conversationId,
   isCommentThread = false,
+  onSent,
 }: {
   conversationId: string;
   isCommentThread?: boolean;
+  onSent?: () => void;
 }) {
   const [state, action] = useActionState(sendReply, INITIAL);
   const [privately, setPrivately] = useState(false);
-  useRefreshOnSuccess(state);
+  useRefreshOnSuccess(state, onSent);
 
   return (
     <form key={state.nonce ?? 0} action={action} className="flex flex-col gap-2">
@@ -245,9 +337,9 @@ function ReplyForm({
   );
 }
 
-function NoteForm({ conversationId }: { conversationId: string }) {
+function NoteForm({ conversationId, onSent }: { conversationId: string; onSent?: () => void }) {
   const [state, action] = useActionState(addNote, INITIAL);
-  useRefreshOnSuccess(state);
+  useRefreshOnSuccess(state, onSent);
 
   return (
     <form key={state.nonce ?? 0} action={action} className="flex flex-col gap-2">
@@ -280,14 +372,16 @@ function NoteForm({ conversationId }: { conversationId: string }) {
 function TemplateForm({
   conversationId,
   templates,
+  onSent,
 }: {
   conversationId: string;
   templates: TemplateOption[];
+  onSent?: () => void;
 }) {
   const [state, action] = useActionState(sendTemplateReply, INITIAL);
   const [templateId, setTemplateId] = useState(templates[0]?.id ?? '');
   const [values, setValues] = useState<Record<string, string>>({});
-  useRefreshOnSuccess(state);
+  useRefreshOnSuccess(state, onSent);
 
   const template = templates.find((t) => t.id === templateId);
   const shape = template ? templateShape(template.components) : null;
