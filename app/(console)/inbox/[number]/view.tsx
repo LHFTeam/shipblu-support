@@ -20,7 +20,9 @@ import {
   updateTicket,
 } from '../../actions';
 import { readOnlyReason } from '@/lib/tickets/channel-policy';
+import type { PickerEntry } from '@/lib/side-conversations/queries';
 import { Composer } from './composer';
+import { SideConversationCard, SideConversationsField } from './side-conversations';
 
 /**
  * What sits where the composer would be, on a channel we only observe.
@@ -85,6 +87,8 @@ export function ConversationView({
   agents,
   groups,
   templates,
+  recipients,
+  canSideConversation,
   currentAgentId,
 }: {
   conversation: ConversationDetail;
@@ -92,6 +96,9 @@ export function ConversationView({
   agents: { id: string; name: string; email: string }[];
   groups: { id: string; name: string }[];
   templates: TemplateOption[];
+  /** The internal directory, for the composer's side conversation tab. */
+  recipients: PickerEntry[];
+  canSideConversation: boolean;
   currentAgentId: string;
 }) {
   return (
@@ -100,7 +107,7 @@ export function ConversationView({
         <Header conversation={conversation} />
 
         <div className="app-scroll min-h-0 flex-1 overflow-y-auto px-4 py-4">
-          <Timeline conversation={conversation} />
+          <Timeline conversation={conversation} canSideConversation={canSideConversation} />
         </div>
 
         {readOnlyReason(conversation.channel) ? (
@@ -109,7 +116,12 @@ export function ConversationView({
             oneSided={!conversation.messages.some((m) => m.direction === 'outbound')}
           />
         ) : (
-          <Composer conversation={conversation} templates={templates} />
+          <Composer
+            conversation={conversation}
+            templates={templates}
+            recipients={recipients}
+            canSideConversation={canSideConversation}
+          />
         )}
       </div>
 
@@ -224,10 +236,62 @@ function WindowIndicator({
   );
 }
 
-function Timeline({ conversation }: { conversation: ConversationDetail }) {
+/**
+ * Messages and side conversations, in one ordered list.
+ *
+ * Interleaved rather than kept in a separate panel because the chronology is the
+ * information: "the customer complained at 09:12, we asked the hub at 09:20, the
+ * hub answered at 11:40, we replied at 11:44" is the story of the ticket, and a
+ * thread parked in a side panel takes the middle two out of it. This is the
+ * shape Freshworks arrived at with anchored threads, and it is right.
+ *
+ * A side conversation sorts by when it was *started*, not by its latest message.
+ * Sorting by activity would move a card that has been sitting on the ticket for
+ * two days down past a reply the agent wrote afterwards, and the agent's memory
+ * of the ticket is "I asked the hub after she wrote in".
+ */
+type TimelineEntry =
+  | { kind: 'message'; at: Date; message: ConversationDetail['messages'][number] }
+  | { kind: 'side'; at: Date; side: ConversationDetail['sideConversations'][number] };
+
+function timelineEntries(conversation: ConversationDetail): TimelineEntry[] {
+  const entries: TimelineEntry[] = [
+    ...conversation.messages.map((message): TimelineEntry => ({
+      kind: 'message',
+      at: new Date(message.createdAt),
+      message,
+    })),
+    ...conversation.sideConversations.map((side): TimelineEntry => ({
+      kind: 'side',
+      at: new Date(side.createdAt),
+      side,
+    })),
+  ];
+
+  return entries.sort((a, b) => a.at.getTime() - b.at.getTime());
+}
+
+function Timeline({
+  conversation,
+  canSideConversation,
+}: {
+  conversation: ConversationDetail;
+  canSideConversation: boolean;
+}) {
   return (
     <ol className="flex flex-col gap-4">
-      {conversation.messages.map((message) => {
+      {timelineEntries(conversation).map((entry) => {
+        if (entry.kind === 'side') {
+          return (
+            <SideConversationCard
+              key={entry.side.id}
+              side={entry.side}
+              canWrite={canSideConversation && !readOnlyReason(conversation.channel)}
+            />
+          );
+        }
+
+        const message = entry.message;
         const isNote = message.kind === 'note';
         const isInbound = message.direction === 'inbound';
         const meta = (message.meta ?? {}) as {
@@ -416,6 +480,10 @@ function Sidebar({
       <ShipmentsField conversation={conversation} />
       <ShippingAccountsField conversation={conversation} />
 
+      <Field label="Side conversations">
+        <SideConversationsField sides={conversation.sideConversations} />
+      </Field>
+
       <div className="mt-5 border-t border-[var(--border)] pt-3">
         <h2 className="mb-2 text-xs font-medium opacity-70">Activity</h2>
         <ol className="flex flex-col gap-1.5 text-xs opacity-60">
@@ -468,6 +536,12 @@ function describeEvent(type: string, data: Record<string, unknown>): string {
       return `linked account ${String(data.sbid ?? '')}`;
     case 'shipping_account_unlinked':
       return `unlinked account ${String(data.sbid ?? '')}`;
+    case 'side_conversation_started':
+      return `started a side conversation with ${String(data.to ?? 'an internal team')}`;
+    case 'side_conversation_replied':
+      // The actor here is the person at the hub, so the name is already printed
+      // ahead of this sentence by the caller.
+      return `replied on side conversation #${String(data.sideConversationNumber ?? '')}`;
     case 'sla_recalculated':
       return data.reason === 'group_hours'
         ? "re-counted the due dates on the new group's business hours"

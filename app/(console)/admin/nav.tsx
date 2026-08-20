@@ -48,6 +48,7 @@ const SECTIONS: { title: string; links: { href: string; label: string }[] }[] = 
     title: 'Channels',
     links: [
       { href: '/admin/channels', label: 'Channels' },
+      { href: '/admin/recipients', label: 'Internal recipients' },
       { href: '/admin/import', label: 'Freshdesk import' },
     ],
   },

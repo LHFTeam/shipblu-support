@@ -88,8 +88,13 @@ export async function processWebhook(job: ClaimedJob): Promise<void> {
       .set({ processedAt: new Date(), error: null })
       .where(eq(webhookEvents.id, webhookEventId));
 
+    const where =
+      result.sideConversationNumber !== undefined
+        ? `side conversation #${result.sideConversationNumber} on ticket #${result.conversationNumber}`
+        : `ticket #${result.conversationNumber}`;
+
     console.log(
-      `[process_webhook] ${webhookEventId} → ticket #${result.conversationNumber} ` +
+      `[process_webhook] ${webhookEventId} → ${where} ` +
         `(${result.duplicate ? 'duplicate' : result.createdConversation ? 'new' : 'appended'})`,
     );
   } catch (error) {

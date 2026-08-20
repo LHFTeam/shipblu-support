@@ -1,5 +1,7 @@
 import { notFound } from 'next/navigation';
 import { requireAgent } from '@/lib/auth/guard';
+import { can } from '@/lib/auth/permissions';
+import { listSideConversationRecipients } from '@/lib/side-conversations/queries';
 import {
   getConversation,
   listActiveAgents,
@@ -32,13 +34,17 @@ export default async function ConversationPage({
   // behaviour we want.
   if (!conversation) notFound();
 
-  const [statuses, agentList, groupList, templates] = await Promise.all([
+  const canSideConversation = can(agent, 'ticket.side_conversation');
+
+  const [statuses, agentList, groupList, templates, recipients] = await Promise.all([
     listStatuses(),
     listActiveAgents(),
     listGroups(),
     // Only fetched for WhatsApp tickets: an email ticket has no use for them
     // and the table is synced hourly, so this is a needless query otherwise.
     conversation.channel === 'whatsapp' ? listApprovedTemplates() : Promise.resolve([]),
+    // Same reasoning: an agent who cannot start one has no picker to fill.
+    canSideConversation ? listSideConversationRecipients() : Promise.resolve([]),
   ]);
 
   return (
@@ -49,6 +55,8 @@ export default async function ConversationPage({
         agents={agentList}
         groups={groupList}
         templates={templates}
+        recipients={recipients}
+        canSideConversation={canSideConversation}
         currentAgentId={agent.id}
       />
     </InboxShell>

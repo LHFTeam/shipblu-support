@@ -4,6 +4,7 @@ export * from './locations';
 export * from './customers';
 export * from './config';
 export * from './conversations';
+export * from './side-conversations';
 export * from './shipments';
 export * from './ops';
 export * from './kb';

@@ -5,6 +5,7 @@ import { jobs } from '@/db/schema';
 export type JobType =
   | 'process_webhook'
   | 'send_email'
+  | 'send_side_email'
   | 'send_notification_email'
   | 'send_whatsapp'
   | 'send_meta'

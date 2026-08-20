@@ -14,6 +14,7 @@ import { stripQuotedHtml, stripQuotedText } from '@/lib/email/quote-strip';
 import { resolveThread, stripSubjectPrefixes } from '@/lib/email/threading';
 import type { ParsedInboundEmail } from '@/lib/email/types';
 import { htmlToText, sanitiseEmailHtml } from '@/lib/html/sanitize';
+import { ingestSideReply, resolveSideConversation } from '@/lib/side-conversations/ingest';
 import { buildAttachmentPath, uploadObject } from '@/lib/storage';
 import { resolveContact } from './contacts';
 import { afterInboundMessage, afterMessageStored } from './lifecycle';
@@ -26,6 +27,12 @@ export type IngestResult = {
   /** Set when the message was already ingested; nothing was written. */
   duplicate: boolean;
   automationReason: string | null;
+  /**
+   * Set when the mail was a reply on a side conversation rather than from the
+   * customer. Nothing below `findConversation` ran: no contact was resolved, no
+   * SLA clock moved, no automation fired.
+   */
+  sideConversationNumber?: number;
 };
 
 /**
@@ -46,6 +53,34 @@ export async function ingestInboundEmail(email: ParsedInboundEmail): Promise<Ing
   }
 
   const automation = classifyAutomation(email);
+
+  /*
+   * Side conversations are resolved first — before `resolveContact` below, and
+   * that ordering is load-bearing rather than tidy.
+   *
+   * The sender of a side conversation reply is a colleague at a hub, a warehouse
+   * or a vendor. `resolveContact` would create them a `contacts` row, which is
+   * the customer table: they would show up in the customer list, be linkable to
+   * shipping accounts, and be able to register for the customer portal against
+   * an address we had verified for them. Nothing downstream would ever notice,
+   * because every one of those is a legitimate thing to do with a contact.
+   *
+   * So the branch happens here, at the top, where it is impossible to reach the
+   * rest of this function by accident.
+   */
+  const side = await resolveSideConversation(email);
+  if (side) {
+    const result = await ingestSideReply(side, email);
+    return {
+      conversationId: result.conversationId,
+      conversationNumber: result.conversationNumber,
+      messageId: result.messageId,
+      createdConversation: false,
+      duplicate: result.duplicate,
+      automationReason: automation.reason,
+      sideConversationNumber: result.sideConversationNumber,
+    };
+  }
 
   // Idempotency. The provider retries on any non-2xx, and webhook_events can be
   // replayed by hand, so the same Message-ID must never produce two messages.

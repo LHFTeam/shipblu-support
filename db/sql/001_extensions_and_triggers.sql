@@ -43,6 +43,13 @@ CREATE INDEX IF NOT EXISTS contacts_phone_trgm_idx
 CREATE INDEX IF NOT EXISTS messages_body_trgm_idx
   ON messages USING gin (body_text gin_trgm_ops);
 
+-- The hub's answer is searchable for the same reason a message body is: it is
+-- where "driver attempted twice, phone off" is written down, and that sentence
+-- is what an agent half-remembers three weeks later. Agents only ever see this
+-- table, so there is no visibility question to answer here.
+CREATE INDEX IF NOT EXISTS side_conversation_messages_body_trgm_idx
+  ON side_conversation_messages USING gin (body_text gin_trgm_ops);
+
 CREATE INDEX IF NOT EXISTS companies_name_trgm_idx
   ON companies USING gin (name gin_trgm_ops);
 
@@ -83,6 +90,118 @@ BEGIN
       ADD CONSTRAINT groups_business_hours_id_fk
       FOREIGN KEY (business_hours_id) REFERENCES business_hours(id) ON DELETE SET NULL;
   END IF;
+END $$;
+
+-- --------------------------------------------------------------------------
+-- Attachments belong to exactly one message
+--
+-- `attachments` carries files from ticket messages and from side conversation
+-- messages, with a nullable owner column for each. Two things Drizzle's DSL
+-- cannot say are said here.
+--
+-- The foreign key is deferred to SQL because db/schema/side-conversations.ts
+-- imports conversations.ts; declaring the column against that table in Drizzle
+-- would make the two modules circular. Same reason as groups.business_hours_id
+-- above.
+--
+-- The CHECK is the one that matters. Without it "both null" is a legal row: an
+-- orphan no query returns, no cascade deletes, and whose file sits in the bucket
+-- for ever. "Both set" is worse — the attachment route would authorise against
+-- whichever join it happened to try first.
+-- --------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'attachments_side_message_id_fk'
+  ) THEN
+    ALTER TABLE attachments
+      ADD CONSTRAINT attachments_side_message_id_fk
+      FOREIGN KEY (side_message_id) REFERENCES side_conversation_messages(id) ON DELETE CASCADE;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'attachments_one_owner'
+  ) THEN
+    ALTER TABLE attachments
+      ADD CONSTRAINT attachments_one_owner
+      CHECK ((message_id IS NULL) <> (side_message_id IS NULL));
+  END IF;
+END $$;
+
+-- --------------------------------------------------------------------------
+-- A side conversation names at most one directory entry
+--
+-- The picker reads two registers and keeps them apart. `locations` is the sixteen
+-- places ShipBlu works out of, entered before anything used them;
+-- `internal_recipients` is the parties that are not places — Finance, a courier
+-- partner. A thread points at one or the other, or at neither when the agent
+-- typed an address by hand.
+--
+-- Both set is the state worth forbidding: the card's title, the sidebar entry and
+-- the reply box would each name whichever join their query reached first, so the
+-- same thread would appear to be addressed to two different people on two parts
+-- of one screen.
+-- --------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'side_conversations_one_directory'
+  ) THEN
+    ALTER TABLE side_conversations
+      ADD CONSTRAINT side_conversations_one_directory
+      CHECK (location_id IS NULL OR recipient_id IS NULL);
+  END IF;
+END $$;
+
+-- --------------------------------------------------------------------------
+-- Row level security on the tables this file's schema added
+--
+-- Drizzle does not emit ENABLE ROW LEVEL SECURITY, so every table arriving
+-- through a generated migration lands without it — and Supabase grants `anon`
+-- and `authenticated` full DML on everything in `public` by default. RLS is the
+-- only thing between that grant and the data, so a new table is readable *and
+-- writable* with the anon key that ships in client bundles until somebody
+-- remembers.
+--
+-- `side_conversation_messages` is the worst table in this schema to leave open:
+-- it is the internal discussion *about* a customer, which is the one thing this
+-- whole feature exists to keep away from them.
+--
+-- Enabled with zero policies and never FORCE, matching every other table here.
+-- The app connects as `postgres`, the table owner, which bypasses RLS entirely —
+-- so this is a lockdown against direct PostgREST access, not an app-level
+-- authorisation mechanism. Authorisation lives in code. Adding FORCE would break
+-- every query in the app.
+--
+-- Named tables rather than a loop over everything in `public`. A loop is the
+-- better answer and is already in flight on its own branch; writing a second one
+-- here would be two sessions fixing the same thing twice, which this repo has
+-- paid for before. These three are what *this* change added, and they are this
+-- change's to close. When the loop lands it is a strict superset and these
+-- become no-ops.
+--
+-- Guarded on `relrowsecurity` because ENABLE takes ACCESS EXCLUSIVE on the
+-- table: checking first means the steady state re-applies with no locks at all,
+-- which is the rule the rest of this file follows.
+DO $$
+DECLARE
+  t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY[
+    'internal_recipients',
+    'side_conversations',
+    'side_conversation_messages'
+  ]
+  LOOP
+    IF NOT EXISTS (
+      SELECT 1
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relname = t AND c.relrowsecurity
+    ) THEN
+      EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', t);
+    END IF;
+  END LOOP;
 END $$;
 
 -- --------------------------------------------------------------------------
@@ -176,6 +295,13 @@ DECLARE
 BEGIN
   IF TG_TABLE_NAME = 'messages' THEN
     conversation_id := NEW.conversation_id;
+  ELSIF TG_TABLE_NAME = 'side_conversation_messages' THEN
+    -- One hop further out: a side conversation message names its thread, and the
+    -- thread names the ticket. Schema-qualified because this function runs with
+    -- SET search_path = '' and would otherwise not find the table at all.
+    SELECT sc.conversation_id INTO conversation_id
+    FROM public.side_conversations sc
+    WHERE sc.id = NEW.side_conversation_id;
   ELSE
     conversation_id := NEW.id;
   END IF;
@@ -223,6 +349,25 @@ BEGIN
   ) THEN
     CREATE TRIGGER notify_change
       AFTER INSERT OR UPDATE ON conversations
+      FOR EACH ROW EXECUTE FUNCTION notify_conversation_change();
+  END IF;
+END $$;
+
+-- The hub answering is the moment an agent has been waiting for, so it reaches
+-- the open ticket the same way a customer's reply does. Guarded rather than
+-- dropped and recreated, for the lock reason above.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_trigger tg
+    JOIN pg_class cl ON cl.oid = tg.tgrelid
+    JOIN pg_namespace n ON n.oid = cl.relnamespace
+    WHERE n.nspname = 'public' AND cl.relname = 'side_conversation_messages'
+      AND tg.tgname = 'notify_change' AND NOT tg.tgisinternal
+  ) THEN
+    CREATE TRIGGER notify_change
+      AFTER INSERT OR UPDATE ON side_conversation_messages
       FOR EACH ROW EXECUTE FUNCTION notify_conversation_change();
   END IF;
 END $$;

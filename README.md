@@ -110,12 +110,28 @@ Design decisions worth knowing before changing things:
   records are one person is not being told which name is right. `is_blocked` never
   moves in either direction, because blocking is a decision about a record rather than
   a fact about a person.
-- **Locations are a register, joined to nothing.** ShipBlu's sixteen hubs each have a
-  name, a unique code and a shared mailbox, and nothing routes on them yet — no agent
-  carries one, no ticket is attributed to one. Entering them now means whichever of
-  those lands first points at a real row instead of a hub name typed sixteen different
-  ways; deciding today whether an employee has one location or several would be
-  guessing the column that carries it. The email is on the record, not in the mail path.
+- **Locations are a register, and side conversations are its first consumer.** ShipBlu's
+  sixteen hubs each have a name, a unique code and a shared mailbox. They were entered
+  before anything used them precisely so that whichever feature landed first would point
+  at a real row instead of a hub name typed sixteen different ways — and the side
+  conversation picker is that feature. Still nothing else routes on a location: no agent
+  carries one, no ticket is attributed to one. The email remains on the record rather
+  than in the mail path — an agent picks it, nothing delivers a customer's reply there.
+- **Side conversations are their own tables, not `conversations` rows.** A thread with
+  a hub has no requester, no SLA and no customer-facing anything, and reusing
+  `conversations` would mean excluding it from the inbox query, the counts, reporting,
+  the sweep, the portal and the widget — a rule enforced in nine of ten places after
+  the next change. Separate tables make the invariant structural: a query that does not
+  name `side_conversation_messages` cannot return one. The other half is that
+  `conversations.requester_contact_id` is `NOT NULL`, so the shortcut would write hub
+  employees into the customer table.
+- **A hub is a location; a vendor is not.** The picker reads two directories and keeps
+  them apart rather than copying one into the other. `locations` is the register of
+  places ShipBlu works out of, and it already exists; `internal_recipients` holds the
+  parties that are not places — Finance, a courier partner. `side_conversations` carries
+  a `location_id` **or** a `recipient_id`, never both, enforced by a CHECK. A single
+  merged table would have meant maintaining a hub's address in two screens, which is the
+  failure `locations` was created to prevent.
 
 ### Contacts, not customers
 
@@ -197,6 +213,49 @@ formats were not settled when this landed — and are overridable per environmen
 `SHIPMENT_TRACKING_PATTERN`, `SHIPMENT_SBID_PATTERN` and `SHIPMENT_IGNORE`. Correcting a
 pattern only affects new messages; run the shipment backfill from `/admin/import` to
 reach history.
+
+## Side conversations
+
+Answering a ticket usually means asking somebody else first. The parcel is late, it is
+in the Downtown hub, and the answer the recipient wants is not in this system — so the
+agent emails the hub's forwarding list, and whoever is on shift replies with what
+actually happened.
+
+A **side conversation** is that exchange, hanging off the ticket. The term is the one
+the field uses: Zendesk ships the feature under that name; Freshworks calls its
+equivalent a _forward thread_ and anchors each one to a message in the ticket, which is
+the idea borrowed here as `side_conversations.anchor_message_id`.
+
+```
+/inbox/<number>              the thread appears as a card in the timeline, in
+                             chronological order among the messages
+/admin/locations             the hubs and warehouses the picker offers
+/admin/recipients            the teams and vendors it offers alongside them
+```
+
+- **The recipient comes from a directory**, not a text box. `hub-downton@shipblu.com`
+  is a live domain somebody else could own, and the mail carries a customer's name,
+  address and complaint. A free-text address is still allowed, and every address is
+  checked against the requester's own identities and our support mailbox before it is
+  accepted — in the server action, not only in the composer.
+- **The picker reads two registers and keeps them apart.** Hubs and warehouses are
+  `locations` rows; Finance and a courier partner are `internal_recipients`. An agent
+  sees one list with three group headings and never has to know which table a name
+  lives in. `side_conversations` carries a `location_id` **or** a `recipient_id`, never
+  both, and the chosen row's address is re-read server-side rather than trusted from a
+  form field — otherwise the picker is a text box wearing a dropdown.
+- **Replies thread on an `s`-prefixed token**, `support+s4.<sig>@`, resolved _before_
+  `resolveContact` in `lib/tickets/ingest.ts`. That ordering is the guarantee a hub
+  employee never lands in `contacts`. The HMAC is domain-separated — the signed input
+  is `side:4`, never `4` — so a customer holding their own ticket's reply address
+  cannot reach an internal thread by editing one character.
+- **Nothing downstream of a ticket fires.** No SLA clock, no automation, no CSAT. The
+  only column touched on `conversations` is `last_message_at`, so the ticket floats
+  back up the inbox when the answer lands; `last_customer_message_at` and
+  `last_agent_message_at` drive the messaging windows and the SLA and are left alone.
+- **The SLA is not paused.** Starting a thread offers to set the ticket to Pending and
+  otherwise does nothing, because a clock stopped behind a thread the customer cannot
+  see makes the report stop describing what the customer experienced.
 
 ## The customer portal
 

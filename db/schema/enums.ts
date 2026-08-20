@@ -162,3 +162,30 @@ export const shipmentSyncStateEnum = pgEnum('shipment_sync_state', ['stub', 'syn
  * the column exists.
  */
 export const linkSourceEnum = pgEnum('link_source', ['detected', 'manual', 'platform']);
+
+/**
+ * Where a side conversation stands.
+ *
+ * Two values on purpose. A side conversation is a question and its answer, not a
+ * ticket: it is open until the agent has what they asked for, and then it is
+ * done. Giving it the four-category status vocabulary of `conversations` would
+ * invite an SLA policy, a queue and a report onto a thread that has none of
+ * those things — and `done` is the word both Zendesk and Freshworks settled on.
+ */
+export const sideConversationStateEnum = pgEnum('side_conversation_state', ['open', 'done']);
+
+/**
+ * What kind of internal party a directory entry names.
+ *
+ * **No `hub`.** A hub is a `locations` row — that register already exists, holds
+ * the sixteen places ShipBlu works out of, and carries the shared mailbox that
+ * reaches whoever is there. Repeating hubs here would mean a hub's address is
+ * maintained in two admin screens with nothing keeping them in step, which is
+ * the exact failure `locations` was entered to prevent.
+ *
+ * What is left is everything that is not a place: Finance, a courier partner, a
+ * customs broker. Only used to group the picker — the two are written to
+ * identically, and the difference an agent cares about is finding the right one
+ * in a list.
+ */
+export const internalRecipientKindEnum = pgEnum('internal_recipient_kind', ['team', 'vendor']);
