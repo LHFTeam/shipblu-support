@@ -61,7 +61,7 @@ describe('explainAuthError', () => {
     const explained = explainAuthError(ACCESS_TOKEN_CODE, META_TEXT);
 
     expect(explained).toContain(META_TEXT);
-    expect(explained).toContain('WHATSAPP_ACCESS_TOKEN');
+    expect(explained).toContain('META_PAGE_ACCESS_TOKEN');
     expect(explained).toContain('System User token');
   });
 
@@ -74,6 +74,6 @@ describe('explainAuthError', () => {
     // An agent looking at a failed send should be told it is a token rather
     // than something they or the customer did.
     const explained = explainDeliveryError(ACCESS_TOKEN_CODE, META_TEXT, { windowOpen: true });
-    expect(explained).toContain('WHATSAPP_ACCESS_TOKEN');
+    expect(explained).toContain('META_PAGE_ACCESS_TOKEN');
   });
 });

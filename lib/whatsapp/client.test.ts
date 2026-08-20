@@ -34,7 +34,7 @@ async function classify(): Promise<WhatsAppApiError> {
 beforeEach(() => {
   process.env.DATABASE_URL = 'postgres://localhost/test';
   process.env.APP_SECRET = 'x'.repeat(32);
-  process.env.WHATSAPP_ACCESS_TOKEN = 'token';
+  process.env.META_PAGE_ACCESS_TOKEN = 'token';
   process.env.WHATSAPP_PHONE_NUMBER_ID = '123';
   resetEnvCache();
 });
@@ -42,6 +42,32 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   resetEnvCache();
+});
+
+describe('WhatsApp credentials', () => {
+  it('authorises with the shared Meta page token', async () => {
+    // The substantive half of collapsing the two credential sets: WhatsApp now
+    // sends with the same token Messenger and Instagram do. Asserting on the
+    // header rather than on the absence of the old variable is what proves the
+    // wiring, since a missing token would also just throw.
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ url: 'https://cdn' })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    process.env.META_PAGE_ACCESS_TOKEN = 'page-token-abc';
+    resetEnvCache();
+
+    await getMediaUrl('media-1');
+
+    const [, init] = fetchMock.mock.calls[0]! as unknown as [string, RequestInit];
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer page-token-abc');
+  });
+
+  it('refuses to call Meta with no token rather than sending an unauthorised request', async () => {
+    delete process.env.META_PAGE_ACCESS_TOKEN;
+    resetEnvCache();
+
+    await expect(getMediaUrl('media-1')).rejects.toThrow(/META_PAGE_ACCESS_TOKEN/);
+  });
 });
 
 describe('WhatsApp error classification', () => {

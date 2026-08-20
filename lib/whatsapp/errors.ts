@@ -17,9 +17,9 @@ export const RE_ENGAGEMENT_CODE = 131047;
  *
  * Meta reports the fact — "Session has expired on Tuesday, 18-Aug-26" — and not
  * the cause, which is almost always that the token in the environment is a
- * short-lived user token rather than a permanent System User one. Every
- * WhatsApp call fails identically until it is replaced, so saying that once, in
- * the error itself, is the difference between a five-minute fix and an
+ * short-lived user token rather than a permanent System User one. Every call on
+ * every Meta channel fails identically until it is replaced, so saying that
+ * once, in the error itself, is the difference between a five-minute fix and an
  * afternoon spent reading Meta's documentation.
  */
 export const ACCESS_TOKEN_CODE = 190;
@@ -29,10 +29,12 @@ export function explainAuthError(code: number | null, message: string): string {
   if (code !== ACCESS_TOKEN_CODE) return message;
 
   return (
-    `${message}\n\nWHATSAPP_ACCESS_TOKEN is expired or revoked, so every ` +
-    `WhatsApp call fails until it is replaced. Short-lived user tokens last ` +
-    `about 24 hours; issue a System User token in Meta Business Manager, which ` +
-    `does not expire, and set it in the shipblu-shared environment group.`
+    `${message}\n\nMETA_PAGE_ACCESS_TOKEN is expired or revoked, so every ` +
+    `WhatsApp, Messenger and Instagram call fails until it is replaced — one ` +
+    `Meta app serves all three, so they share the one token. Short-lived user ` +
+    `tokens last about 24 hours; issue a System User token in Meta Business ` +
+    `Manager, which does not expire, and set it in the shipblu-shared ` +
+    `environment group.`
   );
 }
 
