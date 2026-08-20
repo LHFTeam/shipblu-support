@@ -162,3 +162,28 @@ export const shipmentSyncStateEnum = pgEnum('shipment_sync_state', ['stub', 'syn
  * the column exists.
  */
 export const linkSourceEnum = pgEnum('link_source', ['detected', 'manual', 'platform']);
+
+/**
+ * Where a side conversation stands.
+ *
+ * Two values on purpose. A side conversation is a question and its answer, not a
+ * ticket: it is open until the agent has what they asked for, and then it is
+ * done. Giving it the four-category status vocabulary of `conversations` would
+ * invite an SLA policy, a queue and a report onto a thread that has none of
+ * those things — and `done` is the word both Zendesk and Freshworks settled on.
+ */
+export const sideConversationStateEnum = pgEnum('side_conversation_state', ['open', 'done']);
+
+/**
+ * What kind of internal party a directory entry names.
+ *
+ * Only used to group the recipient picker. It is deliberately not a permission
+ * or a routing rule — a hub and a vendor are written to identically, and the
+ * only difference an agent cares about is finding the right one in a list that
+ * will eventually hold every hub in the country.
+ */
+export const internalRecipientKindEnum = pgEnum('internal_recipient_kind', [
+  'hub',
+  'team',
+  'vendor',
+]);

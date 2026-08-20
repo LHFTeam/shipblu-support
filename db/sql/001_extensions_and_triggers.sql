@@ -43,6 +43,13 @@ CREATE INDEX IF NOT EXISTS contacts_phone_trgm_idx
 CREATE INDEX IF NOT EXISTS messages_body_trgm_idx
   ON messages USING gin (body_text gin_trgm_ops);
 
+-- The hub's answer is searchable for the same reason a message body is: it is
+-- where "driver attempted twice, phone off" is written down, and that sentence
+-- is what an agent half-remembers three weeks later. Agents only ever see this
+-- table, so there is no visibility question to answer here.
+CREATE INDEX IF NOT EXISTS side_conversation_messages_body_trgm_idx
+  ON side_conversation_messages USING gin (body_text gin_trgm_ops);
+
 CREATE INDEX IF NOT EXISTS companies_name_trgm_idx
   ON companies USING gin (name gin_trgm_ops);
 
@@ -82,6 +89,42 @@ BEGIN
     ALTER TABLE groups
       ADD CONSTRAINT groups_business_hours_id_fk
       FOREIGN KEY (business_hours_id) REFERENCES business_hours(id) ON DELETE SET NULL;
+  END IF;
+END $$;
+
+-- --------------------------------------------------------------------------
+-- Attachments belong to exactly one message
+--
+-- `attachments` carries files from ticket messages and from side conversation
+-- messages, with a nullable owner column for each. Two things Drizzle's DSL
+-- cannot say are said here.
+--
+-- The foreign key is deferred to SQL because db/schema/side-conversations.ts
+-- imports conversations.ts; declaring the column against that table in Drizzle
+-- would make the two modules circular. Same reason as groups.business_hours_id
+-- above.
+--
+-- The CHECK is the one that matters. Without it "both null" is a legal row: an
+-- orphan no query returns, no cascade deletes, and whose file sits in the bucket
+-- for ever. "Both set" is worse — the attachment route would authorise against
+-- whichever join it happened to try first.
+-- --------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'attachments_side_message_id_fk'
+  ) THEN
+    ALTER TABLE attachments
+      ADD CONSTRAINT attachments_side_message_id_fk
+      FOREIGN KEY (side_message_id) REFERENCES side_conversation_messages(id) ON DELETE CASCADE;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'attachments_one_owner'
+  ) THEN
+    ALTER TABLE attachments
+      ADD CONSTRAINT attachments_one_owner
+      CHECK ((message_id IS NULL) <> (side_message_id IS NULL));
   END IF;
 END $$;
 
@@ -176,6 +219,13 @@ DECLARE
 BEGIN
   IF TG_TABLE_NAME = 'messages' THEN
     conversation_id := NEW.conversation_id;
+  ELSIF TG_TABLE_NAME = 'side_conversation_messages' THEN
+    -- One hop further out: a side conversation message names its thread, and the
+    -- thread names the ticket. Schema-qualified because this function runs with
+    -- SET search_path = '' and would otherwise not find the table at all.
+    SELECT sc.conversation_id INTO conversation_id
+    FROM public.side_conversations sc
+    WHERE sc.id = NEW.side_conversation_id;
   ELSE
     conversation_id := NEW.id;
   END IF;
@@ -223,6 +273,25 @@ BEGIN
   ) THEN
     CREATE TRIGGER notify_change
       AFTER INSERT OR UPDATE ON conversations
+      FOR EACH ROW EXECUTE FUNCTION notify_conversation_change();
+  END IF;
+END $$;
+
+-- The hub answering is the moment an agent has been waiting for, so it reaches
+-- the open ticket the same way a customer's reply does. Guarded rather than
+-- dropped and recreated, for the lock reason above.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_trigger tg
+    JOIN pg_class cl ON cl.oid = tg.tgrelid
+    JOIN pg_namespace n ON n.oid = cl.relnamespace
+    WHERE n.nspname = 'public' AND cl.relname = 'side_conversation_messages'
+      AND tg.tgname = 'notify_change' AND NOT tg.tgisinternal
+  ) THEN
+    CREATE TRIGGER notify_change
+      AFTER INSERT OR UPDATE ON side_conversation_messages
       FOR EACH ROW EXECUTE FUNCTION notify_conversation_change();
   END IF;
 END $$;

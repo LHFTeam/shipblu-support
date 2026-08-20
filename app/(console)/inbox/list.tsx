@@ -163,6 +163,17 @@ export function InboxList({
                     <Badge tone="danger">{row.priority}</Badge>
                   ) : null}
 
+                  {/* A ticket blocked on a hub looks identical to one nobody has
+                      picked up, and "the hub answered an hour ago and nobody
+                      noticed" is the failure this feature would otherwise
+                      introduce. Only the answered state gets a loud colour: the
+                      waiting one is a fact, the replied one is a job. */}
+                  {row.sideState === 'replied' ? (
+                    <Badge tone="success">hub replied</Badge>
+                  ) : row.sideState === 'waiting' ? (
+                    <Badge tone="neutral">awaiting hub</Badge>
+                  ) : null}
+
                   {row.assigneeName ? (
                     <span className="ms-auto truncate text-xs text-[var(--muted-foreground)]">
                       {row.assigneeName}

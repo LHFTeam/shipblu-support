@@ -36,6 +36,15 @@ name, a unique code and a shared mailbox per hub, joined to nothing on purpose;
 see `plans/contact-merge-and-locations.md` for why, and §5.1 for the sixteen rows
 nobody has entered yet.
 
+And **side conversations**: an agent can open a thread with a hub, an internal
+team or a vendor from inside a ticket, and the answer comes back onto the ticket
+rather than into their personal mailbox — never onto the customer's timeline.
+This is the first thing to join `locations` to anything: the picker's hubs are
+its rows, which is what that table was entered for. Teams and vendors are not
+locations, so they keep their own small directory at `/admin/recipients`. Built
+and verified end to end against a local Postgres; like everything in §5.1 both
+directories are empty, so the picker offers nothing until somebody fills them.
+
 **But almost none of it is configured.** The database holds 1 agent, 0 channel
 rows, 0 SLA policies and 0 automation rules. The remaining work is mostly not
 code — it is configuration, live-provider verification, and cutover. Treat
@@ -169,6 +178,12 @@ is code:
 - **SLA policies and automation rules are both empty**, so the sweep and the
   time-based cron currently run over nothing every 5 and 15 minutes. Whatever
   Freshdesk enforces today needs transcribing.
+- **Internal recipients.** `internal_recipients` is empty, so the side
+  conversation picker offers nothing but "Someone else…" and every agent will
+  type a hub address from memory — which is the exact failure the directory was
+  built to prevent, since a mistyped address delivers a customer's name, address
+  and complaint to whoever owns that domain. Every hub needs a row at
+  `/admin/recipients` before the feature is turned on for the team, not after.
 - **Unset config:** `EMAIL_API_KEY`, `EMAIL_FROM_ADDRESS`, `EMAIL_REPLY_DOMAIN`,
   `EMAIL_WEBHOOK_SECRET`, `KB_PUBLIC_HOST`, `WIDGET_ALLOWED_ORIGINS`.
 - **The shipment detection patterns are a guess and need confirming.**
@@ -205,6 +220,15 @@ provider. Each is a round trip somebody has to actually watch:
   redirect. 174 `kb_redirects` rows exist and none has been followed in anger.
 - **A WhatsApp template send outside the 24-hour window** — the one path the
   end-to-end test in §7 could not cover.
+- **A side conversation to a genuine forwarding list.** Everything below is
+  verified against a local Postgres — the plus-address route, the References
+  fallback, the signed-subject fallback, idempotent redelivery, and that a hub
+  employee never becomes a `contacts` row. What no local test can establish is
+  whether a _real_ forwarding list preserves the `Reply-To`, the plus-address in
+  `To`/`Delivered-To`, or the `References` chain. Send one to an actual hub list
+  and have somebody on it reply. If all three are eaten the reply opens a new
+  customer ticket instead, which is visible immediately: the mail lands in the
+  inbox as a new ticket from a hub address rather than on the thread.
 - **The portal's verification and reset emails through Postmark.** The whole
   flow has been driven end to end against a local Postgres with
   `EMAIL_PROVIDER=local`, so the links, the tokens and the single-use rules are
@@ -420,6 +444,20 @@ Each cost real time. Most are also comments in the code.
   Freshdesk and matches the category's meaning, so it needs no decision.
 - **Production health:** `status: ok`, 4 ms database latency, queue empty, no
   dead jobs. Job history shows only completed work.
+- **Side conversations, end to end against a local Postgres 16.** The migration
+  and the `db/sql/` replay both applied clean; the `attachments_one_owner` CHECK
+  refuses a row with neither owner. An agent's question was sent through
+  `send_side_email` with `Reply-To: support+s1.<sig>@reply.shipblu.com`, and the
+  hub's reply threaded back three separate ways — by plus-address, by
+  `References` alone with the address stripped, and by the signed subject tag
+  with both gone. On each: no new ticket, **no new `contacts` row**, nothing
+  written to the ticket timeline, `last_message_at` moved and
+  `last_customer_message_at` did not. A redelivered Message-ID was reported as a
+  duplicate and wrote nothing. A genuine customer email in the same database
+  still opened a normal ticket. Reading the ticket back through
+  `lib/portal/tickets.ts` as the requester, the hub's words, our question, the
+  hub employee's name and the hub address are all **absent from the payload**,
+  not merely unrendered.
 
 ### Tooling notes for this environment
 

@@ -1,9 +1,16 @@
 import { NextResponse } from 'next/server';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { attachments, conversations, messages } from '@/db/schema';
+import {
+  attachments,
+  conversations,
+  messages,
+  sideConversationMessages,
+  sideConversations,
+} from '@/db/schema';
 import { can } from '@/lib/auth/permissions';
 import { getSessionAgent } from '@/lib/auth/session';
+import { canSeeChannel } from '@/lib/tickets/channel-policy';
 import { signedUrl } from '@/lib/storage';
 
 export const dynamic = 'force-dynamic';
@@ -15,6 +22,15 @@ export const dynamic = 'force-dynamic';
  * invoice, an ID document or a delivery address. Serving through this route
  * means every download is behind the session check *and* the agent's ticket
  * visibility, and the URL that reaches the browser expires in five minutes.
+ *
+ * A file can hang off a ticket message or off a side conversation message — the
+ * photograph a hub sends back of a failed delivery is the common case for the
+ * second. Both resolve to the same ticket and are authorised against it: a side
+ * conversation has no visibility rule of its own, it is exactly as reachable as
+ * the ticket it belongs to.
+ *
+ * `COALESCE` over a single left-joined query rather than two round trips, so the
+ * two paths cannot answer differently.
  */
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const agent = await getSessionAgent();
@@ -26,10 +42,22 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     .select({
       storagePath: attachments.storagePath,
       assigneeAgentId: conversations.assigneeAgentId,
+      channel: conversations.channel,
     })
     .from(attachments)
-    .innerJoin(messages, eq(messages.id, attachments.messageId))
-    .innerJoin(conversations, eq(conversations.id, messages.conversationId))
+    .leftJoin(messages, eq(messages.id, attachments.messageId))
+    .leftJoin(sideConversationMessages, eq(sideConversationMessages.id, attachments.sideMessageId))
+    .leftJoin(
+      sideConversations,
+      eq(sideConversations.id, sideConversationMessages.sideConversationId),
+    )
+    .innerJoin(
+      conversations,
+      eq(
+        conversations.id,
+        sql`COALESCE(${messages.conversationId}, ${sideConversations.conversationId})`,
+      ),
+    )
     .where(eq(attachments.id, id))
     .limit(1);
 
@@ -39,6 +67,13 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   // Same visibility rule as the ticket the file hangs off — otherwise an
   // attachment id would be a way around it.
   if (!can(agent, 'ticket.view.all') && attachment.assigneeAgentId !== agent.id) {
+    return NextResponse.json({ error: 'not found' }, { status: 404 });
+  }
+
+  // And the channel rule, which this route had no reason to check while every
+  // attachment came from email: a bot transcript's media is on a channel an
+  // agent without `ticket.view.bot` may not open at all.
+  if (!canSeeChannel(agent, attachment.channel)) {
     return NextResponse.json({ error: 'not found' }, { status: 404 });
   }
 

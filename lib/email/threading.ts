@@ -2,9 +2,10 @@ import { createHmac } from 'node:crypto';
 import type { EmailAddress, ParsedInboundEmail } from './types';
 
 /**
- * Threading: deciding whether an inbound email continues an existing ticket or
- * starts a new one. This is where naive helpdesks break, so it uses three
- * independent signals in descending order of reliability.
+ * Threading: deciding whether an inbound email continues an existing ticket,
+ * continues a side conversation, or starts a new one. This is where naive
+ * helpdesks break, so it uses three independent signals in descending order of
+ * reliability.
  *
  *   1. Plus-addressed reply token   — we put it there; survives subject edits,
  *                                     forwards and clients that drop References.
@@ -16,6 +17,28 @@ import type { EmailAddress, ParsedInboundEmail } from './types';
  * A ticket number alone is never trusted: it is a small integer, so accepting it
  * unsigned would let anyone read or write another customer's ticket by guessing.
  * Both the reply token and the subject token are HMAC-verified.
+ *
+ * ## Side conversations
+ *
+ * A side conversation — the thread an agent opens with a hub or another internal
+ * team — gets the same three signals with an `s` prefix instead of `c`, and its
+ * matches are returned *ahead* of the ticket ones. Two properties are doing real
+ * work here:
+ *
+ *  - **The prefixes are domain-separated in the HMAC, not just in the text.**
+ *    The signed input is `side:12`, never `12`. Signing the bare number would
+ *    mean the signature on ticket #12's reply address is also a valid signature
+ *    for side conversation #12 — so every customer who has ever received a reply
+ *    would be holding a working token for an internal thread. Rewriting one
+ *    character of an address they already have is not a difficult attack.
+ *
+ *  - **Side matches win.** A hub replying to a side conversation quotes our
+ *    Message-ID, and that message is not in `messages` at all, so the two
+ *    signals cannot both fire on real mail. Checking side first is what makes
+ *    the ambiguous case — a mangled forward that carries both — resolve to the
+ *    internal thread rather than to the customer's ticket, which is the safe
+ *    direction: a hub's answer filed on the ticket timeline is visible to the
+ *    customer through the portal.
  */
 
 /**
@@ -31,6 +54,18 @@ const SIG_LENGTH = 16;
 
 function sign(secret: string, value: string): string {
   return createHmac('sha256', secret).update(value).digest('hex').slice(0, SIG_LENGTH);
+}
+
+/**
+ * The signed input for a side conversation.
+ *
+ * A function rather than a template literal at each call site so the prefix
+ * cannot drift between the builder and the parser — which would not fail loudly,
+ * it would silently stop threading hub replies and start opening tickets from
+ * them.
+ */
+function sideSubject(sideNumber: number | string): string {
+  return `side:${sideNumber}`;
 }
 
 /**
@@ -66,10 +101,58 @@ export function parseReplyToken(token: string, secret: string): number | null {
   return Number.parseInt(digits, 10);
 }
 
-/** Pulls `c123.sig` out of `support+c123.sig@shipblu.com`. */
+/** Pulls `c123.sig` or `s4.sig` out of `support+c123.sig@shipblu.com`. */
 export function extractTokenFromAddress(address: string): string | null {
   const match = /^[^+@]+\+([^@]+)@/.exec(address.trim().toLowerCase());
   return match?.[1] ?? null;
+}
+
+/**
+ * Builds the local part of a side conversation's reply address: `s<number>.<sig>`.
+ *
+ * A serial number rather than the row's uuid because this has to fit in an email
+ * local part: `support+s<32 hex>.<16 hex>@` is 59 characters against RFC 5321's
+ * 64-octet budget, before anyone picks a mailbox name longer than "support".
+ */
+export function buildSideReplyToken(sideNumber: number, secret: string): string {
+  return `s${sideNumber}.${sign(secret, sideSubject(sideNumber))}`;
+}
+
+export function buildSideReplyAddress(
+  sideNumber: number,
+  secret: string,
+  mailbox: string,
+  domain: string,
+): string {
+  return `${mailbox}+${buildSideReplyToken(sideNumber, secret)}@${domain}`;
+}
+
+/** Returns the side conversation number, or null if absent, malformed or unsigned. */
+export function parseSideReplyToken(token: string, secret: string): number | null {
+  const match = /^s(\d+)\.([a-fA-F0-9]+)$/.exec(token);
+  if (!match) return null;
+
+  const [, digits, signature] = match;
+  if (!digits || !signature) return null;
+
+  if (signature.toLowerCase() !== sign(secret, sideSubject(digits))) return null;
+
+  return Number.parseInt(digits, 10);
+}
+
+export function buildSideSubjectTag(sideNumber: number, secret: string): string {
+  return `[#S${sideNumber}.${sign(secret, sideSubject(sideNumber))}]`;
+}
+
+export function parseSideSubjectTag(subject: string, secret: string): number | null {
+  const match = /\[#S(\d+)\.([a-fA-F0-9]+)\]/i.exec(subject);
+  if (!match) return null;
+
+  const [, digits, signature] = match;
+  if (!digits || !signature) return null;
+  if (signature.toLowerCase() !== sign(secret, sideSubject(digits))) return null;
+
+  return Number.parseInt(digits, 10);
 }
 
 export function buildSubjectTag(conversationNumber: number, secret: string): string {
@@ -121,8 +204,10 @@ export function buildReplySubject(
 }
 
 export type ThreadMatch =
+  | { kind: 'side_reply_token'; sideNumber: number }
   | { kind: 'reply_token'; conversationNumber: number }
   | { kind: 'references'; messageIds: string[] }
+  | { kind: 'side_subject_tag'; sideNumber: number }
   | { kind: 'subject_tag'; conversationNumber: number }
   | { kind: 'none' };
 
@@ -130,8 +215,10 @@ export type ThreadMatch =
  * Resolves an inbound email to a thread, without touching the database.
  *
  * `references` is returned rather than resolved because matching those ids to
- * stored messages requires a query; the caller does that lookup. Keeping this
- * function pure is what makes the ordering rules straightforward to test.
+ * stored messages requires a query; the caller does that lookup — against
+ * `side_conversation_messages` first and `messages` second, mirroring the
+ * ordering of the token checks here. Keeping this function pure is what makes
+ * the ordering rules straightforward to test.
  */
 export function resolveThread(email: ParsedInboundEmail, secret: string): ThreadMatch {
   // 1. Reply token, across every field the address could arrive in. Providers
@@ -141,6 +228,20 @@ export function resolveThread(email: ParsedInboundEmail, secret: string): Thread
     ...email.cc.map((a) => a.address),
     ...(email.deliveredTo ?? []),
   ];
+
+  // Side conversations are checked in their own pass rather than inside the loop
+  // below, so a mail carrying both tokens — a hub forwarding our note back with
+  // the customer's original still attached — resolves to the internal thread. A
+  // hub's answer landing on the ticket timeline would be visible in the customer
+  // portal, and that is the failure worth ordering around.
+  for (const address of candidates) {
+    const token = extractTokenFromAddress(address);
+    if (!token) continue;
+    const sideNumber = parseSideReplyToken(token, secret);
+    if (sideNumber !== null) {
+      return { kind: 'side_reply_token', sideNumber };
+    }
+  }
 
   for (const address of candidates) {
     const token = extractTokenFromAddress(address);
@@ -162,7 +263,12 @@ export function resolveThread(email: ParsedInboundEmail, secret: string): Thread
     return { kind: 'references', messageIds };
   }
 
-  // 3. Subject tag.
+  // 3. Subject tag, side first for the reason above.
+  const fromSideSubject = parseSideSubjectTag(email.subject, secret);
+  if (fromSideSubject !== null) {
+    return { kind: 'side_subject_tag', sideNumber: fromSideSubject };
+  }
+
   const fromSubject = parseSubjectTag(email.subject, secret);
   if (fromSubject !== null) {
     return { kind: 'subject_tag', conversationNumber: fromSubject };

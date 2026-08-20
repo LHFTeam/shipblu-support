@@ -3,11 +3,16 @@ import {
   buildReplyAddress,
   buildReplySubject,
   buildReplyToken,
+  buildSideReplyAddress,
+  buildSideReplyToken,
+  buildSideSubjectTag,
   buildSubjectTag,
   extractTokenFromAddress,
   formatAddress,
   normaliseMessageId,
   parseReplyToken,
+  parseSideReplyToken,
+  parseSideSubjectTag,
   parseSubjectTag,
   resolveThread,
   stripSubjectPrefixes,
@@ -209,5 +214,128 @@ describe('header helpers', () => {
     expect(formatAddress({ address: 'a@b.com', name: 'He "Q" Him' })).toBe(
       '"He \\"Q\\" Him" <a@b.com>',
     );
+  });
+});
+
+describe('side conversation tokens', () => {
+  it('round-trips a side conversation number', () => {
+    const token = buildSideReplyToken(4, SECRET);
+    expect(parseSideReplyToken(token, SECRET)).toBe(4);
+  });
+
+  it('rejects a forged signature', () => {
+    expect(parseSideReplyToken('s4.aaaaaaaaaaaaaaaa', SECRET)).toBeNull();
+  });
+
+  it('rejects a tampered number', () => {
+    const token = buildSideReplyToken(4, SECRET);
+    expect(parseSideReplyToken(token.replace('s4', 's5'), SECRET)).toBeNull();
+  });
+
+  /**
+   * The reason the signed input is `side:<n>` rather than `<n>`.
+   *
+   * Without domain separation the two tokens differ only in one leading
+   * character of plain text, so a customer holding the reply address for their
+   * own ticket #4 could edit `c` to `s` and reach internal thread #4 — where the
+   * hub is discussing them. These four assertions are the whole guarantee.
+   */
+  it('does not accept a ticket signature for a side conversation, or the reverse', () => {
+    const ticketToken = buildReplyToken(4, SECRET);
+    const sideToken = buildSideReplyToken(4, SECRET);
+
+    expect(sideToken).not.toBe(ticketToken.replace('c', 's'));
+    expect(parseSideReplyToken(ticketToken.replace(/^c/, 's'), SECRET)).toBeNull();
+    expect(parseReplyToken(sideToken.replace(/^s/, 'c'), SECRET)).toBeNull();
+
+    // And neither parser is fooled by the other's well-formed token.
+    expect(parseSideReplyToken(ticketToken, SECRET)).toBeNull();
+    expect(parseReplyToken(sideToken, SECRET)).toBeNull();
+  });
+
+  it('builds an address inside the RFC 5321 local-part budget', () => {
+    const address = buildSideReplyAddress(999999, SECRET, 'support', 'reply.shipblu.com');
+    const localPart = address.split('@')[0] ?? '';
+    expect(localPart.length).toBeLessThanOrEqual(64);
+    expect(parseSideReplyToken(extractTokenFromAddress(address)!, SECRET)).toBe(999999);
+  });
+
+  it('round-trips a side subject tag without colliding with a ticket tag', () => {
+    const tag = buildSideSubjectTag(4, SECRET);
+    expect(parseSideSubjectTag(`Re: Late parcel ${tag}`, SECRET)).toBe(4);
+    // A ticket parser must not read a side tag as a ticket number.
+    expect(parseSubjectTag(`Re: Late parcel ${tag}`, SECRET)).toBeNull();
+    // And a side parser must not read a ticket tag.
+    expect(parseSideSubjectTag(`Re: Late parcel ${buildSubjectTag(4, SECRET)}`, SECRET)).toBeNull();
+  });
+});
+
+describe('resolveThread — side conversations', () => {
+  it('resolves a hub reply from the plus-addressed side token', () => {
+    const match = resolveThread(
+      email({
+        to: [{ address: buildSideReplyAddress(7, SECRET, 'support', 'reply.shipblu.com') }],
+        from: { address: 'ahmed@downtown-hub.shipblu.com' },
+      }),
+      SECRET,
+    );
+
+    expect(match).toEqual({ kind: 'side_reply_token', sideNumber: 7 });
+  });
+
+  it('finds the side token in Delivered-To when a forwarder rewrites To', () => {
+    // The case a real forwarding list is most likely to produce.
+    const match = resolveThread(
+      email({
+        to: [{ address: 'hub-downtown@shipblu.com' }],
+        deliveredTo: [buildSideReplyAddress(7, SECRET, 'support', 'reply.shipblu.com')],
+      }),
+      SECRET,
+    );
+
+    expect(match).toEqual({ kind: 'side_reply_token', sideNumber: 7 });
+  });
+
+  it('prefers the side token over a ticket token on the same message', () => {
+    // A mangled forward carrying both. Landing this on the ticket would put the
+    // hub's answer where the customer portal can read it.
+    const match = resolveThread(
+      email({
+        to: [{ address: buildReplyAddress(123, SECRET, 'support', 'reply.shipblu.com') }],
+        cc: [{ address: buildSideReplyAddress(7, SECRET, 'support', 'reply.shipblu.com') }],
+      }),
+      SECRET,
+    );
+
+    expect(match).toEqual({ kind: 'side_reply_token', sideNumber: 7 });
+  });
+
+  it('falls back to the side subject tag when every address is stripped', () => {
+    const match = resolveThread(
+      email({
+        to: [{ address: 'support@shipblu.com' }],
+        subject: `Re: Late parcel [#123] ${buildSideSubjectTag(7, SECRET)}`,
+      }),
+      SECRET,
+    );
+
+    expect(match).toEqual({ kind: 'side_subject_tag', sideNumber: 7 });
+  });
+
+  it('still returns references first, so the caller can search both tables', () => {
+    // References beats a subject tag for both kinds of thread; the caller
+    // resolves the ids against side_conversation_messages before messages.
+    const match = resolveThread(
+      email({
+        inReplyTo: 'sent-side-1@reply.shipblu.com',
+        subject: `Re: Late parcel ${buildSideSubjectTag(7, SECRET)}`,
+      }),
+      SECRET,
+    );
+
+    expect(match).toEqual({
+      kind: 'references',
+      messageIds: ['sent-side-1@reply.shipblu.com'],
+    });
   });
 });

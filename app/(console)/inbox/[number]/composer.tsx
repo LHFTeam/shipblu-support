@@ -9,19 +9,25 @@ import type { ConversationDetail } from '@/lib/tickets/queries';
 import { describeWindow, metaWindowState } from '@/lib/meta/window';
 import { renderTemplatePreview, templateShape } from '@/lib/whatsapp/templates';
 import { formatRemaining, windowState } from '@/lib/whatsapp/window';
+import type { InternalRecipient } from '@/lib/side-conversations/queries';
 import { addNote, sendReply, sendTemplateReply, type ActionState } from '../../actions';
+import { StartSideConversationForm } from './side-conversations';
 import type { TemplateOption } from './view';
 
 const INITIAL: ActionState = { error: null };
 
-type Tab = 'reply' | 'note' | 'template';
+type Tab = 'reply' | 'note' | 'template' | 'side';
 
 export function Composer({
   conversation,
   templates,
+  recipients,
+  canSideConversation,
 }: {
   conversation: ConversationDetail;
   templates: TemplateOption[];
+  recipients: InternalRecipient[];
+  canSideConversation: boolean;
 }) {
   const isWhatsApp = conversation.channel === 'whatsapp';
   const isMeta = conversation.channel === 'facebook' || conversation.channel === 'instagram';
@@ -74,6 +80,14 @@ export function Composer({
             Template
           </TabButton>
         ) : null}
+        {/* Fourth, and last, so the two customer-facing tabs stay leftmost and
+            the muscle memory of "the first box is the one the customer reads"
+            keeps holding. */}
+        {canSideConversation ? (
+          <TabButton active={tab === 'side'} onClick={() => setRequestedTab('side')}>
+            Side conversation
+          </TabButton>
+        ) : null}
 
         {isWhatsApp && now !== null ? (
           <span className="ml-auto text-xs opacity-60">
@@ -101,6 +115,9 @@ export function Composer({
         {tab === 'note' ? <NoteForm conversationId={conversation.id} /> : null}
         {tab === 'template' ? (
           <TemplateForm conversationId={conversation.id} templates={templates} />
+        ) : null}
+        {tab === 'side' ? (
+          <StartSideConversationForm conversation={conversation} recipients={recipients} />
         ) : null}
       </div>
     </div>

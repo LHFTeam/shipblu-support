@@ -15,6 +15,16 @@ export const PERMISSIONS = [
   'ticket.view.bot',
   'ticket.reply',
   'ticket.note',
+  /**
+   * Starting or answering a side conversation — a thread with a hub, a warehouse
+   * or a vendor, hanging off a ticket.
+   *
+   * Not folded into `ticket.reply`. That one authorises writing back to somebody
+   * who already wrote to us; this one authorises putting a customer's situation
+   * in front of a third party who did not ask, which is a different thing to
+   * hand out and a different thing to take away.
+   */
+  'ticket.side_conversation',
   'ticket.assign',
   'ticket.delete',
   'ticket.merge',
@@ -50,6 +60,7 @@ const AGENT: Permission[] = [
   'ticket.view.assigned',
   'ticket.reply',
   'ticket.note',
+  'ticket.side_conversation',
   'ticket.assign',
   'ticket.edit_fields',
   'contact.view',

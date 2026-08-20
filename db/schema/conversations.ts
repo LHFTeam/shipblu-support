@@ -200,13 +200,31 @@ export const messages = pgTable(
   ],
 );
 
+/**
+ * A file on a message — on a ticket message, or on a side conversation message.
+ *
+ * One table with two nullable owners rather than two tables, because everything
+ * downstream of the row is identical: the same private bucket, the same derived
+ * storage path, the same signed-URL route. A second table would have meant a
+ * second copy of `app/api/attachments/[id]/route.ts`, and the copy that drifts
+ * is the one that serves a file to someone who should not have it.
+ *
+ * Exactly one of `message_id` / `side_message_id` is set, enforced by a CHECK in
+ * `db/sql/001_extensions_and_triggers.sql` — Drizzle's DSL cannot express it,
+ * and leaving it to application code would make "both null" a row that no query
+ * ever finds and no cascade ever deletes.
+ *
+ * The reference to `side_conversation_messages` is added in SQL for the same
+ * reason `groups.business_hours_id` is: side-conversations.ts imports this
+ * module, so declaring the column against it here would make the two circular.
+ */
 export const attachments = pgTable(
   'attachments',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    messageId: uuid('message_id')
-      .notNull()
-      .references(() => messages.id, { onDelete: 'cascade' }),
+    messageId: uuid('message_id').references(() => messages.id, { onDelete: 'cascade' }),
+    /** Set instead of `messageId` when the file came in on a side conversation. */
+    sideMessageId: uuid('side_message_id'),
 
     /** Object key inside the Supabase Storage bucket. */
     storagePath: text('storage_path').notNull(),
@@ -221,7 +239,10 @@ export const attachments = pgTable(
 
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('attachments_message_idx').on(t.messageId)],
+  (t) => [
+    index('attachments_message_idx').on(t.messageId),
+    index('attachments_side_message_idx').on(t.sideMessageId),
+  ],
 );
 
 /** Append-only audit trail powering the ticket activity feed. */

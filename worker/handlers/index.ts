@@ -10,6 +10,7 @@ import { sendCsat } from './send-csat';
 import { sendEmail } from './send-email';
 import { sendMeta } from './send-meta';
 import { sendNotificationEmail } from './send-notification-email';
+import { sendSideEmail } from './send-side-email';
 import { sendWhatsApp } from './send-whatsapp';
 import { slaSweep } from './sla-sweep';
 import { syncWhatsAppTemplates } from './sync-whatsapp-templates';
@@ -36,6 +37,7 @@ export const handlers: Partial<Record<JobType, JobHandler>> = {
   send_email: sendEmail,
   send_meta: sendMeta,
   send_notification_email: sendNotificationEmail,
+  send_side_email: sendSideEmail,
   send_whatsapp: sendWhatsApp,
   sla_sweep: () => slaSweep(),
   sync_whatsapp_templates: () => syncWhatsAppTemplates(),

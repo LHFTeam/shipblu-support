@@ -40,6 +40,10 @@ import {
   type LinkedShippingAccount,
   type ReadScope,
 } from '@/lib/shipments/queries';
+import {
+  sideConversationsForConversation,
+  type SideConversationView,
+} from '@/lib/side-conversations/queries';
 import { parseSearchTerm } from './search';
 
 /**
@@ -153,6 +157,16 @@ export type InboxRow = {
   lastCustomerMessageAt: Date | null;
   tags: string[];
   preview: string | null;
+  /**
+   * Whether this ticket is blocked on, or has just heard back from, an internal
+   * team.
+   *
+   * `replied` is the one an agent needs to see from the list: the hub has
+   * answered and nobody has acted on it yet. Derived from the thread's own rows
+   * rather than tracked per agent — a read receipt would be a table and a write
+   * on every render, to decide the colour of a badge.
+   */
+  sideState: 'waiting' | 'replied' | null;
 };
 
 /**
@@ -265,6 +279,16 @@ export async function listInbox(
           SELECT 1 FROM ${messages} m
           WHERE m.conversation_id = ${conversations.id} AND m.body_text ILIKE ${pattern}
         )`,
+        // And what the hub said. Often the only place the actual explanation
+        // lives — "driver attempted twice, phone off" is written by somebody who
+        // never appears on the ticket timeline, and it is what an agent
+        // half-remembers weeks later. Only agents ever read this table, so
+        // searching it raises no visibility question.
+        sql`EXISTS (
+          SELECT 1 FROM side_conversations sc
+          JOIN side_conversation_messages sm ON sm.side_conversation_id = sc.id
+          WHERE sc.conversation_id = ${conversations.id} AND sm.body_text ILIKE ${pattern}
+        )`,
       ];
 
       if (number !== null) clauses.push(eq(conversations.number, number));
@@ -316,6 +340,16 @@ export async function listInbox(
         WHERE m.conversation_id = ${conversations.id} AND m.kind <> 'note'
         ORDER BY m.created_at DESC LIMIT 1
       )`,
+      // The newest message on the newest still-open side conversation. One
+      // correlated subquery beside the preview one above rather than a join,
+      // because a ticket with three threads must still produce one row.
+      sideState: sql<string | null>`(
+        SELECT CASE WHEN sm.direction = 'inbound' THEN 'replied' ELSE 'waiting' END
+        FROM side_conversations sc
+        JOIN side_conversation_messages sm ON sm.side_conversation_id = sc.id
+        WHERE sc.conversation_id = ${conversations.id} AND sc.state = 'open'
+        ORDER BY sm.created_at DESC LIMIT 1
+      )`,
     })
     .from(conversations)
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
@@ -354,6 +388,7 @@ export async function listInbox(
       lastCustomerMessageAt: row.lastCustomerMessageAt,
       tags: row.tags,
       preview: row.preview,
+      sideState: row.sideState === 'replied' || row.sideState === 'waiting' ? row.sideState : null,
     })),
   };
 }
@@ -406,6 +441,14 @@ export type ConversationDetail = {
   /** Parcels this ticket is about, and the accounts it names. */
   shipments: LinkedShipment[];
   shippingAccounts: LinkedShippingAccount[];
+  /**
+   * Threads with hubs and other internal teams, hanging off this ticket.
+   *
+   * Loaded here rather than by the view because the timeline interleaves them
+   * with messages: "the customer complained, we asked the hub, the hub answered,
+   * we replied" only reads correctly in one ordered list.
+   */
+  sideConversations: SideConversationView[];
   messages: TimelineMessage[];
   events: {
     id: string;
@@ -453,7 +496,7 @@ export async function getConversation(
   const row = rows[0];
   if (!row) return null;
 
-  const [timeline, files, events, shipments, accounts] = await Promise.all([
+  const [timeline, files, events, shipments, accounts, sides] = await Promise.all([
     db
       .select({
         message: messages,
@@ -495,10 +538,15 @@ export async function getConversation(
 
     shipmentsForConversation(row.conversation.id, row.conversation.requesterContactId),
     shippingAccountsForConversation(row.conversation.id),
+    sideConversationsForConversation(row.conversation.id),
   ]);
 
   const filesByMessage = new Map<string, ConversationDetail['messages'][number]['attachments']>();
   for (const file of files) {
+    // `messageId` is nullable since attachments also hang off side conversation
+    // messages; the join above already restricts this query to ticket ones, so
+    // this is a type narrowing rather than a filter.
+    if (!file.messageId) continue;
     const list = filesByMessage.get(file.messageId) ?? [];
     list.push({
       id: file.id,
@@ -517,6 +565,7 @@ export async function getConversation(
     externalId: row.conversation.externalId,
     shipments,
     shippingAccounts: accounts,
+    sideConversations: sides,
     priority: row.conversation.priority,
     type: row.conversation.type,
     statusId: row.conversation.statusId,
