@@ -55,10 +55,59 @@ export type InboxFilters = {
   statusCategory: 'open' | 'pending' | 'resolved' | 'closed' | 'all' | 'unresolved';
   channel: 'all' | 'email' | 'whatsapp' | 'webchat' | 'facebook' | 'instagram' | 'whatsapp_bot';
   q: string;
-  page: number;
 };
 
 export const PAGE_SIZE = 30;
+
+/**
+ * Where a page of the inbox stops, as a keyset rather than an offset.
+ *
+ * The inbox is sorted by most recent activity and reorders itself constantly —
+ * every inbound message moves a conversation to the top. Under `OFFSET 30` that
+ * shuffling is silent corruption: rows pushed past the boundary between two
+ * requests are served twice, and rows that move up are skipped entirely. An
+ * agent scrolling a busy queue would see duplicates and, worse, never see the
+ * tickets that slipped through the gap.
+ *
+ * A keyset asks for "older than this exact row" instead, which is stable no
+ * matter what happens above it. Rows that move up are simply re-sorted into the
+ * live first page, where the list dedupes them by id.
+ *
+ * `lastMessageAt` alone is not unique, so the row's id is carried as a
+ * tiebreaker and both are compared as a tuple.
+ */
+export type InboxCursor = { time: string; id: string };
+
+/**
+ * The timestamp travels as the text Postgres printed rather than as a JS Date.
+ *
+ * `Date` holds milliseconds and `timestamptz` holds microseconds, so a cursor
+ * that round-tripped through `Date` would compare against a value a few
+ * microseconds earlier than the row it names — and the tuple comparison would
+ * then hand back a row that has already been shown, or skip its neighbour.
+ * Keeping the original text keeps the comparison exact.
+ */
+export function encodeInboxCursor(cursor: InboxCursor): string {
+  return Buffer.from(`${cursor.time}|${cursor.id}`, 'utf8').toString('base64url');
+}
+
+export function parseInboxCursor(value: string | null | undefined): InboxCursor | null {
+  if (!value) return null;
+
+  const decoded = Buffer.from(value, 'base64url').toString('utf8');
+  // Split on the first separator only: the timestamp cannot contain one, but
+  // refusing to guess keeps a malformed cursor from becoming a malformed query.
+  const separator = decoded.indexOf('|');
+  if (separator < 1) return null;
+
+  const time = decoded.slice(0, separator);
+  const id = decoded.slice(separator + 1);
+  if (!time || !UUID_PATTERN.test(id)) return null;
+
+  return { time, id };
+}
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function parseFilters(params: Record<string, string | string[] | undefined>): InboxFilters {
   const one = (key: string) => {
@@ -86,7 +135,6 @@ export function parseFilters(params: Record<string, string | string[] | undefine
       ? (channel as FilterableChannel)
       : 'all',
     q: (one('q') ?? '').trim(),
-    page: Math.max(1, Number(one('page') ?? '1') || 1),
   };
 }
 
@@ -150,7 +198,8 @@ export function scopeForAgent(agent: SessionAgent, overrides: ReadScope = {}): R
 export async function listInbox(
   agent: SessionAgent,
   filters: InboxFilters,
-): Promise<{ rows: InboxRow[]; hasMore: boolean }> {
+  cursor: InboxCursor | null = null,
+): Promise<{ rows: InboxRow[]; nextCursor: string | null }> {
   const where = [isNull(conversations.deletedAt), isNull(conversations.mergedIntoId)];
 
   // Visibility is enforced in the query, not the template: an agent who can
@@ -232,6 +281,15 @@ export async function listInbox(
     }
   }
 
+  // "Older than the row the last page ended on", as a tuple so the id breaks
+  // ties on identical timestamps. Matches the ORDER BY below exactly; if one
+  // changes the other has to.
+  if (cursor) {
+    where.push(
+      sql`(${conversations.lastMessageAt}, ${conversations.id}) < (${cursor.time}::timestamptz, ${cursor.id}::uuid)`,
+    );
+  }
+
   const rows = await db
     .select({
       id: conversations.id,
@@ -247,6 +305,9 @@ export async function listInbox(
       assigneeName: agents.name,
       lastMessageAt: conversations.lastMessageAt,
       lastCustomerMessageAt: conversations.lastCustomerMessageAt,
+      // The cursor's timestamp, at the precision Postgres stores it. See
+      // `InboxCursor` for why the mapped `Date` above cannot serve.
+      cursorTime: sql<string>`${conversations.lastMessageAt}::text`,
       tags: conversations.tags,
       // The newest message body, for the two-line preview in the list. A
       // lateral subquery keeps this one round trip instead of N+1.
@@ -261,15 +322,24 @@ export async function listInbox(
     .innerJoin(contacts, eq(contacts.id, conversations.requesterContactId))
     .leftJoin(agents, eq(agents.id, conversations.assigneeAgentId))
     .where(and(...where))
-    .orderBy(desc(conversations.lastMessageAt))
+    // The id is part of the sort, not decoration: without a total order, two
+    // rows sharing a timestamp could come back in either order and the cursor
+    // would step over one of them.
+    .orderBy(desc(conversations.lastMessageAt), desc(conversations.id))
     // One extra row is the cheapest way to know whether a next page exists.
-    .limit(PAGE_SIZE + 1)
-    .offset((filters.page - 1) * PAGE_SIZE);
+    .limit(PAGE_SIZE + 1);
 
-  const hasMore = rows.length > PAGE_SIZE;
+  const page = rows.slice(0, PAGE_SIZE);
+  const last = page[page.length - 1];
 
   return {
-    rows: rows.slice(0, PAGE_SIZE).map((row) => ({
+    // A cursor only when there is more to fetch, so "no cursor" is the single
+    // signal for "end of list" and the client needs no second flag.
+    nextCursor:
+      rows.length > PAGE_SIZE && last
+        ? encodeInboxCursor({ time: last.cursorTime, id: last.id })
+        : null,
+    rows: page.map((row) => ({
       id: row.id,
       number: row.number,
       subject: row.subject,
@@ -285,7 +355,6 @@ export async function listInbox(
       tags: row.tags,
       preview: row.preview,
     })),
-    hasMore,
   };
 }
 

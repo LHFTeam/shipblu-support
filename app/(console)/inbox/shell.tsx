@@ -27,7 +27,7 @@ export async function InboxShell({
 }) {
   const agent = await requireAgent();
   const filters = parseFilters(searchParams);
-  const { rows, hasMore } = await listInbox(agent, filters);
+  const { rows, nextCursor } = await listInbox(agent, filters);
 
   const viewingTicket = activeNumber !== undefined;
 
@@ -40,7 +40,7 @@ export async function InboxShell({
       >
         <InboxList
           rows={rows}
-          hasMore={hasMore}
+          nextCursor={nextCursor}
           filters={filters}
           activeNumber={activeNumber}
           canSeeBot={can(agent, 'ticket.view.bot')}
