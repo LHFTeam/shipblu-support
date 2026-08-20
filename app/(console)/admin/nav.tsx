@@ -25,6 +25,7 @@ const SECTIONS: { title: string; links: { href: string; label: string }[] }[] = 
     links: [
       { href: '/admin/agents', label: 'Agents' },
       { href: '/admin/groups', label: 'Groups' },
+      { href: '/admin/locations', label: 'Locations' },
     ],
   },
   {

@@ -7,6 +7,7 @@ import {
   businessHours,
   cannedResponses,
   channels,
+  locations,
   slaPolicies,
   ticketStatuses,
 } from '@/db/schema';
@@ -14,6 +15,9 @@ import { Badge, Card, PageHeader } from '@/components/ui';
 import { requirePermission } from '@/lib/auth/guard';
 
 export const dynamic = 'force-dynamic';
+
+/** ShipBlu's location count, and the only reason this page can say "the rest". */
+const LOCATIONS_EXPECTED = 16;
 
 /**
  * Settings overview.
@@ -37,6 +41,7 @@ export default async function AdminIndexPage() {
       statuses: sql<number>`(select count(*)::int from ${ticketStatuses})`,
       canned: sql<number>`(select count(*)::int from ${cannedResponses})`,
       channels: sql<number>`(select count(*)::int from ${channels} where is_active)`,
+      locations: sql<number>`(select count(*)::int from ${locations})`,
     })
     .from(sql`(select 1) as one`);
 
@@ -66,6 +71,20 @@ export default async function AdminIndexPage() {
       title: 'Channels',
       good: `${counts?.channels} active`,
       bad: 'None configured — tickets still arrive, but with no default group',
+    },
+    {
+      // Sixteen is the number, and a register stuck at fourteen is the failure
+      // this row exists to make visible — a missing hub reads as a hub that does
+      // not exist. Optional because nothing routes on a location yet.
+      ok: (counts?.locations ?? 0) >= LOCATIONS_EXPECTED,
+      href: '/admin/locations',
+      title: 'Locations',
+      good: `${counts?.locations} entered`,
+      bad:
+        (counts?.locations ?? 0) === 0
+          ? `None of the ${LOCATIONS_EXPECTED} ShipBlu locations have been entered`
+          : `${counts?.locations} of ${LOCATIONS_EXPECTED} entered — the rest look like locations that do not exist`,
+      optional: true,
     },
     {
       ok: (counts?.rules ?? 0) > 0,

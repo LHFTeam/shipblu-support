@@ -501,13 +501,13 @@ export async function shipmentsForContact(contactId: string, limit = 25) {
 }
 
 /**
- * The console's customer search: people, accounts and shipments in one box.
+ * The console's contact search: people, accounts and shipments in one box.
  *
  * ILIKE rather than the plain `%` operator, per the README — `%` compares whole
  * strings and scores a short term against a long one below the threshold, so it
  * would match nothing. The trigram indexes accelerate all three.
  */
-export async function searchCustomers(query: string, limit = 20) {
+export async function searchContacts(query: string, limit = 20) {
   const q = query.trim();
   if (!q) return { contacts: [], accounts: [], shipments: [] };
 

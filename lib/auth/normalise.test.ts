@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normaliseEmail, normaliseIdentifier, normalisePhone } from './normalise';
+import { looksLikeEmail, normaliseEmail, normaliseIdentifier, normalisePhone } from './normalise';
 
 describe('normaliseEmail', () => {
   it('lowercases and trims', () => {
@@ -35,5 +35,24 @@ describe('normaliseIdentifier', () => {
     // Facebook PSIDs and Instagram IGSIDs are case-sensitive opaque tokens;
     // lowercasing them would break contact matching.
     expect(normaliseIdentifier('instagram', ' AbC123XyZ ')).toBe('AbC123XyZ');
+  });
+});
+
+describe('looksLikeEmail', () => {
+  it('accepts an ordinary address', () => {
+    expect(looksLikeEmail('cairo.hub@shipblu.com')).toBe(true);
+    expect(looksLikeEmail(' Alex@ShipBlu.com ')).toBe(true);
+  });
+
+  it('rejects what would never be delivered', () => {
+    expect(looksLikeEmail('')).toBe(false);
+    expect(looksLikeEmail('shipblu.com')).toBe(false);
+    expect(looksLikeEmail('hub@')).toBe(false);
+    expect(looksLikeEmail('@shipblu.com')).toBe(false);
+    // No dot in the domain: a bare hostname is not an address anyone can reach
+    // from outside our network.
+    expect(looksLikeEmail('hub@localhost')).toBe(false);
+    expect(looksLikeEmail('two@@shipblu.com')).toBe(false);
+    expect(looksLikeEmail('cairo hub@shipblu.com')).toBe(false);
   });
 });

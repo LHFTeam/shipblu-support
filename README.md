@@ -99,6 +99,30 @@ Design decisions worth knowing before changing things:
 - **One `conversations` table** with a `channel` discriminator backs both the
   Freshdesk-style ticket list and the Freshchat-style inbox. `contact_identities` maps
   one customer across email, WhatsApp and the social platforms.
+- **A merged contact is a tombstone, not a deletion.** Duplicates are the normal state
+  of a support database — `resolveContact()` creates a record per channel identity,
+  because nothing proves at arrival time that two addresses are one human. Merging moves
+  the identities, tickets, messages, account memberships and parcel roles to the
+  survivor, then keeps the loser's row with `merged_into_contact_id` set, so
+  `/contacts/<old-id>` still redirects to the person. Hard-deleting it would take its
+  `(source_system, external_id)` with it and the next importer run would recreate the
+  duplicate. A merge fills the survivor's blanks and overwrites nothing: being told two
+  records are one person is not being told which name is right. `is_blocked` never
+  moves in either direction, because blocking is a decision about a record rather than
+  a fact about a person.
+- **Locations are a register, joined to nothing.** ShipBlu's sixteen hubs each have a
+  name, a unique code and a shared mailbox, and nothing routes on them yet — no agent
+  carries one, no ticket is attributed to one. Entering them now means whichever of
+  those lands first points at a real row instead of a hub name typed sixteen different
+  ways; deciding today whether an employee has one location or several would be
+  guessing the column that carries it. The email is on the record, not in the mail path.
+
+### Contacts, not customers
+
+The console section is `/contacts` and everything in it says contact, matching the table
+name it has always had. "Customer" is kept for the person on the other end of a ticket —
+the customer portal, `last_customer_message_at`, a status's `customer_label`. A contact is
+a row; a customer is who writes in.
 
 ## Local development
 

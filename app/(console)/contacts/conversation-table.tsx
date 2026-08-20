@@ -5,7 +5,7 @@ import { formatRelative } from '@/lib/format';
 import type { ConversationSummary } from '@/lib/shipments/queries';
 
 /**
- * The conversation list every customer-side page shows.
+ * The conversation list every contact-side page shows.
  *
  * One component so a ticket looks the same on a contact, an account and a
  * shipment. The rows are already visibility-filtered by whichever query
