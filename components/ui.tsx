@@ -39,8 +39,17 @@ export function Button({
   );
 }
 
+/**
+ * 16px on a phone, 14px from `sm` up.
+ *
+ * Not a taste decision: iOS Safari zooms the page in when a field smaller than
+ * 16px takes focus, and it does not zoom back out. In a viewport-height layout
+ * with no page scroll that leaves the agent stranded inside a composer they
+ * then have to pan around, which is most of what "the composer is broken on my
+ * phone" turns out to mean.
+ */
 const FIELD_BASE =
-  'w-full rounded-md border border-[var(--border)] bg-[var(--surface)] text-sm outline-none transition-colors focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 disabled:opacity-60';
+  'w-full rounded-md border border-[var(--border)] bg-[var(--surface)] text-base sm:text-sm outline-none transition-colors focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 disabled:opacity-60';
 
 export function Input({ className = '', ...props }: ComponentProps<'input'>) {
   return <input {...props} className={`${FIELD_BASE} px-3 py-2 ${className}`} />;
@@ -51,7 +60,9 @@ export function Textarea({ className = '', ...props }: ComponentProps<'textarea'
 }
 
 export function Select({ className = '', ...props }: ComponentProps<'select'>) {
-  return <select {...props} className={`${FIELD_BASE} px-2 py-1.5 ${className}`} />;
+  // Taller on a phone, where 1.5 of padding around 14px text is a 34px tap
+  // target sat next to a 42px input in the same row.
+  return <select {...props} className={`${FIELD_BASE} px-2 py-2 sm:py-1.5 ${className}`} />;
 }
 
 export function Label({ children, htmlFor }: { children: ReactNode; htmlFor?: string }) {

@@ -62,53 +62,70 @@ export function Composer({
   // the moment the customer writes again.
   const tab: Tab = !windowOpen && requestedTab === 'reply' ? 'template' : requestedTab;
 
+  // The note beside the tabs, if this channel has one to make.
+  const notice =
+    isWhatsApp && now !== null
+      ? state.isOpen
+        ? `24h window: ${formatRemaining(state.remainingMs)}`
+        : 'Window closed — approved templates only'
+      : isMeta && !isCommentThread && now !== null
+        ? describeWindow(metaState)
+        : isCommentThread
+          ? 'Public comment thread — anyone who can see the post can read your reply'
+          : null;
+
   return (
-    <div className="shrink-0 border-t border-[var(--border)]">
-      <div className="flex items-center gap-1 px-3 pt-2">
-        <TabButton
-          active={tab === 'reply'}
-          onClick={() => setRequestedTab('reply')}
-          disabled={!windowOpen || !metaSendable}
-        >
-          {isCommentThread ? 'Reply publicly' : 'Reply'}
-        </TabButton>
-        <TabButton active={tab === 'note'} onClick={() => setRequestedTab('note')}>
-          Private note
-        </TabButton>
-        {isWhatsApp ? (
-          <TabButton active={tab === 'template'} onClick={() => setRequestedTab('template')}>
-            Template
+    /*
+      Capped rather than free-standing, and scrolling inside that cap.
+
+      The pane it sits in is `overflow-hidden`, so a composer taller than the
+      space left over does not push a scrollbar — it is simply cut off, taking
+      the send button with it. The side conversation form is the tall one and a
+      short phone is where it happens: an agent on a 667px screen could fill the
+      whole form in and never reach "Send". So the composer takes at most two
+      thirds of the pane and scrolls within it, which also leaves the last
+      messages of the conversation on screen while writing.
+    */
+    <div className="flex max-h-[65%] min-h-0 flex-col border-t border-[var(--border)]">
+      <div className="flex shrink-0 flex-col gap-1 px-3 pt-2 lg:flex-row lg:items-center lg:gap-2">
+        {/* One row that scrolls sideways rather than four tabs squeezed into a
+            phone's width — at 390px they wrapped onto two lines each and the
+            last one ran off the edge. The negative margin lets a tab scroll
+            under the padding instead of stopping short of it. */}
+        <div className="app-scroll -mx-3 flex items-center gap-1 overflow-x-auto px-3 lg:mx-0 lg:px-0">
+          <TabButton
+            active={tab === 'reply'}
+            onClick={() => setRequestedTab('reply')}
+            disabled={!windowOpen || !metaSendable}
+          >
+            {isCommentThread ? 'Reply publicly' : 'Reply'}
           </TabButton>
-        ) : null}
-        {/* Fourth, and last, so the two customer-facing tabs stay leftmost and
-            the muscle memory of "the first box is the one the customer reads"
-            keeps holding. */}
-        {canSideConversation ? (
-          <TabButton active={tab === 'side'} onClick={() => setRequestedTab('side')}>
-            Side conversation
+          <TabButton active={tab === 'note'} onClick={() => setRequestedTab('note')}>
+            Private note
           </TabButton>
-        ) : null}
+          {isWhatsApp ? (
+            <TabButton active={tab === 'template'} onClick={() => setRequestedTab('template')}>
+              Template
+            </TabButton>
+          ) : null}
+          {/* Fourth, and last, so the two customer-facing tabs stay leftmost and
+              the muscle memory of "the first box is the one the customer reads"
+              keeps holding. */}
+          {canSideConversation ? (
+            <TabButton active={tab === 'side'} onClick={() => setRequestedTab('side')}>
+              Side conversation
+            </TabButton>
+          ) : null}
+        </div>
 
-        {isWhatsApp && now !== null ? (
-          <span className="ml-auto text-xs opacity-60">
-            {state.isOpen
-              ? `24h window: ${formatRemaining(state.remainingMs)}`
-              : 'Window closed — approved templates only'}
-          </span>
-        ) : null}
-
-        {isMeta && !isCommentThread && now !== null ? (
-          <span className="ml-auto text-xs opacity-60">{describeWindow(metaState)}</span>
-        ) : null}
-
-        {isCommentThread ? (
-          <span className="ml-auto text-xs opacity-60">
-            Public comment thread — anyone who can see the post can read your reply
-          </span>
+        {/* Its own line on a phone. Sharing the tab row left it four characters
+            wide and clipped; there is no width to spare down there. */}
+        {notice ? (
+          <span className="text-xs opacity-60 lg:ms-auto lg:shrink-0">{notice}</span>
         ) : null}
       </div>
 
-      <div className="p-3">
+      <div className="app-scroll min-h-0 flex-1 overflow-y-auto p-3">
         {tab === 'reply' ? (
           <ReplyForm conversationId={conversation.id} isCommentThread={isCommentThread} />
         ) : null}
@@ -140,7 +157,7 @@ function TabButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`rounded-t-md px-3 py-1.5 text-sm ${
+      className={`shrink-0 rounded-t-md px-3 py-1.5 text-sm whitespace-nowrap ${
         active ? 'bg-[var(--muted)] font-medium' : 'opacity-60 hover:opacity-100'
       } disabled:cursor-not-allowed disabled:opacity-30`}
     >

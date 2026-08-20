@@ -411,7 +411,11 @@ export function StartSideConversationForm({
           <input type="checkbox" name="includeAnchor" defaultChecked className="mt-0.5" />
           <span>
             <span className="font-medium">Quote the customer&apos;s last message</span>
-            <span className="block opacity-60 line-clamp-1">{anchor.bodyText}</span>
+            {/* No `block` beside the clamp: `display: block` and the clamp's
+                own `display: -webkit-box` are the same property, and the one
+                that won left a long WhatsApp message unclamped — five lines of
+                quote that pushed the send button off a phone screen. */}
+            <span className="line-clamp-1 opacity-60">{anchor.bodyText}</span>
           </span>
         </label>
       ) : null}
