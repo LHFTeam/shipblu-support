@@ -24,6 +24,15 @@ export class MetaApiError extends Error {
     readonly code: number | null,
     readonly subcode: number | null,
     readonly isTransient: boolean,
+    /**
+     * `error_user_msg`, when Graph sends one. It is the only field in a Graph
+     * error written for a person to read, and it is the field most often
+     * missing from the generic refusals — so it is preferred over `message`
+     * where it exists rather than relied on.
+     */
+    readonly userMessage: string | null = null,
+    /** `fbtrace_id` — what Meta support asks for first. */
+    readonly traceId: string | null = null,
   ) {
     super(message);
     this.name = 'MetaApiError';
@@ -130,8 +139,23 @@ async function graph<T>(
   }
 
   if (!response.ok) {
-    const body = parsed as { error?: { message?: string; code?: number; error_subcode?: number } };
+    const body = parsed as {
+      error?: {
+        message?: string;
+        code?: number;
+        error_subcode?: number;
+        error_user_msg?: string;
+        fbtrace_id?: string;
+      };
+    };
     const code = body?.error?.code ?? null;
+
+    // Logged whole, because Graph's generic refusals ("An unknown error has
+    // occurred.") carry their only distinguishing detail in the fields around
+    // the message.
+    console.warn(
+      `[meta] ${init.method} ${path} failed with ${response.status}: ${text.slice(0, 1000)}`,
+    );
 
     throw new MetaApiError(
       body?.error?.message ?? text.slice(0, 500) ?? `Graph API returned ${response.status}`,
@@ -141,6 +165,8 @@ async function graph<T>(
       // 5xx is transient regardless of code: Meta returns them without one.
       (code !== null && (TRANSIENT_CODES.has(code) || RETRYABLE_AFTER_HUMAN_FIX.has(code))) ||
         response.status >= 500,
+      body?.error?.error_user_msg ?? null,
+      body?.error?.fbtrace_id ?? null,
     );
   }
 

@@ -87,7 +87,41 @@ export async function claimJobs(limit: number, workerId: string): Promise<Claime
     RETURNING j.*;
   `);
 
-  return rows as unknown as ClaimedJob[];
+  return (rows as unknown as JobRow[]).map(toClaimedJob);
+}
+
+type JobRow = Record<string, unknown>;
+
+/**
+ * Raw SQL bypasses drizzle's column mapping, so `RETURNING j.*` hands back the
+ * database's own names — `max_attempts`, not `maxAttempts`. Casting the result
+ * to the schema's row type only hid that: `failJob` read `job.maxAttempts` off
+ * such a row, got `undefined`, and `attempts >= undefined` is false on every
+ * attempt — so no job ever reached 'dead'. A failing send retried hourly
+ * forever instead of stopping at five, and for a customer-visible reply that
+ * means it can still go out days after the agent wrote it.
+ *
+ * Written out field by field rather than case-converted in a loop, because then
+ * a column added to the table stops this compiling instead of arriving as
+ * another silent `undefined`.
+ */
+export function toClaimedJob(row: JobRow): ClaimedJob {
+  return {
+    id: row.id as string,
+    type: row.type as string,
+    payload: (row.payload ?? {}) as Record<string, unknown>,
+    status: row.status as ClaimedJob['status'],
+    priority: row.priority as number,
+    runAt: row.run_at as Date,
+    attempts: row.attempts as number,
+    maxAttempts: row.max_attempts as number,
+    lastError: (row.last_error ?? null) as string | null,
+    dedupeKey: (row.dedupe_key ?? null) as string | null,
+    lockedAt: (row.locked_at ?? null) as Date | null,
+    lockedBy: (row.locked_by ?? null) as string | null,
+    completedAt: (row.completed_at ?? null) as Date | null,
+    createdAt: row.created_at as Date,
+  };
 }
 
 export async function completeJob(id: string): Promise<void> {

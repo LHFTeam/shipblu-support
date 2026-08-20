@@ -400,7 +400,9 @@ function MessageBody({ message }: { message: ConversationDetail['messages'][numb
 function DeliveryState({ message }: { message: ConversationDetail['messages'][number] }) {
   if (message.deliveryStatus === 'failed') {
     return (
-      <p className="mt-1.5 text-xs text-red-600 dark:text-red-400">
+      // A delivery error explains itself in paragraphs — what Meta said, and
+      // what it means — so it is wrapped rather than run together into one line.
+      <p className="mt-1.5 whitespace-pre-wrap text-xs text-red-600 dark:text-red-400">
         Not delivered — {message.deliveryError ?? 'unknown error'}
       </p>
     );
