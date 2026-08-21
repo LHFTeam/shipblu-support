@@ -4,9 +4,13 @@ import type { NextConfig } from 'next';
  * Origins allowed to embed the chat widget.
  *
  * Read from the environment rather than hard-coded, because the widget goes on
- * the help centre, the merchant dashboard and eventually the marketing site,
- * and each is a different origin. Empty means the widget is embeddable only
- * from our own origin, which is the safe default for a fresh deploy.
+ * the merchant dashboard and eventually the marketing site, and each is a
+ * different origin. Empty means the widget is embeddable only from our own
+ * origin, which is the safe default for a fresh deploy.
+ *
+ * The help centre is not one of the origins that has to be listed, even on its
+ * custom domain: `/widget/embed.js` frames the hostname that served it, so the
+ * iframe is always same-origin with the page and `'self'` covers it.
  */
 function widgetFrameAncestors(): string {
   const configured = (process.env.WIDGET_ALLOWED_ORIGINS ?? '')

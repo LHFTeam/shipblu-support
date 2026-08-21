@@ -234,7 +234,11 @@ is code:
   Instagram account, and a `webchat` channel each still need a row. The env vars
   are the credentials; the rows are what the app routes on. A `portal` row is
   worth adding too: without one, tickets opened from the customer portal land
-  with no default group, so nothing routes them.
+  with no default group, so nothing routes them. The `webchat` row is in the
+  same position now that the help centre carries the chat launcher on every
+  page: a chat still opens a ticket without it, but with no channel and no
+  group, and it is also the row whose default group decides which schedule the
+  widget calls "we are here" — with none, the global default applies.
 - **Agents.** Three accounts exist. The rest of the team needs inviting, and
   `groups` (3 rows) needs its membership — which is now load-bearing rather than
   decorative: auto-assignment only ever considers members of the ticket's group,
@@ -276,7 +280,11 @@ is code:
   `raw_body`. Verified read-only beforehand: all 821 have both coordinates, all
   are in range, so the run should recover all 821 and leave nothing unreadable.
 - **Unset config:** `EMAIL_API_KEY`, `EMAIL_FROM_ADDRESS`, `EMAIL_REPLY_DOMAIN`,
-  `EMAIL_WEBHOOK_SECRET`, `KB_PUBLIC_HOST`, `WIDGET_ALLOWED_ORIGINS`.
+  `EMAIL_WEBHOOK_SECRET`, `KB_PUBLIC_HOST`, `WIDGET_ALLOWED_ORIGINS`. The last of
+  those is not blocking chat on the help centre and never will be: the snippet
+  frames the hostname that served it, so the help centre's own iframe is
+  same-origin either side of the custom domain going live. It is for the day the
+  widget goes on shipblu.com.
 - **Presence has never been observed with more than one agent.** It is written
   from the SSE stream and verified against a local Postgres, but the multi-tab
   case is handled by expiry rather than by reference counting: closing one of two
@@ -329,6 +337,8 @@ provider. Each is a round trip somebody has to actually watch:
   may be a third.
 - **The widget on a genuine third-party origin**, not localhost. The
   `frame-ancestors` allowlist and the visitor token are what you are testing.
+  The help centre is not that test even on its own domain — it serves the
+  snippet itself, so the frame is same-origin and `'self'` already covers it.
 - **The KB on its custom domain**, including that Freshdesk's old article URLs
   redirect. 174 `kb_redirects` rows exist and none has been followed in anger.
 - **A WhatsApp template send outside the 24-hour window** — the one path the

@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
  * the widget never hands the host access to a customer's conversation.
  *
  * Deliberately dependency-free and small enough to read: this runs on every
- * page of shipblu.com, so it must not be a framework.
+ * page of shipblu.com and of the help centre, so it must not be a framework.
  */
 export async function GET() {
   const base = publicBaseUrl();
@@ -22,23 +22,51 @@ export async function GET() {
   'use strict';
 
   if (window.__shipbluWidget) return;
-  window.__shipbluWidget = true;
 
-  var BASE = ${JSON.stringify(base)};
+  // Claimed before anything else runs, so a page carrying the snippet twice
+  // still draws one launcher. \`setLocale\` is a function declaration, so it is
+  // already defined by the time a host page can reach it.
+  window.__shipbluWidget = { setLocale: setLocale };
+
   var script = document.currentScript;
+
+  /*
+   * The origin the widget is served from.
+   *
+   * Read from this script's own URL rather than baked in, because the site
+   * carrying the widget is often one of ours and reachable on more than one
+   * hostname: the help centre answers on its custom domain and on the Render
+   * service URL, and the console serves /widget too. A baked-in base would
+   * frame the other hostname, which is a different origin — so the visitor
+   * would need that origin in WIDGET_ALLOWED_ORIGINS before the frame loaded
+   * at all, and would otherwise open an empty box. Taking the origin from the
+   * snippet's own URL keeps the iframe same-origin with the page on every one
+   * of our surfaces, which \`frame-ancestors 'self'\` already allows, while a
+   * genuine third-party host still gets the origin it pasted into its tag.
+   *
+   * The configured base remains the fallback for the one case with no element
+   * to read: a snippet injected where \`currentScript\` is unavailable.
+   */
+  var BASE = ${JSON.stringify(base)};
+  if (script && script.src) {
+    try {
+      BASE = new URL(script.src, window.location.href).origin;
+    } catch (error) {
+      // Keeps the configured base.
+    }
+  }
+
   var locale = (script && script.getAttribute('data-locale')) || 'en';
-  var rtl = locale === 'ar';
 
   var open = false;
   var iframe = null;
 
   var launcher = document.createElement('button');
   launcher.type = 'button';
-  launcher.setAttribute('aria-label', rtl ? 'المحادثة' : 'Chat with us');
+  launcher.id = 'shipblu-chat-launcher';
   launcher.style.cssText = [
     'position:fixed',
     'bottom:20px',
-    rtl ? 'left:20px' : 'right:20px',
     'width:56px',
     'height:56px',
     'border-radius:28px',
@@ -60,7 +88,6 @@ export async function GET() {
   badge.style.cssText = [
     'position:absolute',
     'top:-2px',
-    rtl ? 'left:-2px' : 'right:-2px',
     'min-width:18px',
     'height:18px',
     'border-radius:9px',
@@ -75,17 +102,83 @@ export async function GET() {
   ].join(';');
   launcher.appendChild(badge);
 
+  /*
+   * A button that floats over the page is the one thing on it with no business
+   * being on paper, and help centre articles are printed and handed to a
+   * colleague. A stylesheet rather than inline styles because a media query
+   * cannot go in a style attribute; keyed on our two ids so it changes nothing
+   * else on the host page.
+   */
+  var sheet = document.createElement('style');
+  sheet.textContent =
+    '@media print{#shipblu-chat-launcher,#shipblu-chat-frame{display:none !important}}';
+  document.head.appendChild(sheet);
+
+  function frameSrc() {
+    return BASE + '/widget?locale=' + encodeURIComponent(locale);
+  }
+
+  /**
+   * Everything that differs between the two languages, in one place so that a
+   * language switch can re-apply it. The launcher sits on the side the reader's
+   * eye ends on, which is the other side in Arabic — a chat button pinned to
+   * the bottom right of an Arabic page reads as something the site forgot to
+   * translate.
+   */
+  function applyLocale() {
+    var rtl = locale === 'ar';
+
+    launcher.setAttribute('aria-label', rtl ? 'المحادثة' : 'Chat with us');
+    launcher.style.left = rtl ? '20px' : '';
+    launcher.style.right = rtl ? '' : '20px';
+    badge.style.left = rtl ? '-2px' : '';
+    badge.style.right = rtl ? '' : '-2px';
+
+    if (!iframe) return;
+
+    iframe.title = rtl ? 'محادثة الدعم' : 'Support chat';
+    iframe.style.left = rtl ? '20px' : '';
+    iframe.style.right = rtl ? '' : '20px';
+
+    // Only when it actually changed: assigning the same src reloads the frame,
+    // which would throw away a half-typed message every time this runs.
+    var src = frameSrc();
+    if (iframe.src !== src) iframe.src = src;
+  }
+
+  /**
+   * Told to us by a host page whose own language changes without a reload. The
+   * help centre's language switcher is a client-side navigation, so without
+   * this an Arabic page would keep an English widget parked on the wrong side
+   * of the screen until the visitor happened to reload.
+   *
+   * Re-pointing the iframe reloads the chat in the other language. The
+   * transcript survives that: it is read back from the server against the
+   * visitor token in our origin's localStorage rather than held in the frame.
+   */
+  function setLocale(next) {
+    if (next !== 'en' && next !== 'ar') return;
+    if (next === locale) return;
+
+    locale = next;
+    applyLocale();
+  }
+
+  // The launcher is styled as soon as it exists rather than as it is inserted,
+  // so a language switch that lands before the page is ready still finds it in
+  // the right place.
+  applyLocale();
+
   function ensureFrame() {
     if (iframe) return iframe;
 
     iframe = document.createElement('iframe');
-    iframe.src = BASE + '/widget?locale=' + encodeURIComponent(locale);
-    iframe.title = rtl ? 'محادثة الدعم' : 'Support chat';
+    iframe.id = 'shipblu-chat-frame';
+    iframe.src = frameSrc();
     iframe.setAttribute('allow', 'clipboard-write');
     iframe.style.cssText = [
       'position:fixed',
       'bottom:88px',
-      rtl ? 'left:20px' : 'right:20px',
       'width:380px',
       'height:min(600px, calc(100vh - 120px))',
       'max-width:calc(100vw - 40px)',
@@ -97,6 +190,10 @@ export async function GET() {
       'background:#fff',
       'color-scheme:light'
     ].join(';');
+
+    // Sets the title and the side it opens on. The src it would set is the one
+    // just assigned, so the frame is not loaded twice.
+    applyLocale();
 
     document.body.appendChild(iframe);
     return iframe;
