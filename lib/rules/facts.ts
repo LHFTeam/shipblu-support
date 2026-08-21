@@ -44,6 +44,11 @@ export function conversationFacts(source: FactSource, now: Date = new Date()): F
     hours_since_last_customer_message: hoursSince(c.lastCustomerMessageAt, now),
     hours_since_last_agent_message: hoursSince(c.lastAgentMessageAt, now),
     hours_since_resolved: hoursSince(c.resolvedAt, now),
+    // How long the current assignee has held it. Null when nobody does, which
+    // `is_empty` catches and a comparison does not — so "assigned more than four
+    // hours ago and still no reply" cannot accidentally match every unassigned
+    // ticket in the queue.
+    hours_since_assigned: hoursSince(c.assignedAt, now),
 
     // The overdue flags are what a time-based rule keys off to chase a ticket
     // that is about to embarrass someone, without having to restate the SLA's

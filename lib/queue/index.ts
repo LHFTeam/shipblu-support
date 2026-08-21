@@ -12,6 +12,7 @@ export type JobType =
   | 'download_media'
   | 'sync_whatsapp_templates'
   | 'sla_sweep'
+  | 'assign_sweep'
   | 'run_time_automations'
   | 'send_csat'
   | 'rollup_metrics'

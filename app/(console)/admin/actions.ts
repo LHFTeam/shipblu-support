@@ -82,6 +82,40 @@ export async function setAgentActive(_state: AdminState, formData: FormData): Pr
   return { error: null };
 }
 
+/**
+ * An agent's own ticket cap.
+ *
+ * Blank clears it, which puts them back on their group's default rather than on
+ * "no limit" — the two are different answers and only one of them is a decision
+ * about this person.
+ *
+ * Deliberately not gated behind deactivation or self-editing checks the way
+ * `setAgentActive` is: raising your own cap is not a way to lock anybody out,
+ * and an admin adjusting their own number while the queue is backing up is the
+ * expected use rather than the abuse.
+ */
+export async function setAgentCapacity(
+  _state: AdminState,
+  formData: FormData,
+): Promise<AdminState> {
+  await requirePermission('admin.agents');
+
+  const agentId = String(formData.get('agentId') ?? '');
+  const raw = String(formData.get('maxOpenTickets') ?? '').trim();
+
+  let maxOpenTickets: number | null = null;
+  if (raw) {
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value < 0) return { error: 'That is not a number of tickets' };
+    maxOpenTickets = Math.trunc(value);
+  }
+
+  await db.update(agents).set({ maxOpenTickets }).where(eq(agents.id, agentId));
+
+  revalidatePath('/admin/agents');
+  return { error: null };
+}
+
 export async function saveChannel(_state: AdminState, formData: FormData): Promise<AdminState> {
   await requirePermission('admin.channels');
 

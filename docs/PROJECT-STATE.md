@@ -5,7 +5,7 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-08-20, against `main` at `45c30df`.
+Last updated: 2026-08-21, against `main` at `870d2cb`.
 
 ---
 
@@ -36,9 +36,22 @@ name, a unique code and a shared mailbox per hub, joined to nothing on purpose;
 see `plans/contact-merge-and-locations.md` for why, and §5.1 for the sixteen rows
 nobody has entered yet.
 
-And **side conversations**: an agent can open a thread with a hub, an internal
-team or a vendor from inside a ticket, and the answer comes back onto the ticket
-rather than into their personal mailbox — never onto the customer's timeline.
+And now **ticket assignment**. Until this landed a ticket reached a group and
+stopped there; a person only ever got one by picking it out of a dropdown. Each
+group can now hand its tickets out by round robin or by load, optionally filtered
+by skills, gated on its own business hours, with per-agent caps, opt-in
+reclaiming from agents who have gone offline, and escalation of anything nobody
+picks up. Three pieces of scaffolding that had been in the schema doing nothing
+since the first migration are finally read: `groups.escalate_to_agent_id` /
+`escalate_after_mins`, `group_members` as an actual constraint rather than a
+roster to draw, and `agents.presence`, which the dashboard has rendered from day
+one and **nothing had ever written** — so every agent read `offline` forever. It
+is written now, by the SSE stream and by nothing else. Every group ships on
+`manual`, so none of it changes behaviour until somebody opts a team in.
+
+And before that, **side conversations**: an agent can open a thread with a hub, an
+internal team or a vendor from inside a ticket, and the answer comes back onto the
+ticket rather than into their personal mailbox — never onto the customer's timeline.
 This is the first thing to join `locations` to anything: the picker's hubs are
 its rows, which is what that table was entered for. Teams and vendors are not
 locations, so they keep their own small directory at `/admin/recipients`. Built
@@ -177,7 +190,16 @@ is code:
   routes on. A `portal` row is worth adding too: without one, tickets opened
   from the customer portal land with no default group, so nothing routes them.
 - **Agents.** One account exists. The team needs inviting, and `groups` (3 rows)
-  needs its membership.
+  needs its membership — which is now load-bearing rather than decorative:
+  auto-assignment only ever considers members of the ticket's group, so a group
+  with an empty roster hands out nothing and says `no_group_members` on the
+  timeline.
+- **Assignment is configured but off.** Every group is on `manual`, which is the
+  deliberate default and means the module changes nothing until somebody chooses
+  otherwise at `/admin/groups`. Whoever configures it should also decide the
+  per-agent caps and, if skills are used, set a **skill timeout** — without one,
+  a mistake in a skill's conditions is a ticket no human ever sees. `/admin`
+  reports both, including any skill no active agent holds.
 - **Locations.** `locations` is empty, and there are sixteen of them. Nothing
   routes on a location yet, so an empty table breaks nothing — but a register
   entered to fourteen is worse than an empty one, because the two missing hubs
@@ -198,6 +220,12 @@ is code:
   feature is turned on for the team, not after.
 - **Unset config:** `EMAIL_API_KEY`, `EMAIL_FROM_ADDRESS`, `EMAIL_REPLY_DOMAIN`,
   `EMAIL_WEBHOOK_SECRET`, `KB_PUBLIC_HOST`, `WIDGET_ALLOWED_ORIGINS`.
+- **Presence has never been observed with more than one agent.** It is written
+  from the SSE stream and verified against a local Postgres, but the multi-tab
+  case is handled by expiry rather than by reference counting: closing one of two
+  tabs marks the agent offline and the surviving tab's next beat — up to 25
+  seconds later — puts them back. That window is a brief skip in the rota, which
+  is the cheaper error, but nobody has watched it happen with a real team.
 - **The shipment detection patterns are a guess and need confirming.**
   `SHIPMENT_TRACKING_PATTERN` and `SHIPMENT_SBID_PATTERN` are unset, so the
   defaults in `lib/shipments/detect.ts` are in force: a tracking number must

@@ -19,6 +19,12 @@ export type SessionAgent = {
   role: (typeof agents.$inferSelect)['role'];
   permissions: Record<string, boolean>;
   avatarUrl: string | null;
+  /**
+   * Their own "route new work to me" switch. On the session rather than fetched
+   * where it is needed because the console header renders it on every page, and
+   * the session row is already being read there.
+   */
+  isAcceptingTickets: boolean;
 };
 
 export async function createSession(
@@ -67,6 +73,7 @@ export async function getSessionAgent(): Promise<SessionAgent | null> {
       role: agents.role,
       permissions: agents.permissions,
       avatarUrl: agents.avatarUrl,
+      isAcceptingTickets: agents.isAcceptingTickets,
       isActive: agents.isActive,
       lastUsedAt: sessions.lastUsedAt,
     })
@@ -92,6 +99,7 @@ export async function getSessionAgent(): Promise<SessionAgent | null> {
     role: row.role,
     permissions: row.permissions,
     avatarUrl: row.avatarUrl,
+    isAcceptingTickets: row.isAcceptingTickets,
   };
 }
 

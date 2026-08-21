@@ -77,6 +77,7 @@ export async function ticketFieldOptions(): Promise<FieldOption[]> {
     },
     { value: 'reopen_count', label: 'Times reopened', kind: 'number' },
     { value: 'hours_since_created', label: 'Hours since created', kind: 'number' },
+    { value: 'hours_since_assigned', label: 'Hours since assigned', kind: 'number' },
     { value: 'hours_since_last_message', label: 'Hours since last message', kind: 'number' },
     {
       value: 'hours_since_last_customer_message',

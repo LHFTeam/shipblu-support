@@ -274,6 +274,15 @@ services:
   # value was undefined and every job that opened a database connection failed
   # validation on a variable it had no use for.
 
+  # Two jobs on one schedule, chained the way shipblu-nightly chains cleanup and
+  # the rollup. They want the same cadence and neither takes long, and a cron
+  # service of its own would be a second container booting every five minutes to
+  # run a query that usually returns nothing.
+  #
+  # Order matters: the SLA sweep first, so a ticket the assignment sweep is about
+  # to hand to somebody carries its breach flags when they open it. `&&` rather
+  # than `;` — if the SLA sweep dies the run should go red rather than reporting
+  # success because the second half worked.
   - type: cron
     name: shipblu-sla-sweep
     runtime: node
@@ -282,7 +291,7 @@ services:
     branch: main
     schedule: '*/5 * * * *' # SLA breaches need minute-ish resolution
     buildCommand: npm ci --include=dev
-    startCommand: npm run job -- sla_sweep
+    startCommand: npm run job -- sla_sweep && npm run job -- assign_sweep
     envVars:
       - fromGroup: shipblu-shared
 

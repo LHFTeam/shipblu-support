@@ -1,4 +1,5 @@
 import type { ClaimedJob, JobType } from '@/lib/queue';
+import { assignSweep } from './assign-sweep';
 import { backfillMessageLocations } from './backfill-message-locations';
 import { backfillShipmentLinks } from './backfill-shipment-links';
 import { cleanup } from './cleanup';
@@ -27,6 +28,7 @@ export type JobHandler = (job: ClaimedJob) => Promise<void>;
  * run_time_automations, send_csat and rollup_metrics here.
  */
 export const handlers: Partial<Record<JobType, JobHandler>> = {
+  assign_sweep: () => assignSweep(),
   backfill_message_locations: (job) => backfillMessageLocations(job),
   backfill_shipment_links: (job) => backfillShipmentLinks(job),
   cleanup,

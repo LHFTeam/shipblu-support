@@ -19,6 +19,9 @@ export default async function AgentsPage() {
         role: agents.role,
         isActive: agents.isActive,
         lastSeenAt: agents.lastSeenAt,
+        presence: agents.presence,
+        isAcceptingTickets: agents.isAcceptingTickets,
+        maxOpenTickets: agents.maxOpenTickets,
       })
       .from(agents)
       .orderBy(asc(agents.name)),

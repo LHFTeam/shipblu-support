@@ -49,6 +49,8 @@ export const PERMISSIONS = [
   'admin.channels',
   'admin.automations',
   'admin.sla',
+  /** Skills, and who holds them — the input to skill-based assignment. */
+  'admin.skills',
   'admin.fields',
   'admin.billing',
 ] as const;
@@ -93,6 +95,7 @@ const ADMIN: Permission[] = [
   'admin.channels',
   'admin.automations',
   'admin.sla',
+  'admin.skills',
   'admin.fields',
 ];
 

@@ -2,12 +2,15 @@ import Link from 'next/link';
 import { eq, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
+  agentSkills,
   agents,
   automationRules,
   businessHours,
   cannedResponses,
   channels,
+  groups,
   locations,
+  skills,
   slaPolicies,
   ticketStatuses,
 } from '@/db/schema';
@@ -42,6 +45,21 @@ export default async function AdminIndexPage() {
       canned: sql<number>`(select count(*)::int from ${cannedResponses})`,
       channels: sql<number>`(select count(*)::int from ${channels} where is_active)`,
       locations: sql<number>`(select count(*)::int from ${locations})`,
+      routingGroups: sql<number>`(select count(*)::int from ${groups} where assignment_strategy <> 'manual')`,
+      allGroups: sql<number>`(select count(*)::int from ${groups})`,
+      // A skill that no active agent holds, on a group that routes by skill, is
+      // a ticket that waits for the timeout and then goes to anybody — or waits
+      // forever, if nobody set one. Counted here because it is invisible
+      // everywhere else until a customer chases.
+      orphanSkills: sql<number>`(
+        select count(*)::int from ${skills} s
+        where s.is_active
+          and not exists (
+            select 1 from ${agentSkills} a
+            join ${agents} g on g.id = a.agent_id and g.is_active
+            where a.skill_id = s.id
+          )
+      )`,
     })
     .from(sql`(select 1) as one`);
 
@@ -57,6 +75,17 @@ export default async function AdminIndexPage() {
         (counts?.policies ?? 0) === 0
           ? 'None — no ticket has a due date, and the breach sweep has nothing to find'
           : 'No default policy — a ticket matching nothing gets no targets at all',
+    },
+    {
+      ok: (counts?.routingGroups ?? 0) > 0 && (counts?.orphanSkills ?? 0) === 0,
+      optional: (counts?.routingGroups ?? 0) === 0,
+      href: '/admin/groups',
+      title: 'Ticket assignment',
+      good: `${counts?.routingGroups} of ${counts?.allGroups} group(s) assign automatically`,
+      bad:
+        (counts?.orphanSkills ?? 0) > 0
+          ? `${counts?.orphanSkills} skill(s) no active agent holds — tickets needing one wait for the skill timeout`
+          : 'Every group is on manual — tickets wait in the queue until somebody picks them up',
     },
     {
       ok: (counts?.schedules ?? 0) > 0,

@@ -4,7 +4,7 @@ import { useActionState, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Badge, Button, ErrorText, Input, Label, Select } from '@/components/ui';
 import { formatRelative } from '@/lib/format';
-import { createInvite, setAgentActive, type AdminState } from '../actions';
+import { createInvite, setAgentActive, setAgentCapacity, type AdminState } from '../actions';
 
 const INITIAL: AdminState = { error: null };
 
@@ -75,10 +75,20 @@ export function AgentRow({
     role: string;
     isActive: boolean;
     lastSeenAt: Date | string | null;
+    presence: 'online' | 'away' | 'offline';
+    isAcceptingTickets: boolean;
+    maxOpenTickets: number | null;
   };
   isSelf: boolean;
 }) {
   const [state, action] = useActionState(setAgentActive, INITIAL);
+  const [capacityState, capacityAction] = useActionState(setAgentCapacity, INITIAL);
+
+  // What assignment actually sees, which is not what either column says on its
+  // own: connected but switched off is "away", and it is the state an admin
+  // wondering why somebody is getting no tickets needs to be shown.
+  const availability =
+    agent.presence === 'online' ? (agent.isAcceptingTickets ? 'online' : 'away') : 'offline';
 
   return (
     <li className="flex items-center gap-3 px-3 py-2.5 text-sm">
@@ -91,8 +101,32 @@ export function AgentRow({
 
       <Badge>{agent.role.replace('_', ' ')}</Badge>
       {!agent.isActive ? <Badge tone="danger">deactivated</Badge> : null}
+      <Badge
+        tone={
+          availability === 'online' ? 'success' : availability === 'away' ? 'warning' : 'neutral'
+        }
+      >
+        {availability}
+      </Badge>
 
-      <span className="ml-auto shrink-0 text-xs opacity-50">
+      <form action={capacityAction} className="ml-auto flex shrink-0 items-center gap-1">
+        <input type="hidden" name="agentId" value={agent.id} />
+        <label className="text-xs opacity-50" htmlFor={`cap-${agent.id}`}>
+          cap
+        </label>
+        <input
+          id={`cap-${agent.id}`}
+          name="maxOpenTickets"
+          type="number"
+          min={0}
+          defaultValue={agent.maxOpenTickets ?? ''}
+          placeholder="group"
+          onBlur={(event) => event.currentTarget.form?.requestSubmit()}
+          className="w-16 rounded-md border border-[var(--border)] bg-[var(--surface)] px-1.5 py-1 text-xs"
+        />
+      </form>
+
+      <span className="shrink-0 text-xs opacity-50">
         {agent.lastSeenAt ? `seen ${formatRelative(agent.lastSeenAt)} ago` : 'never signed in'}
       </span>
 
@@ -104,7 +138,9 @@ export function AgentRow({
         </Button>
       </form>
 
-      {state.error ? <span className="text-xs text-red-600">{state.error}</span> : null}
+      {state.error || capacityState.error ? (
+        <span className="text-xs text-red-600">{state.error ?? capacityState.error}</span>
+      ) : null}
     </li>
   );
 }
