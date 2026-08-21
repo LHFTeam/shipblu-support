@@ -402,16 +402,17 @@ async function reopen(
   const statusId = await defaultOpenStatusId(tx);
   if (!statusId) return;
 
-  await tx
+  const reopened = await tx
     .update(conversations)
     .set({ statusId, resolvedAt: null, reopenCount: reopenCount + 1 })
-    .where(eq(conversations.id, conversationId));
+    .where(eq(conversations.id, conversationId))
+    .returning({ resolvedBy: conversations.resolvedByAgentId });
 
   await tx.insert(conversationEvents).values({
     conversationId,
     type: 'reopened',
     actorLabel,
-    data: { reason: 'customer_replied' },
+    data: { reason: 'customer_replied', resolvedBy: reopened[0]?.resolvedBy ?? null },
   });
 }
 

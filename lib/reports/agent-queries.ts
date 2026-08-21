@@ -37,6 +37,7 @@ const SUMS = {
   privateNotes: sql<number>`coalesce(sum(${agentMetricsDaily.privateNotes}), 0)::int`,
   transferredAwayCount: sql<number>`coalesce(sum(${agentMetricsDaily.transferredAwayCount}), 0)::int`,
   reclaimedFromCount: sql<number>`coalesce(sum(${agentMetricsDaily.reclaimedFromCount}), 0)::int`,
+  resolutionsMade: sql<number>`coalesce(sum(${agentMetricsDaily.resolutionsMade}), 0)::int`,
   reopenedAfterResolveCount: sql<number>`coalesce(sum(${agentMetricsDaily.reopenedAfterResolveCount}), 0)::int`,
   daysWorked: sql<number>`count(*) filter (where ${agentMetricsDaily.onlineSeconds} > 0)::int`,
 
@@ -244,29 +245,41 @@ export function handlingSeconds(row: {
 }
 
 /**
- * Share of this agent's resolutions that somebody had to reopen.
+ * Share of the resolutions this agent performed that the customer came back on.
  *
  * The counterweight to every speed column on the page. Handling time and
  * resolution time both improve when tickets are closed before they are
  * finished, and this is the number that shows it — which is why it sits beside
  * them rather than in a section of its own.
+ *
+ * Over `resolutionsMade`, not `ticketsResolved`. The two count different
+ * populations — one is "they clicked resolve", the other "it was resolved while
+ * assigned to them" — and dividing one by the other can exceed 100% with
+ * nothing broken, at which point the number means nothing.
  */
 export function reopenRate(row: {
   reopenedAfterResolveCount: number;
-  ticketsResolved: number;
+  resolutionsMade: number;
 }): number | null {
-  return row.ticketsResolved > 0
-    ? Math.round((row.reopenedAfterResolveCount / row.ticketsResolved) * 100)
+  return row.resolutionsMade > 0
+    ? Math.round((row.reopenedAfterResolveCount / row.resolutionsMade) * 100)
     : null;
 }
 
-/** Throughput against time actually at the desk, not against the calendar. */
+/**
+ * Throughput against time actually at the desk, not against the calendar.
+ *
+ * Counts resolutions the agent performed, matching every other figure in this
+ * module: a page that mixes "what they did" with "what happened to tickets they
+ * hold" invites arithmetic between two columns that cannot legitimately be
+ * compared.
+ */
 export function resolvedPerHour(row: {
-  ticketsResolved: number;
+  resolutionsMade: number;
   onlineSeconds: number;
 }): number | null {
   if (row.onlineSeconds < 600) return null;
-  return Math.round((row.ticketsResolved / (row.onlineSeconds / 3600)) * 10) / 10;
+  return Math.round((row.resolutionsMade / (row.onlineSeconds / 3600)) * 10) / 10;
 }
 
 /**

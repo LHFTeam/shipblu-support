@@ -1,0 +1,3 @@
+ALTER TABLE "conversations" ADD COLUMN "resolved_by_agent_id" uuid;--> statement-breakpoint
+ALTER TABLE "agent_metrics_daily" ADD COLUMN "resolutions_made" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
+ALTER TABLE "conversations" ADD CONSTRAINT "conversations_resolved_by_agent_id_agents_id_fk" FOREIGN KEY ("resolved_by_agent_id") REFERENCES "public"."agents"("id") ON DELETE set null ON UPDATE no action;

@@ -244,7 +244,19 @@ export const agentMetricsDaily = pgTable(
 
     // --- Quality -----------------------------------------------------------
     /**
-     * Tickets this agent resolved that somebody later had to reopen.
+     * Resolutions this agent actually performed — they moved the ticket into a
+     * resolved status themselves.
+     *
+     * Deliberately not `metrics_daily.tickets_resolved`, which counts tickets
+     * resolved *while assigned to* somebody. That is the right question for the
+     * queue and the wrong denominator for a reopen rate: a rate whose numerator
+     * counts one population and whose denominator counts another can exceed
+     * 100% without anything being broken, and then means nothing at all.
+     */
+    resolutionsMade: integer('resolutions_made').notNull().default(0),
+
+    /**
+     * Of those resolutions, how many the customer came back on.
      *
      * The counterweight that makes the speed columns safe to look at. Handling
      * time and resolution time are both trivially gamed by closing tickets that

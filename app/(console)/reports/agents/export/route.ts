@@ -67,6 +67,9 @@ export async function GET(request: Request) {
         occupancy(day) ?? '',
         day.sessionCount,
         day.assignedCount,
+        // Both are kept: they answer different questions and a spreadsheet is
+        // exactly where somebody will want to compare them.
+        day.resolutionsMade,
         day.ticketsResolved,
         day.touchedCount,
         day.publicReplies,
@@ -114,7 +117,8 @@ const HEADER = [
   'occupancy_pct',
   'sessions',
   'assigned',
-  'resolved',
+  'resolutions_made',
+  'resolved_while_assigned',
   'conversations_touched',
   'public_replies',
   'private_notes',

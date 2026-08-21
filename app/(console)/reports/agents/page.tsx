@@ -154,7 +154,7 @@ export default async function AgentProductivityPage({
             </Card>
             <Stat
               label="Reopened after resolve"
-              value={team.ticketsResolved > 0 ? `${reopenRate(team) ?? 0}%` : '—'}
+              value={team.resolutionsMade > 0 ? `${reopenRate(team) ?? 0}%` : '—'}
               tone={(reopenRate(team) ?? 0) > 15 ? 'caution' : undefined}
               hint="The counterweight to every speed figure here"
             />
@@ -202,7 +202,7 @@ export default async function AgentProductivityPage({
 
           <Section
             title="Speed and efficacy"
-            hint="Handling time is measured while the ticket is open, focused and in use — it excludes work done in other systems."
+            hint="Resolved counts resolutions this agent performed, which is what the reopen rate beside it is a share of — not tickets resolved while assigned to them, which is what /reports shows. Handling time is measured while the ticket is open, focused and in use, so it excludes work done in other systems."
           >
             <Table
               head={[
@@ -223,7 +223,7 @@ export default async function AgentProductivityPage({
                     <AgentLink row={row} days={days} selected={selected?.agentId} />
                   </Cell>
                   <Cell>{row.assignedCount}</Cell>
-                  <Cell>{row.ticketsResolved}</Cell>
+                  <Cell>{row.resolutionsMade}</Cell>
                   <Cell>{row.publicReplies}</Cell>
                   <Cell>
                     {focusMeasured(row) ? (
@@ -290,7 +290,7 @@ export default async function AgentProductivityPage({
                       <Cell>{formatHours(row.onlineSeconds)}</Cell>
                       <Cell>{formatHours(row.acceptingSeconds)}</Cell>
                       <Cell>{row.assignedCount}</Cell>
-                      <Cell>{row.ticketsResolved}</Cell>
+                      <Cell>{row.resolutionsMade}</Cell>
                       <Cell>{row.openAtDayEnd ?? '—'}</Cell>
                       <Cell>{focusMeasured(row) ? formatDuration(handlingSeconds(row)) : '—'}</Cell>
                       <Cell>
@@ -395,6 +395,7 @@ function totalsOf(rows: AgentSummary[]): AgentSummary {
     privateNotes: sum((r) => r.privateNotes),
     transferredAwayCount: sum((r) => r.transferredAwayCount),
     reclaimedFromCount: sum((r) => r.reclaimedFromCount),
+    resolutionsMade: sum((r) => r.resolutionsMade),
     reopenedAfterResolveCount: sum((r) => r.reopenedAfterResolveCount),
     daysWorked: sum((r) => r.daysWorked),
     ticketsResolved: sum((r) => r.ticketsResolved),

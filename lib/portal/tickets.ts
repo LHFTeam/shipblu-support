@@ -268,16 +268,17 @@ export async function appendReply(
     if (ticket.statusCategory === 'resolved') {
       const reopenTo = await defaultOpenStatusId(tx);
       if (reopenTo) {
-        await tx
+        const reopened = await tx
           .update(conversations)
           .set({ statusId: reopenTo, resolvedAt: null, reopenCount: ticket.reopenCount + 1 })
-          .where(eq(conversations.id, ticket.id));
+          .where(eq(conversations.id, ticket.id))
+          .returning({ resolvedBy: conversations.resolvedByAgentId });
 
         await tx.insert(conversationEvents).values({
           conversationId: ticket.id,
           type: 'reopened',
           actorLabel: 'portal',
-          data: { reason: 'customer_replied' },
+          data: { reason: 'customer_replied', resolvedBy: reopened[0]?.resolvedBy ?? null },
         });
       }
     }
