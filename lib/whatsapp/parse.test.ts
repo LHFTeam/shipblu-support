@@ -238,6 +238,146 @@ describe('parseWebhook', () => {
   });
 });
 
+describe('location extraction', () => {
+  // The envelope Meta actually sends, so the test exercises parseWebhook rather
+  // than the extractor in isolation.
+  function webhookWith(location: unknown) {
+    return {
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                metadata: { display_phone_number: '+20 100 000 0000', phone_number_id: 'pn1' },
+                contacts: [{ wa_id: '201111111111', profile: { name: 'Nadia' } }],
+                messages: [
+                  {
+                    id: 'wamid.loc1',
+                    from: '201111111111',
+                    timestamp: '1755600000',
+                    type: 'location',
+                    location,
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  it('keeps the coordinates a customer pinned', () => {
+    // Real shape from the archive: a bare pin, fourteen significant digits.
+    const parsed = parseWebhook(
+      webhookWith({ latitude: 29.988094329834, longitude: 31.282814025879 }),
+    );
+
+    expect(parsed.messages[0]!.location).toEqual({
+      latitude: 29.988094329834,
+      longitude: 31.282814025879,
+      name: null,
+      address: null,
+    });
+  });
+
+  it('keeps the place name and geocoded address when Meta sends them', () => {
+    const parsed = parseWebhook(
+      webhookWith({
+        latitude: 26.566639495368,
+        longitude: 31.687916368246,
+        name: 'HM8Q+P64',
+        address: 'El-Khouly, Sohag 1, Sohag Governorate 1681044, Egypt',
+      }),
+    );
+
+    expect(parsed.messages[0]!.location).toMatchObject({
+      name: 'HM8Q+P64',
+      address: 'El-Khouly, Sohag 1, Sohag Governorate 1681044, Egypt',
+    });
+  });
+
+  it('still ingests the message when the pin is unusable', () => {
+    // A pin we cannot read is not a reason to drop a customer's message: the
+    // text still reaches the inbox, just without a map link.
+    const parsed = parseWebhook(webhookWith({ latitude: 'north', longitude: 31 }));
+
+    expect(parsed.messages).toHaveLength(1);
+    expect(parsed.messages[0]!.location).toBeNull();
+    expect(parsed.messages[0]!.text).toContain('[location');
+  });
+
+  it('is null on every message that is not a pin', () => {
+    const parsed = parseWebhook({
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                metadata: { display_phone_number: '+20 100 000 0000' },
+                contacts: [{ wa_id: '201111111111' }],
+                messages: [
+                  {
+                    id: 'wamid.text',
+                    from: '201111111111',
+                    timestamp: '1755600000',
+                    type: 'text',
+                    text: { body: 'where is my parcel' },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(parsed.messages[0]!.location).toBeNull();
+  });
+
+  it('keeps a pin the bot sent, on the echo', () => {
+    // The bot shares hub and pickup-point pins, and an agent reading the
+    // transcript needs to see where they pointed.
+    const parsed = parseWebhook({
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                metadata: { display_phone_number: '+20 100 000 0000' },
+                contacts: [{ wa_id: '201111111111' }],
+                message_echoes: [
+                  {
+                    id: 'wamid.echo1',
+                    from: '201000000000',
+                    to: '201111111111',
+                    timestamp: '1755600000',
+                    type: 'location',
+                    location: { latitude: 30.0444, longitude: 31.2357, name: 'Maadi hub' },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(parsed.echoes[0]!.location).toMatchObject({
+      latitude: 30.0444,
+      longitude: 31.2357,
+      name: 'Maadi hub',
+    });
+  });
+
+  it('leaves body_text alone, so search keeps working on it', () => {
+    // The structured pin is an addition, not a replacement: body_text feeds the
+    // search vector and every text-only consumer.
+    const parsed = parseWebhook(webhookWith({ latitude: 30.04, longitude: 31.23 }));
+    expect(parsed.messages[0]!.text).toBe('[location (30.04, 31.23)]');
+  });
+});
+
 describe('displayText', () => {
   const cases: [Record<string, unknown>, string][] = [
     [{ type: 'text', text: { body: 'hello' } }, 'hello'],

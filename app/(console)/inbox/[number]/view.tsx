@@ -10,6 +10,12 @@ import { useNow } from '@/components/use-now';
 import { formatBytes, formatDateTime, formatRelative } from '@/lib/format';
 import type { ConversationDetail } from '@/lib/tickets/queries';
 import { describeWindow, metaWindowState } from '@/lib/meta/window';
+import {
+  formatCoordinates,
+  mapUrl,
+  readSharedLocation,
+  type SharedLocation,
+} from '@/lib/tickets/shared-location';
 import { describeRequesterRole } from '@/lib/shipments/roles';
 import { formatRemaining, windowState } from '@/lib/whatsapp/window';
 import {
@@ -384,16 +390,85 @@ function MessageBody({ message }: { message: ConversationDetail['messages'][numb
   }
 
   const media = (message.meta as { media?: { downloaded?: boolean; error?: string } }).media;
+  const location = readSharedLocation(message.meta);
 
   return (
     <>
-      <p className="whitespace-pre-wrap text-sm">{message.bodyText}</p>
+      {/*
+        A pin replaces the text only when the text is the placeholder this same
+        data generated — `[location (30.03, 31.23)]` — because showing both
+        would print the coordinates twice and leave the useful one looking like
+        a duplicate.
+
+        Anything else the customer wrote is still shown above the card. No
+        channel today sends words and a pin in one message, but a support tool
+        silently dropping a customer's sentence is a much worse failure than a
+        redundant line, so the card is additive wherever there is real text.
+      */}
+      {location && isLocationPlaceholder(message.bodyText) ? null : (
+        <p className="whitespace-pre-wrap text-sm">{message.bodyText}</p>
+      )}
+      {location ? <SharedLocationCard location={location} /> : null}
       {media && !media.downloaded ? (
         <p className="mt-1 text-xs opacity-50">
           {media.error ? `Attachment unavailable: ${media.error}` : 'Downloading attachment…'}
         </p>
       ) : null}
     </>
+  );
+}
+
+/**
+ * Whether this body is only the generated stand-in for a pin.
+ *
+ * Matched on the prefix rather than rebuilt from the coordinates: `displayText`
+ * writes the place name into the same string, so an exact comparison would fail
+ * on every pin that carries one and print the coordinates twice.
+ */
+function isLocationPlaceholder(bodyText: string): boolean {
+  const trimmed = bodyText.trim();
+  return trimmed === '' || (trimmed.startsWith('[location') && trimmed.endsWith(']'));
+}
+
+/**
+ * A location a customer shared.
+ *
+ * No embedded map. A static map image needs a Google API key this system does
+ * not hold and would put a third-party request on every ticket render, which is
+ * a CSP change and a per-view cost for something an agent only sometimes wants.
+ * The link hands off to the Maps app on a phone, which is where somebody
+ * chasing an address is usually standing.
+ *
+ * The coordinates stay on screen as text as well as in the link: an agent
+ * relaying a drop point to a driver over the phone reads them out.
+ */
+function SharedLocationCard({ location }: { location: SharedLocation }) {
+  const label = [location.name, location.address].filter(Boolean).join(' · ');
+
+  return (
+    <div className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
+      <div className="flex items-baseline gap-2">
+        <span aria-hidden="true">📍</span>
+        <span className="text-sm font-medium">Shared location</span>
+      </div>
+
+      {/* Customer-supplied text: React escapes it, and it is never put in the
+          map URL — see the note on `mapUrl`. */}
+      {label ? <p className="mt-1 whitespace-pre-wrap text-sm">{label}</p> : null}
+
+      <p className="mt-1 font-mono text-xs text-[var(--muted-foreground)]">
+        {formatCoordinates(location)}
+      </p>
+
+      <a
+        href={mapUrl(location)}
+        target="_blank"
+        rel="noreferrer"
+        className="mt-1.5 inline-block text-xs text-brand-600 underline"
+      >
+        Open in Google Maps
+      </a>
+    </div>
   );
 }
 
