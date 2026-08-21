@@ -303,7 +303,8 @@ export function WidgetChat({ locale }: { locale: Locale }) {
                 type="email"
                 required
                 placeholder={copy.emailPlaceholder}
-                className="min-w-0 flex-1 rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-sm outline-none focus:border-brand-500"
+                /* 16px for the same reason as the composer below. */
+                className="min-w-0 flex-1 rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-base outline-none focus:border-brand-500"
               />
               <button
                 type="submit"
@@ -363,7 +364,15 @@ export function WidgetChat({ locale }: { locale: Locale }) {
           maxLength={5000}
           placeholder={copy.placeholder}
           disabled={!token}
-          className="min-w-0 flex-1 resize-none rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm outline-none focus:border-brand-500"
+          /*
+            16px, not the 14px the rest of the widget reads at. Safari zooms
+            the page in on any field smaller than that the moment it is
+            focused, and a zoomed page is a scrolled page — which on iOS is
+            what parts a caret from the field it belongs to. Sizing the field
+            up is the fix that does not also disable pinch-zoom for the
+            visitor.
+          */
+          className="min-w-0 flex-1 resize-none rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-base outline-none focus:border-brand-500"
         />
         <button
           type="submit"

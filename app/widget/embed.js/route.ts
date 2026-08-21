@@ -61,6 +61,17 @@ export async function GET() {
   var open = false;
   var iframe = null;
 
+  /*
+   * The two layouts, and which one a viewport gets.
+   *
+   * Narrow *or* short: a phone held sideways is 844x390, which is roomy across
+   * and has nowhere to put a 600px card.
+   */
+  var compact = window.matchMedia('(max-width: 640px), (max-height: 480px)');
+
+  /** The host page's scroll position while it is pinned, or null. */
+  var pinned = null;
+
   var launcher = document.createElement('button');
   launcher.type = 'button';
   launcher.id = 'shipblu-chat-launcher';
@@ -119,31 +130,130 @@ export async function GET() {
   }
 
   /**
-   * Everything that differs between the two languages, in one place so that a
-   * language switch can re-apply it. The launcher sits on the side the reader's
-   * eye ends on, which is the other side in Arabic — a chat button pinned to
-   * the bottom right of an Arabic page reads as something the site forgot to
-   * translate.
+   * Where the launcher and the panel sit.
+   *
+   * Two layouts rather than one that stretches. On a phone the panel takes the
+   * whole screen, because a 380px card floating 88px above the bottom edge puts
+   * the composer exactly where the software keyboard opens over it — and what
+   * the visitor then does is scroll to find it. Anywhere with room to spare it
+   * stays the card, which is the point of a widget on a desktop page.
+   *
+   * The full-screen size comes from \`visualViewport\` rather than from \`100vh\`,
+   * because on iOS \`100vh\` keeps counting the strip the keyboard now covers.
+   * \`offsetTop\` is what keeps a fixed element aligned with the visible area
+   * once the keyboard has scrolled the visual viewport inside the layout one.
+   *
+   * Both the side the launcher sits on and the side the card opens from are
+   * here too: the reader's eye ends on the other side in Arabic, and a chat
+   * button pinned bottom-right of an Arabic page reads as something the site
+   * forgot to translate.
    */
-  function applyLocale() {
+  function applyPlacement() {
     var rtl = locale === 'ar';
+    var fullScreen = open && compact.matches;
 
-    launcher.setAttribute('aria-label', rtl ? 'المحادثة' : 'Chat with us');
     launcher.style.left = rtl ? '20px' : '';
     launcher.style.right = rtl ? '' : '20px';
     badge.style.left = rtl ? '-2px' : '';
     badge.style.right = rtl ? '' : '-2px';
+    // Nothing to return to on a full screen, and the panel carries its own
+    // close button.
+    launcher.style.display = fullScreen ? 'none' : 'flex';
 
     if (!iframe) return;
 
-    iframe.title = rtl ? 'محادثة الدعم' : 'Support chat';
-    iframe.style.left = rtl ? '20px' : '';
-    iframe.style.right = rtl ? '' : '20px';
+    if (fullScreen) {
+      var viewport = window.visualViewport;
 
-    // Only when it actually changed: assigning the same src reloads the frame,
-    // which would throw away a half-typed message every time this runs.
-    var src = frameSrc();
-    if (iframe.src !== src) iframe.src = src;
+      iframe.style.top = (viewport ? viewport.offsetTop : 0) + 'px';
+      iframe.style.bottom = 'auto';
+      iframe.style.left = '0px';
+      iframe.style.right = 'auto';
+      iframe.style.width = '100%';
+      iframe.style.maxWidth = 'none';
+      iframe.style.height = (viewport ? viewport.height : window.innerHeight) + 'px';
+      iframe.style.borderRadius = '0';
+      return;
+    }
+
+    iframe.style.top = 'auto';
+    iframe.style.bottom = '88px';
+    iframe.style.left = rtl ? '20px' : 'auto';
+    iframe.style.right = rtl ? 'auto' : '20px';
+    iframe.style.width = '380px';
+    iframe.style.maxWidth = 'calc(100vw - 40px)';
+    iframe.style.height = 'min(600px, calc(100vh - 120px))';
+    iframe.style.borderRadius = '12px';
+  }
+
+  /**
+   * The host page must not scroll while a full-screen panel is over it.
+   *
+   * This is not tidiness. On iOS the text caret is positioned against the
+   * document rather than against the fixed element the input belongs to, so a
+   * page that scrolls behind the chat drags the visitor's cursor out of the
+   * field they are typing in — and the keyboard opening is itself a scroll,
+   * because Safari scrolls the document to reveal a focused input. Pinning the
+   * body is what keeps the caret and the field together.
+   *
+   * \`position: fixed\` rather than \`overflow: hidden\`, which Safari ignores on
+   * the body; the offset is kept so the page comes back exactly where it was
+   * rather than at the top.
+   */
+  function pinPage() {
+    if (pinned) return;
+
+    var body = document.body;
+    var offset = window.pageYOffset || document.documentElement.scrollTop || 0;
+
+    pinned = {
+      offset: offset,
+      position: body.style.position,
+      top: body.style.top,
+      left: body.style.left,
+      right: body.style.right,
+      width: body.style.width
+    };
+
+    body.style.position = 'fixed';
+    body.style.top = -offset + 'px';
+    body.style.left = '0';
+    body.style.right = '0';
+    body.style.width = '100%';
+  }
+
+  function releasePage() {
+    if (!pinned) return;
+
+    var body = document.body;
+
+    body.style.position = pinned.position;
+    body.style.top = pinned.top;
+    body.style.left = pinned.left;
+    body.style.right = pinned.right;
+    body.style.width = pinned.width;
+    window.scrollTo(0, pinned.offset);
+
+    pinned = null;
+  }
+
+  /** Language, and nothing about position. */
+  function applyLocale() {
+    var rtl = locale === 'ar';
+
+    launcher.setAttribute('aria-label', rtl ? 'المحادثة' : 'Chat with us');
+
+    if (iframe) {
+      iframe.title = rtl ? 'محادثة الدعم' : 'Support chat';
+
+      // Only when it actually changed: assigning the same src reloads the
+      // frame, which would throw away a half-typed message every time this
+      // runs.
+      var src = frameSrc();
+      if (iframe.src !== src) iframe.src = src;
+    }
+
+    applyPlacement();
   }
 
   /**
@@ -176,14 +286,11 @@ export async function GET() {
     iframe.id = 'shipblu-chat-frame';
     iframe.src = frameSrc();
     iframe.setAttribute('allow', 'clipboard-write');
+    // Everything except its size and position, which \`applyPlacement\` owns —
+    // they depend on the viewport it is opening into and change under it.
     iframe.style.cssText = [
       'position:fixed',
-      'bottom:88px',
-      'width:380px',
-      'height:min(600px, calc(100vh - 120px))',
-      'max-width:calc(100vw - 40px)',
       'border:0',
-      'border-radius:12px',
       'box-shadow:0 10px 40px rgba(0,0,0,.2)',
       'z-index:2147483000',
       'display:none',
@@ -191,8 +298,8 @@ export async function GET() {
       'color-scheme:light'
     ].join(';');
 
-    // Sets the title and the side it opens on. The src it would set is the one
-    // just assigned, so the frame is not loaded twice.
+    // Sets the title and lays it out. The src it would set is the one just
+    // assigned, so the frame is not loaded twice.
     applyLocale();
 
     document.body.appendChild(iframe);
@@ -206,6 +313,11 @@ export async function GET() {
     launcher.textContent = open ? '✕' : '💬';
     launcher.appendChild(badge);
 
+    if (open && compact.matches) pinPage();
+    else releasePage();
+
+    applyPlacement();
+
     if (open) {
       badge.style.display = 'none';
       // Told on every open so the widget can mark the transcript read and
@@ -217,6 +329,31 @@ export async function GET() {
   launcher.addEventListener('click', function () {
     toggle();
   });
+
+  /**
+   * The keyboard opening, a rotation and a resized window all arrive here, and
+   * any of the three can move the boundary between the two layouts — so which
+   * layout applies is re-decided rather than remembered from the open.
+   */
+  function onViewportChange() {
+    if (!open) return;
+
+    if (compact.matches) pinPage();
+    else releasePage();
+
+    applyPlacement();
+  }
+
+  window.addEventListener('resize', onViewportChange);
+  window.addEventListener('orientationchange', onViewportChange);
+
+  if (window.visualViewport) {
+    // \`scroll\` as well as \`resize\`: on iOS the keyboard does not resize the
+    // visual viewport so much as scroll it inside the layout viewport, and the
+    // panel has to follow it down.
+    window.visualViewport.addEventListener('resize', onViewportChange);
+    window.visualViewport.addEventListener('scroll', onViewportChange);
+  }
 
   window.addEventListener('message', function (event) {
     // The origin check is the whole security of this listener: without it any
