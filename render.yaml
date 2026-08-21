@@ -307,6 +307,24 @@ services:
     envVars:
       - fromGroup: shipblu-shared
 
+  # This runs two jobs now, chained the way shipblu-nightly chains cleanup and
+  # the rollup: both want an hourly cadence, neither takes long, and a cron
+  # service of its own would be a second container booting every hour to run one
+  # grouped count.
+  #
+  # **The name is deliberately not updated to match.** Renaming a service in a
+  # Blueprint is a delete and a create, not a rename, and losing a cron's history
+  # is a worse outcome than a name that is narrower than what it runs.
+  #
+  # The backlog snapshot is hourly rather than once at midnight because "open at
+  # day end" is the one productivity figure that cannot be recomputed later, and
+  # Render's schedules are UTC while Cairo observes DST — a fixed end-of-day cron
+  # is on the wrong side of midnight for half the year. Sampling hourly lets the
+  # rollup pick the sample nearest the boundary in the reporting zone instead.
+  #
+  # `;` rather than `&&`: the template sync is the half that depends on Meta
+  # being configured, and a run that goes red there must not also stop the
+  # snapshot, whose measurement cannot be taken again once the hour has passed.
   - type: cron
     name: shipblu-whatsapp-template-sync
     runtime: node
@@ -315,7 +333,7 @@ services:
     branch: main
     schedule: '0 * * * *'
     buildCommand: npm ci --include=dev
-    startCommand: npm run job -- sync_whatsapp_templates
+    startCommand: npm run job -- sync_whatsapp_templates; npm run job -- snapshot_backlog
     envVars:
       # WHATSAPP_WABA_ID and META_PAGE_ACCESS_TOKEN come from shipblu-shared.
       # The handler skips cleanly while they are unset, so this cron is green

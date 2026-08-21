@@ -16,6 +16,7 @@ export type JobType =
   | 'run_time_automations'
   | 'send_csat'
   | 'rollup_metrics'
+  | 'snapshot_backlog'
   | 'import_freshdesk_kb'
   | 'backfill_shipment_links'
   | 'backfill_message_locations'

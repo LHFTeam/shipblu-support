@@ -278,6 +278,11 @@ export const conversationEvents = pgTable(
     // Reopenings are counted by type across a date range, which the
     // per-conversation index cannot serve.
     index('conversation_events_type_idx').on(t.type, t.createdAt),
+    // And the agent rollup asks for a whole day of events regardless of type,
+    // to count every ticket somebody touched. A leading `type` cannot serve
+    // that, so this is the plain date index `messages` already carries for the
+    // same reason.
+    index('conversation_events_created_idx').on(t.createdAt),
   ],
 );
 

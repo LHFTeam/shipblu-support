@@ -4,7 +4,6 @@ import { revalidatePath } from 'next/cache';
 import { and, desc, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
-  agents,
   contactIdentities,
   conversationEvents,
   conversations,
@@ -18,7 +17,7 @@ import {
   whatsappTemplates,
 } from '@/db/schema';
 import { assignConversation } from '@/lib/assignment';
-import { requestAssignmentSweep } from '@/lib/assignment/presence';
+import { requestAssignmentSweep, setAccepting } from '@/lib/assignment/presence';
 import { requireAgent } from '@/lib/auth/guard';
 import { env } from '@/lib/env';
 import { can } from '@/lib/auth/permissions';
@@ -1103,7 +1102,11 @@ export async function setAcceptingTickets(
   const agent = await requireAgent();
   const accepting = formData.get('accepting') === 'true';
 
-  await db.update(agents).set({ isAcceptingTickets: accepting }).where(eq(agents.id, agent.id));
+  // Through the presence module rather than writing the column here: the switch
+  // marks the boundary between available and merely present, and that boundary
+  // has to land in the presence history or "available time" in the productivity
+  // report counts an agent who spent the afternoon in a meeting as working it.
+  await setAccepting(agent.id, accepting);
 
   if (accepting) await requestAssignmentSweep();
 

@@ -15,6 +15,7 @@ import { sendNotificationEmail } from './send-notification-email';
 import { sendSideEmail } from './send-side-email';
 import { sendWhatsApp } from './send-whatsapp';
 import { slaSweep } from './sla-sweep';
+import { snapshotBacklog } from './snapshot-backlog';
 import { syncWhatsAppTemplates } from './sync-whatsapp-templates';
 
 export type JobHandler = (job: ClaimedJob) => Promise<void>;
@@ -44,6 +45,7 @@ export const handlers: Partial<Record<JobType, JobHandler>> = {
   send_side_email: sendSideEmail,
   send_whatsapp: sendWhatsApp,
   sla_sweep: () => slaSweep(),
+  snapshot_backlog: () => snapshotBacklog(),
   sync_whatsapp_templates: () => syncWhatsAppTemplates(),
 };
 

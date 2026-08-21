@@ -70,6 +70,14 @@ export default async function ReportsPage({
             </Link>
           ))}
         </nav>
+        {can(agent, 'report.agents') ? (
+          <Link
+            href={`/reports/agents?days=${days}`}
+            className="rounded-md border border-[var(--border)] px-2.5 py-1 text-sm hover:bg-[var(--muted)]"
+          >
+            Agent productivity
+          </Link>
+        ) : null}
         <p className="ml-auto text-xs opacity-50">Rolled up nightly — today is not included yet.</p>
       </div>
 

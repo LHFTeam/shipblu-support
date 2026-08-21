@@ -106,6 +106,33 @@ export function nextOpeningAt(
 }
 
 /**
+ * The envelope of one local day's schedule: first opening to last closing.
+ *
+ * The envelope rather than the individual periods, because its consumer is
+ * punctuality — "was the agent here when the doors opened" — and a schedule
+ * with a lunch break in the middle still has one start of day and one end of
+ * it. Null on a holiday or a day the schedule is closed, which is what stops
+ * the productivity report calling somebody late for a day nobody asked them to
+ * work.
+ *
+ * Exported so reporting resolves a shift through the same code the SLA clock
+ * resolves a due date through: the alternative is a second reading of the same
+ * `WeeklySchedule` that agrees with this one until somebody adds a holiday.
+ */
+export function scheduledWindow(config: HoursConfig, at: Date): { start: Date; end: Date } | null {
+  const day = DateTime.fromJSDate(at, { zone: config.timezone });
+  if (!day.isValid) return null;
+
+  const intervals = openIntervalsOn(day.startOf('day'), config);
+  if (intervals.length === 0) return null;
+
+  return {
+    start: intervals[0]!.start.toJSDate(),
+    end: intervals[intervals.length - 1]!.end.toJSDate(),
+  };
+}
+
+/**
  * The open periods of one local day, in chronological order.
  *
  * Built as real instants rather than minute offsets so that everything above

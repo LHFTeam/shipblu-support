@@ -183,6 +183,24 @@ luxon and let the timezone database convert; never hand-convert fixtures. SLA
 clocks are working-time, resolved through `lib/hours/resolve.ts` by every
 consumer so a due date and the report measuring it cannot disagree.
 
+**Measured time is a union, never a sum.** Presence and focus are recorded as
+intervals by hot paths that are deliberately approximate — two instances racing
+leave overlapping rows, and a tab closing and reopening shreds one shift into
+fragments. `lib/reports/intervals.ts` merges them before anything is measured.
+Summing durations instead is the obvious implementation and it is wrong in the
+one direction that matters: it reports more hours than the day contained and
+pushes occupancy above 100%, where it stops meaning anything. An interval's end
+is `coalesce(ended_at, last_beat_at)`, so a stream that died without signing off
+contributes the time it can account for rather than every hour since.
+
+**A snapshot cannot be recomputed.** Anything of the form "how much was open at
+time T" has to be sampled at the time — `conversations` carries only current
+state, so counting it during a rebuild writes today's answer onto an old date.
+`agent_backlog_snapshots` is sampled hourly for that reason, and the nightly
+rollup reads it rather than owning it: `rollup_metrics` rebuilds by delete and
+insert, and would otherwise destroy the only copy. Hourly rather than at
+midnight because Render's cron schedules are UTC and Cairo's offset moves.
+
 ## Tests
 
 Vitest, `*.test.ts` next to the code, node environment, no database. Put tests
