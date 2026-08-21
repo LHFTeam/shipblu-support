@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, ne, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, ne, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { kbArticles, kbCategories, kbFolders, kbRedirects } from '@/db/schema';
 import type { Locale } from './locale';
@@ -59,12 +59,30 @@ export async function listCategories(locale: Locale): Promise<CategorySummary[]>
   return rows.filter((row) => row.articleCount > 0);
 }
 
+/** Just enough of an article to render its title as a link. */
+export type ArticleLink = {
+  id: string;
+  title: string;
+  slug: string;
+};
+
+/**
+ * How many article titles a folder shows before it collapses into "View all".
+ *
+ * Three, which is the live portal's number too. Enough to tell a customer what
+ * kind of thing is in the folder — which is the whole job of the preview — and
+ * few enough that a category with eight folders still fits on one screen.
+ */
+const FOLDER_PREVIEW_SIZE = 3;
+
 export type FolderSummary = {
   id: string;
   name: string;
   slug: string;
   description: string | null;
   articleCount: number;
+  /** The first `FOLDER_PREVIEW_SIZE` articles, for the category page. */
+  preview: ArticleLink[];
 };
 
 export type CategoryDetail = {
@@ -104,7 +122,46 @@ export async function getCategory(locale: Locale, slug: string): Promise<Categor
     .groupBy(kbFolders.id)
     .orderBy(asc(kbFolders.position), asc(kbFolders.name));
 
-  return { ...category, folders: folders.filter((folder) => folder.articleCount > 0) };
+  const visible = folders.filter((folder) => folder.articleCount > 0);
+  const previews = await folderPreviews(visible.map((folder) => folder.id));
+
+  return {
+    ...category,
+    folders: visible.map((folder) => ({ ...folder, preview: previews.get(folder.id) ?? [] })),
+  };
+}
+
+/**
+ * The first few article titles in each of several folders.
+ *
+ * One query for every folder on the page rather than one per folder: a category
+ * with eight folders is eight round trips otherwise, and the whole result set
+ * here is a few dozen rows of title and slug. The per-folder cut is taken in
+ * JavaScript, which is what keeps this a plain `where … in` instead of a window
+ * function nobody will want to read again.
+ */
+async function folderPreviews(folderIds: string[]): Promise<Map<string, ArticleLink[]>> {
+  const byFolder = new Map<string, ArticleLink[]>();
+  if (folderIds.length === 0) return byFolder;
+
+  const rows = await db
+    .select({
+      folderId: kbArticles.folderId,
+      id: kbArticles.id,
+      title: kbArticles.title,
+      slug: kbArticles.slug,
+    })
+    .from(kbArticles)
+    .where(and(inArray(kbArticles.folderId, folderIds), publiclyVisible()))
+    .orderBy(asc(kbArticles.position), asc(kbArticles.title));
+
+  for (const { folderId, ...article } of rows) {
+    const list = byFolder.get(folderId) ?? [];
+    if (list.length < FOLDER_PREVIEW_SIZE) list.push(article);
+    byFolder.set(folderId, list);
+  }
+
+  return byFolder;
 }
 
 export type ArticleSummary = {

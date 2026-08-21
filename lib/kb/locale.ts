@@ -38,9 +38,19 @@ const STRINGS = {
     searchPlaceholder: 'Search for an answer…',
     search: 'Search',
     home: 'Help centre',
+    knowledgeBase: 'Knowledge base',
+    mainNavLabel: 'Help centre navigation',
+    breadcrumb: 'Breadcrumb',
+    skipToContent: 'Skip to main content',
+    language: 'Language',
+    heroHeading: 'Hi, how can we help you?',
+    browseTopics: 'Browse by topic',
+    inThisFolder: 'Articles in this folder',
+    viewAll: 'View all',
+    print: 'Print',
+    footerRights: 'All rights reserved.',
     noResults: 'No articles matched that search.',
     resultsFor: 'Results for',
-    articles: 'articles',
     wasHelpful: 'Was this article helpful?',
     yes: 'Yes',
     no: 'No',
@@ -135,9 +145,19 @@ const STRINGS = {
     searchPlaceholder: 'ابحث عن إجابة…',
     search: 'بحث',
     home: 'مركز المساعدة',
+    knowledgeBase: 'قاعدة المعرفة',
+    mainNavLabel: 'تنقّل مركز المساعدة',
+    breadcrumb: 'مسار التنقل',
+    skipToContent: 'الانتقال إلى المحتوى الرئيسي',
+    language: 'اللغة',
+    heroHeading: 'مرحبًا، كيف يمكننا مساعدتك؟',
+    browseTopics: 'تصفّح حسب الموضوع',
+    inThisFolder: 'مقالات في هذا المجلد',
+    viewAll: 'عرض الكل',
+    print: 'طباعة',
+    footerRights: 'جميع الحقوق محفوظة.',
     noResults: 'لا توجد مقالات مطابقة لهذا البحث.',
     resultsFor: 'نتائج البحث عن',
-    articles: 'مقالات',
     wasHelpful: 'هل كان هذا المقال مفيدًا؟',
     yes: 'نعم',
     no: 'لا',
@@ -233,6 +253,44 @@ export type StringKey = keyof (typeof STRINGS)['en'];
 
 export function t(locale: Locale, key: StringKey): string {
   return STRINGS[locale][key];
+}
+
+/**
+ * Digits in the reader's own numerals.
+ *
+ * Arabic-Indic digits in Arabic, Latin in English. A count rendered with
+ * `${n}` gets Latin digits either way, which in an otherwise Arabic sentence
+ * reads as a placeholder somebody forgot to translate.
+ */
+export function formatCount(locale: Locale, value: number): string {
+  return new Intl.NumberFormat(locale === 'ar' ? 'ar-EG' : 'en-GB').format(value);
+}
+
+/**
+ * "1 article", "4 articles", "مقال واحد", "٤ مقالات".
+ *
+ * Through `Intl.PluralRules` rather than a ternary on `n === 1`, because Arabic
+ * has six plural categories and gets a different noun form for two, for three
+ * to ten, and for eleven upwards. A hand-rolled English rule would have been
+ * "1 articles" in Arabic dress.
+ */
+const ARTICLE_COUNT: Record<Locale, Partial<Record<Intl.LDMLPluralRule, string>>> = {
+  en: { one: '{n} article', other: '{n} articles' },
+  ar: {
+    zero: 'لا مقالات',
+    one: 'مقال واحد',
+    two: 'مقالان',
+    few: '{n} مقالات',
+    many: '{n} مقالًا',
+    other: '{n} مقال',
+  },
+};
+
+export function articleCount(locale: Locale, count: number): string {
+  const forms = ARTICLE_COUNT[locale];
+  const rule = new Intl.PluralRules(locale === 'ar' ? 'ar-EG' : 'en-GB').select(count);
+  const template = forms[rule] ?? forms.other!;
+  return template.replace('{n}', formatCount(locale, count));
 }
 
 /** Dates render in the reader's locale but always in ShipBlu's timezone. */

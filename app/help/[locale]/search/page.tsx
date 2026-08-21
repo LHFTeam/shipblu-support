@@ -1,8 +1,8 @@
-import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { isLocale, t } from '@/lib/kb/locale';
+import { SearchIcon } from '@/components/icons';
+import { articleCount, isLocale, t } from '@/lib/kb/locale';
 import { searchArticles } from '@/lib/kb/queries';
-import { SearchBox } from '../search-box';
+import { ArticleList, ArticleRow, EmptyNote, PageBody, PageHeader } from '../chrome';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,31 +25,34 @@ export default async function SearchPage({
 
   return (
     <>
-      <div className="mb-6 sm:hidden">
-        <SearchBox locale={locale} initial={query} />
-      </div>
+      <PageHeader
+        locale={locale}
+        crumbs={[{ label: t(locale, 'home'), href: `/${locale}` }]}
+        title={`${t(locale, 'resultsFor')} “${query}”`}
+        selfPath={`/${locale}/search`}
+        icon={<SearchIcon size={28} />}
+        searchInitial={query}
+        /* The count, not the query — the query is already the heading, and what a
+           reader wants next is whether there is anything here to read. */
+        meta={articleCount(locale, results.length)}
+      />
 
-      <h1 className="mb-6 text-xl font-semibold">
-        {t(locale, 'resultsFor')} <span className="opacity-60">“{query}”</span>
-      </h1>
-
-      {results.length === 0 ? (
-        <p className="opacity-60">{t(locale, 'noResults')}</p>
-      ) : (
-        <ul className="divide-y divide-[var(--border)] rounded-lg border border-[var(--border)]">
-          {results.map((hit) => (
-            <li key={hit.id}>
-              <Link
+      <PageBody>
+        {results.length === 0 ? (
+          <EmptyNote>{t(locale, 'noResults')}</EmptyNote>
+        ) : (
+          <ArticleList>
+            {results.map((hit) => (
+              <ArticleRow
+                key={hit.id}
                 href={`/${locale}/a/${hit.slug}`}
-                className="block px-4 py-3 transition-colors hover:bg-[var(--muted)]"
-              >
-                <h2 className="font-medium">{hit.title}</h2>
-                {hit.excerpt ? <p className="mt-0.5 text-sm opacity-60">{hit.excerpt}</p> : null}
-              </Link>
-            </li>
-          ))}
-        </ul>
-      )}
+                title={hit.title}
+                excerpt={hit.excerpt}
+              />
+            ))}
+          </ArticleList>
+        )}
+      </PageBody>
     </>
   );
 }

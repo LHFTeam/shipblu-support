@@ -19,7 +19,11 @@ export function Button({
   size?: 'sm' | 'md';
 }) {
   const styles = {
-    primary: 'bg-brand-600 text-white hover:bg-brand-700 disabled:bg-brand-600/50 shadow-sm',
+    /* Through variables rather than `bg-brand-600` directly, so the help centre
+       can hand this component its own navy without a second Button. The console
+       defines them as the brand blue; `.kb-shell` re-points them. */
+    primary:
+      'bg-[var(--button-primary)] text-white hover:bg-[var(--button-primary-hover)] disabled:opacity-50 shadow-sm',
     // Coral is the one "do the thing" colour and is used sparingly, so that
     // when it appears it actually means something.
     accent: 'bg-accent-600 text-white hover:bg-accent-700 disabled:bg-accent-600/50 shadow-sm',

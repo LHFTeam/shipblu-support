@@ -1,9 +1,10 @@
-import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
+import { FolderIcon } from '@/components/icons';
 import { isLocale, t } from '@/lib/kb/locale';
 import { getFolder } from '@/lib/kb/queries';
 import { decodeSlugParam } from '@/lib/kb/slug';
+import { ArticleList, ArticleRow, EmptyNote, PageBody, PageHeader } from '../../../chrome';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,6 +24,7 @@ export async function generateMetadata({
   return {
     title: `${folder.name} — ShipBlu Support`,
     description: folder.description ?? undefined,
+    alternates: { canonical: `/${locale}/c/${folder.categorySlug}/${folder.slug}` },
   };
 }
 
@@ -41,38 +43,34 @@ export default async function FolderPage({
 
   return (
     <>
-      <nav className="mb-4 flex flex-wrap items-center gap-2 text-sm opacity-60">
-        <Link href={`/${locale}`} className="hover:opacity-100">
-          {t(locale, 'home')}
-        </Link>
-        <span aria-hidden>/</span>
-        <Link href={`/${locale}/c/${folder.categorySlug}`} className="hover:opacity-100">
-          {folder.categoryName}
-        </Link>
-      </nav>
+      <PageHeader
+        locale={locale}
+        crumbs={[
+          { label: t(locale, 'home'), href: `/${locale}` },
+          { label: folder.categoryName, href: `/${locale}/c/${folder.categorySlug}` },
+        ]}
+        title={folder.name}
+        selfPath={`/${locale}/c/${folder.categorySlug}/${folder.slug}`}
+        icon={<FolderIcon size={28} />}
+        meta={folder.description}
+      />
 
-      <h1 className="mb-1 text-2xl font-semibold">{folder.name}</h1>
-      {folder.description ? (
-        <p className="mb-6 opacity-70">{folder.description}</p>
-      ) : (
-        <div className="mb-6" />
-      )}
-
-      <ul className="divide-y divide-[var(--border)] rounded-lg border border-[var(--border)]">
-        {folder.articles.map((article) => (
-          <li key={article.id}>
-            <Link
-              href={`/${locale}/a/${article.slug}`}
-              className="block px-4 py-3 transition-colors hover:bg-[var(--muted)]"
-            >
-              <h2 className="font-medium">{article.title}</h2>
-              {article.excerpt ? (
-                <p className="mt-0.5 text-sm opacity-60">{article.excerpt}</p>
-              ) : null}
-            </Link>
-          </li>
-        ))}
-      </ul>
+      <PageBody>
+        {folder.articles.length === 0 ? (
+          <EmptyNote>{t(locale, 'emptyCategory')}</EmptyNote>
+        ) : (
+          <ArticleList>
+            {folder.articles.map((article) => (
+              <ArticleRow
+                key={article.id}
+                href={`/${locale}/a/${article.slug}`}
+                title={article.title}
+                excerpt={article.excerpt}
+              />
+            ))}
+          </ArticleList>
+        )}
+      </PageBody>
     </>
   );
 }

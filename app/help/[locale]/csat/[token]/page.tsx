@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { surveyByToken } from '@/lib/csat';
 import { isLocale, t } from '@/lib/kb/locale';
+import { PageBody, Panel } from '../../chrome';
 import { SurveyForm } from './form';
 
 export const dynamic = 'force-dynamic';
@@ -32,12 +33,20 @@ export default async function CsatPage({
 
   if (survey.respondedAt) {
     return (
-      <div className="py-16 text-center">
-        <h1 className="text-xl font-semibold">{t(locale, 'csatThanks')}</h1>
-        <p className="mt-2 opacity-60">{t(locale, 'csatAlreadyAnswered')}</p>
-      </div>
+      <PageBody>
+        <Panel className="mx-auto max-w-lg p-8 text-center">
+          <h1 className="text-xl font-semibold text-[var(--kb-heading)]">
+            {t(locale, 'csatThanks')}
+          </h1>
+          <p className="mt-2 text-sm text-[var(--kb-muted)]">{t(locale, 'csatAlreadyAnswered')}</p>
+        </Panel>
+      </PageBody>
     );
   }
 
-  return <SurveyForm token={token} locale={locale} />;
+  return (
+    <PageBody>
+      <SurveyForm token={token} locale={locale} />
+    </PageBody>
+  );
 }

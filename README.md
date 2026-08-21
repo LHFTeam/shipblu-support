@@ -58,6 +58,14 @@ Design decisions worth knowing before changing things:
 - **The front door is the Arabic help centre.** `/` lands on `/ar` on every hostname. The
   console used to own the bare domain, which made the public site something you had to
   already know the URL of.
+- **The help centre has its own palette and its own typefaces**, scoped to `.kb-shell` in
+  `app/globals.css`. The light values are the hex from the live Freshdesk portal theme and
+  the fonts are its Lato/Tajawal pairing, so the cutover is not also a redesign as far as a
+  returning customer is concerned. The console's token names are redefined inside that
+  scope, which is how the shared primitives in `components/ui.tsx` pick up help-centre
+  colours without a second set of components. Page furniture — the blue band, the trail,
+  the card, the article list — lives in `app/help/[locale]/chrome.tsx`; adding a public page
+  means composing those, not restyling one.
 - **One condition language for SLA policies and automation rules.** Both store the same
   `conditions` jsonb and go through `lib/rules`, so a condition written for one reads the
   same in the other. A malformed condition never matches, so a corrupt policy cannot

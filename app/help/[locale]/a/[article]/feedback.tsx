@@ -1,15 +1,20 @@
 'use client';
 
 import { useState } from 'react';
-import { type Locale, t } from '@/lib/kb/locale';
+import { ThumbsDownIcon, ThumbsUpIcon } from '@/components/icons';
+import { t, type Locale } from '@/lib/kb/locale';
 
 /**
- * "Was this helpful?" — the one signal that tells the team which articles are
- * failing readers.
+ * "Was this article helpful?" — the one signal that tells the team which
+ * articles are failing readers.
  *
  * The comment box only appears after "No". Asking everyone for prose collapses
  * the response rate; asking only the people who were not helped is where the
  * useful text comes from.
+ *
+ * The two buttons carry green and red, which is the live portal's treatment and
+ * the right one: this is the last thing on a long page and a pair of identical
+ * grey buttons reads as a form to fill in rather than a question to answer.
  */
 export function ArticleFeedback({ articleId, locale }: { articleId: string; locale: Locale }) {
   const [answer, setAnswer] = useState<boolean | null>(null);
@@ -29,63 +34,92 @@ export function ArticleFeedback({ articleId, locale }: { articleId: string; loca
 
   if (done) {
     return (
-      <p className="mt-10 rounded-lg border border-[var(--border)] p-4 text-sm opacity-70">
+      <p className="text-center text-sm font-medium text-[var(--kb-muted)]" role="status">
         {t(locale, 'thanks')}
       </p>
     );
   }
 
   return (
-    <section className="mt-10 rounded-lg border border-[var(--border)] p-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <p className="text-sm font-medium">{t(locale, 'wasHelpful')}</p>
+    <section className="kb-noprint text-center">
+      <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-3">
+        <p className="font-semibold text-[var(--kb-heading)]">{t(locale, 'wasHelpful')}</p>
 
-        <button
-          type="button"
-          onClick={() => {
-            setAnswer(true);
-            void send(true);
-            setDone(true);
-          }}
-          className="rounded-md border border-[var(--border)] px-3 py-1.5 text-sm hover:bg-[var(--muted)]"
-        >
-          {t(locale, 'yes')}
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setAnswer(false)}
-          className="rounded-md border border-[var(--border)] px-3 py-1.5 text-sm hover:bg-[var(--muted)]"
-        >
-          {t(locale, 'no')}
-        </button>
+        <div className="flex items-center gap-3">
+          <FeedbackButton
+            tone="yes"
+            label={t(locale, 'yes')}
+            onClick={() => {
+              setAnswer(true);
+              void send(true);
+              setDone(true);
+            }}
+          />
+          <FeedbackButton
+            tone="no"
+            label={t(locale, 'no')}
+            pressed={answer === false}
+            onClick={() => setAnswer(false)}
+          />
+        </div>
       </div>
 
       {answer === false ? (
         <form
-          className="mt-3 flex flex-col gap-2"
+          className="mx-auto mt-5 flex max-w-md flex-col items-center gap-3"
           onSubmit={(event) => {
             event.preventDefault();
             void send(false, comment.trim() || undefined);
             setDone(true);
           }}
         >
+          <label htmlFor="kb-feedback-comment" className="sr-only">
+            {t(locale, 'feedbackPlaceholder')}
+          </label>
           <textarea
+            id="kb-feedback-comment"
             value={comment}
             onChange={(event) => setComment(event.target.value)}
             rows={3}
             maxLength={2000}
+            autoFocus
             placeholder={t(locale, 'feedbackPlaceholder')}
-            className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm outline-none focus:border-brand-500"
+            className="w-full rounded-lg border border-[var(--kb-border-strong)] bg-[var(--kb-surface)] px-3 py-2 text-base text-[var(--kb-heading)] outline-none focus:border-[var(--kb-band)] sm:text-sm"
           />
           <button
             type="submit"
-            className="self-start rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700"
+            className="rounded-md bg-[var(--button-primary)] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--button-primary-hover)]"
           >
             {t(locale, 'send')}
           </button>
         </form>
       ) : null}
     </section>
+  );
+}
+
+function FeedbackButton({
+  tone,
+  label,
+  pressed = false,
+  onClick,
+}: {
+  tone: 'yes' | 'no';
+  label: string;
+  pressed?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={pressed}
+      className={`inline-flex items-center gap-2 rounded-md border px-5 py-2 font-semibold transition-colors hover:bg-[var(--kb-surface-2)] ${
+        pressed ? 'border-[var(--kb-border-strong)]' : 'border-[var(--kb-border)]'
+      } ${tone === 'yes' ? 'text-[var(--kb-yes)]' : 'text-[var(--kb-no)]'}`}
+    >
+      {tone === 'yes' ? <ThumbsUpIcon size={18} /> : <ThumbsDownIcon size={18} />}
+      {label}
+    </button>
   );
 }
