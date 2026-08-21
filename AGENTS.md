@@ -235,6 +235,10 @@ PR was thrown away.
 - Claim your seam out loud before starting anything longer than one commit.
 - Prefer rebasing onto main over merging main in.
 
+`.github/pull_request_template.md` is the PR body's shape: why, how it was
+verified, what deploys with it and what rolls it back. Fill it in rather than
+deleting it, and drop the sections that genuinely do not apply.
+
 ## Security — non-negotiable
 
 - Secrets never enter the repo. `render.yaml` uses `sync: false` or the env
