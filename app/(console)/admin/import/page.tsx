@@ -3,9 +3,15 @@ import { db } from '@/db/client';
 import { jobs } from '@/db/schema';
 import { requirePermission } from '@/lib/auth/guard';
 import { ImportForm } from './form';
+import { LocationBackfillForm } from './location-backfill';
 import { ShipmentBackfillForm } from './shipment-backfill';
 
 export const dynamic = 'force-dynamic';
+
+type LocationCounts = {
+  candidates: number;
+  recovered: number;
+};
 
 type ShipmentCounts = {
   shipments: number;
@@ -19,38 +25,39 @@ type ShipmentCounts = {
 export default async function ImportPage() {
   await requirePermission('admin.agents');
 
-  const [runs, counts, backfillRuns, shipmentCounts] = await Promise.all([
-    db
-      .select({
-        id: jobs.id,
-        status: jobs.status,
-        attempts: jobs.attempts,
-        lastError: jobs.lastError,
-        createdAt: jobs.createdAt,
-        completedAt: jobs.completedAt,
-      })
-      .from(jobs)
-      .where(eq(jobs.type, 'import_freshdesk_kb'))
-      .orderBy(desc(jobs.createdAt))
-      .limit(10),
+  const [runs, counts, backfillRuns, shipmentCounts, locationRuns, locationCounts] =
+    await Promise.all([
+      db
+        .select({
+          id: jobs.id,
+          status: jobs.status,
+          attempts: jobs.attempts,
+          lastError: jobs.lastError,
+          createdAt: jobs.createdAt,
+          completedAt: jobs.completedAt,
+        })
+        .from(jobs)
+        .where(eq(jobs.type, 'import_freshdesk_kb'))
+        .orderBy(desc(jobs.createdAt))
+        .limit(10),
 
-    // One round trip rather than seven, and it returns a row even when every
-    // table is empty — which is exactly the state this page exists to explain.
-    //
-    // Broken down by language, not just totalled. A total is what hid a real
-    // failure here: the import found no English at all, and "3 categories, 12
-    // folders, 58 articles" read as a clean run rather than as half a knowledge
-    // base. A zero against a language is the thing worth seeing.
-    db.execute<{
-      categories: number;
-      folders: number;
-      articles: number;
-      redirects: number;
-      categories_en: number;
-      articles_en: number;
-      categories_ar: number;
-      articles_ar: number;
-    }>(sql`
+      // One round trip rather than seven, and it returns a row even when every
+      // table is empty — which is exactly the state this page exists to explain.
+      //
+      // Broken down by language, not just totalled. A total is what hid a real
+      // failure here: the import found no English at all, and "3 categories, 12
+      // folders, 58 articles" read as a clean run rather than as half a knowledge
+      // base. A zero against a language is the thing worth seeing.
+      db.execute<{
+        categories: number;
+        folders: number;
+        articles: number;
+        redirects: number;
+        categories_en: number;
+        articles_en: number;
+        categories_ar: number;
+        articles_ar: number;
+      }>(sql`
       SELECT
         (SELECT count(*)::int FROM kb_categories) AS categories,
         (SELECT count(*)::int FROM kb_folders)    AS folders,
@@ -62,31 +69,31 @@ export default async function ImportPage() {
         (SELECT count(*)::int FROM kb_articles   WHERE locale = 'ar') AS articles_ar
     `),
 
-    db
-      .select({
-        id: jobs.id,
-        status: jobs.status,
-        attempts: jobs.attempts,
-        lastError: jobs.lastError,
-        createdAt: jobs.createdAt,
-        completedAt: jobs.completedAt,
-      })
-      .from(jobs)
-      .where(eq(jobs.type, 'backfill_shipment_links'))
-      .orderBy(desc(jobs.createdAt))
-      .limit(10),
+      db
+        .select({
+          id: jobs.id,
+          status: jobs.status,
+          attempts: jobs.attempts,
+          lastError: jobs.lastError,
+          createdAt: jobs.createdAt,
+          completedAt: jobs.completedAt,
+        })
+        .from(jobs)
+        .where(eq(jobs.type, 'backfill_shipment_links'))
+        .orderBy(desc(jobs.createdAt))
+        .limit(10),
 
-    // Broken down by how a link came to exist, for the same reason the article
-    // counts are broken down by language: the total cannot tell "the detector
-    // is working" apart from "agents have been linking these by hand".
-    db.execute<{
-      shipments: number;
-      accounts: number;
-      links: number;
-      links_detected: number;
-      account_links: number;
-      unsynced: number;
-    }>(sql`
+      // Broken down by how a link came to exist, for the same reason the article
+      // counts are broken down by language: the total cannot tell "the detector
+      // is working" apart from "agents have been linking these by hand".
+      db.execute<{
+        shipments: number;
+        accounts: number;
+        links: number;
+        links_detected: number;
+        account_links: number;
+        unsynced: number;
+      }>(sql`
       SELECT
         (SELECT count(*)::int FROM shipments)                  AS shipments,
         (SELECT count(*)::int FROM shipping_accounts)          AS accounts,
@@ -96,15 +103,42 @@ export default async function ImportPage() {
         (SELECT count(*)::int FROM conversation_shipping_accounts) AS account_links,
         (SELECT count(*)::int FROM shipments WHERE sync_state = 'stub') AS unsynced
     `),
-  ]);
+
+      db
+        .select({
+          id: jobs.id,
+          status: jobs.status,
+          attempts: jobs.attempts,
+          lastError: jobs.lastError,
+          createdAt: jobs.createdAt,
+          completedAt: jobs.completedAt,
+        })
+        .from(jobs)
+        .where(eq(jobs.type, 'backfill_message_locations'))
+        .orderBy(desc(jobs.createdAt))
+        .limit(10),
+
+      // The gap between these two is the whole point of the card: how many
+      // shared pins an agent still cannot open on a map. `candidates` uses the
+      // same prefilter as the job, so the two cannot disagree about what counts.
+      db.execute<{ candidates: number; recovered: number }>(sql`
+      SELECT
+        count(*)::int                                              AS candidates,
+        count(*) FILTER (WHERE meta -> 'location' IS NOT NULL)::int AS recovered
+      FROM messages
+      WHERE raw_body IS NOT NULL AND raw_body LIKE '%"location"%'
+    `),
+    ]);
 
   const row = (counts as unknown as Record<string, number>[])[0] ?? null;
   const shipmentRow = (shipmentCounts as unknown as ShipmentCounts[])[0] ?? null;
+  const locationRow = (locationCounts as unknown as LocationCounts[])[0] ?? null;
 
   return (
     <div className="flex flex-col gap-10">
       <ImportForm runs={runs} counts={row} />
       <ShipmentBackfillForm runs={backfillRuns} counts={shipmentRow} />
+      <LocationBackfillForm runs={locationRuns} counts={locationRow} />
     </div>
   );
 }

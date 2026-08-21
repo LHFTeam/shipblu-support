@@ -139,6 +139,22 @@ export type NormalisedMedia = {
   isVoice: boolean;
 };
 
+/**
+ * A pin the customer dropped, kept as coordinates rather than flattened to prose.
+ *
+ * `displayText` also renders a location into `body_text` for search and for any
+ * consumer that only has text — this is the same pin, structured, so the console
+ * can offer a map link instead of fourteen digits an agent has to copy out.
+ */
+export type NormalisedLocation = {
+  latitude: number;
+  longitude: number;
+  /** The place name, when the customer picked a place rather than dropping a pin. */
+  name: string | null;
+  /** Meta's geocoded address, when it sends one. */
+  address: string | null;
+};
+
 export type NormalisedInboundMessage = {
   wamid: string;
   /** E.164 without '+', as Meta sends it. */
@@ -151,6 +167,7 @@ export type NormalisedInboundMessage = {
   /** Display text: the body, the caption, the button title, or a placeholder. */
   text: string;
   media: NormalisedMedia | null;
+  location: NormalisedLocation | null;
 
   /** wamid of the message this one replies to, when the customer used reply. */
   replyToWamid: string | null;
@@ -179,6 +196,7 @@ export type NormalisedEcho = {
   type: WhatsAppMessageType | string;
   text: string;
   media: NormalisedMedia | null;
+  location: NormalisedLocation | null;
   replyToWamid: string | null;
   /** Meta's own account of how the message was created, when it sends one. */
   creationType: string | null;

@@ -17,6 +17,7 @@ export type JobType =
   | 'rollup_metrics'
   | 'import_freshdesk_kb'
   | 'backfill_shipment_links'
+  | 'backfill_message_locations'
   | 'cleanup';
 
 export type EnqueueOptions = {

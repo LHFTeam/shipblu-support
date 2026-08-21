@@ -1,11 +1,14 @@
 'use client';
 
-import { useActionState, useEffect } from 'react';
-import { useFormStatus } from 'react-dom';
-import { useRouter } from 'next/navigation';
-import { Badge, Button, ErrorText } from '@/components/ui';
-import { formatDateTime, formatRelative } from '@/lib/format';
+import { useActionState } from 'react';
+import { ErrorText } from '@/components/ui';
 import { startShipmentBackfill, type AdminState } from '../actions';
+import {
+  BackfillRuns,
+  StartBackfillButton,
+  useRefreshWhileRunning,
+  type BackfillRun,
+} from './backfill-runs';
 
 const INITIAL: AdminState = { error: null };
 
@@ -19,26 +22,15 @@ type Counts = {
   unsynced: number;
 };
 
-type Run = {
-  id: string;
-  status: string;
-  attempts: number;
-  lastError: string | null;
-  createdAt: Date | string;
-  completedAt: Date | string | null;
-};
-
-export function ShipmentBackfillForm({ runs, counts }: { runs: Run[]; counts: Counts | null }) {
+export function ShipmentBackfillForm({
+  runs,
+  counts,
+}: {
+  runs: BackfillRun[];
+  counts: Counts | null;
+}) {
   const [state, action] = useActionState(startShipmentBackfill, INITIAL);
-  const router = useRouter();
-
-  const inFlight = runs.some((run) => run.status === 'pending' || run.status === 'processing');
-
-  useEffect(() => {
-    if (!inFlight) return;
-    const timer = setInterval(() => router.refresh(), 4000);
-    return () => clearInterval(timer);
-  }, [inFlight, router]);
+  useRefreshWhileRunning(runs);
 
   const manual = counts ? counts.links - counts.links_detected : 0;
 
@@ -116,7 +108,7 @@ export function ShipmentBackfillForm({ runs, counts }: { runs: Run[]; counts: Co
 
       <section>
         <form action={action}>
-          <StartButton />
+          <StartBackfillButton />
         </form>
         <ErrorText>{state.error}</ErrorText>
 
@@ -127,61 +119,7 @@ export function ShipmentBackfillForm({ runs, counts }: { runs: Run[]; counts: Co
         </p>
       </section>
 
-      <section>
-        <h2 className="mb-2 text-sm font-medium opacity-70">Recent runs</h2>
-
-        {runs.length === 0 ? (
-          <p className="text-sm opacity-50">No backfills have been run yet.</p>
-        ) : (
-          <ul className="divide-y divide-[var(--border)] rounded-lg border border-[var(--border)] text-sm">
-            {runs.map((run) => (
-              <li key={run.id} className="px-3 py-2.5">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge tone={toneFor(run.status)}>{labelFor(run.status)}</Badge>
-                  <span className="opacity-60">{formatDateTime(run.createdAt)}</span>
-                  {run.attempts > 1 ? (
-                    <span className="text-xs opacity-50">attempt {run.attempts}</span>
-                  ) : null}
-                  {run.completedAt ? (
-                    <span className="ms-auto text-xs opacity-50">
-                      finished {formatRelative(run.completedAt)}
-                    </span>
-                  ) : null}
-                </div>
-
-                {run.lastError ? (
-                  <pre className="mt-1.5 overflow-x-auto rounded bg-red-500/10 p-2 text-xs whitespace-pre-wrap text-red-700 dark:text-red-300">
-                    {run.lastError.split('\n').slice(0, 6).join('\n')}
-                  </pre>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      <BackfillRuns runs={runs} empty="No backfills have been run yet." />
     </div>
-  );
-}
-
-function toneFor(status: string) {
-  if (status === 'completed') return 'open' as const;
-  if (status === 'dead' || status === 'failed') return 'danger' as const;
-  if (status === 'processing') return 'warning' as const;
-  return 'neutral' as const;
-}
-
-function labelFor(status: string): string {
-  return (
-    { completed: 'succeeded', dead: 'failed', processing: 'running', pending: 'queued' }[status] ??
-    status
-  );
-}
-
-function StartButton() {
-  const { pending } = useFormStatus();
-  return (
-    <Button type="submit" disabled={pending}>
-      {pending ? 'Queuing…' : 'Run backfill now'}
-    </Button>
   );
 }

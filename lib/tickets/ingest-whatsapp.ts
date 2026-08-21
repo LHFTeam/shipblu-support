@@ -156,6 +156,10 @@ export async function ingestWhatsAppMessage(
                 },
               }
             : {}),
+          // The pin as coordinates, so the console can offer a map link rather
+          // than the digits inside body_text. Read back through
+          // `readSharedLocation`, which validates rather than trusting this.
+          ...(message.location ? { location: message.location } : {}),
         },
         createdAt: message.sentAt,
       })
@@ -342,6 +346,9 @@ export async function ingestWhatsAppEcho(echo: NormalisedEcho): Promise<WhatsApp
                 },
               }
             : {}),
+          // The bot sends pins too — a hub address, a pickup point — and an
+          // agent reading the transcript needs to see where it pointed.
+          ...(echo.location ? { location: echo.location } : {}),
         },
         createdAt: echo.sentAt,
       })

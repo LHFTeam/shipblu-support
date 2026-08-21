@@ -1,6 +1,8 @@
+import { parseCoordinates } from '@/lib/tickets/shared-location';
 import type {
   NormalisedEcho,
   NormalisedInboundMessage,
+  NormalisedLocation,
   NormalisedMedia,
   NormalisedStatus,
   NormalisedWebhook,
@@ -113,6 +115,7 @@ function normaliseMessage(
     type: message.type ?? 'unsupported',
     text: displayText(message),
     media,
+    location: extractLocation(message),
     replyToWamid: message.context?.id ?? null,
     raw: message as unknown as Record<string, unknown>,
   };
@@ -140,6 +143,7 @@ function normaliseEcho(
     type: echo.type ?? 'unsupported',
     text: displayText(echo),
     media: extractMedia(echo),
+    location: extractLocation(echo),
     replyToWamid: echo.context?.id ?? null,
     creationType: echo.message_creation_type ?? null,
     raw: echo as unknown as Record<string, unknown>,
@@ -233,6 +237,41 @@ function extractMedia(message: WhatsAppInboundMessage): NormalisedMedia | null {
     }
   }
   return null;
+}
+
+/**
+ * The pin on a location message, kept as coordinates.
+ *
+ * `displayText` already renders one into `body_text`, but only as prose — the
+ * numbers go in as characters and the structure is gone, so the console could
+ * offer nothing better than `[location (30.0307677, 31.2345206)]` and an agent
+ * chasing an address had to select it and paste it into a map by hand. Location
+ * shares are a tenth of inbound volume on this channel, and on unstructured
+ * Egyptian addresses the pin is usually the only part of the message that says
+ * precisely where to go.
+ *
+ * Validation is `parseCoordinates`, shared with the reader and the backfill so
+ * all three agree on what is usable. An unusable pair yields null and the
+ * message still ingests with its text: a pin we cannot read is not a reason to
+ * drop a customer's message.
+ */
+function extractLocation(message: WhatsAppInboundMessage): NormalisedLocation | null {
+  const location = message?.location;
+  if (!location) return null;
+
+  const coordinates = parseCoordinates(location.latitude, location.longitude);
+  if (!coordinates) return null;
+
+  return {
+    ...coordinates,
+    name: trimmedOrNull(location.name),
+    address: trimmedOrNull(location.address),
+  };
+}
+
+function trimmedOrNull(value: string | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
 }
 
 /**

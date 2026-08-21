@@ -185,6 +185,50 @@ export async function startFreshdeskImport(
 }
 
 /**
+ * Recovers the map pins already sitting in the archive.
+ *
+ * The live path keeps a pin's coordinates as they arrive, so this is for
+ * everything that came before — messages where the pin only ever reached us as
+ * text inside `body_text`, which an agent cannot open on a map.
+ *
+ * Guarded the same way as the shipment backfill and for the same reason: it is
+ * idempotent and re-running it costs nothing but a pass over the archive, so the
+ * only thing worth preventing is two of them at once.
+ */
+export async function startLocationBackfill(
+  _state: AdminState,
+  _formData: FormData,
+): Promise<AdminState> {
+  await requirePermission('admin.agents');
+
+  const running = await db
+    .select({ id: jobs.id })
+    .from(jobs)
+    .where(
+      sql`${jobs.type} = 'backfill_message_locations' and ${jobs.status} in ('pending', 'processing')`,
+    )
+    .limit(1);
+
+  if (running.length > 0) {
+    return { error: 'A location backfill is already queued or running.' };
+  }
+
+  await enqueue(
+    'backfill_message_locations',
+    {},
+    {
+      // Behind anything a customer is waiting on.
+      priority: 80,
+      dedupeKey: `backfill_message_locations:${Math.floor(Date.now() / 60_000)}`,
+      maxAttempts: 2,
+    },
+  );
+
+  revalidatePath('/admin/import');
+  return { error: null };
+}
+
+/**
  * Scans the archive for tracking numbers and SBIDs nobody has linked yet.
  *
  * Also the way a corrected detection pattern reaches history: the live path only
