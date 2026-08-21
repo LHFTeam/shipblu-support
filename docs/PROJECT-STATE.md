@@ -580,6 +580,16 @@ Each cost real time. Most are also comments in the code.
 
 ---
 
+19. **A fixed-position iframe parts an iOS caret from its field.** The caret is
+    positioned against the document rather than against the fixed element the
+    input belongs to, so a page scrolling behind the chat panel drags the
+    visitor's cursor across the page while they are typing. They need not scroll
+    deliberately either: Safari scrolls the document to reveal a focused input,
+    and zooms the page in on any field under 16px, which is another scroll. The
+    widget pins the host body while its full-screen panel is up and sizes both
+    of its fields at 16px. Chromium reproduces none of this, emulated phone or
+    not — the caret is the one part of that fix nothing here can test.
+
 ## 7. Verification already done
 
 - **WhatsApp, end to end on production.** A synthetic webhook was enqueued; the
