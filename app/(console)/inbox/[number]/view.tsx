@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { ChannelBadge } from '@/components/channel';
 import { ChevronLeftIcon } from '@/components/icons';
@@ -146,13 +146,21 @@ function Header({ conversation }: { conversation: ConversationDetail }) {
   const isMeta = conversation.channel === 'facebook' || conversation.channel === 'instagram';
   const isComment = Boolean(conversation.externalId?.includes(':comment:'));
 
+  // The filters live in the query string, and the rows link forward carrying it,
+  // so the way back has to carry it too. A bare `/inbox` reset the list to "all
+  // channels" — and on a restricted channel that is worse than losing a filter:
+  // the customer bot is absent from "all channels" by design, so going back from
+  // one of its transcripts emptied the list of the very conversation the agent
+  // had just been reading.
+  const search = useSearchParams().toString();
+
   return (
     <header className="shrink-0 border-b border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 md:px-4">
       <div className="flex items-center gap-2">
         {/* On a phone the list and the ticket are separate screens, so the
             ticket needs a way back. */}
         <Link
-          href="/inbox"
+          href={search ? `/inbox?${search}` : '/inbox'}
           aria-label="Back to the inbox"
           className="-ms-1 rounded-md p-1 hover:bg-[var(--muted)] md:hidden"
         >
