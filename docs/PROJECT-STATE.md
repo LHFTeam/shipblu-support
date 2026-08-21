@@ -46,11 +46,11 @@ been filled to three rows, but `locations` has not, so the picker still offers n
 hub at all — see §5.1, because a hub is the recipient an agent most often wants.
 
 And **shared locations**: a pin a customer drops is kept as coordinates rather
-than flattened into prose, rendered as a card with a Maps link, and the 821
-already in the archive are recoverable by a backfill from `/admin/import`. This
-is the first feature in the system whose case was made entirely from production
-data rather than from the plan — see §5.1 for the backfill, which has not been
-run yet, and §6.17 for the trap found while measuring it.
+than flattened into prose and rendered as a card with a Maps link. **Every pin in
+the archive is now readable** — the backfill ran on 2026-08-21 and recovered all
+821, so all 845 open on a map. This is the first feature in the system whose case
+was made entirely from production data rather than from the plan; §6.17 is the
+trap found while measuring it, and §6.20 the one found while running it.
 
 The **help centre's UI was then rebuilt on the portal's design**, so the two
 halves a signed-in customer moves between stop looking like different products.
@@ -271,14 +271,11 @@ is code:
   partner, Finance — also still go in `internal_recipients` at
   `/admin/recipients`, and none is entered. Two side conversations are open
   against the three teams that exist, so the mechanism is in use.
-- **The shared-location backfill has not been run.** 821 messages in the archive
-  carry a pin that reached us before the coordinates were kept, so the console
-  still shows those as `[location (30.03, 31.23)]` text an agent cannot open on
-  a map. New messages are fine — the live path stores the pin as it arrives. Run
-  it from `/admin/import`, which states how many are still text-only; it is
-  idempotent, never deletes, and reads each pin out of the original payload on
-  `raw_body`. Verified read-only beforehand: all 821 have both coordinates, all
-  are in range, so the run should recover all 821 and leave nothing unreadable.
+- ~~**The shared-location backfill has not been run.**~~ Run on 2026-08-21: 821
+  recovered, 0 unreadable, and `/admin/import` now reports nothing text-only. It
+  stays available and is safe to re-run — a second pass recovers nothing — so
+  re-run it if the parser ever learns to read a shape it currently skips. §7 has
+  the figures.
 - **Unset config:** `EMAIL_API_KEY`, `EMAIL_FROM_ADDRESS`, `EMAIL_REPLY_DOMAIN`,
   `EMAIL_WEBHOOK_SECRET`, `KB_PUBLIC_HOST`, `WIDGET_ALLOWED_ORIGINS`. The last of
   those is not blocking chat on the help centre and never will be: the snippet
@@ -656,6 +653,10 @@ Each cost real time. Most are also comments in the code.
   why the map link matters more than the label. The four gates are clean and both
   the web service and the worker are live on `98ec9d4`.
 
+  Those figures are a snapshot taken before the deploy, which is why the run
+  below counts 845 rather than 821: the archive grows by a few hundred pins a day
+  and every number here is only true of the moment it was measured.
+
   **The live path is verified on production.** Both services went live on
   `98ec9d4` at 02:28 on 2026-08-21, and by 09:58 sixteen pins had arrived and been
   stored structurally — every one typed as a JSON number, every one in range, and
@@ -669,9 +670,28 @@ Each cost real time. Most are also comments in the code.
   would have silently dropped the media block and the bot's `echo` flag on every
   pin.
 
-  So the counts now read: 837 candidate messages, 16 structured by the live path,
-  **821 still waiting on the backfill** (§5.1). The candidate figure climbs with
-  traffic; the 821 does not, and only the backfill moves it.
+- **The backfill, run on production on 2026-08-21.** Enqueued as a job row rather
+  than clicked, which is the route §5.5 documents for a payload the one-shot
+  runner cannot carry. A `dryRun` pass first, then the real one, then a third to
+  prove it settles:
+
+  | run     | candidates | already | recovered | unreadable | time   |
+  | ------- | ---------- | ------- | --------- | ---------- | ------ |
+  | dry run | 845        | 24      | 821       | 0          | 157 ms |
+  | real    | 845        | 24      | **821**   | 0          | 8.1 s  |
+  | again   | 845        | 845     | 0         | 0          | 106 ms |
+
+  **845 of 845 pins now open on a map, and nothing was unreadable.** The dry run
+  wrote nothing, confirmed by query. Checked afterwards on all 845 rows: every
+  latitude and longitude is a JSON number and in range; **every row still carries
+  its `whatsappType` and `phoneNumberId`**, so the jsonb merge took nothing away;
+  and no row holds a pin whose `raw_body` never contained one, so nothing was
+  invented. The third run left the `meta` of all 845 byte-identical, by checksum.
+
+  The `821` in the two runs before it is the same 821 that had sat unchanged all
+  day while the candidate count climbed with traffic — which is what a backfill
+  figure should do, and was the sign the live path and the archive were being
+  counted separately rather than confused.
 
 - **Both backfills, run end to end against a local Postgres 16** — and the first
   run is what found the bug in §6.20. Nine messages were seeded to cover every
