@@ -258,8 +258,11 @@ deleting it, and drop the sections that genuinely do not apply.
 ## Verify, do not infer
 
 Back any claim about production with a query or a log line. "Phase N is
-complete" in the docs describes the codebase, never the product: channels,
-agents, locations, SLA policies and automation rules are all still empty.
+complete" in the docs describes the codebase, never the product — the system
+still cannot take a real human support ticket. But do not read "not configured"
+as "no data" either: the bot channel has been copying real traffic in since
+August, so there is an archive worth measuring against. `docs/PROJECT-STATE.md`
+§1 carries the current figures; that is the file that gets updated, not this one.
 
 A 200 in the request logs is not evidence a page renders — RSC prefetches of a
 `force-dynamic` route return 200 without running it, so only full navigations
