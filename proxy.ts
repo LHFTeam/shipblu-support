@@ -51,8 +51,25 @@ const LEGACY_ARTICLE = /\/solutions\/articles\/(\d+)/;
 const LOCALE_PREFIX = /^\/(en|ar)(\/|$)/;
 const LEGACY_FOLDER = /\/solutions\/folders\/(\d+)/;
 
+/**
+ * Paths served as themselves on the help-centre hostname, rather than being
+ * rewritten under /help.
+ *
+ * `/api` and `/_next` are the app's own plumbing, which every surface needs.
+ * `/widget` joins them because the help centre now carries the chat launcher:
+ * the snippet and the iframe are fetched from whichever hostname served the
+ * page, so on the custom domain they would be rewritten to /help/widget and
+ * 404 — chat working on the service URL and silently missing on the domain
+ * customers actually visit.
+ */
+const KB_HOST_PASSTHROUGH = ['/api', '/_next', '/widget'];
+
+function underPrefix(pathname: string, prefixes: readonly string[]): boolean {
+  return prefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+}
+
 function isPublic(pathname: string): boolean {
-  return PUBLIC_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+  return underPrefix(pathname, PUBLIC_PREFIXES);
 }
 
 export default function proxy(request: NextRequest) {
@@ -76,12 +93,13 @@ export default function proxy(request: NextRequest) {
 
   // --- Help centre hostname ------------------------------------------------
   if (kbHost && host === kbHost) {
-    // The console is not served on this hostname at all. Serving it on both
-    // would give every console page two URLs, one of them public-looking.
-    if (pathname.startsWith('/api/') || pathname.startsWith('/_next')) {
+    if (underPrefix(pathname, KB_HOST_PASSTHROUGH)) {
       return NextResponse.next();
     }
 
+    // Everything else here is the help centre. The console is not served on
+    // this hostname at all: serving it on both would give every console page
+    // two URLs, one of them public-looking.
     const url = request.nextUrl.clone();
     url.pathname = pathname === '/' ? '/help' : `/help${pathname}`;
     return NextResponse.rewrite(url);

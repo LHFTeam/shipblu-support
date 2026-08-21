@@ -67,6 +67,15 @@ Design decisions worth knowing before changing things:
   colours without a second set of components. Page furniture — the blue band, the trail,
   the card, the article list — lives in `app/help/[locale]/chrome.tsx`; adding a public page
   means composing those, not restyling one.
+- **The help centre embeds the chat widget the way any other site would.** Every page
+  loads `/widget/embed.js`, the same snippet a marketing page would paste in, rather than
+  carrying a launcher of its own: one launcher to fix, and the chat stays inside its
+  iframe where `.kb-shell`'s palette cannot reach it and the visitor's token stays in our
+  origin's localStorage. The snippet frames whichever hostname served it, so the iframe is
+  same-origin with the page on the custom domain and on the Render URL alike, and
+  `WIDGET_ALLOWED_ORIGINS` is only ever for sites that are not ours. A chat opened there
+  is a `webchat` ticket like any other; outside the hours of the group `webchat` routes
+  to, the widget says so and takes an email address instead.
 - **One condition language for SLA policies and automation rules.** Both store the same
   `conditions` jsonb and go through `lib/rules`, so a condition written for one reads the
   same in the other. A malformed condition never matches, so a corrupt policy cannot

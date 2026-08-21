@@ -5,6 +5,7 @@ import { ShipBluLogo } from '@/components/brand';
 import { DEFAULT_LOCALE, direction, isLocale, LOCALES, LOCALE_NAMES, t } from '@/lib/kb/locale';
 import { publicBaseUrl } from '@/lib/kb/site';
 import { AccountNav } from './account-nav';
+import { ChatWidget } from './chat';
 import { Container } from './chrome';
 import { lato, tajawal } from './fonts';
 
@@ -117,6 +118,14 @@ export default async function KbLayout({
           </span>
         </Container>
       </footer>
+
+      {/*
+        Renders nothing: the snippet appends its own launcher to the document
+        body, as it does on any other host page. In the layout rather than on
+        one page because a visitor who cannot find an answer gives up wherever
+        they happen to be — most often on a search that returned nothing.
+      */}
+      <ChatWidget locale={locale} />
     </div>
   );
 }
