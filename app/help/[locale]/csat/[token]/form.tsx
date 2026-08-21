@@ -40,16 +40,20 @@ export function SurveyForm({ token, locale }: { token: string; locale: Locale })
 
   if (saved) {
     return (
-      <div className="py-16 text-center">
-        <h1 className="text-xl font-semibold">{t(locale, 'csatThanks')}</h1>
-        <p className="mt-2 opacity-60">{t(locale, 'csatRecorded')}</p>
+      <div className="kb-panel mx-auto max-w-lg p-8 text-center">
+        <h1 className="text-xl font-semibold text-[var(--kb-heading)]">
+          {t(locale, 'csatThanks')}
+        </h1>
+        <p className="mt-2 text-sm text-[var(--kb-muted)]">{t(locale, 'csatRecorded')}</p>
       </div>
     );
   }
 
   return (
-    <section className="mx-auto max-w-lg py-12 text-center">
-      <h1 className="text-xl font-semibold">{t(locale, 'csatQuestion')}</h1>
+    <section className="kb-panel mx-auto max-w-lg p-8 text-center">
+      <h1 className="text-xl font-semibold text-[var(--kb-heading)]">
+        {t(locale, 'csatQuestion')}
+      </h1>
 
       <div className="mt-6 flex justify-center gap-2">
         {RATINGS.map((value) => (
@@ -62,8 +66,10 @@ export function SurveyForm({ token, locale }: { token: string; locale: Locale })
               setRating(value);
               void send(value, null);
             }}
-            className={`rounded-lg border px-4 py-3 text-2xl transition-colors hover:bg-[var(--muted)] ${
-              rating === value ? 'border-brand-600 bg-[var(--muted)]' : 'border-[var(--border)]'
+            className={`rounded-lg border px-4 py-3 text-2xl transition-colors hover:bg-[var(--kb-surface-2)] ${
+              rating === value
+                ? 'border-[var(--kb-band)] bg-[var(--kb-band-soft)]'
+                : 'border-[var(--kb-border)]'
             }`}
           >
             {FACES[value]}
@@ -73,7 +79,7 @@ export function SurveyForm({ token, locale }: { token: string; locale: Locale })
 
       {rating !== null ? (
         <div className="mt-8 text-start">
-          <label className="text-sm opacity-70" htmlFor="csat-comment">
+          <label className="text-sm text-[var(--kb-muted)]" htmlFor="csat-comment">
             {t(locale, 'csatCommentPrompt')}
           </label>
           <textarea
@@ -81,7 +87,7 @@ export function SurveyForm({ token, locale }: { token: string; locale: Locale })
             value={comment}
             onChange={(event) => setComment(event.target.value)}
             rows={4}
-            className="mt-2 w-full rounded-md border border-[var(--border)] bg-transparent p-3 text-sm"
+            className="mt-2 w-full rounded-lg border border-[var(--kb-border-strong)] bg-[var(--kb-surface)] p-3 text-base text-[var(--kb-heading)] outline-none focus:border-[var(--kb-band)] sm:text-sm"
           />
           <button
             type="button"
@@ -89,7 +95,7 @@ export function SurveyForm({ token, locale }: { token: string; locale: Locale })
               void send(rating, comment.trim() || null);
               setSaved(true);
             }}
-            className="mt-3 rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+            className="mt-3 rounded-md bg-[var(--button-primary)] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--button-primary-hover)]"
           >
             {t(locale, 'send')}
           </button>

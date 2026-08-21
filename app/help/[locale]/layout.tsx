@@ -1,8 +1,12 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import type { Metadata } from 'next';
+import { ShipBluLogo } from '@/components/brand';
 import { DEFAULT_LOCALE, direction, isLocale, LOCALES, LOCALE_NAMES, t } from '@/lib/kb/locale';
+import { publicBaseUrl } from '@/lib/kb/site';
 import { AccountNav } from './account-nav';
-import { SearchBox } from './search-box';
+import { Container } from './chrome';
+import { lato, tajawal } from './fonts';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,6 +18,10 @@ export const dynamic = 'force-dynamic';
  * `dir` is inherited, and every layout decision below it is logical
  * (`ms-`/`me-`, `start`/`end`) rather than physical, so Arabic mirrors without
  * a second stylesheet.
+ *
+ * The same wrapper carries `kb-shell`, which is where the help centre's palette
+ * and typefaces are scoped. Nothing in `globals.css` can reach the console from
+ * inside it.
  */
 export default async function KbLayout({
   children,
@@ -26,54 +34,129 @@ export default async function KbLayout({
   if (!isLocale(locale)) notFound();
 
   return (
-    <div dir={direction(locale)} lang={locale} className="flex min-h-dvh flex-col">
-      <header className="border-b border-[var(--border)]">
-        <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-4 px-4 py-4">
-          <Link href={`/${locale}`} className="text-base font-semibold">
-            {t(locale, 'title')}
+    <div
+      dir={direction(locale)}
+      lang={locale}
+      className={`kb-shell ${lato.variable} ${tajawal.variable} flex min-h-dvh flex-col antialiased`}
+    >
+      {/*
+        First thing in the tab order, invisible until it has focus. On the
+        article page the header, the trail and the search field are about a dozen
+        stops before the prose a keyboard or screen-reader user came for.
+      */}
+      <a
+        href="#kb-main"
+        className="sr-only focus:not-sr-only focus:absolute focus:start-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-[var(--button-primary)] focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-white"
+      >
+        {t(locale, 'skipToContent')}
+      </a>
+
+      <header className="kb-noprint sticky top-0 z-30 border-b border-[var(--kb-border)] bg-[var(--kb-surface)]">
+        <Container className="flex flex-wrap items-center gap-x-6 gap-y-3 py-3">
+          <Link
+            href={`/${locale}`}
+            className="flex items-center gap-2.5 font-bold text-[var(--kb-heading)]"
+          >
+            <ShipBluLogo className="size-9" />
+            <span className="text-base">{t(locale, 'title')}</span>
           </Link>
 
-          <div className="order-3 w-full sm:order-none sm:ms-auto sm:w-80">
-            <SearchBox locale={locale} />
-          </div>
+          <nav
+            aria-label={t(locale, 'mainNavLabel')}
+            className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm sm:ms-auto"
+          >
+            <Link
+              href={`/${locale}`}
+              className="hidden font-medium text-[var(--kb-heading)] underline-offset-4 hover:underline sm:inline"
+            >
+              {t(locale, 'knowledgeBase')}
+            </Link>
 
-          <nav className="flex items-center gap-2 text-sm sm:ms-2">
-            {LOCALES.map((option) => (
-              <Link
-                key={option}
-                href={`/${option}`}
-                lang={option}
-                className={
-                  option === locale
-                    ? 'font-medium underline underline-offset-4'
-                    : 'opacity-60 hover:opacity-100'
-                }
-              >
-                {LOCALE_NAMES[option]}
-              </Link>
-            ))}
+            <LocaleSwitcher locale={locale} />
+
+            <AccountNav locale={locale} />
+
+            <Link
+              href={`/${locale}/portal/new`}
+              className="rounded-md bg-[var(--button-primary)] px-3.5 py-2 font-semibold text-white transition-colors hover:bg-[var(--button-primary-hover)]"
+            >
+              {t(locale, 'contactAction')}
+            </Link>
           </nav>
-
-          <AccountNav locale={locale} />
-        </div>
+        </Container>
       </header>
 
-      <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8">{children}</main>
+      {/*
+        `tabIndex` so the skip link can move focus here, not merely scroll to it —
+        without it the next Tab goes back to the header the reader just skipped.
+      */}
+      <main id="kb-main" tabIndex={-1} className="flex-1 outline-none">
+        {children}
+      </main>
 
-      <footer className="border-t border-[var(--border)]">
-        <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-3 px-4 py-6 text-sm opacity-60">
-          <span>ShipBlu</span>
-          <Link href={`/${locale}`} className="hover:opacity-100">
+      <footer className="kb-noprint bg-[var(--kb-footer)] text-[var(--kb-footer-text)]">
+        <Container className="flex flex-wrap items-center gap-x-6 gap-y-3 py-8 text-sm">
+          <span className="font-semibold">ShipBlu</span>
+
+          <Link href={`/${locale}`} className="underline-offset-4 opacity-80 hover:opacity-100">
             {t(locale, 'home')}
           </Link>
-          <span className="ms-auto">
+
+          <span className="opacity-80">
             {t(locale, 'contactPrompt')}{' '}
-            <a href="mailto:support@shipblu.com" className="underline underline-offset-4">
-              {t(locale, 'contactAction')}
+            <a
+              href="mailto:support@shipblu.com"
+              className="underline underline-offset-4 hover:opacity-100"
+            >
+              support@shipblu.com
             </a>
           </span>
-        </div>
+
+          <span className="sm:ms-auto opacity-60">
+            © {new Date().getFullYear()} ShipBlu. {t(locale, 'footerRights')}
+          </span>
+        </Container>
       </footer>
+    </div>
+  );
+}
+
+/**
+ * Two locales, so two links rather than a dropdown: a menu that has to be
+ * opened to find out it holds two things is a menu that should have been the
+ * two things.
+ *
+ * Both point at that locale's front page rather than at a translation of the
+ * current one. There is no general path mapping — an Arabic article has its own
+ * slug — and the article page offers the direct link to its own translation
+ * where one exists, which is the only place the mapping is actually known.
+ */
+function LocaleSwitcher({ locale }: { locale: (typeof LOCALES)[number] }) {
+  return (
+    <div
+      role="group"
+      aria-label={t(locale, 'language')}
+      className="flex items-center overflow-hidden rounded-md border border-[var(--kb-border)]"
+    >
+      {LOCALES.map((option) => {
+        const current = option === locale;
+        return (
+          <Link
+            key={option}
+            href={`/${option}`}
+            lang={option}
+            hrefLang={option}
+            aria-current={current ? 'true' : undefined}
+            className={`px-2.5 py-1 text-xs font-medium transition-colors ${
+              current
+                ? 'bg-[var(--kb-band)] text-[var(--kb-band-text)]'
+                : 'text-[var(--kb-muted)] hover:bg-[var(--kb-surface-2)]'
+            }`}
+          >
+            {LOCALE_NAMES[option]}
+          </Link>
+        );
+      })}
     </div>
   );
 }
@@ -82,8 +165,15 @@ export function generateStaticParams() {
   return LOCALES.map((locale) => ({ locale }));
 }
 
-export const metadata = {
+export const metadata: Metadata = {
   title: 'ShipBlu Support',
+  /*
+   * Every `alternates` and `openGraph` URL a page below sets is relative, and
+   * Next resolves those against this. Without it they resolve against the
+   * Render service hostname, which is the one hostname that must never appear
+   * in a canonical tag.
+   */
+  metadataBase: new URL(publicBaseUrl()),
 };
 
 export { DEFAULT_LOCALE };

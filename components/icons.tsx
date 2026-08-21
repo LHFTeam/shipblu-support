@@ -206,3 +206,73 @@ export function PlusIcon(props: IconProps) {
     </Icon>
   );
 }
+
+/* ── Help centre ──────────────────────────────────────────────────────────── */
+
+export function DocumentIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M13.5 3.5H7a1.5 1.5 0 0 0-1.5 1.5v14A1.5 1.5 0 0 0 7 20.5h10a1.5 1.5 0 0 0 1.5-1.5V8.5z" />
+      <path d="M13.5 3.5v5h5" />
+      <path d="M9 12.5h6M9 16h4" />
+    </Icon>
+  );
+}
+
+export function FolderIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M3.5 7.5A1.5 1.5 0 0 1 5 6h4l2 2.5h8a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 19 19.5H5A1.5 1.5 0 0 1 3.5 18z" />
+    </Icon>
+  );
+}
+
+/** The mark used for a whole category — a shelf of folders. */
+export function CategoryIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="3.5" y="4" width="7" height="7" rx="1.5" />
+      <rect x="13.5" y="4" width="7" height="7" rx="1.5" />
+      <rect x="3.5" y="13" width="7" height="7" rx="1.5" />
+      <rect x="13.5" y="13" width="7" height="7" rx="1.5" />
+    </Icon>
+  );
+}
+
+export function LifeBuoyIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <circle cx="12" cy="12" r="8.5" />
+      <circle cx="12" cy="12" r="3.5" />
+      <path d="m6 6 3.5 3.5M18 6l-3.5 3.5M6 18l3.5-3.5M18 18l-3.5-3.5" />
+    </Icon>
+  );
+}
+
+export function PrinterIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M7 9V4.5h10V9" />
+      <path d="M7 17.5H5.5A1.5 1.5 0 0 1 4 16v-5.5A1.5 1.5 0 0 1 5.5 9h13a1.5 1.5 0 0 1 1.5 1.5V16a1.5 1.5 0 0 1-1.5 1.5H17" />
+      <path d="M7 14h10v5.5H7z" />
+    </Icon>
+  );
+}
+
+export function ThumbsUpIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M7 20V10l4-6.5a2 2 0 0 1 2 2V10h4.5a2 2 0 0 1 2 2.35l-1.1 6A2 2 0 0 1 16.4 20z" />
+      <path d="M7 10H4.5v10H7" />
+    </Icon>
+  );
+}
+
+export function ThumbsDownIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M7 4v10l4 6.5a2 2 0 0 0 2-2V14h4.5a2 2 0 0 0 2-2.35l-1.1-6A2 2 0 0 0 16.4 4z" />
+      <path d="M7 14H4.5V4H7" />
+    </Icon>
+  );
+}

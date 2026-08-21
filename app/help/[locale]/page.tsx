@@ -1,10 +1,19 @@
-import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { isLocale, t } from '@/lib/kb/locale';
+import { CategoryIcon } from '@/components/icons';
+import { articleCount, isLocale, t } from '@/lib/kb/locale';
 import { listCategories } from '@/lib/kb/queries';
+import { CardGrid, EmptyNote, Hero, NavCard, PageBody, SectionHeading } from './chrome';
 
 export const dynamic = 'force-dynamic';
 
+/**
+ * The front door.
+ *
+ * Search first, then the categories — in that order and with that difference in
+ * weight, because those are the two things a customer arriving here can want and
+ * the first is far more common than the second. Everything else a help centre
+ * home page tends to accumulate is furniture.
+ */
 export default async function HelpCentreHome({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
@@ -13,30 +22,29 @@ export default async function HelpCentreHome({ params }: { params: Promise<{ loc
 
   return (
     <>
-      <h1 className="mb-6 text-2xl font-semibold">{t(locale, 'home')}</h1>
+      <Hero locale={locale} />
 
-      {categories.length === 0 ? (
-        <p className="opacity-60">{t(locale, 'emptyCategory')}</p>
-      ) : (
-        <ul className="grid gap-3 sm:grid-cols-2">
-          {categories.map((category) => (
-            <li key={category.id}>
-              <Link
+      <PageBody>
+        <SectionHeading>{t(locale, 'browseTopics')}</SectionHeading>
+
+        {categories.length === 0 ? (
+          <EmptyNote>{t(locale, 'emptyCategory')}</EmptyNote>
+        ) : (
+          <CardGrid>
+            {categories.map((category) => (
+              <NavCard
+                key={category.id}
+                level="h3"
                 href={`/${locale}/c/${category.slug}`}
-                className="block rounded-lg border border-[var(--border)] p-4 transition-colors hover:bg-[var(--muted)]"
-              >
-                <h2 className="font-medium">{category.name}</h2>
-                {category.description ? (
-                  <p className="mt-1 text-sm opacity-70">{category.description}</p>
-                ) : null}
-                <p className="mt-2 text-xs opacity-50">
-                  {category.articleCount} {t(locale, 'articles')}
-                </p>
-              </Link>
-            </li>
-          ))}
-        </ul>
-      )}
+                title={category.name}
+                description={category.description}
+                footer={articleCount(locale, category.articleCount)}
+                icon={<CategoryIcon size={22} />}
+              />
+            ))}
+          </CardGrid>
+        )}
+      </PageBody>
     </>
   );
 }

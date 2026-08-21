@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { isLocale, t } from '@/lib/kb/locale';
 import { requireCustomer } from '@/lib/portal/guard';
+import { PageBody, PageHeader, Panel } from '../../chrome';
 import { NewTicketForm } from './form';
 
 export const dynamic = 'force-dynamic';
@@ -13,23 +14,39 @@ export default async function NewPortalTicket({ params }: { params: Promise<{ lo
   await requireCustomer(locale, `/${locale}/portal/new`);
 
   return (
-    <div className="mx-auto w-full max-w-2xl">
-      <h1 className="text-2xl font-semibold">{t(locale, 'newTicketTitle')}</h1>
-      <p className="mt-1 text-sm opacity-70">{t(locale, 'newTicketIntro')}</p>
-      {/* Nudged before the form rather than after it: a customer who finds the
-          answer here costs the team nothing, and after the Send button is too
-          late to be a suggestion. */}
-      <p className="mt-1 text-sm opacity-50">{t(locale, 'searchKb')}</p>
+    <>
+      <PageHeader
+        locale={locale}
+        crumbs={[
+          { label: t(locale, 'home'), href: `/${locale}` },
+          { label: t(locale, 'myTickets'), href: `/${locale}/portal` },
+        ]}
+        title={t(locale, 'newTicketTitle')}
+        selfPath={`/${locale}/portal/new`}
+        meta={t(locale, 'newTicketIntro')}
+      />
 
-      <div className="mt-6 rounded-lg border border-[var(--border)] p-6">
-        <NewTicketForm locale={locale} />
-      </div>
+      <PageBody>
+        <div className="mx-auto w-full max-w-2xl">
+          {/* Nudged before the form rather than after it: a customer who finds the
+              answer here costs the team nothing, and after the Send button is too
+              late to be a suggestion. */}
+          <p className="text-sm text-[var(--kb-muted)]">{t(locale, 'searchKb')}</p>
 
-      <p className="mt-4 text-sm">
-        <Link href={`/${locale}/portal`} className="underline underline-offset-4">
-          {t(locale, 'backToTickets')}
-        </Link>
-      </p>
-    </div>
+          <Panel className="mt-4 p-6">
+            <NewTicketForm locale={locale} />
+          </Panel>
+
+          <p className="mt-4 text-sm">
+            <Link
+              href={`/${locale}/portal`}
+              className="text-[var(--kb-link)] underline underline-offset-4"
+            >
+              {t(locale, 'backToTickets')}
+            </Link>
+          </p>
+        </div>
+      </PageBody>
+    </>
   );
 }

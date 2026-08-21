@@ -59,6 +59,11 @@
   --series-1: var(--color-brand-500);
   --series-2: var(--color-accent-600);
   --chart-grid: var(--border);
+
+  /* The filled button's colour, named rather than hard-coded in `components/ui`
+     so the help centre can substitute its own without forking the component. */
+  --button-primary: var(--color-brand-600);
+  --button-primary-hover: var(--color-brand-700);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -134,35 +139,236 @@ body {
   text-align: right;
 }
 
-/* Knowledge base article typography.
+/* ─────────────────────────────────────────────────────────────────────────────
+   The public help centre.
+
+   Its own palette, scoped to `.kb-shell`, rather than the console's. The two
+   surfaces are read by different people for different reasons — an agent stares
+   at the console all day and wants density, a customer arrives once with a
+   question and wants a page that reads like ShipBlu's — and a single token set
+   stretched over both ends up serving neither.
+
+   The light values are the hex from the live Freshdesk portal theme, kept
+   verbatim rather than re-expressed in oklch. They are not a scale to step
+   through, they are the brand as customers already know it: matching them
+   exactly is the point, and a conversion that lands half a percent off in
+   lightness would only make the two sites look subtly unlike each other during
+   the cutover. The dark values are oklch, because those *are* a scale.
+   ────────────────────────────────────────────────────────────────────────── */
+.kb-shell {
+  --kb-bg: #f5f7f9;
+  --kb-surface: #ffffff;
+  --kb-surface-2: #f5f7f9;
+  --kb-border: #ebeff3;
+  --kb-border-strong: #cfd7df;
+
+  /* Two text colours on purpose: navy for anything structural — headings, nav,
+     breadcrumbs — and the deeper blue for article prose, which is what the
+     live portal sets on article bodies. */
+  --kb-heading: #12344d;
+  --kb-text: #0b2878;
+  --kb-muted: #264966;
+
+  --kb-link: #2c5cc5;
+  --kb-link-hover: #021519;
+
+  /* The blue band behind the search on the home page and behind the title on
+     every inner page. One colour, full bleed, so a customer can tell at a
+     glance which page of the help centre they are on. */
+  --kb-band: #296dff;
+  --kb-band-text: #ffffff;
+  /* The band's colour at listing-card strength, for the icon tile in front of a
+     category or folder name. A flat tint rather than the band at low alpha, so
+     it reads the same over the white card and the grey page behind it, with the
+     `ink` that stays legible on top of it in both themes. */
+  --kb-band-soft: #e9f0ff;
+  --kb-band-ink: #1b5ce0;
+
+  --kb-footer: #12344d;
+  --kb-footer-text: #ffffff;
+
+  /* Article feedback. Green and red carry the answer, so the two buttons stay
+     distinguishable when they are the only thing on screen. */
+  --kb-yes: #005c3f;
+  --kb-no: #c82124;
+
+  --kb-shadow: 0 6px 19px rgba(39, 49, 58, 0.1);
+
+  /* The help centre's own focus colour, so the ring reads as part of this site
+     rather than of the console. */
+  --ring: var(--kb-band);
+
+  /* The console's own token names, re-pointed at the help centre's palette.
+     `components/ui` — the Button, Input and Badge the sign-in forms and the
+     ticket list are built from — reads these, and it is shared with the console,
+     so it cannot be given help-centre colours directly. Redefining the names
+     inside this scope gives those primitives the right palette here without a
+     second set of components to keep in step. */
+  --background: var(--kb-bg);
+  --surface: var(--kb-surface);
+  --surface-2: var(--kb-surface-2);
+  --foreground: var(--kb-text);
+  --muted: var(--kb-surface-2);
+  --muted-foreground: var(--kb-muted);
+  --border: var(--kb-border);
+  --border-strong: var(--kb-border-strong);
+
+  /* Navy, as on the live portal, and used for every filled button here so that
+     one means the same thing on every page. The dark theme swaps it for the band
+     blue: this navy against a near-black page is a button nobody can see. */
+  --button-primary: #12344d;
+  --button-primary-hover: #0a2438;
+}
+
+/* The live portal is light-only. A reader who has asked their operating system
+   for a dark interface has still asked for it here, so the same roles are
+   re-stepped for a dark surface rather than the preference being ignored. */
+@media (prefers-color-scheme: dark) {
+  .kb-shell {
+    --kb-bg: oklch(0.17 0.012 255);
+    --kb-surface: oklch(0.21 0.014 255);
+    --kb-surface-2: oklch(0.24 0.015 255);
+    --kb-border: oklch(0.31 0.014 255);
+    --kb-border-strong: oklch(0.42 0.016 255);
+
+    --kb-heading: oklch(0.97 0.005 250);
+    --kb-text: oklch(0.93 0.008 250);
+    --kb-muted: oklch(0.75 0.012 250);
+
+    --kb-link: oklch(0.79 0.09 252);
+    --kb-link-hover: oklch(0.89 0.06 252);
+
+    /* The band darkens: #296dff behind white text is comfortable on a white
+       page and glaring against a dark one. */
+    --kb-band: oklch(0.44 0.16 262);
+    --kb-band-soft: oklch(0.31 0.06 262);
+    --kb-band-ink: oklch(0.83 0.09 255);
+    --kb-footer: oklch(0.15 0.014 258);
+
+    --kb-yes: oklch(0.78 0.13 155);
+    --kb-no: oklch(0.76 0.15 25);
+
+    --button-primary: oklch(0.5 0.17 260);
+    --button-primary-hover: oklch(0.57 0.17 260);
+
+    --kb-shadow: 0 6px 19px rgb(0 0 0 / 0.35);
+  }
+}
+
+.kb-shell {
+  background: var(--kb-bg);
+  color: var(--kb-text);
+  /* Lato for Latin, Tajawal for Arabic — the same pairing the live portal uses.
+     Lato carries no Arabic glyphs, so Arabic falls through to Tajawal by
+     itself; no `:lang()` rule is needed. */
+  font-family:
+    var(--font-lato),
+    var(--font-tajawal),
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    'Noto Sans Arabic',
+    sans-serif;
+  /* The console runs tabular figures so ticket numbers stop jittering. Prose
+     wants the proportional ones. */
+  font-variant-numeric: normal;
+}
+
+/* The one card shape the help centre uses: white, hairline border, a shadow
+   soft enough to lift the card off the grey page without announcing itself.
+   Written here rather than repeated inline because it appears on every listing,
+   every panel and both halves of the article page. */
+.kb-panel {
+  background: var(--kb-surface);
+  border: 1px solid var(--kb-border);
+  border-radius: 0.75rem;
+  box-shadow: var(--kb-shadow);
+}
+
+/* ── Article typography ─────────────────────────────────────────────────────
    Article HTML comes from the console editor and the Freshdesk importer, so it
    arrives as plain semantic tags with no classes of its own — the styling has
-   to hang off the element names. Scoped to .kb-article so nothing here can
-   reach the agent console. */
+   to hang off the element names. Scoped to `.kb-article` so nothing here can
+   reach the agent console.
+   ────────────────────────────────────────────────────────────────────────── */
 .kb-article {
-  line-height: 1.7;
+  color: var(--kb-text);
+  /* 17px on a phone, 18px from tablet up — the size the live portal sets, and
+     about where a support article stops feeling like interface copy and starts
+     reading like a page. */
+  font-size: 1.0625rem;
+  line-height: 1.75;
+  /* Imported articles contain bare tracking URLs and support@ addresses long
+     enough to push a phone viewport sideways. */
+  overflow-wrap: break-word;
 }
+
+@media (min-width: 768px) {
+  .kb-article {
+    font-size: 1.125rem;
+  }
+}
+
 .kb-article > * + * {
-  margin-top: 1rem;
+  margin-top: 1.15em;
 }
+.kb-article > :first-child {
+  margin-top: 0;
+}
+
+/* The measure, applied to the text-flow elements rather than to the article as a
+   whole. Prose past about 75 characters a line costs the reader the return sweep
+   — they land on the wrong line and re-read it — and the article column here is
+   wide enough to reach 90 on a desktop. Tables, code blocks and screenshots are
+   deliberately left out: they are not read line by line, and they are the things
+   that actually want the full width of the card. */
+.kb-article > :is(p, ul, ol, dl, blockquote, h2, h3, h4, h5, h6) {
+  max-width: 62ch;
+}
+
 .kb-article h2,
 .kb-article h3,
-.kb-article h4 {
+.kb-article h4,
+.kb-article h5,
+.kb-article h6 {
+  color: var(--kb-heading);
   font-weight: 600;
   line-height: 1.3;
-  margin-top: 2rem;
+  /* A heading belongs to what follows it, so the space above is roughly twice
+     the space below. Without this every section floats equidistant and the
+     article reads as one undifferentiated column. */
+  margin-top: 2em;
+  /* Sticky header clearance, for when a link lands on a heading. */
+  scroll-margin-top: 5rem;
+}
+.kb-article :is(h2, h3, h4, h5, h6) + * {
+  margin-top: 0.6em;
 }
 .kb-article h2 {
-  font-size: 1.25rem;
+  font-size: 1.5rem;
 }
 .kb-article h3 {
-  font-size: 1.1rem;
+  font-size: 1.25rem;
 }
+.kb-article h4 {
+  font-size: 1.125rem;
+}
+.kb-article h5,
+.kb-article h6 {
+  font-size: 1rem;
+}
+
 .kb-article a {
-  color: var(--color-brand-600);
+  color: var(--kb-link);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+.kb-article a:hover {
+  color: var(--kb-link-hover);
+}
+
 .kb-article ul,
 .kb-article ol {
   /* Logical padding, so lists indent from the right in Arabic. */
@@ -175,48 +381,129 @@ body {
   list-style: decimal;
 }
 .kb-article li + li {
-  margin-top: 0.35rem;
+  margin-top: 0.625rem;
 }
+/* A nested list is part of its parent item, not a new one. */
+.kb-article li > ul,
+.kb-article li > ol {
+  margin-top: 0.375rem;
+}
+.kb-article li::marker {
+  color: var(--kb-muted);
+}
+
 .kb-article blockquote {
-  border-inline-start: 3px solid var(--border);
+  border-inline-start: 3px solid var(--kb-band);
   padding-inline-start: 1rem;
-  opacity: 0.85;
+  color: var(--kb-muted);
 }
+
 .kb-article pre {
-  background: var(--muted);
+  background: var(--kb-surface-2);
+  border: 1px solid var(--kb-border);
   padding: 0.875rem 1rem;
   border-radius: 0.5rem;
   overflow-x: auto;
   font-size: 0.875rem;
+  line-height: 1.6;
+  /* Code is read left to right whatever the surrounding article does. */
+  direction: ltr;
+  text-align: start;
 }
 .kb-article code {
   font-size: 0.9em;
 }
 .kb-article :not(pre) > code {
-  background: var(--muted);
+  background: var(--kb-surface-2);
+  border: 1px solid var(--kb-border);
   padding: 0.1rem 0.3rem;
   border-radius: 0.25rem;
 }
-.kb-article img,
-.kb-article iframe {
+
+/* Screenshots are most of what an imported article contains. The border is
+   what keeps a screenshot of a white dashboard from bleeding into the white
+   card it sits on. */
+.kb-article img {
   max-width: 100%;
   height: auto;
+  border: 1px solid var(--kb-border);
   border-radius: 0.5rem;
 }
+.kb-article :is(iframe, video) {
+  max-width: 100%;
+  border-radius: 0.5rem;
+}
+.kb-article figcaption {
+  margin-top: 0.5rem;
+  color: var(--kb-muted);
+  font-size: 0.875rem;
+}
+
 .kb-article table {
-  width: 100%;
   border-collapse: collapse;
-  /* Wide tables scroll inside the article rather than widening the page. */
+  /*
+   * A wide table scrolls inside the article rather than widening the page.
+   * `block` plus `overflow-x` is what makes the table its own scroll container,
+   * and leaving `width` alone is the part that is easy to get wrong: setting it
+   * to `max-content` makes the table's *minimum* contribution its full natural
+   * width, which propagates up through the grid track and pushes the whole
+   * document sideways on a phone. A scroll container with an auto width
+   * contributes nothing, which is the behaviour we want.
+   */
   display: block;
+  max-width: 100%;
   overflow-x: auto;
+  font-size: 0.9375em;
 }
 .kb-article th,
 .kb-article td {
-  border: 1px solid var(--border);
+  border: 1px solid var(--kb-border);
   padding: 0.5rem 0.75rem;
   text-align: start;
+  vertical-align: top;
 }
 .kb-article th {
-  background: var(--muted);
+  background: var(--kb-surface-2);
+  color: var(--kb-heading);
   font-weight: 600;
+}
+
+.kb-article hr {
+  border: 0;
+  border-top: 1px solid var(--kb-border);
+  margin-block: 2em;
+}
+
+/* ── Print ──────────────────────────────────────────────────────────────────
+   Customers print delivery and claims procedures and hand them to a colleague.
+   What they want on paper is the article: not the header, not the search box,
+   not the sidebar, and not a feedback prompt nobody can click.
+   ────────────────────────────────────────────────────────────────────────── */
+@media print {
+  .kb-noprint {
+    display: none !important;
+  }
+  .kb-shell {
+    background: #fff;
+    color: #000;
+  }
+  .kb-panel {
+    border: 0;
+    box-shadow: none;
+  }
+  .kb-article {
+    font-size: 11pt;
+  }
+  /* A printed link is dead text, so the destination has to be on the page. */
+  .kb-article a[href^='http']::after {
+    content: ' (' attr(href) ')';
+    font-size: 0.85em;
+    word-break: break-all;
+  }
+  .kb-article :is(pre, blockquote, img, table, figure, li) {
+    break-inside: avoid;
+  }
+  .kb-article :is(h2, h3, h4) {
+    break-after: avoid;
+  }
 }
