@@ -2,13 +2,19 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type UIEvent } from 'react';
 import { ChannelBadge, channelInfo } from '@/components/channel';
 import { SearchIcon } from '@/components/icons';
 import { Badge, Select } from '@/components/ui';
 import { formatRelative } from '@/lib/format';
 import type { InboxFilters, InboxRow } from '@/lib/tickets/queries';
 import { FILTERABLE_CHANNELS, isRestrictedChannel } from '@/lib/tickets/channel-policy';
+import {
+  inboxSignature,
+  readInboxPosition,
+  rememberInboxPages,
+  rememberInboxScroll,
+} from '@/lib/tickets/inbox-position';
 import { metaWindowState } from '@/lib/meta/window';
 import { formatRemaining, windowState } from '@/lib/whatsapp/window';
 
@@ -44,7 +50,8 @@ export function InboxList({
     error,
     loadMore,
     sentinelRef,
-    scrollRef,
+    listRef,
+    onScroll,
   } = useOlderPages({ firstPage: rows, nextCursor, filters, params });
 
   function setParam(key: string, value: string) {
@@ -105,7 +112,12 @@ export function InboxList({
         </div>
       </div>
 
-      <ol ref={scrollRef} className="app-scroll min-h-0 flex-1 overflow-y-auto" aria-busy={loading}>
+      <ol
+        ref={listRef}
+        onScroll={onScroll}
+        className="app-scroll min-h-0 flex-1 overflow-y-auto"
+        aria-busy={loading}
+      >
         {visible.length === 0 ? (
           <li className="p-8 text-center text-sm text-[var(--muted-foreground)]">
             Nothing matches those filters.
@@ -247,6 +259,13 @@ export function InboxList({
  * nothing has been loaded yet. After that the cursor comes from the last
  * response, so a refresh reshuffling the top of the queue cannot rewind the
  * scroll position to the end of page one.
+ *
+ * What a refresh cannot do, a navigation does: opening a conversation replaces
+ * this whole subtree, because `/inbox` and `/inbox/[number]` are sibling
+ * segments rather than a layout and its child. So the pages and the offset are
+ * also mirrored into `lib/tickets/inbox-position`, which outlives the mount, and
+ * seeded back from it below — otherwise every trip into a conversation and back
+ * ended at the top of page one.
  */
 function useOlderPages({
   firstPage,
@@ -259,14 +278,30 @@ function useOlderPages({
   filters: InboxFilters;
   params: URLSearchParams;
 }) {
-  const signature = `${filters.view}|${filters.statusCategory}|${filters.channel}|${filters.q}`;
+  const signature = inboxSignature(filters);
 
   const [loaded, setLoaded] = useState<{
     signature: string;
     rows: InboxRow[];
     /** `undefined` until a page has been fetched; `null` once the end is known. */
     cursor: string | null | undefined;
-  }>({ signature, rows: [], cursor: undefined });
+  }>(() => {
+    // Seeded in the first render rather than from an effect, so the rows the
+    // agent had scrolled into view are already in the DOM when the offset is put
+    // back below. Restoring 4000px into a thirty-row list only clamps to its
+    // bottom.
+    const saved = readInboxPosition(signature);
+    return saved
+      ? { signature, rows: saved.rows, cursor: saved.cursor }
+      : { signature, rows: [], cursor: undefined };
+  });
+
+  // Kept up to date as the pages accumulate rather than written on the way out:
+  // a ref read in an unmount cleanup races React detaching it, and by then the
+  // node can already be out of the document and reporting an offset of zero.
+  useEffect(() => {
+    rememberInboxPages(loaded.signature, loaded.rows, loaded.cursor);
+  }, [loaded]);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -340,7 +375,45 @@ function useOlderPages({
   });
 
   const sentinelRef = useRef<HTMLLIElement>(null);
-  const scrollRef = useRef<HTMLOListElement>(null);
+  const scrollRef = useRef<HTMLOListElement | null>(null);
+  const restored = useRef(false);
+
+  /**
+   * Puts the offset back as the list is attached.
+   *
+   * A ref callback rather than an effect because it runs inside the commit,
+   * before the browser paints: an effect would show the list at the top for a
+   * frame and then jump. Once per mount, deliberately — React calls a ref again
+   * on every reattachment, and a second restore would yank the list out from
+   * under an agent who had scrolled since.
+   */
+  const listRef = useCallback((node: HTMLOListElement | null) => {
+    scrollRef.current = node;
+    if (!node || restored.current) return;
+    restored.current = true;
+
+    const saved = readInboxPosition(signatureRef.current);
+    if (saved) node.scrollTop = saved.scrollTop;
+  }, []);
+
+  // Cheap enough to do on every scroll event — it is one property assignment,
+  // no React state and no re-render — which is what lets the offset survive a
+  // navigation the list gets no other warning about.
+  const onScroll = useCallback((event: UIEvent<HTMLOListElement>) => {
+    rememberInboxScroll(signatureRef.current, event.currentTarget.scrollTop);
+  }, []);
+
+  // A filter change is a different list, and the offset of the old one is
+  // meaningless in it: the accumulated pages go with the old signature, so the
+  // list drops back to thirty rows and the browser clamps a deep offset to the
+  // bottom of them. Its own ref rather than `signatureRef`, which is already
+  // updated by the effect above by the time this one runs.
+  const shown = useRef(signature);
+  useEffect(() => {
+    if (shown.current === signature) return;
+    shown.current = signature;
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+  }, [signature]);
 
   useEffect(() => {
     const sentinel = sentinelRef.current;
@@ -371,7 +444,8 @@ function useOlderPages({
     error,
     loadMore,
     sentinelRef,
-    scrollRef,
+    listRef,
+    onScroll,
   };
 }
 
