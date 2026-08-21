@@ -1,4 +1,4 @@
-import { relations } from 'drizzle-orm';
+import { relations, sql } from 'drizzle-orm';
 import {
   boolean,
   index,
@@ -325,3 +325,57 @@ export const groupMembersRelations = relations(groupMembers, ({ one }) => ({
 export const sessionsRelations = relations(sessions, ({ one }) => ({
   agent: one(agents, { fields: [sessions.agentId], references: [agents.id] }),
 }));
+
+/**
+ * The history `agents.presence` cannot keep.
+ *
+ * `presence`, `last_seen_at` and `is_accepting_tickets` are current-state
+ * columns: they answer "is this agent at their desk right now", which is the
+ * only question auto-assignment has. They cannot answer "when did the shift
+ * start", "how long were they here" or "were they here when the queue was
+ * busy", because yesterday's value is simply gone.
+ *
+ * One row per continuous stretch of connected time. The effective end is
+ * `coalesce(ended_at, last_beat_at)` rather than `ended_at` alone, which is what
+ * makes an instance killed mid-stream heal itself: it never runs its abort
+ * handler, so `ended_at` stays null forever, and the last beat it managed is the
+ * honest answer for when the agent stopped being there. Same reasoning as the
+ * staleness check that already guards assignment eligibility — no reaper.
+ *
+ * `accepting` is on the interval rather than being a second table, because "here
+ * but not taking new work" is a *span* of time exactly like being connected is,
+ * and reporting has to add the two up the same way. Flipping the switch closes
+ * the interval and opens a replacement, so available time is a `sum(...) where
+ * accepting` instead of an interleaving of two event streams.
+ *
+ * Written only from `lib/assignment/presence.ts`. Presence still has exactly one
+ * writer; this is the same writer keeping a record.
+ */
+export const agentPresenceIntervals = pgTable(
+  'agent_presence_intervals',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    agentId: uuid('agent_id')
+      .notNull()
+      .references(() => agents.id, { onDelete: 'cascade' }),
+
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+    /** Moved by every SSE keepalive. The fallback end for a stream that died. */
+    lastBeatAt: timestamp('last_beat_at', { withTimezone: true }).notNull().defaultNow(),
+    /** Set only on a clean sign-off. Null means "still open, or never closed". */
+    endedAt: timestamp('ended_at', { withTimezone: true }),
+
+    /** `is_accepting_tickets` as it stood for this span. */
+    accepting: boolean('accepting').notNull().default(true),
+  },
+  (t) => [
+    // The rollup's query: one agent's intervals overlapping a day.
+    index('agent_presence_intervals_agent_idx').on(t.agentId, t.startedAt),
+    // Finding the row to extend on a beat. Partial, because every lookup asks
+    // for the open one and closed rows are the overwhelming majority within a
+    // week of shipping.
+    index('agent_presence_intervals_open_idx')
+      .on(t.agentId, t.lastBeatAt)
+      .where(sql`${t.endedAt} is null`),
+  ],
+);

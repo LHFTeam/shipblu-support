@@ -68,6 +68,29 @@ one and **nothing had ever written** — so every agent read `offline` forever. 
 is written now, by the SSE stream and by nothing else. Every group ships on
 `manual`, so none of it changes behaviour until somebody opts a team in.
 
+And now **agent productivity reporting**, at `/reports/agents` behind a new
+`report.agents` permission. It answers punctuality, availability, speed and
+efficacy per agent per day: first and last connection, time at the desk,
+available time, adherence to their group's calendar, tickets assigned and
+resolved, backlog at day end, measured handling time, occupancy, and the reopen
+rate that keeps the speed columns honest.
+
+Most of that **could not be answered before, because nothing recorded it**.
+`agents.presence`, `last_seen_at` and `is_accepting_tickets` are current-state
+columns with no history; `sessions` rows are deleted on logout. So this change is
+mostly three new append-only capture tables — `agent_presence_intervals` written
+by the SSE stream's existing single writer, `agent_focus_intervals` written by a
+new beat from the ticket page, and `agent_backlog_snapshots` sampled hourly —
+plus `agent_metrics_daily`, rebuilt nightly by the same `rollup_metrics` job that
+already owns `metrics_daily`. **The report is empty until the capture has run for
+a day**, and on this database it will stay near-empty until humans work tickets:
+see the paragraph below.
+
+The focus beat also finally writes `conversation_presence`, which has existed
+since the first migration for collision detection and which **nothing had ever
+written** — the same shape of dead scaffolding `agents.presence` was before
+assignment landed. It is worth grepping for others.
+
 **The bot channel is live, and everything else is not.** This is the single most
 important thing to understand about the current state, and the easiest to read
 backwards.
@@ -93,7 +116,12 @@ still empty, all sixteen of them.
 
 So: **the system still cannot take a real human support ticket**, and the
 remaining work is mostly not code — it is configuration, live-provider
-verification, and cutover. Treat "phase N is complete" as a statement about the
+verification, and cutover. The agent productivity report is the sharpest example
+of what that costs: on 2026-08-21 production held **3 agents, 1 assigned
+conversation and 7 agent-authored messages**, so every figure on that page will
+read as a near-empty row until the team is actually working in the product. That
+is an argument for having landed the capture early, not for reading the report
+yet. Treat "phase N is complete" as a statement about the
 codebase, never about the product being usable by the support team. But do not
 read "not configured" as "no data": there is a real archive now, it is worth
 measuring things against, and §6.17 is what happens when you measure carelessly.

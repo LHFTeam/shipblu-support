@@ -43,6 +43,20 @@ export const PERMISSIONS = [
   'kb.edit',
   'kb.publish',
   'report.view',
+  /**
+   * Per-agent productivity: shift times, availability, handling time.
+   *
+   * Separate from `report.view` because it is a different kind of data about a
+   * different subject. The aggregate reports describe the queue; this one
+   * describes named people — when they arrived, how long they were at their
+   * desk, how long they spent on each ticket — and somebody who needs to know
+   * how the team is coping does not automatically need that.
+   *
+   * Granted to supervisors, since coaching the people is their job, but as its
+   * own key so it can be taken off one of them without taking reporting away
+   * too.
+   */
+  'report.agents',
   'admin.agents',
   'admin.groups',
   'admin.locations',
@@ -79,6 +93,7 @@ const SUPERVISOR: Permission[] = [
   'kb.edit',
   'kb.publish',
   'report.view',
+  'report.agents',
 ];
 
 const ADMIN: Permission[] = [

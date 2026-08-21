@@ -1,8 +1,9 @@
 import { DateTime } from 'luxon';
 import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { metricsDaily } from '@/db/schema';
+import { agentMetricsDaily, metricsDaily } from '@/db/schema';
 import type { ClaimedJob } from '@/lib/queue';
+import { computeAgentDay, withActivity } from '@/lib/reports/agent-rollup';
 import {
   asRows,
   computeDay,
@@ -18,6 +19,14 @@ import {
  * The figures themselves are computed by `lib/reports/rollup`, which the live
  * dashboard also runs against today. This handler is only the storage half:
  * which days to recompute, and writing them.
+ *
+ * It writes two tables. `metrics_daily` measures tickets, sliced four ways;
+ * `agent_metrics_daily` measures the people, one row per agent per day. They are
+ * separate tables for reasons `db/schema/metrics.ts` sets out, but they are
+ * deliberately one job: two nightly jobs would be two answers to "which day is
+ * this", and the first daylight-saving change or late-running cron would make
+ * an agent's shift and the tickets they closed during it land on different
+ * dates.
  */
 
 /**
@@ -152,14 +161,29 @@ export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
   for (const day of plan.days) {
     const slices = await computeDay(day, context);
     const rows = asRows(day, slices);
+    const agentRows = withActivity(await computeAgentDay(day, context));
 
     // Delete-then-insert rather than an upsert on the unique index: Postgres
     // treats NULLs as distinct in a unique index, so the "all" slices — which
     // are mostly NULLs — would never conflict and would accumulate a duplicate
     // row on every recompute.
+    //
+    // The agent rows are rebuilt the same way and in the same transaction, so a
+    // failure halfway cannot leave a day whose ticket figures were recomputed
+    // and whose agent figures were not. Safe to destroy because every column is
+    // derived: presence intervals, focus intervals and backlog snapshots are
+    // append-only and owned elsewhere, which is exactly why the backlog is
+    // sampled hourly by its own job rather than counted here.
     await db.transaction(async (tx) => {
       await tx.delete(metricsDaily).where(eq(metricsDaily.day, day));
       if (rows.length) await tx.insert(metricsDaily).values(rows);
+
+      await tx.delete(agentMetricsDaily).where(eq(agentMetricsDaily.day, day));
+      if (agentRows.length) {
+        await tx
+          .insert(agentMetricsDaily)
+          .values(agentRows.map((row) => ({ ...row, day, computedAt: new Date() })));
+      }
     });
 
     // Asserted on every write, not just on backfills: a day whose totals do not
@@ -170,7 +194,7 @@ export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
       console.error(`[rollup_metrics] ${day}: totals do not match the sum of the channel slices`);
     }
 
-    console.log(`[rollup_metrics] ${day}: ${rows.length} rows`);
+    console.log(`[rollup_metrics] ${day}: ${rows.length} rows, ${agentRows.length} agent-day(s)`);
   }
 
   console.log(

@@ -10,6 +10,7 @@ import {
   listStatuses,
 } from '@/lib/tickets/queries';
 import { InboxShell } from '../shell';
+import { FocusBeat } from './focus';
 import { ConversationView } from './view';
 
 export const dynamic = 'force-dynamic';
@@ -59,6 +60,7 @@ export default async function ConversationPage({
         canSideConversation={canSideConversation}
         currentAgentId={agent.id}
       />
+      <FocusBeat conversationId={conversation.id} />
     </InboxShell>
   );
 }

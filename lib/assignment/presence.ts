@@ -1,7 +1,8 @@
-import { and, eq, ne } from 'drizzle-orm';
+import { and, eq, gte, isNull, lt, ne, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { agents } from '@/db/schema';
+import { agentPresenceIntervals, agents } from '@/db/schema';
 import { enqueue } from '@/lib/queue';
+import { HEARTBEAT_TTL_MS } from './eligibility';
 
 /**
  * Whether an agent is at their desk.
@@ -22,6 +23,21 @@ import { enqueue } from '@/lib/queue';
  * need state shared across autoscaled instances to be correct, and being briefly
  * skipped by the rota is a far cheaper error than being permanently online
  * because a counter leaked.
+ *
+ * **This module also keeps the history.** `agent_presence_intervals` is the
+ * record `agents.presence` structurally cannot be — a column knows only what is
+ * true now — and it is written here, from the same three functions, so presence
+ * still has exactly one writer.
+ *
+ * The writes are deliberately best-effort and approximate: they extend an open
+ * interval when they can and open a new one when they cannot, and they make no
+ * attempt to be transactionally exact about it. Two instances racing can leave
+ * two overlapping open rows, and the flapping described above can leave a
+ * shift in several pieces. Neither is corrected here, because both are
+ * correctable at *read* time and only at read time: `lib/reports/intervals.ts`
+ * merges overlapping and near-adjacent spans before measuring anything. Pushing
+ * that correctness into the write path would need locking on the hottest write
+ * in the system to buy nothing the reader cannot do with a sort.
  */
 
 /**
@@ -35,7 +51,7 @@ export async function goOnline(agentId: string): Promise<void> {
     .update(agents)
     .set({ presence: 'online', lastSeenAt: new Date() })
     .where(and(eq(agents.id, agentId), ne(agents.presence, 'online')))
-    .returning({ id: agents.id });
+    .returning({ id: agents.id, accepting: agents.isAcceptingTickets });
 
   if (arrived.length === 0) {
     // Already online — a second tab, or a reload. Just move the heartbeat.
@@ -43,19 +59,135 @@ export async function goOnline(agentId: string): Promise<void> {
     return;
   }
 
+  await record(agentId, arrived[0]!.accepting);
   await requestSweep();
 }
 
 /** A keepalive fired. Re-asserts `online` so a sibling tab closing cannot strand it. */
 export async function beat(agentId: string): Promise<void> {
-  await db
+  const beaten = await db
     .update(agents)
     .set({ presence: 'online', lastSeenAt: new Date() })
-    .where(eq(agents.id, agentId));
+    .where(eq(agents.id, agentId))
+    .returning({ accepting: agents.isAcceptingTickets });
+
+  if (beaten.length > 0) await record(agentId, beaten[0]!.accepting);
 }
 
 export async function goOffline(agentId: string): Promise<void> {
   await db.update(agents).set({ presence: 'offline' }).where(eq(agents.id, agentId));
+  await close(agentId, new Date());
+}
+
+/**
+ * The agent's own away switch, and the record of it.
+ *
+ * Here rather than in the server action because the switch marks the boundary
+ * between available and merely present, and that boundary is a span of time —
+ * the same shape as being connected. Closing the interval and opening a
+ * replacement makes "available time" a sum over rows instead of a replay of two
+ * interleaved event streams.
+ *
+ * Only recorded for an agent who is actually connected. Flipping the switch
+ * from a page load after the stream has gone would otherwise open an interval
+ * that says they were at their desk because they changed a setting.
+ */
+export async function setAccepting(agentId: string, accepting: boolean): Promise<void> {
+  const updated = await db
+    .update(agents)
+    .set({ isAcceptingTickets: accepting, updatedAt: new Date() })
+    .where(eq(agents.id, agentId))
+    .returning({ presence: agents.presence, lastSeenAt: agents.lastSeenAt });
+
+  const agent = updated[0];
+  if (!agent) return;
+
+  const now = new Date();
+  const live =
+    agent.presence === 'online' &&
+    agent.lastSeenAt !== null &&
+    now.getTime() - agent.lastSeenAt.getTime() < HEARTBEAT_TTL_MS;
+  if (!live) return;
+
+  await close(agentId, now);
+  await open(agentId, accepting, now);
+}
+
+// --- The history ------------------------------------------------------------
+
+/**
+ * Extend the agent's live interval, or start one.
+ *
+ * "Live" means open, carrying the same accepting flag, and beaten within the
+ * heartbeat TTL — the same window assignment already uses to decide somebody has
+ * gone, so the two cannot disagree about when a shift ended.
+ *
+ * Failures are swallowed. This is a record for a report that is read tomorrow;
+ * it must never be the reason an agent loses their live updates, which is the
+ * same trade the caller in `/api/events` already makes for presence itself.
+ */
+async function record(agentId: string, accepting: boolean): Promise<void> {
+  const now = new Date();
+
+  try {
+    const extended = await db
+      .update(agentPresenceIntervals)
+      .set({ lastBeatAt: now })
+      .where(
+        and(
+          eq(agentPresenceIntervals.agentId, agentId),
+          isNull(agentPresenceIntervals.endedAt),
+          eq(agentPresenceIntervals.accepting, accepting),
+          gte(agentPresenceIntervals.lastBeatAt, new Date(now.getTime() - HEARTBEAT_TTL_MS)),
+        ),
+      )
+      .returning({ id: agentPresenceIntervals.id });
+
+    if (extended.length > 0) return;
+
+    // Nothing live to extend. Anything still open is stale — an instance that
+    // died without running its abort handler — and its last beat is the honest
+    // end, so seal it at that rather than at now and leave a gap that never
+    // happened.
+    await db
+      .update(agentPresenceIntervals)
+      .set({ endedAt: sql`${agentPresenceIntervals.lastBeatAt}` })
+      .where(
+        and(
+          eq(agentPresenceIntervals.agentId, agentId),
+          isNull(agentPresenceIntervals.endedAt),
+          lt(agentPresenceIntervals.lastBeatAt, new Date(now.getTime() - HEARTBEAT_TTL_MS)),
+        ),
+      );
+
+    await open(agentId, accepting, now);
+  } catch (error) {
+    console.error('[presence] could not record an interval', error);
+  }
+}
+
+async function open(agentId: string, accepting: boolean, at: Date): Promise<void> {
+  try {
+    await db
+      .insert(agentPresenceIntervals)
+      .values({ agentId, accepting, startedAt: at, lastBeatAt: at });
+  } catch (error) {
+    console.error('[presence] could not open an interval', error);
+  }
+}
+
+/** A clean sign-off. Anything still open for this agent ends now. */
+async function close(agentId: string, at: Date): Promise<void> {
+  try {
+    await db
+      .update(agentPresenceIntervals)
+      .set({ endedAt: at })
+      .where(
+        and(eq(agentPresenceIntervals.agentId, agentId), isNull(agentPresenceIntervals.endedAt)),
+      );
+  } catch (error) {
+    console.error('[presence] could not close an interval', error);
+  }
 }
 
 /**
