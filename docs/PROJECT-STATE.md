@@ -590,6 +590,27 @@ Each cost real time. Most are also comments in the code.
     of its fields at 16px. Chromium reproduces none of this, emulated phone or
     not — the caret is the one part of that fix nothing here can test.
 
+20. **A JS `Date` cannot be a keyset-paging cursor over a Postgres timestamp.**
+    Both backfills paged on `(created_at, id)`, taking the cursor from the last
+    row of each batch. Neither ever terminated. postgres.js hands a
+    `timestamptz` back as a JS `Date`, which holds milliseconds, while the column
+    holds microseconds — so a cursor read back through JS is _earlier_ than the
+    row it came from, that row satisfies its own `created_at > cursor`, and the
+    same batch is returned for ever. On Postgres 16 every row in a seeded table
+    reports `created_at > date_trunc('milliseconds', created_at)` as true.
+
+    Both now page on the primary key, which survives the round trip intact. The
+    scan is then ordered by uuid rather than by time, which costs a backfill
+    nothing.
+
+    Worth noting how long it hid: `backfill_shipment_links` shipped with this and
+    sat behind a live button on `/admin/import` for weeks. It looked correct, it
+    passed review, and its unit tests all passed — because the tests covered the
+    detection logic and nothing exercised the loop against a real database. The
+    figure that would have given it away is that the `jobs` table has never held
+    a single `backfill_shipment_links` row. **A job that has never been run is
+    not tested, whatever its tests say.**
+
 ## 7. Verification already done
 
 - **WhatsApp, end to end on production.** A synthetic webhook was enqueued; the
@@ -651,6 +672,25 @@ Each cost real time. Most are also comments in the code.
   So the counts now read: 837 candidate messages, 16 structured by the live path,
   **821 still waiting on the backfill** (§5.1). The candidate figure climbs with
   traffic; the 821 does not, and only the backfill moves it.
+
+- **Both backfills, run end to end against a local Postgres 16** — and the first
+  run is what found the bug in §6.20. Nine messages were seeded to cover every
+  branch: a bare pin, a pin with name and address, a pin on a row already
+  carrying `media` and the bot's `echo` flag, an out-of-range coordinate, a
+  malformed `raw_body`, a row already holding a pin, a text message mentioning
+  the word, and a message with no pin at all — across two channels, so the
+  per-channel tally could be checked rather than assumed.
+
+  All of it behaved: 5 pins written at full precision, the out-of-range and
+  malformed rows skipped and counted as unreadable, the already-structured row
+  reported as already-done and left untouched, and the message with no mention
+  never scanned. **The merge held** — the row with `media`, `echo`,
+  `creationType`, `whatsappType` and `phoneNumberId` kept all five and gained
+  `location`. A second run recovered nothing and left the `meta` of every row
+  byte-identical, checked by checksum rather than by eye. `dryRun` wrote nothing.
+
+  `backfill_shipment_links` was run too, since it carried the same defect, and
+  now completes over the same table in 40 ms.
 
 ### Tooling notes for this environment
 

@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, gte, lte, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, eq, gt, gte, lte, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversations, messages } from '@/db/schema';
 import type { ClaimedJob } from '@/lib/queue';
@@ -67,7 +67,7 @@ export async function backfillMessageLocations(job: ClaimedJob): Promise<void> {
   const tallies = new Map<string, ChannelTally>();
   const failures: string[] = [];
 
-  let cursor: { createdAt: Date; id: string } | null = null;
+  let cursor: string | null = null;
   let scanned = 0;
 
   for (;;) {
@@ -75,37 +75,39 @@ export async function backfillMessageLocations(job: ClaimedJob): Promise<void> {
     if (remaining <= 0) break;
 
     const where = [...bounds];
-    if (cursor) {
-      // Keyset paging on (created_at, id), served by messages_created_idx —
-      // same reasoning as backfill-shipment-links, including why this is eq()
-      // and gt() rather than a raw sql fragment holding a Date.
-      where.push(
-        or(
-          gt(messages.createdAt, cursor.createdAt),
-          and(eq(messages.createdAt, cursor.createdAt), gt(messages.id, cursor.id)),
-        )!,
-      );
-    }
+    // Keyset paging on the primary key alone, served by its own index.
+    //
+    // Not on (created_at, id), which is the obvious choice and is broken here.
+    // postgres.js hands a timestamptz back as a JS Date, which holds
+    // milliseconds, while the column holds microseconds — so a cursor taken
+    // from a row read back through JS is *earlier* than the row itself, the row
+    // matches its own `created_at > cursor`, and the same batch is returned for
+    // ever. Verified against Postgres 16: every row in a seeded table reported
+    // `created_at > date_trunc('milliseconds', created_at)` as true.
+    //
+    // The id is a uuid, so this orders the scan arbitrarily rather than by
+    // time. That costs nothing — a backfill has no reason to prefer one order —
+    // and it removes the whole class of bug rather than patching around it.
+    if (cursor) where.push(gt(messages.id, cursor));
 
     const batch = await db
       .select({
         id: messages.id,
         meta: messages.meta,
         rawBody: messages.rawBody,
-        createdAt: messages.createdAt,
         channel: conversations.channel,
       })
       .from(messages)
       .innerJoin(conversations, eq(conversations.id, messages.conversationId))
       .where(and(...where))
-      .orderBy(asc(messages.createdAt), asc(messages.id))
+      .orderBy(asc(messages.id))
       .limit(Math.min(BATCH, remaining));
 
     if (batch.length === 0) break;
 
     for (const message of batch) {
       scanned += 1;
-      cursor = { createdAt: message.createdAt, id: message.id };
+      cursor = message.id;
 
       const tally = tallies.get(message.channel) ?? emptyTally();
       tallies.set(message.channel, tally);
