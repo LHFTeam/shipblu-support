@@ -5,7 +5,7 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-08-21, against `main` at `870d2cb`.
+Last updated: 2026-08-21, against `main` at `e388285`.
 
 ---
 
@@ -17,8 +17,7 @@ the bilingual knowledge base with its Freshdesk importer, the chat widget, SLA
 policies, automation rules, CSAT and reporting, and a live dashboard for admins
 at `/admin/dashboard`. Since then the **customer portal** has landed too — the
 bare domain now opens the Arabic help centre, and one Sign in button
-authenticates customers and agents alike. Production is healthy on `04b5c60`,
-4 ms database latency, empty job queue, no dead jobs.
+authenticates customers and agents alike.
 
 Since then, **shipments**: tickets link to parcels and to shipping accounts,
 tracking numbers and SBIDs are detected in message text as it arrives, the inbox
@@ -36,6 +35,26 @@ name, a unique code and a shared mailbox per hub, joined to nothing on purpose;
 see `plans/contact-merge-and-locations.md` for why, and §5.1 for the sixteen rows
 nobody has entered yet.
 
+And then **side conversations**: an agent can open a thread with a hub, an
+internal team or a vendor from inside a ticket, and the answer comes back onto the
+ticket rather than into their personal mailbox — never onto the customer's timeline.
+This is the first thing to join `locations` to anything: the picker's hubs are
+its rows, which is what that table was entered for. Teams and vendors are not
+locations, so they keep their own small directory at `/admin/recipients`. Built
+and verified end to end against a local Postgres. The team directory has since
+been filled to three rows, but `locations` has not, so the picker still offers no
+hub at all — see §5.1, because a hub is the recipient an agent most often wants.
+
+And **shared locations**: a pin a customer drops is kept as coordinates rather
+than flattened into prose, rendered as a card with a Maps link, and the 821
+already in the archive are recoverable by a backfill from `/admin/import`. This
+is the first feature in the system whose case was made entirely from production
+data rather than from the plan — see §5.1 for the backfill, which has not been
+run yet, and §6.17 for the trap found while measuring it.
+
+The **help centre's UI was then rebuilt on the portal's design**, so the two
+halves a signed-in customer moves between stop looking like different products.
+
 And now **ticket assignment**. Until this landed a ticket reached a group and
 stopped there; a person only ever got one by picking it out of a dropdown. Each
 group can now hand its tickets out by round robin or by load, optionally filtered
@@ -49,27 +68,42 @@ one and **nothing had ever written** — so every agent read `offline` forever. 
 is written now, by the SSE stream and by nothing else. Every group ships on
 `manual`, so none of it changes behaviour until somebody opts a team in.
 
-And before that, **side conversations**: an agent can open a thread with a hub, an
-internal team or a vendor from inside a ticket, and the answer comes back onto the
-ticket rather than into their personal mailbox — never onto the customer's timeline.
-This is the first thing to join `locations` to anything: the picker's hubs are
-its rows, which is what that table was entered for. Teams and vendors are not
-locations, so they keep their own small directory at `/admin/recipients`. Built
-and verified end to end against a local Postgres; like everything in §5.1 both
-directories are empty, so the picker offers nothing until somebody fills them.
+**The bot channel is live, and everything else is not.** This is the single most
+important thing to understand about the current state, and the easiest to read
+backwards.
 
-**But almost none of it is configured.** The database holds 1 agent, 0 channel
-rows, 0 SLA policies and 0 automation rules. The remaining work is mostly not
-code — it is configuration, live-provider verification, and cutover. Treat
-"phase N is complete" as a statement about the codebase, never about the
-product being usable by the support team.
+`channels` holds exactly one row: `whatsapp_bot`. Through it, real traffic has
+been arriving since 2026-08-18 — **3,552 conversations, 9,544 messages and 3,476
+contacts** in three days, around 1,500 conversations a day. The database is not
+empty and the system is not idle.
+
+But that channel is **read-only observation by design**. Another service owns
+that number and holds the conversation; we receive a copy of both sides.
+`lib/tickets/channel-policy.ts` marks it read-only _and_ restricted, excludes it
+from "all channels" even for an admin, and keeps it out of the SLA sweep, the
+time-based automations and every reporting metric. Nobody on the team works
+those conversations. They are transcripts, not a queue.
+
+Every human channel put together holds **7 conversations** — 3 email, 2
+WhatsApp, 1 Facebook, 1 Instagram — all of them test traffic from 18–19 August.
+There is no email mailbox row, no human WhatsApp row, no `webchat` row and no
+`portal` row. `sla_policies` and `automation_rules` are both still empty, so the
+crons that sweep them run over nothing every 5 and 15 minutes. `locations` is
+still empty, all sixteen of them.
+
+So: **the system still cannot take a real human support ticket**, and the
+remaining work is mostly not code — it is configuration, live-provider
+verification, and cutover. Treat "phase N is complete" as a statement about the
+codebase, never about the product being usable by the support team. But do not
+read "not configured" as "no data": there is a real archive now, it is worth
+measuring things against, and §6.17 is what happens when you measure carelessly.
 
 ---
 
 ## 2. Live infrastructure
 
 Everything is in **Frankfurt / eu-central-1**. Colocation is deliberate and is
-worth protecting: the health endpoint reports 4 ms to the database, and a
+worth protecting: the health endpoint reports 2–4 ms to the database, and a
 console page issues 10–30 queries.
 
 ### Render — workspace `tea-da1f2lgjo6nc738hobmg`
@@ -79,10 +113,20 @@ console page issues 10–30 queries.
 | `shipblu-support`                | web (standard, autoscale 1→3) | `srv-da1jgtg1ne8s73ciqulg` | `main`                       |
 | `shipblu-support-worker`         | worker (starter)              | `srv-da1jgtg1ne8s73ciqujg` | `main`                       |
 | `shipblu-support-staging`        | web (starter)                 | `srv-da1jgtg1ne8s73ciqul0` | a feature branch — see below |
-| `shipblu-sla-sweep`              | cron `*/5 * * * *`            | `crn-da1jgtg1ne8s73ciqup0` | `main`                       |
+| `shipblu-sla-sweep`¹             | cron `*/5 * * * *`            | `crn-da1jgtg1ne8s73ciqup0` | `main`                       |
 | `shipblu-time-automations`       | cron `*/15 * * * *`           | `crn-da1jgtg1ne8s73ciquog` | `main`                       |
 | `shipblu-whatsapp-template-sync` | cron `0 * * * *`              | `crn-da1jgtg1ne8s73ciquk0` | `main`                       |
 | `shipblu-nightly`                | cron `0 0 * * *`              | `crn-da1jgtg1ne8s73ciqumg` | `main`                       |
+
+¹ `shipblu-sla-sweep` runs **two** jobs, `sla_sweep && assign_sweep`, chained the
+way `shipblu-nightly` chains cleanup and the rollup — same cadence, neither long,
+and a second container booting every five minutes to run a query that usually
+returns nothing is not worth it. The order matters and the `&&` does too: the SLA
+sweep goes first so a ticket the assignment sweep is about to hand to somebody
+carries its breach flags when they open it, and a failure in the first half takes
+the run red rather than reporting success because the second half worked. So the
+service name understates what it does — grep `render.yaml` for `startCommand`
+rather than trusting a cron's name.
 
 **Staging is currently suspended, and it is pinned to the feature branch
 `claude/shipblu-support-app-03p2we` rather than to a staging branch.** Both are
@@ -184,16 +228,18 @@ In rough priority order. Nothing here is blocked by anything else.
 The system cannot take a single real ticket until this is done, and none of it
 is code:
 
-- **Channel rows.** `channels` is empty. Email mailboxes, the WhatsApp business
-  number, the Facebook page and Instagram account, and a `webchat` channel each
-  need a row. The env vars are the credentials; the rows are what the app
-  routes on. A `portal` row is worth adding too: without one, tickets opened
-  from the customer portal land with no default group, so nothing routes them.
-- **Agents.** One account exists. The team needs inviting, and `groups` (3 rows)
-  needs its membership — which is now load-bearing rather than decorative:
-  auto-assignment only ever considers members of the ticket's group, so a group
-  with an empty roster hands out nothing and says `no_group_members` on the
-  timeline.
+- **Channel rows.** `channels` holds one row, `whatsapp_bot`, and it is the
+  observed bot number rather than anything the team answers (§1). Email
+  mailboxes, the _human_ WhatsApp business number, the Facebook page and
+  Instagram account, and a `webchat` channel each still need a row. The env vars
+  are the credentials; the rows are what the app routes on. A `portal` row is
+  worth adding too: without one, tickets opened from the customer portal land
+  with no default group, so nothing routes them.
+- **Agents.** Three accounts exist. The rest of the team needs inviting, and
+  `groups` (3 rows) needs its membership — which is now load-bearing rather than
+  decorative: auto-assignment only ever considers members of the ticket's group,
+  so a group with an empty roster hands out nothing and says `no_group_members`
+  on the timeline.
 - **Assignment is configured but off.** Every group is on `manual`, which is the
   deliberate default and means the module changes nothing until somebody chooses
   otherwise at `/admin/groups`. Whoever configures it should also decide the
@@ -210,14 +256,25 @@ is code:
 - **SLA policies and automation rules are both empty**, so the sweep and the
   time-based cron currently run over nothing every 5 and 15 minutes. Whatever
   Freshdesk enforces today needs transcribing.
-- **The side conversation picker's two registers.** Both are empty, so the
-  picker offers nothing but "Someone else…" and every agent will type an address
-  from memory — the exact failure it was built to prevent, since a mistyped
-  address delivers a customer's name, address and complaint to whoever owns that
-  domain. The hubs are the sixteen `locations` rows nobody has entered yet
-  (above); anything that is not a place — Finance, a courier partner — goes in
-  `internal_recipients` at `/admin/recipients`. Both need filling before the
-  feature is turned on for the team, not after.
+- **The side conversation picker's two registers.** One is now filled and one is
+  not. `internal_recipients` has 3 rows, all of them teams — so the picker
+  offers those three and nothing else. **Every hub is still missing**, because
+  the hubs are the sixteen `locations` rows nobody has entered (above), and a
+  hub is the recipient an agent most often wants. Until they exist an agent
+  needing one will type an address from memory, which is the exact failure the
+  feature was built to prevent: a mistyped address delivers a customer's name,
+  address and complaint to whoever owns that domain. Vendors — a courier
+  partner, Finance — also still go in `internal_recipients` at
+  `/admin/recipients`, and none is entered. Two side conversations are open
+  against the three teams that exist, so the mechanism is in use.
+- **The shared-location backfill has not been run.** 821 messages in the archive
+  carry a pin that reached us before the coordinates were kept, so the console
+  still shows those as `[location (30.03, 31.23)]` text an agent cannot open on
+  a map. New messages are fine — the live path stores the pin as it arrives. Run
+  it from `/admin/import`, which states how many are still text-only; it is
+  idempotent, never deletes, and reads each pin out of the original payload on
+  `raw_body`. Verified read-only beforehand: all 821 have both coordinates, all
+  are in range, so the run should recover all 821 and leave nothing unreadable.
 - **Unset config:** `EMAIL_API_KEY`, `EMAIL_FROM_ADDRESS`, `EMAIL_REPLY_DOMAIN`,
   `EMAIL_WEBHOOK_SECRET`, `KB_PUBLIC_HOST`, `WIDGET_ALLOWED_ORIGINS`.
 - **Presence has never been observed with more than one agent.** It is written
@@ -226,20 +283,36 @@ is code:
   tabs marks the agent offline and the surviving tab's next beat — up to 25
   seconds later — puts them back. That window is a brief skip in the rota, which
   is the cheaper error, but nobody has watched it happen with a real team.
-- **The shipment detection patterns are a guess and need confirming.**
-  `SHIPMENT_TRACKING_PATTERN` and `SHIPMENT_SBID_PATTERN` are unset, so the
-  defaults in `lib/shipments/detect.ts` are in force: a tracking number must
-  carry letters _and_ digits, and an SBID must be anchored on its keyword.
-  Nobody has told us the real formats. That is deliberate rather than an
-  oversight — the two failure modes are not symmetric, and an under-detection is
-  repaired by one agent click plus a backfill re-run, while an over-detection
-  puts junk shipments on real tickets and eventually out over an API. But it
-  does mean detection will find less than it should until someone checks. The
-  variables live in the `shipblu-shared` group because the web service and the
-  worker have to agree: the worker links on the pattern, the console searches on
+- **The shipment detection patterns are still a guess — and the zero they
+  produce is not evidence against them.** `SHIPMENT_TRACKING_PATTERN` and
+  `SHIPMENT_SBID_PATTERN` are unset, so the defaults in
+  `lib/shipments/detect.ts` are in force: a tracking number must carry letters
+  _and_ digits, and an SBID must be anchored on its keyword. Nobody has told us
+  the real formats. That is deliberate rather than an oversight — the two failure
+  modes are not symmetric, and an under-detection is repaired by one agent click
+  plus a backfill re-run, while an over-detection puts junk shipments on real
+  tickets and eventually out over an API.
+
+  `shipments` is empty across 9,544 messages, which looks exactly like the
+  under-detection predicted above. **It is not.** 837 of those messages contain a
+  run of six or more digits, and reading them shows what the digits are: GPS
+  coordinate fractions from shared pins, and Egyptian postal codes inside
+  geocoded addresses — `Gharbia Governorate 6745022`. Only 14 messages carry
+  anything with the letters-and-digits shape at all. There is no evidence of a
+  single real tracking number in the archive, which is unsurprising: the only
+  live channel is the bot, and a customer talking to a bot is answering its
+  prompts rather than quoting an AWB. So zero is the correct output here, and
+  widening the pattern to bare seven-digit numbers on the strength of that 837
+  would have attached junk shipments to hundreds of real tickets. See §6.17.
+
+  Get the real formats from the shipping team; do not infer them from this
+  archive. The variables live in the `shipblu-shared` group because the web
+  service and the worker have to agree: the worker links on the pattern, the
+  console searches on
   it, and a service that disagreed would link a ticket the search could never
   find again. After correcting one, run the backfill from `/admin/import` — the
   live path only ever sees new messages.
+
 - **`/admin/import` now has a second card** whose figures answer whether the
   pattern is right: it splits links into those the detector found and those
   agents made by hand, and says so plainly when the second number is larger.
@@ -269,6 +342,19 @@ provider. Each is a round trip somebody has to actually watch:
   and have somebody on it reply. If all three are eaten the reply opens a new
   customer ticket instead, which is visible immediately: the mail lands in the
   inbox as a new ticket from a hub address rather than on the thread.
+- **Meta's Human Agent feature, which nothing has confirmed is approved.** A
+  Facebook or Instagram reply sent more than 24 hours after the customer's last
+  message goes out tagged `HUMAN_AGENT`, and that tag requires the Human Agent
+  permission to be approved for the app. On 2026-08-20 one such send failed
+  eight times and died in the queue, and Graph's only account of why was "An
+  unknown error has occurred." #49 made that refusal explain itself and named
+  this as the likely cause, but **the diagnosis is a hypothesis and the
+  permission has never been checked** — nobody has looked at the app's review
+  status in the Meta dashboard. If it is not approved then every FB/IG reply
+  outside 24 hours fails, which on a support channel is most of them. That dead
+  job is still the one dead row in `jobs`; it is a real customer reply that was
+  never delivered. Check the dashboard before the channels are turned on, not
+  after.
 - **The portal's verification and reset emails through Postmark.** The whole
   flow has been driven end to end against a local Postgres with
   `EMAIL_PROVIDER=local`, so the links, the tokens and the single-use rules are
@@ -457,7 +543,24 @@ Each cost real time. Most are also comments in the code.
     cost nothing — but an index on a table the size of `messages` needs its own
     migration. There is a note to this effect in the file itself.
 
-17. **A module reachable from the search parser must not call `env()`.**
+17. **A count of digits is not a count of tracking numbers.** `shipments` sat at
+    zero across 9,544 messages while 837 of them contained a six-or-more-digit
+    run — which reads as the conservative detection pattern under-matching, and
+    invites widening it to bare numbers. Reading the messages instead of the
+    aggregate showed the digits were GPS coordinate fractions from shared pins
+    and Egyptian postal codes inside geocoded addresses. One "tracking number"
+    appearing six times, which looked like the clinching evidence of a real
+    parcel being chased, was a coordinate fragment.
+
+    Widening the pattern on that basis would have attached junk shipments to
+    hundreds of real tickets — the failure `lib/shipments/detect.ts` is
+    deliberately built to avoid, arrived at by way of the metric that was
+    supposed to justify the change. **This is trap 14 inverted**: there, a total
+    hid a real gap; here, a total invented one that was not there. Same lesson
+    either way — before acting on an aggregate, read the rows underneath it.
+    Both times the rows were one query away.
+
+18. **A module reachable from the search parser must not call `env()`.**
     `lib/shipments/detect.ts` reads its three variables straight from
     `process.env`, because `env()` validates the whole schema and the detector is
     imported by `parseSearchTerm` — going through it made an inbox search fail on
@@ -482,8 +585,11 @@ Each cost real time. Most are also comments in the code.
   version in Freshdesk — so nothing is missing. Its 4 folders are the only
   `agents_only` ones; every other folder is public. That visibility came from
   Freshdesk and matches the category's meaning, so it needs no decision.
-- **Production health:** `status: ok`, 4 ms database latency, queue empty, no
-  dead jobs. Job history shows only completed work.
+- **Production health**, checked 2026-08-21 on `98ec9d4`: `status: ok`, 2 ms
+  database latency, queue empty. **One dead job** — the `send_meta` row in §5.2,
+  which is a real undelivered customer reply and not a transient failure.
+  Everything else in the job history is completed work: 43,396 rows, almost all
+  `process_webhook`, which is what 1,500 bot conversations a day looks like.
 - **Side conversations, end to end against a local Postgres 16.** The migration
   and the `db/sql/` replay both applied clean; the `attachments_one_owner` CHECK
   refuses a row with neither owner. An agent's question was sent through
@@ -498,6 +604,33 @@ Each cost real time. Most are also comments in the code.
   `lib/portal/tickets.ts` as the requester, the hub's words, our question, the
   hub employee's name and the hub address are all **absent from the payload**,
   not merely unrendered.
+
+- **Shared locations, measured against the archive before the code was written.**
+  Of the 821 messages whose stored payload mentions a location, all 821 have a
+  `location` object carrying both coordinates; all are typed as JSON numbers, all
+  fall inside valid latitude and longitude, and none sits at 0,0. So the range
+  check in `lib/tickets/shared-location.ts` rejects nothing real, and the SQL
+  prefilter the backfill uses has no false positives on this archive. 136 of the
+  821 carry a name and a geocoded address; the other 685 are a bare pin, which is
+  why the map link matters more than the label. The four gates are clean and both
+  the web service and the worker are live on `98ec9d4`.
+
+  **The live path is verified on production.** Both services went live on
+  `98ec9d4` at 02:28 on 2026-08-21, and by 09:58 sixteen pins had arrived and been
+  stored structurally — every one typed as a JSON number, every one in range, and
+  the most recent candidate in the table is itself one of them, so nothing is
+  slipping past. Thirteen are bare pins and three carry a name, which is the same
+  roughly one-in-six ratio as the archive.
+
+  The write is **additive, confirmed in the data**: `whatsappType` and
+  `phoneNumberId` are still present on all sixteen rows. That was the specific
+  risk — `meta` is a single jsonb column and assigning it rather than merging
+  would have silently dropped the media block and the bot's `echo` flag on every
+  pin.
+
+  So the counts now read: 837 candidate messages, 16 structured by the live path,
+  **821 still waiting on the backfill** (§5.1). The candidate figure climbs with
+  traffic; the 821 does not, and only the backfill moves it.
 
 ### Tooling notes for this environment
 
