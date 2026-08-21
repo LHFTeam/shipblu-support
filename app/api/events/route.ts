@@ -1,5 +1,6 @@
 import { sessionSql } from '@/db/client';
 import { getSessionAgent } from '@/lib/auth/session';
+import { beat, goOffline, goOnline } from '@/lib/assignment/presence';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,6 +15,13 @@ export const dynamic = 'force-dynamic';
  * The payload is deliberately just "something changed on conversation X" — the
  * client refetches through the normal authorised path, so the stream never
  * becomes a way to receive tickets the agent cannot otherwise see.
+ *
+ * It doubles as the presence signal. An open stream is an agent with the console
+ * in front of them, which is exactly the question auto-assignment needs answered
+ * and exactly the one `agents.presence` had no writer for until now. Recording it
+ * here rather than from a heartbeat endpoint of its own means there is nothing
+ * extra to keep alive, and nothing that can disagree with the stream about
+ * whether somebody is there.
  */
 export async function GET(request: Request) {
   const agent = await getSessionAgent();
@@ -44,19 +52,36 @@ export async function GET(request: Request) {
         send('degraded', '{}');
       }
 
+      // Presence is recorded after LISTEN rather than before, so a database that
+      // cannot be reached does not leave an agent marked online on a stream that
+      // carries nothing. Failures are swallowed: presence is a routing hint, and
+      // losing it must never cost the agent their live updates.
+      void goOnline(agent.id).catch((error) => {
+        console.error('[sse] could not record presence', error);
+      });
+
       // Proxies drop idle connections at around 60s; a comment line keeps the
-      // stream alive without being delivered as an event.
+      // stream alive without being delivered as an event. It is also the
+      // heartbeat that assignment reads — an agent whose beat has gone stale is
+      // treated as gone whatever the presence column still says, which is what
+      // makes an instance killed mid-stream heal itself.
       heartbeat = setInterval(() => {
         try {
           controller.enqueue(encoder.encode(': keepalive\n\n'));
         } catch {
           /* closed */
         }
+        void beat(agent.id).catch(() => {
+          /* the staleness check covers a missed beat */
+        });
       }, 25_000);
 
       request.signal.addEventListener('abort', () => {
         if (heartbeat) clearInterval(heartbeat);
         void listener?.end();
+        void goOffline(agent.id).catch(() => {
+          /* the staleness check covers a missed sign-off */
+        });
         try {
           controller.close();
         } catch {
@@ -68,6 +93,13 @@ export async function GET(request: Request) {
     cancel() {
       if (heartbeat) clearInterval(heartbeat);
       void listener?.end();
+      // Both teardown paths sign off. `cancel` fires when the consumer drops the
+      // stream, `abort` when the request is torn down; which one runs depends on
+      // the runtime, and an agent left marked online is one who keeps receiving
+      // tickets they cannot see.
+      void goOffline(agent.id).catch(() => {
+        /* the staleness check covers a missed sign-off */
+      });
     },
   });
 

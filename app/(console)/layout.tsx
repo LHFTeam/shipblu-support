@@ -5,6 +5,7 @@ import { requireAgent } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
 import { inboxCounts } from '@/lib/tickets/queries';
 import { initials } from '@/lib/format';
+import { AvailabilitySwitch } from './availability';
 import { Rail, type NavItem } from './nav';
 
 export const dynamic = 'force-dynamic';
@@ -62,6 +63,7 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
           </Link>
 
           <div className="ms-auto flex items-center gap-3">
+            <AvailabilitySwitch accepting={agent.isAcceptingTickets} />
             <span className="hidden text-xs text-[var(--muted-foreground)] sm:block">
               {agent.name ?? agent.email}
             </span>

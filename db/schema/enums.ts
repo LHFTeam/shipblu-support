@@ -62,6 +62,21 @@ export const agentRoleEnum = pgEnum('agent_role', [
 
 export const agentPresenceEnum = pgEnum('agent_presence', ['online', 'away', 'offline']);
 
+/**
+ * How a group hands a ticket to a person.
+ *
+ * `manual` is the default and means what the product did before this existed:
+ * the ticket sits in the group queue until somebody picks it up. Skills are not
+ * a fourth value here — they are a *filter* over the candidates, kept as a
+ * separate `match_skills` flag on the group, so turning skill matching on does
+ * not make an admin re-choose how the survivors are distributed.
+ */
+export const assignmentStrategyEnum = pgEnum('assignment_strategy', [
+  'manual',
+  'round_robin',
+  'load_balanced',
+]);
+
 export const automationTriggerEnum = pgEnum('automation_trigger', [
   'on_create',
   'on_update',

@@ -580,6 +580,14 @@ function Sidebar({
   );
 }
 
+const SKIP_REASONS: Record<string, string> = {
+  outside_hours: 'the group was outside its business hours',
+  no_group_members: 'the group has no members',
+  none_available: 'nobody in the group was online and accepting tickets',
+  all_at_capacity: 'everybody available was at their ticket limit',
+  no_skill_match: 'nobody available held every skill it needs',
+};
+
 function describeEvent(type: string, data: Record<string, unknown>): string {
   switch (type) {
     case 'status_changed':
@@ -590,6 +598,20 @@ function describeEvent(type: string, data: Record<string, unknown>): string {
       return 'reassigned the ticket';
     case 'unassigned':
       return 'unassigned the ticket';
+    case 'group_changed':
+      return 'moved the ticket to another group';
+    /*
+     * The whole point of recording a refusal. A queue that assigns itself has to
+     * be able to say why it did not, in a sentence an agent looking at the ticket
+     * can act on — "everybody is at their limit" is a different problem from
+     * "nobody has the skill", and both are different from "we were shut".
+     */
+    case 'assignment_skipped':
+      return `could not assign it: ${SKIP_REASONS[String(data.reason)] ?? String(data.reason)}`;
+    case 'assignment_reclaimed':
+      return 'took the ticket back — the agent it was with went offline before replying';
+    case 'assignment_escalated':
+      return 'escalated it: nobody had picked it up';
     case 'reopened':
       return 'reopened the ticket';
     case 'sla_paused':

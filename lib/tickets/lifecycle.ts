@@ -1,3 +1,4 @@
+import { assignConversation } from '@/lib/assignment';
 import { runAutomations } from '@/lib/automations';
 import { linkShipmentsFromMessage } from '@/lib/shipments/links';
 import { scheduleSurvey } from '@/lib/csat';
@@ -36,16 +37,45 @@ export async function afterInboundMessage(
   if (createdConversation) {
     await runAutomations('on_create', conversationId);
     await applySlaOnCreate(conversationId);
+    await autoAssign(conversationId);
     return;
   }
 
   await onCustomerReply(conversationId, at);
   await runAutomations('on_update', conversationId);
+  await autoAssign(conversationId);
 }
 
 /** An agent changed something in the console. */
 export async function afterTicketUpdate(conversationId: string): Promise<void> {
   await runAutomations('on_update', conversationId);
+  await autoAssign(conversationId);
+}
+
+/**
+ * Hand the ticket to somebody, if its group is configured to do that.
+ *
+ * Last, and after the automations, because a rule that moves the ticket to
+ * another group is describing where the work belongs — assigning first would
+ * hand it to a member of the group it is about to leave.
+ *
+ * It runs on replies and console updates as well as on arrival, and that costs
+ * nothing: `assignConversation` returns without a write for a ticket that
+ * already has an assignee, which is nearly all of them. What it buys is the
+ * ticket that arrived unassigned overnight and is still unassigned when the
+ * customer chases it, and the one a rule has just moved into a group that does
+ * route.
+ *
+ * Failures are logged and swallowed, exactly as shipment linking is. These paths
+ * run inside queue jobs; throwing here would fail the job, and the retry would
+ * re-run every engine that already succeeded — including sending a reply twice.
+ */
+async function autoAssign(conversationId: string): Promise<void> {
+  try {
+    await assignConversation(conversationId);
+  } catch (error) {
+    console.error(`[lifecycle] auto-assignment failed for conversation ${conversationId}`, error);
+  }
 }
 
 /**

@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { and, desc, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
+  agents,
   contactIdentities,
   conversationEvents,
   conversations,
@@ -16,6 +17,8 @@ import {
   ticketStatuses,
   whatsappTemplates,
 } from '@/db/schema';
+import { assignConversation } from '@/lib/assignment';
+import { requestAssignmentSweep } from '@/lib/assignment/presence';
 import { requireAgent } from '@/lib/auth/guard';
 import { env } from '@/lib/env';
 import { can } from '@/lib/auth/permissions';
@@ -462,7 +465,7 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
       await db.transaction(async (tx) => {
         await tx
           .update(conversations)
-          .set({ assigneeAgentId })
+          .set({ assigneeAgentId, assignedAt: assigneeAgentId ? new Date() : null })
           .where(eq(conversations.id, conversationId));
 
         await tx.insert(conversationEvents).values({
@@ -476,15 +479,34 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
     }
 
     case 'group': {
-      await db
-        .update(conversations)
-        .set({ groupId: value || null })
-        .where(eq(conversations.id, conversationId));
+      const groupId = value || null;
+
+      await db.transaction(async (tx) => {
+        await tx
+          .update(conversations)
+          .set({ groupId })
+          .where(eq(conversations.id, conversationId));
+
+        // Recorded, where it was not before. Moving a ticket between teams is
+        // the same weight of decision as reassigning it and the case above has
+        // always written an event; without this one the timeline could say who
+        // took a ticket but never how it reached their team.
+        await tx.insert(conversationEvents).values({
+          conversationId,
+          type: 'group_changed',
+          actorAgentId: agent.id,
+          data: { to: groupId },
+        });
+      });
 
       // Groups can keep their own operating days and holidays, so the due dates
       // are re-counted on the new team's calendar rather than left pointing at
       // hours that team does not work.
       await onGroupChanged(conversationId);
+
+      // The new team may route automatically where the old one did not. A no-op
+      // if somebody already holds the ticket, which is the usual case.
+      await assignConversation(conversationId, { actorLabel: 'auto_assign' });
       break;
     }
 
@@ -1062,4 +1084,29 @@ async function quotedAnchorMessage(
   if (message.kind === 'note') return null;
 
   return quoteAnchor(message.contactName, message.bodyText, message.createdAt);
+}
+
+/**
+ * The agent's own availability switch.
+ *
+ * Needs no permission beyond being signed in: it is a statement about
+ * themselves, and the only thing it can do is send fewer tickets their way.
+ *
+ * Turning it back on asks the sweep to look at the queue, so somebody coming out
+ * of a meeting picks up what is waiting rather than waiting for the next
+ * five-minute tick.
+ */
+export async function setAcceptingTickets(
+  _state: { error: string | null; accepting?: boolean },
+  formData: FormData,
+): Promise<{ error: string | null; accepting?: boolean }> {
+  const agent = await requireAgent();
+  const accepting = formData.get('accepting') === 'true';
+
+  await db.update(agents).set({ isAcceptingTickets: accepting }).where(eq(agents.id, agent.id));
+
+  if (accepting) await requestAssignmentSweep();
+
+  revalidatePath('/inbox');
+  return { error: null, accepting };
 }

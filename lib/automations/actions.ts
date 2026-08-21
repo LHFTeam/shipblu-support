@@ -8,11 +8,31 @@
  * resulting timeline entries honest.
  */
 
+import type { AssignmentStrategy } from '@/lib/assignment';
+
 export type Action =
   | { type: 'set_priority'; value: 'low' | 'medium' | 'high' | 'urgent' }
   | { type: 'set_status'; category: 'open' | 'pending' | 'resolved' | 'closed' }
   | { type: 'assign_agent'; agentId: string | null }
   | { type: 'assign_group'; groupId: string | null }
+  /**
+   * Route into a group and let that group's rota pick the person.
+   *
+   * The difference from `assign_agent` is that this one names no agent: it is
+   * how an admin says "urgent shipping tickets go to the shipping team, whoever
+   * is free", which is a rule that stays correct when somebody leaves.
+   *
+   * `groupId: null` means the ticket's current group, so a rule can turn routing
+   * on for a ticket without moving it. `strategy: 'group_default'` defers to the
+   * group's own setting, which is the common case — an override is for the rule
+   * that wants urgent work load-balanced in a group that is otherwise round
+   * robin.
+   */
+  | {
+      type: 'auto_assign';
+      groupId: string | null;
+      strategy: AssignmentStrategy | 'group_default';
+    }
   | { type: 'add_tags'; tags: string[] }
   | { type: 'remove_tags'; tags: string[] }
   | { type: 'add_watchers'; agentIds: string[] }
@@ -20,6 +40,7 @@ export type Action =
   | { type: 'send_reply'; cannedResponseId: string };
 
 const PRIORITIES = new Set(['low', 'medium', 'high', 'urgent']);
+const STRATEGIES = new Set(['group_default', 'manual', 'round_robin', 'load_balanced']);
 const CATEGORIES = new Set(['open', 'pending', 'resolved', 'closed']);
 
 /**
@@ -52,6 +73,20 @@ export function parseAction(input: unknown): Action | null {
 
     case 'assign_group':
       return { type: 'assign_group', groupId: asIdOrNull(node.groupId) };
+
+    case 'auto_assign': {
+      // An unrecognised strategy rejects the whole action rather than quietly
+      // falling back to the group default: a rule written against a strategy
+      // this deploy does not know about should be skipped, not reinterpreted
+      // into something the admin did not ask for.
+      const strategy = typeof node.strategy === 'string' ? node.strategy : 'group_default';
+      if (!STRATEGIES.has(strategy)) return null;
+      return {
+        type: 'auto_assign',
+        groupId: asIdOrNull(node.groupId),
+        strategy: strategy as AssignmentStrategy | 'group_default',
+      };
+    }
 
     case 'add_tags':
     case 'remove_tags': {

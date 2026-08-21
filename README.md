@@ -7,8 +7,9 @@ Facebook and Instagram, a web chat widget, and a bilingual knowledge base.
 email ticketing; WhatsApp; the agent console; the bilingual knowledge base, Freshdesk
 import and chat widget; SLA policies, automation rules, CSAT and reporting; Facebook and
 Instagram — direct messages and public comments — with admin screens for every piece of
-configuration and a live dashboard at `/admin/dashboard`; and a signed-in customer portal
-behind one sign-in shared with the console.
+configuration and a live dashboard at `/admin/dashboard`; a signed-in customer portal
+behind one sign-in shared with the console; and automatic ticket assignment, which is the
+first thing in this system to put a ticket in front of a named person rather than a team.
 
 ## Architecture
 
@@ -77,6 +78,16 @@ Design decisions worth knowing before changing things:
 - **Automations never trigger automations.** Rule actions write to the ticket directly
   instead of re-entering the engine, which is what stops two rules from triggering each
   other forever.
+- **Auto-assignment never overwrites an existing assignee**, on any path. That one
+  invariant is what makes a reopened ticket stick to the agent who handled it and what
+  stops the five-minute sweep from shuffling work under people mid-reply. It is also why
+  the sweep can safely re-examine the whole backlog: for nearly every ticket it is a read.
+- **Presence has exactly one writer.** `agents.presence` is set by the SSE stream at
+  `/api/events` and nothing else — a stream is open or it is not. The agent's own away
+  switch is a separate column, `is_accepting_tickets`, because a manual "away" that the
+  next reconnect silently overwrites is worse than no switch at all. Eligibility also
+  requires a fresh heartbeat, so an instance killed mid-stream stops receiving tickets in
+  two minutes without a reaper.
 - **Reporting reads only `metrics_daily`.** The nightly rollup stores four slices per day
   — totals, by group, by agent, by channel — so the reports page never aggregates over
   the full message history, and today's figures appear tomorrow.
@@ -256,6 +267,68 @@ the idea borrowed here as `side_conversations.anchor_message_id`.
 - **The SLA is not paused.** Starting a thread offers to set the ticket to Pending and
   otherwise does nothing, because a clock stopped behind a thread the customer cannot
   see makes the report stop describing what the customer experienced.
+
+## Ticket assignment
+
+A ticket has always reached a **group**; this is what gets it to a **person**. Each group
+chooses how, and every group starts on `manual`, which is exactly what the product did
+before — so nothing changes until an admin opts a team in.
+
+```
+/admin/groups              the strategy, caps, hours, reclaim and escalation
+/admin/skills              skills, what makes a ticket need one, and who holds it
+/admin/agents              per-agent caps, and what assignment currently sees
+```
+
+- **Manual** — the ticket waits in the group queue.
+- **Round robin** — each member in turn.
+- **Load balanced** — whoever is holding the fewest open tickets, capped per agent.
+- **Skills** are a *filter*, not a fourth strategy: switch matching on and the group still
+  distributes the survivors by round robin or by load. Freshdesk models this as three
+  mutually exclusive modes, which makes turning skills on discard the answer you already
+  gave about distribution.
+
+Who is eligible is decided in one pure function, `filterCandidates` in
+`lib/assignment/eligibility.ts`: a member of the group, active, connected, accepting, under
+their cap, holding every skill the ticket matched. Everything else in `lib/assignment` is
+either the SQL that loads those rows or the strategy that picks between them.
+
+- **What a ticket needs is derived from it, never stored on it.** A skill carries
+  `conditions` in the same language as SLA policies and automation rules, so correcting a
+  skill immediately corrects every ticket already sitting in the queue rather than only the
+  ones that arrive next. The one departure from that language's conventions: an **empty**
+  condition set means the skill is never required. `{}` is the deliberate catch-all an SLA
+  configuration needs, but a skill with no conditions is nearly always one somebody started
+  and did not finish — and read as "always" it would demand that skill of every ticket in
+  the system and stop the queue dead.
+- **A refusal is recorded.** "Why is this still unassigned?" is the question a
+  self-assigning queue has to answer, so a skipped assignment writes `assignment_skipped`
+  with a reason — out of hours, everybody at capacity, nobody holds the skill — onto the
+  timeline. It is written once per reason rather than once per attempt, or a ticket that
+  arrives on a Friday evening carries two hundred identical entries by Monday.
+- **The routing rules are the automation rules.** One new action, `auto_assign`, rather
+  than a second engine with its own conditions, ordering and bugs. A rule says "urgent
+  shipping tickets go to the shipping team, whoever is free", which stays correct when
+  somebody leaves in a way `assign_agent` does not. Naming a group **moves** the ticket
+  whether or not anybody turns out to be free to take it — otherwise the rule quietly means
+  "…unless they are busy, in which case leave it where it was".
+- **Assignment is serialised per group** by a `SELECT … FOR UPDATE` on the group row. Two
+  tickets arriving in the same second would otherwise read the same round-robin cursor and
+  land on the same agent, and two load-balanced picks would both see the counts from before
+  either wrote.
+- **The sweep re-asks the question every five minutes**, chained onto the SLA cron, because
+  most of the reasons a ticket goes unassigned resolve themselves later and none of them
+  announce it. It also runs on demand when an agent comes online, so the overnight queue
+  drains as the shift starts instead of up to five minutes later.
+- **Reclaiming is opt-in and narrow.** A group with `reclaim_after_mins` set takes a ticket
+  back off somebody who has gone offline — but only one still awaiting its first agent
+  reply, and only in an `open` status. Once an agent has answered, the thread is theirs:
+  pulling it out from under a half-written follow-up is worse for the customer than a slow
+  response. A `pending` ticket is waiting on the customer, not on us.
+- **Escalation finally reads `groups.escalate_to_agent_id`**, which has been in the schema
+  since the first migration with a comment describing exactly this and no code behind it.
+  It means what it means in the SLA sweep — the named agent becomes a watcher and the
+  timeline says why — because there is still no agent notification channel in this product.
 
 ## The customer portal
 

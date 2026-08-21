@@ -1,6 +1,6 @@
-import { asc, notInArray, sql } from 'drizzle-orm';
+import { asc, eq, notInArray, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { businessHours, conversations, groupMembers, groups } from '@/db/schema';
+import { agents, businessHours, conversations, groupMembers, groups } from '@/db/schema';
 import { Cell, PageHeader, Row, Table } from '@/components/ui';
 import { requirePermission } from '@/lib/auth/guard';
 import { readOnlyChannels } from '@/lib/tickets/channel-policy';
@@ -18,16 +18,30 @@ export const dynamic = 'force-dynamic';
  * counted on the company calendar or its own is worth being able to read down
  * the list.
  */
+const STRATEGY_LABELS: Record<'manual' | 'round_robin' | 'load_balanced', string> = {
+  manual: 'Manual',
+  round_robin: 'Round robin',
+  load_balanced: 'Load balanced',
+};
+
 export default async function GroupsPage() {
   await requirePermission('admin.groups');
 
-  const [rows, schedules] = await Promise.all([
+  const [rows, schedules, agentRows] = await Promise.all([
     db
       .select({
         id: groups.id,
         name: groups.name,
         description: groups.description,
         businessHoursId: groups.businessHoursId,
+        assignmentStrategy: groups.assignmentStrategy,
+        matchSkills: groups.matchSkills,
+        skillTimeoutMins: groups.skillTimeoutMins,
+        defaultMaxOpenTickets: groups.defaultMaxOpenTickets,
+        assignWithinHoursOnly: groups.assignWithinHoursOnly,
+        reclaimAfterMins: groups.reclaimAfterMins,
+        escalateToAgentId: groups.escalateToAgentId,
+        escalateAfterMins: groups.escalateAfterMins,
         members: sql<number>`(select count(*)::int from ${groupMembers} gm where gm.group_id = ${groups.id})`,
         // Read-only channels excluded: this number is "how much work sits with
         // this group", and a transcript nobody may answer is not work. It would
@@ -63,6 +77,11 @@ export default async function GroupsPage() {
       })
       .from(businessHours)
       .orderBy(asc(businessHours.name)),
+    db
+      .select({ id: agents.id, name: agents.name, email: agents.email })
+      .from(agents)
+      .where(eq(agents.isActive, true))
+      .orderBy(asc(agents.name)),
   ]);
 
   const scheduleChoices = schedules.map((schedule) => ({
@@ -70,29 +89,50 @@ export default async function GroupsPage() {
     label: schedule.name,
   }));
   const defaultName = schedules.find((schedule) => schedule.isDefault)?.name ?? null;
+  const agentChoices = agentRows.map((agent) => ({
+    value: agent.id,
+    label: agent.name || agent.email,
+  }));
 
   return (
     <>
       <PageHeader
         title="Groups"
-        description="Teams that tickets are routed to. A channel, an automation or an SLA policy can all put a ticket into one. A group can also work its own hours, days and holidays."
-        actions={<NewGroup schedules={scheduleChoices} />}
+        description="Teams that tickets are routed to. A channel, an automation or an SLA policy can all put a ticket into one. A group can also work its own hours, days and holidays, and hand its tickets out to its members automatically."
+        actions={<NewGroup schedules={scheduleChoices} agents={agentChoices} />}
       />
 
-      <Table head={['Group', 'Business hours', 'Agents', 'Tickets', '']}>
+      <Table head={['Group', 'Assignment', 'Business hours', 'Agents', 'Tickets', '']}>
         {rows.map((group) => {
           const editable = {
             id: group.id,
             name: group.name,
             description: group.description,
             businessHoursId: group.businessHoursId,
+            assignmentStrategy: group.assignmentStrategy,
+            matchSkills: group.matchSkills,
+            skillTimeoutMins: group.skillTimeoutMins,
+            defaultMaxOpenTickets: group.defaultMaxOpenTickets,
+            assignWithinHoursOnly: group.assignWithinHoursOnly,
+            reclaimAfterMins: group.reclaimAfterMins,
+            escalateToAgentId: group.escalateToAgentId,
+            escalateAfterMins: group.escalateAfterMins,
           };
           const own = schedules.find((schedule) => schedule.id === group.businessHoursId);
 
           return (
             <Row key={group.id}>
               <Cell>
-                <GroupEditor group={editable} schedules={scheduleChoices} />
+                <GroupEditor group={editable} schedules={scheduleChoices} agents={agentChoices} />
+              </Cell>
+              {/* On the list rather than only in the editor: a group set to
+                  manual while every other team routes is the kind of thing you
+                  want to notice by reading down a column. */}
+              <Cell className="text-[var(--muted-foreground)]">
+                {STRATEGY_LABELS[group.assignmentStrategy]}
+                {group.assignmentStrategy !== 'manual' && group.matchSkills ? (
+                  <span className="block text-xs">by skill</span>
+                ) : null}
               </Cell>
               <Cell className="text-[var(--muted-foreground)]">
                 {own ? (
@@ -104,7 +144,12 @@ export default async function GroupsPage() {
               <Cell className="text-[var(--muted-foreground)]">{group.members}</Cell>
               <Cell className="text-[var(--muted-foreground)]">{group.tickets}</Cell>
               <Cell className="text-end">
-                <GroupEditor group={editable} schedules={scheduleChoices} deleteOnly />
+                <GroupEditor
+                  group={editable}
+                  schedules={scheduleChoices}
+                  agents={agentChoices}
+                  deleteOnly
+                />
               </Cell>
             </Row>
           );

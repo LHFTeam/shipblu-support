@@ -63,6 +63,14 @@ export const conversations = pgTable(
     assigneeAgentId: uuid('assignee_agent_id').references(() => agents.id, {
       onDelete: 'set null',
     }),
+    /**
+     * When the current assignee got it. Null whenever `assigneeAgentId` is.
+     *
+     * Not derivable from the timeline: `conversation_events` is swept for
+     * nothing today but it is an append-only log meant for reading, and the
+     * reclaim pass asks this question of every live ticket every five minutes.
+     */
+    assignedAt: timestamp('assigned_at', { withTimezone: true }),
     groupId: uuid('group_id').references(() => groups.id, { onDelete: 'set null' }),
 
     tags: text('tags').array().notNull().default([]),

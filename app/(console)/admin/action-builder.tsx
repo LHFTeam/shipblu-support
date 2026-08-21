@@ -19,6 +19,7 @@ type ActionKind =
   | 'set_status'
   | 'assign_agent'
   | 'assign_group'
+  | 'auto_assign'
   | 'add_tags'
   | 'remove_tags'
   | 'add_watchers'
@@ -30,6 +31,7 @@ const KINDS: { value: ActionKind; label: string }[] = [
   { value: 'set_status', label: 'Set status' },
   { value: 'assign_agent', label: 'Assign to agent' },
   { value: 'assign_group', label: 'Assign to group' },
+  { value: 'auto_assign', label: 'Auto-assign in group' },
   { value: 'add_tags', label: 'Add tags' },
   { value: 'remove_tags', label: 'Remove tags' },
   { value: 'add_watchers', label: 'Add watchers' },
@@ -44,6 +46,19 @@ const PRIORITIES: Choice[] = [
   { value: 'urgent', label: 'Urgent' },
 ];
 
+/**
+ * How the group should choose, when a rule wants to override its own setting.
+ *
+ * `group_default` is first and is what a new action gets: overriding is the rare
+ * case, and a rule that pins a strategy is one more place to update the day the
+ * team changes how it works.
+ */
+const STRATEGIES: Choice[] = [
+  { value: 'group_default', label: "the group's own setting" },
+  { value: 'round_robin', label: 'round robin' },
+  { value: 'load_balanced', label: 'load balanced' },
+];
+
 const CATEGORIES: Choice[] = [
   { value: 'open', label: 'Open' },
   { value: 'pending', label: 'Pending' },
@@ -51,7 +66,12 @@ const CATEGORIES: Choice[] = [
   { value: 'closed', label: 'Closed' },
 ];
 
-type Item = { type: ActionKind; value: string };
+/**
+ * `extra` is the second value, and only `auto_assign` has one — a group *and* a
+ * strategy. Optional rather than a separate action per strategy, which would put
+ * three near-identical entries in a menu whose whole point is being short.
+ */
+type Item = { type: ActionKind; value: string; extra?: string };
 
 export function ActionBuilder({
   name,
@@ -94,6 +114,7 @@ export function ActionBuilder({
             groups={groups}
             cannedResponses={cannedResponses}
             onChange={(value) => update(index, { ...item, value })}
+            onChangeExtra={(extra) => update(index, { ...item, extra })}
           />
 
           <button
@@ -127,12 +148,14 @@ function ValueInput({
   groups,
   cannedResponses,
   onChange,
+  onChangeExtra,
 }: {
   item: Item;
   agents: Choice[];
   groups: Choice[];
   cannedResponses: Choice[];
   onChange: (value: string) => void;
+  onChangeExtra: (value: string) => void;
 }) {
   const select = (choices: Choice[], placeholder: string) => (
     <Select value={item.value} onChange={(event) => onChange(event.target.value)} className="w-56">
@@ -154,6 +177,24 @@ function ValueInput({
       return select(agents, 'Nobody (unassign)');
     case 'assign_group':
       return select(groups, 'No group');
+    case 'auto_assign':
+      return (
+        <>
+          {select(groups, "The ticket's current group")}
+          <span className="text-xs text-[var(--muted-foreground)]">using</span>
+          <Select
+            value={item.extra ?? 'group_default'}
+            onChange={(event) => onChangeExtra(event.target.value)}
+            className="w-52"
+          >
+            {STRATEGIES.map((strategy) => (
+              <option key={strategy.value} value={strategy.value}>
+                {strategy.label}
+              </option>
+            ))}
+          </Select>
+        </>
+      );
     case 'send_reply':
       return select(cannedResponses, 'Choose a response…');
     case 'add_watchers':
@@ -183,6 +224,12 @@ function toJson(items: Item[]): string {
         return { type: item.type, agentId: item.value || null };
       case 'assign_group':
         return { type: item.type, groupId: item.value || null };
+      case 'auto_assign':
+        return {
+          type: item.type,
+          groupId: item.value || null,
+          strategy: item.extra || 'group_default',
+        };
       case 'send_reply':
         return { type: item.type, cannedResponseId: item.value };
       case 'add_watchers':
@@ -210,6 +257,16 @@ function fromJson(input: unknown): Item[] {
     if (!raw || typeof raw !== 'object') return [];
     const action = raw as Record<string, unknown>;
     const type = action.type as ActionKind;
+
+    if (type === 'auto_assign') {
+      return [
+        {
+          type,
+          value: String(action.groupId ?? ''),
+          extra: String(action.strategy ?? 'group_default'),
+        },
+      ];
+    }
 
     const value =
       type === 'set_status'

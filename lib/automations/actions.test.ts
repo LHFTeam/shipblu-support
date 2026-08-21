@@ -74,3 +74,40 @@ describe('parseActions', () => {
     expect(parseActions(undefined)).toEqual([]);
   });
 });
+
+describe('auto_assign', () => {
+  it('defaults to the group\'s own strategy and the ticket\'s own group', () => {
+    expect(parseAction({ type: 'auto_assign' })).toEqual({
+      type: 'auto_assign',
+      groupId: null,
+      strategy: 'group_default',
+    });
+  });
+
+  it('carries an explicit group and strategy', () => {
+    expect(parseAction({ type: 'auto_assign', groupId: 'g1', strategy: 'load_balanced' })).toEqual({
+      type: 'auto_assign',
+      groupId: 'g1',
+      strategy: 'load_balanced',
+    });
+  });
+
+  /*
+   * Rejected outright rather than falling back to the group default. A rule
+   * written against a strategy this deploy does not know about should be
+   * skipped — quietly reinterpreting it would route tickets somewhere the admin
+   * never asked for, which is worse than the rule not running.
+   */
+  it('rejects a strategy it does not recognise', () => {
+    expect(parseAction({ type: 'auto_assign', strategy: 'psychic' })).toBeNull();
+  });
+
+  it('survives round-tripping through parseActions with its siblings', () => {
+    const actions = parseActions([
+      { type: 'set_priority', value: 'urgent' },
+      { type: 'auto_assign', groupId: 'g1', strategy: 'round_robin' },
+    ]);
+    expect(actions).toHaveLength(2);
+    expect(actions[1]).toMatchObject({ type: 'auto_assign', strategy: 'round_robin' });
+  });
+});

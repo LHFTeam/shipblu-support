@@ -4,12 +4,15 @@ import { db } from '@/db/client';
 import {
   agents,
   conversations,
+  groupMembers,
+  groups,
   jobs,
   messages,
   metricsDaily,
   ticketStatuses,
   webhookEvents,
 } from '@/db/schema';
+import { openBacklog } from '@/lib/tickets/backlog';
 import { readOnlyChannels } from '@/lib/tickets/channel-policy';
 import { computeDay, todayIn, totalsOf, type Bucket, type ReportingContext } from './rollup';
 
@@ -51,16 +54,12 @@ function asDate(value: unknown): Date | null {
  * all of them: nineteen hundred bot transcripts against three real tickets would
  * report a backlog that does not exist and an unassigned count nobody can act
  * on.
+ *
+ * Moved to `lib/tickets/backlog` when assignment started asking the same
+ * question: what this page calls an agent's load is what the capacity check
+ * calls their count, and the two must not be able to drift.
  */
-function liveTickets() {
-  return and(
-    isNull(conversations.deletedAt),
-    isNull(conversations.mergedIntoId),
-    eq(conversations.isSpam, false),
-    notInArray(conversations.channel, readOnlyChannels()),
-    inArray(ticketStatuses.category, ['open', 'pending']),
-  );
-}
+const liveTickets = openBacklog;
 
 /**
  * The customer spoke last, so the ticket is waiting on us.
@@ -158,8 +157,18 @@ export async function todaySoFar(
 export type AgentLoad = {
   id: string;
   name: string;
+  /**
+   * What assignment actually sees, not what the column says.
+   *
+   * `away` is never stored — an agent is connected or they are not — so it is
+   * derived here: connected but not accepting. Computing it in one place means
+   * the badge on the dashboard and the decision the router makes cannot disagree
+   * about who is available.
+   */
   presence: 'online' | 'away' | 'offline';
   lastSeenAt: Date | null;
+  /** Their effective cap, already resolved through the group default. Null is uncapped. */
+  maxOpen: number | null;
   open: number;
   awaitingReply: number;
   breached: number;
@@ -198,7 +207,16 @@ export async function agentLoad(): Promise<AgentLoad[]> {
       id: agents.id,
       name: sql<string>`coalesce(nullif(${agents.name}, ''), ${agents.email})`,
       presence: agents.presence,
+      isAcceptingTickets: agents.isAcceptingTickets,
       lastSeenAt: agents.lastSeenAt,
+      // The smallest cap any of their groups would apply, since a ticket from
+      // the strictest group is the first one they stop receiving.
+      maxOpen: sql<number | null>`coalesce(${agents.maxOpenTickets}, (
+        select min(g.default_max_open_tickets)
+        from ${groupMembers} gm
+        join ${groups} g on g.id = gm.group_id
+        where gm.agent_id = ${agents}.id
+      ))`,
       open: sql<number>`count(${live.assigneeAgentId})::int`,
       awaitingReply: sql<number>`count(*) filter (where ${awaiting})::int`,
       breached: sql<number>`count(*) filter (where ${live.breached})::int`,
@@ -210,7 +228,11 @@ export async function agentLoad(): Promise<AgentLoad[]> {
     .groupBy(agents.id)
     .orderBy(desc(sql`count(${live.assigneeAgentId})`), asc(agents.name));
 
-  return rows.map((row) => ({ ...row, oldestWaitingSince: asDate(row.oldestWaitingSince) }));
+  return rows.map(({ isAcceptingTickets, ...row }) => ({
+    ...row,
+    presence: row.presence === 'online' && !isAcceptingTickets ? ('away' as const) : row.presence,
+    oldestWaitingSince: asDate(row.oldestWaitingSince),
+  }));
 }
 
 export type ChannelLoad = { channel: string; open: number; awaitingReply: number };

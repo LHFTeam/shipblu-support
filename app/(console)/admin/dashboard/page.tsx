@@ -427,7 +427,23 @@ export default async function DashboardPage({
                     </span>
                   ) : null}
                 </Cell>
-                <Cell>{agent.open.toLocaleString('en-GB')}</Cell>
+                <Cell>
+                  {agent.open.toLocaleString('en-GB')}
+                  {/* Shown as a fraction so a full agent is legible at a glance:
+                      "8 / 8" is the reason the queue is not draining, and it
+                      reads as an explanation where a bare 8 reads as a total. */}
+                  {agent.maxOpen !== null ? (
+                    <span
+                      className={
+                        agent.open >= agent.maxOpen
+                          ? 'ms-1 text-xs font-medium text-amber-600'
+                          : 'ms-1 text-xs text-[var(--muted-foreground)]'
+                      }
+                    >
+                      / {agent.maxOpen}
+                    </span>
+                  ) : null}
+                </Cell>
                 <Cell>{agent.awaitingReply.toLocaleString('en-GB')}</Cell>
                 <Cell>
                   {agent.breached > 0 ? (

@@ -10,6 +10,7 @@ import {
   messages,
   ticketStatuses,
 } from '@/db/schema';
+import { assignConversation } from '@/lib/assignment';
 import { scheduleSurvey } from '@/lib/csat';
 import { readOnlyChannels } from '@/lib/tickets/channel-policy';
 import { enqueue } from '@/lib/queue';
@@ -212,7 +213,10 @@ async function applyAction(action: Action, ticket: TicketRow, ruleName: string):
     case 'assign_agent':
       await db
         .update(conversations)
-        .set({ assigneeAgentId: action.agentId })
+        .set({
+          assigneeAgentId: action.agentId,
+          assignedAt: action.agentId ? new Date() : null,
+        })
         .where(eq(conversations.id, conversationId));
       await record(action.agentId ? 'assigned' : 'unassigned', { to: action.agentId });
       return;
@@ -227,6 +231,25 @@ async function applyAction(action: Action, ticket: TicketRow, ruleName: string):
       // A no-op on a brand new ticket, whose SLA has not been applied yet.
       await onGroupChanged(conversationId);
       return;
+
+    case 'auto_assign': {
+      // Writes the ticket itself and does not come back through this engine, in
+      // keeping with the rule at the top of this file: an automation that
+      // triggered an automation is how four hundred emails reach one customer.
+      const groupChanged = action.groupId !== null && action.groupId !== ticket.conversation.groupId;
+
+      await assignConversation(conversationId, {
+        groupId: action.groupId,
+        strategy: action.strategy === 'group_default' ? undefined : action.strategy,
+        actorLabel: `automation:${ruleName}`,
+      });
+
+      // The SLA counts against the group's calendar, so a rule that moved the
+      // ticket has moved its due dates too — whether or not anybody was free to
+      // take it.
+      if (groupChanged) await onGroupChanged(conversationId);
+      return;
+    }
 
     case 'add_tags': {
       // Merged in SQL rather than read-modify-write, so two rules tagging the
