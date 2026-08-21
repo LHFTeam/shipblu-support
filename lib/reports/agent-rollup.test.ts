@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DateTime } from 'luxon';
 import type { HoursConfig } from '@/lib/hours';
-import { emptyDay, shiftWindow, withActivity } from './agent-rollup';
+import { attributeReopen, emptyDay, shiftWindow, withActivity } from './agent-rollup';
 
 const CAIRO = 'Africa/Cairo';
 
@@ -101,5 +101,31 @@ describe('withActivity', () => {
 
   it('keeps an agent who ended the day holding tickets', () => {
     expect(withActivity([{ ...emptyDay(agent), openAtDayEnd: 0 }])).toHaveLength(1);
+  });
+});
+
+describe('attributeReopen', () => {
+  const alice = 'a1b2c3d4-0000-0000-0000-00000000000a';
+  const bob = 'a1b2c3d4-0000-0000-0000-00000000000b';
+
+  it('credits the agent who resolved it, from the event snapshot', () => {
+    expect(attributeReopen({ resolvedBy: alice }, alice)).toBe(true);
+  });
+
+  it('does not credit whoever holds the ticket now', () => {
+    // The bug this replaced: keying on `assigneeAgentId` put a reopening on
+    // Bob simply because the ticket was handed to him afterwards.
+    expect(attributeReopen({ resolvedBy: alice }, bob)).toBe(false);
+  });
+
+  it('attributes nothing when an automation resolved it', () => {
+    // Null is a real answer. A rule closing a ticket owns that resolution, and
+    // guessing an agent would put a customer coming back on somebody who did
+    // not close it.
+    expect(attributeReopen({ resolvedBy: null }, alice)).toBe(false);
+  });
+
+  it('attributes nothing for a ticket resolved before this was recorded', () => {
+    expect(attributeReopen({}, alice)).toBe(false);
   });
 });

@@ -90,6 +90,28 @@ export const conversations = pgTable(
     lastCustomerMessageAt: timestamp('last_customer_message_at', { withTimezone: true }),
     lastAgentMessageAt: timestamp('last_agent_message_at', { withTimezone: true }),
     resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    /**
+     * Who moved it into a resolved status, as opposed to who holds it now.
+     *
+     * Those are the same person for most tickets and different for exactly the
+     * ones a reopen rate is supposed to catch. Reporting cannot use
+     * `assigneeAgentId` for "whose resolution came back": a ticket handed on
+     * after the fact would move the mark to somebody who never closed it, and
+     * because the nightly rollup rebuilds the last three days, the same day's
+     * figure would change depending on when it happened to be recomputed.
+     *
+     * Null when nobody clicked anything — an automation resolved it, or it
+     * predates this column. Null is deliberately not "the assignee": an
+     * unattributed resolution is a real answer, and guessing would put a
+     * customer coming back on the record of whoever happened to be holding it.
+     *
+     * Overwritten by each resolve, never cleared by a reopen, so a ticket
+     * resolved by one agent and re-resolved by another attributes each
+     * reopening to the person whose work it followed.
+     */
+    resolvedByAgentId: uuid('resolved_by_agent_id').references(() => agents.id, {
+      onDelete: 'set null',
+    }),
     closedAt: timestamp('closed_at', { withTimezone: true }),
 
     /** Number of times the ticket has moved back out of a resolved status. */

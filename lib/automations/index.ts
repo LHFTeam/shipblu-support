@@ -195,6 +195,11 @@ async function applyAction(action: Action, ticket: TicketRow, ruleName: string):
         .set({
           statusId: status.id,
           resolvedAt: action.category === 'resolved' ? new Date() : null,
+          // Explicitly nobody, not "leave whoever was there". A rule closing a
+          // ticket that an agent had resolved earlier owns this resolution, so
+          // if the customer comes back it must not land on that agent's reopen
+          // rate — they are not the reason it was closed this time.
+          ...(action.category === 'resolved' ? { resolvedByAgentId: null } : {}),
           closedAt: action.category === 'closed' ? new Date() : null,
         })
         .where(eq(conversations.id, conversationId));

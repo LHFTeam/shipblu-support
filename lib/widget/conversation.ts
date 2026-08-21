@@ -122,7 +122,10 @@ export async function appendVisitorMessage(
           conversationId,
           type: 'reopened',
           actorLabel: 'webchat',
-          data: { reason: 'visitor_replied' },
+          // Snapshotted rather than read back at report time: the column it
+          // came from is overwritten by the next resolution, and the rollup
+          // rebuilds recent days.
+          data: { reason: 'visitor_replied', resolvedBy: reopened.resolvedBy },
         });
       }
     }
@@ -197,7 +200,18 @@ export async function attachVisitorEmail(
   });
 }
 
-async function reopenIfResolved(tx: typeof db, conversationId: string): Promise<boolean> {
+/**
+ * Reopen a resolved conversation, reporting who had resolved it.
+ *
+ * Returns null when there was nothing to reopen. The resolver comes back with
+ * it because the caller writes the timeline event and needs to stamp it there —
+ * `resolved_by_agent_id` is overwritten by the next resolution, so a reader
+ * looking it up later would attribute this reopening to the wrong person.
+ */
+async function reopenIfResolved(
+  tx: typeof db,
+  conversationId: string,
+): Promise<{ resolvedBy: string | null } | null> {
   const rows = await tx
     .select({ category: ticketStatuses.category, reopenCount: conversations.reopenCount })
     .from(conversations)
@@ -205,17 +219,20 @@ async function reopenIfResolved(tx: typeof db, conversationId: string): Promise<
     .where(eq(conversations.id, conversationId))
     .limit(1);
 
-  if (rows[0]?.category !== 'resolved') return false;
+  if (rows[0]?.category !== 'resolved') return null;
 
   const statusId = await defaultOpenStatusId(tx);
-  if (!statusId) return false;
+  if (!statusId) return null;
 
-  await tx
+  // `resolvedByAgentId` is left untouched by this update, so returning it tells
+  // the caller who resolved the ticket this reply is reopening.
+  const reopened = await tx
     .update(conversations)
     .set({ statusId, resolvedAt: null, reopenCount: rows[0].reopenCount + 1 })
-    .where(eq(conversations.id, conversationId));
+    .where(eq(conversations.id, conversationId))
+    .returning({ resolvedBy: conversations.resolvedByAgentId });
 
-  return true;
+  return { resolvedBy: reopened[0]?.resolvedBy ?? null };
 }
 
 async function defaultOpenStatusId(tx: typeof db): Promise<string | null> {

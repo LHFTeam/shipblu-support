@@ -78,20 +78,21 @@ export async function ingestWhatsAppMessage(
       if (existing.statusCategory === 'resolved') {
         const reopenTo = await defaultOpenStatusId(tx);
         if (reopenTo) {
-          await tx
+          const reopened = await tx
             .update(conversations)
             .set({
               statusId: reopenTo,
               resolvedAt: null,
               reopenCount: existing.reopenCount + 1,
             })
-            .where(eq(conversations.id, conversationId));
+            .where(eq(conversations.id, conversationId))
+            .returning({ resolvedBy: conversations.resolvedByAgentId });
 
           await tx.insert(conversationEvents).values({
             conversationId,
             type: 'reopened',
             actorLabel: 'inbound_whatsapp',
-            data: { reason: 'customer_replied' },
+            data: { reason: 'customer_replied', resolvedBy: reopened[0]?.resolvedBy ?? null },
           });
         }
       }

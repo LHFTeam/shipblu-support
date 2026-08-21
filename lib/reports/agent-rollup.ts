@@ -89,6 +89,7 @@ export type AgentDay = {
   focusSeconds: number;
   conversationsFocused: number;
 
+  resolutionsMade: number;
   reopenedAfterResolveCount: number;
 };
 
@@ -115,6 +116,7 @@ export function emptyDay(agentId: string): AgentDay {
     pendingAtDayEnd: null,
     focusSeconds: 0,
     conversationsFocused: 0,
+    resolutionsMade: 0,
     reopenedAfterResolveCount: 0,
   };
 }
@@ -396,12 +398,41 @@ export async function computeAgentDay(
 
   for (const [agentId, bucket] of days) bucket.touchedCount = touched.get(agentId)?.size ?? 0;
 
-  // --- Reopened after they resolved it ---------------------------------------
+  // --- Resolutions they performed, and the ones that came back ---------------
   // The counterweight that makes the speed columns safe to publish. Resolution
   // time and handling time are both trivially improved by closing tickets that
-  // are not finished, and this is the column that shows it happening.
+  // are not finished, and these two columns are what show it happening.
+  //
+  // Both are keyed on who actually resolved the ticket, never on who holds it
+  // now. `assigneeAgentId` was the obvious source and is wrong twice over: a
+  // ticket handed on after the fact moves the mark onto somebody who never
+  // closed it, and since this job rebuilds the last three days, the same day's
+  // figure would change depending on when it was recomputed.
+  const resolutions = await db
+    .select({ agentId: conversations.resolvedByAgentId })
+    .from(conversations)
+    .where(
+      and(
+        gte(conversations.resolvedAt, from),
+        lt(conversations.resolvedAt, to),
+        isNull(conversations.deletedAt),
+        eq(conversations.isSpam, false),
+        worked,
+      ),
+    );
+
+  for (const row of resolutions) {
+    const bucket = forAgent(row.agentId);
+    if (bucket) bucket.resolutionsMade += 1;
+  }
+
+  // Read from the event's own snapshot rather than from the conversation. The
+  // column the snapshot came from is overwritten by the next resolution, so a
+  // ticket resolved by one agent, reopened, then resolved by another would have
+  // this reopening silently move onto the second agent on the next rebuild.
+  // Same reasoning as `csat_surveys` snapshotting its agent at send time.
   const reopened = await db
-    .select({ agentId: conversations.assigneeAgentId })
+    .select({ resolvedBy: sql<string | null>`${conversationEvents.data}->>'resolvedBy'` })
     .from(conversationEvents)
     .innerJoin(conversations, eq(conversations.id, conversationEvents.conversationId))
     .where(
@@ -414,7 +445,11 @@ export async function computeAgentDay(
     );
 
   for (const row of reopened) {
-    const bucket = forAgent(row.agentId);
+    // Null for an automation's resolution, and for anything resolved before
+    // this was recorded. Unattributed rather than guessed: putting a customer
+    // coming back on the record of whoever happens to hold the ticket is the
+    // exact error this replaced.
+    const bucket = forAgent(row.resolvedBy);
     if (bucket) bucket.reopenedAfterResolveCount += 1;
   }
 
@@ -447,6 +482,18 @@ export async function computeAgentDay(
   return [...days.values()];
 }
 
+/**
+ * Whether a reopening belongs to this agent.
+ *
+ * The whole rule is "the event's own snapshot, or nobody" — but it is the rule
+ * that was wrong before, and getting it wrong is invisible in the output: a
+ * reopen rate attributed to the wrong person still looks like a reopen rate.
+ * Exported so it can be tested against the cases that actually differ.
+ */
+export function attributeReopen(event: { resolvedBy?: string | null }, agentId: string): boolean {
+  return event.resolvedBy != null && event.resolvedBy === agentId;
+}
+
 /** Only rows with something on them — an agent who was off is not a day of zeros. */
 export function withActivity(rows: AgentDay[]): AgentDay[] {
   return rows.filter(
@@ -455,6 +502,7 @@ export function withActivity(rows: AgentDay[]): AgentDay[] {
       row.touchedCount > 0 ||
       row.assignedCount > 0 ||
       row.focusSeconds > 0 ||
+      row.resolutionsMade > 0 ||
       row.openAtDayEnd !== null,
   );
 }

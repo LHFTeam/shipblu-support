@@ -440,6 +440,10 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
           .set({
             statusId: status.id,
             resolvedAt: status.category === 'resolved' ? new Date() : null,
+            // Stamped on the way in and left alone otherwise. Moving a ticket
+            // back to Open must not erase who resolved it — that record is what
+            // the reopening about to follow gets attributed to.
+            ...(status.category === 'resolved' ? { resolvedByAgentId: agent.id } : {}),
             closedAt: status.category === 'closed' ? new Date() : null,
           })
           .where(eq(conversations.id, conversationId));
@@ -584,6 +588,7 @@ async function applyStatusCategory(
       .set({
         statusId: status.id,
         resolvedAt: category === 'resolved' ? new Date() : null,
+        ...(category === 'resolved' ? { resolvedByAgentId: agent.id } : {}),
         closedAt: category === 'closed' ? new Date() : null,
       })
       .where(eq(conversations.id, conversationId));

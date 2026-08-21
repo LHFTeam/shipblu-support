@@ -71,6 +71,13 @@
       "when": 1787329167480,
       "tag": "0009_panoramic_miss_america",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1787340108632,
+      "tag": "0010_public_frog_thor",
+      "breakpoints": true
     }
   ]
 }

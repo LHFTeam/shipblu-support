@@ -144,20 +144,28 @@ export async function ingestInboundEmail(email: ParsedInboundEmail): Promise<Ing
       if (existingConversation.statusCategory === 'resolved') {
         const reopenTo = await defaultOpenStatusId(tx);
         if (reopenTo) {
-          await tx
+          // `resolvedByAgentId` is deliberately not cleared here, so it survives
+          // to be read back below.
+          const reopened = await tx
             .update(conversations)
             .set({
               statusId: reopenTo,
               resolvedAt: null,
               reopenCount: existingConversation.reopenCount + 1,
             })
-            .where(eq(conversations.id, conversationId));
+            .where(eq(conversations.id, conversationId))
+            .returning({ resolvedBy: conversations.resolvedByAgentId });
 
           await tx.insert(conversationEvents).values({
             conversationId,
             type: 'reopened',
             actorLabel: 'inbound_email',
-            data: { reason: 'customer_replied' },
+            // The resolver is snapshotted onto the event rather than looked up
+            // later. `conversations.resolved_by_agent_id` is overwritten by the
+            // next resolution, and the nightly rollup rebuilds the last three
+            // days — so reading it at report time would let a ticket resolved
+            // again by somebody else silently move this reopening onto them.
+            data: { reason: 'customer_replied', resolvedBy: reopened[0]?.resolvedBy ?? null },
           });
         }
       }

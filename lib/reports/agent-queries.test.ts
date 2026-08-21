@@ -95,24 +95,32 @@ describe('handlingSeconds', () => {
 });
 
 describe('reopenRate', () => {
-  it('is the share of their resolutions that came back', () => {
-    expect(reopenRate({ reopenedAfterResolveCount: 3, ticketsResolved: 20 })).toBe(15);
+  it('is the share of their own resolutions that came back', () => {
+    expect(reopenRate({ reopenedAfterResolveCount: 3, resolutionsMade: 20 })).toBe(15);
   });
 
-  it('is null rather than zero when they resolved nothing', () => {
-    expect(reopenRate({ reopenedAfterResolveCount: 0, ticketsResolved: 0 })).toBeNull();
+  it('is null rather than zero when they resolved nothing themselves', () => {
+    expect(reopenRate({ reopenedAfterResolveCount: 0, resolutionsMade: 0 })).toBeNull();
+  });
+
+  it('divides by resolutions they made, not by tickets resolved under them', () => {
+    // The two count different populations. An agent who personally resolved
+    // four tickets and had three come back is at 75% — dividing by a larger
+    // "resolved while assigned to them" figure would quietly flatter them, and
+    // dividing by a smaller one could print over 100%.
+    expect(reopenRate({ reopenedAfterResolveCount: 3, resolutionsMade: 4 })).toBe(75);
   });
 });
 
 describe('resolvedPerHour', () => {
   it('measures throughput against time at the desk', () => {
-    expect(resolvedPerHour({ ticketsResolved: 16, onlineSeconds: 8 * 3600 })).toBe(2);
+    expect(resolvedPerHour({ resolutionsMade: 16, onlineSeconds: 8 * 3600 })).toBe(2);
   });
 
   it('refuses to extrapolate from a few minutes online', () => {
     // Five minutes and one ticket is twelve an hour, which is not a rate — it
     // is a rounding error with a decimal point.
-    expect(resolvedPerHour({ ticketsResolved: 1, onlineSeconds: 300 })).toBeNull();
+    expect(resolvedPerHour({ resolutionsMade: 1, onlineSeconds: 300 })).toBeNull();
   });
 });
 
