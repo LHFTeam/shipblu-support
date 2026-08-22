@@ -276,3 +276,17 @@ export function ThumbsDownIcon(props: IconProps) {
     </Icon>
   );
 }
+
+/**
+ * The information affordance, drawn a little heavier than the rest: at 14px
+ * beside a label it has to read as a glyph rather than as a smudge.
+ */
+export function InfoIcon(props: IconProps) {
+  return (
+    <Icon strokeWidth={2} {...props}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 11v5" />
+      <path d="M12 7.75h.01" />
+    </Icon>
+  );
+}
