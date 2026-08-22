@@ -40,7 +40,16 @@ export function ChannelForm({ groups }: { groups: { id: string; name: string }[]
               The widget needs no address — only a default group.
             </p>
           ) : type === 'whatsapp' || type === 'whatsapp_bot' ? (
-            <Field label="Phone number ID">
+            <Field
+              label="Phone number ID"
+              explain={
+                <>
+                  Meta&rsquo;s numeric id for the WhatsApp number, copied from the WhatsApp Manager
+                  — not the phone number itself. Inbound messages are matched to this channel by it,
+                  so a wrong one means webhooks arrive and route nowhere.
+                </>
+              }
+            >
               <Input name="phoneNumberId" placeholder="1234567890" />
             </Field>
           ) : type === 'facebook' || type === 'instagram' ? (
@@ -58,7 +67,17 @@ export function ChannelForm({ groups }: { groups: { id: string; name: string }[]
           )}
         </div>
 
-        <Field label="Default group" className="w-40">
+        <Field
+          label="Default group"
+          className="w-40"
+          explain={
+            <>
+              Which group a ticket from this channel starts in, before any automation moves it. With
+              none, it arrives in no group at all and waits in the unassigned queue for somebody to
+              pick it up.
+            </>
+          }
+        >
           <Select name="defaultGroupId" defaultValue="">
             <option value="">None</option>
             {groups.map((group) => (

@@ -62,7 +62,10 @@ function Fields({ field }: { field?: TicketField }) {
           </Select>
         </Field>
 
-        <Field label="Position">
+        <Field
+          label="Position"
+          explain="Lower comes first in the list of fields an automation or SLA condition can pick from, which is the only place these fields are read today — nothing renders them on a ticket yet."
+        >
           <Input name="position" type="number" defaultValue={field?.position ?? 0} />
         </Field>
       </div>

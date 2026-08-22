@@ -3,6 +3,7 @@ import { DateTime } from 'luxon';
 import { ChannelBadge } from '@/components/channel';
 import { Columns, Meter, Sparkline, Stat } from '@/components/charts';
 import { Badge, Card, Cell, EmptyState, PageHeader, Row, Table } from '@/components/ui';
+import { InfoTip } from '@/components/tooltip';
 import { requirePermission } from '@/lib/auth/guard';
 import { formatDateTime, formatRelative } from '@/lib/format';
 import {
@@ -137,6 +138,7 @@ export default async function DashboardPage({
           <Stat
             label="Waiting on us"
             value={queue.awaitingReply.toLocaleString('en-GB')}
+            explain="Open tickets where the customer spoke last — they have written and nobody has replied since. It is one definition, shared by every figure on this page that says waiting."
             hint={`${queue.awaitingFirstReply.toLocaleString('en-GB')} never answered`}
             tone={queue.awaitingReply > 0 ? 'caution' : undefined}
           />
@@ -386,6 +388,7 @@ export default async function DashboardPage({
               </Stat>
               <Stat
                 label="CSAT"
+                explain="Mean rating out of 5 across the surveys answered in this window. Surveys sent and never answered are not counted, and a score belongs to whoever handled the ticket at the time rather than to whoever owns it now."
                 value={
                   averageRating(window.csatRatingSum, window.csatResponseCount)?.toFixed(1) ?? '—'
                 }
@@ -415,7 +418,39 @@ export default async function DashboardPage({
         {agentRows.length === 0 ? (
           <EmptyState title="No active agents" hint="Invite the team from Settings → Agents." />
         ) : (
-          <Table head={['Agent', 'Presence', 'Open', 'Waiting on us', 'Breached', 'Longest wait']}>
+          <Table
+            head={[
+              'Agent',
+              'Presence',
+              <>
+                Open{' '}
+                <InfoTip label="Open">
+                  Tickets assigned to them that are still open or pending — the same count the
+                  assignment engine measures a cap against, which is why a second number appears
+                  beside it for an agent who has one.
+                </InfoTip>
+              </>,
+              <>
+                Waiting on us{' '}
+                <InfoTip label="Waiting on us">
+                  Of those, the ones where the customer spoke last and has had no reply since.
+                </InfoTip>
+              </>,
+              <>
+                Breached{' '}
+                <InfoTip label="Breached">
+                  Past a first-response or resolution target already, counted in the working hours
+                  the ticket&rsquo;s SLA policy uses rather than in wall-clock time.
+                </InfoTip>
+              </>,
+              <>
+                Longest wait{' '}
+                <InfoTip label="Longest wait">
+                  How long their oldest unanswered customer message has been sitting there.
+                </InfoTip>
+              </>,
+            ]}
+          >
             {agentRows.map((agent) => (
               <Row key={agent.id}>
                 <Cell className="font-medium">{agent.name}</Cell>
@@ -502,6 +537,7 @@ export default async function DashboardPage({
           />
           <Stat
             label="Jobs given up on"
+            explain="Work that used every retry and stopped — a reply that never sent, a webhook never handled. Nothing retries it on its own, so any number above zero is something that did not happen."
             value={health.jobsDead.toLocaleString('en-GB')}
             hint={`${health.jobsFailed.toLocaleString('en-GB')} retrying`}
             tone={health.jobsDead > 0 ? 'critical' : undefined}

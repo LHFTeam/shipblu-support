@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { InfoTip } from './tooltip';
 import { bands, compact, linePath, niceCeiling, split } from '@/lib/charts/scale';
 
 /**
@@ -244,12 +245,20 @@ export function Stat({
   label,
   value,
   hint,
+  explain,
   tone,
   children,
 }: {
   label: string;
   value: string;
   hint?: ReactNode;
+  /**
+   * How the figure is defined, for the ⓘ beside the label. The `hint` is for
+   * what this number says today — a comparison, a count behind it; `explain` is
+   * for what it counts, which does not change and would be noise on screen
+   * every time somebody reads the tile.
+   */
+  explain?: ReactNode;
   /** Colours the value when the number itself is a state worth noticing. */
   tone?: 'critical' | 'caution';
   children?: ReactNode;
@@ -263,7 +272,10 @@ export function Stat({
 
   return (
     <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
-      <p className="text-xs text-[var(--muted-foreground)]">{label}</p>
+      <p className="flex items-center gap-1 text-xs text-[var(--muted-foreground)]">
+        {label}
+        {explain ? <InfoTip label={label}>{explain}</InfoTip> : null}
+      </p>
       {/* Proportional figures: tabular-nums gives every digit a zero's width,
           which reads as loose spacing at this size. Columns of numbers in the
           tables below keep the console default. */}

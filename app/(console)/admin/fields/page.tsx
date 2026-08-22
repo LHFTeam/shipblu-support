@@ -2,6 +2,7 @@ import { asc } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { ticketFields } from '@/db/schema';
 import { Badge, Cell, PageHeader, Row, Table } from '@/components/ui';
+import { InfoTip } from '@/components/tooltip';
 import { requirePermission } from '@/lib/auth/guard';
 import { FieldEditor, NewField } from './forms';
 
@@ -30,7 +31,30 @@ export default async function FieldsPage() {
         actions={<NewField />}
       />
 
-      <Table head={['Field', 'Key', 'Type', 'Required', '']}>
+      <Table
+        head={[
+          'Field',
+          <>
+            Key{' '}
+            <InfoTip label="Key">
+              How an automation or an SLA condition names this field — <code>custom.the_key</code>.
+              Fixed once the field exists: renaming it would leave every stored rule pointing at
+              something that is no longer there, and nothing would report an error.
+            </InfoTip>
+          </>,
+          'Type',
+          <>
+            Required{' '}
+            <InfoTip label="Required">
+              Recorded on the field, and nothing enforces it yet — no form in the console or the
+              portal reads these two, so a field marked required can still be left empty. Set them
+              for the intent (<b>on create</b> blocks a new ticket, <b>to resolve</b> blocks
+              resolving one), not for the guarantee.
+            </InfoTip>
+          </>,
+          '',
+        ]}
+      >
         {rows.map((field) => (
           <Row key={field.id}>
             <Cell>

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Badge, Button, Field, Input, Select, Toggle } from '@/components/ui';
+import { InfoTip } from '@/components/tooltip';
 import type { SlaTargets } from '@/db/schema/config';
 import { ConditionBuilder, type FieldOption } from '../condition-builder';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
@@ -51,13 +52,28 @@ function TargetGrid({ targets }: { targets?: SlaTargets }) {
               Priority
             </th>
             <th className="pb-1 text-start text-xs font-medium text-[var(--muted-foreground)]">
-              First response
+              First response{' '}
+              <InfoTip label="First response">
+                From the ticket arriving to the first reply. An automation&rsquo;s
+                auto-acknowledgement counts as that reply and stops this clock — deliberately, so
+                that a team auto-replying to everything is measuring the robot rather than itself.
+              </InfoTip>
             </th>
             <th className="pb-1 text-start text-xs font-medium text-[var(--muted-foreground)]">
-              Next response
+              Next response{' '}
+              <InfoTip label="Next response">
+                Every reply after the first. It starts only once the ticket has been answered once,
+                restarts each time the customer writes again, and clears the moment an agent
+                replies. Left blank it does not go away — it falls back to the first-response target
+                on the same row.
+              </InfoTip>
             </th>
             <th className="pb-1 text-start text-xs font-medium text-[var(--muted-foreground)]">
-              Resolution
+              Resolution{' '}
+              <InfoTip label="Resolution">
+                From arrival to the ticket reaching a resolved status. Time in a status that pauses
+                the clock does not count — that is what the pause is for.
+              </InfoTip>
             </th>
           </tr>
         </thead>
@@ -91,7 +107,8 @@ function TargetGrid({ targets }: { targets?: SlaTargets }) {
       </table>
       <p className="mt-1 text-xs text-[var(--muted-foreground)]">
         Minutes. Leave blank for no commitment on that target — blank means nothing is owed, not
-        that it is due immediately.
+        that it is due immediately. Next response is the exception: blank there inherits the
+        first-response target rather than dropping the commitment.
       </p>
     </div>
   );
