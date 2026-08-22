@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { Field, Input, Select, Toggle } from '@/components/ui';
+import { useEffect, useRef, useState } from 'react';
+import { Card, Cell, Field, Input, Row, Select, Table, Toggle } from '@/components/ui';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
 import { deleteGroup, saveGroup } from '../settings-actions';
 
@@ -45,7 +45,6 @@ function HoursField({ group, schedules }: { group?: Group; schedules: Choice[] }
     </Field>
   );
 }
-
 
 /**
  * How this group hands work to people.
@@ -201,39 +200,132 @@ export function NewGroup({ schedules, agents }: { schedules: Choice[]; agents: C
   );
 }
 
-export function GroupEditor({
-  group,
+const STRATEGY_LABELS: Record<Group['assignmentStrategy'], string> = {
+  manual: 'Manual',
+  round_robin: 'Round robin',
+  load_balanced: 'Load balanced',
+};
+
+type GroupSummary = {
+  group: Group;
+  /** The group's own schedule, or null when it works the company one. */
+  scheduleName: string | null;
+  members: number;
+  tickets: number;
+};
+
+/**
+ * The list, and the editor for whichever row is open.
+ *
+ * The editor is deliberately *not* inside the row's first cell, which is where
+ * every other settings screen puts it. A group's form is the longest one in the
+ * admin — hours, four assignment settings, skills, escalation — and a table
+ * column sizes itself to the other rows, so on a phone that form rendered into
+ * about a hundred pixels of a horizontally scrolling table, with every select
+ * and hint crushed into a vertical ribbon. Above the table it gets the page's
+ * whole width at every viewport, and reads the same as the "New group" form it
+ * shares its fields with.
+ *
+ * Which row is open lives here rather than in each row so that opening a second
+ * group closes the first: two long forms stacked on one screen is how you save
+ * the wrong one.
+ */
+export function GroupsTable({
+  rows,
   schedules,
   agents,
-  deleteOnly = false,
+  defaultScheduleName,
 }: {
-  group: Group;
+  rows: GroupSummary[];
   schedules: Choice[];
   agents: Choice[];
-  deleteOnly?: boolean;
+  defaultScheduleName: string | null;
 }) {
-  const [editing, setEditing] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const editing = rows.find((row) => row.group.id === editingId)?.group ?? null;
+  const editorRef = useRef<HTMLDivElement | null>(null);
 
-  if (deleteOnly) return <DangerAction action={deleteGroup} id={group.id} />;
-
-  if (!editing) {
-    return (
-      <button type="button" onClick={() => setEditing(true)} className="text-start hover:underline">
-        <span className="font-medium">{group.name}</span>
-        {group.description ? (
-          <span className="block text-xs text-[var(--muted-foreground)]">{group.description}</span>
-        ) : null}
-      </button>
-    );
-  }
+  // The open form is above the table, so clicking the twentieth group would
+  // otherwise change something off-screen and look like nothing happened.
+  useEffect(() => {
+    if (editing) editorRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [editing]);
 
   return (
-    <EditorForm action={saveGroup} submitLabel="Save" onSaved={() => setEditing(false)}>
-      <input type="hidden" name="id" value={group.id} />
-      <Input name="name" defaultValue={group.name} required />
-      <Input name="description" defaultValue={group.description ?? ''} placeholder="Description" />
-      <HoursField group={group} schedules={schedules} />
-      <AssignmentFields group={group} agents={agents} />
-    </EditorForm>
+    <>
+      {editing ? (
+        <div ref={editorRef} id="group-editor" className="mb-4">
+          {/* Keyed so that opening a different group remounts the form rather
+              than leaving the previous one's assignment state on screen. */}
+          <Card key={editing.id} className="w-full border-brand-500/30">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h2 className="min-w-0 truncate text-sm font-semibold">{editing.name}</h2>
+              <button
+                type="button"
+                onClick={() => setEditingId(null)}
+                className="shrink-0 text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+              >
+                Cancel
+              </button>
+            </div>
+
+            <EditorForm action={saveGroup} submitLabel="Save" onSaved={() => setEditingId(null)}>
+              <input type="hidden" name="id" value={editing.id} />
+              <Field label="Name">
+                <Input name="name" defaultValue={editing.name} required />
+              </Field>
+              <Field label="Description" hint="Shown to admins only.">
+                <Input
+                  name="description"
+                  defaultValue={editing.description ?? ''}
+                  placeholder="Handles delivery and tracking questions"
+                />
+              </Field>
+              <HoursField group={editing} schedules={schedules} />
+              <AssignmentFields group={editing} agents={agents} />
+            </EditorForm>
+          </Card>
+        </div>
+      ) : null}
+
+      <Table head={['Group', 'Assignment', 'Business hours', 'Agents', 'Tickets', '']}>
+        {rows.map(({ group, scheduleName, members, tickets }) => (
+          <Row key={group.id}>
+            <Cell>
+              <button
+                type="button"
+                onClick={() => setEditingId(group.id)}
+                aria-expanded={editingId === group.id}
+                aria-controls="group-editor"
+                className="text-start font-medium hover:underline"
+              >
+                {group.name}
+              </button>
+            </Cell>
+            {/* On the list rather than only in the editor: a group set to manual
+                while every other team routes is the kind of thing you want to
+                notice by reading down a column. */}
+            <Cell className="text-[var(--muted-foreground)]">
+              {STRATEGY_LABELS[group.assignmentStrategy]}
+              {group.assignmentStrategy !== 'manual' && group.matchSkills ? (
+                <span className="block text-xs">by skill</span>
+              ) : null}
+            </Cell>
+            <Cell className="text-[var(--muted-foreground)]">
+              {scheduleName ?? (
+                <span className="text-xs">
+                  {defaultScheduleName ? `${defaultScheduleName} (default)` : '—'}
+                </span>
+              )}
+            </Cell>
+            <Cell className="text-[var(--muted-foreground)]">{members}</Cell>
+            <Cell className="text-[var(--muted-foreground)]">{tickets}</Cell>
+            <Cell className="text-end">
+              <DangerAction action={deleteGroup} id={group.id} />
+            </Cell>
+          </Row>
+        ))}
+      </Table>
+    </>
   );
 }
