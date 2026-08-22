@@ -509,14 +509,54 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   until the ticket importer exists. `usage_count` on canned responses is the
   remaining member of this family: still incremented by nothing.
 
-- `canned_responses.usage_count` is never incremented, and the reason is
-  bigger than the column. The only thing that sends a canned response is an
-  automation's `send_reply` action (`sendCannedReply` in `lib/automations/index.ts`),
-  which reads the body and leaves the count alone; **an agent cannot insert one
-  from the composer at all** — there is no picker. So the admin table's "Used"
-  column ranks nothing, and will keep reading zero even after the count is
-  wired up, until there is a manual path to count. The tooltip on that column
-  says it is inert.
+- ~~`canned_responses.usage_count` is never incremented, and the reason is
+  bigger than the column.~~ Both halves are done. The composer's reply tab now
+  carries a picker, scoped to the agent's own `personal` responses, their teams'
+  `group` ones and everything `global` — in the query rather than in the
+  renderer, because a list narrowed after it is built is a list already sent to
+  the browser, and a personal response is somebody's own draft wording. Each arm
+  tests its own key too, so an orphaned `personal` row with a null `agent_id` is
+  visible to nobody rather than to everybody.
+
+  `usage_count` is incremented by both senders — the agent's composer and the
+  automation's `send_reply`, which had been reading the body and leaving the
+  count alone. **Counted on send, not on insert**, so a response an agent
+  reached for and thought better of does not score. It over-counts in one
+  direction on purpose: an agent who inserts one and rewrites every word still
+  registers a use, because the alternative is diffing the sent body against the
+  stored one and picking a similarity threshold nobody can defend. Two snippets
+  in one reply attribute to the last one picked, because the column counts
+  replies rather than fragments.
+
+  The figures start from this change, so **a response the team has sent for
+  months still starts at zero** and the ranking is only meaningful once some
+  traffic has gone through it. The tooltip says so.
+
+- **The dead-scaffolding sweep, run rather than recommended.** §1 has said it is
+  worth grepping for other columns nothing reads or writes; this is the answer as
+  of `e5e2f8a`. Of 548 columns across 52 tables, five are referenced nowhere in
+  `lib/`, `app/`, `worker/` or `components/`:
+
+  | Column                               | What it was for                                                |
+  | ------------------------------------ | -------------------------------------------------------------- |
+  | `kb_articles.visible_to_company_ids` | the `selected_companies` visibility level, still inert (above) |
+  | `kb_folders.visible_to_company_ids`  | the same, at folder level                                      |
+  | `conversations.parent_id`            | child tickets — nothing creates one, and no UI offers it       |
+  | `messages.bcc_addresses`             | BCC on an outbound email; the composer has no field for it     |
+  | `conversation_presence.is_typing`    | a typing indicator; the focus beat writes the row but not this |
+
+  None of them breaks anything by sitting there, and none is worth building on
+  spec. They are listed so the next session can tell "deliberately unbuilt" from
+  "somebody forgot", which is the distinction that cost the time when
+  `custom_fields` turned out to be the second kind. The command is
+  `db/schema` parsed for column names, grepped against those four directories —
+  cheap enough to re-run whenever a feature lands.
+
+  Note what the sweep does **not** catch: a column that is read but never
+  written. That is the `custom_fields` shape and the more dangerous one, because
+  the reader makes it look alive. Nothing mechanical finds those; they turn up
+  by asking, of each read, who writes it.
+
 - ~~`metrics_daily` rows written before the totals-slice fix are inflated.~~
   Repaired. `rollup_metrics` now takes a range (`{"from","to"}`, `{"days":N}`)
   and rebuilds those days from the source tables, and every write asserts that

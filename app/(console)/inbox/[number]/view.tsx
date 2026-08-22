@@ -8,7 +8,7 @@ import { ChevronLeftIcon } from '@/components/icons';
 import { Badge, Select } from '@/components/ui';
 import { useNow } from '@/components/use-now';
 import { formatBytes, formatDateTime, formatRelative } from '@/lib/format';
-import type { ConversationDetail } from '@/lib/tickets/queries';
+import type { CannedResponseOption, ConversationDetail } from '@/lib/tickets/queries';
 import { formatForInput, selectedValues, type TicketFieldDef } from '@/lib/tickets/custom-fields';
 import { describeWindow, metaWindowState } from '@/lib/meta/window';
 import {
@@ -96,6 +96,7 @@ export function ConversationView({
   templates,
   recipients,
   fields,
+  canned,
   canSideConversation,
   currentAgentId,
 }: {
@@ -108,6 +109,8 @@ export function ConversationView({
   fields: TicketFieldDef[];
   /** The internal directory, for the composer's side conversation tab. */
   recipients: PickerEntry[];
+  /** Reusable replies, already scoped to this agent's own and their groups'. */
+  canned: CannedResponseOption[];
   canSideConversation: boolean;
   currentAgentId: string;
 }) {
@@ -130,6 +133,7 @@ export function ConversationView({
             conversation={conversation}
             templates={templates}
             recipients={recipients}
+            canned={canned}
             canSideConversation={canSideConversation}
           />
         )}

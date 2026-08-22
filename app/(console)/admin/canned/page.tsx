@@ -38,8 +38,11 @@ export default async function CannedPage() {
           <>
             Used{' '}
             <InfoTip label="Used">
-              Intended as how often the reply has been inserted, but nothing increments it yet — it
-              reads zero for every response, including the ones the team sends daily.
+              How many replies went out carrying this response — counted when the reply is sent, so
+              one an agent inserted and then thought better of does not score. Both paths count: an
+              agent inserting it from the composer, and an automation sending it as an
+              auto-acknowledgement. Counts start from the day this began being recorded, so a
+              response the team has sent for months still starts at zero.
             </InfoTip>
           </>,
           '',

@@ -1,12 +1,13 @@
 'use client';
 
-import { useActionState, useCallback, useEffect, useState } from 'react';
+import { useActionState, useCallback, useEffect, useRef, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { ChevronDownIcon, ChevronUpIcon } from '@/components/icons';
 import { Button, ErrorText, Input, Label, Select, Textarea } from '@/components/ui';
 import { useNow } from '@/components/use-now';
-import type { ConversationDetail } from '@/lib/tickets/queries';
+import type { CannedResponseOption, ConversationDetail } from '@/lib/tickets/queries';
+import { insertCanned } from '@/lib/tickets/canned';
 import { describeWindow, metaWindowState } from '@/lib/meta/window';
 import { renderTemplatePreview, templateShape } from '@/lib/whatsapp/templates';
 import { formatRemaining, windowState } from '@/lib/whatsapp/window';
@@ -26,11 +27,14 @@ export function Composer({
   conversation,
   templates,
   recipients,
+  canned,
   canSideConversation,
 }: {
   conversation: ConversationDetail;
   templates: TemplateOption[];
   recipients: PickerEntry[];
+  /** Reusable replies this agent may insert — already scoped to them. */
+  canned: CannedResponseOption[];
   canSideConversation: boolean;
 }) {
   const isWhatsApp = conversation.channel === 'whatsapp';
@@ -203,6 +207,7 @@ export function Composer({
             <ReplyForm
               conversationId={conversation.id}
               isCommentThread={isCommentThread}
+              canned={canned}
               onSent={onSent}
             />
           ) : null}
@@ -274,19 +279,61 @@ function useRefreshOnSuccess(state: ActionState, onSent?: () => void) {
 function ReplyForm({
   conversationId,
   isCommentThread = false,
+  canned,
   onSent,
 }: {
   conversationId: string;
   isCommentThread?: boolean;
+  canned: CannedResponseOption[];
   onSent?: () => void;
 }) {
   const [state, action] = useActionState(sendReply, INITIAL);
   const [privately, setPrivately] = useState(false);
   useRefreshOnSuccess(state, onSent);
 
+  const bodyRef = useRef<HTMLTextAreaElement>(null);
+
+  /*
+    Which canned response went into this reply, for `usage_count`.
+
+    Counted on send rather than on insert, because the column exists to rank
+    which responses are worth keeping and "reached for and then abandoned" is
+    not a use. It is still an over-count in one direction: an agent who inserts
+    one and then rewrites every word of it is recorded as having used it. The
+    alternative is diffing the sent body against the stored one and picking a
+    similarity threshold, which is a number nobody can defend.
+
+    Last one wins. Inserting two into one reply is real — a greeting and a
+    closing — but the column counts replies, not fragments, and attributing the
+    reply to both would make the totals add up to more than the replies sent.
+  */
+  const [usedId, setUsedId] = useState('');
+
+  function insert(response: CannedResponseOption) {
+    const box = bodyRef.current;
+    if (!box) return;
+
+    const { text, caret } = insertCanned(
+      box.value,
+      response.bodyText,
+      box.selectionStart,
+      box.selectionEnd,
+    );
+
+    // Written straight to the node, because the textarea is uncontrolled — the
+    // form is keyed on the send nonce so the browser keeps the agent's draft
+    // through a tab switch, and making it controlled to support this would give
+    // that up for every reply in order to serve the ones that use a snippet.
+    box.value = text;
+    box.focus();
+    box.setSelectionRange(caret, caret);
+    setUsedId(response.id);
+  }
+
   return (
     <form key={state.nonce ?? 0} action={action} className="flex flex-col gap-2">
       <input type="hidden" name="conversationId" value={conversationId} />
+      <input type="hidden" name="cannedResponseId" value={usedId} />
       <input
         type="hidden"
         name="metaSendKind"
@@ -294,6 +341,7 @@ function ReplyForm({
       />
 
       <Textarea
+        ref={bodyRef}
         name="body"
         rows={4}
         placeholder={
@@ -305,6 +353,8 @@ function ReplyForm({
         }
         required
       />
+
+      <CannedPicker responses={canned} onPick={insert} />
 
       {isCommentThread ? (
         <label className="flex items-start gap-2 rounded-md border border-[var(--border)] p-2 text-xs">
@@ -334,6 +384,78 @@ function ReplyForm({
         <SubmitButton className="ml-auto" idle="Send reply" busy="Sending…" />
       </div>
     </form>
+  );
+}
+
+/**
+ * The canned response picker.
+ *
+ * A `<select>` rather than a search palette. This codebase has no modals, the
+ * list is a handful of rows per team rather than hundreds, and a control that
+ * inserts on change is the same gesture every other field in the console uses.
+ * If the list ever grows past what a dropdown can carry, the folder grouping
+ * below is already the shape a search would filter.
+ *
+ * It sits under the textarea rather than above it because the box is what the
+ * agent came here to type in — a picker above it pushes the thing they want
+ * down the screen, on a phone especially.
+ *
+ * Renders nothing at all when there are none, rather than an empty dropdown
+ * that reads as broken. Today that is every console: `canned_responses` is
+ * empty in production.
+ */
+function CannedPicker({
+  responses,
+  onPick,
+}: {
+  responses: CannedResponseOption[];
+  onPick: (response: CannedResponseOption) => void;
+}) {
+  if (responses.length === 0) return null;
+
+  // Grouped by folder, with the unfiled ones first — an agent scanning for
+  // "Refund approved" reads the folder names as headings rather than as a flat
+  // list that happens to be sorted.
+  const folders = [...new Set(responses.map((r) => r.folder ?? ''))];
+
+  return (
+    <label className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
+      <span className="shrink-0">Canned reply</span>
+      <Select
+        // Always reads "Insert…": it is an action, not a stored value, and a
+        // select that kept the last pick would claim the reply still contains
+        // something the agent may have since deleted.
+        value=""
+        onChange={(event) => {
+          const picked = responses.find((r) => r.id === event.target.value);
+          if (picked) onPick(picked);
+        }}
+        className="min-w-0 flex-1"
+      >
+        <option value="">Insert…</option>
+        {folders.map((folder) =>
+          folder ? (
+            <optgroup key={folder} label={folder}>
+              {responses
+                .filter((r) => (r.folder ?? '') === folder)
+                .map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.title}
+                  </option>
+                ))}
+            </optgroup>
+          ) : (
+            responses
+              .filter((r) => (r.folder ?? '') === '')
+              .map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.title}
+                </option>
+              ))
+          ),
+        )}
+      </Select>
+    </label>
   );
 }
 

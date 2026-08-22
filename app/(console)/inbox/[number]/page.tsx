@@ -6,6 +6,7 @@ import {
   getConversation,
   listActiveAgents,
   listApprovedTemplates,
+  listCannedResponses,
   listGroups,
   listStatuses,
   listTicketFields,
@@ -38,17 +39,20 @@ export default async function ConversationPage({
 
   const canSideConversation = can(agent, 'ticket.side_conversation');
 
-  const [statuses, agentList, groupList, fields, templates, recipients] = await Promise.all([
-    listStatuses(),
-    listActiveAgents(),
-    listGroups(),
-    listTicketFields(),
-    // Only fetched for WhatsApp tickets: an email ticket has no use for them
-    // and the table is synced hourly, so this is a needless query otherwise.
-    conversation.channel === 'whatsapp' ? listApprovedTemplates() : Promise.resolve([]),
-    // Same reasoning: an agent who cannot start one has no picker to fill.
-    canSideConversation ? listSideConversationRecipients() : Promise.resolve([]),
-  ]);
+  const [statuses, agentList, groupList, fields, canned, templates, recipients] = await Promise.all(
+    [
+      listStatuses(),
+      listActiveAgents(),
+      listGroups(),
+      listTicketFields(),
+      listCannedResponses(agent),
+      // Only fetched for WhatsApp tickets: an email ticket has no use for them
+      // and the table is synced hourly, so this is a needless query otherwise.
+      conversation.channel === 'whatsapp' ? listApprovedTemplates() : Promise.resolve([]),
+      // Same reasoning: an agent who cannot start one has no picker to fill.
+      canSideConversation ? listSideConversationRecipients() : Promise.resolve([]),
+    ],
+  );
 
   return (
     <InboxShell searchParams={query} activeNumber={ticketNumber}>
@@ -58,6 +62,7 @@ export default async function ConversationPage({
         agents={agentList}
         groups={groupList}
         fields={fields}
+        canned={canned}
         templates={templates}
         recipients={recipients}
         canSideConversation={canSideConversation}

@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
+  cannedResponses,
   contactIdentities,
   conversationEvents,
   conversations,
@@ -160,6 +161,7 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
   const conversationId = String(formData.get('conversationId') ?? '');
   const body = String(formData.get('body') ?? '').trim();
   const resolveAfter = formData.get('resolveAfter') === 'on';
+  const cannedResponseId = String(formData.get('cannedResponseId') ?? '');
 
   if (!body) return { error: 'Write something first' };
 
@@ -286,12 +288,37 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
     kind: 'reply',
   });
 
+  if (cannedResponseId) await countCannedUse(cannedResponseId);
+
   if (resolveAfter) {
     await applyStatusCategory(agent, conversation.id, 'resolved');
   }
 
   refresh(conversation.number);
   return ok();
+}
+
+/**
+ * Records that a canned response went out in a reply.
+ *
+ * After the send rather than before it: the column ranks what the team actually
+ * sends, so a reply that failed validation and never left must not count. The
+ * id comes from the composer, so it is incremented rather than trusted for
+ * anything — a bogus id updates no rows, which is the whole blast radius.
+ *
+ * Not awaited for correctness anywhere: a lost increment costs a ranking column
+ * one point, and failing the agent's reply because a counter did not move would
+ * be the wrong trade.
+ */
+async function countCannedUse(id: string): Promise<void> {
+  try {
+    await db
+      .update(cannedResponses)
+      .set({ usageCount: sql`${cannedResponses.usageCount} + 1` })
+      .where(eq(cannedResponses.id, id));
+  } catch (error) {
+    console.warn('[canned] could not record a use', error);
+  }
 }
 
 export async function addNote(_state: ActionState, formData: FormData): Promise<ActionState> {
