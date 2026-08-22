@@ -4,6 +4,7 @@ import type { Metadata } from 'next';
 import { DocumentIcon } from '@/components/icons';
 import { formatArticleDate, isLocale, LOCALE_NAMES, t, type Locale } from '@/lib/kb/locale';
 import { getArticle, relatedArticles, translationsOf } from '@/lib/kb/queries';
+import { kbViewer } from '@/lib/kb/viewer';
 import { decodeSlugParam } from '@/lib/kb/slug';
 import { PageBody, PageHeader, Panel } from '../../chrome';
 import { ArticleFeedback } from './feedback';
@@ -21,10 +22,12 @@ export async function generateMetadata({
   const slug = decodeSlugParam(articleParam);
   if (!isLocale(locale)) return {};
 
-  const article = await getArticle(locale, slug);
+  const viewer = await kbViewer();
+
+  const article = await getArticle(viewer, locale, slug);
   if (!article) return {};
 
-  const translations = await translationsOf(article.translationGroupId);
+  const translations = await translationsOf(viewer, article.translationGroupId);
 
   return {
     title: article.seo.title ?? `${article.title} — ShipBlu Support`,
@@ -56,12 +59,14 @@ export default async function ArticlePage({
   const slug = decodeSlugParam(articleParam);
   if (!isLocale(locale)) notFound();
 
-  const article = await getArticle(locale, slug);
+  const viewer = await kbViewer();
+
+  const article = await getArticle(viewer, locale, slug);
   if (!article) notFound();
 
   const [related, translations] = await Promise.all([
-    relatedArticles(article.folderId, article.id),
-    translationsOf(article.translationGroupId),
+    relatedArticles(viewer, article.folderId, article.id),
+    translationsOf(viewer, article.translationGroupId),
   ]);
 
   const others = translations.filter((entry) => entry.locale !== locale);

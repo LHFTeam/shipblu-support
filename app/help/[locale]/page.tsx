@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 import { CategoryIcon } from '@/components/icons';
 import { articleCount, isLocale, t } from '@/lib/kb/locale';
 import { listCategories } from '@/lib/kb/queries';
+import { kbViewer } from '@/lib/kb/viewer';
 import { CardGrid, EmptyNote, Hero, NavCard, PageBody, SectionHeading } from './chrome';
 
 export const dynamic = 'force-dynamic';
@@ -18,7 +19,7 @@ export default async function HelpCentreHome({ params }: { params: Promise<{ loc
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
 
-  const categories = await listCategories(locale);
+  const categories = await listCategories(await kbViewer(), locale);
 
   return (
     <>

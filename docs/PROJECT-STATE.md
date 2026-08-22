@@ -470,11 +470,46 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
 - One imported article's detected language disagrees with its category. The
   importer counts and reports these rather than silently refiling them; someone
   who reads Arabic should look at it.
-- `logged_in` and `selected_companies` knowledge base articles are still not
-  served, even though customers can now sign in. Wiring them up means threading
-  the viewer through every query in `lib/kb/queries.ts`; until then
-  `publiclyVisible()` treats an unevaluated rule as deny, which is the safe
-  reading but means the two visibility levels are inert in the editor.
+- ~~`logged_in` and `selected_companies` knowledge base articles are still not
+  served.~~ Both are evaluated now. `publiclyVisible()` is gone; every query in
+  `lib/kb/queries.ts` takes a `KbViewer`, resolved from the portal session by
+  `kbViewer()`, and the rule itself lives in `lib/kb/visibility.ts`.
+
+  **The viewer is a required argument, and that is the security design.** A
+  missed call site is a compile error rather than an internal runbook in
+  Google's index — there is no zero-argument predicate left to call by accident,
+  so a query written next year cannot forget the rule. `tsc` found all fourteen
+  call sites when the parameter was added.
+
+  Two callers pass `ANONYMOUS` and always must:
+
+  - **The sitemap.** `allPublishedArticles()` takes no viewer at all, so it
+    cannot be handed a customer by someone being helpful. A `logged_in` article
+    listed there would be advertised to the open web by the one file whose job
+    is telling crawlers what to fetch.
+  - **The widget's search.** The widget authenticates a _visitor_ — a token
+    minted for a browser on somebody else's site — which is not the portal
+    session that says who a customer is.
+
+  **A folder's visibility gates the articles inside it**, so a public article in
+  a `logged_in` folder needs a sign-in. The folder is what the navigation
+  exposes; an article reachable by URL from a folder nobody can list is a hole
+  in the hardest place to notice.
+
+  This is only safe because every help centre page is `force-dynamic`. **A
+  cached page that varied by viewer would serve one signed-in customer's render
+  to an anonymous crawler** — if any of them is ever given a `revalidate` or made
+  static, it has to stop calling `kbViewer()`. The comment on that function says
+  so.
+
+  `selected_companies` resolves against `contacts.company_id` against the
+  article's `visible_to_company_ids`. It is **correctly evaluated but still
+  serves nothing in practice**: neither the article editor nor the folder form
+  offers that level, so the only source is the Freshdesk importer, and nothing
+  populates `visible_to_company_ids` — an imported one has an empty allowlist,
+  which matches nobody. Finishing it means a company picker in the editor and a
+  mapping in the importer; until then the level is safe rather than useful.
+
 - Ticket statuses show customers the configured `customer_label` or a plain word
   for the category in their own language — never the status's own name. That
   field has no per-locale variant, so setting it pins one language for every
@@ -537,13 +572,13 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   of `e5e2f8a`. Of 548 columns across 52 tables, five are referenced nowhere in
   `lib/`, `app/`, `worker/` or `components/`:
 
-  | Column                               | What it was for                                                |
-  | ------------------------------------ | -------------------------------------------------------------- |
-  | `kb_articles.visible_to_company_ids` | the `selected_companies` visibility level, still inert (above) |
-  | `kb_folders.visible_to_company_ids`  | the same, at folder level                                      |
-  | `conversations.parent_id`            | child tickets — nothing creates one, and no UI offers it       |
-  | `messages.bcc_addresses`             | BCC on an outbound email; the composer has no field for it     |
-  | `conversation_presence.is_typing`    | a typing indicator; the focus beat writes the row but not this |
+  | Column                               | What it was for                                                   |
+  | ------------------------------------ | ----------------------------------------------------------------- |
+  | `kb_articles.visible_to_company_ids` | read by the visibility rule now; still written by nothing (above) |
+  | `kb_folders.visible_to_company_ids`  | the same, at folder level                                         |
+  | `conversations.parent_id`            | child tickets — nothing creates one, and no UI offers it          |
+  | `messages.bcc_addresses`             | BCC on an outbound email; the composer has no field for it        |
+  | `conversation_presence.is_typing`    | a typing indicator; the focus beat writes the row but not this    |
 
   None of them breaks anything by sitting there, and none is worth building on
   spec. They are listed so the next session can tell "deliberately unbuilt" from

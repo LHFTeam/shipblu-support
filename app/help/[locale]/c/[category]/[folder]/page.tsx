@@ -3,6 +3,7 @@ import type { Metadata } from 'next';
 import { FolderIcon } from '@/components/icons';
 import { isLocale, t } from '@/lib/kb/locale';
 import { getFolder } from '@/lib/kb/queries';
+import { kbViewer } from '@/lib/kb/viewer';
 import { decodeSlugParam } from '@/lib/kb/slug';
 import { ArticleList, ArticleRow, EmptyNote, PageBody, PageHeader } from '../../../chrome';
 
@@ -18,7 +19,7 @@ export async function generateMetadata({
   const folderSlug = decodeSlugParam(folderParam);
   if (!isLocale(locale)) return {};
 
-  const folder = await getFolder(locale, categorySlug, folderSlug);
+  const folder = await getFolder(await kbViewer(), locale, categorySlug, folderSlug);
   if (!folder) return {};
 
   return {
@@ -38,7 +39,7 @@ export default async function FolderPage({
   const folderSlug = decodeSlugParam(folderParam);
   if (!isLocale(locale)) notFound();
 
-  const folder = await getFolder(locale, categorySlug, folderSlug);
+  const folder = await getFolder(await kbViewer(), locale, categorySlug, folderSlug);
   if (!folder) notFound();
 
   return (

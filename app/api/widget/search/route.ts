@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { DEFAULT_LOCALE, isLocale } from '@/lib/kb/locale';
 import { searchArticles } from '@/lib/kb/queries';
+import { ANONYMOUS } from '@/lib/kb/visibility';
 import { allow, clientIp } from '@/lib/kb/rate-limit';
 import { publicBaseUrl } from '@/lib/kb/site';
 
@@ -15,6 +16,13 @@ export const dynamic = 'force-dynamic';
  *
  * Reuses the public search, so it inherits the same visibility rule: a draft or
  * an agents-only article cannot be suggested here.
+ *
+ * Anonymous, always. The widget authenticates a *visitor* — a token minted for
+ * a browser on somebody else's website — which is not the portal session that
+ * says who a customer is. Treating one as the other would hand a `logged_in`
+ * article to any page that embeds the widget. A signed-in customer searching
+ * from the help centre gets their own articles through the search page, which
+ * has their session.
  */
 export async function GET(request: Request) {
   if (!allow(`widget-search:${clientIp(request)}`, 60, 60_000)) {
@@ -28,7 +36,7 @@ export async function GET(request: Request) {
 
   if (query.length < 3) return NextResponse.json({ articles: [] });
 
-  const hits = await searchArticles(locale, query, 3);
+  const hits = await searchArticles(ANONYMOUS, locale, query, 3);
   const base = publicBaseUrl();
 
   return NextResponse.json({
