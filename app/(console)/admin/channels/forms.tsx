@@ -18,8 +18,12 @@ export function ChannelForm({ groups }: { groups: { id: string; name: string }[]
       action={action}
       className="flex flex-col gap-3 rounded-lg border border-[var(--border)] p-4"
     >
-      <div className="flex gap-3">
-        <Field label="Type" className="w-40">
+      {/* Stacked on a phone, one row from `sm` up. Four controls sharing a
+          non-wrapping row left the name box about one character wide, and the
+          field that names the channel is the one an admin is actually typing
+          into. */}
+      <div className="flex flex-col gap-3 sm:flex-row">
+        <Field label="Type" className="sm:w-40">
           <Select name="type" value={type} onChange={(e) => setType(e.target.value as ChannelType)}>
             <option value="email">Email</option>
             <option value="whatsapp">WhatsApp</option>
@@ -30,13 +34,13 @@ export function ChannelForm({ groups }: { groups: { id: string; name: string }[]
           </Select>
         </Field>
 
-        <Field label="Name" className="flex-1">
+        <Field label="Name" className="sm:flex-1">
           <Input name="name" placeholder="Support mailbox" required />
         </Field>
 
-        <div className="flex-1">
+        <div className="sm:flex-1">
           {type === 'webchat' ? (
-            <p className="pt-6 text-xs text-[var(--muted-foreground)]">
+            <p className="text-xs text-[var(--muted-foreground)] sm:pt-6">
               The widget needs no address — only a default group.
             </p>
           ) : type === 'whatsapp' || type === 'whatsapp_bot' ? (
@@ -56,7 +60,7 @@ export function ChannelForm({ groups }: { groups: { id: string; name: string }[]
             // The page and account ids live in the environment, because they are
             // paired with a token that must never be in the database. This row
             // is routing only: which group a message from here lands in.
-            <p className="pt-6 text-xs text-[var(--muted-foreground)]">
+            <p className="text-xs text-[var(--muted-foreground)] sm:pt-6">
               Configured by {type === 'facebook' ? 'FACEBOOK_PAGE_ID' : 'INSTAGRAM_ACCOUNT_ID'} in
               the environment. This row only sets the default group.
             </p>
@@ -69,7 +73,7 @@ export function ChannelForm({ groups }: { groups: { id: string; name: string }[]
 
         <Field
           label="Default group"
-          className="w-40"
+          className="sm:w-40"
           explain={
             <>
               Which group a ticket from this channel starts in, before any automation moves it. With
