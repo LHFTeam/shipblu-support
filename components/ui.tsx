@@ -1,4 +1,5 @@
 import type { ComponentProps, ReactNode } from 'react';
+import { InfoTip } from './tooltip';
 
 /**
  * Shared primitives.
@@ -95,19 +96,30 @@ export function Label({ children, htmlFor }: { children: ReactNode; htmlFor?: st
 export function Field({
   label,
   hint,
+  explain,
   as = 'label',
   children,
   className = '',
 }: {
   label: string;
   hint?: ReactNode;
+  /**
+   * The ⓘ beside the label. A `hint` is always on screen and belongs to
+   * anything an admin needs while filling the field in; `explain` is for what
+   * the setting *is*, which is read once and would be clutter underneath every
+   * control in a twelve-field form.
+   */
+  explain?: ReactNode;
   as?: 'label' | 'group';
   children: ReactNode;
   className?: string;
 }) {
   const body = (
     <>
-      <span className="mb-1 block text-xs font-medium text-[var(--muted-foreground)]">{label}</span>
+      <span className="mb-1 flex items-center gap-1 text-xs font-medium text-[var(--muted-foreground)]">
+        {label}
+        {explain ? <InfoTip label={label}>{explain}</InfoTip> : null}
+      </span>
       {children}
       {hint ? (
         <span className="mt-1 block text-xs text-[var(--muted-foreground)]">{hint}</span>

@@ -2,6 +2,7 @@ import { asc } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { ticketStatuses } from '@/db/schema';
 import { Badge, Cell, PageHeader, Row, Table } from '@/components/ui';
+import { InfoTip } from '@/components/tooltip';
 import { requirePermission } from '@/lib/auth/guard';
 import { NewStatus, StatusEditor } from './forms';
 
@@ -32,7 +33,37 @@ export default async function StatusesPage() {
         actions={<NewStatus />}
       />
 
-      <Table head={['Status', 'Category', 'SLA clock', 'Customer sees', '']}>
+      <Table
+        head={[
+          'Status',
+          <>
+            Category{' '}
+            <InfoTip label="Category">
+              The four states everything else reasons about. SLA and every report group by this and
+              never by the status&rsquo;s name, so one filed under the wrong category miscounts
+              quietly: <b>open</b> and <b>pending</b> are the live backlog every figure on the
+              dashboard counts, and <b>resolved</b> and <b>closed</b> are outside it.
+            </InfoTip>
+          </>,
+          <>
+            SLA clock{' '}
+            <InfoTip label="SLA clock">
+              Whether time in this status counts against your targets. Paused is for waiting on
+              someone else — that time is added back to the due date when the ticket moves on.
+            </InfoTip>
+          </>,
+          <>
+            Customer sees{' '}
+            <InfoTip label="Customer sees">
+              What the portal shows. Agents name statuses for themselves — &ldquo;Waiting on
+              ops&rdquo;, &ldquo;Escalated tier 2&rdquo; — so a customer is never shown the
+              status&rsquo;s own name: they see the label set here, and with none set, a plain word
+              for the category in their own language.
+            </InfoTip>
+          </>,
+          '',
+        ]}
+      >
         {rows.map((status) => (
           <Row key={status.id}>
             <Cell>
@@ -49,7 +80,11 @@ export default async function StatusesPage() {
               )}
             </Cell>
             <Cell className="text-xs text-[var(--muted-foreground)]">
-              {status.visibleToCustomer ? (status.customerLabel ?? status.name) : 'hidden'}
+              {status.visibleToCustomer ? (
+                (status.customerLabel ?? <span className="italic">the category word</span>)
+              ) : (
+                <span>hidden</span>
+              )}
             </Cell>
             <Cell className="text-end">
               <StatusEditor status={status} deleteOnly />

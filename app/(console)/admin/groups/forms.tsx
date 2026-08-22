@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Card, Cell, Field, Input, Row, Select, Table, Toggle } from '@/components/ui';
+import { InfoTip } from '@/components/tooltip';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
 import { deleteGroup, saveGroup } from '../settings-actions';
 
@@ -288,7 +289,29 @@ export function GroupsTable({
         </div>
       ) : null}
 
-      <Table head={['Group', 'Assignment', 'Business hours', 'Agents', 'Tickets', '']}>
+      <Table
+        head={[
+          'Group',
+          'Assignment',
+          'Business hours',
+          <>
+            Agents{' '}
+            <InfoTip label="Agents">
+              How many people are members of this group. Only members are ever assigned its tickets,
+              so a routing group with none is a queue nothing comes out of.
+            </InfoTip>
+          </>,
+          <>
+            Tickets{' '}
+            <InfoTip label="Tickets">
+              Every ticket ever routed to this group, not the open backlog — an empty group with a
+              count here is work that has nobody to go to. Channels the team only watches are left
+              out.
+            </InfoTip>
+          </>,
+          '',
+        ]}
+      >
         {rows.map(({ group, scheduleName, members, tickets }) => (
           <Row key={group.id}>
             <Cell>

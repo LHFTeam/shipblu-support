@@ -2,6 +2,7 @@ import { asc } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { cannedResponses } from '@/db/schema';
 import { Cell, PageHeader, Row, Table } from '@/components/ui';
+import { InfoTip } from '@/components/tooltip';
 import { requirePermission } from '@/lib/auth/guard';
 import { CannedEditor, NewCanned } from './forms';
 
@@ -30,7 +31,20 @@ export default async function CannedPage() {
         actions={<NewCanned />}
       />
 
-      <Table head={['Title', 'Folder', 'Used', '']}>
+      <Table
+        head={[
+          'Title',
+          'Folder',
+          <>
+            Used{' '}
+            <InfoTip label="Used">
+              Intended as how often the reply has been inserted, but nothing increments it yet — it
+              reads zero for every response, including the ones the team sends daily.
+            </InfoTip>
+          </>,
+          '',
+        ]}
+      >
         {rows.map((response) => (
           <Row key={response.id}>
             <Cell>

@@ -42,7 +42,17 @@ function Fields({ rule, agents, groups, cannedResponses, fields }: BuilderProps 
         </Field>
       </div>
 
-      <Field label="When">
+      <Field
+        label="When"
+        explain={
+          <>
+            What makes this rule run. The first two fire the moment it happens, inside the same
+            request. <b>On a schedule</b> is different: a sweep every fifteen minutes over the
+            tickets with the oldest activity, which is the only way to act on time passing —
+            &ldquo;unassigned for four hours&rdquo;, &ldquo;no reply in three days&rdquo;.
+          </>
+        }
+      >
         <Select name="trigger" defaultValue={rule?.trigger ?? 'on_create'}>
           <option value="on_create">A ticket is created</option>
           <option value="on_update">A ticket is updated</option>

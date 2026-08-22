@@ -3,6 +3,7 @@
 import { useActionState, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Badge, Button, ErrorText, Input, Label, Select } from '@/components/ui';
+import { InfoTip, Tooltip } from '@/components/tooltip';
 import { formatRelative } from '@/lib/format';
 import { createInvite, setAgentActive, setAgentCapacity, type AdminState } from '../actions';
 
@@ -126,13 +127,29 @@ export function AgentRow({
       <div className="flex flex-wrap items-center gap-1.5">
         <Badge>{agent.role.replace('_', ' ')}</Badge>
         {!agent.isActive ? <Badge tone="danger">deactivated</Badge> : null}
-        <Badge
-          tone={
-            availability === 'online' ? 'success' : availability === 'away' ? 'warning' : 'neutral'
+        <Tooltip
+          label="Availability"
+          content={
+            <>
+              What assignment sees, which is not the same as being signed in. <b>Online</b> is
+              connected and accepting tickets; <b>away</b> is connected with &ldquo;accepting
+              tickets&rdquo; switched off, so nothing is routed to them; <b>offline</b> is no open
+              console.
+            </>
           }
         >
-          {availability}
-        </Badge>
+          <Badge
+            tone={
+              availability === 'online'
+                ? 'success'
+                : availability === 'away'
+                  ? 'warning'
+                  : 'neutral'
+            }
+          >
+            {availability}
+          </Badge>
+        </Tooltip>
       </div>
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -141,6 +158,11 @@ export function AgentRow({
           <label className="text-xs opacity-50" htmlFor={`cap-${agent.id}`}>
             cap
           </label>
+          <InfoTip label="Ticket cap">
+            The most open tickets auto-assignment will give this agent at once. Leave it blank and
+            the group&rsquo;s default cap applies; with neither set they are uncapped. It never
+            stops you assigning a ticket by hand.
+          </InfoTip>
           {/* 16px on a phone for the same reason as every other field in the
               console: iOS zooms into anything smaller and does not zoom back. */}
           <input
