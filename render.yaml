@@ -89,6 +89,13 @@ envVarGroups:
         sync: false
       - key: META_VERIFY_TOKEN
         sync: false
+      # Public, unlike the three above, and still here: the webhook subscription
+      # endpoint is addressed by app id and authenticated with the app id and
+      # app secret joined by a pipe. Only `npm run job --
+      # subscribe_meta_webhooks` reads it, which is why it was missing until
+      # that job needed it.
+      - key: META_APP_ID
+        sync: false
       - key: FACEBOOK_PAGE_ID
         sync: false
       - key: INSTAGRAM_ACCOUNT_ID

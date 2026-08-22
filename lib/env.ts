@@ -117,6 +117,12 @@ const schema = z.object({
    * webhook, and `META_VERIFY_TOKEN` answers Meta's subscription handshake for
    * all of them.
    *
+   * `META_APP_ID` is the odd one out: an app id is public, not a secret. It is
+   * here because the webhook *subscription* endpoint is addressed by app id and
+   * authenticated with an app access token, which is the app id and the app
+   * secret joined by a pipe. Nothing else in the system needs it, which is why
+   * it went missing until `subscribe_meta_webhooks` had to have it.
+   *
    * The remaining WHATSAPP_* keys below are ids, not credentials — they name
    * which phone number and business account to use, and have no Meta-app
    * equivalent to collapse into.
@@ -124,6 +130,7 @@ const schema = z.object({
   META_PAGE_ACCESS_TOKEN: z.string().optional(),
   META_APP_SECRET: z.string().optional(),
   META_VERIFY_TOKEN: z.string().optional(),
+  META_APP_ID: z.string().optional(),
   FACEBOOK_PAGE_ID: z.string().optional(),
   INSTAGRAM_ACCOUNT_ID: z.string().optional(),
 

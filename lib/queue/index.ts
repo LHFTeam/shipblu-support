@@ -11,6 +11,7 @@ export type JobType =
   | 'send_meta'
   | 'download_media'
   | 'sync_whatsapp_templates'
+  | 'subscribe_meta_webhooks'
   | 'sla_sweep'
   | 'assign_sweep'
   | 'run_time_automations'

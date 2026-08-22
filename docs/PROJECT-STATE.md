@@ -267,6 +267,25 @@ is code:
   page: a chat still opens a ticket without it, but with no channel and no
   group, and it is also the row whose default group decides which schedule the
   widget calls "we are here" — with none, the global default applies.
+- **Every bot transcript is one-sided, and the fix is one job away.** The app has
+  never been subscribed to `message_echoes`, so the archive holds what customers
+  said to the bot and nothing the bot said back — 10,007 inbound rows on
+  `whatsapp_bot` and **zero outbound**. The missing half is never delivered
+  rather than delivered and dropped, and its size is known exactly, because the
+  delivery statuses _do_ arrive: 14,828 distinct outbound wamids in the three
+  days to 2026-08-22 against 10,024 inbound messages, so roughly 60% of each
+  conversation is absent. The receiving code has been ready since the channel
+  landed — `lib/whatsapp/parse.ts`, `ingestWhatsAppEcho` — and has only ever seen
+  Meta's documentation sample replayed by hand, five payloads on the test number
+  `16505551111`. `META_APP_ID` is set, so all that is left is
+  `npm run job -- subscribe_meta_webhooks` — from a Render shell on
+  `shipblu-support-worker` once this is on `main`, because that is where the
+  credentials are and the job ships with this change rather than being deployed
+  already. It reads the fields Meta has now, adds what is missing, and refuses
+  to write a list that would drop `messages`.
+  Do not do this with a hand-written `curl`: the Graph call _replaces_ the field
+  list rather than adding to it, so naming only the new field unsubscribes
+  `messages` and stops inbound WhatsApp entirely, and Meta answers that with a 200.
 - **Agents.** Three accounts exist. The rest of the team needs inviting, and
   `groups` (3 rows) needs its membership — which is now load-bearing rather than
   decorative: auto-assignment only ever considers members of the ticket's group,
@@ -305,7 +324,10 @@ is code:
   re-run it if the parser ever learns to read a shape it currently skips. §7 has
   the figures.
 - **Unset config:** `EMAIL_API_KEY`, `EMAIL_FROM_ADDRESS`, `EMAIL_REPLY_DOMAIN`,
-  `EMAIL_WEBHOOK_SECRET`, `KB_PUBLIC_HOST`, `WIDGET_ALLOWED_ORIGINS`. The last of
+  `EMAIL_WEBHOOK_SECRET`, `KB_PUBLIC_HOST`, `WIDGET_ALLOWED_ORIGINS`.
+  `META_APP_ID` joined the shared group with this change and is _not_ on that
+  list — it is an app id rather than a secret, only
+  `subscribe_meta_webhooks` reads it, and nothing needed it before. The last of
   those is not blocking chat on the help centre and never will be: the snippet
   frames the hostname that served it, so the help centre's own iframe is
   same-origin either side of the custom domain going live. It is for the day the
