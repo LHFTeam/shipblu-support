@@ -17,16 +17,18 @@ export function InviteForm() {
       action={action}
       className="flex flex-col gap-3 rounded-lg border border-[var(--border)] p-4"
     >
-      <div className="flex gap-3">
-        <div className="flex-1">
+      {/* Stacked on a phone: three fields sharing one row leaves an email box
+          about eleven characters wide. */}
+      <div className="flex flex-col gap-3 sm:flex-row">
+        <div className="sm:flex-1">
           <Label htmlFor="email">Email</Label>
           <Input id="email" name="email" type="email" required />
         </div>
-        <div className="flex-1">
+        <div className="sm:flex-1">
           <Label htmlFor="name">Name (optional)</Label>
           <Input id="name" name="name" />
         </div>
-        <div className="w-40">
+        <div className="sm:w-40">
           <Label htmlFor="role">Role</Label>
           <Select id="role" name="role" defaultValue="agent">
             <option value="agent">Agent</option>
@@ -64,6 +66,19 @@ export function InviteForm() {
   );
 }
 
+/**
+ * `formatRelative` answers "now" inside the first minute and an absolute date
+ * past a month, and neither of those takes the "seen … ago" the durations do:
+ * the row read "seen now ago", and would have read "seen 3 Jul 2026, 14:02 ago"
+ * for anyone who had been away long enough to be worth noticing.
+ */
+function lastSeen(value: Date | string | null): string {
+  if (!value) return 'never signed in';
+  const relative = formatRelative(value);
+  if (relative === 'now') return 'seen just now';
+  return /^\d+[mhd]$/.test(relative) ? `seen ${relative} ago` : `seen ${relative}`;
+}
+
 export function AgentRow({
   agent,
   isSelf,
@@ -90,53 +105,70 @@ export function AgentRow({
   const availability =
     agent.presence === 'online' ? (agent.isAcceptingTickets ? 'online' : 'away') : 'offline';
 
+  /*
+   * One row per agent above `sm`, three stacked bands below it.
+   *
+   * Everything here — a name, three badges, a capacity box, a last-seen stamp
+   * and a button — is about 560px of content, so a single non-wrapping row on a
+   * phone pushed the buttons off the side of the screen and squeezed the name
+   * that identifies the row down to an ellipsis. The bands keep the reading
+   * order (who, what state, what you can do about it) at every width.
+   */
   return (
-    <li className="flex items-center gap-3 px-3 py-2.5 text-sm">
-      <div className="min-w-0">
+    <li className="flex flex-col gap-2 px-3 py-3 text-sm sm:flex-row sm:items-center sm:gap-3 sm:py-2.5">
+      <div className="min-w-0 sm:flex-1">
         <p className="truncate font-medium">
           {agent.name} {isSelf ? <span className="opacity-50">(you)</span> : null}
         </p>
         <p className="truncate text-xs opacity-50">{agent.email}</p>
       </div>
 
-      <Badge>{agent.role.replace('_', ' ')}</Badge>
-      {!agent.isActive ? <Badge tone="danger">deactivated</Badge> : null}
-      <Badge
-        tone={
-          availability === 'online' ? 'success' : availability === 'away' ? 'warning' : 'neutral'
-        }
-      >
-        {availability}
-      </Badge>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Badge>{agent.role.replace('_', ' ')}</Badge>
+        {!agent.isActive ? <Badge tone="danger">deactivated</Badge> : null}
+        <Badge
+          tone={
+            availability === 'online' ? 'success' : availability === 'away' ? 'warning' : 'neutral'
+          }
+        >
+          {availability}
+        </Badge>
+      </div>
 
-      <form action={capacityAction} className="ml-auto flex shrink-0 items-center gap-1">
-        <input type="hidden" name="agentId" value={agent.id} />
-        <label className="text-xs opacity-50" htmlFor={`cap-${agent.id}`}>
-          cap
-        </label>
-        <input
-          id={`cap-${agent.id}`}
-          name="maxOpenTickets"
-          type="number"
-          min={0}
-          defaultValue={agent.maxOpenTickets ?? ''}
-          placeholder="group"
-          onBlur={(event) => event.currentTarget.form?.requestSubmit()}
-          className="w-16 rounded-md border border-[var(--border)] bg-[var(--surface)] px-1.5 py-1 text-xs"
-        />
-      </form>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <form action={capacityAction} className="flex shrink-0 items-center gap-1">
+          <input type="hidden" name="agentId" value={agent.id} />
+          <label className="text-xs opacity-50" htmlFor={`cap-${agent.id}`}>
+            cap
+          </label>
+          {/* 16px on a phone for the same reason as every other field in the
+              console: iOS zooms into anything smaller and does not zoom back. */}
+          <input
+            id={`cap-${agent.id}`}
+            name="maxOpenTickets"
+            type="number"
+            min={0}
+            defaultValue={agent.maxOpenTickets ?? ''}
+            placeholder="group"
+            onBlur={(event) => event.currentTarget.form?.requestSubmit()}
+            className="w-16 rounded-md border border-[var(--border)] bg-[var(--surface)] px-1.5 py-1 text-base sm:text-xs"
+          />
+        </form>
 
-      <span className="shrink-0 text-xs opacity-50">
-        {agent.lastSeenAt ? `seen ${formatRelative(agent.lastSeenAt)} ago` : 'never signed in'}
-      </span>
+        <span className="shrink-0 text-xs opacity-50">{lastSeen(agent.lastSeenAt)}</span>
 
-      <form action={action}>
-        <input type="hidden" name="agentId" value={agent.id} />
-        <input type="hidden" name="active" value={agent.isActive ? 'false' : 'true'} />
-        <Button type="submit" variant={agent.isActive ? 'secondary' : 'primary'} disabled={isSelf}>
-          {agent.isActive ? 'Deactivate' : 'Reactivate'}
-        </Button>
-      </form>
+        <form action={action} className="ms-auto sm:ms-0">
+          <input type="hidden" name="agentId" value={agent.id} />
+          <input type="hidden" name="active" value={agent.isActive ? 'false' : 'true'} />
+          <Button
+            type="submit"
+            variant={agent.isActive ? 'secondary' : 'primary'}
+            disabled={isSelf}
+          >
+            {agent.isActive ? 'Deactivate' : 'Reactivate'}
+          </Button>
+        </form>
+      </div>
 
       {state.error || capacityState.error ? (
         <span className="text-xs text-red-600">{state.error ?? capacityState.error}</span>

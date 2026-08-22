@@ -1,4 +1,4 @@
-import { asc, desc, eq, isNull } from 'drizzle-orm';
+import { asc, desc, isNull } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agents, invites } from '@/db/schema';
 import { requirePermission } from '@/lib/auth/guard';
@@ -38,8 +38,6 @@ export default async function AgentsPage() {
       .orderBy(desc(invites.createdAt)),
   ]);
 
-  void eq;
-
   return (
     <div className="flex flex-col gap-8">
       <section>
@@ -61,10 +59,10 @@ export default async function AgentsPage() {
           <h2 className="mb-3 text-sm font-medium opacity-70">Pending invites</h2>
           <ul className="divide-y divide-[var(--border)] rounded-lg border border-[var(--border)] text-sm">
             {openInvites.map((invite) => (
-              <li key={invite.id} className="flex items-center gap-3 px-3 py-2">
-                <span>{invite.email}</span>
+              <li key={invite.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
+                <span className="min-w-0 break-all">{invite.email}</span>
                 <span className="opacity-50">{invite.role}</span>
-                <span className="ml-auto text-xs opacity-50">
+                <span className="ms-auto text-xs opacity-50">
                   expires {formatDateTime(invite.expiresAt)}
                 </span>
               </li>

@@ -1,10 +1,10 @@
 import { asc, eq, notInArray, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agents, businessHours, conversations, groupMembers, groups } from '@/db/schema';
-import { Cell, PageHeader, Row, Table } from '@/components/ui';
+import { PageHeader } from '@/components/ui';
 import { requirePermission } from '@/lib/auth/guard';
 import { readOnlyChannels } from '@/lib/tickets/channel-policy';
-import { GroupEditor, NewGroup } from './forms';
+import { GroupsTable, NewGroup } from './forms';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,12 +18,6 @@ export const dynamic = 'force-dynamic';
  * counted on the company calendar or its own is worth being able to read down
  * the list.
  */
-const STRATEGY_LABELS: Record<'manual' | 'round_robin' | 'load_balanced', string> = {
-  manual: 'Manual',
-  round_robin: 'Round robin',
-  load_balanced: 'Load balanced',
-};
-
 export default async function GroupsPage() {
   await requirePermission('admin.groups');
 
@@ -102,59 +96,18 @@ export default async function GroupsPage() {
         actions={<NewGroup schedules={scheduleChoices} agents={agentChoices} />}
       />
 
-      <Table head={['Group', 'Assignment', 'Business hours', 'Agents', 'Tickets', '']}>
-        {rows.map((group) => {
-          const editable = {
-            id: group.id,
-            name: group.name,
-            description: group.description,
-            businessHoursId: group.businessHoursId,
-            assignmentStrategy: group.assignmentStrategy,
-            matchSkills: group.matchSkills,
-            skillTimeoutMins: group.skillTimeoutMins,
-            defaultMaxOpenTickets: group.defaultMaxOpenTickets,
-            assignWithinHoursOnly: group.assignWithinHoursOnly,
-            reclaimAfterMins: group.reclaimAfterMins,
-            escalateToAgentId: group.escalateToAgentId,
-            escalateAfterMins: group.escalateAfterMins,
-          };
-          const own = schedules.find((schedule) => schedule.id === group.businessHoursId);
-
-          return (
-            <Row key={group.id}>
-              <Cell>
-                <GroupEditor group={editable} schedules={scheduleChoices} agents={agentChoices} />
-              </Cell>
-              {/* On the list rather than only in the editor: a group set to
-                  manual while every other team routes is the kind of thing you
-                  want to notice by reading down a column. */}
-              <Cell className="text-[var(--muted-foreground)]">
-                {STRATEGY_LABELS[group.assignmentStrategy]}
-                {group.assignmentStrategy !== 'manual' && group.matchSkills ? (
-                  <span className="block text-xs">by skill</span>
-                ) : null}
-              </Cell>
-              <Cell className="text-[var(--muted-foreground)]">
-                {own ? (
-                  own.name
-                ) : (
-                  <span className="text-xs">{defaultName ? `${defaultName} (default)` : '—'}</span>
-                )}
-              </Cell>
-              <Cell className="text-[var(--muted-foreground)]">{group.members}</Cell>
-              <Cell className="text-[var(--muted-foreground)]">{group.tickets}</Cell>
-              <Cell className="text-end">
-                <GroupEditor
-                  group={editable}
-                  schedules={scheduleChoices}
-                  agents={agentChoices}
-                  deleteOnly
-                />
-              </Cell>
-            </Row>
-          );
-        })}
-      </Table>
+      <GroupsTable
+        rows={rows.map(({ members, tickets, ...group }) => ({
+          group,
+          scheduleName:
+            schedules.find((schedule) => schedule.id === group.businessHoursId)?.name ?? null,
+          members,
+          tickets,
+        }))}
+        schedules={scheduleChoices}
+        agents={agentChoices}
+        defaultScheduleName={defaultName}
+      />
 
       {rows.length === 0 ? (
         <p className="mt-3 text-sm text-[var(--muted-foreground)]">
