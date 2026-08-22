@@ -8,6 +8,7 @@ import {
   listApprovedTemplates,
   listGroups,
   listStatuses,
+  listTicketFields,
 } from '@/lib/tickets/queries';
 import { InboxShell } from '../shell';
 import { FocusBeat } from './focus';
@@ -37,10 +38,11 @@ export default async function ConversationPage({
 
   const canSideConversation = can(agent, 'ticket.side_conversation');
 
-  const [statuses, agentList, groupList, templates, recipients] = await Promise.all([
+  const [statuses, agentList, groupList, fields, templates, recipients] = await Promise.all([
     listStatuses(),
     listActiveAgents(),
     listGroups(),
+    listTicketFields(),
     // Only fetched for WhatsApp tickets: an email ticket has no use for them
     // and the table is synced hourly, so this is a needless query otherwise.
     conversation.channel === 'whatsapp' ? listApprovedTemplates() : Promise.resolve([]),
@@ -55,6 +57,7 @@ export default async function ConversationPage({
         statuses={statuses}
         agents={agentList}
         groups={groupList}
+        fields={fields}
         templates={templates}
         recipients={recipients}
         canSideConversation={canSideConversation}

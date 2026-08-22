@@ -163,7 +163,7 @@ export async function getTicket(
  */
 export async function createTicket(
   contactId: string,
-  input: { subject: string; body: string },
+  input: { subject: string; body: string; customFields?: Record<string, unknown> },
 ): Promise<number> {
   const now = new Date();
   const portal = await portalChannel();
@@ -183,6 +183,9 @@ export async function createTicket(
         subject: input.subject,
         requesterContactId: contactId,
         groupId: portal?.defaultGroupId ?? null,
+        // Parsed and required-checked by the action before it gets here, against
+        // the field definitions read from the database rather than from the form.
+        customFields: input.customFields ?? {},
         lastMessageAt: now,
         lastCustomerMessageAt: now,
       })

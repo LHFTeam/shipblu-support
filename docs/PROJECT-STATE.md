@@ -5,7 +5,7 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-08-21, against `main` at `e388285`.
+Last updated: 2026-08-22, against `main` at `9112536`.
 
 ---
 
@@ -90,6 +90,18 @@ The focus beat also finally writes `conversation_presence`, which has existed
 since the first migration for collision detection and which **nothing had ever
 written** — the same shape of dead scaffolding `agents.presence` was before
 assignment landed. It is worth grepping for others.
+
+And now **custom ticket fields carry values**, which is one of those others found
+by doing exactly that. An admin has been able to define a field since the first
+migration, `ticketFieldOptions()` has offered it to the condition builder as
+`custom.<key>`, and `lib/rules/facts.ts` has read `conversations.custom_fields`
+to answer it — but **nothing had ever written that column**, so every rule
+written against a custom field matched nothing and said so to nobody. Two forms
+write it now: the conversation sidebar, and the portal's new-ticket form for the
+fields an admin marks visible and editable by customers. The two required flags
+were the same shape of dead scaffolding and are enforced as of this change. See
+§5.5 for the three decisions behind it, and §6.21 for the bundle trap found while
+building it.
 
 **The bot channel is live, and everything else is not.** This is the single most
 important thing to understand about the current state, and the easiest to read
@@ -467,19 +479,36 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   for the category in their own language — never the status's own name. That
   field has no per-locale variant, so setting it pins one language for every
   reader; leaving it null is usually the better answer.
-- **Custom ticket fields can be defined and referenced, but never carry a
-  value.** An admin creates one under Settings → Ticket fields; `ticketFieldOptions()`
-  adds it to the condition vocabulary as `custom.<key>`, and `lib/rules/facts.ts`
-  reads `conversations.custom_fields` to answer that fact. Nothing writes that
-  column — not a console form, not the portal, not the Freshdesk importer — so
-  every custom fact is absent and every condition on one silently never matches.
-  The two required flags (`required_on_create`, `required_on_resolve`) are
-  written by `saveField` and read by nothing at all, so a field marked required
-  can be left empty everywhere. Either the ticket side gets built (a field
-  editor on the conversation, a portal input, an importer mapping) or the flags
-  should go; leaving them on screen is how an admin builds a rule that quietly
-  matches nothing. The admin tooltips say so as of #66, which is a label on the
-  gap, not a fix for it.
+- ~~**Custom ticket fields can be defined and referenced, but never carry a
+  value.**~~ Built. `conversations.custom_fields` is written by two forms now —
+  the conversation sidebar in the console, gated on `ticket.edit_fields`, and
+  the portal's new-ticket form for any field marked both visible _and_ editable
+  by customers — so a condition on `custom.<key>` finally matches something.
+  Both required flags are enforced: `required_on_create` refuses a portal
+  ticket, `required_on_resolve` refuses an agent's move to a resolved status and
+  the reply-and-resolve button with it, naming the fields that are empty.
+
+  Four decisions worth not re-deriving. **Neither flag stops an automation** —
+  a rule cannot fill a field in, so enforcing it there would wedge tickets
+  nobody was asked to clear. **`required_on_create` is checked only against the
+  fields a customer can see and edit**, because an admin can mark an
+  internal-only field required and a customer has no way to answer it; without
+  that filter one such field would refuse every ticket anybody tried to open.
+  And **"empty" is defined once**, in `isBlank`, deliberately mirroring
+  `isEmpty` in `lib/rules/conditions.ts` — otherwise a ticket could read as
+  complete on the form and empty to a rule. A consequence: an unticked required
+  checkbox counts as answered, because "no" is an answer. Finally, **the console
+  patches the column in the database** (`custom_fields || '{...}'::jsonb`, or
+  `- 'key'` to clear) rather than reading the map, merging in JavaScript and
+  writing it back: the sidebar saves on every change, so two agents on one ticket
+  editing two different fields would otherwise race and the slower write would
+  silently undo the other.
+
+  What is still missing is the **importer mapping**, which belongs with §5.3
+  rather than here — a Freshdesk ticket's custom fields have nowhere to land
+  until the ticket importer exists. `usage_count` on canned responses is the
+  remaining member of this family: still incremented by nothing.
+
 - `canned_responses.usage_count` is never incremented, and the reason is
   bigger than the column. The only thing that sends a canned response is an
   automation's `send_reply` action (`sendCannedReply` in `lib/automations/index.ts`),
@@ -678,6 +707,26 @@ Each cost real time. Most are also comments in the code.
     figure that would have given it away is that the `jobs` table has never held
     a single `backfill_shipment_links` row. **A job that has never been run is
     not tested, whatever its tests say.**
+
+21. **luxon in a client component puts a date library in the console's bundle.**
+    The custom-field editor lives in the conversation sidebar, which is a client
+    component, and the module it imported also held the parser that reads a
+    `datetime-local` wall clock as an instant. That needs the timezone database,
+    so luxon — which had never been in a client bundle here — would have shipped
+    to every agent on the busiest route in the product.
+
+    Split by _side_, not by subject: `lib/tickets/custom-fields.ts` is what both
+    sides import and is luxon-free, and `custom-fields-parse.ts` holds the
+    direction that needs it and is server-only. The read direction — instant to
+    Cairo wall clock — goes through `Intl.DateTimeFormat` with a `timeZone`,
+    which the runtime already carries and which `lib/format.ts` has always
+    relied on. Do not hand-roll the other direction to avoid the dependency:
+    finding a zone's offset for a given wall clock is exactly the arithmetic
+    §6.7 says not to write.
+
+    Worth checking for on any new client component that reaches into `lib/`:
+    `grep -rl luxon .next/static/chunks/` after a build answers it in one call,
+    and the answer should stay empty.
 
 ## 7. Verification already done
 

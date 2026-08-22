@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   contactIdentities,
@@ -55,6 +55,9 @@ import {
   refuseRecipients,
 } from '@/lib/side-conversations/guard';
 import { lastSideMessageId, loadSideConversation } from '@/lib/side-conversations/queries';
+import { isBlank, listLabels, missingRequired } from '@/lib/tickets/custom-fields';
+import { parseFieldValue } from '@/lib/tickets/custom-fields-parse';
+import { getTicketField, listTicketFields } from '@/lib/tickets/queries';
 import { windowState } from '@/lib/whatsapp/window';
 
 /**
@@ -125,6 +128,29 @@ function refresh(number: number) {
   revalidatePath('/inbox');
 }
 
+/**
+ * Refuses to resolve a ticket whose required fields are still empty.
+ *
+ * `required_on_resolve` was written by the admin form and read by nothing since
+ * the first migration, so a field marked required could be left empty
+ * everywhere. This is the gate that makes the flag mean something.
+ *
+ * Deliberately only on the agent's own path. An automation or an SLA escalation
+ * that resolves a ticket is not stopped by it: a rule cannot fill a field in, so
+ * enforcing it there would leave tickets wedged in a state no human was asked to
+ * clear, and the flag is about what a person must record before calling it done.
+ */
+async function refuseIfIncomplete(
+  customFields: Record<string, unknown>,
+): Promise<ActionState | null> {
+  const missing = missingRequired(await listTicketFields(), customFields, 'resolve');
+  if (!missing.length) return null;
+
+  return {
+    error: `Fill in ${listLabels(missing)} before resolving this ticket`,
+  };
+}
+
 // --- Replies and notes ------------------------------------------------------
 
 export async function sendReply(_state: ActionState, formData: FormData): Promise<ActionState> {
@@ -144,6 +170,15 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
 
   const readOnly = refuseIfReadOnly(conversation.channel);
   if (readOnly) return readOnly;
+
+  // Checked before the reply is written rather than beside the resolve below it.
+  // Refusing afterwards would send the message, leave the ticket open and clear
+  // the composer, so the agent would see a reply they cannot un-send and a
+  // status that did not move, with nothing on screen saying why.
+  if (resolveAfter) {
+    const incomplete = await refuseIfIncomplete(conversation.customFields);
+    if (incomplete) return incomplete;
+  }
 
   if (conversation.channel === 'whatsapp') {
     // Checked before the row is written, so an agent is told the window closed
@@ -434,6 +469,11 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
       const status = statuses[0];
       if (!status) return { error: 'Unknown status' };
 
+      if (status.category === 'resolved') {
+        const incomplete = await refuseIfIncomplete(row.conversation.customFields);
+        if (incomplete) return incomplete;
+      }
+
       await db.transaction(async (tx) => {
         await tx
           .update(conversations)
@@ -549,8 +589,66 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
       break;
     }
 
-    default:
-      return { error: `Unknown field "${field}"` };
+    default: {
+      // `custom:<key>` — one of the admin-defined ticket fields.
+      //
+      // The definition is re-read from the database rather than taken from the
+      // form: the type decides how the value is parsed and the options decide
+      // what is accepted, so a request that could supply either could store an
+      // arbitrary value under an arbitrary key and every rule reading it would
+      // believe it.
+      if (!field.startsWith('custom:')) return { error: `Unknown field "${field}"` };
+
+      if (!can(agent, 'ticket.edit_fields')) {
+        return { error: "You cannot edit this ticket's fields" };
+      }
+
+      const def = await getTicketField(field.slice('custom:'.length));
+      if (!def) return { error: 'Unknown field' };
+
+      const raw = def.type === 'multi_select' ? formData.getAll('value').map(String) : value;
+      const parsed = parseFieldValue(def, raw);
+      if (!parsed.ok) return { error: parsed.error };
+
+      // Patched in the database rather than read, merged in JavaScript and
+      // written back whole. Two agents on the same ticket editing two different
+      // fields would otherwise race, and the slower write would carry a stale
+      // copy of the other's field and silently undo it — the sidebar saves on
+      // every change, so the window is as wide as the round trip.
+      //
+      // `-` deletes the key instead of storing null. Both read as `is_empty` to
+      // the condition language, so this is only about not accumulating keys for
+      // fields that were emptied or deleted long ago.
+      const patch = isBlank(parsed.value)
+        ? sql`${conversations.customFields} - ${def.key}`
+        : sql`${conversations.customFields} || ${JSON.stringify({ [def.key]: parsed.value })}::jsonb`;
+
+      const before = row.conversation.customFields[def.key] ?? null;
+
+      await db.transaction(async (tx) => {
+        const [updated] = await tx
+          .update(conversations)
+          .set({ customFields: patch })
+          .where(eq(conversations.id, conversationId))
+          .returning({ customFields: conversations.customFields });
+
+        // The one key that moved, not the whole map: otherwise the timeline says
+        // "fields changed" and an agent reading back a week later cannot tell
+        // which. Taken from the returned row so it is what was actually stored.
+        await tx.insert(conversationEvents).values({
+          conversationId,
+          type: 'custom_field_changed',
+          actorAgentId: agent.id,
+          data: {
+            key: def.key,
+            label: def.label,
+            from: before,
+            to: updated?.customFields[def.key] ?? null,
+          },
+        });
+      });
+      break;
+    }
   }
 
   // Observer rules see the ticket as the agent has just left it. Actions taken
