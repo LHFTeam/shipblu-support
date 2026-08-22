@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 import { SearchIcon } from '@/components/icons';
 import { articleCount, isLocale, t } from '@/lib/kb/locale';
 import { searchArticles } from '@/lib/kb/queries';
+import { kbViewer } from '@/lib/kb/viewer';
 import { ArticleList, ArticleRow, EmptyNote, PageBody, PageHeader } from '../chrome';
 
 export const dynamic = 'force-dynamic';
@@ -21,7 +22,7 @@ export default async function SearchPage({
   if (!isLocale(locale)) notFound();
 
   const query = (q ?? '').trim();
-  const results = query ? await searchArticles(locale, query) : [];
+  const results = query ? await searchArticles(await kbViewer(), locale, query) : [];
 
   return (
     <>

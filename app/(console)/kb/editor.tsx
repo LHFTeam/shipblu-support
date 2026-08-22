@@ -106,15 +106,17 @@ export function ArticleEditor({
       </div>
 
       {/*
-        Only 'public' articles are served today. Customers can sign in now, but
-        the public queries do not yet take the viewer into account, so
-        'logged_in' still evaluates to not-public. Saying so here stops someone
-        marking an article 'logged_in' and expecting customers to see it.
+        'logged_in' is served for real now: the public queries take the reader's
+        portal session into account. Two things still need saying, because both
+        would otherwise be discovered by an editor wondering why a page looks
+        wrong — a signed-in article is deliberately absent from the sitemap, and
+        the folder gates the article rather than the other way round.
       */}
       <p className="-mt-2 text-xs opacity-50">
-        Only public articles appear on the help centre. Agents-only and signed-in articles are
-        stored and searchable here, but are not served to customers yet — signed-in visibility is
-        not wired to the portal sign-in.
+        Public articles are open to everyone. Signed-in articles appear only once a customer has
+        signed in to the portal, and are kept out of the sitemap and the chat widget, so search
+        engines never index them. Agents-only articles are never served on the help centre at all. A
+        folder&rsquo;s own visibility wins: a public article in a signed-in folder needs a sign-in.
       </p>
 
       <div>

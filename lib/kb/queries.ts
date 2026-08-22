@@ -1,34 +1,24 @@
-import { and, asc, desc, eq, inArray, ne, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { kbArticles, kbCategories, kbFolders, kbRedirects } from '@/db/schema';
 import type { Locale } from './locale';
+import { ANONYMOUS, articleVisibleTo, folderVisibleTo, type KbViewer } from './visibility';
 
 /**
  * Read models for the public knowledge base.
  *
- * Every query that can reach a customer goes through `publiclyVisible()`. That
+ * Every query that can reach a customer goes through `articleVisibleTo(viewer)`. That
  * is the only place the visibility rule is written down, deliberately: this
  * codebase has `agents_only` and `selected_companies` articles in the same
  * table as public ones, and "I forgot the status filter on one page" is exactly
  * how an internal runbook ends up indexed by Google.
  */
 
-/**
- * Published *and* public.
- *
- * `logged_in` and `selected_companies` are still not served at all, even though
- * customers can now sign in. Wiring them up means threading the viewer through
- * every query below and getting it right in all of them; until that is done,
- * the honest reading of an unevaluated rule is "deny". Treating it as "allow"
- * is how an internal runbook ends up in Google's index.
+/*
+ * The visibility rule lives in `./visibility.ts` and takes a viewer. Every query
+ * below threads one through, so all four levels are served rather than only
+ * `public` — and a query written without one does not compile.
  */
-function publiclyVisible(): SQL {
-  return and(eq(kbArticles.status, 'published'), eq(kbArticles.visibility, 'public'))!;
-}
-
-function folderVisible(): SQL {
-  return eq(kbFolders.visibility, 'public');
-}
 
 export type CategorySummary = {
   id: string;
@@ -38,7 +28,7 @@ export type CategorySummary = {
   articleCount: number;
 };
 
-export async function listCategories(locale: Locale): Promise<CategorySummary[]> {
+export async function listCategories(viewer: KbViewer, locale: Locale): Promise<CategorySummary[]> {
   const rows = await db
     .select({
       id: kbCategories.id,
@@ -48,8 +38,8 @@ export async function listCategories(locale: Locale): Promise<CategorySummary[]>
       articleCount: sql<number>`count(${kbArticles.id})::int`,
     })
     .from(kbCategories)
-    .leftJoin(kbFolders, and(eq(kbFolders.categoryId, kbCategories.id), folderVisible()))
-    .leftJoin(kbArticles, and(eq(kbArticles.folderId, kbFolders.id), publiclyVisible()))
+    .leftJoin(kbFolders, and(eq(kbFolders.categoryId, kbCategories.id), folderVisibleTo(viewer)))
+    .leftJoin(kbArticles, and(eq(kbArticles.folderId, kbFolders.id), articleVisibleTo(viewer)))
     .where(eq(kbCategories.locale, locale))
     .groupBy(kbCategories.id)
     .orderBy(asc(kbCategories.position), asc(kbCategories.name));
@@ -93,7 +83,11 @@ export type CategoryDetail = {
   folders: FolderSummary[];
 };
 
-export async function getCategory(locale: Locale, slug: string): Promise<CategoryDetail | null> {
+export async function getCategory(
+  viewer: KbViewer,
+  locale: Locale,
+  slug: string,
+): Promise<CategoryDetail | null> {
   const categories = await db
     .select({
       id: kbCategories.id,
@@ -117,13 +111,16 @@ export async function getCategory(locale: Locale, slug: string): Promise<Categor
       articleCount: sql<number>`count(${kbArticles.id})::int`,
     })
     .from(kbFolders)
-    .leftJoin(kbArticles, and(eq(kbArticles.folderId, kbFolders.id), publiclyVisible()))
-    .where(and(eq(kbFolders.categoryId, category.id), folderVisible()))
+    .leftJoin(kbArticles, and(eq(kbArticles.folderId, kbFolders.id), articleVisibleTo(viewer)))
+    .where(and(eq(kbFolders.categoryId, category.id), folderVisibleTo(viewer)))
     .groupBy(kbFolders.id)
     .orderBy(asc(kbFolders.position), asc(kbFolders.name));
 
   const visible = folders.filter((folder) => folder.articleCount > 0);
-  const previews = await folderPreviews(visible.map((folder) => folder.id));
+  const previews = await folderPreviews(
+    viewer,
+    visible.map((folder) => folder.id),
+  );
 
   return {
     ...category,
@@ -140,7 +137,10 @@ export async function getCategory(locale: Locale, slug: string): Promise<Categor
  * JavaScript, which is what keeps this a plain `where … in` instead of a window
  * function nobody will want to read again.
  */
-async function folderPreviews(folderIds: string[]): Promise<Map<string, ArticleLink[]>> {
+async function folderPreviews(
+  viewer: KbViewer,
+  folderIds: string[],
+): Promise<Map<string, ArticleLink[]>> {
   const byFolder = new Map<string, ArticleLink[]>();
   if (folderIds.length === 0) return byFolder;
 
@@ -152,7 +152,7 @@ async function folderPreviews(folderIds: string[]): Promise<Map<string, ArticleL
       slug: kbArticles.slug,
     })
     .from(kbArticles)
-    .where(and(inArray(kbArticles.folderId, folderIds), publiclyVisible()))
+    .where(and(inArray(kbArticles.folderId, folderIds), articleVisibleTo(viewer)))
     .orderBy(asc(kbArticles.position), asc(kbArticles.title));
 
   for (const { folderId, ...article } of rows) {
@@ -182,6 +182,7 @@ export type FolderDetail = {
 };
 
 export async function getFolder(
+  viewer: KbViewer,
   locale: Locale,
   categorySlug: string,
   folderSlug: string,
@@ -202,7 +203,7 @@ export async function getFolder(
         eq(kbCategories.locale, locale),
         eq(kbCategories.slug, categorySlug),
         eq(kbFolders.slug, folderSlug),
-        folderVisible(),
+        folderVisibleTo(viewer),
       ),
     )
     .limit(1);
@@ -218,7 +219,7 @@ export async function getFolder(
       excerpt: kbArticles.excerpt,
     })
     .from(kbArticles)
-    .where(and(eq(kbArticles.folderId, folder.id), publiclyVisible()))
+    .where(and(eq(kbArticles.folderId, folder.id), articleVisibleTo(viewer)))
     .orderBy(asc(kbArticles.position), asc(kbArticles.title));
 
   return { ...folder, articles };
@@ -240,7 +241,11 @@ export type ArticleDetail = {
   translationGroupId: string;
 };
 
-export async function getArticle(locale: Locale, slug: string): Promise<ArticleDetail | null> {
+export async function getArticle(
+  viewer: KbViewer,
+  locale: Locale,
+  slug: string,
+): Promise<ArticleDetail | null> {
   const rows = await db
     .select({
       id: kbArticles.id,
@@ -264,8 +269,8 @@ export async function getArticle(locale: Locale, slug: string): Promise<ArticleD
       and(
         eq(kbArticles.locale, locale),
         eq(kbArticles.slug, slug),
-        publiclyVisible(),
-        folderVisible(),
+        articleVisibleTo(viewer),
+        folderVisibleTo(viewer),
       ),
     )
     .limit(1);
@@ -275,6 +280,7 @@ export async function getArticle(locale: Locale, slug: string): Promise<ArticleD
 
 /** Same folder, excluding the article itself. Cheap and usually relevant. */
 export async function relatedArticles(
+  viewer: KbViewer,
   folderId: string,
   excludeArticleId: string,
   limit = 5,
@@ -291,7 +297,7 @@ export async function relatedArticles(
       and(
         eq(kbArticles.folderId, folderId),
         ne(kbArticles.id, excludeArticleId),
-        publiclyVisible(),
+        articleVisibleTo(viewer),
       ),
     )
     .orderBy(desc(kbArticles.helpfulCount), asc(kbArticles.position))
@@ -300,12 +306,13 @@ export async function relatedArticles(
 
 /** Locales this article has been translated into, for the language switcher. */
 export async function translationsOf(
+  viewer: KbViewer,
   translationGroupId: string,
 ): Promise<{ locale: string; slug: string }[]> {
   return db
     .select({ locale: kbArticles.locale, slug: kbArticles.slug })
     .from(kbArticles)
-    .where(and(eq(kbArticles.translationGroupId, translationGroupId), publiclyVisible()));
+    .where(and(eq(kbArticles.translationGroupId, translationGroupId), articleVisibleTo(viewer)));
 }
 
 export type SearchHit = ArticleSummary & { categorySlug: string; rank: number };
@@ -321,6 +328,7 @@ export type SearchHit = ArticleSummary & { categorySlug: string; rank: number };
  * word with a prefixed conjunction.
  */
 export async function searchArticles(
+  viewer: KbViewer,
   locale: Locale,
   query: string,
   limit = 20,
@@ -353,8 +361,8 @@ export async function searchArticles(
     .where(
       and(
         eq(kbArticles.locale, locale),
-        publiclyVisible(),
-        folderVisible(),
+        articleVisibleTo(viewer),
+        folderVisibleTo(viewer),
         sql`(
           ${kbArticles.searchVector} @@ websearch_to_tsquery('simple', ${trimmed})
           OR ${kbArticles.title} % ${trimmed}
@@ -406,10 +414,21 @@ export async function recordArticleView(articleId: string): Promise<void> {
     .where(eq(kbArticles.id, articleId));
 }
 
-/** Every published article, for the sitemap. */
+/**
+ * Every article a crawler may index.
+ *
+ * Takes no viewer, deliberately, and hard-codes the anonymous one. A sitemap is
+ * read by Google and by anybody who asks for the URL, so there is no signed-in
+ * reader for it to reflect — and a `logged_in` article listed here would be
+ * published to the open web by the one file whose whole job is telling crawlers
+ * what to fetch. Making the parameter unavailable means it cannot be passed a
+ * customer by a caller who was being helpful.
+ */
 export async function allPublishedArticles(): Promise<
   { slug: string; locale: string; updatedAt: Date }[]
 > {
+  const viewer = ANONYMOUS;
+
   return db
     .select({
       slug: kbArticles.slug,
@@ -418,6 +437,6 @@ export async function allPublishedArticles(): Promise<
     })
     .from(kbArticles)
     .innerJoin(kbFolders, eq(kbFolders.id, kbArticles.folderId))
-    .where(and(publiclyVisible(), folderVisible()))
+    .where(and(articleVisibleTo(viewer), folderVisibleTo(viewer)))
     .orderBy(desc(kbArticles.updatedAt));
 }

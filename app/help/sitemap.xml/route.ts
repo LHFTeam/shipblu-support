@@ -1,5 +1,6 @@
 import { LOCALES } from '@/lib/kb/locale';
 import { allPublishedArticles, listCategories } from '@/lib/kb/queries';
+import { ANONYMOUS } from '@/lib/kb/visibility';
 import { publicBaseUrl } from '@/lib/kb/site';
 
 export const dynamic = 'force-dynamic';
@@ -12,9 +13,13 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   const base = publicBaseUrl();
 
+  // Anonymous on purpose. A sitemap is fetched by crawlers and by anyone who
+  // asks for the URL, so it must list only what an anonymous reader can open —
+  // a `logged_in` article named here would be advertised to the open web by the
+  // one file whose job is telling Google what to index.
   const [articles, ...categoriesByLocale] = await Promise.all([
     allPublishedArticles(),
-    ...LOCALES.map((locale) => listCategories(locale)),
+    ...LOCALES.map((locale) => listCategories(ANONYMOUS, locale)),
   ]);
 
   const urls: { loc: string; lastmod?: string; priority: string }[] = [];

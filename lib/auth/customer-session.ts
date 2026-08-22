@@ -26,6 +26,11 @@ export type SessionCustomer = {
   email: string;
   name: string | null;
   locale: string;
+  /**
+   * `contacts.company_id`, for the help centre's `selected_companies` articles.
+   * Null is the normal case — most contacts belong to no company.
+   */
+  companyId: string | null;
 };
 
 export async function createCustomerSession(
@@ -76,6 +81,7 @@ export async function getSessionCustomer(): Promise<SessionCustomer | null> {
       email: contactIdentities.identifier,
       name: contacts.name,
       locale: contacts.locale,
+      companyId: contacts.companyId,
       isVerified: contactIdentities.isVerified,
       passwordHash: contactIdentities.passwordHash,
       isBlocked: contacts.isBlocked,
@@ -105,6 +111,7 @@ export async function getSessionCustomer(): Promise<SessionCustomer | null> {
     email: row.email,
     name: row.name,
     locale: row.locale,
+    companyId: row.companyId,
   };
 }
 

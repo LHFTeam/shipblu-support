@@ -4,6 +4,7 @@ import type { Metadata } from 'next';
 import { CategoryIcon, DocumentIcon, FolderIcon } from '@/components/icons';
 import { articleCount, formatCount, isLocale, t, type Locale } from '@/lib/kb/locale';
 import { getCategory, type FolderSummary } from '@/lib/kb/queries';
+import { kbViewer } from '@/lib/kb/viewer';
 import { decodeSlugParam } from '@/lib/kb/slug';
 import { EmptyNote, PageBody, PageHeader, Panel } from '../../chrome';
 
@@ -18,7 +19,7 @@ export async function generateMetadata({
   const slug = decodeSlugParam(categoryParam);
   if (!isLocale(locale)) return {};
 
-  const category = await getCategory(locale, slug);
+  const category = await getCategory(await kbViewer(), locale, slug);
   if (!category) return {};
 
   return {
@@ -37,7 +38,7 @@ export default async function CategoryPage({
   const slug = decodeSlugParam(categoryParam);
   if (!isLocale(locale)) notFound();
 
-  const category = await getCategory(locale, slug);
+  const category = await getCategory(await kbViewer(), locale, slug);
   if (!category) notFound();
 
   return (
