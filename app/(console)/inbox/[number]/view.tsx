@@ -9,6 +9,7 @@ import { Badge, Select } from '@/components/ui';
 import { useNow } from '@/components/use-now';
 import { formatBytes, formatDateTime, formatRelative } from '@/lib/format';
 import type { ConversationDetail } from '@/lib/tickets/queries';
+import { formatForInput, selectedValues, type TicketFieldDef } from '@/lib/tickets/custom-fields';
 import { describeWindow, metaWindowState } from '@/lib/meta/window';
 import {
   formatCoordinates,
@@ -94,6 +95,7 @@ export function ConversationView({
   groups,
   templates,
   recipients,
+  fields,
   canSideConversation,
   currentAgentId,
 }: {
@@ -102,6 +104,8 @@ export function ConversationView({
   agents: { id: string; name: string; email: string }[];
   groups: { id: string; name: string }[];
   templates: TemplateOption[];
+  /** The admin-defined ticket fields, in the order they were arranged. */
+  fields: TicketFieldDef[];
   /** The internal directory, for the composer's side conversation tab. */
   recipients: PickerEntry[];
   canSideConversation: boolean;
@@ -136,6 +140,7 @@ export function ConversationView({
         statuses={statuses}
         agents={agents}
         groups={groups}
+        fields={fields}
         currentAgentId={currentAgentId}
       />
     </div>
@@ -503,12 +508,14 @@ function Sidebar({
   statuses,
   agents,
   groups,
+  fields,
   currentAgentId,
 }: {
   conversation: ConversationDetail;
   statuses: { id: string; name: string; category: string }[];
   agents: { id: string; name: string; email: string }[];
   groups: { id: string; name: string }[];
+  fields: TicketFieldDef[];
   currentAgentId: string;
 }) {
   return (
@@ -561,6 +568,8 @@ function Sidebar({
       <Field label="Tags">
         <TagField conversationId={conversation.id} tags={conversation.tags} />
       </Field>
+
+      <CustomFields conversation={conversation} fields={fields} />
 
       <ShipmentsField conversation={conversation} />
       <ShippingAccountsField conversation={conversation} />
@@ -649,6 +658,15 @@ function describeEvent(type: string, data: Record<string, unknown>): string {
       // The actor here is the person at the hub, so the name is already printed
       // ahead of this sentence by the caller.
       return `replied on side conversation #${String(data.sideConversationNumber ?? '')}`;
+    case 'custom_field_changed': {
+      // The value, not just the field name. "set Root cause to damaged in
+      // transit" is the whole record; "changed Root cause" sends whoever is
+      // reading back through the ticket to work out what it was changed to.
+      const label = String(data.label ?? data.key ?? 'a field');
+      const to = data.to;
+      if (to === null || to === undefined || to === '') return `cleared ${label}`;
+      return `set ${label} to ${Array.isArray(to) ? to.join(', ') : String(to)}`;
+    }
     case 'sla_recalculated':
       return data.reason === 'group_hours'
         ? "re-counted the due dates on the new group's business hours"
@@ -658,11 +676,27 @@ function describeEvent(type: string, data: Record<string, unknown>): string {
   }
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  hint,
+  as = 'block',
+  children,
+}: {
+  label: string;
+  hint?: React.ReactNode;
+  /**
+   * `group` for a set of controls one label cannot belong to — the checkboxes
+   * of a multi-select. Assistive technology reads the label once for the set
+   * rather than leaving each box unnamed.
+   */
+  as?: 'block' | 'group';
+  children: React.ReactNode;
+}) {
   return (
-    <div className="mb-3">
+    <div className="mb-3" {...(as === 'group' ? { role: 'group', 'aria-label': label } : {})}>
       <p className="mb-1 text-xs font-medium opacity-60">{label}</p>
       {children}
+      {hint ? <p className="mt-1 text-xs opacity-60">{hint}</p> : null}
     </div>
   );
 }
@@ -747,6 +781,198 @@ function TagField({ conversationId, tags }: { conversationId: string; tags: stri
     />
   );
 }
+
+/**
+ * The admin-defined ticket fields.
+ *
+ * These are the first controls in the console ever to write
+ * `conversations.custom_fields`. Until this existed an admin could define a
+ * field, an automation could be written against `custom.<key>`, and the column
+ * stayed `{}` on every ticket — so the rule matched nothing and nothing said so.
+ *
+ * One control per field rather than a single JSON box: the type is what decides
+ * whether a stored 12 is a number a rule can order or a string it cannot, and a
+ * free-text box would put that decision on whoever is typing.
+ */
+function CustomFields({
+  conversation,
+  fields,
+}: {
+  conversation: ConversationDetail;
+  fields: TicketFieldDef[];
+}) {
+  if (fields.length === 0) return null;
+
+  return (
+    <>
+      {fields.map((field) => (
+        <Field
+          key={field.key}
+          label={field.label}
+          as={field.type === 'multi_select' ? 'group' : 'block'}
+          hint={
+            field.requiredOnResolve ? (
+              <span className="opacity-70">Needed before this ticket can be resolved.</span>
+            ) : null
+          }
+        >
+          <CustomFieldControl
+            conversationId={conversation.id}
+            field={field}
+            value={conversation.customFields[field.key]}
+          />
+        </Field>
+      ))}
+    </>
+  );
+}
+
+function CustomFieldControl({
+  conversationId,
+  field,
+  value,
+}: {
+  conversationId: string;
+  field: TicketFieldDef;
+  value: unknown;
+}) {
+  const router = useRouter();
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [draft, setDraft] = useState(() => formatForInput(field, value));
+
+  async function save(next: string | string[]) {
+    setSaving(true);
+    setError(null);
+
+    const formData = new FormData();
+    formData.set('conversationId', conversationId);
+    formData.set('field', `custom:${field.key}`);
+    // `append`, so a multi-select arrives as the several values it is rather
+    // than one comma-joined string the action would have to guess how to split.
+    if (Array.isArray(next)) for (const entry of next) formData.append('value', entry);
+    else formData.set('value', next);
+
+    const result = await updateTicket({ error: null }, formData);
+    setSaving(false);
+
+    if (result.error) setError(result.error);
+    else router.refresh();
+  }
+
+  const control = () => {
+    switch (field.type) {
+      case 'checkbox':
+        return (
+          <input
+            type="checkbox"
+            checked={value === true}
+            disabled={saving}
+            onChange={(e) => save(e.target.checked ? 'on' : '')}
+            className="size-4 accent-brand-500"
+          />
+        );
+
+      case 'dropdown':
+        return (
+          <Select
+            value={String(value ?? '')}
+            disabled={saving}
+            onChange={(e) => save(e.target.value)}
+          >
+            <option value="">—</option>
+            {field.options.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </Select>
+        );
+
+      case 'multi_select': {
+        const chosen = selectedValues(value);
+        return (
+          <div className="flex flex-col gap-1">
+            {field.options.map((option) => (
+              <label key={option.value} className="flex items-center gap-1.5 text-xs">
+                <input
+                  type="checkbox"
+                  checked={chosen.includes(option.value)}
+                  disabled={saving}
+                  onChange={(e) =>
+                    save(
+                      e.target.checked
+                        ? [...chosen, option.value]
+                        : chosen.filter((entry) => entry !== option.value),
+                    )
+                  }
+                  className="size-3.5 accent-brand-500"
+                />
+                {option.label}
+              </label>
+            ))}
+            {field.options.length === 0 ? (
+              <span className="text-xs opacity-50">No options defined.</span>
+            ) : null}
+          </div>
+        );
+      }
+
+      case 'paragraph':
+        return (
+          <textarea
+            rows={3}
+            value={draft}
+            disabled={saving}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={() => draft !== formatForInput(field, value) && save(draft)}
+            className={INPUT_CLASS}
+          />
+        );
+
+      // Date and time controls commit on change: they have no meaningful
+      // intermediate state to protect, and a picker that saved on blur would
+      // lose the choice if the agent clicked straight onto another field.
+      case 'date':
+      case 'datetime':
+        return (
+          <input
+            type={field.type === 'date' ? 'date' : 'datetime-local'}
+            value={draft}
+            disabled={saving}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              void save(e.target.value);
+            }}
+            className={INPUT_CLASS}
+          />
+        );
+
+      default:
+        return (
+          <input
+            type={field.type === 'number' || field.type === 'decimal' ? 'number' : 'text'}
+            step={field.type === 'decimal' ? 'any' : field.type === 'number' ? '1' : undefined}
+            value={draft}
+            disabled={saving}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={() => draft !== formatForInput(field, value) && save(draft)}
+            className={INPUT_CLASS}
+          />
+        );
+    }
+  };
+
+  return (
+    <>
+      {control()}
+      {error ? <p className="mt-1 text-xs text-red-600">{error}</p> : null}
+    </>
+  );
+}
+
+const INPUT_CLASS =
+  'w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-sm outline-none focus:border-brand-500';
 
 /**
  * The parcels a ticket is about.

@@ -46,10 +46,12 @@ export default async function FieldsPage() {
           <>
             Required{' '}
             <InfoTip label="Required">
-              Recorded on the field, and nothing enforces it yet — no form in the console or the
-              portal reads these two, so a field marked required can still be left empty. Set them
-              for the intent (<b>on create</b> blocks a new ticket, <b>to resolve</b> blocks
-              resolving one), not for the guarantee.
+              <b>On create</b> refuses a ticket opened from the customer portal until the field is
+              answered — and only applies to fields a customer can actually see and edit, since a
+              question they are never shown is not one they can answer. <b>To resolve</b> refuses an
+              agent&rsquo;s move to a resolved status, and the reply-and-resolve button with it.
+              Neither stops an automation: a rule cannot fill a field in, so enforcing it there
+              would wedge tickets nobody was asked to clear.
             </InfoTip>
           </>,
           '',

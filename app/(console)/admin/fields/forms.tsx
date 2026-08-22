@@ -90,6 +90,7 @@ function Fields({ field }: { field?: TicketField }) {
         <Toggle
           name="requiredOnCreate"
           label="Required when a ticket is created"
+          hint="Only reaches the customer portal, the one form where a ticket is opened by hand."
           defaultChecked={field?.requiredOnCreate ?? false}
         />
         <Toggle
@@ -106,6 +107,7 @@ function Fields({ field }: { field?: TicketField }) {
         <Toggle
           name="editableByCustomer"
           label="Customers can edit it"
+          hint="Needs “visible to customers” as well — that pair is what puts an input on the portal's form. The label is shown exactly as written here, in whichever language that is."
           defaultChecked={field?.editableByCustomer ?? false}
         />
       </div>

@@ -20,11 +20,13 @@ import {
   contacts,
   groups,
   messages,
+  ticketFields,
   ticketStatuses,
   whatsappTemplates,
 } from '@/db/schema';
 import type { SessionAgent } from '@/lib/auth/session';
 import { can } from '@/lib/auth/permissions';
+import type { CustomFieldValues, TicketFieldDef } from './custom-fields';
 import {
   FILTERABLE_CHANNELS,
   hiddenChannels,
@@ -419,6 +421,11 @@ export type ConversationDetail = {
   statusName: string;
   statusCategory: 'open' | 'pending' | 'resolved' | 'closed';
   tags: string[];
+  /**
+   * Values for the admin-defined ticket fields, keyed by the field's `key` —
+   * the same map `custom.<key>` conditions are evaluated against.
+   */
+  customFields: CustomFieldValues;
   assigneeAgentId: string | null;
   assigneeName: string | null;
   groupId: string | null;
@@ -572,6 +579,7 @@ export async function getConversation(
     statusName: row.statusName,
     statusCategory: row.statusCategory,
     tags: row.conversation.tags,
+    customFields: row.conversation.customFields,
     assigneeAgentId: row.conversation.assigneeAgentId,
     assigneeName: row.assigneeName,
     groupId: row.conversation.groupId,
@@ -620,6 +628,44 @@ export async function listStatuses() {
     })
     .from(ticketStatuses)
     .orderBy(asc(ticketStatuses.position));
+}
+
+/**
+ * The custom fields a ticket can carry, in the order an admin arranged them.
+ *
+ * Active fields only. Deactivating a field takes it off every form without
+ * touching the values already stored, which is the point of the flag: a field
+ * retired mid-quarter must not erase the answers the last three months of
+ * tickets gave it, and a rule still reading `custom.<key>` keeps working on them.
+ */
+export async function listTicketFields(): Promise<TicketFieldDef[]> {
+  return db
+    .select({
+      key: ticketFields.key,
+      label: ticketFields.label,
+      type: ticketFields.type,
+      options: ticketFields.options,
+      requiredOnCreate: ticketFields.requiredOnCreate,
+      requiredOnResolve: ticketFields.requiredOnResolve,
+      visibleToCustomer: ticketFields.visibleToCustomer,
+      editableByCustomer: ticketFields.editableByCustomer,
+    })
+    .from(ticketFields)
+    .where(eq(ticketFields.isActive, true))
+    .orderBy(asc(ticketFields.position), asc(ticketFields.label));
+}
+
+/**
+ * The one field a write is allowed to touch, re-read from the database.
+ *
+ * The key arrives in a FormData field, so the definition behind it is never
+ * taken from the request: the type decides how the value is parsed and the
+ * options decide what is accepted, and a caller who could supply those could
+ * store anything under any key.
+ */
+export async function getTicketField(key: string): Promise<TicketFieldDef | null> {
+  const rows = await listTicketFields();
+  return rows.find((field) => field.key === key) ?? null;
 }
 
 export async function listActiveAgents() {

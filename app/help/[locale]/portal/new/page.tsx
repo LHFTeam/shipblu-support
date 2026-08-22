@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { isLocale, t } from '@/lib/kb/locale';
 import { requireCustomer } from '@/lib/portal/guard';
+import { customerTicketFields } from '@/lib/portal/fields';
 import { PageBody, PageHeader, Panel } from '../../chrome';
 import { NewTicketForm } from './form';
 
@@ -12,6 +13,8 @@ export default async function NewPortalTicket({ params }: { params: Promise<{ lo
   if (!isLocale(locale)) notFound();
 
   await requireCustomer(locale, `/${locale}/portal/new`);
+
+  const fields = await customerTicketFields();
 
   return (
     <>
@@ -34,7 +37,7 @@ export default async function NewPortalTicket({ params }: { params: Promise<{ lo
           <p className="text-sm text-[var(--kb-muted)]">{t(locale, 'searchKb')}</p>
 
           <Panel className="mt-4 p-6">
-            <NewTicketForm locale={locale} />
+            <NewTicketForm locale={locale} fields={fields} />
           </Panel>
 
           <p className="mt-4 text-sm">
