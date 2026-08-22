@@ -172,6 +172,14 @@ A module reachable from the search parser must read `process.env` directly
 rather than `env()`, which validates the whole schema (see
 `lib/shipments/detect.ts`).
 
+**Explaining a control.** A label short enough to fit a dense table is rarely
+long enough to explain itself. `InfoTip` from `components/tooltip.tsx` is the
+console's answer — an ⓘ that opens on hover, focus _and_ tap, portalled to
+`document.body` because every admin table and the content column clip their own
+overflow. Reach for a `Field` hint when the explanation should always be on
+screen, `InfoTip` when it should be one gesture away, and never `title=`: it
+never appears on a phone, which is where the console is read.
+
 **Bilingual and RTL.** Arabic is the default locale and the front door; every
 public URL keeps an explicit locale segment. Use `direction()` from
 `lib/kb/locale.ts` and never assume LTR. Slugify through `lib/kb/slug.ts` —
