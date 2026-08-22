@@ -467,6 +467,27 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   for the category in their own language — never the status's own name. That
   field has no per-locale variant, so setting it pins one language for every
   reader; leaving it null is usually the better answer.
+- **Custom ticket fields can be defined and referenced, but never carry a
+  value.** An admin creates one under Settings → Ticket fields; `ticketFieldOptions()`
+  adds it to the condition vocabulary as `custom.<key>`, and `lib/rules/facts.ts`
+  reads `conversations.custom_fields` to answer that fact. Nothing writes that
+  column — not a console form, not the portal, not the Freshdesk importer — so
+  every custom fact is absent and every condition on one silently never matches.
+  The two required flags (`required_on_create`, `required_on_resolve`) are
+  written by `saveField` and read by nothing at all, so a field marked required
+  can be left empty everywhere. Either the ticket side gets built (a field
+  editor on the conversation, a portal input, an importer mapping) or the flags
+  should go; leaving them on screen is how an admin builds a rule that quietly
+  matches nothing. The admin tooltips say so as of #66, which is a label on the
+  gap, not a fix for it.
+- `canned_responses.usage_count` is never incremented, and the reason is
+  bigger than the column. The only thing that sends a canned response is an
+  automation's `send_reply` action (`sendCannedReply` in `lib/automations/index.ts`),
+  which reads the body and leaves the count alone; **an agent cannot insert one
+  from the composer at all** — there is no picker. So the admin table's "Used"
+  column ranks nothing, and will keep reading zero even after the count is
+  wired up, until there is a manual path to count. The tooltip on that column
+  says it is inert.
 - ~~`metrics_daily` rows written before the totals-slice fix are inflated.~~
   Repaired. `rollup_metrics` now takes a range (`{"from","to"}`, `{"days":N}`)
   and rebuilds those days from the source tables, and every write asserts that
