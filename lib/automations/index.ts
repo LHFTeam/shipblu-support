@@ -387,6 +387,14 @@ async function sendCannedReply(
       { priority: 20, dedupeKey: `send:${messageId}` },
     );
   }
+
+  // Counted here as well as on the agent's own path. A rule sending a response
+  // a thousand times a week is the clearest signal the column can carry, and
+  // leaving it out would rank the team's busiest boilerplate at zero.
+  await db
+    .update(cannedResponses)
+    .set({ usageCount: sql`${cannedResponses.usageCount} + 1` })
+    .where(eq(cannedResponses.id, cannedResponseId));
 }
 
 /**

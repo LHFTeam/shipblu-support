@@ -15,9 +15,11 @@ import { db } from '@/db/client';
 import {
   agents,
   attachments,
+  cannedResponses,
   conversationEvents,
   conversations,
   contacts,
+  groupMembers,
   groups,
   messages,
   ticketFields,
@@ -667,6 +669,52 @@ export async function getTicketField(key: string): Promise<TicketFieldDef | null
   const rows = await listTicketFields();
   return rows.find((field) => field.key === key) ?? null;
 }
+
+/**
+ * The canned responses this agent may insert.
+ *
+ * Three visibilities, and the scoping is the whole point of doing it in the
+ * query rather than filtering a full list afterwards: `personal` belongs to one
+ * agent and `group` to one team, so a list built without the `where` and
+ * narrowed in the renderer is a list that was already sent to the browser. A
+ * personal response is somebody's own draft wording — often with a name or an
+ * account number still in it — and a group's belongs to a team this agent may
+ * not be on.
+ *
+ * `agent_id` and `group_id` are only meaningful for their own visibility, so
+ * each arm tests both: a `global` row with a stale `agent_id` left on it from an
+ * earlier edit is still global, and a `personal` row whose `agent_id` is null is
+ * visible to nobody rather than to everybody.
+ */
+export async function listCannedResponses(agent: SessionAgent) {
+  return db
+    .select({
+      id: cannedResponses.id,
+      title: cannedResponses.title,
+      folder: cannedResponses.folder,
+      bodyText: cannedResponses.bodyText,
+    })
+    .from(cannedResponses)
+    .where(
+      or(
+        eq(cannedResponses.visibility, 'global'),
+        and(eq(cannedResponses.visibility, 'personal'), eq(cannedResponses.agentId, agent.id)),
+        and(
+          eq(cannedResponses.visibility, 'group'),
+          inArray(
+            cannedResponses.groupId,
+            db
+              .select({ id: groupMembers.groupId })
+              .from(groupMembers)
+              .where(eq(groupMembers.agentId, agent.id)),
+          ),
+        ),
+      ),
+    )
+    .orderBy(asc(cannedResponses.folder), asc(cannedResponses.title));
+}
+
+export type CannedResponseOption = Awaited<ReturnType<typeof listCannedResponses>>[number];
 
 export async function listActiveAgents() {
   return db
