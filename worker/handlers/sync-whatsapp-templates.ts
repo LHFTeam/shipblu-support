@@ -1,7 +1,13 @@
-import { and, lt, ne, sql } from 'drizzle-orm';
+import { and, eq, isNull, lt, ne, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { whatsappTemplates } from '@/db/schema';
+import { whatsappAccounts, whatsappTemplates } from '@/db/schema';
 import { env } from '@/lib/env';
+import {
+  credentialsForAccount,
+  ensureEnvironmentAccount,
+  listActiveAccounts,
+  type WhatsAppAccount,
+} from '@/lib/whatsapp/accounts';
 import { listTemplates, WhatsAppApiError } from '@/lib/whatsapp/client';
 import { explainAuthError } from '@/lib/whatsapp/errors';
 
@@ -9,6 +15,11 @@ import { explainAuthError } from '@/lib/whatsapp/errors';
  * Rows this run did not refresh: templates deleted in Meta stop being returned.
  * Marking rather than deleting keeps the name resolvable for messages already
  * sent with it.
+ *
+ * Scoped to the account that was just synced. Without that, syncing the second
+ * business account would mark every template of the first as deleted, because
+ * the first account's rows were not refreshed by *this* call — a whole-table
+ * filter and a per-account sync cannot both be right.
  *
  * Built from typed operators rather than a `sql` template on purpose, and
  * exported so a test can assert that. A bare Date interpolated into a template
@@ -23,50 +34,91 @@ import { explainAuthError } from '@/lib/whatsapp/errors';
  * same wall and worked around it with an explicit `::timestamptz` cast; here no
  * raw SQL is needed at all.
  */
-export function staleTemplateFilter(now: Date) {
-  return and(lt(whatsappTemplates.syncedAt, now), ne(whatsappTemplates.status, 'DELETED'));
+export function staleTemplateFilter(now: Date, accountId: string | null) {
+  return and(
+    lt(whatsappTemplates.syncedAt, now),
+    ne(whatsappTemplates.status, 'DELETED'),
+    accountId
+      ? eq(whatsappTemplates.whatsappAccountId, accountId)
+      : isNull(whatsappTemplates.whatsappAccountId),
+  );
 }
 
 /**
- * Hourly sync of the WABA's approved templates.
+ * Hourly sync of every connected WABA's approved templates.
  *
  * Templates are edited and approved in Meta's Business Manager, not here, so
  * the console's list would otherwise drift — an agent picking a template Meta
- * has since rejected gets an opaque send failure. Upsert on (name, language)
- * because that pair, not Meta's id, is what a send actually references.
+ * has since rejected gets an opaque send failure. Upsert on (account, name,
+ * language) because that triple, not Meta's id, is what a send actually
+ * references: two business accounts can both have `shipment_update`, with
+ * different text and different approval states.
  */
 export async function syncWhatsAppTemplates(): Promise<void> {
+  // Turns a pre-multi-WABA environment into a row on the first run, so an
+  // upgrade needs no admin retyping what the environment already says.
+  await ensureEnvironmentAccount();
+
+  const accounts = await listActiveAccounts();
+
   // The cron runs hourly from the moment the Blueprint creates it, which is
   // before anyone has pasted the Meta credentials in. Skipping quietly beats
   // failing every hour: a cron that is always red is a cron nobody reads, and
   // then the first real failure goes unnoticed.
-  const e = env();
-  if (!e.WHATSAPP_WABA_ID || !e.META_PAGE_ACCESS_TOKEN) {
+  if (accounts.length === 0) {
     console.log(
-      '[sync_whatsapp_templates] WhatsApp is not configured yet (WHATSAPP_WABA_ID / ' +
-        'META_PAGE_ACCESS_TOKEN) — skipping',
+      '[sync_whatsapp_templates] no WhatsApp business account is connected yet ' +
+        '(Settings → Channels, or WHATSAPP_WABA_ID) — skipping',
     );
     return;
   }
 
-  let templates;
-  try {
-    templates = await listTemplates();
-  } catch (error) {
-    // Still fails the run — an expired credential is a real problem and a green
-    // cron would hide it. What changes is that the log names the remedy instead
-    // of only reporting Meta's "session has expired", which says what happened
-    // but not what to do about it.
-    if (error instanceof WhatsAppApiError) {
-      console.error(`[sync_whatsapp_templates] ${explainAuthError(error.code, error.message)}`);
-    }
-    throw error;
+  if (!env().META_PAGE_ACCESS_TOKEN && accounts.some((account) => !account.tokenEnvVar)) {
+    console.log(
+      '[sync_whatsapp_templates] META_PAGE_ACCESS_TOKEN is not set and an account ' +
+        'relies on it — skipping',
+    );
+    return;
   }
+
+  // One account's failure must not cost the others their sync: an expired token
+  // on a secondary WABA would otherwise silently stop refreshing the main one's
+  // templates. Collected and rethrown at the end so the cron still goes red.
+  const failures: string[] = [];
+
+  for (const account of accounts) {
+    try {
+      await syncAccount(account);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      const explained =
+        error instanceof WhatsAppApiError ? explainAuthError(error.code, error.message) : reason;
+
+      console.error(`[sync_whatsapp_templates] ${account.name}: ${explained}`);
+      await recordSync(account.id, explained);
+      failures.push(`${account.name}: ${reason}`);
+    }
+  }
+
+  if (failures.length > 0) {
+    throw new Error(
+      `${failures.length} of ${accounts.length} WhatsApp business account(s) failed to ` +
+        `sync — ${failures.join('; ')}`,
+    );
+  }
+}
+
+async function syncAccount(account: WhatsAppAccount): Promise<void> {
+  const { token, wabaId } = credentialsForAccount(account);
+  const templates = await listTemplates({ wabaId, token });
 
   if (templates.length === 0) {
     // Deliberately not treated as "delete everything": an API hiccup returning
     // an empty page must not wipe the templates agents are relying on.
-    console.warn('[sync_whatsapp_templates] Meta returned no templates, leaving existing rows');
+    console.warn(
+      `[sync_whatsapp_templates] ${account.name} returned no templates, leaving existing rows`,
+    );
+    await recordSync(account.id, null);
     return;
   }
 
@@ -76,6 +128,7 @@ export async function syncWhatsAppTemplates(): Promise<void> {
     await db
       .insert(whatsappTemplates)
       .values({
+        whatsappAccountId: account.id,
         metaTemplateId: template.id,
         name: template.name,
         language: template.language,
@@ -85,7 +138,11 @@ export async function syncWhatsAppTemplates(): Promise<void> {
         syncedAt: now,
       })
       .onConflictDoUpdate({
-        target: [whatsappTemplates.name, whatsappTemplates.language],
+        target: [
+          whatsappTemplates.whatsappAccountId,
+          whatsappTemplates.name,
+          whatsappTemplates.language,
+        ],
         set: {
           metaTemplateId: sql`excluded.meta_template_id`,
           category: sql`excluded.category`,
@@ -99,11 +156,33 @@ export async function syncWhatsAppTemplates(): Promise<void> {
   const stale = await db
     .update(whatsappTemplates)
     .set({ status: 'DELETED' })
-    .where(staleTemplateFilter(now))
+    .where(staleTemplateFilter(now, account.id))
     .returning({ id: whatsappTemplates.id });
 
+  await recordSync(account.id, null);
+
   console.log(
-    `[sync_whatsapp_templates] synced ${templates.length}` +
+    `[sync_whatsapp_templates] ${account.name}: synced ${templates.length}` +
       (stale.length ? `, marked ${stale.length} deleted` : ''),
   );
+}
+
+/**
+ * The outcome, on the account row.
+ *
+ * So the admin screen can say which connection is actually working. A WABA
+ * whose token cannot read it looks identical to a healthy one everywhere else,
+ * and the difference only surfaces when an agent's template send fails.
+ */
+async function recordSync(accountId: string, error: string | null): Promise<void> {
+  await db
+    .update(whatsappAccounts)
+    .set({
+      // Only on success: keeping the last good sync time visible is what makes
+      // "connected, but stale since Tuesday" readable at a glance.
+      ...(error ? {} : { lastSyncedAt: new Date() }),
+      lastSyncError: error?.slice(0, 500) ?? null,
+      updatedAt: new Date(),
+    })
+    .where(eq(whatsappAccounts.id, accountId));
 }

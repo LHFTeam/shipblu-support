@@ -1,9 +1,9 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { agents, channels, invites, jobs } from '@/db/schema';
+import { agents, channels, invites, jobs, whatsappAccounts } from '@/db/schema';
 import { requirePermission } from '@/lib/auth/guard';
 import { normaliseEmail } from '@/lib/auth/normalise';
 import { generateToken, hashToken } from '@/lib/auth/tokens';
@@ -125,6 +125,7 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
   const defaultGroupId = String(formData.get('defaultGroupId') ?? '') || null;
   const phoneNumberId = String(formData.get('phoneNumberId') ?? '').trim();
   const address = String(formData.get('address') ?? '').trim();
+  const whatsappAccountId = String(formData.get('whatsappAccountId') ?? '') || null;
 
   if (!name) return { error: 'Give the channel a name' };
   if (!['email', 'whatsapp', 'webchat', 'facebook', 'instagram', 'whatsapp_bot'].includes(type)) {
@@ -136,6 +137,30 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
   // ordinary WhatsApp tickets the team can reply to. Required, not defaulted.
   if (type === 'whatsapp_bot' && !phoneNumberId) {
     return { error: 'A customer bot channel needs the phone number ID it receives on' };
+  }
+
+  const isWhatsApp = type === 'whatsapp' || type === 'whatsapp_bot';
+
+  if (isWhatsApp) {
+    // Re-read rather than trusted: the id arrives in a FormData field, and a
+    // number pointed at a business account that does not exist would send with
+    // a token that has no access to it.
+    const accounts = await db
+      .select({ id: whatsappAccounts.id })
+      .from(whatsappAccounts)
+      .orderBy(asc(whatsappAccounts.name));
+
+    if (whatsappAccountId && !accounts.some((row) => row.id === whatsappAccountId)) {
+      return { error: 'That WhatsApp business account no longer exists' };
+    }
+
+    // Required once there is anything to choose from, so an unset link means
+    // "configured before there were accounts" and nothing else — which is what
+    // lets the adoption in `ensureEnvironmentAccount` claim those rows without
+    // also sweeping up ones an admin left blank on purpose.
+    if (accounts.length > 0 && !whatsappAccountId) {
+      return { error: 'Choose which WhatsApp business account this number belongs to' };
+    }
   }
 
   // Non-secret settings only. Access tokens and app secrets stay in the
@@ -150,10 +175,12 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
         ? {}
         : { address };
 
+  const account = isWhatsApp ? whatsappAccountId : null;
+
   if (id) {
     await db
       .update(channels)
-      .set({ name, defaultGroupId, config, updatedAt: new Date() })
+      .set({ name, defaultGroupId, config, whatsappAccountId: account, updatedAt: new Date() })
       .where(eq(channels.id, id));
   } else {
     await db.insert(channels).values({
@@ -161,6 +188,7 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
       name,
       defaultGroupId,
       config,
+      whatsappAccountId: account,
     });
   }
 

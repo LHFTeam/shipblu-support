@@ -4,6 +4,7 @@ import { attachments, messages } from '@/db/schema';
 import type { ClaimedJob } from '@/lib/queue';
 import { buildAttachmentPath, uploadObject } from '@/lib/storage';
 import { downloadAttachment, MetaApiError } from '@/lib/meta/client';
+import { credentialsForPhoneNumberId } from '@/lib/whatsapp/accounts';
 import { WhatsAppApiError, downloadMedia, getMediaUrl } from '@/lib/whatsapp/client';
 
 /**
@@ -63,18 +64,27 @@ export async function downloadMediaJob(job: ClaimedJob): Promise<void> {
   const message = rows[0];
   if (!message) throw new Error(`message ${messageId} not found`);
 
-  const meta = message.meta as { media?: Record<string, unknown> };
+  const meta = message.meta as { media?: Record<string, unknown>; phoneNumberId?: unknown };
   if (meta.media?.downloaded === true) {
     console.log(`[download_media] ${mediaId} already stored, skipping`);
     return;
   }
 
+  // A media id belongs to the business account whose number received it, so the
+  // token has to be that account's. The number is on the message, written by
+  // the ingest — with two WABAs connected, the other account's token answers
+  // this lookup with "unsupported get request", which reads like a deleted file
+  // rather than the wrong credential.
+  const { token } = await credentialsForPhoneNumberId(
+    typeof meta.phoneNumberId === 'string' ? meta.phoneNumberId : null,
+  );
+
   let content: Buffer;
   let contentType: string;
 
   try {
-    const metadata = await getMediaUrl(mediaId);
-    const downloaded = await downloadMedia(metadata.url);
+    const metadata = await getMediaUrl(mediaId, { token });
+    const downloaded = await downloadMedia(metadata.url, { token });
     content = downloaded.content;
     contentType = metadata.mimeType ?? downloaded.contentType;
   } catch (error) {

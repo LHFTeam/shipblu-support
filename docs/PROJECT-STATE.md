@@ -211,6 +211,14 @@ deliberate exceptions, each commented in `render.yaml`:
   reach a real customer on any channel;
 - web service only: `EMAIL_WEBHOOK_SECRET`, which has exactly one consumer.
 
+One family of keys is declared without being read by name: a connected WhatsApp
+business account may carry its own access token, and its row names the variable
+holding it. The name must start `WHATSAPP_TOKEN_` — enforced in
+`lib/whatsapp/accounts.ts`, because the value is sent to Meta as a bearer token
+and a free-text variable name would be a way to exfiltrate any secret in the
+process. The value goes in `shipblu-shared`; the key goes in `render.yaml`
+without it, in the same commit that names it on the account.
+
 When you add a variable, add it to `render.yaml` in the same commit. The
 blueprint is meant to describe the running system; it is not documentation that
 drifts.
@@ -271,7 +279,16 @@ is code:
 - **Channel rows.** `channels` holds one row, `whatsapp_bot`, and it is the
   observed bot number rather than anything the team answers (§1). Email
   mailboxes, the _human_ WhatsApp business number, the Facebook page and
-  Instagram account, and a `webchat` channel each still need a row. The env vars
+  Instagram account, and a `webchat` channel each still need a row.
+  A WhatsApp row now also needs a **business account** to point at — Settings →
+  Channels, "WhatsApp business accounts". Nothing has to be done by hand for the
+  existing setup: the hourly template sync turns `WHATSAPP_WABA_ID` into the
+  first connection and adopts the numbers and templates that already exist. The
+  connection is what decides the token a reply sends with and which templates
+  an agent may pick, so a second WABA is a row rather than a second deploy. See
+  `plans/multiple-waba-connections.md`, and note the limit it states: every
+  connected WABA has to sit under the same Meta app, because the app secret that
+  verifies inbound webhooks is single-valued. The env vars
   are the credentials; the rows are what the app routes on. A `portal` row is
   worth adding too: without one, tickets opened from the customer portal land
   with no default group, so nothing routes them. The `webchat` row is in the
@@ -823,6 +840,18 @@ Each cost real time. Most are also comments in the code.
   which is a real undelivered customer reply and not a transient failure.
   Everything else in the job history is completed work: 43,396 rows, almost all
   `process_webhook`, which is what 1,500 bot conversations a day looks like.
+- **Multiple WABA connections, against a local Postgres 16.** Migration 0011 and
+  the `db/sql/` replay both applied clean, and RLS came out enabled and not
+  forced on `whatsapp_accounts`. A legacy null-account template upserted onto
+  itself rather than duplicating, which is the `NULLS NOT DISTINCT` case the
+  constraint exists for; two accounts each kept their own `shipment_update` with
+  independent statuses; marking one account's templates stale left the other's
+  untouched. `phone number → account` resolved through `channels` with the
+  default account as the fallback, disconnecting an account cascaded its
+  templates while leaving its channel rows intact, and
+  `ensureEnvironmentAccount` adopted a single-WABA install — numbers and
+  templates — idempotently. Not yet exercised against a real second WABA: no
+  second business account exists to connect.
 - **Side conversations, end to end against a local Postgres 16.** The migration
   and the `db/sql/` replay both applied clean; the `attachments_one_owner` CHECK
   refuses a row with neither owner. An agent's question was sent through

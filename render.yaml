@@ -137,10 +137,28 @@ envVarGroups:
       # The worker sends and downloads media with the phone number id, and the
       # template sync cron lists templates with the WABA id, which is what makes
       # these a group rather than a per-service concern.
+      #
+      # Since more than one WABA can be connected, these are the fallback rather
+      # than the configuration: connections are `whatsapp_accounts` rows, edited
+      # under Settings → Channels, and the template sync turns WHATSAPP_WABA_ID
+      # into the first of them on its next run. They still matter — they are
+      # what a fresh install sends with before anything is connected.
       - key: WHATSAPP_PHONE_NUMBER_ID
         sync: false
       - key: WHATSAPP_WABA_ID
         sync: false
+
+      # A connected WABA that needs its own credential names the variable
+      # holding it, and the name must start WHATSAPP_TOKEN_. There are none
+      # declared here because there is nothing to declare until an account needs
+      # one: add the key beside these, without its value, in the same commit
+      # that names it on the account — the blueprint describes the running
+      # system.
+      #
+      # Only the token varies per account. META_APP_SECRET and META_VERIFY_TOKEN
+      # above belong to the Meta *app*, so every connected WABA has to sit under
+      # the same one; a WABA on a second app would have its webhooks stored
+      # unverified and answered 403.
 
   # Still per-service, and inconsistent with the rule above: SUPABASE_URL and
   # SUPABASE_SERVICE_ROLE_KEY are identical on the web service and the worker.

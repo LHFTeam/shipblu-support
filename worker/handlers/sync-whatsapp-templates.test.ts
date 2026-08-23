@@ -26,12 +26,22 @@ beforeEach(() => {
   resetEnvCache();
 });
 
+const ACCOUNT = '11111111-1111-4111-8111-111111111111';
+
 function paramsFor(now: Date) {
   return db
     .update(whatsappTemplates)
     .set({ status: 'DELETED' })
-    .where(staleTemplateFilter(now))
+    .where(staleTemplateFilter(now, ACCOUNT))
     .toSQL().params;
+}
+
+function textFor(accountId: string | null) {
+  return db
+    .update(whatsappTemplates)
+    .set({ status: 'DELETED' })
+    .where(staleTemplateFilter(new Date('2026-08-20T08:00:00Z'), accountId))
+    .toSQL().sql;
 }
 
 describe('staleTemplateFilter', () => {
@@ -43,15 +53,25 @@ describe('staleTemplateFilter', () => {
   });
 
   it('compares against synced_at and spares rows already marked deleted', () => {
-    const { sql: text } = db
-      .update(whatsappTemplates)
-      .set({ status: 'DELETED' })
-      .where(staleTemplateFilter(new Date('2026-08-20T08:00:00Z')))
-      .toSQL();
+    const text = textFor(ACCOUNT);
 
     // Cheap, but it is the whole intent of the clause: only rows this run did
     // not refresh, and never one that is already gone.
     expect(text).toContain('"synced_at" <');
     expect(text).toContain('"status" <>');
+  });
+
+  /**
+   * The clause has to be scoped to the account that was just synced. Syncing a
+   * second business account would otherwise mark every template of the first
+   * as DELETED — its rows were not refreshed by *this* call — and the console
+   * would offer the team nothing to send from their main number.
+   */
+  it('only marks the account that was just synced', () => {
+    expect(textFor(ACCOUNT)).toContain('"whatsapp_account_id" =');
+  });
+
+  it('marks the pre-account rows when there is no account yet', () => {
+    expect(textFor(null)).toContain('"whatsapp_account_id" is null');
   });
 });

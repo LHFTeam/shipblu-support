@@ -235,6 +235,78 @@ export const cannedResponses = pgTable(
 );
 
 /**
+ * One WhatsApp Business Account, and the credential that talks to it.
+ *
+ * A WABA is the unit Meta scopes almost everything to: the phone numbers it
+ * owns, the message templates approved on it, and the media ids its numbers
+ * hand us. Before this table there was one of each, named by
+ * `WHATSAPP_WABA_ID` in the environment, and a second business account meant a
+ * second deploy of the whole app.
+ *
+ * The row holds ids, never a token. `tokenEnvVar` *names* the environment
+ * variable the access token is read from — a level of indirection that keeps
+ * the rule the rest of the configuration follows (a database dump contains no
+ * usable credential) while still letting one WABA use a different credential
+ * from another. Null means the shared `META_PAGE_ACCESS_TOKEN`, which is the
+ * right answer whenever the accounts sit under one Meta app, and that is the
+ * ordinary case: a Business Manager with several WABAs installs one app on all
+ * of them and one system-user token serves the lot.
+ *
+ * What is deliberately *not* per-account is the app secret and the verify
+ * token. Those belong to the Meta app, not to the business account, and
+ * `X-Hub-Signature-256` is verified with a single secret in
+ * `app/api/webhooks/whatsapp`. Connecting a WABA that lives under a *different*
+ * Meta app therefore needs more than a row here — see the note in
+ * `lib/whatsapp/accounts.ts`.
+ */
+export const whatsappAccounts = pgTable(
+  'whatsapp_accounts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    /** Admin-facing label: "ShipBlu Egypt", not the id. */
+    name: text('name').notNull(),
+    /** Meta's WhatsApp Business Account id, from the WhatsApp Manager. */
+    wabaId: text('waba_id').notNull(),
+
+    /**
+     * Name of the environment variable holding this account's access token.
+     * Null uses `META_PAGE_ACCESS_TOKEN`. Constrained to a prefix in
+     * `lib/whatsapp/accounts.ts` — an admin naming an arbitrary variable would
+     * otherwise be choosing which of the process's secrets gets sent to Meta as
+     * a bearer token.
+     */
+    tokenEnvVar: text('token_env_var'),
+
+    /**
+     * The account used when nothing else names one: a template send on a
+     * conversation with no inbound history, or a media download from before
+     * this table existed.
+     */
+    isDefault: boolean('is_default').notNull().default(false),
+    isActive: boolean('is_active').notNull().default(true),
+
+    /**
+     * Outcome of the last template sync. Kept on the row because a WABA that
+     * has been connected but whose token cannot read it looks identical to a
+     * working one on every screen — the failure is otherwise only in the cron
+     * log, which nobody reads until a template send fails.
+     */
+    lastSyncedAt: timestamp('last_synced_at', { withTimezone: true }),
+    lastSyncError: text('last_sync_error'),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // Two rows for the same WABA would sync templates twice into the same
+    // (account, name, language) slot and make "which token does this number
+    // use?" ambiguous.
+    uniqueIndex('whatsapp_accounts_waba_idx').on(t.wabaId),
+    uniqueIndex('whatsapp_accounts_name_idx').on(t.name),
+  ],
+);
+
+/**
  * A configured inbox: one support mailbox, or one WhatsApp number.
  *
  * `config` holds non-secret settings only (addresses, display names, defaults).
@@ -249,6 +321,19 @@ export const channels = pgTable(
     name: text('name').notNull(),
 
     config: jsonb('config').$type<Record<string, unknown>>().notNull().default({}),
+
+    /**
+     * Which WhatsApp Business Account this number belongs to, for `whatsapp`
+     * and `whatsapp_bot` rows and null for every other type.
+     *
+     * A column rather than another key in `config` because it is a foreign key:
+     * a WABA that is deleted must not leave numbers pointing at an id that is
+     * gone, and `set null` degrades to the pre-multi-WABA behaviour — the
+     * default account — rather than to a send that throws.
+     */
+    whatsappAccountId: uuid('whatsapp_account_id').references(() => whatsappAccounts.id, {
+      onDelete: 'set null',
+    }),
 
     /** Default group and status applied to tickets arriving on this channel. */
     defaultGroupId: uuid('default_group_id').references(() => groups.id, { onDelete: 'set null' }),
@@ -265,5 +350,6 @@ export const channels = pgTable(
     // conflict target that lets the seed be re-run without making a second copy
     // of the bot channel.
     uniqueIndex('channels_name_idx').on(t.name),
+    index('channels_whatsapp_account_idx').on(t.whatsappAccountId),
   ],
 );
