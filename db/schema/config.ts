@@ -7,6 +7,7 @@ import {
   pgTable,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
@@ -351,5 +352,89 @@ export const channels = pgTable(
     // of the bot channel.
     uniqueIndex('channels_name_idx').on(t.name),
     index('channels_whatsapp_account_idx').on(t.whatsappAccountId),
+  ],
+);
+
+/**
+ * The message a customer gets when they write in and nobody is working.
+ *
+ * Scope is two nullable columns rather than a `scope` enum, and that is what
+ * makes "by group or by channel" one table instead of two. A row matches a
+ * ticket when every column it *does* set matches, so `{group: null, channel:
+ * 'whatsapp'}` is "every group, on WhatsApp", `{group: Returns, channel: null}`
+ * is "the Returns team, everywhere", and both dimensions set is the pair. The
+ * most specific matching row wins, resolved in `lib/auto-response/resolve.ts`.
+ *
+ * `channel` is the channel *type* rather than a `channels` row: the wording that
+ * differs is the medium's — an email can carry three paragraphs where a WhatsApp
+ * message should be two lines — and the type is the discriminator every other
+ * read, filter and report already keys on. A second mailbox needing its own
+ * wording is a real case, and it is deliberately not this one.
+ *
+ * Bodies are plain text. An out-of-hours acknowledgement is three sentences, a
+ * rich text editor would buy formatting nobody needs, and storing HTML would
+ * mean sanitising admin-authored markup on the way in and again around every
+ * substituted value. The email HTML is built from the text at send time, after
+ * substitution, so escaping the values is not a step anybody can forget.
+ *
+ * Which hours count as "out" is **not** configured here. It is the ticket's
+ * group calendar, resolved through `lib/hours/resolve.ts` like every SLA due
+ * date — a second schedule attached to the message is a second answer to "are
+ * we open?", and the two would disagree the first time somebody edited one.
+ */
+export const autoResponses = pgTable(
+  'auto_responses',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+
+    /** Null means every group, including tickets that have none. */
+    groupId: uuid('group_id').references(() => groups.id, { onDelete: 'cascade' }),
+    /** Null means every channel. */
+    channel: channelEnum('channel'),
+
+    /**
+     * Sent outside the group's working hours. One per language: the requester's
+     * `contacts.locale` picks, and whichever is filled in covers the other, so a
+     * team that only writes Arabic is not forced to write English too.
+     */
+    bodyAr: text('body_ar').notNull().default(''),
+    bodyEn: text('body_en').notNull().default(''),
+
+    /**
+     * The holiday override, sent instead on a day the calendar marks a holiday.
+     * Empty falls back to the ordinary out-of-hours body, which is what makes
+     * the override optional rather than something every row has to fill in
+     * twice.
+     *
+     * One body covers every holiday because `{{holiday}}` interpolates the name
+     * off the calendar. Per-holiday wording would mean re-typing a message for
+     * each of a dozen public holidays, in two languages, every year.
+     */
+    holidayBodyAr: text('holiday_body_ar').notNull().default(''),
+    holidayBodyEn: text('holiday_body_en').notNull().default(''),
+
+    /**
+     * Match this scope and send nothing.
+     *
+     * The only way to say "not here" once a broader row exists: the widget
+     * already tells a web chat visitor the office is shut before they type, so a
+     * company-wide row plus a silent `webchat` row is a real configuration, and
+     * without this it could only be expressed by deleting the company row and
+     * restating it on every other channel — where the next channel anybody adds
+     * would silently get nothing.
+     */
+    silent: boolean('silent').notNull().default(false),
+
+    isActive: boolean('is_active').notNull().default(true),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // `nulls not distinct`, so two "every group, on WhatsApp" rows collide
+    // rather than making the winner depend on row order — the scope *is* the
+    // identity here, which is why these rows carry no name of their own.
+    unique('auto_responses_scope_key').on(t.groupId, t.channel).nullsNotDistinct(),
+    index('auto_responses_active_idx').on(t.isActive),
   ],
 );

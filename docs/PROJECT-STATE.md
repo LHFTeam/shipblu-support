@@ -5,7 +5,7 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-08-22, against `main` at `9112536`.
+Last updated: 2026-08-23, against `main` at `ff272e4`.
 
 ---
 
@@ -102,6 +102,26 @@ fields an admin marks visible and editable by customers. The two required flags
 were the same shape of dead scaffolding and are enforced as of this change. See
 §5.5 for the three decisions behind it, and §6.21 for the bundle trap found while
 building it.
+
+And now the **out-of-hours reply**: when a customer writes in and their group is
+outside its calendar, the helpdesk answers once, on its own initiative, for the
+first time. Configured at `/admin/auto-responses` by group, by channel or by
+both — the most specific rule wins, a channel beats a group — with an optional
+holiday body that `{{holiday}}` fills in from the calendar. The hours are not a
+new setting: it is `groupHours()` from `lib/hours/resolve.ts`, the same calendar
+every SLA due date is counted against, so nothing has been added that could
+disagree with the clock. See `plans/out-of-hours-auto-response.md`.
+
+Two things in it are worth knowing before reading the code. It is **deliberately
+not a first response** — it does not stop the SLA clock and does not move
+`lastAgentMessageAt`, because it is sent precisely when nobody is working and the
+SLA is counted in working time; recording it would report a first response of
+zero minutes on every ticket that arrives overnight. And it sends **once per
+closed stretch**, not per message: `conversations.auto_responded_at` is claimed
+with a conditional update, so the six ingest jobs six WhatsApp messages at 23:00
+produce still yield one reply. The case for it is in the archive — **11,402 of
+18,417 bot-channel inbound messages arrived outside production's schedule**, Sun–Fri
+10:00–18:00 Cairo.
 
 **The bot channel is live, and everything else is not.** This is the single most
 important thing to understand about the current state, and the easiest to read
@@ -484,6 +504,17 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
 
 ### 5.5 Loose ends
 
+- **`contacts.locale` is never written, so every contact reads `'en'`.** All
+  6,244 of them sit at the column default, and `lib/contacts/merge.ts` already
+  documents why that is not the same as knowing: `'en'` means either "reads
+  English" or "nobody has ever said". Anything that picks a language off it is
+  answering an Arabic-first customer base in English — **CSAT surveys are doing
+  that today** (`worker/handlers/send-csat.ts` reads the column directly). The
+  out-of-hours reply works around it by reading the script of the customer's own
+  message (`preferredLocale()` in `lib/auto-response/resolve.ts`), which is a
+  workaround and not the fix. The fix is to set the column at ingest — the widget
+  and the portal both know the locale from the URL they were opened on, and a
+  WhatsApp or email contact can be read the same way the auto-response reads it.
 - One imported article's detected language disagrees with its category. The
   importer counts and reports these rather than silently refiling them; someone
   who reads Arabic should look at it.
