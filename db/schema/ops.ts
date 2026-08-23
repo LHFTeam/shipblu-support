@@ -6,9 +6,11 @@ import {
   pgTable,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
+import { whatsappAccounts } from './config';
 import { channelEnum, jobStatusEnum } from './enums';
 
 /**
@@ -100,11 +102,29 @@ export const jobs = pgTable(
  * WhatsApp message templates, synced from Meta by a cron job. Sending outside the
  * 24-hour customer service window is only possible with an approved template, so
  * the console reads this table to decide what an agent is allowed to send.
+ *
+ * A template belongs to one WABA — the same name can exist on two business
+ * accounts with different text, and be approved on one and rejected on the
+ * other. So `whatsappAccountId` is part of the identity of a row, not a label
+ * on it: without it a second account's sync would overwrite the first
+ * account's copy, and the console would offer an agent a template that the
+ * number they are replying from has never had approved.
  */
 export const whatsappTemplates = pgTable(
   'whatsapp_templates',
   {
     id: uuid('id').primaryKey().defaultRandom(),
+
+    /**
+     * The account this template was synced from. Nullable only for rows written
+     * before there were accounts; the sync adopts those on its next run by
+     * upserting over them. `cascade` because a template is a cache of what the
+     * WABA holds — disconnecting the WABA leaves nothing to send them from.
+     */
+    whatsappAccountId: uuid('whatsapp_account_id').references(() => whatsappAccounts.id, {
+      onDelete: 'cascade',
+    }),
+
     metaTemplateId: text('meta_template_id').notNull(),
     name: text('name').notNull(),
     language: text('language').notNull(),
@@ -119,7 +139,14 @@ export const whatsappTemplates = pgTable(
     syncedAt: timestamp('synced_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    uniqueIndex('whatsapp_templates_name_lang_idx').on(t.name, t.language),
+    // A constraint rather than a unique index, for `nullsNotDistinct`: the
+    // account is nullable, and postgres would otherwise treat every legacy row
+    // as unique — the sync's conflict target would match nothing and each
+    // hourly run would insert a fresh duplicate of every template until an
+    // account adopted them.
+    unique('whatsapp_templates_account_name_lang_idx')
+      .on(t.whatsappAccountId, t.name, t.language)
+      .nullsNotDistinct(),
     index('whatsapp_templates_status_idx').on(t.status),
   ],
 );

@@ -125,7 +125,16 @@ const schema = z.object({
    *
    * The remaining WHATSAPP_* keys below are ids, not credentials — they name
    * which phone number and business account to use, and have no Meta-app
-   * equivalent to collapse into.
+   * equivalent to collapse into. Since more than one WABA can be connected they
+   * are the *fallback*, not the configuration: `whatsapp_accounts` rows are, and
+   * the template sync turns these into the first such row on its next run. They
+   * stay because they are what a fresh install has before anyone opens the
+   * admin screen, and what every send falls back to when nothing is connected.
+   *
+   * A second account that needs its own credential names a `WHATSAPP_TOKEN_*`
+   * variable on its row, which is read directly from `process.env` — the name
+   * is data, so it cannot be declared here. `lib/whatsapp/accounts.ts` holds the
+   * rule that constrains which names are allowed.
    */
   META_PAGE_ACCESS_TOKEN: z.string().optional(),
   META_APP_SECRET: z.string().optional(),

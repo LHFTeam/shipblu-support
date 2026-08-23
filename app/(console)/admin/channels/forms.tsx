@@ -9,9 +9,16 @@ const INITIAL: AdminState = { error: null };
 
 type ChannelType = 'email' | 'whatsapp' | 'webchat' | 'facebook' | 'instagram' | 'whatsapp_bot';
 
-export function ChannelForm({ groups }: { groups: { id: string; name: string }[] }) {
+export function ChannelForm({
+  groups,
+  whatsappAccounts,
+}: {
+  groups: { id: string; name: string }[];
+  whatsappAccounts: { id: string; name: string }[];
+}) {
   const [state, action] = useActionState(saveChannel, INITIAL);
   const [type, setType] = useState<ChannelType>('email');
+  const isWhatsApp = type === 'whatsapp' || type === 'whatsapp_bot';
 
   return (
     <form
@@ -43,7 +50,7 @@ export function ChannelForm({ groups }: { groups: { id: string; name: string }[]
             <p className="text-xs text-[var(--muted-foreground)] sm:pt-6">
               The widget needs no address — only a default group.
             </p>
-          ) : type === 'whatsapp' || type === 'whatsapp_bot' ? (
+          ) : isWhatsApp ? (
             <Field
               label="Phone number ID"
               explain={
@@ -70,6 +77,32 @@ export function ChannelForm({ groups }: { groups: { id: string; name: string }[]
             </Field>
           )}
         </div>
+
+        {/* Only for WhatsApp, and only once there is a choice to make: with one
+            account connected every number belongs to it, and a picker with a
+            single option is a question with one answer. */}
+        {isWhatsApp && whatsappAccounts.length > 0 ? (
+          <Field
+            label="Business account"
+            className="sm:w-44"
+            explain={
+              <>
+                Which WABA this number belongs to. It decides the access token the reply is sent
+                with and the set of templates an agent may pick from — a template approved on
+                another business account is rejected by Meta on a status webhook, long after the
+                agent was told the message went.
+              </>
+            }
+          >
+            <Select name="whatsappAccountId" defaultValue={whatsappAccounts[0]?.id ?? ''}>
+              {whatsappAccounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        ) : null}
 
         <Field
           label="Default group"

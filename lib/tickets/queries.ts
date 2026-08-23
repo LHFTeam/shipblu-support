@@ -728,8 +728,21 @@ export async function listGroups() {
   return db.select({ id: groups.id, name: groups.name }).from(groups).orderBy(asc(groups.name));
 }
 
-/** Approved templates only — anything else is rejected at send time by Meta. */
-export async function listApprovedTemplates() {
+/**
+ * Approved templates on one business account — anything else is rejected at
+ * send time by Meta.
+ *
+ * Scoped to the account rather than listing the table, because a template is
+ * approved on a WABA and not on the installation. Two connected accounts can
+ * both have `shipment_update`, approved on one and rejected on the other, and
+ * an unscoped picker would offer the agent whichever row happened to be there.
+ * The send then fails asynchronously, on a status webhook, after the agent has
+ * already been told it went.
+ *
+ * `null` means the rows that predate business accounts, which is the whole
+ * table until the first sync adopts them.
+ */
+export async function listApprovedTemplates(whatsappAccountId: string | null) {
   return db
     .select({
       id: whatsappTemplates.id,
@@ -739,7 +752,14 @@ export async function listApprovedTemplates() {
       components: whatsappTemplates.components,
     })
     .from(whatsappTemplates)
-    .where(eq(whatsappTemplates.status, 'APPROVED'))
+    .where(
+      and(
+        eq(whatsappTemplates.status, 'APPROVED'),
+        whatsappAccountId
+          ? eq(whatsappTemplates.whatsappAccountId, whatsappAccountId)
+          : isNull(whatsappTemplates.whatsappAccountId),
+      ),
+    )
     .orderBy(asc(whatsappTemplates.name));
 }
 

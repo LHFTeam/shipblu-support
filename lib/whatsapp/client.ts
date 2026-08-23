@@ -76,6 +76,14 @@ type MetaErrorBody = {
 };
 
 /**
+ * What a call is addressed to and authenticated with.
+ *
+ * Both are per-WhatsApp-Business-Account, and both are resolved by the caller —
+ * from `lib/whatsapp/accounts.ts`, which reads the configured accounts — rather
+ * than here. This module stays free of the database so it can be tested against
+ * a fake `fetch` alone, and so a resolution that needs three queries is done
+ * once per job instead of once per Graph call.
+ *
  * `phoneNumberId` overrides the configured default.
  *
  * The 24-hour window belongs to a *pair* — one business number and one
@@ -89,17 +97,28 @@ type MetaErrorBody = {
  * Callers therefore pass the number the conversation actually arrived on, and
  * the environment default is only a fallback for sends with no inbound history.
  */
-function credentials(phoneNumberId?: string | null) {
-  const e = env();
-  // The same page token Messenger and Instagram send with: one Meta app serves
-  // all three products, so there is one credential rather than a WhatsApp copy
-  // of it that has to be rotated in step.
-  if (!e.META_PAGE_ACCESS_TOKEN) throw new Error('META_PAGE_ACCESS_TOKEN is not configured');
+export type CallCredentials = { token?: string | null; phoneNumberId?: string | null };
 
-  const resolved = phoneNumberId ?? e.WHATSAPP_PHONE_NUMBER_ID;
+/**
+ * The token alone, for the calls that are not addressed to a number — media
+ * lookup and download are addressed to a media id and to Meta's CDN.
+ *
+ * The environment fallback is the same page token Messenger and Instagram send
+ * with: one Meta app serves all three products, so an account that does not
+ * name its own token shares that one rather than keeping a WhatsApp copy of it
+ * that has to be rotated in step.
+ */
+function accessToken(override?: CallCredentials | null): string {
+  const token = override?.token || env().META_PAGE_ACCESS_TOKEN;
+  if (!token) throw new Error('META_PAGE_ACCESS_TOKEN is not configured');
+  return token;
+}
+
+function credentials(override?: CallCredentials | null) {
+  const resolved = override?.phoneNumberId ?? env().WHATSAPP_PHONE_NUMBER_ID;
   if (!resolved) throw new Error('WHATSAPP_PHONE_NUMBER_ID is not configured');
 
-  return { token: e.META_PAGE_ACCESS_TOKEN, phoneNumberId: resolved };
+  return { token: accessToken(override), phoneNumberId: resolved };
 }
 
 async function graph<T>(
@@ -163,11 +182,9 @@ export async function sendText(
   options: {
     previewUrl?: boolean;
     replyToWamid?: string | null;
-    /** The business number to send from. See `credentials`. */
-    phoneNumberId?: string | null;
-  } = {},
+  } & CallCredentials = {},
 ): Promise<SendResult> {
-  const { token, phoneNumberId } = credentials(options.phoneNumberId);
+  const { token, phoneNumberId } = credentials(options);
 
   const response = await graph<SendResponse>(`${phoneNumberId}/messages`, {
     method: 'POST',
@@ -191,9 +208,9 @@ export async function sendTemplate(
   name: string,
   language: string,
   components: WhatsAppTemplateComponent[] = [],
-  options: { phoneNumberId?: string | null } = {},
+  options: CallCredentials = {},
 ): Promise<SendResult> {
-  const { token, phoneNumberId } = credentials(options.phoneNumberId);
+  const { token, phoneNumberId } = credentials(options);
 
   const response = await graph<SendResponse>(`${phoneNumberId}/messages`, {
     method: 'POST',
@@ -219,8 +236,8 @@ export async function sendTemplate(
  * the customer sees in WhatsApp. Best-effort: failing to tick a message blue is
  * never worth failing a job over.
  */
-export async function markRead(wamid: string, from?: string | null): Promise<void> {
-  const { token, phoneNumberId } = credentials(from);
+export async function markRead(wamid: string, options: CallCredentials = {}): Promise<void> {
+  const { token, phoneNumberId } = credentials(options);
   await graph(`${phoneNumberId}/messages`, {
     method: 'POST',
     token,
@@ -242,8 +259,15 @@ export type MediaMetadata = {
  * a job rather than lazily when an agent opens the ticket — by then the link is
  * long dead and the file is unrecoverable.
  */
-export async function getMediaUrl(mediaId: string): Promise<MediaMetadata> {
-  const { token } = credentials();
+export async function getMediaUrl(
+  mediaId: string,
+  options: CallCredentials = {},
+): Promise<MediaMetadata> {
+  // Media ids are scoped to the business account that received them, so this
+  // takes the token of the number the message arrived on rather than the
+  // shared one, which only reaches every WABA while they are all under one
+  // Meta app.
+  const token = accessToken(options);
   const body = await graph<{
     url?: string;
     mime_type?: string;
@@ -264,8 +288,9 @@ export async function getMediaUrl(mediaId: string): Promise<MediaMetadata> {
 /** Meta's CDN requires the access token on the download itself, not just the lookup. */
 export async function downloadMedia(
   url: string,
+  options: CallCredentials = {},
 ): Promise<{ content: Buffer; contentType: string }> {
-  const { token } = credentials();
+  const token = accessToken(options);
 
   const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
 
@@ -296,15 +321,24 @@ export type MetaTemplate = {
   components?: unknown[];
 };
 
-/** Lists the WABA's templates, following Meta's cursor pagination. */
-export async function listTemplates(): Promise<MetaTemplate[]> {
+/**
+ * Lists one business account's templates, following Meta's cursor pagination.
+ *
+ * Takes the WABA rather than reading it from the environment: templates belong
+ * to a business account, and the sync now walks every configured one.
+ */
+export async function listTemplates(
+  account: { wabaId?: string | null; token?: string | null } = {},
+): Promise<MetaTemplate[]> {
   const e = env();
-  if (!e.WHATSAPP_WABA_ID) throw new Error('WHATSAPP_WABA_ID is not configured');
-  if (!e.META_PAGE_ACCESS_TOKEN) throw new Error('META_PAGE_ACCESS_TOKEN is not configured');
+  const wabaId = account.wabaId ?? e.WHATSAPP_WABA_ID;
+  if (!wabaId) throw new Error('WHATSAPP_WABA_ID is not configured');
 
-  const token = e.META_PAGE_ACCESS_TOKEN;
+  const token = account.token || e.META_PAGE_ACCESS_TOKEN;
+  if (!token) throw new Error('META_PAGE_ACCESS_TOKEN is not configured');
+
   const collected: MetaTemplate[] = [];
-  let path: string | null = `${e.WHATSAPP_WABA_ID}/message_templates?limit=100`;
+  let path: string | null = `${wabaId}/message_templates?limit=100`;
 
   // Bounded rather than `while (next)`: a paging bug on either side must not
   // turn an hourly cron into an unbounded loop against Meta's API.

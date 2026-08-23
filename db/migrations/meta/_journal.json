@@ -78,6 +78,13 @@
       "when": 1787340108632,
       "tag": "0010_public_frog_thor",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1787502752001,
+      "tag": "0011_silly_the_leader",
+      "breakpoints": true
     }
   ]
 }

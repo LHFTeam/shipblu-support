@@ -59,6 +59,7 @@ import { lastSideMessageId, loadSideConversation } from '@/lib/side-conversation
 import { isBlank, listLabels, missingRequired } from '@/lib/tickets/custom-fields';
 import { parseFieldValue } from '@/lib/tickets/custom-fields-parse';
 import { getTicketField, listTicketFields } from '@/lib/tickets/queries';
+import { accountIdForConversation } from '@/lib/whatsapp/conversation';
 import { windowState } from '@/lib/whatsapp/window';
 
 /**
@@ -391,16 +392,26 @@ export async function sendTemplateReply(
 
   if (row.conversation.channel !== 'whatsapp') return { error: 'Templates are WhatsApp only' };
 
-  const templates = await db
-    .select()
-    .from(whatsappTemplates)
-    .where(eq(whatsappTemplates.id, templateId))
-    .limit(1);
+  const [templates, accountId] = await Promise.all([
+    db.select().from(whatsappTemplates).where(eq(whatsappTemplates.id, templateId)).limit(1),
+    accountIdForConversation(row.conversation.id),
+  ]);
 
   const template = templates[0];
   if (!template) return { error: 'Template not found' };
   if (template.status !== 'APPROVED') {
     return { error: `Template "${template.name}" is ${template.status.toLowerCase()} in Meta` };
+  }
+
+  // The picker already scopes to this ticket's business account; this is the
+  // server-side half of it, because the template id arrives in a FormData
+  // field. A template approved on another WABA is accepted by the send API and
+  // then rejected on a status webhook, so refusing it here is the only place
+  // the agent finds out at all.
+  if (template.whatsappAccountId !== accountId) {
+    return {
+      error: `Template "${template.name}" belongs to a different WhatsApp business account than this ticket's number.`,
+    };
   }
 
   const shape = templateShape(template.components);
@@ -552,10 +563,7 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
       const groupId = value || null;
 
       await db.transaction(async (tx) => {
-        await tx
-          .update(conversations)
-          .set({ groupId })
-          .where(eq(conversations.id, conversationId));
+        await tx.update(conversations).set({ groupId }).where(eq(conversations.id, conversationId));
 
         // Recorded, where it was not before. Moving a ticket between teams is
         // the same weight of decision as reassigning it and the case above has

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetEnvCache } from '@/lib/env';
-import { WhatsAppApiError, getMediaUrl } from './client';
+import { WhatsAppApiError, getMediaUrl, listTemplates, sendText } from './client';
 import { ACCESS_TOKEN_CODE } from './errors';
 
 /**
@@ -67,6 +67,51 @@ describe('WhatsApp credentials', () => {
     resetEnvCache();
 
     await expect(getMediaUrl('media-1')).rejects.toThrow(/META_PAGE_ACCESS_TOKEN/);
+  });
+
+  /**
+   * With more than one WABA connected, the caller resolves the credential and
+   * this module must use the one it was handed. Falling back to the shared
+   * token is the failure that is hard to see: it succeeds for whichever account
+   * the shared token happens to reach, and fails for the other with an error
+   * that reads like a deleted resource rather than the wrong credential.
+   */
+  it('uses the token and number it is given rather than the environment', async () => {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ messages: [{ id: 'wamid.1' }] })),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await sendText('20100', 'hello', { token: 'saudi-token', phoneNumberId: '999' });
+
+    const [url, init] = fetchMock.mock.calls[0]! as unknown as [string, RequestInit];
+    expect(url).toContain('/999/messages');
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer saudi-token');
+  });
+
+  it('lists the templates of the business account it is given', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data: [] })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await listTemplates({ wabaId: '777', token: 'saudi-token' });
+
+    const [url, init] = fetchMock.mock.calls[0]! as unknown as [string, RequestInit];
+    expect(url).toContain('/777/message_templates');
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer saudi-token');
+  });
+
+  /** Media is addressed by id, so it must not need a number configured. */
+  it('downloads media with no phone number id set at all', async () => {
+    delete process.env.WHATSAPP_PHONE_NUMBER_ID;
+    resetEnvCache();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ url: 'https://cdn' }))),
+    );
+
+    await expect(getMediaUrl('media-1', { token: 'saudi-token' })).resolves.toMatchObject({
+      url: 'https://cdn',
+    });
   });
 });
 

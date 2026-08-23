@@ -170,7 +170,11 @@ in `render.yaml` in the same commit. Shared values belong in the
 precedence, and a key declared in both places silently takes the service value.
 A module reachable from the search parser must read `process.env` directly
 rather than `env()`, which validates the whole schema (see
-`lib/shipments/detect.ts`).
+`lib/shipments/detect.ts`). A WhatsApp business account's access token is read
+the same way, for a different reason: its variable's _name_ is a database value,
+so it cannot be in the schema — and must therefore start `WHATSAPP_TOKEN_`, or
+an admin typing a variable name would be choosing which secret gets sent to Meta
+as a bearer token (`lib/whatsapp/accounts.ts`).
 
 **Explaining a control.** A label short enough to fit a dense table is rarely
 long enough to explain itself. `InfoTip` from `components/tooltip.tsx` is the
