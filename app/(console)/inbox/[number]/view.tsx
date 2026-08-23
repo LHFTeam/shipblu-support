@@ -201,7 +201,10 @@ function Header({ conversation }: { conversation: ConversationDetail }) {
           <WindowIndicator lastCustomerMessageAt={conversation.lastCustomerMessageAt} />
         ) : null}
         {isMeta && !isComment ? (
-          <MetaWindowIndicator lastCustomerMessageAt={conversation.lastCustomerMessageAt} />
+          <MetaWindowIndicator
+            lastCustomerMessageAt={conversation.lastCustomerMessageAt}
+            thread={conversation.metaThread}
+          />
         ) : null}
       </div>
     </header>
@@ -211,10 +214,25 @@ function Header({ conversation }: { conversation: ConversationDetail }) {
 /** The Messenger and Instagram windows, in the agent's terms. */
 function MetaWindowIndicator({
   lastCustomerMessageAt,
+  thread,
 }: {
   lastCustomerMessageAt: Date | string | null;
+  thread: ConversationDetail['metaThread'];
 }) {
   const now = useNow();
+
+  // A thread that cannot be answered at all has no window worth counting, and
+  // the countdown would contradict the composer standing beside it. Rendered
+  // before the mount guard because this one is server-computed and does not
+  // tick — there is no first frame to get wrong.
+  if (thread && !thread.canSend) {
+    return (
+      <Badge tone="closed">
+        {thread.reason === 'standby' ? 'Another app owns this inbox' : 'Cannot reply from here'}
+      </Badge>
+    );
+  }
+
   if (!now) return null;
 
   const state = metaWindowState(

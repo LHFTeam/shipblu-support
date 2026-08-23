@@ -115,6 +115,10 @@ export async function ingestMetaMessage(
           metaKind: 'direct_message',
           platform: message.platform,
           accountId: message.accountId,
+          // Whether this app may answer the thread at all, recorded per message
+          // because thread control moves: the same customer can be answerable
+          // today and handed to another inbox tool tomorrow.
+          standby: message.standby,
           attachments: message.attachments,
         },
         createdAt: message.sentAt,

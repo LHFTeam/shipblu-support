@@ -28,6 +28,8 @@ import {
 } from '@/db/schema';
 import type { SessionAgent } from '@/lib/auth/session';
 import { can } from '@/lib/auth/permissions';
+import { configuredAccountId } from '@/lib/meta/client';
+import { metaThreadStateFromMessage, type MetaThreadState } from '@/lib/meta/thread';
 import type { CustomFieldValues, TicketFieldDef } from './custom-fields';
 import {
   FILTERABLE_CHANNELS,
@@ -442,6 +444,12 @@ export type ConversationDetail = {
   createdAt: Date;
   reopenCount: number;
   /**
+   * Whether a Facebook or Instagram reply can be delivered at all — which is a
+   * separate question from whether the messaging window is still open, and the
+   * one the composer had no way to ask. Null on every other channel.
+   */
+  metaThread: MetaThreadState | null;
+  /**
    * Set for tickets that came from somewhere with its own identifier — today
    * that is a Facebook or Instagram comment thread, keyed on its root comment,
    * which is what tells the composer to write in public rather than in private.
@@ -566,12 +574,38 @@ export async function getConversation(
     filesByMessage.set(file.messageId, list);
   }
 
+  /*
+    Derived from the timeline that was just loaded rather than from a query of
+    its own: the composer's verdict has to describe the same last message the
+    agent is looking at, and a second read could catch a newer one.
+
+    A comment ticket is left out. It is answered through the comment endpoints,
+    which are addressed by comment id and are not page-scoped, so neither of the
+    two refusals applies to it.
+  */
+  const isMeta =
+    row.conversation.channel === 'facebook' || row.conversation.channel === 'instagram';
+  const isCommentThread = Boolean(row.conversation.externalId?.includes(':comment:'));
+
+  let metaThread: MetaThreadState | null = null;
+  if (isMeta && !isCommentThread) {
+    const platform = row.conversation.channel as 'facebook' | 'instagram';
+    const lastInbound = timeline.filter((entry) => entry.message.direction === 'inbound').at(-1);
+
+    metaThread = metaThreadStateFromMessage({
+      platform,
+      configuredAccountId: configuredAccountId(platform),
+      lastInboundMeta: (lastInbound?.message.meta ?? null) as Record<string, unknown> | null,
+    });
+  }
+
   return {
     id: row.conversation.id,
     number: row.conversation.number,
     subject: row.conversation.subject,
     channel: row.conversation.channel,
     externalId: row.conversation.externalId,
+    metaThread,
     shipments,
     shippingAccounts: accounts,
     sideConversations: sides,

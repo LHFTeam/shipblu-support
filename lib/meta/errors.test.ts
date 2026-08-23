@@ -66,6 +66,57 @@ describe('explainMetaSendError', () => {
     expect(explained).toContain('trace Az9trace');
   });
 
+  it('says what has already been ruled out for a refusal inside the window', () => {
+    const explained = explainMetaSendError(refusal(1), {
+      platform: 'facebook',
+      sendKind: 'dm',
+      tag: 'RESPONSE',
+    });
+
+    expect(explained).toContain('24-hour window');
+    expect(explained).toContain('holds control');
+    // The tag explanation is the wrong one here and must not appear.
+    expect(explained).not.toContain('App Review');
+  });
+
+  /*
+    A refusal this app made itself — a thread another tool owns, a page it
+    cannot address — never reached Graph, so there is no code, subcode or trace
+    to quote. Printing the empty reference under it reads as Meta having
+    answered, which sends whoever debugs it to Meta's logs for a request that
+    was never made.
+  */
+  it('does not print an empty Meta reference under our own refusal', () => {
+    const ours = new MetaApiError('Another app holds thread control.', 0, null, null, false);
+
+    const explained = explainMetaSendError(ours, {
+      platform: 'facebook',
+      sendKind: 'dm',
+      tag: 'RESPONSE',
+    });
+
+    expect(explained).toBe('Another app holds thread control.');
+    expect(explained).not.toContain('Meta:');
+  });
+
+  it('still prints the reference for a network failure that carries a status', () => {
+    const unreachable = new MetaApiError(
+      'Graph API unreachable: socket hang up',
+      503,
+      2,
+      null,
+      true,
+    );
+
+    const explained = explainMetaSendError(unreachable, {
+      platform: 'facebook',
+      sendKind: 'dm',
+      tag: 'RESPONSE',
+    });
+
+    expect(explained).toContain('HTTP 503');
+  });
+
   it('prefers the wording Meta wrote for a person, when there is any', () => {
     const error = new MetaApiError(UNKNOWN, 400, 1, null, true, 'Try again in a few minutes.');
 

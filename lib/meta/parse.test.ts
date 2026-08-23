@@ -62,6 +62,71 @@ describe('parseMetaWebhook', () => {
     });
   });
 
+  it('marks a message from the handover standby channel', () => {
+    const parsed = parseMetaWebhook({
+      object: 'page',
+      entry: [
+        {
+          id: '101449698657189',
+          time: 1_787_517_241_500,
+          standby: [
+            {
+              sender: { id: 'psid-9' },
+              recipient: { id: '101449698657189' },
+              timestamp: 1_787_517_239_729,
+              message: { mid: 'm_standby', text: 'Testing' },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(parsed.messages).toHaveLength(1);
+    // The whole point of reading it: the ticket is worth having, and answering
+    // it from here is not possible. Flattening the two arrays lost the second
+    // half of that and produced a reply Graph refused without saying why.
+    expect(parsed.messages[0]).toMatchObject({ mid: 'm_standby', standby: true });
+  });
+
+  it('does not mark an ordinary message as standby', () => {
+    const parsed = parseMetaWebhook(messengerPayload());
+
+    expect(parsed.messages[0]?.standby).toBe(false);
+  });
+
+  it('keeps the two apart when one batch carries both', () => {
+    const parsed = parseMetaWebhook({
+      object: 'page',
+      entry: [
+        {
+          id: '111222333',
+          time: 1_755_000_000_000,
+          messaging: [
+            {
+              sender: { id: 'psid-1' },
+              recipient: { id: '111222333' },
+              timestamp: 1_755_000_000_000,
+              message: { mid: 'm_ours', text: 'ours' },
+            },
+          ],
+          standby: [
+            {
+              sender: { id: 'psid-2' },
+              recipient: { id: '111222333' },
+              timestamp: 1_755_000_000_000,
+              message: { mid: 'm_theirs', text: 'theirs' },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(parsed.messages.map((m) => [m.mid, m.standby])).toEqual([
+      ['m_ours', false],
+      ['m_theirs', true],
+    ]);
+  });
+
   it('ignores echoes of our own outbound messages', () => {
     // The bug this prevents: filing our own agent reply as if the customer had
     // written it, and then replying to ourselves forever.

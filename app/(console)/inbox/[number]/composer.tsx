@@ -59,9 +59,17 @@ export function Composer({
     conversation.lastCustomerMessageAt ? new Date(conversation.lastCustomerMessageAt) : null,
     now ?? undefined,
   );
+
+  // Not a clock at all, and not something the agent can wait out: the thread
+  // belongs to another app, or to a page this deployment cannot send from.
+  // Server-computed, so unlike the window it needs no mount guard.
+  const metaThread = conversation.metaThread;
+  const threadBlocked = Boolean(metaThread && !metaThread.canSend);
+
   // Comments are public and have no messaging window at all, so only a direct
   // message ticket can be locked out.
-  const metaSendable = !isMeta || isCommentThread || now === null || !metaState.isClosed;
+  const metaSendable =
+    !threadBlocked && (!isMeta || isCommentThread || now === null || !metaState.isClosed);
 
   const [requestedTab, setRequestedTab] = useState<Tab>('reply');
 
@@ -100,8 +108,13 @@ export function Composer({
   }[tab];
 
   // The note beside the tabs, if this channel has one to make.
-  const notice =
-    isWhatsApp && now !== null
+  // The thread verdict outranks the clock: "3h left to reply freely" over a
+  // ticket nothing can be sent on is worse than no notice at all.
+  const notice = threadBlocked
+    ? metaThread?.reason === 'standby'
+      ? 'Another app owns this inbox — this ticket can be read here but not answered'
+      : 'This ticket cannot be answered from here — see the message below'
+    : isWhatsApp && now !== null
       ? state.isOpen
         ? `24h window: ${formatRemaining(state.remainingMs)}`
         : 'Window closed — approved templates only'
@@ -204,12 +217,25 @@ export function Composer({
 
         <div className="app-scroll min-h-0 flex-1 overflow-y-auto p-3">
           {tab === 'reply' ? (
-            <ReplyForm
-              conversationId={conversation.id}
-              isCommentThread={isCommentThread}
-              canned={canned}
-              onSent={onSent}
-            />
+            /*
+              The explanation stands in for the textarea rather than sitting
+              above it. Disabling the tab does nothing here — 'reply' is already
+              the active tab, so the form rendered anyway and an agent could
+              write a full answer before the action refused it. Saying why up
+              front costs them the paragraph they would otherwise lose.
+            */
+            threadBlocked ? (
+              <p className="rounded-md border border-[var(--border)] bg-[var(--muted)] p-3 text-sm text-[var(--muted-foreground)]">
+                {metaThread?.explanation}
+              </p>
+            ) : (
+              <ReplyForm
+                conversationId={conversation.id}
+                isCommentThread={isCommentThread}
+                canned={canned}
+                onSent={onSent}
+              />
+            )
           ) : null}
           {tab === 'note' ? <NoteForm conversationId={conversation.id} onSent={onSent} /> : null}
           {tab === 'template' ? (
