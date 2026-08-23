@@ -165,10 +165,16 @@ duplicate. Webhooks persist to `webhook_events` and return 200 immediately; they
 never do the work inline.
 
 **Environment variables** are declared in `lib/env.ts` (Zod, parsed lazily) and
-in `render.yaml` in the same commit. Shared values belong in the
-`shipblu-shared` env group only — Render gives service-level variables
-precedence, and a key declared in both places silently takes the service value.
-A module reachable from the search parser must read `process.env` directly
+in `render.yaml` in the same commit. Three env groups hold them:
+`shipblu-shared` for what is identical in every environment, `shipblu-support-production` for
+anything that can reach a real customer or the production database, and
+`shipblu-support-staging` for staging's own — declare a value in exactly one of them.
+Render gives service-level variables precedence, and a key declared in both
+places silently takes the service value; two groups linked by one service and
+both declaring a key is the same trap without the precedence rule to settle it.
+A value never appears in the file: `sync: false` is not allowed inside an env
+group, so each group lists its dashboard-owned keys as a comment beside its
+literal ones. A module reachable from the search parser must read `process.env` directly
 rather than `env()`, which validates the whole schema (see
 `lib/shipments/detect.ts`). A WhatsApp business account's access token is read
 the same way, for a different reason: its variable's _name_ is a database value,

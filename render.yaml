@@ -6,375 +6,378 @@
 
 previewsEnabled: false
 
-envVarGroups:
-  # Shared settings. Secret *values* are set in the dashboard, never committed.
+# --------------------------------------------------------------- env groups
+#
+# Three groups, split by blast radius rather than by convenience:
+#
+#   shipblu-shared               identical in every environment, and harmless
+#                                to the outside world if it is wrong
+#   shipblu-support-production   anything that can reach a real customer or the
+#                                production database
+#   shipblu-support-staging      staging's own database, and the settings that
+#                                stop it reaching anyone
+#
+# The rule inside a group is the one this file has always had: a value that is
+# the same on more than one service in that environment is declared once, in the
+# group, and nowhere else.
+#
+# Render gives service-level variables precedence over group values, so a key
+# declared in both places takes the service value and the group is silently
+# ignored. DATABASE_URL was declared per-service with `sync: false` on all seven
+# services and did exactly that — editing the group appeared to do nothing,
+# everywhere at once. One declaration site removes the failure mode.
+#
+# Rotation is the other reason. A Meta access token pasted into three services is
+# a rotation you have to remember to do three times, and forgetting leaves a
+# half-working system rather than a clean break.
+#
+# **No group entry below carries a secret, and none uses `sync: false` either.**
+# Render's Blueprint reference rules `sync: false` out inside an environment
+# group, and a group entry has to have either a literal value or
+# `generateValue` — a literal would put the secret in the repo, and `value: ''`
+# would blank the real one on the next sync. So each group lists its
+# dashboard-owned keys as a comment instead. The blueprint still names
+# everything the group holds, which is the point of keeping it in the repo,
+# without being the place the value lives.
+
+# `shipblu-shared` sits outside the project, and it has to.
+#
+# A group scoped to a project environment cannot be linked to any service
+# outside that environment, and Render has no project-wide scope in between: a
+# group belongs to exactly one environment, or to the whole workspace. Services
+# in both environments link this one, so workspace-level is the only scope that
+# works for it. `ungrouped` is how a Blueprint says that outright — leaving the
+# group in a top-level `envVarGroups` list would instead mean "keep whatever
+# scope it happens to have", which is not a thing to leave to chance.
+ungrouped:
+  envVarGroups:
+    - name: shipblu-shared
+      envVars:
+        - key: NODE_VERSION
+          value: '22'
+        - key: EMAIL_FROM_NAME
+          value: ShipBlu Support
+        - key: SUPABASE_STORAGE_BUCKET
+          value: attachments
+
+        # APP_SECRET must be identical across every service in an environment.
+        # It signs the email reply tokens (support+c42.<sig>@): the worker
+        # generates one when sending and verifies it when the customer replies.
+        # If the values differ, every reply fails verification and silently
+        # opens a new ticket instead of threading — which is why it cannot be a
+        # per-service `generateValue`, as that mints a different secret for each
+        # service.
+        #
+        # It stays here rather than splitting into the two environment groups,
+        # which would otherwise be tidier. Splitting it regenerates production's
+        # value, and that invalidates every reply token already sitting in a
+        # customer's mailbox. Staging holding the same signing key is the
+        # cheaper of the two costs: it sends no real mail (EMAIL_PROVIDER=local
+        # below), so it mints no token anybody can reply to.
+        - key: APP_SECRET
+          generateValue: true
+
+        # Dashboard-owned, listed rather than declared — see the note above.
+        #
+        #   SHIPMENT_TRACKING_PATTERN   what a tracking number looks like
+        #   SHIPMENT_SBID_PATTERN       what an SBID looks like
+        #   SHIPMENT_IGNORE             references never to link
+        #
+        # Shared rather than per-environment because both halves of one system
+        # have to agree on the answer: the web service applies the pattern when
+        # an agent searches `track:...`, the worker applies it to every inbound
+        # message, and a service that disagreed would link a ticket the search
+        # could never find again. Unset means the defaults in
+        # lib/shipments/detect.ts, which are deliberately conservative until the
+        # real ShipBlu formats are confirmed — so all three are normally absent,
+        # and exist only to correct those defaults without a deploy.
+
+projects:
+  # These three names are the dashboard's, capitalisation included. A Blueprint
+  # adopts a service by name, and Render does not document what it does with a
+  # project or environment name that matches nothing — a typo here does not
+  # fail, it builds a second project and moves the services into it.
   #
-  # The rule: any value that is the same on more than one service is declared
-  # here and nowhere else.
-  #
-  # Render gives service-level variables precedence over group values, so a key
-  # declared in both places takes the service value and the group is silently
-  # ignored. DATABASE_URL was declared per-service with `sync: false` on all
-  # seven services and did exactly that — editing the group appeared to do
-  # nothing, everywhere at once. One declaration site removes the failure mode.
-  #
-  # Rotation is the other reason. A Meta access token or an AWS key pasted into
-  # three services is a rotation you have to remember to do three times, and
-  # forgetting leaves a half-working system rather than a clean break.
-  #
-  # Service-level overrides are therefore deliberate exceptions, and each one
-  # below says why it exists.
-  - name: shipblu-shared
-    envVars:
-      - key: NODE_VERSION
-        value: '22'
-      - key: EMAIL_FROM_NAME
-        value: ShipBlu Support
-      - key: SUPABASE_STORAGE_BUCKET
-        value: attachments
+  # `shipblu-support-staging` names both this environment's group and the web
+  # service in it. Render keeps groups and services in separate namespaces so
+  # `fromGroup` still resolves, but the two are only telling apart by context.
+  - name: 'ShipBlu Support Platform'
+    environments:
+      # ------------------------------------------------------------ production
+      - name: Production
+        envVarGroups:
+          - name: shipblu-support-production
+            envVars:
+              - key: EMAIL_PROVIDER
+                value: postmark
 
-      # Supavisor pooler URLs. Already group-managed in the dashboard; declared
-      # here so the Blueprint documents them rather than only describing them in
-      # a comment. `sync: false` means the value stays dashboard-owned.
-      #
-      # Staging overrides both at service level so its migrations run against
-      # its own database rather than production's.
-      - key: DATABASE_URL
-        sync: false
-      - key: DATABASE_URL_SESSION
-        sync: false
-      # APP_SECRET MUST be identical across every service. It signs the email
-      # reply tokens (support+c42.<sig>@): the worker generates one when sending
-      # and verifies it when the customer replies. If the values differ, every
-      # reply fails verification and silently opens a new ticket instead of
-      # threading. It lives in the shared group precisely so there is exactly
-      # one value — per-service generateValue would produce a different secret
-      # for each service.
-      - key: APP_SECRET
-        generateValue: true
+              # Dashboard-owned, listed rather than declared:
+              #
+              #   DATABASE_URL             Supavisor transaction pooler
+              #   DATABASE_URL_SESSION     direct connection, for LISTEN
+              #   SUPABASE_URL             storage, for attachments
+              #   SUPABASE_SERVICE_ROLE_KEY
+              #
+              #   EMAIL_API_KEY            Postmark server token
+              #   EMAIL_FROM_ADDRESS
+              #   EMAIL_REPLY_DOMAIN       builds support+<token>@
+              #
+              #   META_PAGE_ACCESS_TOKEN   sends on every Meta channel
+              #   META_APP_SECRET          verifies X-Hub-Signature-256
+              #   META_VERIFY_TOKEN        answers the subscription handshake
+              #   META_APP_ID              addresses the subscription endpoint
+              #   FACEBOOK_PAGE_ID
+              #   INSTAGRAM_ACCOUNT_ID
+              #   WHATSAPP_PHONE_NUMBER_ID
+              #   WHATSAPP_WABA_ID
+              #
+              #   KB_PUBLIC_HOST           host the help centre answers on
+              #   WIDGET_ALLOWED_ORIGINS   origins allowed to frame the widget
+              #
+              # The Meta credentials are one set for three channels, because one
+              # Meta app serves WhatsApp, Messenger and Instagram. There used to
+              # be a WHATSAPP_ACCESS_TOKEN, WHATSAPP_APP_SECRET and
+              # WHATSAPP_VERIFY_TOKEN alongside them with the code falling back
+              # to them; the duplication meant the same secret was pasted twice
+              # and a rotation done once left the other copy stale — which is
+              # how the access token spent a day expired while nobody could tell
+              # which of the two names the failing call had read.
+              #
+              # They are in *this* group rather than the shared one so that
+              # staging cannot inherit them. Meta has no test mode: a send from
+              # staging carrying a real page token arrives on a real customer's
+              # phone. Staging used to override META_PAGE_ACCESS_TOKEN with a
+              # blank value to prevent exactly that, which worked but depended
+              # on somebody remembering to write the override. Not holding the
+              # credential at all is the same protection without the vigilance.
+              #
+              # WHATSAPP_PHONE_NUMBER_ID and WHATSAPP_WABA_ID are ids, not
+              # credentials, and since more than one WABA can be connected they
+              # are the fallback rather than the configuration: connections are
+              # `whatsapp_accounts` rows edited under Settings → Channels, and
+              # the template sync turns WHATSAPP_WABA_ID into the first of them
+              # on its next run. They still matter — they are what a fresh
+              # install sends with before anything is connected.
+              #
+              # A connected WABA that needs its own credential names the
+              # variable holding it, and the name must start `WHATSAPP_TOKEN_`
+              # (enforced in lib/whatsapp/accounts.ts, because the value is sent
+              # to Meta as a bearer token and a free-text variable name would be
+              # a way to exfiltrate any secret in the process). Add such a key
+              # to this list in the same commit that names it on the account.
+              # Only the token varies per account: META_APP_SECRET and
+              # META_VERIFY_TOKEN belong to the Meta *app*, so every connected
+              # WABA has to sit under the same one — a WABA on a second app
+              # would have its webhooks stored unverified and answered 403.
 
-      # Shipment reference detection. Shared rather than per-service because
-      # both halves have to agree on what a tracking number looks like: the web
-      # service applies the pattern when an agent searches `track:...`, the
-      # worker applies it to every inbound message, and a service that disagreed
-      # would link a ticket the search could never find again.
-      #
-      # Unset means the defaults in lib/shipments/detect.ts, which are
-      # deliberately conservative until the real ShipBlu formats are confirmed.
-      - key: SHIPMENT_TRACKING_PATTERN
-        sync: false
-      - key: SHIPMENT_SBID_PATTERN
-        sync: false
-      - key: SHIPMENT_IGNORE
-        sync: false
+        services:
+          - type: web
+            name: shipblu-support
+            runtime: node
+            region: frankfurt
+            plan: standard # 2GB RAM / 1 CPU
+            branch: main
+            buildCommand: npm ci --include=dev && npm run build
+            # Runs after build, before traffic shifts. Migrations are idempotent,
+            # so a rolled-back deploy re-running them is safe.
+            preDeployCommand: npm run db:migrate
+            startCommand: npm run start
+            healthCheckPath: /api/health
+            scaling:
+              minInstances: 1
+              maxInstances: 3
+              targetCPUPercent: 70
+            envVars:
+              - fromGroup: shipblu-shared
+              - fromGroup: shipblu-support-production
+              - key: NODE_ENV
+                value: production
+              # APP_URL is per-service rather than in the group because the cron
+              # services below deliberately do not have it at all — see the note
+              # there. Web and worker do hold the same value.
+              - key: APP_URL
+                sync: false
+              # Only the web service receives inbound webhooks, so the Basic
+              # Auth password Postmark presents lives here rather than in the
+              # group — a secret with one consumer belongs on its one consumer.
+              - key: EMAIL_WEBHOOK_SECRET
+                sync: false
+              # Freshdesk credentials are read only by the knowledge base
+              # importer, which runs as a queued job on this service and nowhere
+              # else, so the same rule keeps them here. They can go once the
+              # migration is done.
+              - key: FRESHDESK_DOMAIN
+                sync: false
+              - key: FRESHDESK_API_KEY
+                sync: false
+              # Re-declaring any group key here would shadow the group and take
+              # the service value instead.
 
-      # Meta, for all three channels. One app serves WhatsApp, Messenger and
-      # Instagram, so there is one credential set rather than a WhatsApp copy of
-      # each alongside it.
-      #
-      # The Page token sends on every channel — Messenger, Instagram Direct,
-      # both comment streams, WhatsApp — and lists WhatsApp templates. The app
-      # secret verifies X-Hub-Signature-256 on every inbound webhook and the
-      # verify token answers every subscription handshake.
-      #
-      # There used to be a WHATSAPP_ACCESS_TOKEN, WHATSAPP_APP_SECRET and
-      # WHATSAPP_VERIFY_TOKEN here too, with the code falling back to them. The
-      # duplication meant the same secret was pasted twice and a rotation done
-      # once left the other copy stale — which is exactly how the access token
-      # spent a day expired while nobody could tell which of the two names the
-      # failing call had read.
-      - key: META_PAGE_ACCESS_TOKEN
-        sync: false
-      - key: META_APP_SECRET
-        sync: false
-      - key: META_VERIFY_TOKEN
-        sync: false
-      # Public, unlike the three above, and still here: the webhook subscription
-      # endpoint is addressed by app id and authenticated with the app id and
-      # app secret joined by a pipe. Only `npm run job --
-      # subscribe_meta_webhooks` reads it, which is why it was missing until
-      # that job needed it.
-      - key: META_APP_ID
-        sync: false
-      - key: FACEBOOK_PAGE_ID
-        sync: false
-      - key: INSTAGRAM_ACCOUNT_ID
-        sync: false
+          - type: worker
+            name: shipblu-support-worker
+            runtime: node
+            region: frankfurt
+            plan: starter # 512MB / 0.5 CPU — the worker is I/O bound, not CPU bound
+            branch: main
+            buildCommand: npm ci --include=dev && npm run build
+            startCommand: npm run worker
+            envVars:
+              - fromGroup: shipblu-shared
+              - fromGroup: shipblu-support-production
+              - key: NODE_ENV
+                value: production
+              - key: APP_URL
+                sync: false
 
-      # Postmark. The server token is used by the worker to send and by the web
-      # service to construct the driver that parses inbound, so it is shared.
-      #
-      # EMAIL_WEBHOOK_SECRET is deliberately *not* here — only the web service
-      # receives webhooks, and a secret with one consumer belongs on that one
-      # service rather than on all seven.
-      - key: EMAIL_PROVIDER
-        value: postmark
-      - key: EMAIL_API_KEY
-        sync: false
-      - key: EMAIL_FROM_ADDRESS
-        sync: false
-      - key: EMAIL_REPLY_DOMAIN
-        sync: false
+          # ------------------------------------------------------- cron jobs
+          # These run `npm run job -- <type>` directly rather than hitting an
+          # HTTP endpoint: the cron run's exit code then reflects whether the
+          # work actually succeeded, and there is no shared secret or request
+          # timeout involved.
+          #
+          # None of them declares APP_URL. A cron has no address of its own and
+          # builds no links, and `appUrl()` now asks for the variable only where
+          # a link is actually constructed. sla-sweep used to declare it with
+          # `sync: false`, which meant "a human will set this in the dashboard" —
+          # nobody ever did, so the value was undefined and every job that opened
+          # a database connection failed validation on a variable it had no use
+          # for.
 
-      # Hostname the public help centre answers on. The proxy rewrites requests
-      # arriving here under /kb, and canonical and sitemap URLs are built from
-      # it — a sitemap advertising the Render service URL would get that
-      # hostname indexed and split the site's search ranking across two domains.
-      - key: KB_PUBLIC_HOST
-        sync: false
+          # Two jobs on one schedule, chained the way shipblu-nightly chains
+          # cleanup and the rollup. They want the same cadence and neither takes
+          # long, and a cron service of its own would be a second container
+          # booting every five minutes to run a query that usually returns
+          # nothing.
+          #
+          # Order matters: the SLA sweep first, so a ticket the assignment sweep
+          # is about to hand to somebody carries its breach flags when they open
+          # it. `&&` rather than `;` — if the SLA sweep dies the run should go
+          # red rather than reporting success because the second half worked.
+          - type: cron
+            name: shipblu-sla-sweep
+            runtime: node
+            region: frankfurt
+            plan: starter
+            branch: main
+            schedule: '*/5 * * * *' # SLA breaches need minute-ish resolution
+            buildCommand: npm ci --include=dev
+            startCommand: npm run job -- sla_sweep && npm run job -- assign_sweep
+            envVars:
+              - fromGroup: shipblu-shared
+              - fromGroup: shipblu-support-production
 
-      # Origins allowed to embed the chat widget, comma separated. Everything
-      # else keeps X-Frame-Options: DENY, so only this route can be framed and
-      # only by these sites — an omission here means the widget silently fails
-      # to load rather than being embeddable by anyone.
-      - key: WIDGET_ALLOWED_ORIGINS
-        sync: false
+          - type: cron
+            name: shipblu-time-automations
+            runtime: node
+            region: frankfurt
+            plan: starter
+            branch: main
+            schedule: '*/15 * * * *'
+            buildCommand: npm ci --include=dev
+            startCommand: npm run job -- run_time_automations
+            envVars:
+              - fromGroup: shipblu-shared
+              - fromGroup: shipblu-support-production
 
-      # Which WhatsApp number and business account to use. Ids rather than
-      # credentials — the token, app secret and verify token they are used with
-      # are the Meta ones above.
-      #
-      # The worker sends and downloads media with the phone number id, and the
-      # template sync cron lists templates with the WABA id, which is what makes
-      # these a group rather than a per-service concern.
-      #
-      # Since more than one WABA can be connected, these are the fallback rather
-      # than the configuration: connections are `whatsapp_accounts` rows, edited
-      # under Settings → Channels, and the template sync turns WHATSAPP_WABA_ID
-      # into the first of them on its next run. They still matter — they are
-      # what a fresh install sends with before anything is connected.
-      - key: WHATSAPP_PHONE_NUMBER_ID
-        sync: false
-      - key: WHATSAPP_WABA_ID
-        sync: false
+          # This runs two jobs now, chained the way shipblu-nightly chains
+          # cleanup and the rollup: both want an hourly cadence, neither takes
+          # long, and a cron service of its own would be a second container
+          # booting every hour to run one grouped count.
+          #
+          # **The name is deliberately not updated to match.** Renaming a service
+          # in a Blueprint is a delete and a create, not a rename, and losing a
+          # cron's history is a worse outcome than a name that is narrower than
+          # what it runs.
+          #
+          # The backlog snapshot is hourly rather than once at midnight because
+          # "open at day end" is the one productivity figure that cannot be
+          # recomputed later, and Render's schedules are UTC while Cairo observes
+          # DST — a fixed end-of-day cron is on the wrong side of midnight for
+          # half the year. Sampling hourly lets the rollup pick the sample
+          # nearest the boundary in the reporting zone instead.
+          #
+          # `;` rather than `&&`: the template sync is the half that depends on
+          # Meta being configured, and a run that goes red there must not also
+          # stop the snapshot, whose measurement cannot be taken again once the
+          # hour has passed.
+          - type: cron
+            name: shipblu-whatsapp-template-sync
+            runtime: node
+            region: frankfurt
+            plan: starter
+            branch: main
+            schedule: '0 * * * *'
+            buildCommand: npm ci --include=dev
+            startCommand: npm run job -- sync_whatsapp_templates; npm run job -- snapshot_backlog
+            envVars:
+              # WHATSAPP_WABA_ID and META_PAGE_ACCESS_TOKEN come from
+              # shipblu-support-production. The handler skips cleanly while they are unset, so
+              # this cron is green from the day the Blueprint creates it rather
+              # than red until Meta is configured.
+              - fromGroup: shipblu-shared
+              - fromGroup: shipblu-support-production
 
-      # A connected WABA that needs its own credential names the variable
-      # holding it, and the name must start WHATSAPP_TOKEN_. There are none
-      # declared here because there is nothing to declare until an account needs
-      # one: add the key beside these, without its value, in the same commit
-      # that names it on the account — the blueprint describes the running
-      # system.
-      #
-      # Only the token varies per account. META_APP_SECRET and META_VERIFY_TOKEN
-      # above belong to the Meta *app*, so every connected WABA has to sit under
-      # the same one; a WABA on a second app would have its webhooks stored
-      # unverified and answered 403.
+          - type: cron
+            name: shipblu-nightly
+            runtime: node
+            region: frankfurt
+            plan: starter
+            branch: main
+            # 02:00 Africa/Cairo = 00:00 UTC. Render cron schedules are UTC.
+            schedule: '0 0 * * *'
+            buildCommand: npm ci --include=dev
+            startCommand: npm run job -- cleanup && npm run job -- rollup_metrics
+            envVars:
+              - fromGroup: shipblu-shared
+              - fromGroup: shipblu-support-production
 
-  # Still per-service, and inconsistent with the rule above: SUPABASE_URL and
-  # SUPABASE_SERVICE_ROLE_KEY are identical on the web service and the worker.
-  #
-  # They are not moved here yet because they already hold live values at service
-  # level. Removing a declaration from this file can drop the value on the next
-  # Blueprint sync, so that move has to be sequenced: set each value in the
-  # group first, confirm it, then delete the per-service entries. The EMAIL_*
-  # keys moved in one step because they had never been set — the SES switch was
-  # abandoned before any value was entered.
-  #
-  # APP_URL stays per-service permanently — it genuinely differs between
-  # production and staging.
+      # --------------------------------------------------------------- staging
+      - name: Staging
+        envVarGroups:
+          - name: shipblu-support-staging
+            envVars:
+              # Staging never reaches a real customer, and this group is most of
+              # how that is guaranteed.
+              #
+              # EMAIL_PROVIDER=local writes to .mail-outbox/ instead of calling
+              # Postmark. It is set here rather than as a service-level override
+              # so that it holds for anything added to this environment later —
+              # a staging worker, say — instead of only for the one service
+              # somebody remembered to write it on.
+              #
+              # The Meta credentials are simply absent: they live in
+              # shipblu-support-production, which nothing in this environment links, so there
+              # is nothing to override and nothing to blank. `pageToken()` in
+              # lib/meta/client.ts throws "META_PAGE_ACCESS_TOKEN is not
+              # configured" on an unset value exactly as it did on the blank one.
+              - key: EMAIL_PROVIDER
+                value: local
 
-services:
-  # ---------------------------------------------------------------- production
-  - type: web
-    name: shipblu-support
-    runtime: node
-    region: frankfurt
-    plan: standard # 2GB RAM / 1 CPU
-    branch: main
-    buildCommand: npm ci --include=dev && npm run build
-    # Runs after build, before traffic shifts. Migrations are idempotent, so a
-    # rolled-back deploy re-running them is safe.
-    preDeployCommand: npm run db:migrate
-    startCommand: npm run start
-    healthCheckPath: /api/health
-    scaling:
-      minInstances: 1
-      maxInstances: 3
-      targetCPUPercent: 70
-    envVars:
-      - fromGroup: shipblu-shared
-      - key: NODE_ENV
-        value: production
-      - key: APP_URL
-        sync: false
-      - key: SUPABASE_URL
-        sync: false
-      - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false
-      # Only the web service receives inbound webhooks, so the Basic Auth
-      # password Postmark presents lives here rather than in the group.
-      - key: EMAIL_WEBHOOK_SECRET
-        sync: false
-      # EMAIL_*, WHATSAPP_* and the database URLs come from shipblu-shared.
-      #
-      # Freshdesk credentials are read only by the knowledge base importer,
-      # which runs as a queued job on this worker and nowhere else — so by the
-      # rule above they stay here rather than going in the group. They can be
-      # removed once the migration is done.
-      - key: FRESHDESK_DOMAIN
-        sync: false
-      - key: FRESHDESK_API_KEY
-        sync: false
-      # Re-declaring any of them here would shadow the group and take the
-      # service value instead.
+              # Dashboard-owned, listed rather than declared:
+              #
+              #   DATABASE_URL             staging's own Supabase project
+              #   DATABASE_URL_SESSION
+              #   SUPABASE_URL
+              #   SUPABASE_SERVICE_ROLE_KEY
+              #
+              # Its own database, so that its migrations run against staging
+              # rather than production.
 
-  - type: worker
-    name: shipblu-support-worker
-    runtime: node
-    region: frankfurt
-    plan: starter # 512MB / 0.5 CPU — the worker is I/O bound, not CPU bound
-    branch: main
-    buildCommand: npm ci --include=dev && npm run build
-    startCommand: npm run worker
-    envVars:
-      - fromGroup: shipblu-shared
-      - key: NODE_ENV
-        value: production
-      - key: APP_URL
-        sync: false
-      - key: SUPABASE_URL
-        sync: false
-      - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false
-      # EMAIL_*, WHATSAPP_* and the database URLs come from shipblu-shared.
-
-  # -------------------------------------------------------------- staging
-  - type: web
-    name: shipblu-support-staging
-    runtime: node
-    region: frankfurt
-    plan: starter
-    branch: claude/shipblu-support-app-03p2we
-    buildCommand: npm ci --include=dev && npm run build
-    preDeployCommand: npm run db:migrate
-    startCommand: npm run start
-    healthCheckPath: /api/health
-    envVars:
-      - fromGroup: shipblu-shared
-      - key: NODE_ENV
-        value: production
-      - key: APP_URL
-        sync: false
-      - key: DATABASE_URL
-        sync: false
-      - key: DATABASE_URL_SESSION
-        sync: false
-      - key: SUPABASE_URL
-        sync: false
-      - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false
-      # Staging never reaches a real customer.
-      #
-      # EMAIL_PROVIDER=local writes to .mail-outbox/ instead of calling
-      # Postmark, which also makes the inherited server token inert — the
-      # Postmark driver is never constructed.
-      #
-      # Meta has no such switch, so the token is blanked explicitly. It is
-      # inherited from the group, and Meta's API has no test mode: a send from
-      # staging would arrive on a real customer's phone. Blank makes the client
-      # throw "META_PAGE_ACCESS_TOKEN is not configured" instead.
-      #
-      # Blanking one key now covers all three channels rather than WhatsApp
-      # alone. That is a gain, not a side effect: staging could previously still
-      # reach a real person on Messenger or Instagram, because the token those
-      # sent with was a different variable that nothing here overrode.
-      #
-      # Today staging has no worker to run a send job at all, but that is an
-      # accident of the current topology rather than a guarantee, and this does
-      # not depend on it staying true.
-      - key: EMAIL_PROVIDER
-        value: local
-      - key: META_PAGE_ACCESS_TOKEN
-        value: ''
-
-  # ------------------------------------------------------------- cron jobs
-  # These run `npm run job -- <type>` directly rather than hitting an HTTP
-  # endpoint: the cron run's exit code then reflects whether the work actually
-  # succeeded, and there is no shared secret or request timeout involved.
-  #
-  # None of them declares APP_URL. A cron has no address of its own and builds
-  # no links, and `appUrl()` now asks for the variable only where a link is
-  # actually constructed. sla-sweep used to declare it with `sync: false`, which
-  # meant "a human will set this in the dashboard" — nobody ever did, so the
-  # value was undefined and every job that opened a database connection failed
-  # validation on a variable it had no use for.
-
-  # Two jobs on one schedule, chained the way shipblu-nightly chains cleanup and
-  # the rollup. They want the same cadence and neither takes long, and a cron
-  # service of its own would be a second container booting every five minutes to
-  # run a query that usually returns nothing.
-  #
-  # Order matters: the SLA sweep first, so a ticket the assignment sweep is about
-  # to hand to somebody carries its breach flags when they open it. `&&` rather
-  # than `;` — if the SLA sweep dies the run should go red rather than reporting
-  # success because the second half worked.
-  - type: cron
-    name: shipblu-sla-sweep
-    runtime: node
-    region: frankfurt
-    plan: starter
-    branch: main
-    schedule: '*/5 * * * *' # SLA breaches need minute-ish resolution
-    buildCommand: npm ci --include=dev
-    startCommand: npm run job -- sla_sweep && npm run job -- assign_sweep
-    envVars:
-      - fromGroup: shipblu-shared
-
-  - type: cron
-    name: shipblu-time-automations
-    runtime: node
-    region: frankfurt
-    plan: starter
-    branch: main
-    schedule: '*/15 * * * *'
-    buildCommand: npm ci --include=dev
-    startCommand: npm run job -- run_time_automations
-    envVars:
-      - fromGroup: shipblu-shared
-
-  # This runs two jobs now, chained the way shipblu-nightly chains cleanup and
-  # the rollup: both want an hourly cadence, neither takes long, and a cron
-  # service of its own would be a second container booting every hour to run one
-  # grouped count.
-  #
-  # **The name is deliberately not updated to match.** Renaming a service in a
-  # Blueprint is a delete and a create, not a rename, and losing a cron's history
-  # is a worse outcome than a name that is narrower than what it runs.
-  #
-  # The backlog snapshot is hourly rather than once at midnight because "open at
-  # day end" is the one productivity figure that cannot be recomputed later, and
-  # Render's schedules are UTC while Cairo observes DST — a fixed end-of-day cron
-  # is on the wrong side of midnight for half the year. Sampling hourly lets the
-  # rollup pick the sample nearest the boundary in the reporting zone instead.
-  #
-  # `;` rather than `&&`: the template sync is the half that depends on Meta
-  # being configured, and a run that goes red there must not also stop the
-  # snapshot, whose measurement cannot be taken again once the hour has passed.
-  - type: cron
-    name: shipblu-whatsapp-template-sync
-    runtime: node
-    region: frankfurt
-    plan: starter
-    branch: main
-    schedule: '0 * * * *'
-    buildCommand: npm ci --include=dev
-    startCommand: npm run job -- sync_whatsapp_templates; npm run job -- snapshot_backlog
-    envVars:
-      # WHATSAPP_WABA_ID and META_PAGE_ACCESS_TOKEN come from shipblu-shared.
-      # The handler skips cleanly while they are unset, so this cron is green
-      # from the day the Blueprint creates it rather than red until Meta is
-      # configured.
-      - fromGroup: shipblu-shared
-
-  - type: cron
-    name: shipblu-nightly
-    runtime: node
-    region: frankfurt
-    plan: starter
-    branch: main
-    # 02:00 Africa/Cairo = 00:00 UTC. Render cron schedules are UTC.
-    schedule: '0 0 * * *'
-    buildCommand: npm ci --include=dev
-    startCommand: npm run job -- cleanup && npm run job -- rollup_metrics
-    envVars:
-      - fromGroup: shipblu-shared
+        services:
+          - type: web
+            name: shipblu-support-staging
+            runtime: node
+            region: frankfurt
+            plan: starter
+            branch: claude/shipblu-support-app-03p2we
+            buildCommand: npm ci --include=dev && npm run build
+            preDeployCommand: npm run db:migrate
+            startCommand: npm run start
+            healthCheckPath: /api/health
+            envVars:
+              - fromGroup: shipblu-shared
+              - fromGroup: shipblu-support-staging
+              - key: NODE_ENV
+                value: production
+              - key: APP_URL
+                sync: false

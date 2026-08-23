@@ -73,7 +73,7 @@ function Fields({
             The <em>name</em> of the environment variable holding this account&rsquo;s access token,
             never the token itself — so a database dump carries no usable credential. It must start{' '}
             <code>WHATSAPP_TOKEN_</code>, and the value is set in the
-            <code> shipblu-shared</code> environment group on Render.
+            <code> shipblu-support-production</code> environment group on Render.
           </>
         }
         hint="Leave blank when this account is reachable with the shared META_PAGE_ACCESS_TOKEN, which is the case whenever the accounts sit under one Meta app."

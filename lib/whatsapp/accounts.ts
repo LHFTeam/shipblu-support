@@ -144,7 +144,7 @@ export function tokenForAccount(account: Pick<WhatsAppAccount, 'tokenEnvVar'> | 
   if (!value) {
     throw new Error(
       `${name} names the access token for this WhatsApp business account, but it is not set. ` +
-        `Add it to the shipblu-shared environment group.`,
+        `Add it to the shipblu-support-production environment group.`,
     );
   }
 

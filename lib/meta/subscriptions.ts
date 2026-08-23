@@ -73,7 +73,7 @@ function appCredentials(): { appId: string; token: string } {
   if (!appId || !appSecret) {
     const missing = [!appId && 'META_APP_ID', !appSecret && 'META_APP_SECRET'].filter(Boolean);
     throw new GraphSubscriptionError(
-      `${missing.join(' and ')} must be set in the shipblu-shared environment ` +
+      `${missing.join(' and ')} must be set in the shipblu-support-production environment ` +
         `group before webhook fields can be read or changed`,
     );
   }

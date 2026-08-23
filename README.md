@@ -300,7 +300,7 @@ before — so nothing changes until an admin opts a team in.
 - **Manual** — the ticket waits in the group queue.
 - **Round robin** — each member in turn.
 - **Load balanced** — whoever is holding the fewest open tickets, capped per agent.
-- **Skills** are a *filter*, not a fourth strategy: switch matching on and the group still
+- **Skills** are a _filter_, not a fourth strategy: switch matching on and the group still
   distributes the survivors by round robin or by load. Freshdesk models this as three
   mutually exclusive modes, which makes turning skills on discard the answer you already
   gave about distribution.
@@ -381,8 +381,10 @@ rule is treated as deny.
 
 ## Deployment
 
-`render.yaml` is a Render Blueprint defining the web service, worker, staging service and
-four cron jobs. Secrets are marked `sync: false` and set in the Render dashboard — they
-are deliberately not committed.
+`render.yaml` is a Render Blueprint defining one project with two environments: the web
+service, worker and four cron jobs in `Production`, the staging service in `Staging`.
+Secrets are set in the Render dashboard and deliberately not committed. Service-level ones
+are marked `sync: false`; the three env groups list theirs as comments instead, because
+Render does not accept `sync: false` inside a group.
 
 Migrations run automatically via `preDeployCommand` before traffic shifts.
