@@ -230,8 +230,8 @@ declared once, in that environment's group, and nowhere else.** There are three:
 | Group                        | Scope        | Holds                                                              |
 | ---------------------------- | ------------ | ------------------------------------------------------------------ |
 | `shipblu-shared`             | workspace    | identical everywhere and harmless outside this system if wrong     |
-| `shipblu-support-production` | `production` | anything that can reach a real customer or the production database |
-| `shipblu-support-staging`    | `staging`    | staging's own database, and what stops it reaching anyone          |
+| `shipblu-support-production` | `Production` | anything that can reach a real customer or the production database |
+| `shipblu-support-staging`    | `Staging`    | staging's own database, and what stops it reaching anyone          |
 
 Render gives service-level variables precedence over group values, so a key
 declared in both places silently takes the service value. That cost us a
@@ -298,12 +298,11 @@ group and the old service-level entries. Nothing is broken in the meantime —
 until somebody syncs the Blueprint the running config is exactly what it was —
 but the file and the dashboard disagree until these run, **in this order**:
 
-1. **Confirm the environment names.** The project is `ShipBlu Support Platform`,
-   which is confirmed; `production` and `staging` are not. A Blueprint adopts a
-   _service_ by name, but Render does not document what it does with a project
-   or environment name that matches nothing — so check both against the
-   dashboard first, rather than discovering afterwards that it created new
-   environments and moved the services into them.
+1. **Names are confirmed.** The project is `ShipBlu Support Platform` and its
+   environments are `Production` and `Staging`, capitalised, as the dashboard
+   has them. A Blueprint adopts a service by name and Render does not document
+   what it does with a project or environment name matching nothing, so these
+   three are worth re-reading before a sync rather than after.
 2. **Sync the Blueprint.** It creates `shipblu-support-production` and `shipblu-support-staging`
    holding only `EMAIL_PROVIDER`, and links them. Nothing changes yet: every
    other value is still where it was, and service-level entries still win.

@@ -93,12 +93,10 @@ ungrouped:
         # and exist only to correct those defaults without a deploy.
 
 projects:
-  # The project name is the one already in the dashboard. **The two environment
-  # names below are not confirmed.** A Blueprint adopts a service by name, and
-  # Render does not document what it does with a project or environment name
-  # that matches nothing — so check `production` and `staging` against the
-  # dashboard before the first sync, rather than discovering afterwards that it
-  # built new environments and moved the services into them.
+  # These three names are the dashboard's, capitalisation included. A Blueprint
+  # adopts a service by name, and Render does not document what it does with a
+  # project or environment name that matches nothing — a typo here does not
+  # fail, it builds a second project and moves the services into it.
   #
   # `shipblu-support-staging` names both this environment's group and the web
   # service in it. Render keeps groups and services in separate namespaces so
