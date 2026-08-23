@@ -46,9 +46,32 @@ function parseMinutes(value: string): number | null {
 }
 
 function isHoliday(dt: DateTime, holidays: Holiday[] | undefined): boolean {
-  if (!holidays?.length) return false;
+  return findHoliday(dt, holidays) !== null;
+}
+
+function findHoliday(dt: DateTime, holidays: Holiday[] | undefined): Holiday | null {
+  if (!holidays?.length) return null;
   const iso = dt.toISODate();
-  return holidays.some((holiday) => holiday.date === iso);
+  return holidays.find((holiday) => holiday.date === iso) ?? null;
+}
+
+/**
+ * The holiday falling on an instant's local date, or null.
+ *
+ * Separate from `isWithinBusinessHours` because a closed office and a closed
+ * office *for Eid* are two different messages to send, and the name is half of
+ * the second one. Returning the holiday rather than a boolean is what lets the
+ * auto-responder interpolate it without re-scanning the list.
+ *
+ * Answers on its own terms: a holiday on a day the schedule was shut anyway is
+ * still a holiday, and a holiday in the middle of a working day is one too —
+ * `isWithinBusinessHours` already treats that day as closed.
+ */
+export function holidayOn(config: HoursConfig, at: Date = new Date()): Holiday | null {
+  const local = DateTime.fromJSDate(at, { zone: config.timezone });
+  if (!local.isValid) return null;
+
+  return findHoliday(local, config.holidays);
 }
 
 /** Ranges for one day, ignoring holidays. */
@@ -242,9 +265,24 @@ export function businessMinutesBetween(config: HoursConfig, from: Date, to: Date
   return total;
 }
 
-/** Formatted for a customer, in the schedule's timezone and their language. */
+/**
+ * Formatted for a customer, in the schedule's timezone and their language.
+ *
+ * The connector is translated along with the day name. Formatting Arabic with
+ * an English "at" is the kind of half-localised string that reads worse than
+ * plain English does, and this is the first line an Arabic-speaking customer
+ * gets from us out of hours.
+ *
+ * `-u-nu-latn` keeps the clock in 0–9 rather than letting ar-EG render it in
+ * Arabic-Indic digits. Egyptian screens — prices, phone numbers, the tracking
+ * numbers in these very tickets — are written in Latin digits, so ٠٩:٠٠ next to
+ * a shipment number in the same message reads as two different alphabets for
+ * the same idea.
+ */
 export function formatOpening(at: Date, timezone: string, locale: string): string {
+  const arabic = locale === 'ar';
+
   return DateTime.fromJSDate(at, { zone: timezone })
-    .setLocale(locale === 'ar' ? 'ar-EG' : 'en-GB')
-    .toFormat("cccc 'at' HH:mm");
+    .setLocale(arabic ? 'ar-EG-u-nu-latn' : 'en-GB')
+    .toFormat(arabic ? "cccc 'الساعة' HH:mm" : "cccc 'at' HH:mm");
 }

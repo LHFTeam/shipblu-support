@@ -7,13 +7,12 @@ import {
   conversationWatchers,
   conversations,
   contacts,
-  messages,
   ticketStatuses,
 } from '@/db/schema';
 import { assignConversation } from '@/lib/assignment';
 import { scheduleSurvey } from '@/lib/csat';
 import { readOnlyChannels } from '@/lib/tickets/channel-policy';
-import { enqueue } from '@/lib/queue';
+import { deliverAutomatedReply } from '@/lib/tickets/outbound';
 import { matches } from '@/lib/rules/conditions';
 import { conversationFacts } from '@/lib/rules/facts';
 import { onAgentReply, onGroupChanged, onStatusChanged } from '@/lib/sla';
@@ -241,7 +240,8 @@ async function applyAction(action: Action, ticket: TicketRow, ruleName: string):
       // Writes the ticket itself and does not come back through this engine, in
       // keeping with the rule at the top of this file: an automation that
       // triggered an automation is how four hundred emails reach one customer.
-      const groupChanged = action.groupId !== null && action.groupId !== ticket.conversation.groupId;
+      const groupChanged =
+        action.groupId !== null && action.groupId !== ticket.conversation.groupId;
 
       await assignConversation(conversationId, {
         groupId: action.groupId,
@@ -341,37 +341,20 @@ async function sendCannedReply(
     return;
   }
 
-  const isEmail = conversation.channel === 'email';
-  const isWebchat = conversation.channel === 'webchat';
-
-  const inserted = await db
-    .insert(messages)
-    .values({
-      conversationId: conversation.id,
-      direction: 'outbound',
-      kind: 'reply',
-      // No author agent — the timeline shows this as sent by the rule.
-      bodyText: canned.bodyText,
-      bodyHtml: isEmail ? canned.bodyHtml : null,
-      toAddresses: isEmail && ticket.requesterEmail ? [ticket.requesterEmail] : [],
-      deliveryStatus: isWebchat ? 'delivered' : 'pending',
-      ...(isWebchat ? { deliveredAt: new Date() } : {}),
-      meta: { automation: ruleName },
-    })
-    .returning({ id: messages.id });
-
-  const messageId = inserted[0]!.id;
-
-  await db
-    .update(conversations)
-    .set({ lastMessageAt: new Date(), lastAgentMessageAt: new Date() })
-    .where(eq(conversations.id, conversation.id));
-
-  await db.insert(conversationEvents).values({
+  await deliverAutomatedReply({
     conversationId: conversation.id,
-    type: 'auto_replied',
+    channel: conversation.channel,
+    requesterEmail: ticket.requesterEmail,
+    bodyText: canned.bodyText,
+    bodyHtml: canned.bodyHtml,
     actorLabel: `automation:${ruleName}`,
-    data: { messageId },
+    eventType: 'auto_replied',
+    meta: { automation: ruleName },
+    // A rule that answers the customer is the team answering: it is sent from
+    // the queue the team owns, during hours somebody could have written it by
+    // hand. The out-of-hours acknowledgement in `lib/auto-response` is the case
+    // where that is not true, and it passes false.
+    countsAsAgentReply: true,
   });
 
   // An automated acknowledgement is a first response as far as the customer is
@@ -379,14 +362,6 @@ async function sendCannedReply(
   // auto-replying — so this deliberately stops the clock, and a team that does
   // not want that should not be auto-replying.
   await onAgentReply(conversation.id);
-
-  if (!isWebchat) {
-    await enqueue(
-      conversation.channel === 'whatsapp' ? 'send_whatsapp' : 'send_email',
-      { messageId },
-      { priority: 20, dedupeKey: `send:${messageId}` },
-    );
-  }
 
   // Counted here as well as on the agent's own path. A rule sending a response
   // a thousand times a week is the clearest signal the column can carry, and

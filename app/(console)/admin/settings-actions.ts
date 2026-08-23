@@ -1,11 +1,12 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { and, eq, inArray, ne, or, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   agents,
   agentSkills,
+  autoResponses,
   automationRules,
   businessHours,
   cannedResponses,
@@ -24,6 +25,7 @@ import {
 } from '@/db/schema';
 import type { SlaTargets, WeeklySchedule } from '@/db/schema/config';
 import { requirePermission } from '@/lib/auth/guard';
+import { textToHtml } from '@/lib/html/sanitize';
 import { looksLikeEmail, normaliseEmail } from '@/lib/auth/normalise';
 import { parseActions } from '@/lib/automations/actions';
 import {
@@ -450,17 +452,7 @@ export async function saveCannedResponse(
   // Stored as both: email sends HTML, WhatsApp and the social channels send
   // text, and deriving one from the other at send time would mean every channel
   // guessing at line breaks.
-  const bodyHtml = bodyText
-    .split(/\n{2,}/)
-    .map(
-      (paragraph) =>
-        `<p>${paragraph
-          .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;')
-          .replace(/>/g, '&gt;')
-          .replace(/\n/g, '<br>')}</p>`,
-    )
-    .join('\n');
+  const bodyHtml = textToHtml(bodyText);
 
   const values = { title, folder, bodyText, bodyHtml };
 
@@ -481,6 +473,112 @@ export async function deleteCannedResponse(
   await requirePermission('admin.fields');
   await db.delete(cannedResponses).where(eq(cannedResponses.id, text(formData, 'id')));
   refresh('/admin/canned');
+  return ok();
+}
+
+// --- Out-of-hours auto-responses --------------------------------------------
+
+/**
+ * The channel values a rule may be scoped to.
+ *
+ * Read from the form and checked against this list rather than cast, because
+ * the column is an enum: an unknown value is a Postgres error at write time,
+ * and the error a customer-facing setting deserves is "pick a channel", not a
+ * 500 in the log.
+ *
+ * `whatsapp_bot` is deliberately absent. Nothing is ever sent on it — the bot
+ * owns those conversations — so offering it would be offering a setting that
+ * cannot do anything.
+ */
+const AUTO_RESPONSE_CHANNELS = [
+  'email',
+  'whatsapp',
+  'webchat',
+  'facebook',
+  'instagram',
+  'portal',
+] as const;
+
+type AutoResponseChannel = (typeof AUTO_RESPONSE_CHANNELS)[number];
+
+function autoResponseChannel(formData: FormData): AutoResponseChannel | null | undefined {
+  const raw = text(formData, 'channel');
+  if (!raw) return null;
+  return (AUTO_RESPONSE_CHANNELS as readonly string[]).includes(raw)
+    ? (raw as AutoResponseChannel)
+    : undefined;
+}
+
+export async function saveAutoResponse(
+  _state: SettingsState,
+  formData: FormData,
+): Promise<SettingsState> {
+  await requirePermission('admin.automations');
+
+  const id = text(formData, 'id');
+  const groupId = text(formData, 'groupId') || null;
+  const channel = autoResponseChannel(formData);
+  if (channel === undefined) return { error: 'Pick a channel, or leave it on every channel' };
+
+  const silent = formData.get('silent') === 'on';
+  const bodyAr = text(formData, 'bodyAr');
+  const bodyEn = text(formData, 'bodyEn');
+
+  // A rule that is neither silent nor written sends nothing, which is the same
+  // as not existing — except that it also shadows the broader rule that would
+  // have answered. Better refused at the form than debugged at midnight.
+  if (!silent && !bodyAr && !bodyEn) {
+    return { error: 'Write the message in at least one language, or tick “send nothing”' };
+  }
+
+  const values = {
+    groupId,
+    channel,
+    silent,
+    bodyAr,
+    bodyEn,
+    holidayBodyAr: text(formData, 'holidayBodyAr'),
+    holidayBodyEn: text(formData, 'holidayBodyEn'),
+    isActive: formData.get('isActive') === 'on',
+    updatedAt: new Date(),
+  };
+
+  // The scope is the identity, so a duplicate is a constraint violation rather
+  // than a second row: caught here to say which rule already covers it, because
+  // the raw error names a constraint the admin has never heard of.
+  const clash = await db
+    .select({ id: autoResponses.id })
+    .from(autoResponses)
+    .where(
+      and(
+        groupId ? eq(autoResponses.groupId, groupId) : isNull(autoResponses.groupId),
+        channel ? eq(autoResponses.channel, channel) : isNull(autoResponses.channel),
+        id ? ne(autoResponses.id, id) : undefined,
+      ),
+    )
+    .limit(1);
+
+  if (clash[0]) {
+    return { error: 'A rule already covers that group and channel — edit it instead' };
+  }
+
+  if (id) {
+    await db.update(autoResponses).set(values).where(eq(autoResponses.id, id));
+  } else {
+    await db.insert(autoResponses).values(values);
+  }
+
+  refresh('/admin/auto-responses');
+  return ok();
+}
+
+export async function deleteAutoResponse(
+  _state: SettingsState,
+  formData: FormData,
+): Promise<SettingsState> {
+  await requirePermission('admin.automations');
+  await db.delete(autoResponses).where(eq(autoResponses.id, text(formData, 'id')));
+  refresh('/admin/auto-responses');
   return ok();
 }
 

@@ -144,6 +144,29 @@ export function htmlToText(html: string): string {
   }).trim();
 }
 
+/**
+ * The inverse: plain text as the HTML body of an email.
+ *
+ * Blank lines become paragraphs and single newlines become breaks, which is how
+ * anybody typing into a textarea expects their message to arrive. Escaping is
+ * not optional and not a sanitiser's job here — the input is text, so every `<`
+ * in it is a literal `<`, and the output is HTML we generated rather than HTML
+ * we accepted. That distinction is what lets an auto-response interpolate a
+ * customer's own display name without giving them a way to write markup into
+ * the mail we send.
+ */
+export function textToHtml(text: string): string {
+  const escape = (value: string) =>
+    value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  return text
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+    .map((paragraph) => `<p>${escape(paragraph).replace(/\n/g, '<br>')}</p>`)
+    .join('\n');
+}
+
 /** One-line preview for the inbox list. */
 export function preview(text: string, maxLength = 140): string {
   const collapsed = text.replace(/\s+/g, ' ').trim();

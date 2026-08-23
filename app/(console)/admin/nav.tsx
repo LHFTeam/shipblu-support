@@ -35,6 +35,7 @@ const SECTIONS: { title: string; links: { href: string; label: string }[] }[] = 
       { href: '/admin/sla', label: 'SLA policies' },
       { href: '/admin/automations', label: 'Automations' },
       { href: '/admin/hours', label: 'Business hours' },
+      { href: '/admin/auto-responses', label: 'Out-of-hours replies' },
     ],
   },
   {

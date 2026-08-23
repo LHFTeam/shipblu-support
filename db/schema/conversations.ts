@@ -114,6 +114,22 @@ export const conversations = pgTable(
     }),
     closedAt: timestamp('closed_at', { withTimezone: true }),
 
+    /**
+     * When an out-of-hours acknowledgement last went out on this ticket.
+     *
+     * Here rather than derived from the timeline because it is a claim, not a
+     * record: `lib/auto-response` writes it with a conditional update and only
+     * sends if that update matched, so a customer sending six messages at
+     * 23:00 — six ingest jobs, running in parallel on the worker — gets one
+     * reply rather than six. Scanning `messages` for the last one instead
+     * would leave exactly that race open.
+     *
+     * Not cleared when the office reopens. "Has the office opened since this
+     * instant?" is a question `lib/hours` already answers, and a timestamp that
+     * something has to remember to reset is a timestamp that will be wrong.
+     */
+    autoRespondedAt: timestamp('auto_responded_at', { withTimezone: true }),
+
     /** Number of times the ticket has moved back out of a resolved status. */
     reopenCount: integer('reopen_count').notNull().default(0),
 

@@ -1,4 +1,5 @@
 import { assignConversation } from '@/lib/assignment';
+import { maybeSendAutoResponse } from '@/lib/auto-response';
 import { runAutomations } from '@/lib/automations';
 import { linkShipmentsFromMessage } from '@/lib/shipments/links';
 import { scheduleSurvey } from '@/lib/csat';
@@ -28,6 +29,12 @@ import { applySlaOnCreate, onCustomerReply } from '@/lib/sla';
  * - **Reply to an existing ticket.** The SLA moves first, so an Observer rule
  *   asking `is_first_response_overdue` sees the state the customer's message
  *   just produced rather than the state before it.
+ *
+ * The out-of-hours acknowledgement goes last in both, and that ordering is also
+ * deliberate. It is the only step here that speaks to the customer, so it should
+ * describe the ticket the team will actually find in the morning: a rule that
+ * moved this one into a group with its own calendar has moved which hours count
+ * as closed, and answering before that ran would tell the customer we are open.
  */
 export async function afterInboundMessage(
   conversationId: string,
@@ -38,12 +45,14 @@ export async function afterInboundMessage(
     await runAutomations('on_create', conversationId);
     await applySlaOnCreate(conversationId);
     await autoAssign(conversationId);
+    await maybeSendAutoResponse(conversationId, at);
     return;
   }
 
   await onCustomerReply(conversationId, at);
   await runAutomations('on_update', conversationId);
   await autoAssign(conversationId);
+  await maybeSendAutoResponse(conversationId, at);
 }
 
 /** An agent changed something in the console. */
