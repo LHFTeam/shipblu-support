@@ -106,7 +106,7 @@ projects:
   - name: 'ShipBlu Support Platform'
     environments:
       # ------------------------------------------------------------ production
-      - name: production
+      - name: Production
         envVarGroups:
           - name: shipblu-support-production
             envVars:
@@ -334,7 +334,7 @@ projects:
               - fromGroup: shipblu-support-production
 
       # --------------------------------------------------------------- staging
-      - name: staging
+      - name: Staging
         envVarGroups:
           - name: shipblu-support-staging
             envVars:

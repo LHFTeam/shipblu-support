@@ -239,7 +239,7 @@ function warnIfOnlyLegacy(current: string, legacy: string): undefined {
   console.error(
     `${current} is not set, but the retired ${legacy} still is. WhatsApp, ` +
       `Messenger and Instagram now share one credential set: copy the value ` +
-      `into ${current} in the shipblu-shared environment group and remove ` +
+      `into ${current} in the shipblu-support-production environment group and remove ` +
       `${legacy}. Until then every inbound Meta webhook fails verification.`,
   );
 

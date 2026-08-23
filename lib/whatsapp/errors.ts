@@ -33,7 +33,7 @@ export function explainAuthError(code: number | null, message: string): string {
     `WhatsApp, Messenger and Instagram call fails until it is replaced — one ` +
     `Meta app serves all three, so they share the one token. Short-lived user ` +
     `tokens last about 24 hours; issue a System User token in Meta Business ` +
-    `Manager, which does not expire, and set it in the shipblu-shared ` +
+    `Manager, which does not expire, and set it in the shipblu-support-production ` +
     `environment group.`
   );
 }
