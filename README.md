@@ -381,8 +381,10 @@ rule is treated as deny.
 
 ## Deployment
 
-`render.yaml` is a Render Blueprint defining the web service, worker, staging service and
-four cron jobs. Secrets are marked `sync: false` and set in the Render dashboard — they
-are deliberately not committed.
+`render.yaml` is a Render Blueprint defining one project with two environments: the web
+service, worker and four cron jobs in `production`, the staging service in `staging`.
+Secrets are set in the Render dashboard and deliberately not committed. Service-level ones
+are marked `sync: false`; the three env groups list theirs as comments instead, because
+Render does not accept `sync: false` inside a group.
 
 Migrations run automatically via `preDeployCommand` before traffic shifts.

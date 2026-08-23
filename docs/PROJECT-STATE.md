@@ -5,7 +5,7 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-08-23, against `main` at `ff272e4`.
+Last updated: 2026-08-23, against `main` at `fc46cac`.
 
 ---
 
@@ -168,6 +168,12 @@ console page issues 10–30 queries.
 
 ### Render — workspace `tea-da1f2lgjo6nc738hobmg`
 
+One project, two environments: `evm-da22su3l550s73b31n60` holds the web service,
+the worker and all four crons, and `evm-da22vi8jo6nc73filkmg` holds staging.
+That split has been real on Render since the services were created; `render.yaml`
+only started describing it in the env-group change below, and before that
+declared all seven services as one flat list.
+
 | Service                          | Type                          | Id                         | Branch                       |
 | -------------------------------- | ----------------------------- | -------------------------- | ---------------------------- |
 | `shipblu-support`                | web (standard, autoscale 1→3) | `srv-da1jgtg1ne8s73ciqulg` | `main`                       |
@@ -218,30 +224,111 @@ deploy, so a new table is locked down whether or not anybody remembered.
 
 ### Environment variables — the rule
 
-**Any value that is the same on more than one service is declared once, in the
-`shipblu-shared` env group, and nowhere else.**
+**Any value that is the same on more than one service in an environment is
+declared once, in that environment's group, and nowhere else.** There are three:
+
+| Group                        | Scope        | Holds                                                              |
+| ---------------------------- | ------------ | ------------------------------------------------------------------ |
+| `shipblu-shared`             | workspace    | identical everywhere and harmless outside this system if wrong     |
+| `shipblu-support-production` | `production` | anything that can reach a real customer or the production database |
+| `shipblu-support-staging`    | `staging`    | staging's own database, and what stops it reaching anyone          |
 
 Render gives service-level variables precedence over group values, so a key
 declared in both places silently takes the service value. That cost us a
-debugging session on `DATABASE_URL`. Service-level entries now exist only as
-deliberate exceptions, each commented in `render.yaml`:
+debugging session on `DATABASE_URL`. Two _groups_ linked by one service and both
+declaring a key is the same trap with no precedence rule to settle it, so no key
+appears in more than one group — `EMAIL_PROVIDER` is in `shipblu-support-production` and
+`shipblu-support-staging`, which is safe only because no service links both.
 
-- staging: `DATABASE_URL`, `DATABASE_URL_SESSION` (its own database),
-  `EMAIL_PROVIDER=local` and `META_PAGE_ACCESS_TOKEN=''`, so staging cannot
-  reach a real customer on any channel;
-- web service only: `EMAIL_WEBHOOK_SECRET`, which has exactly one consumer.
+Service-level entries now exist only as deliberate exceptions, each commented in
+`render.yaml`: `EMAIL_WEBHOOK_SECRET` and the two `FRESHDESK_*` keys on the web
+service, which have exactly one consumer each, and `APP_URL`, which is
+per-service because the crons deliberately do not have it at all.
+
+**`shipblu-shared` is workspace-scoped and cannot be moved into the project.** A
+group scoped to a project environment cannot be linked to any service outside
+it, and Render has no project-wide scope in between — a group belongs to one
+environment or to the whole workspace. Services in both environments link this
+one. `render.yaml` says so with `ungrouped`, which is the only way to state "no
+environment" outright; a group left in a top-level `envVarGroups` list keeps
+whatever scope it happens to have.
+
+**A secret's value is never in the file, and neither is `sync: false` inside a
+group** — Render's Blueprint reference does not accept it there, and a group
+entry needs a literal value or `generateValue`. A literal would commit the
+secret and `value: ''` would blank the live one on the next sync. So each group
+lists its dashboard-owned keys as a comment beside its literal ones. The file
+still names everything each group holds, which is the point of keeping it in the
+repo. This is worth knowing before "fixing" the comments back into entries: the
+old single group declared some twenty keys with `sync: false`, which the
+reference says was never valid.
+
+`META_PAGE_ACCESS_TOKEN` and the rest of the Meta set are in `shipblu-support-production`
+rather than the shared group so staging cannot inherit them. Meta has no test
+mode: a send from staging carrying a real page token arrives on a real
+customer's phone. Staging used to blank the token with a service-level
+`value: ''`, which worked but depended on somebody remembering to write the
+override; not holding the credential at all is the same protection without the
+vigilance. `pageToken()` in `lib/meta/client.ts` throws
+`META_PAGE_ACCESS_TOKEN is not configured` on an unset value exactly as it did
+on a blank one.
+
+`APP_SECRET` stays in `shipblu-shared`, which means staging holds production's
+email-reply signing key. Splitting it per environment would be tidier and is
+deliberately not done: it regenerates production's value, and that invalidates
+every reply token already sitting in a customer's mailbox. Staging sends no real
+mail, so it mints no token anyone can reply to.
 
 One family of keys is declared without being read by name: a connected WhatsApp
 business account may carry its own access token, and its row names the variable
 holding it. The name must start `WHATSAPP_TOKEN_` — enforced in
 `lib/whatsapp/accounts.ts`, because the value is sent to Meta as a bearer token
 and a free-text variable name would be a way to exfiltrate any secret in the
-process. The value goes in `shipblu-shared`; the key goes in `render.yaml`
+process. The value goes in `shipblu-support-production`; the key is listed in `render.yaml`
 without it, in the same commit that names it on the account.
 
 When you add a variable, add it to `render.yaml` in the same commit. The
 blueprint is meant to describe the running system; it is not documentation that
 drifts.
+
+### The three-group split is not applied on Render yet
+
+`render.yaml` describes it; the dashboard still has the single `shipblu-shared`
+group and the old service-level entries. Nothing is broken in the meantime —
+until somebody syncs the Blueprint the running config is exactly what it was —
+but the file and the dashboard disagree until these run, **in this order**:
+
+1. **Confirm the environment names.** The project is `ShipBlu Support Platform`,
+   which is confirmed; `production` and `staging` are not. A Blueprint adopts a
+   _service_ by name, but Render does not document what it does with a project
+   or environment name that matches nothing — so check both against the
+   dashboard first, rather than discovering afterwards that it created new
+   environments and moved the services into them.
+2. **Sync the Blueprint.** It creates `shipblu-support-production` and `shipblu-support-staging`
+   holding only `EMAIL_PROVIDER`, and links them. Nothing changes yet: every
+   other value is still where it was, and service-level entries still win.
+3. **Copy values in.** Each key listed in the `shipblu-support-production` comment moves from
+   `shipblu-shared` into `shipblu-support-production`, same value. Staging's `DATABASE_URL`,
+   `DATABASE_URL_SESSION`, `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` move
+   off the staging service into `shipblu-support-staging`. Both copies existing at once
+   is fine — they agree.
+4. **Delete the moved keys from `shipblu-shared`.** Before step 5, not after.
+   While the shared group still says `EMAIL_PROVIDER=postmark`, staging is held
+   to `local` only by its service-level override; dropping that first would
+   leave two linked groups disagreeing about whether staging sends real mail.
+5. **Delete the redundant service-level entries:** `SUPABASE_URL` and
+   `SUPABASE_SERVICE_ROLE_KEY` from web, worker and staging; `DATABASE_URL`,
+   `DATABASE_URL_SESSION`, `EMAIL_PROVIDER` and `META_PAGE_ACCESS_TOKEN` from
+   staging. Render _preserves_ a service-level variable the Blueprint stopped
+   declaring, so none of these goes away on its own — and each one still shadows
+   the group until it is removed by hand.
+6. **Verify:** `/api/health` on production, and a staging boot. Staging is
+   suspended, so that half needs a resume first.
+
+Step 3 is also the pending `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` move the
+old `render.yaml` described and never finished — the reason it was left was that
+those keys held live values at service level, which is what steps 3 and 5
+sequence around.
 
 ---
 
