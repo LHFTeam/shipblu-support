@@ -937,6 +937,40 @@ Each cost real time. Most are also comments in the code.
     `grep -rl luxon .next/static/chunks/` after a build answers it in one call,
     and the answer should stay empty.
 
+22. **A Messenger ticket can arrive on a page this app cannot answer, and Graph
+    will not say so.** Ticket #6410 was a real "Testing" message that reached
+    the inbox normally and whose reply failed three times with
+    `code 1, "An unknown error has occurred."` and an HTTP 500 — the code
+    `TRANSIENT_CODES` retries, so it burned every attempt and told the agent
+    nothing. Two separate things were wrong and Graph answers both with that
+    same sentence:
+
+    - The message arrived on page `101449698657189`, while `FACEBOOK_PAGE_ID` is
+      `955333171001884`. A page-scoped id is scoped to the page that issued it,
+      so the recipient simply does not exist on the other page. Every Facebook
+      message before it had come from the configured page, which is why this had
+      never shown up.
+    - Every event from that page arrives in the webhook's `standby` array, not
+      `messaging`. That is Meta's handover protocol saying **another app holds
+      thread control** — the echoes name it: `app_id` 576817601276249,
+      `metadata: "freshchannel"`, so Freshchat is the primary receiver on that
+      inbox and we are a secondary one. A secondary receiver may read the thread
+      and may not send on it.
+
+    The code made the second one invisible: `parseMetaWebhook` flattened
+    `standby` into `messaging` and the distinction was gone one line into the
+    system, so the ticket looked ordinary all the way to the composer. It is now
+    carried as `standby` on the message's `meta` and both refusals are decided
+    in `lib/meta/thread.ts` before a request is made — checked in the console so
+    an agent is not invited to write, and again in the send job because thread
+    control can move in between.
+
+    **Neither is fixable in code.** Sending as `101449698657189` needs that
+    page's own token, and sending at all needs Freshchat to hand thread control
+    over. Until both are true, connecting a page to the Meta app produces
+    readable tickets that cannot be answered — which is worth knowing before the
+    next page is connected, because the tickets look completely normal.
+
 ## 7. Verification already done
 
 - **WhatsApp, end to end on production.** A synthetic webhook was enqueued; the

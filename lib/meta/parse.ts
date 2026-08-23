@@ -42,11 +42,19 @@ export function parseMetaWebhook(payload: unknown): NormalisedMetaWebhook {
   for (const entry of body.entry ?? []) {
     const accountId = entry.id ?? null;
 
+    for (const event of entry.messaging ?? []) {
+      readMessagingEvent(event, platform, accountId, false, result);
+    }
+
     // `standby` carries messages while another app holds the thread, which
     // happens when a Page runs more than one inbox tool. They are read-only for
-    // us, but ingesting them keeps the ticket history complete.
-    for (const event of [...(entry.messaging ?? []), ...(entry.standby ?? [])]) {
-      readMessagingEvent(event, platform, accountId, result);
+    // us, but ingesting them keeps the ticket history complete — so the flag
+    // travels with the message rather than the array being flattened into the
+    // other one. Losing it here is what let a reply be composed against a
+    // thread this app cannot send on, and Graph refuses that with nothing but
+    // "An unknown error has occurred."
+    for (const event of entry.standby ?? []) {
+      readMessagingEvent(event, platform, accountId, true, result);
     }
 
     for (const change of entry.changes ?? []) {
@@ -68,6 +76,7 @@ function readMessagingEvent(
   event: MetaMessagingEvent,
   platform: MetaPlatform,
   accountId: string | null,
+  standby: boolean,
   result: NormalisedMetaWebhook,
 ): void {
   if (!isObject(event)) return;
@@ -105,6 +114,7 @@ function readMessagingEvent(
     text: displayText(event),
     attachments: (message.attachments ?? []).map(normaliseAttachment),
     replyToMid: message.reply_to?.mid ?? null,
+    standby,
     raw: event as unknown as Record<string, unknown>,
   });
 }

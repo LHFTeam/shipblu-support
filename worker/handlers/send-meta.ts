@@ -11,6 +11,7 @@ import { explainMetaSendError } from '@/lib/meta/errors';
 import type { MetaPlatform } from '@/lib/meta/types';
 import { messagingTag, metaWindowState } from '@/lib/meta/window';
 import type { ClaimedJob } from '@/lib/queue';
+import { metaReplyTarget } from '@/lib/tickets/meta-thread';
 
 /**
  * Delivers an agent's Facebook or Instagram reply.
@@ -137,8 +138,30 @@ async function deliver(
     return privateReplyToComment(commentId, text);
   }
 
-  const recipientId = meta.recipientId ?? (await lastInboundSenderId(row.conversation.id));
+  const target = await metaReplyTarget(row.conversation.id, platform);
+
+  const recipientId = meta.recipientId ?? target.recipientId;
   if (!recipientId) throw new Error('no recipient id on this ticket');
+
+  // Whether the thread is answerable at all, before whether there is time left
+  // to answer it: an inbox another app owns, or a page this deployment cannot
+  // address, stays refused however fresh the customer's message is. Graph
+  // answers both with "An unknown error has occurred." and an HTTP 500, which
+  // is retried three times and explains nothing — so the send is stopped here
+  // instead, where the reason is known.
+  //
+  // Re-checked here as well as in the console for the same reason the window
+  // is: thread control can be handed to another tool between an agent writing
+  // and this job running.
+  if (!target.thread.canSend) {
+    throw new MetaApiError(
+      target.thread.explanation ?? 'This thread cannot be answered.',
+      0,
+      null,
+      null,
+      false,
+    );
+  }
 
   const window = metaWindowState(row.conversation.lastCustomerMessageAt);
   const tag = messagingTag(window);
@@ -193,15 +216,4 @@ async function lastInboundCommentId(conversationId: string): Promise<string | nu
   }
 
   return null;
-}
-
-async function lastInboundSenderId(conversationId: string): Promise<string | null> {
-  const rows = await db
-    .select({ fromAddress: messages.fromAddress })
-    .from(messages)
-    .where(and(eq(messages.conversationId, conversationId), eq(messages.direction, 'inbound')))
-    .orderBy(desc(messages.createdAt))
-    .limit(1);
-
-  return rows[0]?.fromAddress ?? null;
 }

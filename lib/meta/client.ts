@@ -81,10 +81,22 @@ function pageToken(): string {
   return token;
 }
 
+/**
+ * The account a reply goes out from, per platform, or null when none is set.
+ *
+ * Separate from `accountId` because the send path needs to *compare* this with
+ * the account a message arrived on, and a comparison cannot be made out of an
+ * exception: an unconfigured deployment and a misconfigured one call for
+ * different sentences, and both are decided in `lib/meta/thread.ts`.
+ */
+export function configuredAccountId(platform: MetaPlatform): string | null {
+  const e = env();
+  return (platform === 'instagram' ? e.INSTAGRAM_ACCOUNT_ID : e.FACEBOOK_PAGE_ID) || null;
+}
+
 /** The account a reply goes out from, per platform. */
 export function accountId(platform: MetaPlatform): string {
-  const e = env();
-  const id = platform === 'instagram' ? e.INSTAGRAM_ACCOUNT_ID : e.FACEBOOK_PAGE_ID;
+  const id = configuredAccountId(platform);
   if (!id) {
     throw new Error(
       platform === 'instagram'
@@ -96,9 +108,8 @@ export function accountId(platform: MetaPlatform): string {
 }
 
 export function isConfigured(platform: MetaPlatform): boolean {
-  const e = env();
-  if (!e.META_PAGE_ACCESS_TOKEN) return false;
-  return Boolean(platform === 'instagram' ? e.INSTAGRAM_ACCOUNT_ID : e.FACEBOOK_PAGE_ID);
+  if (!env().META_PAGE_ACCESS_TOKEN) return false;
+  return configuredAccountId(platform) !== null;
 }
 
 async function graph<T>(

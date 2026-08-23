@@ -26,7 +26,13 @@ export type MetaEntry = {
   id?: string;
   time?: number;
   messaging?: MetaMessagingEvent[];
-  /** Instagram uses this name for DMs on some API versions. */
+  /**
+   * The same events, delivered to an app that does *not* hold thread control.
+   *
+   * Not a platform quirk and not an alternative spelling of `messaging`: it is
+   * Meta's handover protocol saying another app owns this inbox. Everything
+   * here is readable and nothing here is answerable — see `lib/meta/thread.ts`.
+   */
   standby?: MetaMessagingEvent[];
   changes?: MetaChange[];
 };
@@ -92,6 +98,11 @@ export type NormalisedDirectMessage = {
   from: string;
   /** The page or Instagram account the message arrived on. */
   accountId: string | null;
+  /**
+   * Arrived in the handover protocol's `standby` array, meaning another app
+   * holds thread control and this one may read the thread but not answer it.
+   */
+  standby: boolean;
   senderName: string | null;
   sentAt: Date;
   text: string;

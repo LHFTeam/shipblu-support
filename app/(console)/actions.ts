@@ -39,6 +39,7 @@ import {
   TemplateParameterError,
 } from '@/lib/whatsapp/templates';
 import { metaWindowState } from '@/lib/meta/window';
+import { metaReplyTarget } from '@/lib/tickets/meta-thread';
 import {
   attachShipment,
   attachShippingAccount,
@@ -208,6 +209,16 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
       : 'comment_reply';
 
   if (isMeta && metaSendKind === 'dm') {
+    // Whether the thread can be answered at all comes before how long is left
+    // to answer it — a reply into an inbox another app controls, or onto a page
+    // this deployment cannot address, fails whatever the clock says, and it
+    // fails with a Graph error that names no reason.
+    const { thread } = await metaReplyTarget(
+      conversationId,
+      conversation.channel as 'facebook' | 'instagram',
+    );
+    if (!thread.canSend) return { error: thread.explanation ?? 'This thread cannot be answered.' };
+
     const state = metaWindowState(conversation.lastCustomerMessageAt);
     if (state.isClosed) {
       return {
