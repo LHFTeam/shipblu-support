@@ -76,9 +76,12 @@ export default async function LocationsPage() {
 
       {rows.length === 0 ? (
         <p className="mt-3 text-sm text-[var(--muted-foreground)]">
-          Nothing routes on a location yet — no agent carries one and no ticket is attributed to
-          one. This is the register they will point at, so the codes here should be the ones the
-          operations team already uses out loud.
+          A location is already how an agent reaches a hub: every row here appears in the
+          side-conversation picker on a ticket, under its code, and the thread records which
+          location it went to. Nothing <em>routes</em> on one yet — no agent carries a location and
+          no ticket is attributed to one — so this is a register of who can be written to, not of
+          who work is assigned to. The codes should be the ones the operations team already uses out
+          loud.
         </p>
       ) : (
         <p className="mt-3 text-xs text-[var(--muted-foreground)]">
