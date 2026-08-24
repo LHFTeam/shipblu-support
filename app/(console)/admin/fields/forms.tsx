@@ -40,7 +40,7 @@ function Fields({ field }: { field?: TicketField }) {
         </Field>
 
         {field ? (
-          <Field label="Key" hint="Fixed — stored rules refer to it.">
+          <Field label="Key" hint="Fixed — the stored answers and every rule are filed under it.">
             <Input defaultValue={field.key} disabled />
           </Field>
         ) : (
@@ -64,7 +64,7 @@ function Fields({ field }: { field?: TicketField }) {
 
         <Field
           label="Position"
-          explain="Lower comes first in the list of fields an automation or SLA condition can pick from, which is the only place these fields are read today — nothing renders them on a ticket yet."
+          explain="Lower comes first everywhere the fields are listed: down the ticket sidebar in the console, down the portal’s new-ticket form, and in the list an automation or SLA condition picks from. Ties fall back to the label, alphabetically."
         >
           <Input name="position" type="number" defaultValue={field?.position ?? 0} />
         </Field>

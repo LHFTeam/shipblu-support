@@ -37,9 +37,11 @@ export default async function FieldsPage() {
           <>
             Key{' '}
             <InfoTip label="Key">
-              How an automation or an SLA condition names this field — <code>custom.the_key</code>.
-              Fixed once the field exists: renaming it would leave every stored rule pointing at
-              something that is no longer there, and nothing would report an error.
+              How this field is named everywhere it is not shown to a person — an automation or SLA
+              condition reads it as <code>custom.the_key</code>, and every answer a ticket gives it
+              is filed under it. Fixed once the field exists, and the reason grew with the answers:
+              renaming it would leave every stored rule pointing at nothing <em>and</em> strand the
+              value on every ticket that ever filled it in, with nothing reporting an error.
             </InfoTip>
           </>,
           'Type',
