@@ -191,7 +191,11 @@ export async function assignConversation(
      * few milliseconds and only ever between tickets that were going to the
      * same place anyway.
      */
-    await tx.execute(sql`select 1 from ${groups} where id = ${groupId} for update`);
+    const lockedGroups = await tx
+      .select({ lastAssignedAgentId: groups.lastAssignedAgentId })
+      .from(groups)
+      .where(eq(groups.id, groupId))
+      .for('update');
 
     // Re-read the assignee inside the lock. Between the check above and here,
     // an agent may have picked the ticket up by hand.
@@ -219,7 +223,10 @@ export async function assignConversation(
       return { assignedTo: null, reason: skipReasonFor(rejected) };
     }
 
-    const cursor = group.lastAssignedAgentId;
+    // The group was initially loaded before this transaction. A concurrent
+    // assignment may have advanced its cursor while this call waited for the
+    // lock, so only the value read from the locked row is safe to use.
+    const cursor = lockedGroups[0]?.lastAssignedAgentId ?? null;
     const agentId =
       strategy === 'load_balanced'
         ? pickLoadBalanced(eligible, cursor)
