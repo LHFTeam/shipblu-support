@@ -24,6 +24,12 @@ const PUBLIC_PREFIXES = [
   '/invite',
   '/api/webhooks',
   '/api/health',
+  // The page `/api/health` renders to prove that rendering works. Fetched over
+  // the loopback by the health check, which carries no session — left to the
+  // cookie check below it would answer 307 to /login, and a redirect that
+  // Render's five-second budget resolves to somebody else's HTML is a health
+  // check that passes while every real page is dead.
+  '/probe',
   '/api/auth',
   '/api/kb',
   // The widget page and every endpoint it calls. Both halves are needed: the

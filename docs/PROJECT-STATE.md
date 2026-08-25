@@ -776,6 +776,47 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   where xact_start < now() - interval '5 minutes' and pid <> pg_backend_pid();
   ```
 
+  **The reaper protects the database, not the app — and on 2026-08-25 that cost
+  us the whole product for eighty-five minutes.** Every page that touched
+  Postgres hung with zero bytes sent, from 18:32 UTC until the web service was
+  restarted, while the database sat idle at 18 of 60 backends with no ungranted
+  locks and no long-running query. The timeline, from the request logs and
+  `postgres_logs`:
+
+  - **18:32:2x** — five transactions open on the web service's pool and never
+    finish. First casualty at 18:32:42: an agent's `/inbox` abandoned after the
+    browser gave up.
+  - **18:37:23–18:37:32** — `terminating connection due to transaction timeout`,
+    five times. The reaper worked exactly as designed, five minutes in.
+  - **Everything after** — the database was fine and the app never recovered. An
+    agent waited 738 seconds on `/inbox` at 18:46; a customer waited 530, 450
+    and 164 seconds on `/ar` between 19:29 and 19:50.
+
+  Two things in our own code turned a reaped leak into an outage, and both are
+  fixed now:
+
+  - **Nothing bounded the wait.** postgres.js has no query timeout, and
+    `connect_timeout` covers only the startup phase, so a caller queued behind
+    ten dead slots waits for the life of the process. `withDeadline()` in
+    `db/client.ts` is the bound; `max_lifetime` is now explicit so a poisoned
+    slot is recycled rather than held forever.
+  - **The health check could not see it, so Render never restarted anything.**
+    Next bundles pages and route handlers separately, so `let pool` was a
+    different variable in each — two pools in one process. `/api/health`
+    answered `select 1` in 2 ms from the healthy one while every render queued
+    on the wedged one. Measured, not inferred: with `max: 1` and the same mixed
+    load, the old dev-only `globalThis` guard holds **two** backends and the
+    current code holds **one**. The pool is now process-wide in production too,
+    and the check renders `/probe` — a real page — so a wedge fails it. Render
+    pulls traffic after 15 s of failures and restarts the instance after 60.
+
+  What is still not fixed is the leak itself, which needs the app off the
+  transaction pooler: Supabase recommends session mode (port 5432) for a
+  persistent container on an IPv4-only network, which Render is, and our own
+  session-mode connection for `LISTEN` has never leaked once. That is a
+  `DATABASE_URL` change plus sizing `max` per service, because session mode
+  holds a backend per pool slot.
+
 ---
 
 ## 6. Traps that have already bitten us
@@ -970,6 +1011,19 @@ Each cost real time. Most are also comments in the code.
     over. Until both are true, connecting a page to the Meta app produces
     readable tickets that cannot be answered — which is worth knowing before the
     next page is connected, because the tickets look completely normal.
+
+23. **A module singleton is per bundle, not per process, and a route handler
+    cannot tell you whether a page renders.** Next bundles pages and route
+    handlers separately, so `let pool` in `db/client.ts` was two variables in
+    one process. On 2026-08-25 the pages' pool wedged and the route handlers'
+    did not: every page hung for eighty-five minutes while `/api/health`
+    answered `select 1` in 2 ms, so Render's health check stayed green and the
+    instance was never restarted. Reproducible in a minute — set `max: 1`, load
+    a page and a route handler together, count backends: the old dev-only
+    `globalThis` guard gives two, one per bundle. Anything that must be one
+    thing per process belongs on `globalThis` in production too, and any check
+    that claims a service is healthy has to exercise the path a person uses.
+    §5.5 has the full incident.
 
 ## 7. Verification already done
 

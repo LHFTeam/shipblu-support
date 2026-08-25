@@ -157,6 +157,25 @@ and must not use `CREATE INDEX CONCURRENTLY`; the whole file runs in one
 implicit transaction. New tables get RLS enabled by a loop in `db/sql/` — do not
 add it by hand.
 
+**One pool per process, and no unbounded database wait.** Next bundles pages and
+route handlers separately, so a module-local `let pool` is a _different variable_
+in each — two pools in one process, and a health check that measures the wrong
+one. Anything that must be a single thing per process hangs off `globalThis` in
+production too, not only under dev's hot reload. And bound every wait you can:
+postgres.js has no query timeout, `connect_timeout` covers only the startup
+phase, and a caller queued behind connections the pooler abandoned waits for the
+life of the process. `withDeadline()` in `db/client.ts` is how a wait is allowed
+to fail. Both rules were written on 2026-08-25, in the eighty-five minutes
+between the two of them taking the product down — §5.5 of `docs/PROJECT-STATE.md`.
+
+**A health check has to exercise the path a person uses.** `/api/health` renders
+`/probe` — an actual page, over the loopback — because on the day it mattered a
+route handler answered `select 1` in 2 ms while every page in the same process
+was wedged. Anything cheaper is a check that reports on itself. Keep it inside
+Render's five-second budget: Render stops routing to an instance after 15 s of
+consecutive failures and restarts it after 60, which is the whole point of the
+check being honest.
+
 **Background work.** Anything slow, external or retryable is a job: add the type
 to `JobType` in `lib/queue/index.ts`, a handler under `worker/handlers/`, and
 register it in `worker/handlers/index.ts` — an unregistered type fails loudly
