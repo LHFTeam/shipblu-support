@@ -65,8 +65,10 @@ since the first migration are finally read: `groups.escalate_to_agent_id` /
 `escalate_after_mins`, `group_members` as an actual constraint rather than a
 roster to draw, and `agents.presence`, which the dashboard has rendered from day
 one and **nothing had ever written** — so every agent read `offline` forever. It
-is written now, by the SSE stream and by nothing else. Every group ships on
-`manual`, so none of it changes behaviour until somebody opts a team in.
+is written now, by the console's lightweight presence stream and by nothing
+else. Conversation invalidations use a separate inbox-only stream, so ticket
+traffic cannot make presence expensive. Every group ships on `manual`, so none
+of it changes behaviour until somebody opts a team in.
 
 And now **agent productivity reporting**, at `/reports/agents` behind a new
 `report.agents` permission. It answers punctuality, availability, speed and
@@ -79,12 +81,12 @@ Most of that **could not be answered before, because nothing recorded it**.
 `agents.presence`, `last_seen_at` and `is_accepting_tickets` are current-state
 columns with no history; `sessions` rows are deleted on logout. So this change is
 mostly three new append-only capture tables — `agent_presence_intervals` written
-by the SSE stream's existing single writer, `agent_focus_intervals` written by a
-new beat from the ticket page, and `agent_backlog_snapshots` sampled hourly —
-plus `agent_metrics_daily`, rebuilt nightly by the same `rollup_metrics` job that
-already owns `metrics_daily`. **The report is empty until the capture has run for
-a day**, and on this database it will stay near-empty until humans work tickets:
-see the paragraph below.
+by the presence stream's existing single writer, `agent_focus_intervals` written
+by a new beat from the ticket page, and `agent_backlog_snapshots` sampled hourly
+— plus `agent_metrics_daily`, rebuilt nightly by the same `rollup_metrics` job
+that already owns `metrics_daily`. **The report is empty until the capture has
+run for a day**, and on this database it will stay near-empty until humans work
+tickets: see the paragraph below.
 
 The focus beat also finally writes `conversation_presence`, which has existed
 since the first migration for collision detection and which **nothing had ever
@@ -468,7 +470,7 @@ is code:
   same-origin either side of the custom domain going live. It is for the day the
   widget goes on shipblu.com.
 - **Presence has never been observed with more than one agent.** It is written
-  from the SSE stream and verified against a local Postgres, but the multi-tab
+  from the presence stream and verified against a local Postgres, but the multi-tab
   case is handled by expiry rather than by reference counting: closing one of two
   tabs marks the agent offline and the surviving tab's next beat — up to 25
   seconds later — puts them back. That window is a brief skip in the rota, which
@@ -970,6 +972,32 @@ Each cost real time. Most are also comments in the code.
     over. Until both are true, connecting a page to the Meta app produces
     readable tickets that cannot be answered — which is worth knowing before the
     next page is connected, because the tickets look completely normal.
+
+23. **A debounce is not backpressure, and a global invalidation can freeze an
+    I/O-bound service while CPU looks idle.** On 2026-08-25 the customer-bot
+    channel was busy while one agent had the inbox open. Every message insert
+    and every delivery-status update emitted the same `conversation_changed`
+    notification to every console and widget. The console's 750 ms debounce
+    started another full `router.refresh()` even when the previous server render
+    had not completed, and rendering the thirty-row inbox re-armed automatic
+    prefetches for its dynamic ticket links. One event stream therefore became
+    a queue of overlapping list renders plus several detail renders each.
+
+    Render showed the consequence rather than the cause: CPU peaked below 7%
+    and memory below 220 MB, health checks and webhook writes stayed fast, but
+    RSC responses remained open for up to 87 minutes and eventually returned
+    502 when the instance was replaced. CPU autoscaling could not see a request
+    and database-connection backlog dominated by waiting.
+
+    The invariant is now structural. Queue notifications are semantic and split
+    by channel; the restricted bot is absent from the default working queue.
+    Ticket pages and widgets listen to a UUID-specific topic. Presence is a
+    separate lightweight stream, so non-inbox pages hold no LISTEN connection.
+    The browser allows one refresh transition at a time, collapses events during
+    it into one trailing refresh with a cooldown, pauses while hidden, and the
+    large inbox list disables automatic route prefetch. Do not replace any of
+    those with a larger pool or instance: capacity can postpone unbounded fan-out
+    but cannot make it bounded.
 
 ## 7. Verification already done
 

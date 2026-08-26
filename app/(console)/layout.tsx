@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { ShipBluLogo } from '@/components/brand';
-import { LiveUpdates } from '@/components/live-updates';
+import { AgentPresence } from '@/components/agent-presence';
 import { requireAgent } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
 import { inboxCounts } from '@/lib/tickets/queries';
@@ -44,7 +44,7 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
 
   return (
     <div className="flex h-dvh overflow-hidden">
-      <LiveUpdates />
+      <AgentPresence />
 
       <Rail
         items={items}

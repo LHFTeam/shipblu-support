@@ -2,8 +2,9 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { BookIcon, ChartIcon, ContactsIcon, InboxIcon, SettingsIcon } from '@/components/icons';
+import { RefreshScheduler } from '@/lib/realtime/refresh-scheduler';
 
 /**
  * The primary navigation rail.
@@ -35,6 +36,97 @@ const ICONS = {
 
 export function Rail({ items, brand }: { items: NavItem[]; brand: ReactNode }) {
   const pathname = usePathname();
+  const inboxActive = isActive(pathname, '/inbox');
+  const serverInboxBadge = items.find((item) => item.href === '/inbox')?.badge ?? 0;
+  const [liveInboxBadge, setLiveInboxBadge] = useState<{
+    serverBaseline: number;
+    count: number;
+  } | null>(null);
+
+  useEffect(() => {
+    // The inbox already owns the one LISTEN connection for this agent. Outside
+    // it, the rail takes over that connection and refreshes only its count — it
+    // never asks Contacts, Reports or Admin to re-render because a ticket moved.
+    if (inboxActive) return;
+
+    let source: EventSource | null = null;
+    let poll: ReturnType<typeof setInterval> | null = null;
+    const abort = new AbortController();
+    const startPolling = () => {
+      if (poll) return;
+      poll = setInterval(() => scheduler.request(), 60_000);
+    };
+
+    const refreshCount = async () => {
+      try {
+        const response = await fetch('/api/inbox-counts', {
+          cache: 'no-store',
+          signal: abort.signal,
+        });
+        if (!response.ok) {
+          startPolling();
+          return;
+        }
+
+        const counts = (await response.json()) as { all?: unknown };
+        if (typeof counts.all === 'number') {
+          setLiveInboxBadge({ serverBaseline: serverInboxBadge, count: counts.all });
+        }
+      } catch {
+        if (!abort.signal.aborted) startPolling();
+      } finally {
+        scheduler.complete();
+      }
+    };
+
+    const scheduler = new RefreshScheduler({
+      visible: document.visibilityState === 'visible',
+      start: () => void refreshCount(),
+    });
+    // Closes the small route-transition gap between the inbox stream stopping
+    // and this one finishing its LISTEN registrations.
+    scheduler.request();
+
+    const onVisibilityChange = () => {
+      scheduler.setVisible(document.visibilityState === 'visible');
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    try {
+      source = new EventSource('/api/events?channel=all');
+      source.addEventListener('conversation', () => scheduler.request());
+      source.addEventListener('degraded', startPolling);
+      source.addEventListener('ready', () => {
+        if (poll) {
+          clearInterval(poll);
+          poll = null;
+        }
+      });
+      source.onerror = startPolling;
+    } catch {
+      startPolling();
+    }
+
+    return () => {
+      source?.close();
+      abort.abort();
+      if (poll) clearInterval(poll);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      scheduler.dispose();
+    };
+  }, [inboxActive, serverInboxBadge]);
+
+  // A newer server render always wins over an override derived from an older
+  // baseline. Outside the inbox, the immediate lightweight fetch above then
+  // supplies the continuously updated value for that baseline.
+  const inboxBadge =
+    !inboxActive && liveInboxBadge?.serverBaseline === serverInboxBadge
+      ? liveInboxBadge.count
+      : serverInboxBadge;
+
+  const liveItems = items.map((item) =>
+    item.href === '/inbox' ? { ...item, badge: inboxBadge } : item,
+  );
 
   return (
     <>
@@ -44,7 +136,7 @@ export function Rail({ items, brand }: { items: NavItem[]; brand: ReactNode }) {
         className="hidden w-16 shrink-0 flex-col items-center gap-1 bg-[var(--rail)] py-3 text-[var(--rail-foreground)] md:flex"
       >
         <div className="mb-3">{brand}</div>
-        {items.map((item) => (
+        {liveItems.map((item) => (
           <RailLink key={item.href} item={item} active={isActive(pathname, item.href)} />
         ))}
       </nav>
@@ -54,7 +146,7 @@ export function Rail({ items, brand }: { items: NavItem[]; brand: ReactNode }) {
         aria-label="Sections"
         className="fixed inset-x-0 bottom-0 z-30 flex items-stretch justify-around border-t border-[var(--border)] bg-[var(--surface)] pb-[env(safe-area-inset-bottom)] md:hidden"
       >
-        {items.map((item) => {
+        {liveItems.map((item) => {
           const Icon = ICONS[item.icon];
           const active = isActive(pathname, item.href);
           return (

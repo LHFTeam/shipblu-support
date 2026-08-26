@@ -1,39 +1,54 @@
 import { sessionSql } from '@/db/client';
 import { getSessionAgent } from '@/lib/auth/session';
-import { beat, goOffline, goOnline } from '@/lib/assignment/presence';
+import { canSubscribeToConversation } from '@/lib/realtime/authorization';
+import { conversationTopic, parseQueueChannel, queueTopicsForAgent } from '@/lib/realtime/topics';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * Server-sent events for live inbox updates.
+ * Server-sent invalidations for one authorised inbox view.
  *
- * Backed by Postgres LISTEN/NOTIFY rather than Redis: NOTIFY reaches every
- * listening connection, so this works unchanged across autoscaled instances
- * with no extra infrastructure. Each connected agent holds one session-mode
- * connection, which is why the console reconnects rather than opening several.
+ * Queue notifications are partitioned by channel and ticket notifications by
+ * conversation UUID. A default inbox therefore never receives customer-bot
+ * traffic, while an open ticket receives delivery updates only for itself.
  *
- * The payload is deliberately just "something changed on conversation X" — the
- * client refetches through the normal authorised path, so the stream never
- * becomes a way to receive tickets the agent cannot otherwise see.
- *
- * It doubles as the presence signal. An open stream is an agent with the console
- * in front of them, which is exactly the question auto-assignment needs answered
- * and exactly the one `agents.presence` had no writer for until now. Recording it
- * here rather than from a heartbeat endpoint of its own means there is nothing
- * extra to keep alive, and nothing that can disagree with the stream about
- * whether somebody is there.
+ * The database payload is discarded. The browser learns only that its own view
+ * is stale and re-fetches through the normal authorised queries. Presence has a
+ * separate lightweight stream so leaving the inbox does not make an agent look
+ * offline and this endpoint owns exactly one session-mode LISTEN connection.
  */
 export async function GET(request: Request) {
   const agent = await getSessionAgent();
   if (!agent) return new Response('unauthorised', { status: 401 });
 
+  const url = new URL(request.url);
+  // Missing means `all` for a zero-downtime deploy: a browser still running the
+  // previous client bundle calls `/api/events` without a query string.
+  const channel = parseQueueChannel(url.searchParams.get('channel'));
+  if (!channel) return new Response('unknown channel', { status: 400 });
+
+  const topics = queueTopicsForAgent(agent, channel);
+  if (!topics) return new Response('forbidden', { status: 403 });
+
+  const requestedConversationId = url.searchParams.get('conversationId');
+  if (requestedConversationId) {
+    const topic = conversationTopic(requestedConversationId);
+    if (!topic) return new Response('invalid conversation', { status: 400 });
+    if (!(await canSubscribeToConversation(agent, requestedConversationId))) {
+      return new Response('not found', { status: 404 });
+    }
+    topics.push(topic);
+  }
+
   const encoder = new TextEncoder();
   let listener: ReturnType<typeof sessionSql> | null = null;
   let heartbeat: ReturnType<typeof setInterval> | null = null;
+  let closed = false;
 
   const stream = new ReadableStream({
     async start(controller) {
       const send = (event: string, data: string) => {
+        if (closed) return;
         try {
           controller.enqueue(encoder.encode(`event: ${event}\ndata: ${data}\n\n`));
         } catch {
@@ -43,7 +58,12 @@ export async function GET(request: Request) {
 
       try {
         listener = sessionSql();
-        await listener.listen('conversation_changed', (payload) => send('conversation', payload));
+        // One session connection owns every topic for this view. Register them
+        // sequentially rather than pipelining LISTEN statements during the
+        // connection's own startup; this runs once per stream, not per event.
+        for (const topic of topics) {
+          await listener.listen(topic, () => send('conversation', '{}'));
+        }
         send('ready', '{}');
       } catch (error) {
         console.error('[sse] could not LISTEN', error);
@@ -52,54 +72,36 @@ export async function GET(request: Request) {
         send('degraded', '{}');
       }
 
-      // Presence is recorded after LISTEN rather than before, so a database that
-      // cannot be reached does not leave an agent marked online on a stream that
-      // carries nothing. Failures are swallowed: presence is a routing hint, and
-      // losing it must never cost the agent their live updates.
-      void goOnline(agent.id).catch((error) => {
-        console.error('[sse] could not record presence', error);
-      });
-
       // Proxies drop idle connections at around 60s; a comment line keeps the
-      // stream alive without being delivered as an event. It is also the
-      // heartbeat that assignment reads — an agent whose beat has gone stale is
-      // treated as gone whatever the presence column still says, which is what
-      // makes an instance killed mid-stream heal itself.
+      // stream alive without becoming an event or a route refresh.
       heartbeat = setInterval(() => {
+        if (closed) return;
         try {
           controller.enqueue(encoder.encode(': keepalive\n\n'));
         } catch {
           /* closed */
         }
-        void beat(agent.id).catch(() => {
-          /* the staleness check covers a missed beat */
-        });
       }, 25_000);
 
-      request.signal.addEventListener('abort', () => {
+      const cleanup = () => {
+        if (closed) return;
+        closed = true;
         if (heartbeat) clearInterval(heartbeat);
         void listener?.end();
-        void goOffline(agent.id).catch(() => {
-          /* the staleness check covers a missed sign-off */
-        });
         try {
           controller.close();
         } catch {
           /* already closed */
         }
-      });
+      };
+
+      request.signal.addEventListener('abort', cleanup);
     },
 
     cancel() {
+      closed = true;
       if (heartbeat) clearInterval(heartbeat);
       void listener?.end();
-      // Both teardown paths sign off. `cancel` fires when the consumer drops the
-      // stream, `abort` when the request is torn down; which one runs depends on
-      // the runtime, and an agent left marked online is one who keeps receiving
-      // tickets they cannot see.
-      void goOffline(agent.id).catch(() => {
-        /* the staleness check covers a missed sign-off */
-      });
     },
   });
 
