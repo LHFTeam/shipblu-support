@@ -432,9 +432,28 @@ body {
   background: var(--kb-bg);
   color: var(--kb-text);
   /* Lato for Latin, Tajawal for Arabic — the same pairing the live portal uses.
-     Lato carries no Arabic glyphs, so Arabic falls through to Tajawal by
-     itself; no `:lang()` rule is needed. */
+     Lato's own faces carry no Arabic, so Arabic falls through to Tajawal per
+     glyph and no `:lang()` rule is needed.
+
+     The two families are named before the variables that also contain them,
+     which reads like a mistake and is the whole fix. `--font-lato` is not one
+     family but `"Lato", "Lato Fallback"`, and that second face is Arial with
+     Lato's metrics and *no* `unicode-range` — so it answers for every
+     codepoint, Arabic included. Led with `var(--font-lato)`, it sat ahead of
+     Tajawal and every Arabic glyph on the site rendered in Arial on any machine
+     that has Arial, which is all of Windows and macOS. It looked right in
+     development only because a Linux container has none, so the face failed to
+     load and Arabic reached Tajawal by accident.
+
+     Naming `Lato` and `Tajawal` first gives each script its own typeface; the
+     variables then follow so the metric-matched fallbacks still apply while a
+     font is loading, which is the only thing they are good for. Repeating a
+     family in a stack is harmless — the browser takes the first entry that has
+     the glyph. Anything that covers every codepoint belongs after Tajawal, not
+     before it. */
   font-family:
+    Lato,
+    Tajawal,
     var(--font-lato),
     var(--font-tajawal),
     ui-sans-serif,

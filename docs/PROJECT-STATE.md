@@ -1084,6 +1084,26 @@ Each cost real time. Most are also comments in the code.
     same trap was live in the legacy Freshdesk redirect, where it mattered more:
     a 301 is cached indefinitely, so each visitor would have remembered the
     internal address rather than merely failing once.
+25. **A `next/font` variable is not one family, and its hidden half answers for
+    every script.** `adjustFontFallback` (on by default) emits a metric-matched
+    `local("Arial")` face — `Lato Fallback` — and splices it into the variable
+    right behind its own family, so `--font-lato` is `"Lato", "Lato Fallback"`.
+    That face declares no `unicode-range`, so it is a candidate for _every_
+    codepoint. With `var(--font-lato)` leading the help centre stack it sat
+    ahead of Tajawal, and every Arabic glyph on the Arabic-first site rendered
+    in Arial on any machine that has Arial — all of Windows and macOS. It looked
+    correct in development because a Linux container has no Arial, the face
+    errored, and Arabic reached Tajawal by accident: the bug was invisible
+    exactly where it would have been caught. **`adjustFontFallback: false` does
+    not fix it** — Turbopack, the bundler both `next dev` and `next build` use
+    here, accepts the option and ignores it (verified on 16.3.1 by renaming the
+    variable and watching the rename land in the served CSS while the fallback
+    stayed). The fix is ordering, in `.kb-shell`: name `Lato, Tajawal` before
+    the variables that also contain them. Anything covering every codepoint goes
+    after the script-specific family, never before it. Checking this needs
+    `CSS.getPlatformFontsForNode` over CDP — a computed `font-family` shows the
+    stack you asked for, never the font that painted — and, on Linux, a
+    `@font-face` override standing in for the Arial the container lacks.
 
 ## 7. Verification already done
 
