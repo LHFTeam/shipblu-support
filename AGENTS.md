@@ -237,6 +237,18 @@ where bugs actually hide — email threading order, quote stripping, the WhatsAp
 24-hour boundary, business hours across DST, Arabic slugs, the condition
 language — not on glue code. Add one when you fix a bug of that kind.
 
+**No database means no SQL is ever executed by the pre-push loop.** All four
+checks pass on a query Postgres will reject: `tsc` type-checks the Drizzle
+builder, not the statement it emits, and a raw `sql` fragment is a template
+string to every tool in the loop. `backfill_meta_profiles` shipped green and
+died on its first real run with `operator does not exist: text = channel` —
+`meta->>'platform'` is `text` and `contact_identities.channel` is an enum, and
+nothing local could have known. So anything with a raw `sql` fragment, a
+`->>`, a cast or a join across an enum gets **run against the real database
+before it is pushed**: `execute_sql` on the production project answers it in
+one call, and reading the row count back is also how you learn the predicate
+selects what you meant.
+
 Playwright (`npm run test:e2e`) exists but is not part of the pre-push loop.
 
 ## Tool use and live infrastructure

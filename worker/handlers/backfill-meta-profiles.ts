@@ -55,7 +55,14 @@ export async function backfillMetaProfiles(job: ClaimedJob): Promise<void> {
           eq(messages.fromAddress, contactIdentities.identifier),
           eq(messages.direction, 'inbound'),
           sql`${messages.meta}->>'metaKind' = 'direct_message'`,
-          sql`${messages.meta}->>'platform' = ${contactIdentities.channel}`,
+          // `::text` on the enum side, not a cast of the JSON side to `channel`.
+          // `->>` yields text and `contact_identities.channel` is an enum, so the
+          // comparison has no operator without one — `operator does not exist:
+          // text = channel`, which is a runtime failure the whole pre-push loop
+          // is blind to, since the tests here never touch a database. Casting the
+          // JSON to `channel` instead would throw on any value that is not a
+          // member of the enum, turning a stray payload into a failed run.
+          sql`${messages.meta}->>'platform' = ${contactIdentities.channel}::text`,
         ),
       ),
   );
