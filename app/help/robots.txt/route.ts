@@ -11,6 +11,10 @@ export async function GET() {
       'Allow: /',
       // Thin, infinite, and competing with the articles they link to.
       'Disallow: /*/search',
+      // Every useful URL here carries somebody's parcel number. The page also
+      // sends `noindex`; this is the half that keeps the number out of a
+      // crawler's logs rather than only out of its index.
+      'Disallow: /*/track',
       '',
       `Sitemap: ${base}/sitemap.xml`,
       '',

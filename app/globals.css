@@ -148,55 +148,195 @@ body {
    question and wants a page that reads like ShipBlu's — and a single token set
    stretched over both ends up serving neither.
 
-   The light values are the hex from the live Freshdesk portal theme, kept
-   verbatim rather than re-expressed in oklch. They are not a scale to step
-   through, they are the brand as customers already know it: matching them
-   exactly is the point, and a conversion that lands half a percent off in
-   lightness would only make the two sites look subtly unlike each other during
-   the cutover. The dark values are oklch, because those *are* a scale.
+   **The values are the ShipBlu design system's**, transcribed from its
+   `tokens/colors.css` and `tokens/shape.css`. They replace the hex lifted from
+   the live Freshdesk portal theme, which is what this file used to carry.
+
+   Two layers, deliberately. The design system's own primitives and semantic
+   names are declared first, verbatim, so that a token can be checked against the
+   system by reading it rather than by tracing a conversion. The `--kb-*` names
+   every page in `app/help/` already speaks are then pointed at them — so the
+   swap is one file, and a page that was written against `--kb-muted` keeps
+   working while meaning the design system's secondary text.
+
+   Dark stays on `prefers-color-scheme` rather than the system's
+   `[data-theme="dark"]`: this site has no theme switch, and inventing one to
+   match a selector would be the tail wagging the dog. The values inside it are
+   the system's dark block.
    ────────────────────────────────────────────────────────────────────────── */
 .kb-shell {
-  --kb-bg: #f5f7f9;
-  --kb-surface: #ffffff;
-  --kb-surface-2: #f5f7f9;
-  --kb-border: #ebeff3;
-  --kb-border-strong: #cfd7df;
+  /* ── Primitive · Blu (brand) ─────────────────────────────────────────── */
+  --blu-50: #eff4ff;
+  --blu-100: #dce6ff;
+  --blu-200: #bcceff;
+  --blu-300: #8fadff;
+  --blu-400: #5c86ff;
+  --blu-500: #1c5bfe;
+  --blu-600: #144ae0;
+  --blu-700: #0f3bb4;
+  --blu-800: #102f87;
+  --blu-900: #0f2a6b;
+  --blu-950: #0a1b45;
 
-  /* Two text colours on purpose: navy for anything structural — headings, nav,
-     breadcrumbs — and the deeper blue for article prose, which is what the
-     live portal sets on article bodies. */
-  --kb-heading: #12344d;
-  --kb-text: #0b2878;
-  --kb-muted: #264966;
+  /* ── Primitive · Neutral (charcoal-based, cool) ──────────────────────── */
+  --neutral-0: #ffffff;
+  --neutral-25: #fbfcfd;
+  --neutral-50: #f6f8fa;
+  --neutral-100: #edf0f4;
+  --neutral-200: #dfe4ea;
+  --neutral-300: #c7ced7;
+  --neutral-400: #9ba5b2;
+  --neutral-500: #6e7987;
+  --neutral-600: #515b68;
+  --neutral-700: #3a424d;
+  --neutral-800: #282e36;
+  --neutral-900: #1e1e1e;
+  --neutral-950: #131417;
 
-  --kb-link: #2c5cc5;
-  --kb-link-hover: #021519;
+  /* ── Primitive · Semantic hues ───────────────────────────────────────── */
+  --green-50: #e6f6ee;
+  --green-100: #c7ebda;
+  --green-500: #0e8a55;
+  --green-600: #0a6f44;
+  --green-700: #075332;
+  --amber-50: #fff4e5;
+  --amber-100: #ffe4bf;
+  --amber-500: #b26a00;
+  --amber-600: #8f5400;
+  --amber-700: #6b3f00;
+  --red-50: #fdecea;
+  --red-100: #fbd3ce;
+  --red-500: #d02b20;
+  --red-600: #aa2119;
+  --red-700: #7f1913;
+  --violet-50: #f1edff;
+  --violet-100: #ded5ff;
+  --violet-500: #5b3fd6;
+  --violet-600: #4a31b4;
 
-  /* The blue band behind the search on the home page and behind the title on
-     every inner page. One colour, full bleed, so a customer can tell at a
-     glance which page of the help centre they are on. */
-  --kb-band: #296dff;
-  --kb-band-text: #ffffff;
-  /* The band's colour at listing-card strength, for the icon tile in front of a
-     category or folder name. A flat tint rather than the band at low alpha, so
-     it reads the same over the white card and the grey page behind it, with the
-     `ink` that stays legible on top of it in both themes. */
-  --kb-band-soft: #e9f0ff;
-  --kb-band-ink: #1b5ce0;
+  /* ── Semantic ─────────────────────────────────────────────────────────
+     Only the roles this site actually renders. The system declares more —
+     pressed states, chart ramps, an overlay scrim — and copying names nothing
+     reads would make this block a place to look things up rather than the
+     description of one site's colours that it is. */
+  --color-background-canvas: var(--neutral-50);
+  --color-background-surface: var(--neutral-0);
+  --color-background-surface-sunken: var(--neutral-100);
+  --color-background-hover: var(--neutral-100);
+  --color-background-inverse: var(--neutral-900);
+  --color-background-brand-subtle: var(--blu-50);
 
-  --kb-footer: #12344d;
-  --kb-footer-text: #ffffff;
+  --color-text-primary: var(--neutral-900);
+  --color-text-secondary: var(--neutral-600);
+  --color-text-tertiary: var(--neutral-500);
+  --color-text-brand: var(--blu-600);
+  --color-text-link: var(--blu-600);
+  --color-text-link-hover: var(--blu-700);
+
+  --color-border-subtle: var(--neutral-200);
+  --color-border-default: var(--neutral-300);
+  --color-border-focus: var(--blu-500);
+
+  --color-action-primary-default: var(--blu-500);
+  --color-action-primary-hover: var(--blu-600);
+
+  --color-feedback-success-bg: var(--green-50);
+  --color-feedback-success-border: var(--green-100);
+  --color-feedback-success-fg: var(--green-600);
+  --color-feedback-warning-bg: var(--amber-50);
+  --color-feedback-warning-border: var(--amber-100);
+  --color-feedback-warning-fg: var(--amber-600);
+  --color-feedback-danger-bg: var(--red-50);
+  --color-feedback-danger-border: var(--red-100);
+  --color-feedback-danger-fg: var(--red-600);
+  --color-feedback-info-bg: var(--blu-50);
+  --color-feedback-info-border: var(--blu-100);
+  --color-feedback-info-fg: var(--blu-700);
+  --color-feedback-neutral-bg: var(--neutral-100);
+  --color-feedback-neutral-border: var(--neutral-200);
+  --color-feedback-neutral-fg: var(--neutral-700);
+
+  --elevation-card: 0 1px 3px rgba(19, 20, 23, 0.07), 0 1px 2px -1px rgba(19, 20, 23, 0.05);
+
+  /* ── Semantic · Logistics status ──────────────────────────────────────
+     The design system's canonical taxonomy, and the reason the tracking page
+     is worth having its badge read from tokens at all: `out for delivery` gets
+     violet of its own rather than sharing blue with `in transit`, which is
+     precisely the distinction a recipient checking their phone cares about.
+
+     Expressed through the feedback roles above wherever the two agree, so the
+     dark block below only has to restate feedback and these follow. Violet and
+     the neutral pair are the exceptions — the system ships no dark value for
+     either, so both are stated in full in both themes. */
+  --color-status-in-transit-bg: var(--color-feedback-info-bg);
+  --color-status-in-transit-fg: var(--color-feedback-info-fg);
+  --color-status-out-for-delivery-bg: var(--violet-50);
+  --color-status-out-for-delivery-fg: var(--violet-600);
+  --color-status-delivered-bg: var(--color-feedback-success-bg);
+  --color-status-delivered-fg: var(--color-feedback-success-fg);
+  --color-status-attempted-bg: var(--color-feedback-warning-bg);
+  --color-status-attempted-fg: var(--color-feedback-warning-fg);
+  --color-status-returned-bg: var(--amber-50);
+  --color-status-returned-fg: var(--amber-700);
+  --color-status-exception-bg: var(--color-feedback-danger-bg);
+  --color-status-exception-fg: var(--color-feedback-danger-fg);
+  --color-status-unknown-bg: var(--color-feedback-neutral-bg);
+  --color-status-unknown-fg: var(--color-feedback-neutral-fg);
+
+  /* ── The names this site's pages speak ────────────────────────────────
+     Everything under `app/help/` was written against these, so they stay. What
+     changed is what they point at. */
+  --kb-bg: var(--color-background-canvas);
+  --kb-surface: var(--color-background-surface);
+  --kb-surface-2: var(--color-background-surface-sunken);
+  --kb-border: var(--color-border-subtle);
+  --kb-border-strong: var(--color-border-default);
+
+  /* One text colour where the Freshdesk theme had two. Its structural navy and
+     its deeper blue for article prose were that portal's, and the design system
+     is explicit that charcoal is text and blue is the action colour and almost
+     nothing else — so prose in a third blue would be the one thing it asks a
+     page not to do. */
+  --kb-heading: var(--color-text-primary);
+  --kb-text: var(--color-text-primary);
+  --kb-muted: var(--color-text-secondary);
+
+  --kb-link: var(--color-text-link);
+  --kb-link-hover: var(--color-text-link-hover);
+
+  /* The band behind the title on every page below the front door.
+
+     Kept, and recoloured rather than removed, which is a compromise worth
+     naming: the design system says blue is never a page background outside an
+     auth or marketing panel. The redesign that brought this palette in only
+     covered the front page, and the front page no longer wears a band — it has
+     the pale hero instead. Restyling the other four page types is a change to
+     their layout, not to their colours, and it is not this one. */
+  --kb-band: var(--color-action-primary-default);
+  /* Not the system's `--color-text-inverse`, which means "text on whatever the
+     inverse surface currently is" and therefore goes *dark* in the dark theme.
+     The band and the footer are dark in both themes, so their text is light in
+     both, and borrowing a token that flips would put charcoal on navy. */
+  --kb-band-text: var(--neutral-0);
+  /* The brand at card strength: the icon tile in front of a category name, the
+     tint behind a stepper's completed run. A flat tint rather than the band at
+     low alpha, so it reads the same over a white card and the grey page. */
+  --kb-band-soft: var(--color-background-brand-subtle);
+  --kb-band-ink: var(--color-text-brand);
+
+  --kb-footer: var(--color-background-inverse);
+  --kb-footer-text: var(--neutral-0);
 
   /* Article feedback. Green and red carry the answer, so the two buttons stay
      distinguishable when they are the only thing on screen. */
-  --kb-yes: #005c3f;
-  --kb-no: #c82124;
+  --kb-yes: var(--color-feedback-success-fg);
+  --kb-no: var(--color-feedback-danger-fg);
 
-  --kb-shadow: 0 6px 19px rgba(39, 49, 58, 0.1);
+  --kb-shadow: var(--elevation-card);
 
-  /* The help centre's own focus colour, so the ring reads as part of this site
-     rather than of the console. */
-  --ring: var(--kb-band);
+  /* The system's focus colour, so the ring reads as part of this site rather
+     than of the console. */
+  --ring: var(--color-border-focus);
 
   /* The console's own token names, re-pointed at the help centre's palette.
      `components/ui` — the Button, Input and Badge the sign-in forms and the
@@ -213,45 +353,78 @@ body {
   --border: var(--kb-border);
   --border-strong: var(--kb-border-strong);
 
-  /* Navy, as on the live portal, and used for every filled button here so that
-     one means the same thing on every page. The dark theme swaps it for the band
-     blue: this navy against a near-black page is a button nobody can see. */
-  --button-primary: #12344d;
-  --button-primary-hover: #0a2438;
+  /* Blu-500, not the portal's navy. The design system gives the action colour
+     exactly one job and this is it, so every filled button on the site is the
+     same blue and nothing else is. */
+  --button-primary: var(--color-action-primary-default);
+  --button-primary-hover: var(--color-action-primary-hover);
 }
 
-/* The live portal is light-only. A reader who has asked their operating system
-   for a dark interface has still asked for it here, so the same roles are
-   re-stepped for a dark surface rather than the preference being ignored. */
+/* The live portal is light-only, and the design system's dark theme is for
+   "operational night shifts and hub screens" rather than for this. A reader who
+   has asked their operating system for a dark interface has still asked for it
+   here, so the system's dark values are used, under the media query this site
+   already answers.
+
+   Only the semantic layer is restated. The primitives above are a fixed scale —
+   the same #1C5BFE in both themes — and the roles are what move across it. */
 @media (prefers-color-scheme: dark) {
   .kb-shell {
-    --kb-bg: oklch(0.17 0.012 255);
-    --kb-surface: oklch(0.21 0.014 255);
-    --kb-surface-2: oklch(0.24 0.015 255);
-    --kb-border: oklch(0.31 0.014 255);
-    --kb-border-strong: oklch(0.42 0.016 255);
+    --color-background-canvas: var(--neutral-950);
+    --color-background-surface: #1a1c20;
+    --color-background-surface-sunken: #101114;
+    --color-background-hover: #25282e;
+    --color-background-inverse: #101114;
+    --color-background-brand-subtle: #132048;
 
-    --kb-heading: oklch(0.97 0.005 250);
-    --kb-text: oklch(0.93 0.008 250);
-    --kb-muted: oklch(0.75 0.012 250);
+    --color-text-primary: #f3f5f8;
+    --color-text-secondary: #a9b2be;
+    --color-text-tertiary: #8a939f;
+    --color-text-brand: var(--blu-300);
+    --color-text-link: var(--blu-300);
+    --color-text-link-hover: var(--blu-200);
 
-    --kb-link: oklch(0.79 0.09 252);
-    --kb-link-hover: oklch(0.89 0.06 252);
+    --color-border-subtle: #2b2f36;
+    --color-border-default: #3a414a;
 
-    /* The band darkens: #296dff behind white text is comfortable on a white
-       page and glaring against a dark one. */
-    --kb-band: oklch(0.44 0.16 262);
-    --kb-band-soft: oklch(0.31 0.06 262);
-    --kb-band-ink: oklch(0.83 0.09 255);
-    --kb-footer: oklch(0.15 0.014 258);
+    --color-action-primary-hover: var(--blu-400);
 
-    --kb-yes: oklch(0.78 0.13 155);
-    --kb-no: oklch(0.76 0.15 25);
+    --color-feedback-success-bg: #0e2a20;
+    --color-feedback-success-border: #1b4635;
+    --color-feedback-success-fg: #5cc79a;
+    --color-feedback-warning-bg: #2e2109;
+    --color-feedback-warning-border: #4b3813;
+    --color-feedback-warning-fg: #e9a73e;
+    --color-feedback-danger-bg: #2e1512;
+    --color-feedback-danger-border: #4c221d;
+    --color-feedback-danger-fg: #f08379;
+    --color-feedback-info-bg: #101f4a;
+    --color-feedback-info-border: #1b3170;
+    --color-feedback-info-fg: #8fadff;
+    --color-feedback-neutral-bg: #25282e;
+    --color-feedback-neutral-border: #3a414a;
+    --color-feedback-neutral-fg: #a9b2be;
 
-    --button-primary: oklch(0.5 0.17 260);
-    --button-primary-hover: oklch(0.57 0.17 260);
+    --elevation-card: 0 1px 3px rgba(0, 0, 0, 0.5);
 
-    --kb-shadow: 0 6px 19px rgb(0 0 0 / 0.35);
+    /* The two the system leaves undefined for dark. Violet at the same
+       lightness its own dark feedback pairs sit at, so the status row does not
+       have one badge glowing brighter than the rest. */
+    --color-status-out-for-delivery-bg: #1e1747;
+    --color-status-out-for-delivery-fg: #b9a8ff;
+    --color-status-returned-bg: var(--color-feedback-warning-bg);
+    --color-status-returned-fg: var(--color-feedback-warning-fg);
+
+    /* The band darkens with the page: blu-500 behind white text is comfortable
+       on a white page and glaring against a near-black one. Pure white softens
+       to the system's own dark-theme primary for the same reason. */
+    --kb-band: var(--blu-700);
+    --kb-band-text: #f3f5f8;
+    --kb-footer: var(--color-background-inverse);
+    --kb-footer-text: #f3f5f8;
+
+    --button-primary: var(--blu-600);
+    --button-primary-hover: var(--blu-500);
   }
 }
 

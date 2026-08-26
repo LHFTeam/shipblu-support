@@ -45,8 +45,22 @@ function prune(now: number): void {
   }
 }
 
-/** Best-effort client address behind Render's proxy. */
+/**
+ * Best-effort client address behind Render's proxy.
+ *
+ * Typed on the one method it uses rather than on `Request`, so a server
+ * component can pass `await headers()` — Next's `ReadonlyHeaders` is not a
+ * `Headers` and has no request to reach for, and the tracking page is a page
+ * rather than a route handler. Copying four lines into it instead is how the
+ * two ways of reading a client address drift apart.
+ */
+type HeaderSource = { get(name: string): string | null };
+
+export function clientIpFrom(headers: HeaderSource): string {
+  const forwarded = headers.get('x-forwarded-for');
+  return forwarded?.split(',')[0]?.trim() || headers.get('x-real-ip') || 'unknown';
+}
+
 export function clientIp(request: Request): string {
-  const forwarded = request.headers.get('x-forwarded-for');
-  return forwarded?.split(',')[0]?.trim() || request.headers.get('x-real-ip') || 'unknown';
+  return clientIpFrom(request.headers);
 }

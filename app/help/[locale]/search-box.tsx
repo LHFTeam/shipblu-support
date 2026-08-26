@@ -18,12 +18,20 @@ export function SearchBox({
   initial = '',
   size = 'compact',
   id = 'kb-search',
+  placeholderKey = 'searchPlaceholder',
 }: {
   locale: Locale;
   initial?: string;
   /** `hero` is the front-door field; `compact` is the one in the page header. */
   size?: 'compact' | 'hero';
   id?: string;
+  /**
+   * Which placeholder to show. The front page has room for one that names an
+   * example question, which is worth far more than "Search…" at teaching a
+   * visitor what this box will accept; the field in a page header does not, and
+   * a placeholder that truncates mid-example teaches nothing.
+   */
+  placeholderKey?: 'searchPlaceholder' | 'searchPlaceholderHero';
 }) {
   const hero = size === 'hero';
 
@@ -39,7 +47,7 @@ export function SearchBox({
         name="q"
         defaultValue={initial}
         required
-        placeholder={t(locale, 'searchPlaceholder')}
+        placeholder={t(locale, placeholderKey)}
         /* 16px on the hero field: iOS Safari zooms into anything smaller when it
            takes focus, and it does not zoom back out. */
         className={`w-full rounded-lg border border-[var(--kb-border-strong)] bg-[var(--kb-surface)] text-[var(--kb-heading)] shadow-sm outline-none placeholder:text-[var(--kb-muted)]/70 focus:border-[var(--kb-band)] ${

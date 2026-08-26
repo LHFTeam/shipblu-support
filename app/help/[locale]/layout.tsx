@@ -7,6 +7,7 @@ import { publicBaseUrl } from '@/lib/kb/site';
 import { AccountNav } from './account-nav';
 import { ChatWidget } from './chat';
 import { Container } from './chrome';
+import { ServiceNoticeBanner } from './notice';
 import { lato, tajawal } from './fonts';
 
 export const dynamic = 'force-dynamic';
@@ -73,6 +74,20 @@ export default async function KbLayout({
               {t(locale, 'knowledgeBase')}
             </Link>
 
+            {/*
+              Tracking sits in the header rather than only on the front page,
+              because the visitor who wants it most is the one who arrived on an
+              article from a search engine and still does not know where their
+              parcel is. Shown at every width, unlike the link above it: on a
+              phone it is the more likely of the two.
+            */}
+            <Link
+              href={`/${locale}/track`}
+              className="font-medium text-[var(--kb-heading)] underline-offset-4 hover:underline"
+            >
+              {t(locale, 'trackTitle')}
+            </Link>
+
             <LocaleSwitcher locale={locale} />
 
             <AccountNav locale={locale} />
@@ -86,6 +101,13 @@ export default async function KbLayout({
           </nav>
         </Container>
       </header>
+
+      {/*
+        Above the content and below the header, so it is read before whatever
+        the visitor came for and does not move when they scroll. Renders nothing
+        unless a notice has been written.
+      */}
+      <ServiceNoticeBanner locale={locale} />
 
       {/*
         `tabIndex` so the skip link can move focus here, not merely scroll to it —

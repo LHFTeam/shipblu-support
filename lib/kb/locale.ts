@@ -43,8 +43,18 @@ const STRINGS = {
     breadcrumb: 'Breadcrumb',
     skipToContent: 'Skip to main content',
     language: 'Language',
-    heroHeading: 'Hi, how can we help you?',
+    noticeLabel: 'Service notice',
+    noticeMore: 'Read the update',
+    heroEyebrow: 'Help centre',
+    heroHeading: 'How can we help?',
+    heroIntro:
+      'Search for answers on shipments, pickups, returns and settlement. Most questions are answered here in under a minute.',
+    searchPlaceholderHero: 'Search for an answer — e.g. “change a pickup address”',
+    commonSearches: 'Common searches',
     browseTopics: 'Browse by topic',
+    allArticles: 'All articles ({n})',
+    mostRead: 'Most read',
+    recentlyUpdated: 'Recently updated',
     inThisFolder: 'Articles in this folder',
     viewAll: 'View all',
     print: 'Print',
@@ -61,6 +71,39 @@ const STRINGS = {
     emptyCategory: 'Nothing published here yet.',
     contactPrompt: 'Still need help?',
     contactAction: 'Contact support',
+    contactIntro:
+      'Have your tracking number or shipping account number to hand — it gets you to an answer faster.',
+    supportOpen: 'Support is answering now.',
+    supportClosed: 'Support is closed right now. Send it anyway — it is answered when we open.',
+    supportOpensAt: 'Support opens again {when}.',
+    channelTicketDetail: 'Describe the problem and attach photos.',
+    channelTicketSla: 'Tracked, with a reference number',
+    channelEmailSla: 'Answered within one business day',
+    channelTicketsDetail: 'Follow up on something you have already sent.',
+    channelTicketsSla: 'Every ticket you have raised, on any channel',
+
+    // --- Tracking a shipment ---------------------------------------------
+    trackTitle: 'Track a shipment',
+    trackIntro: 'Expecting a parcel? Enter its tracking number for the latest status.',
+    trackNumber: 'Tracking number',
+    trackAction: 'Track shipment',
+    trackHint: 'The tracking number is on your label, and in the SMS and email ShipBlu sent you.',
+    trackAnother: 'Track another shipment',
+    trackPrompt: 'Enter a tracking number to see where a parcel has got to.',
+    trackNoStatusTitle: 'No delivery status for this number yet',
+    trackNoStatus:
+      'Check the tracking number and try again. If it is right, ShipBlu support can look the shipment up on the shipping platform and tell you where it has got to.',
+    trackThrottled: 'Too many lookups from this connection. Try again in a minute.',
+    trackLastUpdate: 'Last update',
+    trackNoTimestamp: 'No time recorded for this update',
+    trackAnswers: 'Answers for this status',
+    trackAskSupport: 'Ask support about this shipment',
+    trackPrivacyNote:
+      'Anyone with this tracking number can see its status, so this page never shows a name, an address or a phone number.',
+    trackStepPickedUp: 'Picked up',
+    trackStepInTransit: 'In transit',
+    trackStepOutForDelivery: 'Out for delivery',
+    trackStepDelivered: 'Delivered',
     send: 'Send',
     feedbackPlaceholder: 'What were you looking for?',
     notFound: 'That page does not exist.',
@@ -150,8 +193,18 @@ const STRINGS = {
     breadcrumb: 'مسار التنقل',
     skipToContent: 'الانتقال إلى المحتوى الرئيسي',
     language: 'اللغة',
-    heroHeading: 'مرحبًا، كيف يمكننا مساعدتك؟',
+    noticeLabel: 'إشعار خدمة',
+    noticeMore: 'اقرأ التفاصيل',
+    heroEyebrow: 'مركز المساعدة',
+    heroHeading: 'كيف يمكننا مساعدتك؟',
+    heroIntro:
+      'ابحث عن إجابات حول الشحنات والاستلام والمرتجعات والتحصيل. أغلب الأسئلة تجد إجابتها هنا في أقل من دقيقة.',
+    searchPlaceholderHero: 'ابحث عن إجابة — مثل «تغيير عنوان الاستلام»',
+    commonSearches: 'الأكثر بحثًا',
     browseTopics: 'تصفّح حسب الموضوع',
+    allArticles: 'كل المقالات ({n})',
+    mostRead: 'الأكثر قراءة',
+    recentlyUpdated: 'آخر ما تم تحديثه',
     inThisFolder: 'مقالات في هذا المجلد',
     viewAll: 'عرض الكل',
     print: 'طباعة',
@@ -168,6 +221,39 @@ const STRINGS = {
     emptyCategory: 'لا يوجد محتوى منشور هنا بعد.',
     contactPrompt: 'ما زلت بحاجة إلى مساعدة؟',
     contactAction: 'تواصل مع الدعم',
+    contactIntro: 'جهّز رقم تتبّع الشحنة أو رقم حساب الشحن — يوصلك ذلك إلى إجابة أسرع.',
+    supportOpen: 'الدعم يرد على الرسائل الآن.',
+    supportClosed: 'الدعم مغلق الآن. أرسل طلبك على أي حال — سيُرد عليه فور فتحنا.',
+    supportOpensAt: 'يفتح الدعم مرة أخرى {when}.',
+    channelTicketDetail: 'اشرح المشكلة وأرفق الصور.',
+    channelTicketSla: 'يُتابَع برقم مرجعي',
+    channelEmailSla: 'الرد خلال يوم عمل واحد',
+    channelTicketsDetail: 'تابع طلبًا سبق أن أرسلته.',
+    channelTicketsSla: 'كل ما راسلت به الدعم، من أي قناة',
+
+    // --- Tracking a shipment ---------------------------------------------
+    trackTitle: 'تتبّع شحنة',
+    trackIntro: 'تنتظر شحنة؟ أدخل رقم التتبّع لمعرفة آخر حالة لها.',
+    trackNumber: 'رقم التتبّع',
+    trackAction: 'تتبّع الشحنة',
+    trackHint:
+      'ستجد رقم التتبّع على البوليصة، وفي الرسالة النصية والبريد المرسلين إليك من شيب بلو.',
+    trackAnother: 'تتبّع شحنة أخرى',
+    trackPrompt: 'أدخل رقم التتبّع لمعرفة أين وصلت الشحنة.',
+    trackNoStatusTitle: 'لا توجد حالة تسليم لهذا الرقم بعد',
+    trackNoStatus:
+      'راجع رقم التتبّع وحاول مرة أخرى. إذا كان الرقم صحيحًا فيستطيع دعم شيب بلو البحث عن الشحنة على منصة الشحن وإخبارك بمكانها.',
+    trackThrottled: 'محاولات بحث كثيرة من هذا الاتصال. حاول مرة أخرى بعد دقيقة.',
+    trackLastUpdate: 'آخر تحديث',
+    trackNoTimestamp: 'لم يُسجَّل وقت لهذا التحديث',
+    trackAnswers: 'إجابات لهذه الحالة',
+    trackAskSupport: 'اسأل الدعم عن هذه الشحنة',
+    trackPrivacyNote:
+      'أي شخص يملك رقم التتبّع يستطيع رؤية حالة الشحنة، لذلك لا تعرض هذه الصفحة اسمًا أو عنوانًا أو رقم هاتف.',
+    trackStepPickedUp: 'تم الاستلام',
+    trackStepInTransit: 'في الطريق',
+    trackStepOutForDelivery: 'خرجت للتسليم',
+    trackStepDelivered: 'تم التسليم',
     send: 'إرسال',
     feedbackPlaceholder: 'عمّ كنت تبحث؟',
     notFound: 'هذه الصفحة غير موجودة.',
@@ -256,6 +342,18 @@ export function t(locale: Locale, key: StringKey): string {
 }
 
 /**
+ * A string with a `{n}` in it, filled in with the reader's own numerals.
+ *
+ * Only for counts whose noun does not have to agree with the number — the
+ * parenthesised form in `allArticles` is written that way precisely so it does
+ * not. Anything where Arabic would need `مقالان` rather than `مقالات` goes
+ * through `articleCount` and its plural rules instead.
+ */
+export function tCount(locale: Locale, key: StringKey, count: number): string {
+  return t(locale, key).replace('{n}', formatCount(locale, count));
+}
+
+/**
  * Digits in the reader's own numerals.
  *
  * Arabic-Indic digits in Arabic, Latin in English. A count rendered with
@@ -291,6 +389,24 @@ export function articleCount(locale: Locale, count: number): string {
   const rule = new Intl.PluralRules(locale === 'ar' ? 'ar-EG' : 'en-GB').select(count);
   const template = forms[rule] ?? forms.other!;
   return template.replace('{n}', formatCount(locale, count));
+}
+
+/**
+ * A date *and* a clock time, for a delivery update.
+ *
+ * Latin digits even in Arabic, unlike `formatArticleDate` above and for the same
+ * reason `formatOpening` forces them: this timestamp is printed beside a tracking
+ * number, which is a Latin identifier whatever the page's language. `٢٤ أغسطس ·
+ * ١٦:٠٤` next to `SB4820119` reads as two alphabets for the same idea, and
+ * Egyptian screens — prices, phone numbers, the parcel numbers themselves — are
+ * written in Latin digits.
+ */
+export function formatTimestamp(locale: Locale, value: Date | string): string {
+  return new Intl.DateTimeFormat(locale === 'ar' ? 'ar-EG-u-nu-latn' : 'en-GB', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'Africa/Cairo',
+  }).format(new Date(value));
 }
 
 /** Dates render in the reader's locale but always in ShipBlu's timezone. */

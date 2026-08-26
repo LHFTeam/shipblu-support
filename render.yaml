@@ -134,6 +134,23 @@ projects:
               #   KB_PUBLIC_HOST           host the help centre answers on
               #   WIDGET_ALLOWED_ORIGINS   origins allowed to frame the widget
               #
+              #   KB_NOTICE_EN             service notice, English
+              #   KB_NOTICE_AR             service notice, Arabic
+              #   KB_NOTICE_HREF           optional "read the update" link
+              #   KB_NOTICE_TONE           info | warning | danger
+              #
+              # The notice keys are dashboard-owned rather than declared here
+              # because their whole point is that ops can put a delay warning in
+              # front of every customer without opening a pull request. Unset is
+              # no banner, so leaving them empty is the resting state rather
+              # than a misconfiguration — and an operational claim about the
+              # network has to be one somebody actually made, which is why there
+              # is no default text to go stale.
+              #
+              # They are here and not in shipblu-shared for the same reason the
+              # Meta credentials are: a notice set once would otherwise appear
+              # on staging too, long after production's outage ended.
+              #
               # The Meta credentials are one set for three channels, because one
               # Meta app serves WhatsApp, Messenger and Instagram. There used to
               # be a WHATSAPP_ACCESS_TOKEN, WHATSAPP_APP_SECRET and

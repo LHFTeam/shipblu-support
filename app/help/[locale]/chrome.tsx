@@ -105,39 +105,45 @@ function BreadcrumbSchema({ items }: { items: Crumb[] }) {
 }
 
 /**
- * The blue band. Behind the search on the front page, behind the title
- * everywhere else.
+ * The band behind the title of every page below the front door.
  *
  * `container-fluid` in Freshdesk's markup, and the same idea here: the colour
  * runs the full width of the viewport while the text inside stays on the
  * content column.
+ *
+ * Two tones, and the split is a migration rather than a choice a page gets to
+ * make on taste. `solid` is the saturated blue this site has always worn.
+ * `subtle` is the design system's answer, and the system is explicit that blue
+ * is the action colour and never a page background outside an auth or marketing
+ * panel — a full-bleed blu-500 slab with a title on it is the loudest thing on
+ * the page and says nothing.
+ *
+ * The redesign that brought the system's palette in covered the front page and
+ * the tracking page, so those two are on `subtle`; the front page does not use
+ * this at all, having its own hero. Everything else still wears the band, and
+ * moving it is a change to those pages' layout rather than to their colours —
+ * which is the work this is waiting for, not an argument against it.
  */
-function Band({ className = '', children }: { className?: string; children: ReactNode }) {
+type BandTone = 'solid' | 'subtle';
+
+const BAND_TONE: Record<BandTone, string> = {
+  solid: 'bg-[var(--kb-band)] text-[var(--kb-band-text)]',
+  subtle: 'bg-[var(--kb-band-soft)] text-[var(--kb-heading)] border-b border-[var(--kb-border)]',
+};
+
+function Band({
+  tone = 'solid',
+  className = '',
+  children,
+}: {
+  tone?: BandTone;
+  className?: string;
+  children: ReactNode;
+}) {
   return (
-    <div className={`bg-[var(--kb-band)] text-[var(--kb-band-text)] ${className}`}>
+    <div className={`${BAND_TONE[tone]} ${className}`}>
       <Container>{children}</Container>
     </div>
-  );
-}
-
-/**
- * The front door: one question, one search field, nothing else.
- *
- * The field is the largest thing on the page on purpose. Most people arrive at
- * a help centre with a phrase in mind rather than a category, and every study of
- * these sites says the same thing — they search first and browse only when
- * search fails them.
- */
-export function Hero({ locale }: { locale: Locale }) {
-  return (
-    <Band className="py-12 sm:py-16">
-      <div className="mx-auto max-w-2xl text-center">
-        <h1 className="text-2xl font-bold sm:text-3xl">{t(locale, 'heroHeading')}</h1>
-        <div className="mt-6">
-          <SearchBox locale={locale} size="hero" />
-        </div>
-      </div>
-    </Band>
   );
 }
 
@@ -158,6 +164,7 @@ export function PageHeader({
   meta,
   search = true,
   searchInitial,
+  tone = 'solid',
 }: {
   locale: Locale;
   /** Ancestors, nearest last. The current page is added for structured data. */
@@ -171,6 +178,8 @@ export function PageHeader({
   /** Pre-fills the field. The results page seeds it so a near miss can be edited
       rather than retyped. */
   searchInitial?: string;
+  /** See `Band`: `subtle` is the design system's, `solid` is what is still here. */
+  tone?: BandTone;
 }) {
   return (
     <>
@@ -187,12 +196,24 @@ export function PageHeader({
         </Container>
       </div>
 
-      <Band className="py-7 lg:py-12">
+      <Band tone={tone} className={tone === 'subtle' ? 'py-8 lg:py-10' : 'py-7 lg:py-12'}>
         <div className="flex items-start gap-3">
-          {icon ? <span className="mt-0.5 shrink-0 opacity-90">{icon}</span> : null}
+          {icon ? (
+            <span
+              className={`mt-0.5 shrink-0 ${tone === 'subtle' ? 'text-[var(--kb-band-ink)]' : 'opacity-90'}`}
+            >
+              {icon}
+            </span>
+          ) : null}
           <div className="min-w-0">
             <h1 className="text-2xl font-bold break-words sm:text-3xl">{title}</h1>
-            {meta ? <div className="mt-1.5 text-sm opacity-80">{meta}</div> : null}
+            {meta ? (
+              <div
+                className={`mt-1.5 text-sm ${tone === 'subtle' ? 'text-[var(--kb-muted)]' : 'opacity-80'}`}
+              >
+                {meta}
+              </div>
+            ) : null}
           </div>
         </div>
       </Band>
@@ -313,9 +334,24 @@ export function ArticleList({ children }: { children: ReactNode }) {
   );
 }
 
-/** The label above a grid or a list, one step under the page's `h1`. */
-export function SectionHeading({ children }: { children: ReactNode }) {
-  return <h2 className="mb-4 text-lg font-semibold text-[var(--kb-heading)]">{children}</h2>;
+/**
+ * The label above a grid or a list, one step under the page's `h1`.
+ *
+ * `meta` sits on the same baseline rather than under the heading — a count or a
+ * date is an attribute of the section, and putting it on its own line makes the
+ * reader parse it as the section's first item.
+ */
+export function SectionHeading({ children, meta }: { children: ReactNode; meta?: ReactNode }) {
+  if (!meta) {
+    return <h2 className="mb-4 text-lg font-semibold text-[var(--kb-heading)]">{children}</h2>;
+  }
+
+  return (
+    <div className="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+      <h2 className="text-lg font-semibold text-[var(--kb-heading)]">{children}</h2>
+      <span className="text-sm text-[var(--kb-muted)]">{meta}</span>
+    </div>
+  );
 }
 
 /** Nothing here yet — said once, in a card, so the page still looks finished. */
