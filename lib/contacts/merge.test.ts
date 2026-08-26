@@ -7,6 +7,7 @@ function side(overrides: Partial<MergeSide> = {}): MergeSide {
     name: null,
     primaryEmail: null,
     primaryPhone: null,
+    avatarPath: null,
     companyId: null,
     timezone: null,
     locale: 'en',

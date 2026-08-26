@@ -69,6 +69,65 @@ function isUnspecified(error: MetaApiError): boolean {
   return error.code === null || UNSPECIFIED_CODES.has(error.code);
 }
 
+// --- Profile lookups --------------------------------------------------------
+
+/**
+ * How Graph refuses a profile read the app is not approved for.
+ *
+ *   100/33  "Unsupported get request. Object with ID … does not exist, cannot
+ *           be loaded due to missing permissions, or does not support this
+ *           operation." The usual answer, and note what it conflates: a
+ *           deleted user and an unapproved app produce the identical sentence.
+ *   200     "Permissions error" — the explicit form.
+ *   10      "Application does not have permission for this action" on a GET.
+ *           The same number means "outside the messaging window" on a send,
+ *           which is why this set is scoped to profile reads and not shared
+ *           with `explainMetaSendError` above.
+ */
+const PROFILE_PERMISSION_CODES = new Set([10, 200]);
+const UNSUPPORTED_GET_CODE = 100;
+const UNSUPPORTED_GET_SUBCODE = 33;
+
+export function isProfilePermissionRefusal(error: MetaApiError): boolean {
+  if (error.code === null) return false;
+  if (PROFILE_PERMISSION_CODES.has(error.code)) return true;
+
+  return error.code === UNSUPPORTED_GET_CODE && error.subcode === UNSUPPORTED_GET_SUBCODE;
+}
+
+/**
+ * What to write in the worker log when a profile lookup fails.
+ *
+ * The refusal that matters is indistinguishable from the harmless one by its
+ * sentence alone, and it fails for *every* customer rather than for one — so an
+ * unapproved app looks exactly like a run of private profiles unless something
+ * says so out loud. This is the sentence that was missing when the Human Agent
+ * feature turned out never to have been approved (`docs/PROJECT-STATE.md` §5.2);
+ * the diagnosis cost eight failed sends and a guess.
+ */
+export function explainMetaProfileError(error: MetaApiError, platform: MetaPlatform): string {
+  const base = error.userMessage ?? error.message;
+
+  if (error.code === ACCESS_TOKEN_CODE)
+    return withReference(explainAuthError(error.code, base), error);
+
+  if (isProfilePermissionRefusal(error)) {
+    const product = platform === 'instagram' ? 'Instagram' : 'Messenger';
+
+    return withReference(
+      `${base}\n\nGraph refused a ${product} profile read. It answers this way both when the ` +
+        `person is gone and when the app is not approved for **Business Asset User Profile ` +
+        `Access**, and the two are not distinguishable from the message — so check that feature ` +
+        `under App Review for the Meta app before assuming it is the customer. If it is not ` +
+        `granted, every ${product} ticket stays filed under a bare numeric id, which is what ` +
+        `this call exists to prevent.`,
+      error,
+    );
+  }
+
+  return withReference(base, error);
+}
+
 /** Graph answered. A status of 0 with no code means the request never got there. */
 function cameFromGraph(error: MetaApiError): boolean {
   return error.status !== 0 || error.code !== null;

@@ -50,6 +50,23 @@ export const contacts = pgTable(
     primaryEmail: text('primary_email'),
     primaryPhone: text('primary_phone'),
 
+    /**
+     * Storage key for the customer's profile picture, or null when we have
+     * never been given one.
+     *
+     * A key rather than a URL. Meta hands over `profile_pic` as a signed CDN
+     * link that expires, so a stored URL is a broken image on a timer — the same
+     * reason `download_media` copies attachments the moment they arrive. The
+     * bytes are copied into our own bucket and served through
+     * `/api/contacts/[id]/avatar`, which mints a short-lived signed URL per view
+     * because the bucket is private and stays that way.
+     *
+     * A cache of whatever channel last told us, not an identity: it is display
+     * only, nothing keys off it, and a contact with several channels simply
+     * shows the most recent picture any of them supplied.
+     */
+    avatarPath: text('avatar_path'),
+
     companyId: uuid('company_id').references(() => companies.id, { onDelete: 'set null' }),
 
     timezone: text('timezone'),
@@ -195,6 +212,19 @@ export const contactIdentities = pgTable(
 
     /** Display name as reported by the channel, e.g. the WhatsApp profile name. */
     displayName: text('display_name'),
+
+    /**
+     * When a channel's profile API last answered for this identity — successfully
+     * or with "this person has no name to give".
+     *
+     * Only Facebook and Instagram set it. WhatsApp carries the profile name in
+     * the webhook itself and email has no profile to ask for, so neither has
+     * anything to look up. It exists because "we have no name" and "we have not
+     * asked" are different states and only the second is worth a Graph call: a
+     * customer who has locked their profile down would otherwise be re-fetched
+     * on every message they ever send.
+     */
+    profileFetchedAt: timestamp('profile_fetched_at', { withTimezone: true }),
 
     /** True once the customer has proven control (clicked a verification link). */
     isVerified: boolean('is_verified').notNull().default(false),

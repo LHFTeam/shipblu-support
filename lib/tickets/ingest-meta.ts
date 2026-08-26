@@ -48,11 +48,18 @@ export async function ingestMetaMessage(
   const existingMessage = await findByChannelMessageId(message.mid);
   if (existingMessage) return existingMessage;
 
-  const { contactId } = await resolveContact({
+  const { contactId, needsProfile } = await resolveContact({
     channel: message.platform,
     identifier: message.from,
     displayName: message.senderName,
   });
+
+  // Messenger and Instagram identify the sender by a scoped id and nothing else,
+  // so unless the profile is looked up this ticket is filed under a 17-digit
+  // number. Queued before the ticket is written rather than after: the name is
+  // wanted on the first render, and the job is deduped per person, so a customer
+  // sending five messages in a row still produces one Graph call.
+  if (needsProfile) await queueProfileLookup(message.platform, contactId, message.from);
 
   const channel = await channelFor(message.platform);
   const existing = await findLiveConversation(contactId, message.platform);
@@ -473,4 +480,30 @@ async function queueAttachments(
       { priority: 5, dedupeKey: `download_media:${messageId}:${index}` },
     );
   }
+}
+
+/**
+ * Asks Meta who this person is, once per person.
+ *
+ * Direct messages only. A comment already arrives with a name on Facebook and a
+ * handle on Instagram, so there is nothing to look up — and a comment author's
+ * id is not the page-scoped id the User Profile API answers for, so asking
+ * would produce a refusal indistinguishable from "this app is not approved",
+ * which is the one signal here that has to stay trustworthy.
+ *
+ * The dedupe key is the person, not the message: it collapses a burst of
+ * messages into one lookup, and because `enqueue` only collapses onto a job
+ * that is still pending, a customer who writes in again months later is looked
+ * up again if they still have no name.
+ */
+async function queueProfileLookup(
+  platform: MetaPlatform,
+  contactId: string,
+  userId: string,
+): Promise<void> {
+  await enqueue(
+    'fetch_meta_profile',
+    { contactId, platform, userId },
+    { priority: 20, dedupeKey: `fetch_meta_profile:${platform}:${userId}` },
+  );
 }

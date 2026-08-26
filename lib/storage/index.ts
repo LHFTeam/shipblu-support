@@ -41,6 +41,40 @@ export function buildAttachmentPath(
   return `conversations/${conversationId}/${messageId}.${extension}`;
 }
 
+/** Image types a channel's profile picture is allowed to be stored as. */
+const AVATAR_EXTENSIONS: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+};
+
+export function isStorableAvatarType(contentType: string): boolean {
+  return normaliseContentType(contentType) in AVATAR_EXTENSIONS;
+}
+
+function normaliseContentType(contentType: string): string {
+  return contentType.split(';')[0]!.trim().toLowerCase();
+}
+
+/**
+ * One object per contact, overwritten in place.
+ *
+ * A stable key rather than a new object per fetch, because the alternative
+ * accumulates a copy of every profile picture a customer has ever had and
+ * nothing ever deletes them — `contacts.avatar_path` only remembers the newest,
+ * so the older ones would be unreferenced bytes we keep paying for. `x-upsert`
+ * on the upload is what makes overwriting work.
+ *
+ * The extension comes from the response's content type, never from the remote
+ * URL: Meta's CDN link is a query-string blob with no filename in it, and a
+ * path segment taken from a URL is a path segment somebody else chose.
+ */
+export function buildAvatarPath(contactId: string, contentType: string): string {
+  const extension = AVATAR_EXTENSIONS[normaliseContentType(contentType)] ?? 'bin';
+  return `contacts/${contactId}/avatar.${extension}`;
+}
+
 export async function uploadObject(
   path: string,
   content: Buffer,

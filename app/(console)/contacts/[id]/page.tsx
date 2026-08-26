@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
+import { Avatar } from '@/components/avatar';
 import { Badge, Card, PageHeader } from '@/components/ui';
 import { requirePermission } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
@@ -77,6 +78,14 @@ export default async function ContactPage({
       <PageHeader
         title={contact.name ?? contact.email ?? contact.phone ?? 'Unnamed contact'}
         description={[contact.email, contact.phone].filter(Boolean).join(' · ') || undefined}
+        leading={
+          <Avatar
+            name={contact.name}
+            contactId={contact.id}
+            hasAvatar={contact.hasAvatar}
+            size={40}
+          />
+        }
         actions={
           <Link href="/contacts" className="text-sm hover:underline">
             All contacts

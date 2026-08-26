@@ -439,6 +439,8 @@ export type ConversationDetail = {
     name: string | null;
     email: string | null;
     phone: string | null;
+    /** Whether a profile picture is on file, so the header can skip a 404. */
+    hasAvatar: boolean;
   };
   lastCustomerMessageAt: Date | null;
   createdAt: Date;
@@ -499,6 +501,7 @@ export async function getConversation(
       requesterName: contacts.name,
       requesterEmail: contacts.primaryEmail,
       requesterPhone: contacts.primaryPhone,
+      requesterAvatarPath: contacts.avatarPath,
       assigneeName: agents.name,
       groupName: groups.name,
     })
@@ -625,6 +628,7 @@ export async function getConversation(
       name: row.requesterName,
       email: row.requesterEmail,
       phone: row.requesterPhone,
+      hasAvatar: row.requesterAvatarPath !== null,
     },
     lastCustomerMessageAt: row.conversation.lastCustomerMessageAt,
     createdAt: row.conversation.createdAt,

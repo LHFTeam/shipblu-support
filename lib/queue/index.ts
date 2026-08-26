@@ -10,6 +10,7 @@ export type JobType =
   | 'send_whatsapp'
   | 'send_meta'
   | 'download_media'
+  | 'fetch_meta_profile'
   | 'sync_whatsapp_templates'
   | 'subscribe_meta_webhooks'
   | 'sla_sweep'
@@ -21,6 +22,7 @@ export type JobType =
   | 'import_freshdesk_kb'
   | 'backfill_shipment_links'
   | 'backfill_message_locations'
+  | 'backfill_meta_profiles'
   | 'cleanup';
 
 export type EnqueueOptions = {
