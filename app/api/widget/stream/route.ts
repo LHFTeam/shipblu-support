@@ -1,32 +1,38 @@
 import { sessionSql } from '@/db/client';
 import { listMessages } from '@/lib/widget/conversation';
 import { findLiveConversation, resolveVisitor } from '@/lib/widget/session';
+import { conversationTopic } from '@/lib/realtime/topics';
 
 export const dynamic = 'force-dynamic';
 
 /**
  * Live agent replies for one visitor.
  *
- * Same LISTEN/NOTIFY plumbing as the console's stream, with one important
- * difference: the console's stream serves an authenticated agent, this one
- * serves anyone holding a visitor token. So the notification is used only as a
- * *signal* — the payload is discarded and the transcript is re-read through
- * `listMessages`, which is scoped to this visitor's conversation and already
- * excludes private notes.
+ * The visitor token is resolved before choosing a per-conversation topic. A
+ * widget therefore never receives another ticket's notification and never
+ * re-reads its transcript because unrelated traffic happened elsewhere.
  *
- * Reading the notification payload directly would be faster and would be a way
- * to hand one visitor another visitor's messages the first time the trigger
- * changed shape.
+ * The notification is still only a signal — its payload is discarded and the
+ * transcript is re-read through `listMessages`, which is scoped to the
+ * conversation resolved from the bearer token and excludes private notes.
  */
 export async function GET(request: Request) {
   const token = new URL(request.url).searchParams.get('token') ?? '';
   const contactId = await resolveVisitor(token);
   if (!contactId) return new Response('unauthorised', { status: 401 });
 
+  // A brand-new visitor has no conversation until their first send. Their
+  // client reconnects with the returned conversation id after that write; until
+  // then this stream needs only its keepalive and no database connection.
+  const conversationId = await findLiveConversation(contactId);
+  const topic = conversationId ? conversationTopic(conversationId) : null;
+
   const encoder = new TextEncoder();
   let listener: ReturnType<typeof sessionSql> | null = null;
   let heartbeat: ReturnType<typeof setInterval> | null = null;
   let closed = false;
+  let pushing = false;
+  let pushAgain = false;
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -41,18 +47,30 @@ export async function GET(request: Request) {
 
       /** Re-reads the visitor's own transcript. Never trusts the payload. */
       const push = async () => {
+        if (!conversationId) return;
+        if (pushing) {
+          pushAgain = true;
+          return;
+        }
+
+        pushing = true;
         try {
-          const conversationId = await findLiveConversation(contactId);
-          if (!conversationId) return;
-          send('messages', await listMessages(conversationId));
+          do {
+            pushAgain = false;
+            send('messages', await listMessages(conversationId));
+          } while (pushAgain && !closed);
         } catch (error) {
           console.error('[widget:sse] refresh failed', error);
+        } finally {
+          pushing = false;
         }
       };
 
       try {
-        listener = sessionSql();
-        await listener.listen('conversation_changed', () => void push());
+        if (topic) {
+          listener = sessionSql();
+          await listener.listen(topic, () => void push());
+        }
         send('ready', {});
       } catch (error) {
         console.error('[widget:sse] could not LISTEN', error);

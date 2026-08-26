@@ -18,6 +18,35 @@ import { can } from '@/lib/auth/permissions';
 export type ConversationChannel = (typeof conversations.$inferSelect)['channel'];
 
 /**
+ * Every channel a conversation row can carry.
+ *
+ * This is deliberately broader than `FILTERABLE_CHANNELS`: portal and API
+ * tickets belong in the default working queue even though the filter does not
+ * offer them as standalone choices yet. Realtime subscriptions need the full
+ * set or those tickets stop updating while the ordinary `all` query still
+ * returns them.
+ *
+ * The type assertion below is two-way. `satisfies` rejects a value that is not
+ * in the database enum; `_AllChannelsAreListed` rejects an enum value that was
+ * added to the schema without being routed here as well.
+ */
+export const CONVERSATION_CHANNELS = [
+  'email',
+  'whatsapp',
+  'webchat',
+  'facebook',
+  'instagram',
+  'portal',
+  'api',
+  'whatsapp_bot',
+] as const satisfies readonly ConversationChannel[];
+
+type _AllChannelsAreListed =
+  Exclude<ConversationChannel, (typeof CONVERSATION_CHANNELS)[number]> extends never ? true : never;
+const allChannelsAreListed: _AllChannelsAreListed = true;
+void allChannelsAreListed;
+
+/**
  * Channels the inbox can be filtered to.
  *
  * Here rather than beside the inbox queries because the filter dropdown is a

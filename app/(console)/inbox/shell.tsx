@@ -1,5 +1,6 @@
 import { requireAgent } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
+import { LiveUpdates } from '@/components/live-updates';
 import { listInbox, parseFilters } from '@/lib/tickets/queries';
 import { InboxList } from './list';
 
@@ -19,10 +20,12 @@ import { InboxList } from './list';
 export async function InboxShell({
   searchParams,
   activeNumber,
+  activeConversationId,
   children,
 }: {
   searchParams: Record<string, string | string[] | undefined>;
   activeNumber?: number;
+  activeConversationId?: string;
   children: React.ReactNode;
 }) {
   const agent = await requireAgent();
@@ -33,6 +36,8 @@ export async function InboxShell({
 
   return (
     <div className="flex h-full">
+      <LiveUpdates channel={filters.channel} conversationId={activeConversationId} />
+
       <aside
         className={`w-full shrink-0 flex-col border-e border-[var(--border)] md:flex md:w-[22rem] lg:w-[24rem] ${
           viewingTicket ? 'hidden md:flex' : 'flex'

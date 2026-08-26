@@ -63,7 +63,11 @@ export default async function ConversationPage({
   );
 
   return (
-    <InboxShell searchParams={query} activeNumber={ticketNumber}>
+    <InboxShell
+      searchParams={query}
+      activeNumber={ticketNumber}
+      activeConversationId={conversation.id}
+    >
       <ConversationView
         conversation={conversation}
         statuses={statuses}

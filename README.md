@@ -36,9 +36,13 @@ Design decisions worth knowing before changing things:
   `webhook_events` and hand off to the worker. Meta retries aggressively on slow
   responses, so this decoupling is what makes ingestion reliable — and it doubles as
   replay and audit capability.
-- **No Redis.** Postgres `LISTEN/NOTIFY` fans out to every web instance natively (so SSE
-  works across autoscaled instances), and the job queue uses `FOR UPDATE SKIP LOCKED`.
-  At 30 agents this is strictly simpler with no loss.
+- **No Redis.** Postgres `LISTEN/NOTIFY` reaches matching listeners across every web
+  instance natively, so SSE works across autoscaled instances, and the job queue uses
+  `FOR UPDATE SKIP LOCKED`. Topics are intentionally narrow: one per queue channel and
+  one per open conversation. A global notification made unrelated browsers and widgets
+  re-render together once and froze an otherwise idle instance (§6.23 in
+  `docs/PROJECT-STATE.md`). At 30 agents the scoped Postgres path is strictly simpler
+  with no loss.
 - **Two database connections.** Normal queries go through Supavisor's _transaction_
   pooler (prepared statements disabled — the pooler multiplexes backends). `LISTEN`
   needs a _session_ connection, which `sessionSql()` opens separately.
@@ -99,12 +103,16 @@ Design decisions worth knowing before changing things:
   invariant is what makes a reopened ticket stick to the agent who handled it and what
   stops the five-minute sweep from shuffling work under people mid-reply. It is also why
   the sweep can safely re-examine the whole backlog: for nearly every ticket it is a read.
-- **Presence has exactly one writer.** `agents.presence` is set by the SSE stream at
-  `/api/events` and nothing else — a stream is open or it is not. The agent's own away
-  switch is a separate column, `is_accepting_tickets`, because a manual "away" that the
-  next reconnect silently overwrites is worse than no switch at all. Eligibility also
-  requires a fresh heartbeat, so an instance killed mid-stream stops receiving tickets in
-  two minutes without a reaper.
+- **Presence has exactly one writer.** `agents.presence` is set by the lightweight SSE
+  stream at `/api/presence` and nothing else — a stream is open or it is not. Inbox
+  invalidations are separate, so viewing Contacts or Admin still counts as present and
+  those pages never refresh on ticket traffic. Their rail badge still re-counts through a
+  lightweight endpoint, so open work remains visible without re-rendering the page. The
+  agent's own away switch is a separate column, `is_accepting_tickets`, because a manual
+  "away" that the next reconnect
+  silently overwrites is worse than no switch at all. Eligibility also requires a fresh
+  heartbeat, so an instance killed mid-stream stops receiving tickets in two minutes
+  without a reaper.
 - **Reporting reads only `metrics_daily`.** The nightly rollup stores four slices per day
   — totals, by group, by agent, by channel — so the reports page never aggregates over
   the full message history, and today's figures appear tomorrow.

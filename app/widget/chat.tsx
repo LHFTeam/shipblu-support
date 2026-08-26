@@ -57,6 +57,7 @@ export function WidgetChat({ locale }: { locale: Locale }) {
   const copy = COPY[locale];
 
   const [token, setToken] = useState<string | null>(null);
+  const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [online, setOnline] = useState<boolean | null>(null);
   const [opensAt, setOpensAt] = useState<string | null>(null);
@@ -83,6 +84,7 @@ export function WidgetChat({ locale }: { locale: Locale }) {
         if (!data) return;
         localStorage.setItem(STORAGE_KEY, data.token);
         setToken(data.token);
+        setConversationId(data.conversationId);
         setMessages(data.messages);
         setOnline(data.online);
         setOpensAt(data.opensAt);
@@ -110,7 +112,10 @@ export function WidgetChat({ locale }: { locale: Locale }) {
       })
         .then((response) => (response.ok ? response.json() : null))
         .then((data) => {
-          if (data) setMessages(data.messages);
+          if (data) {
+            setConversationId(data.conversationId);
+            setMessages(data.messages);
+          }
         })
         .catch(() => {});
     };
@@ -126,6 +131,12 @@ export function WidgetChat({ locale }: { locale: Locale }) {
       });
       source.addEventListener('degraded', startPolling);
       source.onerror = startPolling;
+      source.addEventListener('ready', () => {
+        if (poll) {
+          clearInterval(poll);
+          poll = null;
+        }
+      });
     } catch {
       startPolling();
     }
@@ -134,7 +145,7 @@ export function WidgetChat({ locale }: { locale: Locale }) {
       source?.close();
       if (poll) clearInterval(poll);
     };
-  }, [token]);
+  }, [token, conversationId]);
 
   // --- Unread badge on the host page ---------------------------------------
 
@@ -219,7 +230,11 @@ export function WidgetChat({ locale }: { locale: Locale }) {
       });
 
       if (response.ok) {
-        const data = (await response.json()) as { messages: Message[] };
+        const data = (await response.json()) as {
+          conversationId: string;
+          messages: Message[];
+        };
+        setConversationId(data.conversationId);
         setMessages(data.messages);
         seenCount.current = data.messages.filter((m) => m.from === 'agent').length;
       } else {

@@ -7,10 +7,11 @@ import { HEARTBEAT_TTL_MS } from './eligibility';
 /**
  * Whether an agent is at their desk.
  *
- * The signal is the console's own SSE stream: it is open while somebody has the
- * inbox in front of them and closed when they do not. No separate heartbeat
- * endpoint, no "set yourself to available" ritual to forget — the thing that
- * already proves presence is used to record it.
+ * The signal is the console's lightweight presence stream: it is open while
+ * somebody has any signed-in console page in front of them and closed when they
+ * do not. No "set yourself to available" ritual to forget — the connection that
+ * already proves presence is used to record it. Conversation invalidations have
+ * their own inbox-only stream, so ticket traffic cannot make presence expensive.
  *
  * `agents.presence` has exactly one writer, this module, called from exactly one
  * place. The agent's own away switch is a different column
@@ -124,7 +125,7 @@ export async function setAccepting(agentId: string, accepting: boolean): Promise
  *
  * Failures are swallowed. This is a record for a report that is read tomorrow;
  * it must never be the reason an agent loses their live updates, which is the
- * same trade the caller in `/api/events` already makes for presence itself.
+ * same trade the caller in `/api/presence` already makes for presence itself.
  */
 async function record(agentId: string, accepting: boolean): Promise<void> {
   const now = new Date();

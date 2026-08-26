@@ -1,46 +1,75 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
+import { RefreshScheduler } from '@/lib/realtime/refresh-scheduler';
+import type { QueueChannel } from '@/lib/realtime/topics';
 
 /**
- * Keeps the console fresh without polling.
+ * Keeps the inbox and, when present, its open ticket fresh.
  *
- * Subscribes to the SSE stream and calls `router.refresh()` when something
- * changes, which re-runs the server components the agent is currently looking
- * at. Refreshing rather than patching client state is deliberate: the list and
- * the ticket both derive from authorised server queries, so there is no way for
- * a stream message to put data on screen the agent should not see.
+ * The server stream is scoped to the queue channel and conversation the server
+ * already authorised. The payload remains an invalidation signal rather than
+ * row data: `router.refresh()` re-runs the normal authorised queries, so a
+ * notification cannot put a ticket on screen by bypassing the read path.
  *
- * Falls back to a slow poll if the stream cannot be established — better a
- * 60-second lag than a console that silently stops updating.
+ * Refreshes are single-flight. Events that arrive during a render set one dirty
+ * bit, then cause at most one trailing refresh after a cooldown. This is the
+ * backpressure the old 750 ms debounce did not provide: a slow render can no
+ * longer accumulate more renders behind it.
  */
-export function LiveUpdates() {
+export function LiveUpdates({
+  channel,
+  conversationId,
+}: {
+  channel: QueueChannel;
+  conversationId?: string;
+}) {
   const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const schedulerRef = useRef<RefreshScheduler | null>(null);
+  const observedPendingRef = useRef(false);
+
+  useEffect(() => {
+    const scheduler = schedulerRef.current;
+    if (!scheduler) return;
+
+    if (isPending) {
+      observedPendingRef.current = true;
+    } else if (observedPendingRef.current) {
+      observedPendingRef.current = false;
+      scheduler.complete();
+    }
+  }, [isPending]);
 
   useEffect(() => {
     let source: EventSource | null = null;
     let poll: ReturnType<typeof setInterval> | null = null;
-    let pending: ReturnType<typeof setTimeout> | null = null;
+
+    const scheduler = new RefreshScheduler({
+      visible: document.visibilityState === 'visible',
+      start: () => {
+        startTransition(() => router.refresh());
+      },
+    });
+    schedulerRef.current = scheduler;
+
+    const onVisibilityChange = () => {
+      scheduler.setVisible(document.visibilityState === 'visible');
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
 
     const startPolling = () => {
       if (poll) return;
-      poll = setInterval(() => router.refresh(), 60_000);
+      poll = setInterval(() => scheduler.request(), 60_000);
     };
 
-    // Coalesce bursts: a batch of WhatsApp statuses can fire a dozen
-    // notifications in a second, and each refresh is a round of server renders.
-    const refreshSoon = () => {
-      if (pending) return;
-      pending = setTimeout(() => {
-        pending = null;
-        router.refresh();
-      }, 750);
-    };
+    const query = new URLSearchParams({ channel });
+    if (conversationId) query.set('conversationId', conversationId);
 
     try {
-      source = new EventSource('/api/events');
-      source.addEventListener('conversation', refreshSoon);
+      source = new EventSource(`/api/events?${query.toString()}`);
+      source.addEventListener('conversation', () => scheduler.request());
       source.addEventListener('degraded', startPolling);
       source.onerror = () => {
         // EventSource reconnects on its own; polling covers the gap and is
@@ -60,9 +89,12 @@ export function LiveUpdates() {
     return () => {
       source?.close();
       if (poll) clearInterval(poll);
-      if (pending) clearTimeout(pending);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      scheduler.dispose();
+      schedulerRef.current = null;
+      observedPendingRef.current = false;
     };
-  }, [router]);
+  }, [channel, conversationId, router, startTransition]);
 
   return null;
 }

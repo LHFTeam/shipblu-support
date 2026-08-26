@@ -131,6 +131,7 @@ export function InboxList({
             <li key={row.id}>
               <Link
                 href={`/inbox/${row.number}?${params.toString()}`}
+                prefetch={false}
                 aria-current={active ? 'page' : undefined}
                 className={`relative block border-b border-[var(--border)] py-2.5 pe-3 ps-3 transition-colors ${
                   active ? 'bg-brand-500/10' : 'bg-[var(--surface)] hover:bg-[var(--muted)]'
@@ -245,15 +246,13 @@ export function InboxList({
  * The first page stays a server render — it is the freshest data and costs no
  * round trip — and this only accumulates what the agent scrolls past it.
  *
- * The hard part is that the console re-renders itself constantly: `LiveUpdates`
- * calls `router.refresh()` on every inbound message and delivery receipt, which
- * hands this component a brand new `rows` and `nextCursor` several times a
- * minute on a busy queue. Resetting the accumulated pages on either of those
- * would collapse the list back to thirty rows under an agent mid-scroll. So
- * what resets is keyed on the *filters* instead, and the accumulated pages are
- * tagged with the filter signature they were fetched under: a signature that no
- * longer matches is discarded without an effect, a state update or a flash of
- * the wrong rows.
+ * The hard part is that live queue changes hand this component a brand new
+ * `rows` and `nextCursor` while an agent may be deep into older pages. Resetting
+ * the accumulated pages on either of those would collapse the list back to
+ * thirty rows under an agent mid-scroll. So what resets is keyed on the
+ * *filters* instead, and the accumulated pages are tagged with the filter
+ * signature they were fetched under: a signature that no longer matches is
+ * discarded without an effect, a state update or a flash of the wrong rows.
  *
  * For the same reason the fetch cursor is only seeded from `nextCursor` while
  * nothing has been loaded yet. After that the cursor comes from the last

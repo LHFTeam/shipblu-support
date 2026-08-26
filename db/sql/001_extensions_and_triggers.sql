@@ -278,14 +278,21 @@ END $$;
 -- --------------------------------------------------------------------------
 -- Realtime fan-out
 --
--- Each web instance holds one session-mode LISTEN connection. NOTIFY broadcasts
--- to every listener, so this works unchanged across autoscaled instances with no
--- Redis or external pub/sub.
+-- LISTEN/NOTIFY works across autoscaled instances without Redis, but a single
+-- global topic turns every write into work for every open browser. Queue topics
+-- are therefore split by channel, and ticket/widget topics by conversation id.
+-- A customer-bot receipt cannot reach the working inbox, and one widget cannot
+-- make every other widget re-read its transcript.
 --
 -- The payload is deliberately tiny — ids only, never message bodies. NOTIFY has
 -- an 8000-byte limit, and clients re-fetch the actual rows through the normal
 -- authorised query path so the stream can never leak a ticket to an agent who
 -- is not allowed to see it.
+--
+-- `conversation_changed` remains for one zero-downtime compatibility window.
+-- Old instances are still serving while this file is replayed and their client
+-- bundle listens to that name. New code does not listen to it; removing it in a
+-- later deploy cannot change application behaviour.
 -- --------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION notify_conversation_change() RETURNS trigger
 LANGUAGE plpgsql
@@ -293,6 +300,9 @@ SET search_path = ''
 AS $$
 DECLARE
   conversation_id uuid;
+  conversation_channel text;
+  previous_channel text;
+  queue_relevant boolean := false;
   payload text;
 BEGIN
   IF TG_TABLE_NAME = 'messages' THEN
@@ -304,18 +314,88 @@ BEGIN
     SELECT sc.conversation_id INTO conversation_id
     FROM public.side_conversations sc
     WHERE sc.id = NEW.side_conversation_id;
+  ELSIF TG_TABLE_NAME = 'side_conversations' THEN
+    conversation_id := NEW.conversation_id;
   ELSE
     conversation_id := NEW.id;
+  END IF;
+
+  IF TG_TABLE_NAME = 'conversations' THEN
+    conversation_channel := NEW.channel::text;
+    IF TG_OP = 'UPDATE' THEN
+      previous_channel := OLD.channel::text;
+    END IF;
+  ELSE
+    SELECT c.channel::text INTO conversation_channel
+    FROM public.conversations c
+    WHERE c.id = conversation_id;
+  END IF;
+
+  -- A cascading delete can remove the parent before a child notification has a
+  -- channel to route to. There is no useful subscriber in that case.
+  IF conversation_id IS NULL OR conversation_channel IS NULL THEN
+    RETURN NULL;
   END IF;
 
   payload := json_build_object(
     'table', TG_TABLE_NAME,
     'op', lower(TG_OP),
     'conversationId', conversation_id,
+    'channel', conversation_channel,
     'rowId', NEW.id,
     'at', extract(epoch from now())
   )::text;
 
+  -- The ticket view and widget listen only to this UUID-derived identifier.
+  -- Removing hyphens keeps the topic a simple, bounded PostgreSQL identifier.
+  PERFORM pg_notify(
+    'conversation_' || replace(conversation_id::text, '-', ''),
+    payload
+  );
+
+  -- Only changes that can alter the list, its filters or its counts reach a
+  -- queue topic. Message delivery updates still reach the open ticket above,
+  -- but no longer re-run the working queue.
+  IF TG_TABLE_NAME = 'messages' THEN
+    queue_relevant := TG_OP = 'INSERT';
+  ELSIF TG_TABLE_NAME = 'side_conversation_messages' THEN
+    queue_relevant := TG_OP = 'INSERT';
+  ELSIF TG_TABLE_NAME = 'side_conversations' THEN
+    IF TG_OP = 'UPDATE' THEN
+      queue_relevant := OLD.state IS DISTINCT FROM NEW.state;
+    END IF;
+  ELSIF TG_TABLE_NAME = 'conversations' THEN
+    IF TG_OP = 'INSERT' THEN
+      queue_relevant := true;
+    ELSE
+      queue_relevant :=
+        OLD.subject IS DISTINCT FROM NEW.subject OR
+        OLD.channel IS DISTINCT FROM NEW.channel OR
+        OLD.status_id IS DISTINCT FROM NEW.status_id OR
+        OLD.priority IS DISTINCT FROM NEW.priority OR
+        OLD.requester_contact_id IS DISTINCT FROM NEW.requester_contact_id OR
+        OLD.assignee_agent_id IS DISTINCT FROM NEW.assignee_agent_id OR
+        OLD.group_id IS DISTINCT FROM NEW.group_id OR
+        OLD.tags IS DISTINCT FROM NEW.tags OR
+        OLD.last_message_at IS DISTINCT FROM NEW.last_message_at OR
+        OLD.last_customer_message_at IS DISTINCT FROM NEW.last_customer_message_at OR
+        OLD.merged_into_id IS DISTINCT FROM NEW.merged_into_id OR
+        OLD.deleted_at IS DISTINCT FROM NEW.deleted_at;
+    END IF;
+  END IF;
+
+  IF queue_relevant THEN
+    PERFORM pg_notify('conversation_queue_' || conversation_channel, payload);
+
+    -- Channel changes are rare, but both lists must update: one loses the row
+    -- and the other gains it. Treating the channel as immutable here would make
+    -- a future correction leave a stale ticket behind until the next event.
+    IF previous_channel IS NOT NULL AND previous_channel <> conversation_channel THEN
+      PERFORM pg_notify('conversation_queue_' || previous_channel, payload);
+    END IF;
+  END IF;
+
+  -- Compatibility for the old app instance/client bundle during this deploy.
   PERFORM pg_notify('conversation_changed', payload);
   RETURN NULL;
 END;
@@ -370,6 +450,25 @@ BEGIN
   ) THEN
     CREATE TRIGGER notify_change
       AFTER INSERT OR UPDATE ON side_conversation_messages
+      FOR EACH ROW EXECUTE FUNCTION notify_conversation_change();
+  END IF;
+END $$;
+
+-- A thread being marked done changes the inbox's waiting/replied badge, and its
+-- metadata is part of the open ticket. Message inserts already notify through
+-- their own trigger; this one covers the thread row itself.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_trigger tg
+    JOIN pg_class cl ON cl.oid = tg.tgrelid
+    JOIN pg_namespace n ON n.oid = cl.relnamespace
+    WHERE n.nspname = 'public' AND cl.relname = 'side_conversations'
+      AND tg.tgname = 'notify_change' AND NOT tg.tgisinternal
+  ) THEN
+    CREATE TRIGGER notify_change
+      AFTER INSERT OR UPDATE ON side_conversations
       FOR EACH ROW EXECUTE FUNCTION notify_conversation_change();
   END IF;
 END $$;

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { SessionAgent } from '@/lib/auth/session';
 import {
   canSeeChannel,
+  CONVERSATION_CHANNELS,
   hiddenChannels,
   isReadOnlyChannel,
   isRestrictedChannel,
@@ -13,6 +14,19 @@ import {
 function agent(role: SessionAgent['role'], permissions: Record<string, boolean> = {}) {
   return { role, permissions } as SessionAgent;
 }
+
+it('lists every database channel, including ones only shown through all', () => {
+  expect(CONVERSATION_CHANNELS).toEqual([
+    'email',
+    'whatsapp',
+    'webchat',
+    'facebook',
+    'instagram',
+    'portal',
+    'api',
+    'whatsapp_bot',
+  ]);
+});
 
 describe('read-only channels', () => {
   it('covers the customer bot and nothing the team works', () => {
