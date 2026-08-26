@@ -7,6 +7,7 @@ import {
   replyToComment,
   sendDirectMessage,
 } from '@/lib/meta/client';
+import { commentReplyTarget } from '@/lib/meta/comments';
 import { explainMetaSendError } from '@/lib/meta/errors';
 import type { MetaPlatform } from '@/lib/meta/types';
 import { messagingTag, metaWindowState } from '@/lib/meta/window';
@@ -123,19 +124,29 @@ async function deliver(
   const text = row.message.bodyText;
 
   if (sendKind === 'comment_reply') {
-    const commentId = meta.commentId ?? (await lastInboundCommentId(row.conversation.id));
+    // The root of the thread on Instagram, the comment itself on Facebook: an
+    // Instagram reply hangs off the top-level comment and nowhere else, so once
+    // a customer has answered inside a thread, replying to what they just wrote
+    // means posting to a `replies` edge that does not exist.
+    const commentId = commentReplyTarget({
+      platform,
+      externalId: row.conversation.externalId,
+      lastCommentId: meta.commentId ?? (await lastInboundCommentId(row.conversation.id)),
+    });
     if (!commentId) throw new Error('no comment to reply to on this ticket');
-    return replyToComment(commentId, text);
+    return replyToComment({ platform, commentId, message: text });
   }
 
   if (sendKind === 'private_reply') {
+    // The comment the agent is answering, not the thread's root: the seven days
+    // a private reply is allowed within are counted from the comment it names.
     const commentId = meta.commentId ?? (await lastInboundCommentId(row.conversation.id));
     if (!commentId) throw new Error('no comment to reply privately to');
 
     // Meta allows exactly one private reply per comment, ever. A second attempt
     // is rejected, so this is the one send in the product that must not be
     // retried blindly — the error is recorded and the agent decides.
-    return privateReplyToComment(commentId, text);
+    return privateReplyToComment({ platform, commentId, message: text });
   }
 
   const target = await metaReplyTarget(row.conversation.id, platform);

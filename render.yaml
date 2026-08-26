@@ -128,6 +128,12 @@ projects:
               #   META_APP_ID              addresses the subscription endpoint
               #   FACEBOOK_PAGE_ID
               #   INSTAGRAM_ACCOUNT_ID
+              #
+              #   META_INSTAGRAM_APP_SECRET  signs the `instagram` object's
+              #                              webhooks when the account is on
+              #                              Instagram Login
+              #   INSTAGRAM_ACCESS_TOKEN     sends and moderates there, against
+              #                              graph.instagram.com
               #   WHATSAPP_PHONE_NUMBER_ID
               #   WHATSAPP_WABA_ID
               #
@@ -186,6 +192,18 @@ projects:
               # META_VERIFY_TOKEN belong to the Meta *app*, so every connected
               # WABA has to sit under the same one — a WABA on a second app
               # would have its webhooks stored unverified and answered 403.
+              #
+              # The Instagram pair is the one exception to "one app, one
+              # credential", and it is that same 403 in the wild. An Instagram
+              # professional account connected through Instagram Login rather
+              # than through its Facebook Page gets its own app secret and its
+              # own access token inside the same app, and on 2026-08-26 the
+              # account was moved without them: from 07:37 UTC every Instagram
+              # delivery failed signature verification — 2,309 in thirteen
+              # hours, real customers' messages among them — while Facebook's
+              # kept verifying against the unchanged META_APP_SECRET. Set both
+              # or neither; unset is the Page-connected account, which is what
+              # every deployment had before this existed.
 
         services:
           - type: web

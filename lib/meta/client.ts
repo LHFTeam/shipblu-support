@@ -1,4 +1,5 @@
 import { env } from '@/lib/env';
+import { commentRequest, type CommentOperation } from './comments';
 import type { MetaPlatform } from './types';
 
 /**
@@ -16,6 +17,12 @@ import type { MetaPlatform } from './types';
 
 const GRAPH_VERSION = 'v23.0';
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
+
+/**
+ * Instagram Login's own host. Same version, same paths, different origin and a
+ * different credential — see `endpoint` below.
+ */
+const INSTAGRAM_GRAPH_BASE = `https://graph.instagram.com/${GRAPH_VERSION}`;
 
 export class MetaApiError extends Error {
   constructor(
@@ -82,6 +89,31 @@ function pageToken(): string {
 }
 
 /**
+ * The host and credential to address a platform with.
+ *
+ * An Instagram professional account connected through **Instagram Login** is not
+ * reachable with the Page token at all, and not on `graph.facebook.com` either:
+ * it has its own access token and is served from `graph.instagram.com`. The
+ * paths are identical, which is the only reason this is a two-field return
+ * rather than a second client.
+ *
+ * Keyed on whether `INSTAGRAM_ACCESS_TOKEN` is set rather than on a mode flag,
+ * because the token is the thing that actually decides it: a deployment holding
+ * an Instagram token has no use for the Page token on Instagram, and one holding
+ * only the Page token cannot use the Instagram host whatever a flag said. Unset
+ * is the Page-connected account every deployment had before this existed.
+ */
+function endpoint(platform: MetaPlatform): { base: string; token: string } {
+  const instagramToken = env().INSTAGRAM_ACCESS_TOKEN;
+
+  if (platform === 'instagram' && instagramToken) {
+    return { base: INSTAGRAM_GRAPH_BASE, token: instagramToken };
+  }
+
+  return { base: GRAPH_BASE, token: pageToken() };
+}
+
+/**
  * The account a reply goes out from, per platform, or null when none is set.
  *
  * Separate from `accountId` because the send path needs to *compare* this with
@@ -108,16 +140,31 @@ export function accountId(platform: MetaPlatform): string {
 }
 
 export function isConfigured(platform: MetaPlatform): boolean {
-  if (!env().META_PAGE_ACCESS_TOKEN) return false;
+  const e = env();
+  // Either credential will do for Instagram: which one is held is what decides
+  // the host and the token, and holding neither is what makes it unconfigured.
+  const hasToken =
+    platform === 'instagram'
+      ? Boolean(e.INSTAGRAM_ACCESS_TOKEN || e.META_PAGE_ACCESS_TOKEN)
+      : Boolean(e.META_PAGE_ACCESS_TOKEN);
+
+  if (!hasToken) return false;
   return configuredAccountId(platform) !== null;
 }
 
 async function graph<T>(
+  platform: MetaPlatform,
   path: string,
-  init: { method: 'GET' | 'POST'; body?: unknown; query?: Record<string, string> },
+  init: {
+    method: 'GET' | 'POST' | 'DELETE';
+    body?: unknown;
+    query?: Record<string, string>;
+  },
 ): Promise<T> {
-  const url = new URL(`${GRAPH_BASE}/${path}`);
-  url.searchParams.set('access_token', pageToken());
+  const { base, token } = endpoint(platform);
+
+  const url = new URL(`${base}/${path}`);
+  url.searchParams.set('access_token', token);
   for (const [key, value] of Object.entries(init.query ?? {})) {
     url.searchParams.set(key, value);
   }
@@ -164,8 +211,13 @@ async function graph<T>(
     // Logged whole, because Graph's generic refusals ("An unknown error has
     // occurred.") carry their only distinguishing detail in the fields around
     // the message.
+    // The host is named as well as the path: an Instagram call can now go to
+    // either origin depending on which credential is configured, and "wrong
+    // host for this token" is refused with the same unhelpful sentence as
+    // everything else Graph declines.
     console.warn(
-      `[meta] ${init.method} ${path} failed with ${response.status}: ${text.slice(0, 1000)}`,
+      `[meta] ${platform} ${init.method} ${url.host}/${path} failed with ` +
+        `${response.status}: ${text.slice(0, 1000)}`,
     );
 
     throw new MetaApiError(
@@ -211,6 +263,7 @@ export async function sendDirectMessage(input: {
   if (input.tag === 'HUMAN_AGENT') body.tag = 'HUMAN_AGENT';
 
   const result = await graph<{ message_id?: string; recipient_id?: string }>(
+    input.platform,
     `${accountId(input.platform)}/messages`,
     { method: 'POST', body },
   );
@@ -224,15 +277,52 @@ export async function sendDirectMessage(input: {
 // --- Comments ---------------------------------------------------------------
 
 /**
+ * Issues one comment operation, in whichever shape the platform expects.
+ *
+ * The shape comes from `lib/meta/comments.ts`, which is where the two
+ * platforms' disagreements are written down and tested. This function is only
+ * the fetch and the id it reads back.
+ */
+async function comment<T>(
+  platform: MetaPlatform,
+  commentId: string,
+  operation: CommentOperation,
+): Promise<T> {
+  const request = commentRequest({
+    platform,
+    commentId,
+    // Resolved for every operation even though only Instagram's private reply
+    // sends it, so a deployment missing the account id fails the same way on
+    // every comment call rather than on one of the four.
+    accountId: accountId(platform),
+    operation,
+  });
+
+  return graph<T>(platform, request.path, {
+    method: request.method,
+    body: request.body,
+    query: request.query,
+  });
+}
+
+/**
  * Replies publicly, under the comment.
  *
  * The reply is visible to everyone who can see the post, which is the point:
  * one good public answer saves the next twenty people from asking.
+ *
+ * `commentId` must be the comment the reply belongs *under*, which on Instagram
+ * is the root of the thread rather than whichever reply came last — see
+ * `commentReplyTarget`.
  */
-export async function replyToComment(commentId: string, message: string): Promise<string | null> {
-  const result = await graph<{ id?: string }>(`${commentId}/comments`, {
-    method: 'POST',
-    body: { message },
+export async function replyToComment(input: {
+  platform: MetaPlatform;
+  commentId: string;
+  message: string;
+}): Promise<string | null> {
+  const result = await comment<{ id?: string }>(input.platform, input.commentId, {
+    kind: 'reply',
+    message: input.message,
   });
 
   return result?.id ?? null;
@@ -244,22 +334,56 @@ export async function replyToComment(commentId: string, message: string): Promis
  * Meta allows exactly one private reply per comment, ever, and only within
  * seven days — so this is the one send in the product that genuinely cannot be
  * retried. The caller records that it happened.
+ *
+ * Addressed to the comment the agent is answering rather than to the thread's
+ * root: the seven days are counted from the comment named here, so naming the
+ * newest one is what buys the most time.
  */
-export async function privateReplyToComment(
-  commentId: string,
-  message: string,
-): Promise<string | null> {
-  const result = await graph<{ id?: string }>(`${commentId}/private_replies`, {
-    method: 'POST',
-    body: { message },
-  });
+export async function privateReplyToComment(input: {
+  platform: MetaPlatform;
+  commentId: string;
+  message: string;
+}): Promise<string | null> {
+  // Facebook answers with the new message's `id`, Instagram with `message_id`
+  // and a `recipient_id` — it is the messages endpoint there, not a comment one.
+  const result = await comment<{ id?: string; message_id?: string }>(
+    input.platform,
+    input.commentId,
+    { kind: 'private_reply', message: input.message },
+  );
 
-  return result?.id ?? null;
+  return result?.message_id ?? result?.id ?? null;
 }
 
-/** Hides a comment rather than deleting it — the usual answer to abuse. */
-export async function hideComment(commentId: string, hidden = true): Promise<void> {
-  await graph(`${commentId}`, { method: 'POST', body: { is_hidden: hidden } });
+/**
+ * Hides or unhides a comment.
+ *
+ * The usual answer to abuse, and reversible, which is why it is the one an agent
+ * reaches for first: the words stay on the record for us and stop being visible
+ * to everyone else. Its opposite — unhide — is the same call, so the two are one
+ * function rather than two that could disagree about the parameter name.
+ */
+export async function setCommentHidden(input: {
+  platform: MetaPlatform;
+  commentId: string;
+  hidden: boolean;
+}): Promise<void> {
+  await comment(input.platform, input.commentId, { kind: 'hide', hidden: input.hidden });
+}
+
+/**
+ * Deletes a comment.
+ *
+ * Irreversible, and it removes a customer's words from a public thread, so the
+ * console asks before calling it and records who asked. Both platforms allow it
+ * on any comment on media the account owns, not only on the account's own
+ * comments.
+ */
+export async function deleteComment(input: {
+  platform: MetaPlatform;
+  commentId: string;
+}): Promise<void> {
+  await comment(input.platform, input.commentId, { kind: 'delete' });
 }
 
 // --- Profiles ---------------------------------------------------------------
@@ -340,7 +464,7 @@ export function profileDisplayName(result: RawProfile): string | null {
  * distinction.
  */
 export async function fetchProfile(platform: MetaPlatform, userId: string): Promise<MetaProfile> {
-  const result = await graph<RawProfile>(userId, {
+  const result = await graph<RawProfile>(platform, userId, {
     method: 'GET',
     query: { fields: profileFields(platform) },
   });

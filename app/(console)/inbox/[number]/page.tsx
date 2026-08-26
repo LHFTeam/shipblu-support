@@ -39,6 +39,7 @@ export default async function ConversationPage({
   if (!conversation) notFound();
 
   const canSideConversation = can(agent, 'ticket.side_conversation');
+  const canModerateComments = can(agent, 'ticket.moderate_comment');
 
   // Which business account this ticket's number belongs to, because that is
   // what decides the templates the agent may pick — not the installation.
@@ -78,6 +79,7 @@ export default async function ConversationPage({
         templates={templates}
         recipients={recipients}
         canSideConversation={canSideConversation}
+        canModerateComments={canModerateComments}
         currentAgentId={agent.id}
       />
       <FocusBeat conversationId={conversation.id} />

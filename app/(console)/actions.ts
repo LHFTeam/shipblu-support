@@ -38,6 +38,13 @@ import {
   templateShape,
   TemplateParameterError,
 } from '@/lib/whatsapp/templates';
+import {
+  moderatableComment,
+  type ModerationAction,
+  moderationRefusal,
+  readCommentModeration,
+  requested as requestModeration,
+} from '@/lib/meta/moderation';
 import { metaWindowState } from '@/lib/meta/window';
 import { metaReplyTarget } from '@/lib/tickets/meta-thread';
 import {
@@ -373,6 +380,90 @@ export async function addNote(_state: ActionState, formData: FormData): Promise<
     bodyText: body,
     kind: 'note',
   });
+
+  refresh(row.conversation.number);
+  return ok();
+}
+
+/**
+ * Hides, unhides or deletes a customer's public comment.
+ *
+ * The other half of a social ticket. Replying is the answer to a question;
+ * this is the answer to abuse, to a leaked phone number in a public thread, and
+ * to the comment somebody posts forty times. It is the `manage` in
+ * `instagram_business_manage_comments`, and until now the console could do
+ * neither verb — `hideComment` sat unimported in `lib/meta/client.ts` and there
+ * was no delete at all.
+ *
+ * The comment is re-read from the database rather than taken from the form. A
+ * `FormData` field naming a comment id would be an endpoint for hiding any
+ * comment on any of our posts, whatever ticket the agent could see.
+ */
+export async function moderateComment(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const agent = await requireAgent();
+  if (!can(agent, 'ticket.moderate_comment')) {
+    return { error: 'You do not have permission to hide or delete comments' };
+  }
+
+  const messageId = String(formData.get('messageId') ?? '');
+  const wanted = String(formData.get('action') ?? '');
+
+  if (wanted !== 'hide' && wanted !== 'unhide' && wanted !== 'delete') {
+    return { error: 'Unknown moderation action' };
+  }
+  const action: ModerationAction = wanted;
+
+  const rows = await db
+    .select({ id: messages.id, conversationId: messages.conversationId, meta: messages.meta })
+    .from(messages)
+    .where(eq(messages.id, messageId))
+    .limit(1);
+
+  const message = rows[0];
+  if (!message) return { error: 'Comment not found' };
+
+  // The ticket comes from the message, so the agent's visibility rule is applied
+  // to the conversation that actually owns the comment.
+  const row = await loadConversation(agent, message.conversationId);
+  if (!row) return { error: 'Ticket not found' };
+
+  const readOnly = refuseIfReadOnly(row.conversation.channel);
+  if (readOnly) return readOnly;
+
+  const comment = moderatableComment(message.meta);
+  if (!comment) return { error: 'That message is not a Facebook or Instagram comment' };
+
+  const state = readCommentModeration(message.meta);
+  const refusal = moderationRefusal(state, action);
+  if (refusal) return { error: refusal };
+
+  const base = (message.meta ?? {}) as Record<string, unknown>;
+
+  // Pending, not done: what the public can see has not changed until Graph says
+  // so, and the timeline claiming otherwise is the one thing an agent moderating
+  // a comment must not be told.
+  await db
+    .update(messages)
+    .set({
+      meta: {
+        ...base,
+        moderation: requestModeration(state, action, agent.id, new Date()),
+      },
+    })
+    .where(eq(messages.id, message.id));
+
+  // No dedupeKey: hide and unhide are each other's opposite and both are
+  // legitimately repeatable, and a key is spent for good rather than until the
+  // job finishes (see EnqueueOptions). `moderationRefusal` above is the guard
+  // against a double submit instead.
+  await enqueue(
+    'moderate_meta_comment',
+    { messageId: message.id, action, agentId: agent.id },
+    { priority: 10 },
+  );
 
   refresh(row.conversation.number);
   return ok();

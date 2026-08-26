@@ -18,8 +18,10 @@ import { env, metaAppSecret, metaVerifyToken } from '@/lib/env';
 const GRAPH_VERSION = 'v23.0';
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
 
-/** The Webhooks object our WhatsApp fields hang off. */
+/** The Webhooks objects this app subscribes to, one per product. */
 export const WHATSAPP_OBJECT = 'whatsapp_business_account';
+export const INSTAGRAM_OBJECT = 'instagram';
+export const PAGE_OBJECT = 'page';
 
 /**
  * What the WhatsApp pipeline needs delivered.
@@ -38,6 +40,64 @@ export const WHATSAPP_OBJECT = 'whatsapp_business_account';
  * linked companion device, which is not how this number is operated.
  */
 export const REQUIRED_WHATSAPP_FIELDS = ['messages', 'message_echoes'] as const;
+
+/**
+ * What the Instagram pipeline needs delivered.
+ *
+ * `comments` is the field this whole feature rests on and **it has never been
+ * subscribed**: of 2,854 Meta deliveries stored since 19 August, not one carries
+ * a `changes` entry, so `ingestMetaComment` — written, tested and merged with the
+ * channel — has never run once in production. A comment ticket cannot exist
+ * until this is added, which makes it the first step of demonstrating comment
+ * management to App Review rather than a nicety.
+ *
+ * `messages` is listed for the same reason it is under WhatsApp: the write
+ * replaces the field list wholesale, so the merge must be able to prove the
+ * channel's existing traffic survives.
+ *
+ * `live_comments` and `mentions` are deliberately absent. Both would deliver
+ * events nothing ingests, and an unread webhook field is not free — it is a
+ * `webhook_events` row and a job per event, forever.
+ */
+export const REQUIRED_INSTAGRAM_FIELDS = ['messages', 'comments'] as const;
+
+/**
+ * What the Facebook Page pipeline needs delivered.
+ *
+ * `feed` rather than a comments field, because Facebook has none: the same field
+ * carries comments, likes, shares and post edits, discriminated by `value.item`.
+ * `lib/meta/parse.ts` keeps the comments and drops the rest, which is the cost
+ * of the only field Meta offers.
+ */
+export const REQUIRED_PAGE_FIELDS = ['messages', 'feed'] as const;
+
+/**
+ * Object → the fields that object must carry.
+ *
+ * A map rather than an argument the caller composes, because the caller is a
+ * command line: `npm run job -- subscribe_meta_webhooks object=instagram` names
+ * the product, and what that product needs is a property of this codebase rather
+ * than something to be typed correctly at a shell prompt against production.
+ */
+export const REQUIRED_FIELDS: Record<string, readonly string[]> = {
+  [WHATSAPP_OBJECT]: REQUIRED_WHATSAPP_FIELDS,
+  [INSTAGRAM_OBJECT]: REQUIRED_INSTAGRAM_FIELDS,
+  [PAGE_OBJECT]: REQUIRED_PAGE_FIELDS,
+};
+
+/** The object named on the job, or the error naming the three that exist. */
+export function resolveObject(value: unknown): string {
+  const object = typeof value === 'string' && value ? value : WHATSAPP_OBJECT;
+
+  if (!REQUIRED_FIELDS[object]) {
+    throw new GraphSubscriptionError(
+      `"${object}" is not a webhook object this app subscribes to. ` +
+        `Pass one of: ${Object.keys(REQUIRED_FIELDS).join(', ')}.`,
+    );
+  }
+
+  return object;
+}
 
 export type GraphSubscription = {
   object: string;

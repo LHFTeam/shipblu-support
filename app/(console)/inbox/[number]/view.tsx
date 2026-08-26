@@ -29,6 +29,7 @@ import {
 } from '../../actions';
 import { readOnlyReason } from '@/lib/tickets/channel-policy';
 import type { PickerEntry } from '@/lib/side-conversations/queries';
+import { CommentModeration } from './comment-moderation';
 import { Composer } from './composer';
 import { SideConversationCard, SideConversationsField } from './side-conversations';
 
@@ -99,6 +100,7 @@ export function ConversationView({
   fields,
   canned,
   canSideConversation,
+  canModerateComments,
   currentAgentId,
 }: {
   conversation: ConversationDetail;
@@ -113,6 +115,8 @@ export function ConversationView({
   /** Reusable replies, already scoped to this agent's own and their groups'. */
   canned: CannedResponseOption[];
   canSideConversation: boolean;
+  /** Whether this agent may hide or delete a public comment. */
+  canModerateComments: boolean;
   currentAgentId: string;
 }) {
   return (
@@ -121,7 +125,11 @@ export function ConversationView({
         <Header conversation={conversation} />
 
         <div className="app-scroll min-h-0 flex-1 overflow-y-auto px-4 py-4">
-          <Timeline conversation={conversation} canSideConversation={canSideConversation} />
+          <Timeline
+            conversation={conversation}
+            canSideConversation={canSideConversation}
+            canModerateComments={canModerateComments}
+          />
         </div>
 
         {readOnlyReason(conversation.channel) ? (
@@ -324,9 +332,11 @@ function timelineEntries(conversation: ConversationDetail): TimelineEntry[] {
 function Timeline({
   conversation,
   canSideConversation,
+  canModerateComments,
 }: {
   conversation: ConversationDetail;
   canSideConversation: boolean;
+  canModerateComments: boolean;
 }) {
   return (
     <ol className="flex flex-col gap-4">
@@ -411,6 +421,14 @@ function Timeline({
                   </li>
                 ))}
               </ul>
+            ) : null}
+
+            {isInbound && isPublicComment ? (
+              <CommentModeration
+                messageId={message.id}
+                meta={message.meta}
+                canModerate={canModerateComments && !readOnlyReason(conversation.channel)}
+              />
             ) : null}
 
             {!isInbound && !isNote ? <DeliveryState message={message} /> : null}
@@ -698,6 +716,12 @@ function describeEvent(type: string, data: Record<string, unknown>): string {
       if (to === null || to === undefined || to === '') return `cleared ${label}`;
       return `set ${label} to ${Array.isArray(to) ? to.join(', ') : String(to)}`;
     }
+    case 'comment_hidden':
+      return 'hid the comment on the post';
+    case 'comment_unhidden':
+      return 'made the comment public again';
+    case 'comment_deleted':
+      return 'deleted the comment from the post';
     case 'sla_recalculated':
       return data.reason === 'group_hours'
         ? "re-counted the due dates on the new group's business hours"
