@@ -43,6 +43,8 @@ const STRINGS = {
     breadcrumb: 'Breadcrumb',
     skipToContent: 'Skip to main content',
     language: 'Language',
+    noticeLabel: 'Service notice',
+    noticeMore: 'Read the update',
     heroEyebrow: 'Help centre',
     heroHeading: 'How can we help?',
     heroIntro:
@@ -191,6 +193,8 @@ const STRINGS = {
     breadcrumb: 'مسار التنقل',
     skipToContent: 'الانتقال إلى المحتوى الرئيسي',
     language: 'اللغة',
+    noticeLabel: 'إشعار خدمة',
+    noticeMore: 'اقرأ التفاصيل',
     heroEyebrow: 'مركز المساعدة',
     heroHeading: 'كيف يمكننا مساعدتك؟',
     heroIntro:

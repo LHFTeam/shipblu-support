@@ -80,6 +80,7 @@ export default async function TrackShipment({
       selfPath={`/${locale}/track`}
       icon={<PackageSearchIcon size={28} />}
       search={false}
+      tone="subtle"
     />
   );
 
@@ -200,7 +201,7 @@ async function Lookup({ locale, canonical }: { locale: Locale; canonical: string
         <div className="flex flex-wrap items-center gap-3">
           <StatusBadge
             label={status ? status.label : t(locale, 'trackNoStatusTitle')}
-            tone={status ? status.tone : 'neutral'}
+            tone={status ? status.tone : 'unknown'}
           />
           <span
             dir="ltr"

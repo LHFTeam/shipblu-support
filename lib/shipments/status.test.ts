@@ -43,9 +43,15 @@ describe('stageFor', () => {
 });
 
 describe('stageDisplay', () => {
-  it('gives an unknown label no step and no tone of its own', () => {
+  it('gives an unknown label no step and the neutral badge', () => {
     const display = stageDisplay('AWAITING_CUSTOMS_CLEARANCE');
-    expect(display).toEqual({ stage: 'unknown', tone: 'neutral', step: null, terminal: false });
+    expect(display).toEqual({ stage: 'unknown', tone: 'unknown', step: null, terminal: false });
+  });
+
+  it('does not let out for delivery share a badge with in transit', () => {
+    // The whole reason the badge reads from the design system's taxonomy rather
+    // than from four generic tones.
+    expect(stageDisplay('Out for delivery').tone).not.toBe(stageDisplay('In transit').tone);
   });
 
   it('keeps a failed attempt at the step it failed on', () => {

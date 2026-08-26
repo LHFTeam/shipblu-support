@@ -45,6 +45,35 @@ const schema = z.object({
   KB_PUBLIC_HOST: z.string().optional(),
 
   /**
+   * A service notice, shown across the top of every public help centre page.
+   *
+   * Configuration rather than content, and an environment variable rather than a
+   * table, because there is nowhere yet for an admin to type one: the banner is
+   * built and its backing store is not. This is the cheapest seam that is still
+   * real — an ops person can put a delay notice in front of every customer from
+   * the Render dashboard without a deploy or a code change, and the day a
+   * proper `service_notices` table lands, `lib/kb/notice.ts` is the one file
+   * that changes.
+   *
+   * Unset means no banner, which is the only safe default: an operational claim
+   * about ShipBlu's network must be one somebody actually made.
+   *
+   * Both locales, because the reader's own language is the one that should
+   * reach them and the majority of them read Arabic — see `lib/kb/notice.ts`
+   * for what happens when only one is set.
+   */
+  KB_NOTICE_EN: z.string().optional(),
+  KB_NOTICE_AR: z.string().optional(),
+  /**
+   * Where "read the update" points. Optional; the banner is text without it.
+   * Validated at the point of use rather than here, so a bad value drops the
+   * link instead of taking down every page that renders the banner.
+   */
+  KB_NOTICE_HREF: z.string().optional(),
+  /** How loud the banner is. Defaults to `warning`, which is what a delay is. */
+  KB_NOTICE_TONE: z.enum(['info', 'warning', 'danger']).default('warning'),
+
+  /**
    * Comma-separated origins permitted to embed the chat widget, e.g.
    * "https://support.shipblu.com,https://app.shipblu.com". Our own origin is
    * always allowed. Everything outside this list is refused by

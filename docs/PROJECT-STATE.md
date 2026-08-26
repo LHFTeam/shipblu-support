@@ -125,17 +125,41 @@ produce still yield one reply. The case for it is in the archive — **11,402 of
 18,417 bot-channel inbound messages arrived outside production's schedule**, Sun–Fri
 10:00–18:00 Cairo.
 
-And now the **help centre's front page and a public tracking page**. The front
-page was one blue band with a search box on it; it is now a hero carrying the two
-questions people actually arrive with — a phrase to search, and a parcel to
-find — over topic cards that show three article titles each, a most-read and a
-recently-updated list, and a contact panel that says whether support is answering
-right now (read from `widgetHours()`, so it cannot disagree with the chat
-launcher beside it). Every block reads from the knowledge base and hides itself
-when there is nothing in it. `/{locale}/track` is new: a tracking number in, a
-status badge, a four-step progress line and the knowledge-base answers for that
-status out. `noindex` and `Disallow`, and rate limited per address, because every
-useful URL on it carries somebody's parcel number.
+And now the **help centre's front page, a public tracking page, and the ShipBlu
+design system's palette**. The front page was one blue band with a search box on
+it; it is now a hero carrying the two questions people actually arrive with — a
+phrase to search, and a parcel to find — over topic cards that show three article
+titles each, a most-read and a recently-updated list, and a contact panel that
+says whether support is answering right now (read from `widgetHours()`, so it
+cannot disagree with the chat launcher beside it). Every block reads from the
+knowledge base and hides itself when there is nothing in it. `/{locale}/track` is
+new: a tracking number in, a status badge, a four-step progress line and the
+knowledge-base answers for that status out. `noindex` and `Disallow`, and rate
+limited per address, because every useful URL on it carries somebody's parcel
+number.
+
+**`.kb-shell` no longer carries the Freshdesk portal's hex.** It carries the
+design system's `tokens/colors.css`, so the swap reaches every page under
+`app/help/` rather than only the two the redesign covered — charcoal text on cool
+neutrals, blu-500 as the one action colour, and the system's canonical logistics
+status taxonomy behind the tracking badge, which is what gives "out for delivery"
+violet of its own instead of sharing blue with "in transit". Typography did not
+come across: the system substitutes Geist and Rubik and says so, while Lato and
+Tajawal are the live portal's and the ones customers already read. Nor did radii,
+spacing or its component bundle. Four of the six page types still wear the solid
+blue band the system would not have given them — moving them is a change to their
+layout rather than their colours, and it is the obvious next piece of work.
+
+A **service notice** banner sits above the content on every help centre page,
+from `KB_NOTICE_EN` / `KB_NOTICE_AR` / `KB_NOTICE_HREF` / `KB_NOTICE_TONE`. The
+banner is built and its backing store is not: an environment variable is the
+cheapest seam that still lets ops put a delay warning in front of every customer
+without a deploy, and `lib/kb/notice.ts` is the one file a `service_notices`
+table would change. Unset is no banner, deliberately — an operational claim about
+the network has to be one somebody actually made. A notice written in only one
+language is shown to everyone with its own `lang` and `dir` rather than withheld,
+because the silent failure is an Arabic reader, who is the majority here, getting
+no warning at all.
 
 **The tracking page has nothing to show yet, and that is not a bug in the page.**
 Nothing in this system writes `shipments.status_label` — the detector creates

@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { CheckIcon } from '@/components/icons';
 import { t, type Locale, type StringKey } from '@/lib/kb/locale';
-import { TRACKING_STEPS, type StageTone } from '@/lib/shipments/status';
+import { TRACKING_STEPS, type StatusTone } from '@/lib/shipments/status';
 
 /**
  * How a shipment's state is drawn on the public tracking page.
@@ -15,24 +15,33 @@ import { TRACKING_STEPS, type StageTone } from '@/lib/shipments/status';
  * for a box, and will believe what it says.
  */
 
-const TONE_CLASS: Record<StageTone, string> = {
-  neutral: 'bg-[var(--kb-surface-2)] text-[var(--kb-muted)]',
-  progress: 'bg-[var(--kb-status-info-soft)] text-[var(--kb-status-info)]',
-  success: 'bg-[var(--kb-status-ok-soft)] text-[var(--kb-status-ok)]',
-  warning: 'bg-[var(--kb-status-warn-soft)] text-[var(--kb-status-warn)]',
-  danger: 'bg-[var(--kb-status-danger-soft)] text-[var(--kb-status-danger)]',
+/**
+ * Written out rather than built from the tone name, because Tailwind reads
+ * these as source text: `bg-[var(--color-status-${tone}-bg)]` compiles to a
+ * class nobody generated and a badge with no background at all.
+ */
+const TONE_CLASS: Record<StatusTone, string> = {
+  'in-transit': 'bg-[var(--color-status-in-transit-bg)] text-[var(--color-status-in-transit-fg)]',
+  'out-for-delivery':
+    'bg-[var(--color-status-out-for-delivery-bg)] text-[var(--color-status-out-for-delivery-fg)]',
+  delivered: 'bg-[var(--color-status-delivered-bg)] text-[var(--color-status-delivered-fg)]',
+  attempted: 'bg-[var(--color-status-attempted-bg)] text-[var(--color-status-attempted-fg)]',
+  returned: 'bg-[var(--color-status-returned-bg)] text-[var(--color-status-returned-fg)]',
+  exception: 'bg-[var(--color-status-exception-bg)] text-[var(--color-status-exception-fg)]',
+  unknown: 'bg-[var(--color-status-unknown-bg)] text-[var(--color-status-unknown-fg)]',
 };
 
 /**
  * The status, as the platform wrote it.
  *
  * The dot repeats the tone in a second channel so the badge is not colour
- * alone — but the word is what carries the meaning, and it is the platform's
- * word rather than a translation of it. Rewriting "Out for delivery" into our
+ * alone — the design system is explicit that a bare coloured square is never
+ * the status. But the word is what carries the meaning, and it is the
+ * platform's word rather than a translation of it. Rewriting "Out for delivery" into our
  * own vocabulary would mean a customer reading one thing here and a different
  * thing in the SMS ShipBlu sent them about the same parcel.
  */
-export function StatusBadge({ label, tone }: { label: string; tone: StageTone }) {
+export function StatusBadge({ label, tone }: { label: string; tone: StatusTone }) {
   return (
     <span
       className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-semibold ${TONE_CLASS[tone]}`}

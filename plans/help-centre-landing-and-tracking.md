@@ -4,21 +4,33 @@
 
 Two designs arrived together: a redesigned help-centre landing page, and a
 customer-facing tracking result page that did not exist. Both were drawn against
-a **proposed** ShipBlu design system whose own readme says, in as many words, to
-treat a real implementation as ground truth where one exists.
+a **proposed** ShipBlu design system, shipped alongside them as a set of token
+files and a component bundle.
 
-One does. `.kb-shell` in `app/globals.css` carries the live Freshdesk portal's
-palette as verbatim hex, deliberately, so that this site and the one customers
-already use do not look subtly unlike each other during the cutover. So this
-change takes the designs' **structure** and leaves the **tokens** alone. Where
-the design reached for a token this codebase has no equivalent of, the nearest
-existing one is used — `--color-background-brand-subtle` is `--kb-band-soft`,
-which is the same pale blue for the same reason.
+The structure and the palette both come from those designs. `.kb-shell` in
+`app/globals.css` used to carry the live Freshdesk portal's hex, and now carries
+the design system's `tokens/colors.css` instead — so the swap reaches every page
+under `app/help/`, not only the two the redesign covered. What that costs is
+named in §1 below; the alternative, two palettes in one site, is the drift this
+codebase is otherwise careful about.
 
-The one place new tokens were added is delivery status: four tone pairs
-(`--kb-status-*`), because a status badge needs a text colour and the tint it
-sits on, and neither `--kb-yes` nor `--kb-no` — which the article feedback
-buttons own — means "warning".
+Two layers in that block, deliberately. The system's primitives and semantic
+names are transcribed first, verbatim, so a token can be checked against the
+system by reading it rather than by tracing a conversion. The `--kb-*` names the
+existing pages already speak are then pointed at them. A page written against
+`--kb-muted` keeps working and now means the system's secondary text.
+
+What did **not** come across:
+
+- **Typography.** The system substitutes Geist and Rubik and says so — no brand
+  fonts were supplied to whoever drew it. Lato and Tajawal are this site's, from
+  the live portal, and they are the ones customers already read.
+- **Radii, spacing and elevation**, beyond `--elevation-card`. The ask was the
+  palette, and geometry is where a token swap turns into a layout change.
+- **`[data-theme="dark"]`.** This site has no theme switch, so its dark values
+  live under the `prefers-color-scheme` query the site already answers.
+- **Its component bundle.** These are server components reading from Postgres;
+  a client-side bundle of React components is a different thing entirely.
 
 ---
 
@@ -49,10 +61,32 @@ honestly be rather than as a page of empty furniture. All six reads go out in on
 `Promise.all` — they are independent and hit different indexes, and this is the
 most requested page on the site.
 
-### Three things the design offered that are not here
+### The service notice
 
-- **A network-status banner.** There is no table an admin could write one into,
-  and inventing one for a banner is a feature, not a redesign.
+The design's banner is built and sits above the content on **every** help centre
+page, not only the front one: the visitor a delay notice is for is as likely to
+have arrived on an article from a search engine, and a notice that only appears
+at the front door is not much of a notice.
+
+Its text is an environment variable — `KB_NOTICE_EN`, `KB_NOTICE_AR`,
+`KB_NOTICE_HREF`, `KB_NOTICE_TONE` — because there is nowhere else for it yet.
+That is the cheapest seam that is still real: ops can put a delay warning in
+front of every customer from the Render dashboard, and when a `service_notices`
+table with a start, an end and an author lands, `lib/kb/notice.ts` is the one
+file that changes. **Unset is no banner**, which is the only safe default: an
+operational claim about ShipBlu's network has to be one somebody actually made,
+so there is no placeholder text to go stale.
+
+One decision in it is uncomfortable and deliberate. A notice written in only one
+language is shown to **everyone**, carrying its own `lang` and `dir`, rather than
+withheld from the readers it does not cover. The failure that avoids is an ops
+person filling in the English box, walking away, and every Arabic reader — the
+majority of this site — silently getting no warning about a delay affecting their
+parcel. A banner in the wrong language is visibly wrong and gets translated; a
+banner nobody sees is invisibly wrong and does not.
+
+### Two things the design offered that are not here
+
 - **A WhatsApp contact card with a phone number on it.** No public ShipBlu
   number exists in this codebase or its configuration. `whatsapp_accounts` holds
   a WABA id and a token variable name, not a number anyone should ring. A support
@@ -93,6 +127,13 @@ tone and a step, and the badge, the four-step line and the timestamp appear the
 day the sync lands, with no change to this route. The mapping is
 **presentation only** and never written back, which is what keeps the "no enum
 for delivery status" decision in the earlier plan intact.
+
+The tone it maps onto is the design system's **canonical logistics taxonomy** —
+`in-transit`, `out-for-delivery`, `delivered`, `attempted`, `returned`,
+`exception` — rather than a generic four. That is worth the extra names for one
+reason: the system gives `out-for-delivery` violet of its own instead of sharing
+blue with `in-transit`, and that is exactly the distinction a recipient checking
+their phone is looking for. There is a test asserting the two never collapse.
 
 An unrecognised label draws the label alone, with no stepper and no tone. That
 asymmetry is the whole design of the file: the person reading this page is
@@ -142,9 +183,14 @@ would put it in a log even if it kept it out of an index.
   baseline instead of on its own line.
 - `SearchBox` gained a `placeholderKey`, so the front page can afford a
   placeholder that names an example question and a page header cannot.
-- `Hero` was deleted from `chrome.tsx`. The band it used is still there for every
-  page below the front door; the front page is the one page a visitor can tell
-  apart by its layout, so it does not need the colour to say where they are.
+- `Hero` was deleted from `chrome.tsx`, and `Band` gained a `subtle` tone. The
+  system is explicit that blue is the action colour and never a page background
+  outside an auth or marketing panel, so a full-bleed blu-500 slab with a title
+  on it is the loudest thing on a page and says nothing. The front page has its
+  own pale hero and the tracking page is on `subtle`; the other four page types
+  still wear the solid band, because moving them is a change to their layout
+  rather than to their colours. That is the obvious next piece of work and it is
+  not this one.
 - `clientIp` was split so a server component can pass `await headers()` — Next's
   `ReadonlyHeaders` is not a `Headers` and a page has no `Request` to reach for.
 - `/portal/new` accepts `?subject=`, seeded from the tracking page. It is a
@@ -160,10 +206,15 @@ would put it in a log even if it kept it out of an index.
 
 Against a local Postgres with the migrations, the seed and a synthetic knowledge
 base of 36 articles across six categories in both locales, plus one shipment
-carrying `Out for delivery` and one bare stub. Both locales, both pages, at
-1280px and 390px, rendered in Chromium with no console errors: the Arabic pages
-mirror correctly, including the progress line, which runs right to left without a
-second stylesheet.
+carrying `Out for delivery` and one bare stub.
+
+Because the palette is site-wide, the check was too: the front page, the tracking
+page in all its states, a category, an article, a search result and the sign-in
+form, in both locales, at 1280px and 390px, light **and** dark, rendered in
+Chromium with no console errors and no failed requests. The Arabic pages mirror
+correctly, including the progress line and the notice banner, which run right to
+left without a second stylesheet. The banner was then verified absent on every
+page with its variables unset.
 
 `tsc`, `eslint`, `vitest` and `next build` are clean.
 
@@ -177,8 +228,11 @@ second stylesheet.
   test file is where a regression would be caught.
 - **A public WhatsApp number**, if there is one. The contact panel has a slot for
   it the moment somebody can say what it is.
-- **A network-status banner**, if operations want one. It needs somewhere for an
-  admin to write it.
+- **Somewhere to write a service notice.** The banner is built; a
+  `service_notices` table with a start, an end and an author is what turns four
+  environment variables into something ops owns.
+- **The remaining four page types.** They still wear the solid blue band the
+  design system would not have given them.
 - **Shipment history.** The page shows one update because the schema holds one.
   A real timeline arrives with the platform sync, and `TrackingTimeline` in the
   design is the shape to build then.

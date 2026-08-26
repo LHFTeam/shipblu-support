@@ -33,8 +33,27 @@ export type ShipmentStage =
   | 'exception'
   | 'unknown';
 
-/** How the badge and the header read. `unknown` gets the neutral treatment. */
-export type StageTone = 'neutral' | 'progress' | 'success' | 'warning' | 'danger';
+/**
+ * Which entry of the design system's logistics status taxonomy a stage wears.
+ *
+ * The system ships a canonical set — draft, scheduled, picked-up, in-transit,
+ * out-for-delivery, delivered, attempted, on-hold, returned, exception, lost,
+ * cancelled — each with its own background, foreground and dot. Only the ones a
+ * stage below can reach are named here; the rest describe states this page has
+ * no way to be shown.
+ *
+ * `out-for-delivery` is the reason this is a taxonomy rather than four tones. It
+ * gets violet of its own instead of sharing blue with `in-transit`, which is
+ * exactly the distinction a recipient checking their phone is looking for.
+ */
+export type StatusTone =
+  | 'in-transit'
+  | 'out-for-delivery'
+  | 'delivered'
+  | 'attempted'
+  | 'returned'
+  | 'exception'
+  | 'unknown';
 
 /**
  * The four steps a parcel walks, and the only ones a recipient cares about.
@@ -48,7 +67,7 @@ export type TrackingStep = (typeof TRACKING_STEPS)[number];
 
 export type StageDisplay = {
   stage: ShipmentStage;
-  tone: StageTone;
+  tone: StatusTone;
   /** Index into `TRACKING_STEPS`, or null when the stage is off that line. */
   step: number | null;
   /** True once nothing more will happen without somebody intervening. */
@@ -56,16 +75,19 @@ export type StageDisplay = {
 };
 
 const DISPLAY: Record<ShipmentStage, Omit<StageDisplay, 'stage'>> = {
-  created: { tone: 'neutral', step: 0, terminal: false },
-  in_transit: { tone: 'progress', step: 1, terminal: false },
-  out_for_delivery: { tone: 'progress', step: 2, terminal: false },
+  // A parcel that exists and has not moved reads as `unknown` rather than
+  // borrowing the system's `scheduled`: "created" is a fact about our record of
+  // it, and a neutral badge is the honest way to say nothing has happened yet.
+  created: { tone: 'unknown', step: 0, terminal: false },
+  in_transit: { tone: 'in-transit', step: 1, terminal: false },
+  out_for_delivery: { tone: 'out-for-delivery', step: 2, terminal: false },
   // Still on the line, and still at the same step: an attempt that failed did
   // not move the parcel backwards, it used one of the tries at the last step.
-  attempted: { tone: 'warning', step: 2, terminal: false },
-  delivered: { tone: 'success', step: 3, terminal: true },
-  returned: { tone: 'warning', step: null, terminal: true },
-  exception: { tone: 'danger', step: null, terminal: false },
-  unknown: { tone: 'neutral', step: null, terminal: false },
+  attempted: { tone: 'attempted', step: 2, terminal: false },
+  delivered: { tone: 'delivered', step: 3, terminal: true },
+  returned: { tone: 'returned', step: null, terminal: true },
+  exception: { tone: 'exception', step: null, terminal: false },
+  unknown: { tone: 'unknown', step: null, terminal: false },
 };
 
 /**
