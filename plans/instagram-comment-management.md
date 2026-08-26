@@ -1,7 +1,9 @@
 # Instagram comment management
 
-The App Review item is `instagram_business_manage_comments`. This is what had to
-be true before there was anything to submit.
+The App Review item is comment management on Instagram. **Which of its two names
+to apply under is decided by how the account is connected, not by preference** —
+see "Which permission to apply for" below. The rest of this is what had to be
+true before there was anything to submit under either name.
 
 ## Context
 
@@ -58,6 +60,40 @@ permission names are the clearest way to tell which one an app is on:
 `README.md` and `lib/env.ts` both said one Meta app means one credential, which
 was true of WhatsApp, Messenger and a Page-connected Instagram account, and is
 the assumption that cost thirteen hours of Instagram traffic.
+
+## Which permission to apply for
+
+`instagram_manage_comments` and `instagram_business_manage_comments` are **not
+two ways of asking for the same thing**. They are the comment permission of the
+two setups above, and an account is connected one way at a time — one host, one
+token, one signing secret. So the permission follows the connection:
+
+| The account is connected through | Apply for                                                        |
+| -------------------------------- | ---------------------------------------------------------------- |
+| its Facebook Page                | `instagram_basic`, `instagram_manage_comments`, `pages_*`        |
+| Instagram Login                  | `instagram_business_basic`, `instagram_business_manage_comments` |
+
+**Applying for both is worse than applying for one.** App Review wants a
+screencast per permission showing the app actually using it, and the app can only
+exercise the set matching the live connection — so the other one is a permission
+with nothing to demonstrate, on a submission that is approved or rejected as a
+whole.
+
+Being a single-tenant app changes the access _level_ argument but not the name.
+Meta's own line is that "if your app only serves your Instagram professional
+account or an account you manage, Standard Access is all your app needs" — but
+Standard Access only covers app users **with a role on the app**, and this is a
+support inbox whose entire traffic is members of the public who have none. The
+messaging side settles it regardless: an Instagram private reply is documented as
+needing Advanced Access, the Human Agent feature and business verification, and
+the composer has offered private replies since the channel landed. So Advanced
+Access and business verification are required anyway, and the comment permission
+should go in that same submission rather than being deferred on the hope that
+Standard Access stretches.
+
+One useful detail from that requirement: `instagram_manage_comments` is what
+gates the **private reply**, not only hide and delete. The permission is not
+optional for a comment ticket even if nobody ever hides anything.
 
 So `META_INSTAGRAM_APP_SECRET` and `INSTAGRAM_ACCESS_TOKEN` are added as an
 optional pair. Unset — which is every deployment before this — behaves exactly as
