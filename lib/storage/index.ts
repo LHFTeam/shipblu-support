@@ -42,19 +42,10 @@ export function buildAttachmentPath(
 }
 
 /** Image types a channel's profile picture is allowed to be stored as. */
-const AVATAR_EXTENSIONS: Record<string, string> = {
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/webp': 'webp',
-  'image/gif': 'gif',
-};
+const AVATAR_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 
 export function isStorableAvatarType(contentType: string): boolean {
-  return normaliseContentType(contentType) in AVATAR_EXTENSIONS;
-}
-
-function normaliseContentType(contentType: string): string {
-  return contentType.split(';')[0]!.trim().toLowerCase();
+  return AVATAR_TYPES.has(contentType.split(';')[0]!.trim().toLowerCase());
 }
 
 /**
@@ -66,13 +57,16 @@ function normaliseContentType(contentType: string): string {
  * so the older ones would be unreferenced bytes we keep paying for. `x-upsert`
  * on the upload is what makes overwriting work.
  *
- * The extension comes from the response's content type, never from the remote
- * URL: Meta's CDN link is a query-string blob with no filename in it, and a
- * path segment taken from a URL is a path segment somebody else chose.
+ * **No extension**, which is what actually makes the key stable. Deriving one
+ * from the content type looks tidier and quietly breaks the invariant above:
+ * Meta's CDN re-encodes, so the same customer's picture arriving as WebP after
+ * it was JPEG writes a second object and strands the first — the exact leak the
+ * stable key exists to avoid, once per format. Storage keeps the Content-Type it
+ * was uploaded with and serves it back, so the extension was never load-bearing;
+ * `isStorableAvatarType` is what decides whether the bytes are an image at all.
  */
-export function buildAvatarPath(contactId: string, contentType: string): string {
-  const extension = AVATAR_EXTENSIONS[normaliseContentType(contentType)] ?? 'bin';
-  return `contacts/${contactId}/avatar.${extension}`;
+export function buildAvatarPath(contactId: string): string {
+  return `contacts/${contactId}/avatar`;
 }
 
 export async function uploadObject(

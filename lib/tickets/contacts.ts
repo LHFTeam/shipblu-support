@@ -20,15 +20,6 @@ export type ResolveInput = {
 export type ResolvedContact = {
   contactId: string;
   created: boolean;
-  /**
-   * Nobody knows who this is yet, and no channel profile API has been asked.
-   *
-   * Two conditions rather than one. "Has no name" alone would re-ask on every
-   * message from a customer whose profile is private and always will be, and
-   * "has never been asked" alone would re-ask for somebody an agent has already
-   * named by hand.
-   */
-  needsProfile: boolean;
 };
 
 export async function resolveContact(input: ResolveInput): Promise<ResolvedContact> {
@@ -36,13 +27,8 @@ export async function resolveContact(input: ResolveInput): Promise<ResolvedConta
   if (!identifier) throw new Error('Cannot resolve a contact without an identifier');
 
   const existing = await db
-    .select({
-      contactId: contactIdentities.contactId,
-      name: contacts.name,
-      profileFetchedAt: contactIdentities.profileFetchedAt,
-    })
+    .select({ contactId: contactIdentities.contactId })
     .from(contactIdentities)
-    .innerJoin(contacts, eq(contacts.id, contactIdentities.contactId))
     .where(
       and(
         eq(contactIdentities.channel, input.channel),
@@ -55,7 +41,6 @@ export async function resolveContact(input: ResolveInput): Promise<ResolvedConta
     return {
       contactId: existing[0].contactId,
       created: false,
-      needsProfile: !existing[0].name && existing[0].profileFetchedAt === null,
     };
   }
 
@@ -107,12 +92,10 @@ export async function resolveContact(input: ResolveInput): Promise<ResolvedConta
         .limit(1);
 
       if (!winner[0]) throw new Error('Contact identity conflict could not be resolved');
-      // The race's winner resolved the same identity a moment ago and asked for
-      // the profile itself if it was needed, so this side does not repeat it.
-      return { contactId: winner[0].contactId, created: false, needsProfile: false };
+      return { contactId: winner[0].contactId, created: false };
     }
 
-    return { contactId, created: true, needsProfile: !input.displayName };
+    return { contactId, created: true };
   });
 }
 
@@ -129,9 +112,14 @@ export async function resolveContact(input: ResolveInput): Promise<ResolvedConta
  *   a profile refresh must never quietly replace a human's correction with
  *   whatever Meta currently returns.
  *
- * `profileFetchedAt` is stamped whether or not a name came back — that is the
- * point of it. A customer with a locked-down profile answers successfully with
- * nothing in it, and without the timestamp they would be re-fetched forever.
+ * `markFetched` is what closes the identity to further lookups, and a caller
+ * that only got *part* of an answer must pass false. A customer whose profile
+ * came back with a picture we then failed to download is not finished — stamping
+ * them would leave them permanently faceless while Meta holds a picture for
+ * them, and the backfill would skip them for the same reason. It is stamped for
+ * an empty-but-successful answer, though: that is the whole point of the column,
+ * since a locked-down profile answers with nothing and would otherwise be
+ * re-fetched forever.
  */
 export async function applyChannelProfile(input: {
   contactId: string;
@@ -139,6 +127,8 @@ export async function applyChannelProfile(input: {
   identifier: string;
   name: string | null;
   avatarPath: string | null;
+  /** False when the answer was incomplete and the identity should stay open. */
+  markFetched: boolean;
 }): Promise<void> {
   const identifier = normaliseIdentifier(input.channel, input.identifier);
   const name = input.name?.trim() || null;
@@ -146,7 +136,10 @@ export async function applyChannelProfile(input: {
   await db.transaction(async (tx) => {
     await tx
       .update(contactIdentities)
-      .set({ ...(name ? { displayName: name } : {}), profileFetchedAt: new Date() })
+      .set({
+        ...(name ? { displayName: name } : {}),
+        ...(input.markFetched ? { profileFetchedAt: new Date() } : {}),
+      })
       .where(
         and(
           eq(contactIdentities.channel, input.channel),
@@ -179,6 +172,43 @@ export async function applyChannelProfile(input: {
         );
     }
   });
+}
+
+/**
+ * Whether this identity's channel profile has ever been asked for.
+ *
+ * Deliberately *not* folded into `resolveContact`. That function is on the hot
+ * path of every inbound message on all six channels, and only the two Meta ones
+ * have a profile API to ask — widening its query and its return type to carry an
+ * answer the other five discard is a join that email and WhatsApp pay for
+ * nothing. This is one lookup on the `(channel, identifier)` unique index, made
+ * only where the question is real.
+ *
+ * The condition is "never asked", and only that. Gating on the name as well
+ * looks safer and is not: an identity that arrived with a display name would
+ * never be asked, so it would never get a picture either — and on Instagram,
+ * where the handle often does arrive in the payload, that is precisely the
+ * channel where a face is most useful. `profileFetchedAt` is the honest record
+ * of whether the question has been put, and `applyChannelProfile` is what
+ * answers it.
+ */
+export async function needsChannelProfile(
+  channel: ResolveInput['channel'],
+  identifier: string,
+): Promise<boolean> {
+  const rows = await db
+    .select({ profileFetchedAt: contactIdentities.profileFetchedAt })
+    .from(contactIdentities)
+    .where(
+      and(
+        eq(contactIdentities.channel, channel),
+        eq(contactIdentities.identifier, normaliseIdentifier(channel, identifier)),
+      ),
+    )
+    .limit(1);
+
+  // No row means the identity was not written — nothing to attach a profile to.
+  return rows[0] !== undefined && rows[0].profileFetchedAt === null;
 }
 
 /**

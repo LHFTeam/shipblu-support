@@ -2,7 +2,13 @@ import { and, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { contactIdentities, contacts } from '@/db/schema';
 import { normaliseIdentifier } from '@/lib/auth/normalise';
-import { downloadAttachment, fetchProfile, isConfigured, MetaApiError } from '@/lib/meta/client';
+import {
+  downloadAttachment,
+  fetchProfile,
+  isConfigured,
+  MetaApiError,
+  MetaContentTooLargeError,
+} from '@/lib/meta/client';
 import { explainMetaProfileError, isProfilePermissionRefusal } from '@/lib/meta/errors';
 import type { ClaimedJob } from '@/lib/queue';
 import { buildAvatarPath, isStorableAvatarType, uploadObject } from '@/lib/storage';
@@ -131,7 +137,7 @@ export async function fetchMetaProfile(job: ClaimedJob): Promise<void> {
     throw error;
   }
 
-  const avatarPath = await storeAvatar(contactId, profile.pictureUrl, row.avatarPath);
+  const avatar = await storeAvatar(contactId, profile.pictureUrl, row.avatarPath);
 
   await applyChannelProfile({
     contactId,
@@ -140,15 +146,35 @@ export async function fetchMetaProfile(job: ClaimedJob): Promise<void> {
     // Instagram's handle is what an agent would recognise; Messenger has no
     // equivalent, so `name` is all there is.
     name: profile.name ?? profile.username,
-    avatarPath,
+    avatarPath: avatar.path,
+    // The name is written either way — it is the part that makes a ticket
+    // readable — but a picture we could not fetch this time leaves the identity
+    // open, so the next message asks again.
+    markFetched: !avatar.retryable,
   });
+
+  if (avatar.retryable) {
+    // Thrown after the write, so the name is already durable and the retry is
+    // only about the picture. Exhausting the attempts leaves a dead row that
+    // says so, which is better than a contact silently left faceless.
+    throw new Error(
+      `[fetch_meta_profile] ${platform} ${userId}: name saved, but the profile picture ` +
+        `could not be fetched — retrying`,
+    );
+  }
 
   console.log(
     `[fetch_meta_profile] ${platform} ${userId} → ` +
       `${profile.name ?? profile.username ?? '(no name)'}` +
-      `${avatarPath ? ' with picture' : ''}`,
+      `${avatar.path ? ' with picture' : ''}`,
   );
 }
+
+type StoredAvatar = {
+  path: string | null;
+  /** The picture exists and we simply failed to get it. Ask again. */
+  retryable: boolean;
+};
 
 /**
  * Copies the profile picture into our own bucket.
@@ -158,43 +184,59 @@ export async function fetchMetaProfile(job: ClaimedJob): Promise<void> {
  * week later — the same reasoning that makes `download_media` copy attachments
  * on arrival rather than lazily.
  *
- * Best-effort on purpose: a picture that will not download must not cost the
- * name, which is the part that actually makes a ticket readable.
+ * The return distinguishes the two ways there can be no picture, because they
+ * need opposite follow-ups. A profile that simply has none, or one whose image
+ * we will never accept — the wrong format, too large — is *finished*: asking
+ * again produces the same answer forever. A download that failed is not, and
+ * treating it as though it were is what would leave a contact permanently
+ * faceless while Meta holds a picture for them, invisible to the backfill
+ * because the identity had been stamped as answered.
  */
 async function storeAvatar(
   contactId: string,
   pictureUrl: string | null,
   existingPath: string | null,
-): Promise<string | null> {
-  if (!pictureUrl) return null;
+): Promise<StoredAvatar> {
+  if (!pictureUrl) return { path: null, retryable: false };
+
+  let content: Buffer;
+  let contentType: string;
 
   try {
-    const { content, contentType } = await downloadAttachment(pictureUrl);
-
-    if (!isStorableAvatarType(contentType)) {
-      console.warn(`[fetch_meta_profile] ${contactId} avatar is ${contentType}, not stored`);
-      return null;
-    }
-    if (content.length > MAX_AVATAR_BYTES) {
-      console.warn(
-        `[fetch_meta_profile] ${contactId} avatar is ${content.length} bytes, not stored`,
-      );
-      return null;
-    }
-
-    const stored = await uploadObject(
-      buildAvatarPath(contactId, contentType),
-      content,
-      contentType,
-    );
-    return stored.path;
+    ({ content, contentType } = await downloadAttachment(pictureUrl, {
+      maxBytes: MAX_AVATAR_BYTES,
+    }));
   } catch (error) {
+    if (error instanceof MetaContentTooLargeError) {
+      console.warn(
+        `[fetch_meta_profile] ${contactId} avatar is over ${MAX_AVATAR_BYTES} bytes, not stored`,
+      );
+      return { path: existingPath, retryable: false };
+    }
+
     console.warn(
       `[fetch_meta_profile] ${contactId} avatar download failed, keeping the name: ` +
         `${error instanceof Error ? error.message : String(error)}`,
     );
     // Keeps whatever was already on file rather than blanking a working picture
     // because one refresh could not reach the CDN.
-    return existingPath;
+    return { path: existingPath, retryable: true };
+  }
+
+  if (!isStorableAvatarType(contentType)) {
+    console.warn(`[fetch_meta_profile] ${contactId} avatar is ${contentType}, not stored`);
+    return { path: existingPath, retryable: false };
+  }
+
+  try {
+    const stored = await uploadObject(buildAvatarPath(contactId), content, contentType);
+    return { path: stored.path, retryable: false };
+  } catch (error) {
+    // Our own storage being unavailable is the most retryable failure here.
+    console.warn(
+      `[fetch_meta_profile] ${contactId} avatar upload failed: ` +
+        `${error instanceof Error ? error.message : String(error)}`,
+    );
+    return { path: existingPath, retryable: true };
   }
 }

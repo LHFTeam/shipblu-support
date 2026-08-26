@@ -14,12 +14,48 @@ import { isPlannedButUnimplemented, resolveHandler } from './handlers';
  * secret to guard, and no request timeout to fight.
  */
 
+/**
+ * Trailing `key=value` arguments, as the job's payload.
+ *
+ * Cron jobs pass none and get `{}`, exactly as before. It exists for the
+ * handlers whose options were otherwise unreachable: a backfill documents a
+ * `force` flag on its payload type and, run the only way anybody runs it, could
+ * never receive one — the escape hatch existed solely for whoever thought to
+ * hand-insert a `jobs` row.
+ *
+ * `true`, `false` and numbers are converted, because a handler checking
+ * `payload.force === true` would otherwise be reading the string "true" and
+ * quietly doing nothing.
+ */
+function parsePayload(args: string[]): Record<string, unknown> {
+  const payload: Record<string, unknown> = {};
+
+  for (const arg of args) {
+    const separator = arg.indexOf('=');
+    if (separator <= 0) {
+      console.error(`[job] ignoring argument "${arg}" — expected key=value`);
+      continue;
+    }
+
+    const key = arg.slice(0, separator);
+    const raw = arg.slice(separator + 1);
+
+    if (raw === 'true' || raw === 'false') payload[key] = raw === 'true';
+    else if (raw !== '' && Number.isFinite(Number(raw))) payload[key] = Number(raw);
+    else payload[key] = raw;
+  }
+
+  return payload;
+}
+
 async function main() {
   const type = process.argv[2];
   if (!type) {
-    console.error('Usage: npm run job -- <job_type>');
+    console.error('Usage: npm run job -- <job_type> [key=value ...]');
     process.exit(1);
   }
+
+  const payload = parsePayload(process.argv.slice(3));
 
   // The Blueprint provisions every cron job up front, so schedules for later
   // phases fire before their handler exists. Exit 0 rather than failing the run:
@@ -37,7 +73,7 @@ async function main() {
   const job: ClaimedJob = {
     id: randomUUID(),
     type: type as JobType,
-    payload: {},
+    payload,
     status: 'processing',
     priority: 100,
     runAt: new Date(),

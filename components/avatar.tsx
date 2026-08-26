@@ -28,8 +28,17 @@ export function Avatar({
   hasAvatar: boolean;
   size?: number;
 }) {
-  const [failed, setFailed] = useState(false);
-  const showImage = hasAvatar && !failed;
+  /*
+    Which contact failed, not whether one did.
+
+    A bare boolean survives a prop change — React reuses the instance when the
+    header re-renders after a profile job lands, or when any list swaps
+    `contactId` at the same tree position — and an earlier 404 would then
+    suppress a different person's picture that was never requested. The tile
+    would read as "this customer has no photo" when nothing had asked for one.
+  */
+  const [failedFor, setFailedFor] = useState<string | null>(null);
+  const showImage = hasAvatar && failedFor !== contactId;
 
   return (
     <span
@@ -49,7 +58,7 @@ export function Avatar({
           width={size}
           height={size}
           loading="lazy"
-          onError={() => setFailed(true)}
+          onError={() => setFailedFor(contactId)}
           className="absolute inset-0 h-full w-full object-cover"
         />
       ) : null}

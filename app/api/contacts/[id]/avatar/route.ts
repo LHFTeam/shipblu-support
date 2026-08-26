@@ -8,6 +8,8 @@ import { signedUrl } from '@/lib/storage';
 
 export const dynamic = 'force-dynamic';
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * Redirects to a short-lived signed URL for a contact's profile picture.
  *
@@ -29,6 +31,12 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     return NextResponse.json({ error: 'not found' }, { status: 404 });
 
   const { id } = await context.params;
+
+  // Postgres raises 22P02 on a malformed uuid rather than returning no rows, so
+  // without this an `<img>` pointed at a mistyped id is a 500 and a stack trace
+  // instead of the quiet 404 the console is built to fall back from — and this
+  // route is requested on every ticket render.
+  if (!UUID.test(id)) return NextResponse.json({ error: 'not found' }, { status: 404 });
 
   const rows = await db
     .select({ avatarPath: contacts.avatarPath })

@@ -352,9 +352,33 @@ export async function fetchProfile(platform: MetaPlatform, userId: string): Prom
   };
 }
 
-/** Downloads an attachment Meta has given us a URL for. */
+/**
+ * A response bigger than the caller was willing to hold.
+ *
+ * Its own type rather than a `MetaApiError`, because it is not something Graph
+ * said: nothing is wrong with the request and retrying it will produce the same
+ * oversized body. Callers treat it as a final, non-transient refusal.
+ */
+export class MetaContentTooLargeError extends Error {
+  constructor(readonly limitBytes: number) {
+    super(`response body exceeded ${limitBytes} bytes`);
+    this.name = 'MetaContentTooLargeError';
+  }
+}
+
+/**
+ * Downloads an attachment Meta has given us a URL for.
+ *
+ * `maxBytes` is enforced **while reading**, not after. Checking the length of a
+ * Buffer that has already been materialised is not a guard against anything —
+ * the memory it exists to bound has been allocated by the time the check runs,
+ * so a wrong or hostile URL costs the worker the whole body first and reports
+ * "too large" afterwards. The declared `Content-Length` is rejected up front
+ * where there is one, and the stream is aborted mid-read where there is not.
+ */
 export async function downloadAttachment(
   url: string,
+  options: { maxBytes?: number } = {},
 ): Promise<{ content: Buffer; contentType: string }> {
   const response = await fetch(url);
   if (!response.ok) {
@@ -367,8 +391,43 @@ export async function downloadAttachment(
     );
   }
 
-  return {
-    content: Buffer.from(await response.arrayBuffer()),
-    contentType: response.headers.get('content-type') ?? 'application/octet-stream',
-  };
+  const contentType = response.headers.get('content-type') ?? 'application/octet-stream';
+  const { maxBytes } = options;
+
+  if (maxBytes === undefined) {
+    return { content: Buffer.from(await response.arrayBuffer()), contentType };
+  }
+
+  const declared = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await response.body?.cancel();
+    throw new MetaContentTooLargeError(maxBytes);
+  }
+
+  const reader = response.body?.getReader();
+  // No body to stream — an empty response, or a runtime that did not give us
+  // one. `arrayBuffer` is bounded by the header check above in that case.
+  if (!reader) {
+    const content = Buffer.from(await response.arrayBuffer());
+    if (content.length > maxBytes) throw new MetaContentTooLargeError(maxBytes);
+    return { content, contentType };
+  }
+
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+
+    total += value.length;
+    if (total > maxBytes) {
+      await reader.cancel();
+      throw new MetaContentTooLargeError(maxBytes);
+    }
+    chunks.push(value);
+  }
+
+  return { content: Buffer.concat(chunks), contentType };
 }

@@ -34,6 +34,18 @@ export type EnqueueOptions = {
    * Makes enqueueing idempotent. Re-enqueuing the same key while a job is still
    * pending collapses onto the existing row instead of sending twice — which is
    * what stops a webhook retry from producing a duplicate outbound message.
+   *
+   * **A key is spent for good, not until the job finishes.** `jobs_dedupe_idx`
+   * is a plain unique index over the whole table, not a partial one over pending
+   * rows, so the conflict target still matches a job that completed weeks ago —
+   * and a job that reached `dead` is never deleted by `cleanup` at all, which
+   * makes its key unusable for the life of the database. `enqueue` then returns
+   * null and the caller sees "already queued".
+   *
+   * So use it only where the work is genuinely once-ever for that key — one
+   * outbound send, one media download. Anything that might legitimately need to
+   * run again for the same subject must not be keyed on the subject; make the
+   * handler idempotent instead and enqueue without a key.
    */
   dedupeKey?: string;
 };
@@ -65,6 +77,43 @@ export async function enqueue(
 
   const rows = await db.insert(jobs).values(values).returning({ id: jobs.id });
   return rows[0]?.id ?? null;
+}
+
+/**
+ * Enqueues many jobs of one type in a single insert.
+ *
+ * For a backfill, which enqueues one job per row it found. The loop-and-await
+ * version is one database round trip per job — invisible at twenty, minutes of
+ * pure latency at twenty thousand, which is the size a backfill is for.
+ *
+ * No `dedupeKey`, deliberately: the index behind it is a plain unique index over
+ * the whole table, so a key can only ever be used once in the life of the
+ * system. A bulk enqueue is exactly where that bites — see the note on
+ * `dedupeKey` above — so the handlers this is used with have to be idempotent
+ * themselves.
+ */
+export async function enqueueMany(
+  type: JobType,
+  payloads: Record<string, unknown>[],
+  options: Omit<EnqueueOptions, 'dedupeKey'> = {},
+): Promise<number> {
+  if (payloads.length === 0) return 0;
+
+  const rows = await db
+    .insert(jobs)
+    .values(
+      payloads.map((payload) => ({
+        type,
+        payload,
+        priority: options.priority ?? 100,
+        runAt: options.runAt ?? new Date(),
+        maxAttempts: options.maxAttempts ?? 5,
+        dedupeKey: null,
+      })),
+    )
+    .returning({ id: jobs.id });
+
+  return rows.length;
 }
 
 /**

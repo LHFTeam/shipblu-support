@@ -40,4 +40,22 @@ describe('initials', () => {
     expect(initials('  Ali   Hassan  ')).toBe('AH');
     expect(initials('Ali\tHassan')).toBe('AH');
   });
+
+  it('ignores the invisible characters an Arabic name is pasted with', () => {
+    // \s matches none of these, so before they were stripped an RLM prefix
+    // became the "initial" and the tile rendered blank. WhatsApp and Instagram
+    // both hand them over routinely.
+    expect(initials('\u200Fمنى')).toBe('م');
+    expect(initials('\u200Fعلي حسن')).toBe('عح');
+    expect(initials('\u202BAli Hassan\u202C')).toBe('AH');
+    expect(initials('\uFEFFAli')).toBe('A');
+    // Nothing but invisibles is the same as no name at all.
+    expect(initials('\u200B\u200F')).toBe('?');
+  });
+
+  it('keeps a two-letter tile two letters wide', () => {
+    // toUpperCase() is not length-preserving: ß expands to SS, which would put
+    // three glyphs in a tile sized for two.
+    expect(initials('ßeta gamma')).toBe('SG');
+  });
 });

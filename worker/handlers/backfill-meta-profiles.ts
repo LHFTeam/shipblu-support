@@ -1,7 +1,7 @@
-import { and, eq, inArray, isNull, or } from 'drizzle-orm';
+import { and, eq, exists, inArray, isNull, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { contactIdentities, contacts } from '@/db/schema';
-import { enqueue, type ClaimedJob } from '@/lib/queue';
+import { contactIdentities, contacts, messages } from '@/db/schema';
+import { enqueueMany, type ClaimedJob } from '@/lib/queue';
 
 /**
  * Names the Facebook and Instagram customers already in the archive.
@@ -9,7 +9,10 @@ import { enqueue, type ClaimedJob } from '@/lib/queue';
  * The live path only ever sees a new message, so without this every ticket
  * filed before the lookup existed keeps its bare numeric id — and those are the
  * tickets an agent is most likely to be reading, because they are the ones with
- * history. Re-runnable by design: `npm run job -- backfill_meta_profiles`.
+ * history. Re-runnable by design:
+ *
+ *     npm run job -- backfill_meta_profiles
+ *     npm run job -- backfill_meta_profiles force=true limit=50
  *
  * It enqueues rather than calling Graph itself. One job per contact means one
  * customer's private profile cannot end the run for everybody behind them, the
@@ -30,6 +33,33 @@ export async function backfillMetaProfiles(job: ClaimedJob): Promise<void> {
   const force = payload.force === true;
   const limit = typeof payload.limit === 'number' && payload.limit > 0 ? payload.limit : null;
 
+  /*
+    Direct-message senders only, which is why this reaches into `messages`
+    rather than taking every Meta identity there is.
+
+    `ingestMetaComment` resolves comment authors into the very same
+    `(channel, identifier)` namespace — including a synthetic `unknown:<id>`
+    when the payload carried no author id at all — and a comment author's id is
+    not the page-scoped id the User Profile API answers for. Asking about one
+    earns a 100/33, which `isProfilePermissionRefusal` reports as "the app may
+    not hold Business Asset User Profile Access". That sentence is the whole
+    diagnostic value of this feature and it has to stay trustworthy, so the
+    backfill must exclude exactly what `queueProfileLookup` excludes.
+  */
+  const isDirectMessageSender = exists(
+    db
+      .select({ one: sql`1` })
+      .from(messages)
+      .where(
+        and(
+          eq(messages.fromAddress, contactIdentities.identifier),
+          eq(messages.direction, 'inbound'),
+          sql`${messages.meta}->>'metaKind' = 'direct_message'`,
+          sql`${messages.meta}->>'platform' = ${contactIdentities.channel}`,
+        ),
+      ),
+  );
+
   const candidates = db
     .select({
       contactId: contactIdentities.contactId,
@@ -44,12 +74,12 @@ export async function backfillMetaProfiles(job: ClaimedJob): Promise<void> {
         // A merged-away contact is a tombstone; naming it would put the name on
         // a record no ticket points at any more.
         isNull(contacts.deletedAt),
-        ...(force
-          ? []
-          : [
-              isNull(contactIdentities.profileFetchedAt),
-              or(isNull(contacts.name), eq(contacts.name, '')),
-            ]),
+        isDirectMessageSender,
+        // "Never asked", and only that — the same condition `needsChannelProfile`
+        // uses. Adding "and has no name" would skip a contact whose handle
+        // arrived in the webhook but whose picture never did, which on Instagram
+        // is the common case.
+        ...(force ? [] : [isNull(contactIdentities.profileFetchedAt)]),
       ),
     )
     .orderBy(contactIdentities.channel, contactIdentities.identifier);
@@ -61,25 +91,22 @@ export async function backfillMetaProfiles(job: ClaimedJob): Promise<void> {
   // run while hiding that Instagram produced nothing at all — the exact shape of
   // silent failure `AGENTS.md` asks to break counts down along.
   const tally = new Map<string, number>();
-  let enqueued = 0;
+  for (const row of rows) tally.set(row.channel, (tally.get(row.channel) ?? 0) + 1);
 
-  for (const row of rows) {
-    const id = await enqueue(
-      'fetch_meta_profile',
-      { contactId: row.contactId, platform: row.channel, userId: row.identifier, force },
-      {
-        // Behind live traffic: a ticket arriving now needs its name before a
-        // contact from March does.
-        priority: 200,
-        dedupeKey: `fetch_meta_profile:${row.channel}:${row.identifier}`,
-      },
-    );
-
-    if (id) {
-      enqueued += 1;
-      tally.set(row.channel, (tally.get(row.channel) ?? 0) + 1);
-    }
-  }
+  // One insert rather than one per row: at `force` over a grown archive the
+  // loop-and-await version is thousands of sequential round trips.
+  const enqueued = await enqueueMany(
+    'fetch_meta_profile',
+    rows.map((row) => ({
+      contactId: row.contactId,
+      platform: row.channel,
+      userId: row.identifier,
+      force,
+    })),
+    // Behind live traffic: a ticket arriving now needs its name before a contact
+    // from March does.
+    { priority: 200 },
+  );
 
   const breakdown =
     [...tally.entries()].map(([channel, count]) => `${channel} ${count}`).join(', ') || 'none';

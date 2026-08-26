@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetEnvCache } from '@/lib/env';
-import { fetchProfile, MetaApiError, profileDisplayName, profileFields } from './client';
+import {
+  downloadAttachment,
+  fetchProfile,
+  MetaApiError,
+  MetaContentTooLargeError,
+  profileDisplayName,
+  profileFields,
+} from './client';
 import { isProfilePermissionRefusal } from './errors';
 
 /**
@@ -142,5 +149,56 @@ describe('isProfilePermissionRefusal', () => {
     expect(isProfilePermissionRefusal(error(190))).toBe(false);
     expect(isProfilePermissionRefusal(error(613))).toBe(false);
     expect(isProfilePermissionRefusal(error(null))).toBe(false);
+  });
+});
+
+describe('downloadAttachment size cap', () => {
+  function streamOf(chunks: Uint8Array[], headers: Record<string, string> = {}) {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(chunk);
+        controller.close();
+      },
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(body, { status: 200, headers })),
+    );
+  }
+
+  it('rejects on the declared length without reading the body', async () => {
+    streamOf([new Uint8Array(10)], { 'content-length': '5000', 'content-type': 'image/jpeg' });
+
+    await expect(downloadAttachment('https://cdn/p.jpg', { maxBytes: 100 })).rejects.toBeInstanceOf(
+      MetaContentTooLargeError,
+    );
+  });
+
+  it('aborts mid-stream when no length is declared', async () => {
+    // The case the guard exists for: a chunked response that only reveals its
+    // size as it arrives. Checking `content.length` after `arrayBuffer()` would
+    // have allocated all of it before reporting the problem.
+    streamOf([new Uint8Array(60), new Uint8Array(60), new Uint8Array(60)], {
+      'content-type': 'image/jpeg',
+    });
+
+    await expect(downloadAttachment('https://cdn/p.jpg', { maxBytes: 100 })).rejects.toBeInstanceOf(
+      MetaContentTooLargeError,
+    );
+  });
+
+  it('returns a body that fits', async () => {
+    streamOf([new Uint8Array(30), new Uint8Array(30)], { 'content-type': 'image/png' });
+
+    const result = await downloadAttachment('https://cdn/p.png', { maxBytes: 100 });
+    expect(result.content.length).toBe(60);
+    expect(result.contentType).toBe('image/png');
+  });
+
+  it('is unbounded when no cap is given', async () => {
+    streamOf([new Uint8Array(5000)], { 'content-type': 'image/jpeg' });
+
+    const result = await downloadAttachment('https://cdn/p.jpg');
+    expect(result.content.length).toBe(5000);
   });
 });

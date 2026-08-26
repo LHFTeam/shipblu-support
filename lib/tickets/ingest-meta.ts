@@ -8,7 +8,7 @@ import type {
   NormalisedReceipt,
 } from '@/lib/meta/types';
 import { enqueue } from '@/lib/queue';
-import { resolveContact } from './contacts';
+import { needsChannelProfile, resolveContact } from './contacts';
 import { afterInboundMessage, afterMessageStored } from './lifecycle';
 
 /**
@@ -48,7 +48,7 @@ export async function ingestMetaMessage(
   const existingMessage = await findByChannelMessageId(message.mid);
   if (existingMessage) return existingMessage;
 
-  const { contactId, needsProfile } = await resolveContact({
+  const { contactId } = await resolveContact({
     channel: message.platform,
     identifier: message.from,
     displayName: message.senderName,
@@ -56,10 +56,11 @@ export async function ingestMetaMessage(
 
   // Messenger and Instagram identify the sender by a scoped id and nothing else,
   // so unless the profile is looked up this ticket is filed under a 17-digit
-  // number. Queued before the ticket is written rather than after: the name is
-  // wanted on the first render, and the job is deduped per person, so a customer
-  // sending five messages in a row still produces one Graph call.
-  if (needsProfile) await queueProfileLookup(message.platform, contactId, message.from);
+  // number. Queued before the ticket is written rather than after, because the
+  // name is wanted on the first render.
+  if (await needsChannelProfile(message.platform, message.from)) {
+    await queueProfileLookup(message.platform, contactId, message.from);
+  }
 
   const channel = await channelFor(message.platform);
   const existing = await findLiveConversation(contactId, message.platform);
@@ -491,19 +492,24 @@ async function queueAttachments(
  * would produce a refusal indistinguishable from "this app is not approved",
  * which is the one signal here that has to stay trustworthy.
  *
- * The dedupe key is the person, not the message: it collapses a burst of
- * messages into one lookup, and because `enqueue` only collapses onto a job
- * that is still pending, a customer who writes in again months later is looked
- * up again if they still have no name.
+ * **No dedupe key**, though one per person is the obvious choice and was the
+ * first thing written here. `jobs_dedupe_idx` is a plain unique index over the
+ * whole table, so a key is spent permanently rather than until its job finishes:
+ * the first lookup for a customer would burn `fetch_meta_profile:facebook:<id>`
+ * forever, and every later attempt — the customer writing in again, the backfill
+ * run after App Review finally grants the feature — would silently collapse onto
+ * a row that completed months ago and do nothing. A job that reached `dead` is
+ * never cleaned up at all, so that person could never be looked up again.
+ *
+ * The guard is in the handler instead, where it can read what actually happened:
+ * a second job for an identity already answered for returns immediately. That
+ * costs a cheap indexed read per duplicate and keeps the recovery path working,
+ * which is the trade worth making.
  */
 async function queueProfileLookup(
   platform: MetaPlatform,
   contactId: string,
   userId: string,
 ): Promise<void> {
-  await enqueue(
-    'fetch_meta_profile',
-    { contactId, platform, userId },
-    { priority: 20, dedupeKey: `fetch_meta_profile:${platform}:${userId}` },
-  );
+  await enqueue('fetch_meta_profile', { contactId, platform, userId }, { priority: 20 });
 }
