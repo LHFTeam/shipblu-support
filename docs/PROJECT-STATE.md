@@ -811,11 +811,34 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
     pulls traffic after 15 s of failures and restarts the instance after 60.
 
   What is still not fixed is the leak itself, which needs the app off the
-  transaction pooler: Supabase recommends session mode (port 5432) for a
-  persistent container on an IPv4-only network, which Render is, and our own
-  session-mode connection for `LISTEN` has never leaked once. That is a
-  `DATABASE_URL` change plus sizing `max` per service, because session mode
-  holds a backend per pool slot.
+  transaction pooler. Supabase's own guidance is that transaction mode (6543) is
+  for serverless and edge functions and a long-lasting container wants a direct
+  connection — and our own session-mode connection for `LISTEN` has never leaked
+  once, in 31 hours spanning the outage. Two ways there:
+
+  - **Session mode** (5432 on the same pooler host, the value
+    `DATABASE_URL_SESSION` already holds). Free, and one field. Keeps Supavisor
+    in the path but stops it multiplexing, which is the mechanism the signature
+    above describes.
+  - **Direct connection** (5432 on `db.<ref>.supabase.co`), which needs the
+    IPv4 add-on because Render has no outbound IPv6. Removes Supavisor
+    altogether rather than reconfiguring it, and the username and host change,
+    not just the port. **This is the chosen direction**, agreed 2026-08-26.
+
+  Neither is certain to fix it, and it is worth being honest about why: the
+  paragraph above never established whether the trigger is Supavisor or the
+  Render↔Supabase network, and a direct connection has the same exposure to the
+  second. That is the argument for keeping the deadline and the honest health
+  check whatever the connection path ends up being.
+
+  `max` is now 5 rather than 10 for this, because both options cost a real
+  backend per pool slot where transaction mode multiplexes them. A direct
+  connection also has no pooler queueing in front of `max_connections`, so
+  overshooting arrives as `too many clients already` rather than as a wait —
+  loud, which is the right failure, but it means the sizing is load-bearing.
+  Left to do after the switch: `prepare: true`, which session mode and a direct
+  connection both support and which this file, `README.md`, `lib/env.ts` and
+  `db/client.ts` all still describe as impossible.
 
 ---
 

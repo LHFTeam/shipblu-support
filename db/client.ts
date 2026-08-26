@@ -47,7 +47,22 @@ export function getSql(): ReturnType<typeof postgres> {
     globalThis.__shipbluSql ??
     postgres(env().DATABASE_URL, {
       prepare: false,
-      max: 10,
+      /*
+       * Sized for a pool slot costing a real backend, which is what it will
+       * cost as soon as this connection stops going through the transaction
+       * pooler. Multiplexing hides the true price today — the whole fleet runs
+       * on about two backends — so 10 looked free; on a session-mode or direct
+       * connection it is ten, per process, and there are eight processes
+       * against a `max_connections` of 60.
+       *
+       * At 5: web 3 instances × 5, worker 5, four crons at 5 but short and
+       * sequential, one per live SSE viewer, and six for Supabase's own
+       * services. `idle_timeout` keeps the steady state far below that. A page
+       * awaits its queries in sequence, so 5 is five concurrent renders, not
+       * five queries — comfortable for a team of this size, and the number to
+       * revisit before the count of agents grows rather than after.
+       */
+      max: 5,
       idle_timeout: 20,
       connect_timeout: 10,
       /*
