@@ -2,21 +2,31 @@ import {
   applyFieldSubscription,
   planFieldSubscription,
   readSubscription,
-  REQUIRED_WHATSAPP_FIELDS,
-  WHATSAPP_OBJECT,
+  REQUIRED_FIELDS,
+  resolveObject,
 } from '@/lib/meta/subscriptions';
+import type { ClaimedJob } from '@/lib/queue';
 
 /**
- * Bring the app's WhatsApp webhook field subscription up to what the pipeline
- * needs — in practice, add `message_echoes`.
+ * Bring one webhook object's field subscription up to what the pipeline needs.
  *
- * Run by hand (`npm run job -- subscribe_meta_webhooks`) rather than on a
- * schedule. It is here as a job rather than as a pasted curl command for one
- * reason: the Graph call that adds a field replaces the whole field list, so
- * doing it by hand means typing out every field that must survive, and getting
- * that wrong unsubscribes `messages` and stops inbound WhatsApp dead. Reading
- * first and merging is the entire point, and it is not something to improvise
- * at a shell prompt against production.
+ * Run by hand rather than on a schedule, one object at a time:
+ *
+ *   npm run job -- subscribe_meta_webhooks                     # WhatsApp
+ *   npm run job -- subscribe_meta_webhooks object=instagram    # adds `comments`
+ *   npm run job -- subscribe_meta_webhooks object=page         # adds `feed`
+ *
+ * It is here as a job rather than as a pasted curl command for one reason: the
+ * Graph call that adds a field replaces the whole field list, so doing it by
+ * hand means typing out every field that must survive, and getting that wrong
+ * unsubscribes `messages` and stops a channel dead. Reading first and merging is
+ * the entire point, and it is not something to improvise at a shell prompt
+ * against production.
+ *
+ * One object per run, deliberately. A single run that walked all three would
+ * make its own output ambiguous — three reads, three merges and three write-back
+ * checks, of which any one can fail — and the whole reason a person is watching
+ * this job is to see exactly which field list changed.
  *
  * Unlike the cron handlers this fails loudly when the credentials are missing.
  * They skip because they fire on a schedule whether or not anyone is ready;
@@ -26,20 +36,24 @@ import {
  * Safe to re-run: with nothing to add it reports the current state and writes
  * nothing.
  */
-export async function subscribeMetaWebhooks(): Promise<void> {
-  const existing = await readSubscription(WHATSAPP_OBJECT);
+export async function subscribeMetaWebhooks(job?: ClaimedJob): Promise<void> {
+  const object = resolveObject(job?.payload?.object);
+  const want = REQUIRED_FIELDS[object]!;
+
+  const existing = await readSubscription(object);
 
   // No subscription at all is not something to fix by writing one. Creating it
   // means choosing a callback URL, and picking that wrong points production
-  // WhatsApp at the wrong host — a worse outcome than stopping here.
+  // traffic at the wrong host — a worse outcome than stopping here.
   if (!existing) {
     throw new Error(
-      `This app has no ${WHATSAPP_OBJECT} subscription. Create it in the App ` +
-        `Dashboard under WhatsApp → Configuration, then re-run this job to add fields.`,
+      `This app has no ${object} subscription. Create it in the App Dashboard — ` +
+        `WhatsApp → Configuration, or the Messenger/Instagram use case's webhook ` +
+        `settings — then re-run this job to add fields.`,
     );
   }
 
-  const plan = planFieldSubscription(existing, REQUIRED_WHATSAPP_FIELDS);
+  const plan = planFieldSubscription(existing, want);
 
   console.log(`[subscribe_meta_webhooks] callback ${plan.callbackUrl}`);
   console.log(`[subscribe_meta_webhooks] subscribed now: ${plan.current.join(', ') || '(none)'}`);
@@ -71,7 +85,7 @@ export async function subscribeMetaWebhooks(): Promise<void> {
   // list, and Graph accepting a write is not the same as Graph having stored
   // the field — an unavailable field is the case that would otherwise be
   // reported as success.
-  const after = await readSubscription(WHATSAPP_OBJECT);
+  const after = await readSubscription(object);
   const now = after?.fields.map((field) => field.name) ?? [];
   const missing = plan.merged.filter((field) => !now.includes(field));
 

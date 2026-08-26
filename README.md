@@ -129,6 +129,16 @@ Design decisions worth knowing before changing things:
   comment threads on the root of its reply chain, so a customer commenting on two posts
   gets two tickets, each needing its own public answer. Meta echoes our own outbound
   messages back to us, and dropping those is what stops an agent replying to themselves.
+- **The two platforms agree about almost nothing under the surface.** One webhook, one
+  parser and one send job cover both, but a comment on Instagram has a `replies` edge
+  where Facebook has `comments`, is hidden with `hide` where Facebook uses `is_hidden`,
+  and is answered privately through the _messages_ endpoint because Instagram has no
+  private-reply edge at all. `lib/meta/comments.ts` holds those differences as data so
+  they can be checked against Meta's reference in a test — the only check available,
+  since Graph refuses a wrong-shaped request with the same sentence it uses for a
+  deleted comment. An Instagram account connected through Instagram Login rather than
+  through its Facebook Page goes further and brings its own host, access token and app
+  secret; see `docs/PROJECT-STATE.md` §6.26 for what that cost before it was known.
 - **Configuration is validated by the engines that consume it.** The admin screens parse
   conditions and actions with `lib/rules` and `lib/automations` before storing them, so a
   rule that saves is a rule that will run rather than one the sweep silently ignores.

@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/db/client';
 import { webhookEvents } from '@/db/schema';
-import { metaAppSecret, metaVerifyToken } from '@/lib/env';
+import { metaAppSecret, metaInstagramAppSecret, metaVerifyToken } from '@/lib/env';
+import { signingCandidates, unverifiedReason } from '@/lib/meta/signing';
 import type { MetaWebhookPayload } from '@/lib/meta/types';
 import { enqueue } from '@/lib/queue';
 import { SIGNATURE_HEADER, verifyChallenge, verifySignature } from '@/lib/whatsapp/verify';
@@ -13,8 +14,12 @@ export const dynamic = 'force-dynamic';
  *
  * One endpoint for both, because Meta delivers them through one app
  * subscription and distinguishes them only by the `object` field. Splitting
- * them would mean two URLs to register, two secrets to keep in step, and the
- * same code twice.
+ * them would mean two URLs to register and the same code twice.
+ *
+ * One endpoint does not mean one credential, though, and that is the trap: an
+ * Instagram account connected through Instagram Login is signed with the
+ * *Instagram* app secret rather than the app's. Which secrets can have signed a
+ * delivery is decided by `lib/meta/signing.ts`, from the object in the body.
  *
  * Same discipline as the WhatsApp endpoint: persist the raw payload, enqueue,
  * return 200 fast. Nothing here parses a message or calls the Graph API — Meta
@@ -44,8 +49,6 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const appSecret = metaAppSecret();
-
   // Raw bytes: the signature covers exactly what Meta sent, and re-serialising
   // parsed JSON produces a different string.
   let rawBody: string;
@@ -55,16 +58,26 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'unreadable body' }, { status: 400 });
   }
 
-  const signatureVerified = appSecret
-    ? verifySignature(rawBody, request.headers.get(SIGNATURE_HEADER), appSecret)
-    : false;
-
+  // Parsed before the signature is checked, which the body being *read* rather
+  // than rewritten makes safe. It is the payload's own `object` that says which
+  // app secret can have signed it — an Instagram account connected through
+  // Instagram Login is signed with the Instagram app secret, not the app's.
   let payload: MetaWebhookPayload;
   try {
     payload = JSON.parse(rawBody) as MetaWebhookPayload;
   } catch {
     return NextResponse.json({ error: 'invalid json' }, { status: 400 });
   }
+
+  const candidates = signingCandidates(payload.object, {
+    appSecret: metaAppSecret(),
+    instagramAppSecret: metaInstagramAppSecret(),
+  });
+
+  const signature = request.headers.get(SIGNATURE_HEADER);
+  const matched =
+    candidates.find((candidate) => verifySignature(rawBody, signature, candidate.secret)) ?? null;
+  const signatureVerified = matched !== null;
 
   const channel = payload.object === 'instagram' ? 'instagram' : 'facebook';
 
@@ -89,13 +102,20 @@ export async function POST(request: Request) {
       payload,
       headers,
       signatureVerified,
+      // Why it was rejected, on the row itself. Without this a wrong secret and
+      // a forgery are the same unexplained `false`, and the only place the
+      // difference appeared was a log line nobody was reading: the Instagram
+      // app secret going unset cost thirteen hours and 2,309 dropped
+      // deliveries before anybody looked.
+      error: signatureVerified ? null : unverifiedReason(candidates),
     })
     .onConflictDoNothing({ target: [webhookEvents.provider, webhookEvents.providerEventId] })
     .returning({ id: webhookEvents.id });
 
   if (!signatureVerified) {
     console.warn(
-      `[webhook:meta] stored unverified payload from ${headers['x-forwarded-for'] ?? 'an unknown source'}`,
+      `[webhook:meta] stored unverified ${payload.object ?? 'unknown'} payload from ` +
+        `${headers['x-forwarded-for'] ?? 'an unknown source'}: ${unverifiedReason(candidates)}`,
     );
     // 403 rather than 200: an unsigned payload is either a misconfigured app
     // secret or a forgery, and both should be loud.

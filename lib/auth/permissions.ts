@@ -26,6 +26,21 @@ export const PERMISSIONS = [
    */
   'ticket.side_conversation',
   'ticket.assign',
+  /**
+   * Hiding or deleting a customer's public comment on one of our own social
+   * posts.
+   *
+   * Separate from `ticket.reply` because it is not a reply: it changes what
+   * everybody else can see on the brand's post, and one of the two verbs cannot
+   * be undone by anybody, us included. An agent who should answer every comment
+   * is not automatically somebody who should be able to remove one.
+   *
+   * Granted from supervisor up, which is where `ticket.delete` and
+   * `ticket.merge` sit for the same reason — the action is irreversible and
+   * visible outside the team. It is a plain permission, so a front-line agent
+   * who moderates all day can be given it without being promoted.
+   */
+  'ticket.moderate_comment',
   'ticket.delete',
   'ticket.merge',
   'ticket.edit_fields',
@@ -89,6 +104,7 @@ const SUPERVISOR: Permission[] = [
   'ticket.view.all',
   'ticket.merge',
   'contact.merge',
+  'ticket.moderate_comment',
   'ticket.delete',
   'kb.edit',
   'kb.publish',

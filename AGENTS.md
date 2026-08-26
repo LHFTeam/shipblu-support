@@ -187,9 +187,14 @@ A value never appears in the file: `sync: false` is not allowed inside an env
 group, so each group lists its dashboard-owned keys as a comment beside its
 literal ones. A module reachable from the search parser must read `process.env` directly
 rather than `env()`, which validates the whole schema (see
-`lib/shipments/detect.ts`). A WhatsApp business account's access token is read
-the same way, for a different reason: its variable's _name_ is a database value,
-so it cannot be in the schema — and must therefore start `WHATSAPP_TOKEN_`, or
+`lib/shipments/detect.ts`). The one place "one Meta app, one credential" does not
+hold is an Instagram account connected through **Instagram Login**: it signs its
+webhooks with its own app secret and is served from `graph.instagram.com` with
+its own token (`META_INSTAGRAM_APP_SECRET`, `INSTAGRAM_ACCESS_TOKEN`, both
+optional). Getting that wrong is silent in both directions — see
+`docs/PROJECT-STATE.md` §6.26. A WhatsApp business account's access token is read
+directly from `process.env`, for a different reason: its variable's _name_ is a
+database value, so it cannot be in the schema — and must therefore start `WHATSAPP_TOKEN_`, or
 an admin typing a variable name would be choosing which secret gets sent to Meta
 as a bearer token (`lib/whatsapp/accounts.ts`).
 

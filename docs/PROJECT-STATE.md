@@ -5,7 +5,7 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-08-26, against `main` at `88506d6`.
+Last updated: 2026-08-26, against `main` at `22871e1`.
 
 ---
 
@@ -175,14 +175,32 @@ against is the thing being protected — and a WhatsApp contact card, because no
 public ShipBlu number exists anywhere in this codebase or its configuration and a
 support channel printed on a help centre has to be one that answers.
 
+And now **Instagram comment management**, which is the App Review item
+`instagram_business_manage_comments` and which turned out to rest on four things
+that were all broken at once. The comment pipeline had never run: of 2,854 Meta
+deliveries stored since 19 August, **not one carries a `changes` entry**, because
+`comments` is not a subscribed field on the `instagram` object — so
+`ingestMetaComment`, merged with the channel in phase 2, has never been called in
+production and `conversations` holds zero comment threads. Every comment call was
+Facebook-shaped on both platforms, so no Instagram comment reply this system sent
+could ever have been delivered. The console could not hide or delete a comment at
+all — `hideComment` had sat unimported since the channel landed, and there was no
+delete — which is to say the two verbs the permission is named for were the two
+the product did not have. And Instagram's webhooks had stopped verifying that
+morning; see §6.22, which is the one to read first. `subscribe_meta_webhooks`
+now takes an object (`object=instagram` adds `comments`, `object=page` adds
+`feed`) and still merges rather than replaces, an agent with the new
+`ticket.moderate_comment` permission gets Hide / Unhide / Delete under a
+customer's comment, and `plans/instagram-comment-management.md` carries the
+order of operations — none of which is code, and the code is inert without it.
+
 **The bot channel is live, and everything else is not.** This is the single most
 important thing to understand about the current state, and the easiest to read
 backwards.
 
 `channels` holds exactly one row: `whatsapp_bot`. Through it, real traffic has
-been arriving since 2026-08-18 — **3,552 conversations, 9,544 messages and 3,476
-contacts** in three days, around 1,500 conversations a day. The database is not
-empty and the system is not idle.
+been arriving since 2026-08-18 — **10,716 conversations as of 2026-08-26**, still
+around 1,500 a day. The database is not empty and the system is not idle.
 
 But that channel is **read-only observation by design**. Another service owns
 that number and holds the conversation; we receive a copy of both sides.
@@ -191,10 +209,15 @@ from "all channels" even for an admin, and keeps it out of the SLA sweep, the
 time-based automations and every reporting metric. Nobody on the team works
 those conversations. They are transcripts, not a queue.
 
-Every human channel put together holds **7 conversations** — 3 email, 2
-WhatsApp, 1 Facebook, 1 Instagram — all of them test traffic from 18–19 August.
-There is no email mailbox row, no human WhatsApp row, no `webchat` row and no
-`portal` row. `sla_policies` and `automation_rules` are both still empty, so the
+Every human channel put together holds **30 conversations** — 22 Facebook, 3
+email, 2 Instagram, 2 WhatsApp, 1 webchat. Email, WhatsApp and webchat are test
+traffic from 18–21 August, but **Facebook and Instagram are not any more**: 105
+inbound Messenger DMs and 4 Instagram ones from real people, the most recent
+today, all of them filed under bare numeric ids and none of them answered by
+anybody. That is not the channel being configured — no `channels` row exists for
+either — it is the app being connected to a page and an account that the public
+can already write to. There is still no email mailbox row, no human WhatsApp row,
+no `webchat` row and no `portal` row. `sla_policies` and `automation_rules` are both still empty, so the
 crons that sweep them run over nothing every 5 and 15 minutes. `locations` is
 still empty, all sixteen of them.
 
@@ -595,10 +618,18 @@ provider. Each is a round trip somebody has to actually watch:
   this as the likely cause, but **the diagnosis is a hypothesis and the
   permission has never been checked** — nobody has looked at the app's review
   status in the Meta dashboard. If it is not approved then every FB/IG reply
-  outside 24 hours fails, which on a support channel is most of them. That dead
-  job is still the one dead row in `jobs`; it is a real customer reply that was
-  never delivered. Check the dashboard before the channels are turned on, not
-  after.
+  outside 24 hours fails, which on a support channel is most of them. Check the
+  dashboard before the channels are turned on, not after.
+
+  **There are six dead `send_meta` rows now, not one.** The Instagram
+  HUMAN_AGENT one from 2026-08-20, and five Facebook DMs on 23–24 August that
+  failed _inside_ the 24-hour window, on the right page, in a thread this app
+  holds control of — the case `insideWindowExplanation` was written for, which
+  says in as many words that none of the usual causes applies. Six real customer
+  replies that were never delivered. That is a second, unexplained refusal on
+  the same channel and it has not been diagnosed; the trace ids are on the
+  message rows.
+
 - **Meta's Business Asset User Profile Access, which has never once been
   exercised.** The User Profile API is the only thing that can tell this system
   who a Messenger or Instagram customer is — their webhooks carry a scoped id and
@@ -619,6 +650,28 @@ get request"` — the same sentence it uses for a deleted user — so
   bullet above. Run `npm run job -- backfill_meta_profiles` once the app is
   approved and read the worker log; a run that names every contact and a run
   that refuses all 22 are both unambiguous.
+- **Instagram comment management, which cannot be exercised yet at all.** Three
+  separate things gate it, in order, and none is code:
+  1. `META_INSTAGRAM_APP_SECRET` in `shipblu-support-production`, or every
+     Instagram delivery keeps being answered 403 (§6.26). Nothing about comments
+     can be tested while inbound Instagram is rejected.
+  2. `npm run job -- subscribe_meta_webhooks object=instagram`, to add the
+     `comments` field. **Zero comment webhooks have ever arrived** — of 2,854
+     Meta deliveries since 19 August, not one carries a `changes` entry — so
+     `ingestMetaComment` has never run in production and there are no comment
+     threads to look at.
+  3. The App Review approval itself, which nothing has confirmed. Graph refuses
+     an unapproved hide or delete with `100/33 "Unsupported post request"`, the
+     same sentence it uses for a comment that is already gone;
+     `explainMetaModerationError` names the permission in the failure so the two
+     are not confused, which is the lesson from the two bullets above.
+
+  Then: comment on the account's own post from another Instagram account, reply
+  publicly from the console, hide it, unhide it, delete one. Each is a beat in
+  the screencast App Review asks for, and each now writes a
+  `comment_hidden` / `comment_unhidden` / `comment_deleted` event.
+  `plans/instagram-comment-management.md` has the whole order of operations.
+
 - **The portal's verification and reset emails through Postmark.** The whole
   flow has been driven end to end against a local Postgres with
   `EMAIL_PROVIDER=local`, so the links, the tokens and the single-use rules are
@@ -1104,6 +1157,34 @@ Each cost real time. Most are also comments in the code.
     `CSS.getPlatformFontsForNode` over CDP — a computed `font-family` shows the
     stack you asked for, never the font that painted — and, on Linux, a
     `@font-face` override standing in for the Arial the container lacks.
+26. **One Meta app does not mean one app secret, and Instagram is the exception.**
+    An Instagram professional account connected through **Instagram Login**
+    rather than through its linked Facebook Page is a second identity inside the
+    same app: its own access token, its own host (`graph.instagram.com`), and its
+    own **Instagram app secret**, which is what signs the `instagram` object's
+    webhook deliveries. Nothing in the payload says which secret was used — same
+    object, same entry id, same `facebookexternalua`, same header shape — so the
+    only symptom is `signature_verified = false`, which the endpoint answers 403
+    and files as evidence. On **2026-08-26 at 07:37 UTC** the account was moved
+    onto that setup and **every Instagram delivery from that minute failed
+    verification: 2,309 in thirteen hours, 100% of them**, while Facebook's 111
+    deliveries over the same hours kept verifying against the unchanged
+    `META_APP_SECRET`. Real customers' messages were dropped — the last before
+    this was written is an Arabic question about how the service works — and
+    **nothing alerted, because a rejected forgery and a rejected genuine delivery
+    were the same event**. Three things changed as a result: the secret is now
+    chosen from the payload's own `object` and both candidates are tried
+    (`lib/meta/signing.ts`); the reason is written to `webhook_events.error`, so
+    the query that finds this is `select error, count(*) from webhook_events
+where not signature_verified group by 1` rather than a log line nobody was
+    reading; and `META_INSTAGRAM_APP_SECRET` / `INSTAGRAM_ACCESS_TOKEN` exist as
+    an optional pair, unset meaning exactly the old behaviour. **The 2,309 are
+    not recoverable**: only the parsed payload is stored, not the raw bytes, so
+    their signatures can never be re-checked against the right secret — which is
+    the argument for keeping the raw body on an unverified delivery, and the
+    reason the App Review permission's own name (`instagram_business_*` rather
+    than `instagram_*`) is worth reading as a statement about which setup an app
+    is on.
 
 ## 7. Verification already done
 

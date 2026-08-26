@@ -172,6 +172,28 @@ const schema = z.object({
   FACEBOOK_PAGE_ID: z.string().optional(),
   INSTAGRAM_ACCOUNT_ID: z.string().optional(),
 
+  /**
+   * The Instagram Login pair, and the one place the "one app, one credential"
+   * rule above does not hold.
+   *
+   * An Instagram professional account can be connected two ways. Through the
+   * **Facebook Page** it is linked to, which is what everything above assumes:
+   * the Page token sends, the app secret signs, and `graph.facebook.com` serves.
+   * Or through **Instagram Login**, which is its own setup inside the same Meta
+   * app, with its own access token, its own app secret, and `graph.instagram.com`
+   * as the host. The App Review permissions are named for the flow —
+   * `instagram_manage_comments` for the first, `instagram_business_manage_comments`
+   * for the second — which is the clearest signal of which one an app is on.
+   *
+   * Both are optional and both default to the Page behaviour, because the
+   * difference is invisible until something is refused: a webhook signed with
+   * the Instagram app secret is answered 403 and stored unverified, and a Graph
+   * call made with the wrong token is refused with a sentence that names no
+   * cause. Set them together, and only when the account is on Instagram Login.
+   */
+  META_INSTAGRAM_APP_SECRET: z.string().optional(),
+  INSTAGRAM_ACCESS_TOKEN: z.string().optional(),
+
   WHATSAPP_PHONE_NUMBER_ID: z.string().optional(),
   WHATSAPP_WABA_ID: z.string().optional(),
 
@@ -234,6 +256,17 @@ export function appUrl(): string {
  */
 export function metaAppSecret(): string | undefined {
   return env().META_APP_SECRET ?? warnIfOnlyLegacy('META_APP_SECRET', 'WHATSAPP_APP_SECRET');
+}
+
+/**
+ * The Instagram app secret, when the account is on Instagram Login.
+ *
+ * Undefined is the ordinary case, not a misconfiguration: an account connected
+ * through its Facebook Page is signed with `META_APP_SECRET` like everything
+ * else, so the candidates in `lib/meta/signing.ts` fall back to it.
+ */
+export function metaInstagramAppSecret(): string | undefined {
+  return env().META_INSTAGRAM_APP_SECRET;
 }
 
 /** The token Meta echoes back during the subscription handshake. */

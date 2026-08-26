@@ -128,6 +128,54 @@ export function explainMetaProfileError(error: MetaApiError, platform: MetaPlatf
   return withReference(base, error);
 }
 
+// --- Comment moderation -----------------------------------------------------
+
+/**
+ * What to put on a comment whose hide, unhide or delete Graph refused.
+ *
+ * The same lesson as the two above, on the third permission it applies to.
+ * Comment management is gated by its own App Review item, and a refusal for the
+ * missing approval arrives as `100/33 "Unsupported post request"` — the very
+ * sentence Graph also uses for a comment somebody has already deleted from the
+ * app. Those need opposite responses: one is a dashboard problem affecting every
+ * comment until somebody fixes it, the other is normal and final.
+ *
+ * The permission is named per platform, and named as it appears in App Review
+ * rather than as a paraphrase, because the two flows spell it differently and an
+ * agent reading this is going to hand the sentence to whoever holds the Meta
+ * dashboard.
+ */
+export function explainMetaModerationError(
+  error: MetaApiError,
+  context: { platform: MetaPlatform; action: 'hide' | 'unhide' | 'delete' },
+): string {
+  const base = error.userMessage ?? error.message;
+
+  if (!cameFromGraph(error)) return base;
+
+  if (error.code === ACCESS_TOKEN_CODE)
+    return withReference(explainAuthError(error.code, base), error);
+
+  if (isProfilePermissionRefusal(error)) {
+    const permission =
+      context.platform === 'instagram'
+        ? '**instagram_business_manage_comments** (or **instagram_manage_comments**, if the ' +
+          'account is connected through its Facebook Page)'
+        : '**pages_manage_engagement**';
+
+    return withReference(
+      `${base}\n\nGraph refused a request to ${context.action} this comment. It answers this ` +
+        `way both when the comment is already gone and when the app is not approved for ` +
+        `${permission}, and the message does not distinguish them — so check that permission ` +
+        `under App Review before assuming the comment was deleted. Until it is granted, no ` +
+        `comment can be hidden or deleted from here, while public replies keep working.`,
+      error,
+    );
+  }
+
+  return withReference(base, error);
+}
+
 /** Graph answered. A status of 0 with no code means the request never got there. */
 function cameFromGraph(error: MetaApiError): boolean {
   return error.status !== 0 || error.code !== null;

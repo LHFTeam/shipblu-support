@@ -9,6 +9,7 @@ export type JobType =
   | 'send_notification_email'
   | 'send_whatsapp'
   | 'send_meta'
+  | 'moderate_meta_comment'
   | 'download_media'
   | 'fetch_meta_profile'
   | 'sync_whatsapp_templates'

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MetaApiError } from './client';
-import { explainMetaSendError } from './errors';
+import { explainMetaModerationError, explainMetaSendError } from './errors';
 
 const UNKNOWN = 'An unknown error has occurred.';
 
@@ -127,5 +127,59 @@ describe('explainMetaSendError', () => {
     });
 
     expect(explained).toContain('Try again in a few minutes.');
+  });
+});
+
+describe('explainMetaModerationError', () => {
+  /** How Graph refuses a POST the app is not approved for. */
+  const unsupportedPost = () =>
+    new MetaApiError('Unsupported post request.', 400, 100, 33, false, null, 'AaBb');
+
+  it('names the Instagram App Review permission, in both its spellings', () => {
+    const explained = explainMetaModerationError(unsupportedPost(), {
+      platform: 'instagram',
+      action: 'hide',
+    });
+
+    // Both, because the permission is spelled one way for Instagram Login and
+    // another for a Page-connected account, and whoever opens the dashboard
+    // needs to find whichever one their app actually lists.
+    expect(explained).toContain('instagram_business_manage_comments');
+    expect(explained).toContain('instagram_manage_comments');
+    expect(explained).toContain('hide');
+  });
+
+  it('names the Page permission on Facebook', () => {
+    const explained = explainMetaModerationError(unsupportedPost(), {
+      platform: 'facebook',
+      action: 'delete',
+    });
+
+    expect(explained).toContain('pages_manage_engagement');
+    expect(explained).not.toContain('instagram');
+  });
+
+  it('keeps the numbers Meta support asks for', () => {
+    expect(
+      explainMetaModerationError(unsupportedPost(), { platform: 'instagram', action: 'unhide' }),
+    ).toContain('trace AaBb');
+  });
+
+  it('leaves a refusal that is not about permissions alone', () => {
+    const rateLimited = new MetaApiError(
+      'Calls to this api have exceeded the rate limit',
+      400,
+      613,
+      null,
+      true,
+    );
+
+    const explained = explainMetaModerationError(rateLimited, {
+      platform: 'instagram',
+      action: 'hide',
+    });
+
+    expect(explained).toContain('exceeded the rate limit');
+    expect(explained).not.toContain('App Review');
   });
 });

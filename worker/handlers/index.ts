@@ -7,6 +7,7 @@ import { cleanup } from './cleanup';
 import { downloadMediaJob } from './download-media';
 import { fetchMetaProfile } from './fetch-meta-profile';
 import { importFreshdeskKb } from './import-freshdesk-kb';
+import { moderateMetaComment } from './moderate-meta-comment';
 import { processWebhook } from './process-webhook';
 import { rollupMetrics } from './rollup-metrics';
 import { runTimeAutomations } from './run-time-automations';
@@ -40,6 +41,7 @@ export const handlers: Partial<Record<JobType, JobHandler>> = {
   download_media: downloadMediaJob,
   fetch_meta_profile: fetchMetaProfile,
   import_freshdesk_kb: () => importFreshdeskKb(),
+  moderate_meta_comment: moderateMetaComment,
   process_webhook: processWebhook,
   rollup_metrics: (job) => rollupMetrics(job),
   run_time_automations: () => runTimeAutomations(),
@@ -51,7 +53,7 @@ export const handlers: Partial<Record<JobType, JobHandler>> = {
   send_whatsapp: sendWhatsApp,
   sla_sweep: () => slaSweep(),
   snapshot_backlog: () => snapshotBacklog(),
-  subscribe_meta_webhooks: () => subscribeMetaWebhooks(),
+  subscribe_meta_webhooks: (job) => subscribeMetaWebhooks(job),
   sync_whatsapp_templates: () => syncWhatsAppTemplates(),
 };
 
