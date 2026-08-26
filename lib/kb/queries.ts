@@ -49,6 +49,181 @@ export async function listCategories(viewer: KbViewer, locale: Locale): Promise<
   return rows.filter((row) => row.articleCount > 0);
 }
 
+/**
+ * The categories, each with the first few article titles inside it.
+ *
+ * The front page shows those titles rather than only a category name and a
+ * count, because a name is a guess at what is inside and three titles are the
+ * thing itself. Most visitors arriving at a help centre are looking for one
+ * specific answer, and seeing it on the front page saves them the category page
+ * entirely.
+ *
+ * Two queries whatever the number of categories, on the same reasoning as
+ * `folderPreviews` below: the whole result is a few dozen rows of title and
+ * slug, and the per-category cut in JavaScript keeps this a plain `where … in`
+ * rather than a window function.
+ */
+/** Three titles per category on the front page, matching the folder preview. */
+const CATEGORY_PREVIEW_SIZE = 3;
+
+export type CategoryPreview = CategorySummary & { preview: ArticleLink[] };
+
+export async function listCategoryPreviews(
+  viewer: KbViewer,
+  locale: Locale,
+): Promise<CategoryPreview[]> {
+  const categories = await listCategories(viewer, locale);
+  if (categories.length === 0) return [];
+
+  const rows = await db
+    .select({
+      categoryId: kbFolders.categoryId,
+      id: kbArticles.id,
+      title: kbArticles.title,
+      slug: kbArticles.slug,
+    })
+    .from(kbArticles)
+    .innerJoin(kbFolders, eq(kbFolders.id, kbArticles.folderId))
+    .where(
+      and(
+        inArray(
+          kbFolders.categoryId,
+          categories.map((category) => category.id),
+        ),
+        articleVisibleTo(viewer),
+        folderVisibleTo(viewer),
+      ),
+    )
+    .orderBy(asc(kbFolders.position), asc(kbArticles.position), asc(kbArticles.title));
+
+  const byCategory = new Map<string, ArticleLink[]>();
+  for (const { categoryId, ...article } of rows) {
+    const list = byCategory.get(categoryId) ?? [];
+    if (list.length < CATEGORY_PREVIEW_SIZE) list.push(article);
+    byCategory.set(categoryId, list);
+  }
+
+  return categories.map((category) => ({
+    ...category,
+    preview: byCategory.get(category.id) ?? [],
+  }));
+}
+
+export type RankedArticle = {
+  id: string;
+  title: string;
+  slug: string;
+  categoryName: string;
+};
+
+/**
+ * The most-read articles in this locale.
+ *
+ * `view_count` is written by `recordArticleView`, which the article page beacons
+ * and which is rate limited — so this is "what people opened", inflated a little
+ * by whatever got past the limiter, and never a business metric. It is a good
+ * enough ordering for a shortlist on the front page and is not used for anything
+ * else.
+ *
+ * Articles nobody has opened are excluded rather than tie-broken to the bottom.
+ * A list headed "most read" whose entries all have zero reads is furniture, and
+ * the caller hides the section when this comes back empty — which is exactly
+ * what a freshly imported knowledge base should do.
+ */
+export async function popularArticles(
+  viewer: KbViewer,
+  locale: Locale,
+  limit = 6,
+): Promise<RankedArticle[]> {
+  return db
+    .select({
+      id: kbArticles.id,
+      title: kbArticles.title,
+      slug: kbArticles.slug,
+      categoryName: kbCategories.name,
+    })
+    .from(kbArticles)
+    .innerJoin(kbFolders, eq(kbFolders.id, kbArticles.folderId))
+    .innerJoin(kbCategories, eq(kbCategories.id, kbFolders.categoryId))
+    .where(
+      and(
+        eq(kbArticles.locale, locale),
+        articleVisibleTo(viewer),
+        folderVisibleTo(viewer),
+        sql`${kbArticles.viewCount} > 0`,
+      ),
+    )
+    .orderBy(desc(kbArticles.viewCount), asc(kbArticles.title))
+    .limit(limit);
+}
+
+/**
+ * The tags the published articles carry most often, as search terms.
+ *
+ * The front page offers a few one-tap searches, and the honest source for them
+ * is a question this system cannot answer: nothing records what visitors type,
+ * and adding a search log to fill a row of chips would be collecting customer
+ * text to decorate a page. Tags are the nearest true thing — editors write them
+ * on the articles as the words a customer would use — and they already feed the
+ * search index, so a chip built from one cannot return nothing.
+ *
+ * Raw SQL because the unnest has no expression in the query builder. The
+ * visibility predicates are still the shared ones rather than hand-written
+ * copies, which is the part that must not drift; the tables are interpolated
+ * unaliased so those predicates resolve against them.
+ */
+export async function popularTags(viewer: KbViewer, locale: Locale, limit = 4): Promise<string[]> {
+  const rows = await db.execute<{ tag: string }>(sql`
+    SELECT tag
+    FROM ${kbArticles}
+    JOIN ${kbFolders} ON ${kbFolders.id} = ${kbArticles.folderId}
+    CROSS JOIN LATERAL unnest(${kbArticles.tags}) AS tag
+    WHERE ${kbArticles.locale} = ${locale}
+      AND ${articleVisibleTo(viewer)}
+      AND ${folderVisibleTo(viewer)}
+      AND length(btrim(tag)) > 0
+    GROUP BY tag
+    ORDER BY count(*) DESC, tag ASC
+    LIMIT ${limit}
+  `);
+
+  return (rows as unknown as { tag: string }[]).map((row) => row.tag);
+}
+
+export type DatedArticle = {
+  id: string;
+  title: string;
+  slug: string;
+  updatedAt: Date;
+};
+
+/**
+ * What changed recently.
+ *
+ * `updated_at` is maintained by the `touch_updated_at` trigger, so it moves on
+ * any write to the row — including an editor fixing a typo. That is the right
+ * meaning here: the question this list answers is "has the answer I read last
+ * month changed", not "what was published".
+ */
+export async function recentlyUpdatedArticles(
+  viewer: KbViewer,
+  locale: Locale,
+  limit = 6,
+): Promise<DatedArticle[]> {
+  return db
+    .select({
+      id: kbArticles.id,
+      title: kbArticles.title,
+      slug: kbArticles.slug,
+      updatedAt: kbArticles.updatedAt,
+    })
+    .from(kbArticles)
+    .innerJoin(kbFolders, eq(kbFolders.id, kbArticles.folderId))
+    .where(and(eq(kbArticles.locale, locale), articleVisibleTo(viewer), folderVisibleTo(viewer)))
+    .orderBy(desc(kbArticles.updatedAt), asc(kbArticles.title))
+    .limit(limit);
+}
+
 /** Just enough of an article to render its title as a link. */
 export type ArticleLink = {
   id: string;

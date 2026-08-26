@@ -5,7 +5,7 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-08-23, against `main` at `fc46cac`.
+Last updated: 2026-08-26, against `main` at `88506d6`.
 
 ---
 
@@ -124,6 +124,32 @@ with a conditional update, so the six ingest jobs six WhatsApp messages at 23:00
 produce still yield one reply. The case for it is in the archive — **11,402 of
 18,417 bot-channel inbound messages arrived outside production's schedule**, Sun–Fri
 10:00–18:00 Cairo.
+
+And now the **help centre's front page and a public tracking page**. The front
+page was one blue band with a search box on it; it is now a hero carrying the two
+questions people actually arrive with — a phrase to search, and a parcel to
+find — over topic cards that show three article titles each, a most-read and a
+recently-updated list, and a contact panel that says whether support is answering
+right now (read from `widgetHours()`, so it cannot disagree with the chat
+launcher beside it). Every block reads from the knowledge base and hides itself
+when there is nothing in it. `/{locale}/track` is new: a tracking number in, a
+status badge, a four-step progress line and the knowledge-base answers for that
+status out. `noindex` and `Disallow`, and rate limited per address, because every
+useful URL on it carries somebody's parcel number.
+
+**The tracking page has nothing to show yet, and that is not a bug in the page.**
+Nothing in this system writes `shipments.status_label` — the detector creates
+stubs, and the platform sync that would fill them in is designed in
+`plans/shipment-customer-tracking.md` §7 and not built. So every lookup today
+lands on "no delivery status for this number yet" and offers support instead. The
+page is written for both answers and starts working, with no change to it, on the
+day that sync lands. Two things were deliberately left out of it against the
+design that prompted the work: the recipient's name, address, phone and COD
+amount behind a "confirm the last four digits" gate — a four-digit gate on a page
+anyone can reload is a few thousand guesses, and the phone number it checks
+against is the thing being protected — and a WhatsApp contact card, because no
+public ShipBlu number exists anywhere in this codebase or its configuration and a
+support channel printed on a help centre has to be one that answers.
 
 **The bot channel is live, and everything else is not.** This is the single most
 important thing to understand about the current state, and the easiest to read

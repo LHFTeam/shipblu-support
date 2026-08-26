@@ -192,6 +192,25 @@ body {
   --kb-yes: #005c3f;
   --kb-no: #c82124;
 
+  /* Delivery status, on the public tracking page. Each tone is a text colour
+     and the tint it sits on, because a status badge has to be legible as a word
+     first: colour is the second signal, never the only one, and a recipient
+     reading this in bright sun outdoors gets the word either way.
+
+     Four rather than one per delivery state on purpose. The status vocabulary
+     belongs to the shipping platform and will be renamed without telling us —
+     `lib/shipments/status.ts` maps whatever arrives onto these four, and an
+     unrecognised label lands on the neutral pair below rather than on a colour
+     that would assert something about a parcel nobody here can vouch for. */
+  --kb-status-ok: #005c3f;
+  --kb-status-ok-soft: #e3f3ec;
+  --kb-status-warn: #8a5200;
+  --kb-status-warn-soft: #fbf0dd;
+  --kb-status-danger: #c82124;
+  --kb-status-danger-soft: #fbe9e9;
+  --kb-status-info: #1b5ce0;
+  --kb-status-info-soft: #e9f0ff;
+
   --kb-shadow: 0 6px 19px rgba(39, 49, 58, 0.1);
 
   /* The help centre's own focus colour, so the ring reads as part of this site
@@ -247,6 +266,15 @@ body {
 
     --kb-yes: oklch(0.78 0.13 155);
     --kb-no: oklch(0.76 0.15 25);
+
+    --kb-status-ok: oklch(0.78 0.13 155);
+    --kb-status-ok-soft: oklch(0.3 0.05 155);
+    --kb-status-warn: oklch(0.84 0.13 78);
+    --kb-status-warn-soft: oklch(0.31 0.05 78);
+    --kb-status-danger: oklch(0.76 0.15 25);
+    --kb-status-danger-soft: oklch(0.3 0.06 25);
+    --kb-status-info: oklch(0.83 0.09 255);
+    --kb-status-info-soft: oklch(0.31 0.06 262);
 
     --button-primary: oklch(0.5 0.17 260);
     --button-primary-hover: oklch(0.57 0.17 260);

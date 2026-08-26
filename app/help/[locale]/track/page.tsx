@@ -1,0 +1,300 @@
+import { headers } from 'next/headers';
+import Link from 'next/link';
+import { notFound } from 'next/navigation';
+import type { Metadata } from 'next';
+import { PackageSearchIcon } from '@/components/icons';
+import { formatTimestamp, isLocale, t, type Locale } from '@/lib/kb/locale';
+import { popularArticles, searchArticles } from '@/lib/kb/queries';
+import { allow, clientIpFrom } from '@/lib/kb/rate-limit';
+import { kbViewer } from '@/lib/kb/viewer';
+import { normaliseTrackingNumber } from '@/lib/shipments/format';
+import { getShipmentByTrackingNumber } from '@/lib/shipments/queries';
+import { stageDisplay } from '@/lib/shipments/status';
+import { ArticleList, ArticleRow, PageBody, PageHeader, Panel } from '../chrome';
+import { TrackForm } from './form';
+import { LastUpdate, StatusBadge, Stepper } from './result';
+
+export const dynamic = 'force-dynamic';
+
+/**
+ * Never indexed.
+ *
+ * Every useful URL under this route has somebody's parcel number in it. A search
+ * engine that crawled one would publish the number and cache whatever status was
+ * showing at the time, which is the one thing a page reachable by anyone holding
+ * that number must not do.
+ */
+export const metadata: Metadata = { robots: { index: false, follow: false } };
+
+/**
+ * How many lookups one address gets, and over how long.
+ *
+ * Generous, because a family checking the same parcel from one office NAT is the
+ * normal case and must not be throttled. Present at all because this is the one
+ * unauthenticated endpoint on the site that answers a question about a specific
+ * identifier: without a limit, a script walking the number space learns which
+ * numbers exist, one request at a time. It is the same in-memory counter the KB
+ * feedback endpoints use, and the same reasoning — a row per rejected request
+ * would hand an attacker a cheaper way to hurt the database than the lookup.
+ */
+const LOOKUPS = 40;
+const LOOKUP_WINDOW_MS = 60_000;
+
+/**
+ * Where a parcel has got to, for anyone holding its number.
+ *
+ * Two pages in one route, and the split is on whether a number was asked about
+ * rather than on whether one was found: the empty page is a lookup form and
+ * nothing else, and the result page is the answer with the form moved aside so a
+ * mistyped number can be corrected without going back.
+ *
+ * What is deliberately *not* here: the recipient's name, their address, their
+ * phone number, the cash-on-delivery amount, and every action that would change
+ * a delivery. Anyone who has seen the outside of the parcel — a neighbour, a
+ * doorman, whoever the merchant forwarded the number to — can open this page, so
+ * everything on it is what that person may see. The redesign this follows drew
+ * those details behind a "confirm the last four digits of the phone" gate; a
+ * four-digit gate on a page anyone can reload is a few thousand guesses, not an
+ * identity check, and the phone number it checks against is the thing being
+ * protected. Signing in, where the ticket already carries the shipment, is the
+ * honest version of that screen and it already exists.
+ */
+export default async function TrackShipment({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ locale: string }>;
+  searchParams: Promise<{ number?: string }>;
+}) {
+  const [{ locale }, query] = await Promise.all([params, searchParams]);
+  if (!isLocale(locale)) notFound();
+
+  const typed = (query.number ?? '').trim().slice(0, 40);
+  const canonical = normaliseTrackingNumber(typed);
+
+  const header = (
+    <PageHeader
+      locale={locale}
+      crumbs={[{ label: t(locale, 'home'), href: `/${locale}` }]}
+      title={t(locale, 'trackTitle')}
+      selfPath={`/${locale}/track`}
+      icon={<PackageSearchIcon size={28} />}
+      search={false}
+    />
+  );
+
+  if (!canonical) {
+    const viewer = await kbViewer();
+    const popular = await popularArticles(viewer, locale, 4);
+
+    return (
+      <>
+        {header}
+        <PageBody className="flex flex-col gap-8">
+          <Panel className="mx-auto w-full max-w-xl p-6">
+            <p className="text-[var(--kb-muted)]">{t(locale, 'trackPrompt')}</p>
+            <div className="mt-5">
+              <TrackForm locale={locale} id="track-number" initial={typed} autoFocus />
+            </div>
+            <p className="mt-3 text-xs text-[var(--kb-muted)]">{t(locale, 'trackHint')}</p>
+            <p className="mt-4 border-t border-[var(--kb-border)] pt-4 text-xs text-[var(--kb-muted)]">
+              {t(locale, 'trackPrivacyNote')}
+            </p>
+          </Panel>
+
+          <div className="mx-auto w-full max-w-xl">
+            <Answers locale={locale} title={t(locale, 'mostRead')} articles={popular} />
+          </div>
+        </PageBody>
+      </>
+    );
+  }
+
+  return (
+    <>
+      {header}
+      <PageBody className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+        <div className="flex flex-col gap-6">
+          <Lookup locale={locale} canonical={canonical} />
+        </div>
+
+        <Panel as="aside" className="p-5">
+          <h2 className="font-semibold text-[var(--kb-heading)]">{t(locale, 'trackAnother')}</h2>
+          <div className="mt-4">
+            <TrackForm locale={locale} id="track-number" />
+          </div>
+          <p className="mt-3 text-xs text-[var(--kb-muted)]">{t(locale, 'trackHint')}</p>
+          <p className="mt-4 border-t border-[var(--kb-border)] pt-4 text-xs text-[var(--kb-muted)]">
+            {t(locale, 'trackPrivacyNote')}
+          </p>
+        </Panel>
+      </PageBody>
+    </>
+  );
+}
+
+/**
+ * The answer for one number.
+ *
+ * Its own component so the shell above renders identically whatever the lookup
+ * says — the form a customer needs in order to fix a typo is on screen before
+ * the database is asked, not conditionally afterwards.
+ */
+async function Lookup({ locale, canonical }: { locale: Locale; canonical: string }) {
+  const ip = clientIpFrom(await headers());
+
+  if (!allow(`track:${ip}`, LOOKUPS, LOOKUP_WINDOW_MS)) {
+    return (
+      <Panel className="p-6">
+        <p className="text-[var(--kb-muted)]">{t(locale, 'trackThrottled')}</p>
+      </Panel>
+    );
+  }
+
+  const shipment = await getShipmentByTrackingNumber(canonical);
+
+  /*
+   * One object or none, rather than a shipment and a display beside it. Every
+   * branch below asks the same question — do we have a status worth drawing? —
+   * and folding the label, its timestamp and its stage into a single nullable
+   * value is what makes that one check instead of three that can disagree.
+   *
+   * Today it is always null: nothing in this system writes `status_label` yet,
+   * because the platform sync that would is designed and not built. The page is
+   * written for both answers rather than for the one it currently gets, so the
+   * day that sync lands this page starts working with no changes here.
+   */
+  const status = shipment?.statusLabel
+    ? {
+        label: shipment.statusLabel,
+        at: shipment.statusAt,
+        ...stageDisplay(shipment.statusLabel),
+      }
+    : null;
+
+  /*
+   * The articles are chosen by searching the knowledge base for the platform's
+   * own status wording — "out for delivery" finds the articles about what that
+   * means. A hand-written article list per status would be a second place to
+   * maintain every time the knowledge base is edited, and it would go stale
+   * silently, in the direction nobody notices.
+   *
+   * When there is no status to search on, or the search found nothing, the
+   * most-read articles stand in under their own heading rather than under
+   * "answers for this status". This is the page's dead end — a customer who has
+   * just been told we cannot say where their parcel is — and the worst thing to
+   * put in front of them is an empty column.
+   */
+  const viewer = await kbViewer();
+  const matched = status ? await searchArticles(viewer, locale, status.label, 4) : [];
+  const answers =
+    matched.length > 0
+      ? { title: t(locale, 'trackAnswers'), articles: matched }
+      : { title: t(locale, 'mostRead'), articles: await popularArticles(viewer, locale, 4) };
+
+  const subject = `${t(locale, 'trackTitle')}: ${canonical}`;
+
+  return (
+    <>
+      <Panel className="p-6">
+        <div className="flex flex-wrap items-center gap-3">
+          <StatusBadge
+            label={status ? status.label : t(locale, 'trackNoStatusTitle')}
+            tone={status ? status.tone : 'neutral'}
+          />
+          <span
+            dir="ltr"
+            className="text-sm tabular-nums text-[var(--kb-muted)]"
+            aria-label={t(locale, 'trackNumber')}
+          >
+            {canonical}
+          </span>
+        </div>
+
+        {status === null ? (
+          <p className="mt-4 text-[var(--kb-muted)]">{t(locale, 'trackNoStatus')}</p>
+        ) : null}
+
+        {status !== null && status.step !== null ? (
+          <div className="mt-6">
+            <Stepper locale={locale} current={status.step} />
+          </div>
+        ) : null}
+
+        {status !== null ? (
+          <div className="mt-6">
+            <LastUpdate
+              locale={locale}
+              when={
+                status.at ? (
+                  <time dateTime={status.at.toISOString()}>
+                    {formatTimestamp(locale, status.at)}
+                  </time>
+                ) : (
+                  t(locale, 'trackNoTimestamp')
+                )
+              }
+            />
+          </div>
+        ) : null}
+
+        {/*
+          Both routes carry the number in the subject: it is what an agent needs
+          first, and it is what `lib/shipments/detect.ts` reads — so a ticket
+          raised from this page links itself to the shipment the customer was
+          looking at without anybody typing the number a second time.
+
+          The email link is here for the visitor the portal cannot serve. Raising
+          a ticket needs an account; a recipient who has never signed in to
+          ShipBlu — which is most of the people who reach this page — would meet
+          a sign-in wall on the one action the page is for.
+        */}
+        <div className="mt-6 flex flex-wrap gap-3 border-t border-[var(--kb-border)] pt-5">
+          <Link
+            href={`/${locale}/portal/new?subject=${encodeURIComponent(subject)}`}
+            className="rounded-md bg-[var(--button-primary)] px-3.5 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--button-primary-hover)]"
+          >
+            {t(locale, 'trackAskSupport')}
+          </Link>
+          <a
+            href={`mailto:support@shipblu.com?subject=${encodeURIComponent(subject)}`}
+            className="rounded-md border border-[var(--kb-border-strong)] px-3.5 py-2 text-sm font-semibold text-[var(--kb-heading)] transition-colors hover:bg-[var(--kb-surface-2)]"
+          >
+            {t(locale, 'email')}
+          </a>
+        </div>
+      </Panel>
+
+      <Answers locale={locale} title={answers.title} articles={answers.articles} />
+    </>
+  );
+}
+
+/** Articles under a heading, or nothing at all when there are none to list. */
+function Answers({
+  locale,
+  title,
+  articles,
+}: {
+  locale: Locale;
+  title: string;
+  articles: { id: string; title: string; slug: string; excerpt?: string | null }[];
+}) {
+  if (articles.length === 0) return null;
+
+  return (
+    <section>
+      <h2 className="mb-4 text-lg font-semibold text-[var(--kb-heading)]">{title}</h2>
+      <ArticleList>
+        {articles.map((article) => (
+          <ArticleRow
+            key={article.id}
+            href={`/${locale}/a/${article.slug}`}
+            title={article.title}
+            excerpt={article.excerpt}
+          />
+        ))}
+      </ArticleList>
+    </section>
+  );
+}

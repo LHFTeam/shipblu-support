@@ -239,6 +239,86 @@ export function CategoryIcon(props: IconProps) {
   );
 }
 
+/*
+ * Parcels.
+ *
+ * Six of them, and they exist because the public help centre's front page and
+ * its tracking page are read by recipients rather than by agents: a row of six
+ * identical squares makes a customer read every label to find the topic they
+ * came for, where a truck and a wallet are told apart at a glance. The console
+ * still uses `CategoryIcon`, which is what an unrecognised topic falls back to.
+ */
+
+export function PackageIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M12 3.2 20 7.4v9.2L12 20.8 4 16.6V7.4z" />
+      <path d="M4 7.4 12 11.6l8-4.2M12 11.6v9.2" />
+    </Icon>
+  );
+}
+
+export function PackagePlusIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M20 11.2V7.4L12 3.2 4 7.4v9.2l8 4.2 2.4-1.3" />
+      <path d="M4 7.4 12 11.6l8-4.2M12 11.6v6" />
+      <path d="M17.5 15v5M15 17.5h5" />
+    </Icon>
+  );
+}
+
+export function PackageSearchIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M20 11V7.4L12 3.2 4 7.4v9.2l8 4.2 1.6-.8" />
+      <path d="M4 7.4 12 11.6l8-4.2M12 11.6v7.5" />
+      <circle cx="17.5" cy="16.5" r="2.8" />
+      <path d="m19.6 18.6 1.9 1.9" />
+    </Icon>
+  );
+}
+
+export function TruckIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M3 6.5h10.5v9.8H3z" />
+      <path d="M13.5 10h3.8l2.7 3v3.3h-6.5z" />
+      <circle cx="7" cy="17.8" r="1.7" />
+      <circle cx="16.5" cy="17.8" r="1.7" />
+      <path d="M8.7 17.8h6.1" />
+    </Icon>
+  );
+}
+
+export function ReturnIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M4 5.5v5h5" />
+      <path d="M4.6 10.5a8 8 0 1 1 .7 5.6" />
+    </Icon>
+  );
+}
+
+export function WalletIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M4 8a2 2 0 0 1 2-2h11v3" />
+      <path d="M4 8v9a2 2 0 0 0 2 2h12.5a1.5 1.5 0 0 0 1.5-1.5V10.5A1.5 1.5 0 0 0 18.5 9H6a2 2 0 0 1-2-2z" />
+      <circle cx="16.5" cy="14" r="1.1" />
+    </Icon>
+  );
+}
+
+export function WarningIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M12 4.5 21 19.5H3z" />
+      <path d="M12 10v4M12 16.8v.2" />
+    </Icon>
+  );
+}
+
 export function LifeBuoyIcon(props: IconProps) {
   return (
     <Icon {...props}>

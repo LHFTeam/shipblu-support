@@ -8,13 +8,30 @@ import { NewTicketForm } from './form';
 
 export const dynamic = 'force-dynamic';
 
-export default async function NewPortalTicket({ params }: { params: Promise<{ locale: string }> }) {
-  const { locale } = await params;
+export default async function NewPortalTicket({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ locale: string }>;
+  /**
+   * `subject` pre-fills the first field. The tracking page sends one so a
+   * customer who has just looked a parcel up does not retype its number — and
+   * the detector in `lib/shipments/detect.ts` then links the new ticket to that
+   * shipment without anybody doing it by hand.
+   *
+   * It is a default value on an editable field, nothing more: the server reads
+   * what was actually submitted, as `createPortalTicket` already does, so a
+   * crafted link can seed a subject and can do nothing else.
+   */
+  searchParams: Promise<{ subject?: string }>;
+}) {
+  const [{ locale }, query] = await Promise.all([params, searchParams]);
   if (!isLocale(locale)) notFound();
 
   await requireCustomer(locale, `/${locale}/portal/new`);
 
   const fields = await customerTicketFields();
+  const subject = (query.subject ?? '').trim().slice(0, 200);
 
   return (
     <>
@@ -37,7 +54,7 @@ export default async function NewPortalTicket({ params }: { params: Promise<{ lo
           <p className="text-sm text-[var(--kb-muted)]">{t(locale, 'searchKb')}</p>
 
           <Panel className="mt-4 p-6">
-            <NewTicketForm locale={locale} fields={fields} />
+            <NewTicketForm locale={locale} fields={fields} subject={subject} />
           </Panel>
 
           <p className="mt-4 text-sm">

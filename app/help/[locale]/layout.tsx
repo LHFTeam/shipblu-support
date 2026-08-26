@@ -73,6 +73,20 @@ export default async function KbLayout({
               {t(locale, 'knowledgeBase')}
             </Link>
 
+            {/*
+              Tracking sits in the header rather than only on the front page,
+              because the visitor who wants it most is the one who arrived on an
+              article from a search engine and still does not know where their
+              parcel is. Shown at every width, unlike the link above it: on a
+              phone it is the more likely of the two.
+            */}
+            <Link
+              href={`/${locale}/track`}
+              className="font-medium text-[var(--kb-heading)] underline-offset-4 hover:underline"
+            >
+              {t(locale, 'trackTitle')}
+            </Link>
+
             <LocaleSwitcher locale={locale} />
 
             <AccountNav locale={locale} />

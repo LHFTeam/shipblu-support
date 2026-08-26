@@ -9,7 +9,16 @@ import { createPortalTicket, type PortalTicketState } from '../actions';
 
 const INITIAL: PortalTicketState = { error: null };
 
-export function NewTicketForm({ locale, fields }: { locale: Locale; fields: TicketFieldDef[] }) {
+export function NewTicketForm({
+  locale,
+  fields,
+  subject = '',
+}: {
+  locale: Locale;
+  fields: TicketFieldDef[];
+  /** Seeded from the query string; see the comment on the page above. */
+  subject?: string;
+}) {
   const [state, action] = useActionState(createPortalTicket, INITIAL);
 
   return (
@@ -18,7 +27,14 @@ export function NewTicketForm({ locale, fields }: { locale: Locale; fields: Tick
 
       <div>
         <Label htmlFor="subject">{t(locale, 'subject')}</Label>
-        <Input id="subject" name="subject" required autoFocus maxLength={200} />
+        <Input
+          id="subject"
+          name="subject"
+          defaultValue={subject}
+          required
+          autoFocus
+          maxLength={200}
+        />
       </div>
 
       <div>

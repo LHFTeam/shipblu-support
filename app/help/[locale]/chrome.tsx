@@ -105,8 +105,12 @@ function BreadcrumbSchema({ items }: { items: Crumb[] }) {
 }
 
 /**
- * The blue band. Behind the search on the front page, behind the title
- * everywhere else.
+ * The blue band, behind the title of every page below the front door.
+ *
+ * The front page used to wear one too and now wears its own pale hero instead:
+ * it is the one page a visitor can tell apart by its layout, so it does not need
+ * the colour to say where they are, and a band that appears on every page says
+ * nothing.
  *
  * `container-fluid` in Freshdesk's markup, and the same idea here: the colour
  * runs the full width of the viewport while the text inside stays on the
@@ -117,27 +121,6 @@ function Band({ className = '', children }: { className?: string; children: Reac
     <div className={`bg-[var(--kb-band)] text-[var(--kb-band-text)] ${className}`}>
       <Container>{children}</Container>
     </div>
-  );
-}
-
-/**
- * The front door: one question, one search field, nothing else.
- *
- * The field is the largest thing on the page on purpose. Most people arrive at
- * a help centre with a phrase in mind rather than a category, and every study of
- * these sites says the same thing — they search first and browse only when
- * search fails them.
- */
-export function Hero({ locale }: { locale: Locale }) {
-  return (
-    <Band className="py-12 sm:py-16">
-      <div className="mx-auto max-w-2xl text-center">
-        <h1 className="text-2xl font-bold sm:text-3xl">{t(locale, 'heroHeading')}</h1>
-        <div className="mt-6">
-          <SearchBox locale={locale} size="hero" />
-        </div>
-      </div>
-    </Band>
   );
 }
 
@@ -313,9 +296,24 @@ export function ArticleList({ children }: { children: ReactNode }) {
   );
 }
 
-/** The label above a grid or a list, one step under the page's `h1`. */
-export function SectionHeading({ children }: { children: ReactNode }) {
-  return <h2 className="mb-4 text-lg font-semibold text-[var(--kb-heading)]">{children}</h2>;
+/**
+ * The label above a grid or a list, one step under the page's `h1`.
+ *
+ * `meta` sits on the same baseline rather than under the heading — a count or a
+ * date is an attribute of the section, and putting it on its own line makes the
+ * reader parse it as the section's first item.
+ */
+export function SectionHeading({ children, meta }: { children: ReactNode; meta?: ReactNode }) {
+  if (!meta) {
+    return <h2 className="mb-4 text-lg font-semibold text-[var(--kb-heading)]">{children}</h2>;
+  }
+
+  return (
+    <div className="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+      <h2 className="text-lg font-semibold text-[var(--kb-heading)]">{children}</h2>
+      <span className="text-sm text-[var(--kb-muted)]">{meta}</span>
+    </div>
+  );
 }
 
 /** Nothing here yet — said once, in a card, so the page still looks finished. */
