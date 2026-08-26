@@ -93,7 +93,47 @@ export async function GET() {
     'align-items:center',
     'justify-content:center'
   ].join(';');
-  launcher.textContent = '💬';
+
+  /*
+   * The launcher's face.
+   *
+   * An <img> rather than the 💬 emoji this used to be. An emoji is drawn by
+   * whatever font the visitor's own device supplies, so the button was Apple's
+   * blue speech bubble on an iPhone, Segoe's outline on Windows and something
+   * else again on Android — three products, none of them ShipBlu, on the one
+   * control that is supposed to say whose support this is.
+   *
+   * Served from /widget/ rather than anywhere else under public/, and that is
+   * load-bearing rather than tidy: \`/widget\` is already the one prefix
+   * \`proxy.ts\` lets through without a session *and* leaves unrewritten on the
+   * help-centre hostname. An asset one directory to the side would redirect a
+   * visitor on a merchant's site to /login, and 404 under /help on the custom
+   * domain.
+   */
+  var markFailed = false;
+  var mark = document.createElement('img');
+  mark.src = BASE + '/widget/logomark-white.png';
+  mark.alt = '';
+  // The mark is wider than it is tall, so height follows width rather than
+  // being set: a host page's own \`img\` rules cannot squash it. And
+  // \`pointer-events\` off, so every click lands on the button, never on its
+  // contents.
+  mark.style.cssText = 'width:30px;height:auto;display:block;pointer-events:none';
+
+  /*
+   * The mark is the only thing in the button, so a request that fails leaves a
+   * blank blue disc with no hint that it opens anything. The emoji is the worse
+   * mark and the better fallback: it needs nothing from the network, which is
+   * the one thing that has just gone wrong.
+   */
+  mark.addEventListener('error', function () {
+    markFailed = true;
+    paintLauncher();
+  });
+
+  var closeGlyph = document.createElement('span');
+  closeGlyph.textContent = '✕';
+  closeGlyph.style.cssText = 'pointer-events:none';
 
   var badge = document.createElement('span');
   badge.style.cssText = [
@@ -111,7 +151,21 @@ export async function GET() {
     'justify-content:center',
     'padding:0 4px'
   ].join(';');
-  launcher.appendChild(badge);
+  /*
+   * Rebuilt rather than assigned. The badge is a child of the launcher, so the
+   * \`textContent =\` this replaced deleted it on every toggle and had to
+   * put it back afterwards; with an element to swap in, that trick stops
+   * working at all.
+   */
+  function paintLauncher() {
+    while (launcher.firstChild) launcher.removeChild(launcher.firstChild);
+    if (open) launcher.appendChild(closeGlyph);
+    else if (markFailed) launcher.appendChild(document.createTextNode('💬'));
+    else launcher.appendChild(mark);
+    launcher.appendChild(badge);
+  }
+
+  paintLauncher();
 
   /*
    * A button that floats over the page is the one thing on it with no business
@@ -310,8 +364,7 @@ export async function GET() {
     open = next === undefined ? !open : next;
     var frame = ensureFrame();
     frame.style.display = open ? 'block' : 'none';
-    launcher.textContent = open ? '✕' : '💬';
-    launcher.appendChild(badge);
+    paintLauncher();
 
     if (open && compact.matches) pinPage();
     else releasePage();
