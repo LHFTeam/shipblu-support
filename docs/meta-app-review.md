@@ -11,10 +11,15 @@ written to stand alone — a reviewer reads them one at a time and in no
 particular order, so each repeats the minimum context it needs rather than
 referring to another answer.
 
+`user_messenger_contact` has been **dropped from this submission** and has no
+section here; see [Dropped](#dropped-from-this-submission) for why, so nobody
+adds it back next cycle.
+
 § [Before you submit](#before-you-submit) is not for pasting. It lists three
-requested items that the code does not currently back, and four permissions the
-built features need but the list omits. Read it first: the fastest way to fail
-this review is to describe behaviour a reviewer cannot see in the screencast.
+remaining requested items that the code does not currently back, and four
+permissions the built features need but the list omits. Read it first: the
+fastest way to fail this review is to describe behaviour a reviewer cannot see
+in the screencast.
 
 ---
 
@@ -245,16 +250,28 @@ own "App Details" and verification notes too:
 
 ## Business Asset User Profile Access (feature)
 
-**Answer**
+> ⚠️ **Not exercised by the current build.** `fetchProfile()` in
+> `lib/meta/client.ts` is the function that would call the Graph API for these
+> User Fields, and **nothing calls it** — it is exported and dead. The only name
+> the app has today is `senderName`, taken from `event.sender?.username` in the
+> webhook payload itself (`lib/meta/parse.ts`), which Instagram sends and
+> Messenger does not. So an Instagram ticket carries a username that did not come
+> from this feature, and a Facebook ticket carries no name at all. Wire
+> `fetchProfile` into `ingestMetaMessage` before recording — see
+> [Before you submit](#before-you-submit). The answers below describe the app
+> with that call in place.
+
+**Answer** — for "How will this app use Business Asset User Profile Access?"
 
 > This feature is what puts a customer's name on their support ticket.
 >
 > When a person messages ShipBlu's Facebook Page or Instagram account, the
 > webhook gives us a page-scoped ID and nothing else. The app calls the Graph
-> API for the User Fields this feature grants — `name`, and the Instagram
-> `username` — for that one person, at the moment their first message arrives,
-> and stores it on the contact record their ticket hangs off. Nothing else is
-> requested and nothing is requested about people who have not messaged us.
+> API for that one person's display name, at the moment their first message
+> arrives, and stores it on the contact record their ticket hangs off. We
+> request only the name; we do not request the profile picture or
+> `ids_for_business`, and we request nothing at all about people who have not
+> messaged us.
 >
 > Three concrete things depend on it. An agent opening the inbox sees "Mona
 > Hassan" rather than "Facebook user 8123729301…", which is the difference
@@ -271,6 +288,47 @@ own "App Details" and verification notes too:
 > whose profile we cannot read is still served. Value to the person: they are
 > addressed as themselves, and they do not have to re-explain their situation to
 > each agent who picks up a channel.
+
+**Answer** — for "Review the policies for Business Asset User Profile Access and
+tell us how you intend to use it"
+
+> We have reviewed the Business Asset User Profile Access reference, the Meta
+> Platform Terms and the Developer Policies. Our use sits inside the documented
+> allowed usage — reading User Fields for people engaging with our own business
+> assets, within a business app experience — and we have deliberately scoped it
+> narrower than the feature permits.
+>
+> **Whose data, and which fields.** The only business assets involved are
+> ShipBlu's own Facebook Page and Instagram professional account; ShipBlu
+> Support is our in-house helpdesk and is not offered to any other business. We
+> read a profile only for a person who has sent one of those assets a message,
+> only at the point that message becomes a support ticket, and we read only
+> their display name. We do not request the profile picture or
+> `ids_for_business`, and we make no profile call for anyone who has not
+> contacted us.
+>
+> **What we use it for.** One purpose: identifying the customer to the support
+> agent handling their ticket, so the agent can see who they are talking to,
+> address them by name, and recognise them as the same person if they come back
+> on another channel about the same parcel.
+>
+> **What we will not do with it.** We do not use this data for advertising,
+> targeting, audience building, lookalikes or measurement. We do not sell,
+> licence, rent, transfer or otherwise disclose it to any third party, and no
+> third party processes it on our behalf for any purpose beyond hosting. We do
+> not use it to build any profile of a person beyond the support record their
+> tickets hang off, we run no analytics on it, and we hold no aggregated
+> derivative that could be re-identified. It is not combined with data from any
+> outside source.
+>
+> **Storage, access and retention.** The name is stored on the contact record in
+> our own Postgres database in the EU (eu-central-1), reachable only by
+> authenticated ShipBlu support agents through a role-based permission system;
+> the console is not public and there is no external API that exposes it. Raw
+> webhook payloads, which contain the original Meta identifiers, are deleted
+> automatically 30 days after processing. We retain the name for as long as the
+> person is an active support contact, and we delete a person's stored profile
+> data on request.
 
 ---
 
@@ -343,42 +401,6 @@ own "App Details" and verification notes too:
 > attribute. Value to the person: automated messages in their own language that
 > are addressed to them correctly, rather than in a register that signals a
 > machine wrote it without knowing who it was writing to.
-
----
-
-## user_messenger_contact
-
-> ⚠️ **Do not paste this yet.** This permission covers _business-initiated_
-> messaging, and ShipBlu Support only ever replies to threads a customer
-> started. See [Before you submit](#before-you-submit). The answer below is
-> written for the proactive parcel notifications we would need to actually
-> build — do not submit it describing something the screencast will not show.
-
-**Answer**
-
-> ShipBlu delivers parcels, and the single most common reason a customer
-> contacts us is that they do not know where theirs is. `user_messenger_contact`
-> would let us answer that question before it is asked, for customers who have
-> chosen Messenger as the place they want to hear from us.
->
-> The flow is opt-in and tied to a specific parcel. When a recipient is
-> expecting a delivery, ShipBlu's tracking page and post-purchase flow offer
-> them a choice of where to receive updates about that shipment; if they choose
-> Messenger, the app sends them the updates that materially affect them and
-> nothing else — the parcel is out for delivery today, the courier attempted
-> delivery and could not reach them, the delivery window has changed, the parcel
-> is ready for collection. Each message concerns a real shipment that person is
-> a party to, and each one carries the means to reply, which turns the
-> notification into a support conversation with the same team that handles every
-> other channel.
->
-> Value to the person: they hear that their parcel is arriving before they have
-> to go looking, and if something has gone wrong they hear it from us rather
-> than discovering it at the door. The alternative — the situation today — is
-> that they find out by contacting support, which is worse for them and
-> generates the contact we would rather have prevented. We send no marketing,
-> no promotions and nothing unrelated to a shipment the recipient is expecting,
-> and every message links to an unsubscribe for these updates.
 
 ---
 
@@ -465,15 +487,47 @@ Meta reviews the screencast against the description. A permission whose
 described behaviour is not visible in the recording is the most common cause of
 rejection, and a rejection on one item delays the whole submission.
 
-| Item                              | The problem                                                                                                                                                                                                                         | Options                                                                                                                                                                                                                                                                                                       |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `whatsapp_business_manage_events` | It covers logging conversion events to Meta **for ads targeting, optimisation and reporting**. This is a helpdesk. There is no ad account in the loop, no conversion event, and no code that could produce one.                     | **Drop it.** It belongs to a marketing submission, if ShipBlu ever runs click-to-WhatsApp ads. Nothing in the support product is blocked by not having it.                                                                                                                                                    |
-| `pages_user_gender`               | Nothing in the codebase reads, stores or displays gender. `contacts` has no column for it.                                                                                                                                          | Either drop it, or build it first. The Arabic-inflection case is genuinely strong and it is a small change — a nullable `gender` column on `contacts`, written by the same profile lookup that already writes the name, read by the Arabic message templates. Then the answer above is true and demonstrable. |
-| `user_messenger_contact`          | It covers a Page sending someone a **first** message. This app only ever replies inside a thread the customer opened; there is no proactive send path on any Meta channel, and even CSAT surveys go out on email and WhatsApp only. | Either drop it, or scope the proactive parcel notifications as real work first. Do not submit the answer above against the current build — the reviewer will look for the opt-in and the send, and find neither.                                                                                              |
+| Item                                 | The problem                                                                                                                                                                                                                     | Options                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `whatsapp_business_manage_events`    | It covers logging conversion events to Meta **for ads targeting, optimisation and reporting**. This is a helpdesk. There is no ad account in the loop, no conversion event, and no code that could produce one.                 | **Drop it.** It belongs to a marketing submission, if ShipBlu ever runs click-to-WhatsApp ads. Nothing in the support product is blocked by not having it.                                                                                                                                                                                                                                              |
+| `Business Asset User Profile Access` | `fetchProfile()` in `lib/meta/client.ts` is exported and never called. The name on an Instagram ticket comes from `event.sender?.username` in the webhook payload, not from this feature; a Facebook ticket has no name at all. | **Build it — it is small and it is the one on this list worth building.** Call `fetchProfile` from `ingestMetaMessage` in `lib/tickets/ingest-meta.ts` when `senderName` is null, and pass the result into `resolveContact` as `displayName`. That makes the answer true, makes the recording possible, and fixes a live defect: every Facebook contact in the database today is a bare page-scoped id. |
+| `pages_user_gender`                  | Nothing in the codebase reads, stores or displays gender. `contacts` has no column for it.                                                                                                                                      | Either drop it, or build it first. The Arabic-inflection case is genuinely strong and it is a small change — a nullable `gender` column on `contacts`, written by the same profile lookup that already writes the name, read by the Arabic message templates. Then the answer above is true and demonstrable.                                                                                           |
 
 Dropping a permission now costs nothing: it can be requested in a later
 submission once the feature exists, and a smaller submission that passes beats a
 larger one that comes back.
+
+### Dropped from this submission
+
+**`user_messenger_contact`** — decided 2026-08-26, and recorded here because the
+reasoning is not obvious from the permission's name and will otherwise be
+re-litigated.
+
+It covers a Page sending someone a **first** message — Meta's wording is
+"contact a person via Messenger upon their approval," for "an initial message,
+post-purchase updates and account updates." Nothing in this app can do that.
+Every Meta send needs a `conversationId` that exists only because a customer
+messaged us first: the two enqueue sites are `app/(console)/actions.ts` (an
+agent hitting send on a ticket) and `lib/tickets/outbound.ts`, whose only
+automated callers — `lib/auto-response` and `lib/automations` — also fire inside
+a customer-initiated ticket. `send-meta.ts` handles three kinds, `dm`,
+`comment_reply` and `private_reply`, and all three are replies.
+
+So there was no screencast to record: a reviewer watching for a message arriving
+in a thread the person did not open would not find one, and a persuasive answer
+to something the recording cannot show risks the honest permissions sitting in
+the same submission.
+
+Requesting it later costs nothing. What it would take first: an opt-in captured
+at the moment a recipient chooses Messenger for updates about a specific parcel,
+a sender for the handful of events that actually matter to them (out for
+delivery, attempt failed, window changed, ready for collection), and an
+unsubscribe reachable from inside the conversation rather than from a settings
+page. The first of those cannot live in this repo — the tracking and
+post-purchase surfaces belong to the shipping platform, and this app only reads
+shipment data (§5.4 of `docs/PROJECT-STATE.md` notes even that read API is
+designed rather than built). It is a cross-team build, not an afternoon, and the
+recording has to be planned around it rather than the other way round.
 
 ### Four permissions the built features need, and the list omits
 
@@ -511,8 +565,12 @@ For each channel, one continuous take covering:
 1. A customer sending a message to the Page / Instagram account / WhatsApp
    number from a real account.
 2. That message appearing in the agent console as a ticket — showing the
-   customer's **name** on it, which is what evidences Business Asset User
-   Profile Access.
+   customer's **real name** on it, which is what evidences Business Asset User
+   Profile Access. This only works once `fetchProfile` is wired up; on today's
+   build a Facebook ticket shows a bare page-scoped id, which demonstrates the
+   opposite of what the answer claims. Record a Facebook DM specifically, not
+   just Instagram: Instagram's webhook supplies a username on its own, so an
+   Instagram-only take does not evidence the feature.
 3. An agent typing and sending a reply, and the customer's device receiving it.
 4. For **Human Agent**: a thread whose last customer message is more than 24
    hours old, showing the console's own window indicator and a reply going out
@@ -523,6 +581,18 @@ For each channel, one continuous take covering:
 6. For **`public_profile`** / **`email`**: an administrator going through the
    Facebook Login for Business flow and the connection screen showing the
    authorising account.
+
+### One gap behind the deletion commitment
+
+The Business Asset User Profile Access policy answer commits to deleting a
+person's stored profile data on request. That commitment is honest but it is
+currently a manual database operation: `contact.delete` exists in `PERMISSIONS`
+in `lib/auth/permissions.ts` and is **enforced nowhere**, so no screen deletes a
+contact. (The `delete(contacts)` in `lib/tickets/contacts.ts` is race cleanup for
+two webhooks creating the same contact at once, not a deletion feature.) Fine to
+submit — the commitment is about what we will do, not about which button does it
+— but somebody has to be able to actually carry it out, so either build the
+screen or write down the runbook.
 
 ### One thing to check in the Meta dashboard first
 
