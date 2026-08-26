@@ -1049,6 +1049,22 @@ Each cost real time. Most are also comments in the code.
     those with a larger pool or instance: capacity can postpone unbounded fan-out
     but cannot make it bounded.
 
+24. **`request.url` in a route handler names the address the server is bound
+    to, not the `Host` it was asked for.** So `new URL('/login', request.url)`
+    built `http://localhost:10000/login` on Render, and signing out dropped the
+    agent on a dead address on their own machine. No proxy header corrects it:
+    with `Host: support.shipblu.com` and `X-Forwarded-Host` both set, the
+    handler still resolved to the internal listen address — only the _scheme_
+    followed `X-Forwarded-Proto`, which is what makes the bug survive a casual
+    look at the headers. Reach for `redirectTo()` in `lib/http/redirect.ts`
+    instead: a relative `Location` is resolved by the browser against the URL it
+    actually requested, so it is correct on the custom domain, the Render
+    service URL and localhost alike. `proxy.ts` is not affected — middleware
+    redirects go through `request.nextUrl`, which does carry the real host. The
+    same trap was live in the legacy Freshdesk redirect, where it mattered more:
+    a 301 is cached indefinitely, so each visitor would have remembered the
+    internal address rather than merely failing once.
+
 ## 7. Verification already done
 
 - **WhatsApp, end to end on production.** A synthetic webhook was enqueued; the

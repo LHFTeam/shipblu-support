@@ -4,6 +4,7 @@ import { db } from '@/db/client';
 import { kbArticles, kbFolders, kbRedirects } from '@/db/schema';
 import { DEFAULT_LOCALE } from '@/lib/kb/locale';
 import { freshdeskArticleId } from '@/lib/kb/slug';
+import { redirectTo } from '@/lib/http/redirect';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,8 +36,8 @@ export async function GET(request: Request) {
     .limit(1);
 
   const row = explicit[0];
-  if (row?.slug) return permanent(request, `/${row.locale}/a/${row.slug}`);
-  if (row?.toPath) return permanent(request, row.toPath);
+  if (row?.slug) return permanent(`/${row.locale}/a/${row.slug}`);
+  if (row?.toPath) return permanent(row.toPath);
 
   const freshdeskId = freshdeskArticleId(path);
   if (freshdeskId) {
@@ -69,7 +70,7 @@ export async function GET(request: Request) {
       rows.find((row) => row.locale === DEFAULT_LOCALE) ??
       rows[0];
 
-    if (article) return permanent(request, `/${article.locale}/a/${article.slug}`);
+    if (article) return permanent(`/${article.locale}/a/${article.slug}`);
   }
 
   const folderId = /\/solutions\/folders\/(\d+)/.exec(path)?.[1];
@@ -89,7 +90,7 @@ export async function GET(request: Request) {
     // moved category since import would send the reader somewhere wrong. The
     // help centre home is a worse answer than the right folder but a better
     // one than a 404.
-    if (byFolder[0]) return permanent(request, `/${DEFAULT_LOCALE}`);
+    if (byFolder[0]) return permanent(`/${DEFAULT_LOCALE}`);
   }
 
   // Genuinely unknown. A 404 here is correct — redirecting every unmatched URL
@@ -100,7 +101,12 @@ export async function GET(request: Request) {
 /**
  * 301 rather than 302: these URLs are never coming back, and a permanent
  * redirect is what transfers the old page's search ranking to the new one.
+ *
+ * That permanence is also why the relative `Location` matters more here than
+ * anywhere else: a browser caches a 301 indefinitely, so the internal listen
+ * address `new URL(to, request.url)` used to produce would have been
+ * remembered per visitor rather than merely failing once.
  */
-function permanent(request: Request, to: string): NextResponse {
-  return NextResponse.redirect(new URL(to, request.url), { status: 301 });
+function permanent(to: string): NextResponse {
+  return redirectTo(to, 301);
 }
