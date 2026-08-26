@@ -48,6 +48,7 @@ export type MergeSide = {
   name: string | null;
   primaryEmail: string | null;
   primaryPhone: string | null;
+  avatarPath: string | null;
   companyId: string | null;
   timezone: string | null;
   locale: string;
@@ -114,6 +115,7 @@ export type ContactPatch = Partial<
     | 'name'
     | 'primaryEmail'
     | 'primaryPhone'
+    | 'avatarPath'
     | 'timezone'
     | 'companyId'
     | 'locale'
@@ -139,6 +141,12 @@ export function reconcileContact(survivor: MergeSide, loser: MergeSide): Contact
   }
   if (blank(survivor.primaryPhone) && !blank(loser.primaryPhone)) {
     patch.primaryPhone = loser.primaryPhone;
+  }
+  // The duplicate is often the channel that had a picture — a Messenger record
+  // folded into the email one the agent has been using — so a merge that
+  // dropped it would lose the only face on the person.
+  if (blank(survivor.avatarPath) && !blank(loser.avatarPath)) {
+    patch.avatarPath = loser.avatarPath;
   }
   if (blank(survivor.timezone) && !blank(loser.timezone)) patch.timezone = loser.timezone;
   if (!survivor.companyId && loser.companyId) patch.companyId = loser.companyId;
@@ -175,6 +183,7 @@ const MERGE_COLUMNS = {
   name: contacts.name,
   primaryEmail: contacts.primaryEmail,
   primaryPhone: contacts.primaryPhone,
+  avatarPath: contacts.avatarPath,
   companyId: contacts.companyId,
   timezone: contacts.timezone,
   locale: contacts.locale,

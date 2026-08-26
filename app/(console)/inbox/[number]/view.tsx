@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { Avatar } from '@/components/avatar';
 import { ChannelBadge } from '@/components/channel';
 import { ChevronLeftIcon } from '@/components/icons';
 import { Badge, Select } from '@/components/ui';
@@ -188,9 +189,17 @@ function Header({ conversation }: { conversation: ConversationDetail }) {
         <Badge tone={conversation.statusCategory}>{conversation.statusName}</Badge>
         <ChannelBadge channel={conversation.channel} />
         {isComment ? <Badge tone="warning">public comment</Badge> : null}
-        <span className="truncate">
-          {conversation.requester.name ?? 'Unknown'}{' '}
-          {conversation.requester.email ?? conversation.requester.phone ?? ''}
+        <span className="flex min-w-0 items-center gap-1.5">
+          <Avatar
+            name={conversation.requester.name}
+            contactId={conversation.requester.id}
+            hasAvatar={conversation.requester.hasAvatar}
+            size={20}
+          />
+          <span className="truncate">
+            {conversation.requester.name ?? 'Unknown'}{' '}
+            {conversation.requester.email ?? conversation.requester.phone ?? ''}
+          </span>
         </span>
         <span aria-hidden>·</span>
         <span>opened {formatRelative(conversation.createdAt)} ago</span>

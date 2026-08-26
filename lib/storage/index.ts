@@ -41,6 +41,34 @@ export function buildAttachmentPath(
   return `conversations/${conversationId}/${messageId}.${extension}`;
 }
 
+/** Image types a channel's profile picture is allowed to be stored as. */
+const AVATAR_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+
+export function isStorableAvatarType(contentType: string): boolean {
+  return AVATAR_TYPES.has(contentType.split(';')[0]!.trim().toLowerCase());
+}
+
+/**
+ * One object per contact, overwritten in place.
+ *
+ * A stable key rather than a new object per fetch, because the alternative
+ * accumulates a copy of every profile picture a customer has ever had and
+ * nothing ever deletes them — `contacts.avatar_path` only remembers the newest,
+ * so the older ones would be unreferenced bytes we keep paying for. `x-upsert`
+ * on the upload is what makes overwriting work.
+ *
+ * **No extension**, which is what actually makes the key stable. Deriving one
+ * from the content type looks tidier and quietly breaks the invariant above:
+ * Meta's CDN re-encodes, so the same customer's picture arriving as WebP after
+ * it was JPEG writes a second object and strands the first — the exact leak the
+ * stable key exists to avoid, once per format. Storage keeps the Content-Type it
+ * was uploaded with and serves it back, so the extension was never load-bearing;
+ * `isStorableAvatarType` is what decides whether the bytes are an image at all.
+ */
+export function buildAvatarPath(contactId: string): string {
+  return `contacts/${contactId}/avatar`;
+}
+
 export async function uploadObject(
   path: string,
   content: Buffer,

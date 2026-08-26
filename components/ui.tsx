@@ -244,13 +244,17 @@ export function PageHeader({
   title,
   description,
   actions,
+  leading,
 }: {
   title: string;
   description?: string;
   actions?: ReactNode;
+  /** Rendered before the title — an avatar, an icon. Vertically centred on it. */
+  leading?: ReactNode;
 }) {
   return (
     <header className="mb-5 flex flex-wrap items-start gap-3">
+      {leading ? <div className="shrink-0 pt-0.5">{leading}</div> : null}
       <div className="min-w-0">
         <h1 className="text-lg font-semibold">{title}</h1>
         {description ? (

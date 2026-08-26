@@ -161,8 +161,19 @@ add it by hand.
 to `JobType` in `lib/queue/index.ts`, a handler under `worker/handlers/`, and
 register it in `worker/handlers/index.ts` — an unregistered type fails loudly
 rather than being dropped. Use `dedupeKey` for anything a webhook retry could
-duplicate. Webhooks persist to `webhook_events` and return 200 immediately; they
-never do the work inline.
+duplicate — but note that **a key is spent for good, not until its job
+finishes**: `jobs_dedupe_idx` is a plain unique index over the whole table, so
+the conflict target still matches a job that completed months ago, and a job that
+reached `dead` is never cleaned up at all. Key on the subject only where the work
+is genuinely once-ever for it (one send, one media download). Anything that might
+legitimately need to run again for the same subject — a profile refresh, a
+per-row backfill — must make its handler idempotent and enqueue without a key,
+or the retry silently does nothing. Webhooks persist to `webhook_events` and
+return 200 immediately; they never do the work inline.
+
+`npm run job -- <type>` takes trailing `key=value` pairs as the payload
+(`npm run job -- backfill_meta_profiles force=true limit=50`), so a handler's
+options are reachable without hand-inserting a `jobs` row.
 
 **Environment variables** are declared in `lib/env.ts` (Zod, parsed lazily) and
 in `render.yaml` in the same commit. Three env groups hold them:

@@ -599,6 +599,26 @@ provider. Each is a round trip somebody has to actually watch:
   job is still the one dead row in `jobs`; it is a real customer reply that was
   never delivered. Check the dashboard before the channels are turned on, not
   after.
+- **Meta's Business Asset User Profile Access, which has never once been
+  exercised.** The User Profile API is the only thing that can tell this system
+  who a Messenger or Instagram customer is — their webhooks carry a scoped id and
+  nothing else, unlike WhatsApp, which puts the profile name in the payload. As
+  of 2026-08-26 that showed in the data exactly as you would expect: **all 20
+  Facebook and both Instagram contacts had a null `name` and a null
+  `display_name`**, against 13 of 10,211 on WhatsApp. 101 inbound Messenger DMs
+  from 20 people, filed under bare 17-digit ids. The cause was not a missing
+  approval — `fetchProfile` existed in `lib/meta/client.ts` and **nothing
+  imported it**, so no profile call has ever left this system. Now wired: a
+  `fetch_meta_profile` job per person on first sight, `backfill_meta_profiles`
+  for the archive, and the picture copied into our own bucket because
+  `profile_pic` is a signed CDN URL that expires. What is still unverified is
+  the approval itself. Graph answers an unapproved app with `100/33 "Unsupported
+get request"` — the same sentence it uses for a deleted user — so
+  `isProfilePermissionRefusal` singles that out and the worker log names the
+  feature rather than leaving it to be guessed at, which is the lesson from the
+  bullet above. Run `npm run job -- backfill_meta_profiles` once the app is
+  approved and read the worker log; a run that names every contact and a run
+  that refuses all 22 are both unambiguous.
 - **The portal's verification and reset emails through Postmark.** The whole
   flow has been driven end to end against a local Postgres with
   `EMAIL_PROVIDER=local`, so the links, the tokens and the single-use rules are

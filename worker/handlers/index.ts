@@ -1,9 +1,11 @@
 import type { ClaimedJob, JobType } from '@/lib/queue';
 import { assignSweep } from './assign-sweep';
 import { backfillMessageLocations } from './backfill-message-locations';
+import { backfillMetaProfiles } from './backfill-meta-profiles';
 import { backfillShipmentLinks } from './backfill-shipment-links';
 import { cleanup } from './cleanup';
 import { downloadMediaJob } from './download-media';
+import { fetchMetaProfile } from './fetch-meta-profile';
 import { importFreshdeskKb } from './import-freshdesk-kb';
 import { processWebhook } from './process-webhook';
 import { rollupMetrics } from './rollup-metrics';
@@ -32,9 +34,11 @@ export type JobHandler = (job: ClaimedJob) => Promise<void>;
 export const handlers: Partial<Record<JobType, JobHandler>> = {
   assign_sweep: () => assignSweep(),
   backfill_message_locations: (job) => backfillMessageLocations(job),
+  backfill_meta_profiles: (job) => backfillMetaProfiles(job),
   backfill_shipment_links: (job) => backfillShipmentLinks(job),
   cleanup,
   download_media: downloadMediaJob,
+  fetch_meta_profile: fetchMetaProfile,
   import_freshdesk_kb: () => importFreshdeskKb(),
   process_webhook: processWebhook,
   rollup_metrics: (job) => rollupMetrics(job),

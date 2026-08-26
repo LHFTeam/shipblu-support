@@ -264,42 +264,121 @@ export async function hideComment(commentId: string, hidden = true): Promise<voi
 
 // --- Profiles ---------------------------------------------------------------
 
-export type MetaProfile = { name: string | null; username: string | null };
+export type MetaProfile = {
+  name: string | null;
+  username: string | null;
+  /**
+   * Signed CDN link, and a short-lived one. Copy the bytes before storing
+   * anything — see `contacts.avatarPath`.
+   */
+  pictureUrl: string | null;
+};
 
 /**
- * Looks up a customer's display name.
+ * The fields the **Business Asset User Profile Access** feature grants, per
+ * platform.
  *
- * Best-effort by design: the profile API needs permissions a new app often
- * lacks, and a ticket from "Facebook user 4821…" is far better than no ticket.
+ * Every one of them is gated behind that single feature and nothing else, which
+ * is why they are requested together: a partial list would not lower the
+ * approval bar, it would only leave the console with less to show. The three
+ * fields Meta gates *separately* — `locale` (`pages_user_locale`), `timezone`
+ * (`pages_user_timezone`) and `gender` (`pages_user_gender`) — are deliberately
+ * absent. Asking for one we are not approved for fails the whole request, so
+ * the name we do have rights to would be lost along with it.
+ *
+ * Instagram names the same idea with a different vocabulary: no first/last
+ * split, and a `username` that is the handle an agent would actually recognise.
  */
-export async function fetchProfile(
-  platform: MetaPlatform,
-  userId: string,
-): Promise<MetaProfile | null> {
-  try {
-    const fields = platform === 'instagram' ? 'name,username' : 'first_name,last_name,name';
-    const result = await graph<{
-      name?: string;
-      username?: string;
-      first_name?: string;
-      last_name?: string;
-    }>(userId, { method: 'GET', query: { fields } });
+export function profileFields(platform: MetaPlatform): string {
+  return platform === 'instagram'
+    ? 'name,username,profile_pic'
+    : 'first_name,last_name,name,profile_pic';
+}
 
-    const name =
-      result?.name ??
-      [result?.first_name, result?.last_name].filter(Boolean).join(' ').trim() ??
-      null;
+type RawProfile = {
+  name?: string;
+  username?: string;
+  first_name?: string;
+  last_name?: string;
+  profile_pic?: string;
+};
 
-    return { name: name || null, username: result?.username ?? null };
-  } catch (error) {
-    console.warn(`[meta] could not fetch the profile for ${userId}`, error);
-    return null;
+/**
+ * The display name out of whichever fields Graph actually answered with.
+ *
+ * `name` is not always there even when the feature is approved — a person can
+ * have one of the two halves and not the other — so first+last is a fallback
+ * rather than a redundant second copy. Separate from the request so it can be
+ * tested against real response shapes without a fetch.
+ */
+export function profileDisplayName(result: RawProfile): string | null {
+  const full = result.name?.trim();
+  if (full) return full;
+
+  const joined = [result.first_name, result.last_name]
+    .map((part) => part?.trim())
+    .filter(Boolean)
+    .join(' ');
+
+  return joined || null;
+}
+
+/**
+ * Looks up a customer's profile.
+ *
+ * Messenger and Instagram webhooks identify the sender by a scoped id and
+ * nothing else — no name, no handle, unlike WhatsApp, which puts the profile
+ * name in the payload. This call is the only way the console ever learns who
+ * wrote in, which is what makes it worth an approval.
+ *
+ * It **throws** like every other call here rather than returning null on
+ * failure. The version that swallowed everything could not tell "this app is
+ * not approved for the feature" from "this customer has no name to give", and
+ * those need opposite responses: the first is a dashboard problem that will
+ * affect every customer until somebody fixes it, the second is normal and
+ * final. `lib/meta/errors.ts` separates them and the job handler acts on the
+ * distinction.
+ */
+export async function fetchProfile(platform: MetaPlatform, userId: string): Promise<MetaProfile> {
+  const result = await graph<RawProfile>(userId, {
+    method: 'GET',
+    query: { fields: profileFields(platform) },
+  });
+
+  return {
+    name: profileDisplayName(result ?? {}),
+    username: result?.username?.trim() || null,
+    pictureUrl: result?.profile_pic || null,
+  };
+}
+
+/**
+ * A response bigger than the caller was willing to hold.
+ *
+ * Its own type rather than a `MetaApiError`, because it is not something Graph
+ * said: nothing is wrong with the request and retrying it will produce the same
+ * oversized body. Callers treat it as a final, non-transient refusal.
+ */
+export class MetaContentTooLargeError extends Error {
+  constructor(readonly limitBytes: number) {
+    super(`response body exceeded ${limitBytes} bytes`);
+    this.name = 'MetaContentTooLargeError';
   }
 }
 
-/** Downloads an attachment Meta has given us a URL for. */
+/**
+ * Downloads an attachment Meta has given us a URL for.
+ *
+ * `maxBytes` is enforced **while reading**, not after. Checking the length of a
+ * Buffer that has already been materialised is not a guard against anything —
+ * the memory it exists to bound has been allocated by the time the check runs,
+ * so a wrong or hostile URL costs the worker the whole body first and reports
+ * "too large" afterwards. The declared `Content-Length` is rejected up front
+ * where there is one, and the stream is aborted mid-read where there is not.
+ */
 export async function downloadAttachment(
   url: string,
+  options: { maxBytes?: number } = {},
 ): Promise<{ content: Buffer; contentType: string }> {
   const response = await fetch(url);
   if (!response.ok) {
@@ -312,8 +391,43 @@ export async function downloadAttachment(
     );
   }
 
-  return {
-    content: Buffer.from(await response.arrayBuffer()),
-    contentType: response.headers.get('content-type') ?? 'application/octet-stream',
-  };
+  const contentType = response.headers.get('content-type') ?? 'application/octet-stream';
+  const { maxBytes } = options;
+
+  if (maxBytes === undefined) {
+    return { content: Buffer.from(await response.arrayBuffer()), contentType };
+  }
+
+  const declared = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await response.body?.cancel();
+    throw new MetaContentTooLargeError(maxBytes);
+  }
+
+  const reader = response.body?.getReader();
+  // No body to stream — an empty response, or a runtime that did not give us
+  // one. `arrayBuffer` is bounded by the header check above in that case.
+  if (!reader) {
+    const content = Buffer.from(await response.arrayBuffer());
+    if (content.length > maxBytes) throw new MetaContentTooLargeError(maxBytes);
+    return { content, contentType };
+  }
+
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+
+    total += value.length;
+    if (total > maxBytes) {
+      await reader.cancel();
+      throw new MetaContentTooLargeError(maxBytes);
+    }
+    chunks.push(value);
+  }
+
+  return { content: Buffer.concat(chunks), contentType };
 }

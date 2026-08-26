@@ -27,6 +27,8 @@ export type ContactDetail = {
   name: string | null;
   email: string | null;
   phone: string | null;
+  /** Whether a profile picture is on file, so the page can skip a 404. */
+  hasAvatar: boolean;
   locale: string;
   isBlocked: boolean;
   isShipper: boolean;
@@ -67,6 +69,7 @@ export async function getContact(contactId: string): Promise<ContactDetail | nul
     name: row.contact.name,
     email: row.contact.primaryEmail,
     phone: row.contact.primaryPhone,
+    hasAvatar: row.contact.avatarPath !== null,
     locale: row.contact.locale,
     isBlocked: row.contact.isBlocked,
     isShipper: row.contact.isShipper,
