@@ -70,39 +70,69 @@ export function signingCandidates(
 }
 
 /**
- * Says which secret is verifying Instagram deliveries — once, and again only if
- * it changes.
+ * Which envelope a delivery arrived in.
+ *
+ * Not a detail: `messaging` and `standby` are the handover protocol's two
+ * channels — the first means this app holds thread control, the second means
+ * another one does — and on this deployment **they are signed with different
+ * secrets**, which is the fact the notice below exists to surface.
+ */
+export function deliveryEnvelope(payload: {
+  entry?: { messaging?: unknown[]; standby?: unknown[]; changes?: unknown[] }[];
+}): string {
+  const entry = payload.entry?.[0];
+  if (entry?.messaging?.length) return 'messaging';
+  if (entry?.standby?.length) return 'standby';
+  if (entry?.changes?.length) return 'changes';
+  return 'empty';
+}
+
+/**
+ * Says which secret is verifying Instagram deliveries, once per combination of
+ * secret and envelope.
  *
  * Written because its absence cost an answer. When the outage in
  * `docs/PROJECT-STATE.md` §6.26 ended, the deliveries started verifying again
  * and there was no way to tell *how*: a corrected Instagram app secret and an
  * account moved back onto its Facebook Page produce the identical
- * `signature_verified = true`. Those are different configurations with different
- * App Review permissions (`instagram_business_manage_comments` versus
- * `instagram_manage_comments`), so the difference is not a curiosity — it decides
- * what gets submitted, and it was left to be guessed at.
+ * `signature_verified = true`, and those are different configurations with
+ * different App Review permissions.
  *
- * Once per process rather than per delivery, on the same reasoning as
- * `warnIfOnlyLegacy` in `lib/env.ts`: this is a fact about configuration, it
- * changes on the order of never, and 152,000 deliveries a week through the same
- * endpoint means anything logged per request is noise that trains people to
- * ignore the log. Module state, so each web instance says it once — with
- * autoscale at 1→3 that is at most three lines, which is a feature: it also
- * catches one instance running against stale configuration.
+ * The first version of this remembered one name and re-announced on change,
+ * on the reasoning that a signing secret changes on the order of never. **That
+ * was wrong within the hour.** Both secrets are in use on this deployment at
+ * once — the `messaging` copies and the `standby` copies of the same account's
+ * traffic are signed differently — so "re-announce on change" became a line per
+ * delivery, which is precisely the noise the once-only design existed to avoid.
+ *
+ * Keyed on secret *and* envelope instead. That bounds the output at a handful of
+ * lines for the life of a process and makes each one worth reading, because the
+ * pair is the whole answer: which credential signs which channel. The trade is
+ * that a return to a combination already reported is silent — acceptable, since
+ * the set of combinations is what anybody is trying to learn here, not the
+ * sequence.
  */
-let notedSecret: string | null = null;
+const noted = new Set<string>();
 
-export function noteVerifyingSecret(object: string | undefined, name: string): void {
+export function noteVerifyingSecret(
+  object: string | undefined,
+  name: string,
+  envelope: string,
+): void {
+  // Only Instagram has two possible signers, and the other two objects carry
+  // the overwhelming majority of the traffic.
   if (object !== 'instagram') return;
-  if (name === notedSecret) return;
 
-  notedSecret = name;
-  console.log(`[webhook:meta] instagram deliveries are verifying with ${name}`);
+  const key = `${name}:${envelope}`;
+  if (noted.has(key)) return;
+
+  noted.add(key);
+  console.log(`[webhook:meta] instagram ${envelope} deliveries are verifying with ${name}`);
 }
 
 /** Test-only, as `resetEnvCache` is: module state outlives a single test. */
 export function resetVerifyingSecretNotice(): void {
-  notedSecret = null;
+  noted.clear();
 }
 
 /** What the rejection log and the stored row say, given what was tried. */
