@@ -630,26 +630,53 @@ provider. Each is a round trip somebody has to actually watch:
   the same channel and it has not been diagnosed; the trace ids are on the
   message rows.
 
-- **Meta's Business Asset User Profile Access, which has never once been
-  exercised.** The User Profile API is the only thing that can tell this system
-  who a Messenger or Instagram customer is — their webhooks carry a scoped id and
-  nothing else, unlike WhatsApp, which puts the profile name in the payload. As
-  of 2026-08-26 that showed in the data exactly as you would expect: **all 20
-  Facebook and both Instagram contacts had a null `name` and a null
-  `display_name`**, against 13 of 10,211 on WhatsApp. 101 inbound Messenger DMs
-  from 20 people, filed under bare 17-digit ids. The cause was not a missing
-  approval — `fetchProfile` existed in `lib/meta/client.ts` and **nothing
-  imported it**, so no profile call has ever left this system. Now wired: a
-  `fetch_meta_profile` job per person on first sight, `backfill_meta_profiles`
-  for the archive, and the picture copied into our own bucket because
-  `profile_pic` is a signed CDN URL that expires. What is still unverified is
-  the approval itself. Graph answers an unapproved app with `100/33 "Unsupported
-get request"` — the same sentence it uses for a deleted user — so
-  `isProfilePermissionRefusal` singles that out and the worker log names the
-  feature rather than leaving it to be guessed at, which is the lesson from the
-  bullet above. Run `npm run job -- backfill_meta_profiles` once the app is
-  approved and read the worker log; a run that names every contact and a run
-  that refuses all 22 are both unambiguous.
+- **Meta's Business Asset User Profile Access — now exercised, and refused every
+  time.** The User Profile API is the only thing that can tell this system who a
+  Messenger or Instagram customer is — their webhooks carry a scoped id and
+  nothing else, unlike WhatsApp, which puts the profile name in the payload. The
+  wiring landed on 2026-08-26 and has been calling Graph since: **17
+  `fetch_meta_profile` jobs between 15:26 UTC that day and 11:56 UTC on
+  2026-08-27, every one of them refused.** All 29 Facebook and Instagram
+  identities still have a null `profile_fetched_at` and a null `name`, which is
+  the handler working as designed — a refusal is deliberately not stamped, so
+  approval fixes the archive by itself.
+
+  **The App Dashboard reports 0 calls against the feature over the last 30 days,
+  and that is consistent with the above rather than a contradiction of it.** A
+  call refused at the capability gate never reaches the permission, so it is
+  never counted against it. The counter measures _granted_ usage; it cannot
+  leave zero while the app is unapproved, and it is therefore not an independent
+  problem to chase — it is the refusal, restated. The way to move it before
+  approval is Meta's role exemption: a lookup for a person who holds a role on
+  the app (admin, developer, tester) is answered without App Review, so have
+  somebody with a role message the Page and run
+  `npm run job -- backfill_meta_profiles force=true limit=1`. That is also the
+  footage App Review asks for.
+
+  **The two platforms fail differently, and only one of them is about App
+  Review:**
+
+  - **Facebook — `(#3) Application does not have the capability to make this API
+call.`** Eleven refusals, the same sentence each time. This is the missing
+    approval, stated as plainly as Graph ever states it.
+  - **Instagram — `(#100) The page is not linked to an Instagram account or the
+linked IG account is not professional account`.** Six refusals, and **not an
+    approval problem at all.** The requests went to `graph.facebook.com`, which
+    means `INSTAGRAM_ACCESS_TOKEN` is unset — `endpoint()` keys the host and
+    credential on that variable being present. The account is on Instagram Login
+    (its own app secret is what verifies its webhooks now — §6.26), so the Page
+    token has no route to an Instagram-scoped id and granting the feature would
+    change nothing. **Set `INSTAGRAM_ACCESS_TOKEN` in
+    `shipblu-support-production`**, or Instagram profile reads, sends and
+    moderation all keep going to the wrong host with the wrong credential.
+
+  What made this cost more than it should have: `isProfilePermissionRefusal`
+  matched 10, 200 and 100/33 — Meta's documented answer — and not code 3, the
+  one that actually arrives. So the log line naming the feature, written
+  precisely so nobody would have to guess again after the Human Agent episode,
+  **did not print once in 17 refusals.** Fixed, with code 3 in the set and the
+  Instagram linkage refusal explained separately; §6.27.
+
 - **Instagram comment management, which cannot be exercised yet at all.** Three
   separate things gate it, in order, and none is code:
   1. `META_INSTAGRAM_APP_SECRET` in `shipblu-support-production`, or every
@@ -1275,6 +1302,40 @@ where not signature_verified group by 1` rather than a log line nobody was
     false within the hour. It is keyed on secret _and_ envelope now, which bounds
     it at a handful of lines and makes the pair — which credential signs which
     channel — the thing it reports.
+
+27. **"Zero API calls" in Meta's dashboard is not "we never called it", and a
+    permission diagnostic is only as good as the code it matches on.** Meta's
+    App Dashboard reported **0 calls against Business Asset User Profile Access
+    in 30 days** while the worker was calling that endpoint several times a day
+    — 17 refusals in the first 21 hours after the wiring shipped. Both are true:
+    a call refused at the capability gate never reaches the permission, so it is
+    never counted against it. **The counter measures granted usage, not
+    attempted usage**, which means it stays at zero until approval and can never
+    be evidence about whether the code works. The log and the `jobs` table
+    answer that question; the dashboard does not.
+
+    The expensive half is what the refusals said. `isProfilePermissionRefusal`
+    matched Meta's documented answer — `100/33`, plus 200 and 10 — and Facebook
+    returns **`(#3) Application does not have the capability to make this API
+call.`** So every refusal fell through to the generic branch, and the
+    sentence naming the feature — written after the Human Agent episode
+    (§5.2) _specifically_ so nobody would have to guess a second time — printed
+    zero times out of 17. A diagnostic keyed on a code nobody verified is a
+    diagnostic that is silent exactly when it is needed, and nothing in the
+    pre-push loop can catch it: no test has a Graph to ask. **Read the codes out
+    of the production log before trusting a set of them**, the same way §7 says
+    to run raw SQL against the real database before pushing it.
+
+    Third finding from the same log, and the one that would have been missed
+    entirely: **Instagram was failing for a completely different reason wearing
+    the same word.** `(#100) The page is not linked to an Instagram account or
+the linked IG account is not professional account`, from
+    `graph.facebook.com` — i.e. `INSTAGRAM_ACCESS_TOKEN` is unset, `endpoint()`
+    fell back to the Page token and the Facebook host, and the Page has no route
+    to an Instagram-scoped id because the account is on Instagram Login (§6.26).
+    Approving the feature would not have fixed one Instagram lookup. This is why
+    §1's rule about breaking a count down along the dimension that can fail
+    applies to failures too: "17 refused" reads as one problem and was two.
 
 ## 7. Verification already done
 
