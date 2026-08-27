@@ -1186,6 +1186,43 @@ where not signature_verified group by 1` rather than a log line nobody was
     than `instagram_*`) is worth reading as a statement about which setup an app
     is on.
 
+    **Update, 2026-08-27 01:15 UTC — Instagram Login is no longer the leading
+    explanation, and the outage is still live.** `META_INSTAGRAM_APP_SECRET` has
+    since been set, and the new diagnostic reports, on all 495 deliveries since
+    the deploy went live at 21:50:52:
+
+    `signature did not match META_INSTAGRAM_APP_SECRET or META_APP_SECRET`
+
+    That sentence names a candidate only when its value is set and non-empty
+    (`signingCandidates` in `lib/meta/signing.ts`, and identical values are
+    deduplicated to one name), so it is proof that **both secrets are configured
+    and neither one signed these payloads**. 2,981 rejected and counting, 19
+    hours in. Two explanations survive, and they are not the same problem:
+
+    - The value pasted into `META_INSTAGRAM_APP_SECRET` is not the Instagram app
+      secret — the wrong field copied out of the dashboard (the Instagram app
+      _id_, a client token) or a stale one.
+    - **The deliveries are signed by a Meta app we hold no secret for at all** —
+      i.e. somebody created a _second_ app for the Instagram Login setup and
+      pointed its webhook at this callback URL, rather than adding the use case
+      to the existing one. This would be the bigger finding: `META_APP_ID` would
+      then name the wrong app, `subscribe_meta_webhooks` would be reading and
+      writing the wrong app's field list, and **App Review would have to be
+      submitted on the app that actually owns the account**, which is a different
+      question from which permission to submit.
+
+    `npm run job -- subscribe_meta_webhooks object=instagram` tells the two
+    apart, and reads before it writes, so it is safe to run for the answer
+    alone: "This app has no instagram subscription" means the deliveries belong
+    to another app, and a reported callback URL and field list means they belong
+    to this one and the secret is simply wrong.
+
+    The lesson underneath both is the one that has not been fixed: **nothing
+    alerts on this.** The reason is on the row now, which is how the paragraph
+    above got written, but it still took a person running a query at one in the
+    morning. A rejected-delivery count belongs somewhere a human sees without
+    asking; nobody has decided where.
+
 ## 7. Verification already done
 
 - **WhatsApp, end to end on production.** A synthetic webhook was enqueued; the

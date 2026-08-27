@@ -95,6 +95,29 @@ One useful detail from that requirement: `instagram_manage_comments` is what
 gates the **private reply**, not only hide and delete. The permission is not
 optional for a comment ticket even if nobody ever hides anything.
 
+### The recommendation, and what it is waiting on
+
+**Submit `instagram_business_manage_comments`** — that is, stay on Instagram
+Login — alongside `instagram_business_basic`, `instagram_business_manage_messages`
+and the **Human Agent** feature, which `docs/PROJECT-STATE.md` §5.2 has never
+confirmed is approved and which is the likeliest cause of the dead Instagram send
+from 20 August.
+
+The argument is not that Instagram Login is the better design. It is that the
+account is already on it, the code now handles it with one environment variable,
+and reverting Instagram to the Page would be a second live migration of a
+production integration on the day the first one broke it silently for thirteen
+hours. "One Meta app, one credential" is not recoverable by reverting anyway:
+Messenger and WhatsApp keep the Page and the app secret regardless, so the
+two-credential world exists either way.
+
+**This is blocked on a question that is still open.** As of 2026-08-27 01:15 UTC
+both app secrets are configured and Instagram deliveries still fail
+verification against both — see §6.26. Until that is resolved we do not actually
+know which Meta app owns the account, and if the answer turns out to be a
+_second app_, the submission has to be made on that app and this recommendation
+is about the permission name inside a decision that has moved.
+
 So `META_INSTAGRAM_APP_SECRET` and `INSTAGRAM_ACCESS_TOKEN` are added as an
 optional pair. Unset — which is every deployment before this — behaves exactly as
 before: the Page token, `graph.facebook.com`, the app secret. Set, and Instagram
@@ -168,7 +191,9 @@ Nothing below is code, and the code is inert without it.
 
 1. Set `META_INSTAGRAM_APP_SECRET` (and `INSTAGRAM_ACCESS_TOKEN`, if the account
    is on Instagram Login) in `shipblu-support-production`, from the Meta app's
-   Instagram → API setup with Instagram login. Instagram deliveries verify again
+   Instagram → API setup with Instagram login. **This has been done and did not
+   work** — deliveries still fail against both secrets, so read §6.26 before
+   repeating it. Instagram deliveries verify again
    from the next one; check with
    `select count(*) filter (where signature_verified) from webhook_events where channel = 'instagram' and received_at > now() - interval '10 minutes'`.
 2. `npm run job -- subscribe_meta_webhooks object=instagram` from a Render shell
