@@ -1,6 +1,9 @@
 import { notFound } from 'next/navigation';
 import { requireAgent } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
+import { suggestForAgent } from '@/lib/kb/agent-search';
+import { detectLocale } from '@/lib/kb/language';
+import { seedTerms } from '@/lib/kb/seed';
 import { listSideConversationRecipients } from '@/lib/side-conversations/queries';
 import {
   getConversation,
@@ -11,6 +14,7 @@ import {
   listStatuses,
   listTicketFields,
 } from '@/lib/tickets/queries';
+import { readOnlyReason } from '@/lib/tickets/channel-policy';
 import { accountIdForConversation } from '@/lib/whatsapp/conversation';
 import { InboxShell } from '../shell';
 import { FocusBeat } from './focus';
@@ -42,13 +46,34 @@ export default async function ConversationPage({
   const canModerateComments = can(agent, 'ticket.moderate_comment');
   const canEditContact = can(agent, 'contact.edit');
 
+  /*
+    What the ticket suggests it is about, for the composer's knowledge panel.
+
+    Both halves are read off the conversation that is already loaded, so
+    building them costs nothing; only the article lookup is a query, and it is
+    skipped entirely when the agent cannot see the knowledge base or the channel
+    has no composer to insert into.
+
+    The language comes from the script of what the customer actually wrote, not
+    from `contacts.locale` — that column is written by nothing and reads 'en'
+    for all six thousand contacts, so trusting it would search the English
+    articles for every Arabic ticket in the system.
+  */
+  const lastInbound = [...conversation.messages]
+    .reverse()
+    .find((message) => message.direction === 'inbound' && message.kind === 'reply');
+
+  const wantsKnowledge = can(agent, 'kb.view') && !readOnlyReason(conversation.channel);
+  const kbLocale = detectLocale(lastInbound?.bodyText, conversation.subject);
+  const terms = wantsKnowledge ? seedTerms(conversation.subject, lastInbound?.bodyText) : [];
+
   // Which business account this ticket's number belongs to, because that is
   // what decides the templates the agent may pick — not the installation.
   const whatsappAccountId =
     conversation.channel === 'whatsapp' ? await accountIdForConversation(conversation.id) : null;
 
-  const [statuses, agentList, groupList, fields, canned, templates, recipients] = await Promise.all(
-    [
+  const [statuses, agentList, groupList, fields, canned, templates, recipients, suggestions] =
+    await Promise.all([
       listStatuses(),
       listActiveAgents(),
       listGroups(),
@@ -61,8 +86,12 @@ export default async function ConversationPage({
         : Promise.resolve([]),
       // Same reasoning: an agent who cannot start one has no picker to fill.
       canSideConversation ? listSideConversationRecipients() : Promise.resolve([]),
-    ],
-  );
+      // `seedTerms` returns nothing when the ticket is a greeting or a photo,
+      // and `suggestForAgent` returns nothing for fewer than two terms — so a
+      // ticket with nothing to go on costs no query and renders no panel
+      // furniture, the same way the help centre's blocks remove themselves.
+      terms.length ? suggestForAgent(kbLocale, terms) : Promise.resolve([]),
+    ]);
 
   return (
     <InboxShell
@@ -77,6 +106,7 @@ export default async function ConversationPage({
         groups={groupList}
         fields={fields}
         canned={canned}
+        knowledge={wantsKnowledge ? { suggestions, locale: kbLocale } : null}
         templates={templates}
         recipients={recipients}
         canSideConversation={canSideConversation}
