@@ -480,6 +480,37 @@ opened from the customer portal lands with no default group.
 tickets after 3 days", §6.30), so both crons finally have work. `locations` is
 **still empty, all sixteen of them** — the one register nobody has entered.
 
+This branch adds **permanent deletion for admins by default**, which is a deliberate exception to
+everything above about tombstones. While the product is still being tested
+against real traffic, a mis-routed test ticket or a contact invented while trying
+a channel out is junk in an archive that is actively being measured, and
+`deleted_at` only hides it. Two new permissions — `ticket.purge` and
+`contact.purge`, granted to admins and account admins, with individual overrides — put a Danger zone on the ticket sidebar
+and the contact page. Deleting a contact deletes **every ticket they ever
+raised**, because `conversations.requester_contact_id` is `on delete restrict`
+and there is no other shape the schema allows; the panel counts the blast radius
+before it happens and makes the admin type the ticket number or the customer's
+own address back. Everything else is Postgres's own cascade. `lib/admin/purge.ts`
+adds only what a cascade cannot do: the preview, the attachment objects in the
+private bucket, the queued jobs owned by the deleted records, and one
+`admin_deletions` row recording who destroyed what.
+
+Two things it does **not** delete, and the console says so rather than implying
+otherwise: the raw `webhook_events` archive, which is keyed by provider ids and
+not by ours, and daily metrics already rolled up — the nightly job rebuilds only
+the last three days, and `agent_backlog_snapshots` cannot be recomputed at all by
+design. This is a testing-phase cleanup tool, not a right-to-be-forgotten; that
+would be a separate job working from identifiers.
+
+Queue cleanup runs inside the deletion transaction, **before** the cascade,
+and matches both the job type and the records being deleted. A `messageId` on
+`send_side_email` belongs to `side_conversation_messages`, not `messages`:
+the earlier global orphan check would cancel unrelated hub emails whenever
+any ticket was deleted. Only pending and failed jobs owned by this purge are
+removed; unrelated jobs and work already held by a worker remain. The database
+CI job exercises that distinction against Postgres with transaction-rolled-back
+fixtures.
+
 So: **the system still cannot take a real human support ticket**, and the
 remaining work is mostly not code — it is configuration, live-provider
 verification, and cutover. But the team has started arriving: **11 agents** as of

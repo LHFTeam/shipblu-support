@@ -11,6 +11,7 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
+import { agents } from './agents';
 import { whatsappAccounts } from './config';
 import { channelEnum, jobStatusEnum } from './enums';
 
@@ -175,5 +176,57 @@ export const whatsappTemplates = pgTable(
       .on(t.whatsappAccountId, t.name, t.language)
       .nullsNotDistinct(),
     index('whatsapp_templates_status_idx').on(t.status),
+  ],
+);
+
+/**
+ * What a purge destroyed.
+ *
+ * The one record a hard delete leaves behind, and the reason it is worth having
+ * is the question that gets asked afterwards: not "what was in ticket #482" —
+ * that is gone and is meant to be — but "#482 was here yesterday, where did it
+ * go, and who decided that?". `contact_merges` earns its row for the same
+ * reason a merge does, and a purge is strictly heavier than a merge.
+ *
+ * **Deliberately not a foreign key to anything.** Every other audit trail in
+ * this schema points at rows that still exist; this one points at rows that by
+ * definition do not, so `subject_id` is a bare uuid and `summary` carries the
+ * human-readable identity — ticket number, customer name and address — that the
+ * id can no longer be resolved to. A `references()` here would either refuse the
+ * delete or cascade the evidence away with it.
+ *
+ * `deleted_by_agent_id` is the exception and is `set null`: the purge still
+ * happened after the person who did it has left, and `summary` names them too.
+ */
+export const adminDeletions = pgTable(
+  'admin_deletions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+
+    /** 'conversation' | 'contact' — plain text, see the note above on enums. */
+    subject: text('subject').notNull(),
+    subjectId: uuid('subject_id').notNull(),
+
+    /**
+     * Who and what, in one line an admin can read without joining anything:
+     * `Ticket #482 (whatsapp) — Ali Hassan <ali@example.com>`.
+     */
+    summary: text('summary').notNull(),
+
+    /** Row counts per table, plus the ticket numbers a contact purge took. */
+    details: jsonb('details').$type<Record<string, unknown>>().notNull().default({}),
+
+    deletedByAgentId: uuid('deleted_by_agent_id').references(() => agents.id, {
+      onDelete: 'set null',
+    }),
+    /** Kept beside the id so a departed agent is still named. */
+    deletedByLabel: text('deleted_by_label'),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // The only way this table is ever read: newest first.
+    index('admin_deletions_created_idx').on(t.createdAt),
+    index('admin_deletions_subject_idx').on(t.subject, t.subjectId),
   ],
 );

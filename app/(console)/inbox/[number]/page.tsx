@@ -1,5 +1,6 @@
 import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
+import { previewConversationPurge } from '@/lib/admin/purge';
 import { requireAgent } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
 import { suggestForAgent } from '@/lib/kb/agent-search';
@@ -54,7 +55,16 @@ export default async function ConversationPage({
   // Read whatever the permission, because the sidebar shows what a ticket is
   // filed under to anybody who can open it — `ticket.categorise` gates changing
   // it, not seeing it.
-  const [categories, causes] = await Promise.all([categoryOptions(), rootCauseOptions()]);
+  const [categories, causes, purgePreview] = await Promise.all([
+    categoryOptions(),
+    rootCauseOptions(),
+    // Counted on render rather than on click, because the counts are the whole
+    // argument the confirmation panel makes and a panel that has to fetch before
+    // it can warn is a panel that gets clicked through. Only for an admin who
+    // could act on it — this is several counting queries, and everybody else
+    // would pay for them to render nothing.
+    can(agent, 'ticket.purge') ? previewConversationPurge(conversation.id) : Promise.resolve(null),
+  ]);
 
   /*
     What the ticket suggests it is about, for the composer's knowledge panel.
@@ -137,6 +147,7 @@ export default async function ConversationPage({
         canCategorise={canCategorise}
         categoryOptions={categories}
         rootCauses={causes}
+        purgePreview={purgePreview}
         currentAgentId={agent.id}
       />
       <FocusBeat conversationId={conversation.id} />

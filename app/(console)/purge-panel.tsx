@@ -1,0 +1,162 @@
+'use client';
+
+import { useActionState, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { Button, ErrorText } from '@/components/ui';
+import { confirmationMatches, describePurgeCounts, RETAINED } from '@/lib/admin/purge-summary';
+import type { PurgePreview } from '@/lib/admin/purge-summary';
+
+type PurgeState = { error: string | null; ok?: boolean; nonce?: number };
+
+/**
+ * The confirmation an irreversible delete is worth.
+ *
+ * The console's usual pattern for a destructive button is arm-then-confirm — a
+ * second click on the same control, which is what `MergeCandidateRow` uses and
+ * is right for a merge, because a merge that was wrong can be walked back by
+ * hand. This cannot, so it asks for something a mis-click cannot produce: the
+ * ticket number, or the customer's own address, typed back.
+ *
+ * Three things follow from that and are worth not undoing later.
+ *
+ * The button is **disabled until the text matches**, and the same check runs
+ * again in `purgeConversation()` / `purgeContact()` against the locked row. The
+ * client copy is there to stop somebody wasting a round trip; the server copy is
+ * the one that decides, because a `FormData` field is never the authority on
+ * what is being destroyed.
+ *
+ * The counts come from the server as a **preview and are labelled as one**. They
+ * were true when the page rendered, and the transaction recounts before it
+ * deletes — a ticket that arrived in between goes too, and the audit row records
+ * the transaction's numbers rather than these.
+ *
+ * And it says what it does **not** delete. "Completely delete" is the phrase
+ * that gets asked for, and the raw webhook archive and already-rolled-up metrics
+ * survive this; an admin who needs a real erasure should find that out here
+ * rather than from a report six weeks later.
+ */
+export function PurgePanel({
+  preview,
+  action,
+  idField,
+  noun,
+  confirmationHint,
+  redirectTo,
+}: {
+  preview: PurgePreview;
+  action: (state: PurgeState, formData: FormData) => Promise<PurgeState>;
+  /** Name of the hidden field carrying the id — `conversationId` or `contactId`. */
+  idField: string;
+  /** 'ticket' | 'contact', for the button and the prose. */
+  noun: string;
+  /** What the typed value is, in words: 'the ticket number', 'the email address'. */
+  confirmationHint: string;
+  redirectTo: string;
+}) {
+  const router = useRouter();
+  const [state, formAction, pending] = useActionState(action, { error: null } as PurgeState);
+  const [open, setOpen] = useState(false);
+  const [typed, setTyped] = useState('');
+
+  useEffect(() => {
+    if (!state.ok) return;
+    // `replace`, not `push`: the page behind this no longer resolves, so leaving
+    // it in the history would make Back a 404.
+    router.replace(redirectTo);
+    router.refresh();
+  }, [state.ok, state.nonce, router, redirectTo]);
+
+  const destroyed = describePurgeCounts(preview.counts);
+  const armed = confirmationMatches(preview.confirmation, typed);
+
+  if (!open) {
+    return (
+      <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(true)}>
+        Delete this {noun}…
+      </Button>
+    );
+  }
+
+  return (
+    <div className="rounded-md border border-[var(--color-critical)]/40 p-3">
+      <p className="text-xs font-medium">Permanently delete {preview.summary}?</p>
+
+      <p className="mt-2 text-xs text-[var(--muted-foreground)]">
+        {destroyed.length > 0 ? (
+          <>
+            Preview: this destroys <span className="font-medium">{destroyed.join(', ')}</span>, and
+            the files on them. It cannot be undone.
+          </>
+        ) : (
+          <>There is nothing on it yet. It cannot be undone.</>
+        )}
+      </p>
+
+      {preview.counts.shipmentsDetached > 0 ? (
+        <p className="mt-2 text-xs text-[var(--muted-foreground)]">
+          {preview.counts.shipmentsDetached} shipment
+          {preview.counts.shipmentsDetached === 1 ? '' : 's'} will be kept, with this person unset
+          as the shipper or recipient — a parcel is a record of something that happened.
+        </p>
+      ) : null}
+
+      {preview.ticketNumbers.length > 0 ? (
+        <p className="mt-2 text-xs text-[var(--muted-foreground)]">
+          Tickets going with it:{' '}
+          <span className="font-medium">
+            {preview.ticketNumbers
+              .slice(0, 12)
+              .map((number) => `#${number}`)
+              .join(', ')}
+            {preview.ticketNumbers.length > 12
+              ? ` and ${preview.ticketNumbers.length - 12} more`
+              : ''}
+          </span>
+        </p>
+      ) : null}
+
+      <p className="mt-2 text-xs text-[var(--muted-foreground)]">
+        Kept: {RETAINED.join(', and ')}.
+      </p>
+
+      <form action={formAction} className="mt-3 flex flex-col gap-2">
+        <input type="hidden" name={idField} value={preview.id} />
+
+        <label className="text-xs" htmlFor={`purge-confirm-${preview.id}`}>
+          Type {confirmationHint} — <span className="font-medium">{preview.confirmation}</span> — to
+          confirm.
+        </label>
+        <input
+          id={`purge-confirm-${preview.id}`}
+          name="confirmation"
+          value={typed}
+          onChange={(event) => setTyped(event.target.value)}
+          autoComplete="off"
+          disabled={pending}
+          aria-label={`Type ${confirmationHint} to confirm deletion`}
+          className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-base outline-none sm:text-xs focus:border-[var(--color-critical)]"
+        />
+
+        <div className="flex items-center gap-2">
+          <Button type="submit" variant="danger" size="sm" disabled={!armed || pending}>
+            {pending ? 'Deleting…' : 'Delete permanently'}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={pending}
+            onClick={() => {
+              setOpen(false);
+              setTyped('');
+            }}
+          >
+            Cancel
+          </Button>
+        </div>
+
+        {state.error ? <ErrorText>{state.error}</ErrorText> : null}
+      </form>
+    </div>
+  );
+}

@@ -3,6 +3,7 @@ import { notFound, redirect } from 'next/navigation';
 import { Avatar } from '@/components/avatar';
 import { InfoTip } from '@/components/tooltip';
 import { Badge, Card, PageHeader } from '@/components/ui';
+import { previewContactPurge } from '@/lib/admin/purge';
 import { requirePermission } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
 import { DEFAULT_CONTACT_LOCALE } from '@/lib/contacts/locale';
@@ -18,6 +19,8 @@ import { formatDateTime } from '@/lib/format';
 import { LOCALE_NAMES, type Locale } from '@/lib/kb/locale';
 import { ConversationTable } from '../conversation-table';
 import { SyncBadge } from '../page';
+import { PurgePanel } from '../../purge-panel';
+import { purgeContactRecord } from '../actions';
 import { AccountLinks, RoleToggles } from './forms';
 import { MergeCandidateRow, MergeSearch } from './merge';
 
@@ -58,8 +61,9 @@ export default async function ContactPage({
   const mergeQuery = (Array.isArray(rawMerge) ? rawMerge[0] : rawMerge)?.trim() ?? '';
 
   const mayMerge = can(agent, 'contact.merge');
+  const mayPurge = can(agent, 'contact.purge');
 
-  const [accounts, parcels, conversations, merges, duplicates] = await Promise.all([
+  const [accounts, parcels, conversations, merges, duplicates, purgePreview] = await Promise.all([
     shippingAccountsForContact(contact.id),
     shipmentsForContact(contact.id),
     conversationsForContact(agent, contact.id),
@@ -72,6 +76,10 @@ export default async function ContactPage({
         ? searchMergeCandidates(contact.id, mergeQuery)
         : mergeCandidates(contact.id)
       : Promise.resolve([]),
+    // Same reasoning as the duplicate search above, and more so: this is half a
+    // dozen counting queries across the whole ticket history, and only an admin
+    // has anything to do with the answer.
+    mayPurge ? previewContactPurge(contact.id) : Promise.resolve(null),
   ]);
 
   const editable = can(agent, 'contact.edit');
@@ -285,6 +293,32 @@ export default async function ContactPage({
           )}
         </Card>
       </section>
+
+      {/* Its own section at the very bottom, and only for an admin. Deliberately
+          not inside Duplicates: merging is the answer to "this person is in here
+          twice", and offering an irreversible delete beside it invites reaching
+          for the wrong one to solve the same problem. */}
+      {purgePreview ? (
+        <section className="mt-6">
+          <h2 className="mb-2 text-sm font-medium">Danger zone</h2>
+          <Card>
+            <p className="mb-3 text-xs text-[var(--muted-foreground)]">
+              Deletes this customer outright — every address and number they write in on, their
+              portal sign-in, and <span className="font-medium">every ticket they ever raised</span>
+              , because a ticket cannot exist without a requester. If this is a duplicate of
+              somebody real, merge it above instead: a merge keeps the history and redirects.
+            </p>
+            <PurgePanel
+              preview={purgePreview}
+              action={purgeContactRecord}
+              idField="contactId"
+              noun="contact"
+              confirmationHint="the highlighted value"
+              redirectTo="/contacts"
+            />
+          </Card>
+        </section>
+      ) : null}
     </div>
   );
 }
