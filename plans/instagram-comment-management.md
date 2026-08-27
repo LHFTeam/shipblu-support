@@ -123,12 +123,16 @@ hours. "One Meta app, one credential" is not recoverable by reverting anyway:
 Messenger and WhatsApp keep the Page and the app secret regardless, so the
 two-credential world exists either way.
 
-**This is blocked on a question that is still open.** As of 2026-08-27 01:15 UTC
-both app secrets are configured and Instagram deliveries still fail
-verification against both — see §6.26. Until that is resolved we do not actually
-know which Meta app owns the account, and if the answer turns out to be a
-_second app_, the submission has to be made on that app and this recommendation
-is about the permission name inside a decision that has moved.
+**One confirmation is still outstanding, and it is a short one.** Instagram
+verifies again as of 01:29:01 on the 27th, which rules out the alarming
+possibility — a second Meta app delivering to this callback URL, which would have
+moved the submission to that app entirely. What it does not settle is whether the
+account is on Instagram Login with a corrected app secret, or back on its
+Facebook Page: both verify identically, and they take the two different
+permission names. `noteVerifyingSecret` now writes the answer to the web log once
+per instance — `instagram deliveries are verifying with …` — so the next deploy
+prints it. Read that line before submitting; everything above assumes it names
+`META_INSTAGRAM_APP_SECRET`.
 
 ## What the console does now
 
@@ -191,10 +195,10 @@ Nothing below is code, and the code is inert without it.
 
 1. Set `META_INSTAGRAM_APP_SECRET` (and `INSTAGRAM_ACCESS_TOKEN`, if the account
    is on Instagram Login) in `shipblu-support-production`, from the Meta app's
-   Instagram → API setup with Instagram login. **This has been done and did not
-   work** — deliveries still fail against both secrets, so read §6.26 before
-   repeating it. Instagram deliveries verify again
-   from the next one; check with
+   Instagram → API setup with Instagram login. **Done — Instagram has been
+   verifying again since 2026-08-27 01:29:01 UTC**, after a first attempt that
+   did not match; §6.26 has the tally and what is still unknown. Instagram
+   deliveries verify again from the next one; check with
    `select count(*) filter (where signature_verified) from webhook_events where channel = 'instagram' and received_at > now() - interval '10 minutes'`.
 2. `npm run job -- subscribe_meta_webhooks object=instagram` from a Render shell
    on the worker. It reads the current field list, merges `comments` in, writes
