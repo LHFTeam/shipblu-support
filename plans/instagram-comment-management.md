@@ -61,6 +61,18 @@ permission names are the clearest way to tell which one an app is on:
 was true of WhatsApp, Messenger and a Page-connected Instagram account, and is
 the assumption that cost thirteen hours of Instagram traffic.
 
+So `META_INSTAGRAM_APP_SECRET` and `INSTAGRAM_ACCESS_TOKEN` are added as an
+optional pair. Unset — which is every deployment before this — behaves exactly as
+before: the Page token, `graph.facebook.com`, the app secret. Set, and Instagram
+alone moves.
+
+Two candidate secrets are _tried_ for an `instagram` delivery rather than one
+being chosen, most-specific first. Both are ours, so accepting either is not a
+weakening, and it means an account can be moved between the two setups without a
+deploy timed to the minute. Nothing but the `instagram` object is ever offered
+the Instagram secret: the WhatsApp path carries 152,000 deliveries and does not
+need a second HMAC per request.
+
 ## Which permission to apply for
 
 `instagram_manage_comments` and `instagram_business_manage_comments` are **not
@@ -117,18 +129,6 @@ verification against both — see §6.26. Until that is resolved we do not actua
 know which Meta app owns the account, and if the answer turns out to be a
 _second app_, the submission has to be made on that app and this recommendation
 is about the permission name inside a decision that has moved.
-
-So `META_INSTAGRAM_APP_SECRET` and `INSTAGRAM_ACCESS_TOKEN` are added as an
-optional pair. Unset — which is every deployment before this — behaves exactly as
-before: the Page token, `graph.facebook.com`, the app secret. Set, and Instagram
-alone moves.
-
-Two candidate secrets are _tried_ for an `instagram` delivery rather than one
-being chosen, most-specific first. Both are ours, so accepting either is not a
-weakening, and it means an account can be moved between the two setups without a
-deploy timed to the minute. Nothing but the `instagram` object is ever offered
-the Instagram secret: the WhatsApp path carries 152,000 deliveries and does not
-need a second HMAC per request.
 
 ## What the console does now
 
