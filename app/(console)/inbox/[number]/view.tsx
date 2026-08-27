@@ -30,6 +30,7 @@ import {
 import { readOnlyReason } from '@/lib/tickets/channel-policy';
 import type { PickerEntry } from '@/lib/side-conversations/queries';
 import { CommentModeration } from './comment-moderation';
+import { ProfileRefresh } from './profile-refresh';
 import { Composer } from './composer';
 import { SideConversationCard, SideConversationsField } from './side-conversations';
 
@@ -101,6 +102,7 @@ export function ConversationView({
   canned,
   canSideConversation,
   canModerateComments,
+  canEditContact,
   currentAgentId,
 }: {
   conversation: ConversationDetail;
@@ -117,12 +119,14 @@ export function ConversationView({
   canSideConversation: boolean;
   /** Whether this agent may hide or delete a public comment. */
   canModerateComments: boolean;
+  /** Whether this agent may re-read the customer's profile from Meta. */
+  canEditContact: boolean;
   currentAgentId: string;
 }) {
   return (
     <div className="flex h-full">
       <div className="flex min-w-0 flex-1 flex-col">
-        <Header conversation={conversation} />
+        <Header conversation={conversation} canEditContact={canEditContact} />
 
         <div className="app-scroll min-h-0 flex-1 overflow-y-auto px-4 py-4">
           <Timeline
@@ -160,7 +164,13 @@ export function ConversationView({
   );
 }
 
-function Header({ conversation }: { conversation: ConversationDetail }) {
+function Header({
+  conversation,
+  canEditContact,
+}: {
+  conversation: ConversationDetail;
+  canEditContact: boolean;
+}) {
   const isMeta = conversation.channel === 'facebook' || conversation.channel === 'instagram';
   const isComment = Boolean(conversation.externalId?.includes(':comment:'));
 
@@ -209,6 +219,22 @@ function Header({ conversation }: { conversation: ConversationDetail }) {
             {conversation.requester.email ?? conversation.requester.phone ?? ''}
           </span>
         </span>
+        {/*
+          Only where there is something to ask. A Messenger or Instagram
+          customer arrives as a bare scoped id and stays unnamed until Meta
+          answers; every other channel already knows who wrote in, so a button
+          offering to find out would be a control that can only disappoint.
+          Comment tickets are excluded for a sharper reason: a comment author's
+          id is not the page-scoped id the User Profile API answers for, so the
+          call is refused in a way indistinguishable from a missing approval —
+          the one signal here that has to stay trustworthy.
+        */}
+        {isMeta && !isComment && canEditContact ? (
+          <ProfileRefresh
+            conversationId={conversation.id}
+            hasName={conversation.requester.name !== null}
+          />
+        ) : null}
         <span aria-hidden>·</span>
         <span>opened {formatRelative(conversation.createdAt)} ago</span>
         {conversation.reopenCount > 0 ? (
@@ -716,6 +742,16 @@ function describeEvent(type: string, data: Record<string, unknown>): string {
       if (to === null || to === undefined || to === '') return `cleared ${label}`;
       return `set ${label} to ${Array.isArray(to) ? to.join(', ') : String(to)}`;
     }
+    case 'profile_refreshed': {
+      const name = data.name;
+      return name
+        ? `looked the customer up at Meta: ${String(name)}`
+        : 'looked the customer up at Meta, which had no name for them';
+    }
+    case 'profile_refresh_refused':
+      return data.permission === true
+        ? 'asked Meta for the customer\u2019s profile and was refused — the app may not hold Business Asset User Profile Access'
+        : 'asked Meta for the customer\u2019s profile and was refused';
     case 'comment_hidden':
       return 'hid the comment on the post';
     case 'comment_unhidden':

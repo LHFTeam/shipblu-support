@@ -157,7 +157,18 @@ and must not use `CREATE INDEX CONCURRENTLY`; the whole file runs in one
 implicit transaction. New tables get RLS enabled by a loop in `db/sql/` — do not
 add it by hand.
 
-**Background work.** Anything slow, external or retryable is a job: add the type
+**Background work.** Anything slow, external or retryable is a job — with one
+narrow exception, written down because it looks like a violation: a control an
+agent presses and _waits on_, whose entire output is the provider's answer, calls
+the provider in the action instead. `refreshRequesterProfile` is the only one
+today. The rule exists so a customer's ticket never depends on Graph being up and
+so unattended work gets retried; a person clicking a button is neither, and
+queueing it would put the one sentence they are waiting for into a worker log
+they cannot read — which is exactly how a missing Meta approval hid for a month
+(`docs/PROJECT-STATE.md` §6.27). Where this applies, the provider call itself
+stays in one shared function the job and the action both use
+(`lib/meta/profile-refresh.ts`), so the two paths cannot answer differently for
+the same subject. Everything else is a job: add the type
 to `JobType` in `lib/queue/index.ts`, a handler under `worker/handlers/`, and
 register it in `worker/handlers/index.ts` — an unregistered type fails loudly
 rather than being dropped. Use `dedupeKey` for anything a webhook retry could

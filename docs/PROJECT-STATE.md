@@ -675,6 +675,16 @@ linked IG account is not professional account`.** Six refusals, and **not an
     the Messenger path, so one Business Asset User Profile Access approval
     covers both platforms instead of one.
 
+  **There is now a button for it.** The ticket header on a Facebook or Instagram
+  ticket carries **Refresh profile** (**Fetch name from Meta** where there is no
+  name yet), behind `contact.edit`, so an agent can ask again without a shell on
+  the worker — and, more to the point, read Meta's answer where they are
+  standing. It calls Graph in the action rather than queueing, which `AGENTS.md`
+  now records as the one deliberate exception to the job rule and why; the Graph
+  call itself is shared with the job in `lib/meta/profile-refresh.ts` so the two
+  cannot diverge. The outcome is also written to `conversation_events`, so "we
+  asked Meta on this date and were refused" survives the page being closed.
+
   What made this cost more than it should have: `isProfilePermissionRefusal`
   matched 10, 200 and 100/33 — Meta's documented answer — and not code 3, the
   one that actually arrives. So the log line naming the feature, written
