@@ -181,6 +181,10 @@ describe('isProfilePermissionRefusal', () => {
     expect(explained).toContain('INSTAGRAM_ACCESS_TOKEN');
     expect(explained).toContain('graph.instagram.com');
     expect(explained).not.toContain('App Review for the Meta app');
+
+    // Both fixes, because they are opposites and the log line is read by
+    // somebody who may not know which setup the account is on today.
+    expect(explained).toContain('Facebook Page');
   });
 
   it('leaves the same sentence alone on Facebook, where it cannot mean that', () => {

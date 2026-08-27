@@ -663,12 +663,17 @@ call.`** Eleven refusals, the same sentence each time. This is the missing
 linked IG account is not professional account`.** Six refusals, and **not an
     approval problem at all.** The requests went to `graph.facebook.com`, which
     means `INSTAGRAM_ACCESS_TOKEN` is unset — `endpoint()` keys the host and
-    credential on that variable being present. The account is on Instagram Login
-    (its own app secret is what verifies its webhooks now — §6.26), so the Page
-    token has no route to an Instagram-scoped id and granting the feature would
-    change nothing. **Set `INSTAGRAM_ACCESS_TOKEN` in
-    `shipblu-support-production`**, or Instagram profile reads, sends and
-    moderation all keep going to the wrong host with the wrong credential.
+    credential on that variable being present. The account was on Instagram
+    Login (its own app secret is what verified its webhooks — §6.26), so the
+    Page token had no route to an Instagram-scoped id and granting the feature
+    would have changed nothing for Instagram.
+
+    **This is now a decision rather than a fix: the account is being moved back
+    onto its Facebook Page** (§6.28). Under that setup `INSTAGRAM_ACCESS_TOKEN`
+    stays unset and the refusal ends when the link is made in the Meta
+    dashboard, not by setting anything here. It also folds Instagram back onto
+    the Messenger path, so one Business Asset User Profile Access approval
+    covers both platforms instead of one.
 
   What made this cost more than it should have: `isProfilePermissionRefusal`
   matched 10, 200 and 100/33 — Meta's documented answer — and not code 3, the
@@ -1336,6 +1341,53 @@ the linked IG account is not professional account`, from
     Approving the feature would not have fixed one Instagram lookup. This is why
     §1's rule about breaking a count down along the dimension that can fail
     applies to failures too: "17 refused" reads as one problem and was two.
+
+28. **Moving Instagram back onto its Facebook Page: the code needs no deploy,
+    and the order of the two steps is the whole risk.** Decided 2026-08-27 —
+    the helpdesk owns the **Page-connected** Instagram account, not the
+    Instagram Login one, which reverses the recommendation standing in
+    `plans/instagram-comment-management.md`.
+
+    **Nothing in this repo has to change for the switch to work**, which is what
+    the optional-pair design in §6.26 bought. `endpoint()` picks the host and
+    credential from whether `INSTAGRAM_ACCESS_TOKEN` is set, and it is unset, so
+    every Instagram call already goes out as Page token + `graph.facebook.com` —
+    the target configuration. `signingCandidates` already offers **both** app
+    secrets for an `instagram` delivery, so webhooks keep verifying across the
+    cutover no matter which secret signs them, with no deploy timed to the
+    minute and no window of 403s.
+
+    **So the only dangerous move is unsetting `META_INSTAGRAM_APP_SECRET` too
+    early.** Do it _after_ the account is linked to the Page and the log says
+    `instagram messaging deliveries are verifying with META_APP_SECRET`. Unset
+    it while the account is still on Instagram Login and every Instagram
+    delivery fails verification again — §6.26, reproduced deliberately. The
+    variable costs one extra HMAC per Instagram delivery while it lingers, which
+    is not a reason to hurry.
+
+    **The scoped ids survive the move, and this was verified rather than
+    assumed.** During the hour both connections were live, the same account
+    (`entry.id` 17841448759001625) and the same sender IGSID appeared in a
+    `messaging` delivery signed by `META_INSTAGRAM_APP_SECRET` _and_ in a
+    `standby` delivery signed by `META_APP_SECRET`, seconds apart. Identical
+    ids across the two connections means `contact_identities` stays valid, no
+    contact fragments into two, and no open thread loses its 24-hour window.
+    That was the one failure mode that would have made this migration
+    unaffordable, and it is ruled out by data rather than by Meta's docs.
+
+    **What the switch does not settle: who is actually answering this inbox.**
+    Over 36 hours the `instagram` object delivered 1,037 inbound messages and
+    **1,166 outbound echoes** — something is replying at volume on this account,
+    and it is not this app, whose Instagram sends fail. `standby` traffic was 5
+    events total (4 `message_edit`, 1 `read`) and no messages at all, so the
+    handover picture is not a clean "another app is primary": it is a busy
+    channel owned by something outside this system. Settle that before any App
+    Review screencast, per `plans/instagram-comment-management.md` — a recording
+    of a reply Graph refuses is a rejected submission.
+
+    **The permission set flips with the connection**: `instagram_basic` +
+    `instagram_manage_comments` + the `pages_*` items, not the
+    `instagram_business_*` pair. See the table in the plan.
 
 ## 7. Verification already done
 

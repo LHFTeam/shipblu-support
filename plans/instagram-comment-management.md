@@ -107,7 +107,41 @@ One useful detail from that requirement: `instagram_manage_comments` is what
 gates the **private reply**, not only hide and delete. The permission is not
 optional for a comment ticket even if nobody ever hides anything.
 
-### The recommendation, and what it is waiting on
+### The decision, 2026-08-27
+
+**Superseded by a decision: the helpdesk owns the Page-connected account.** The
+recommendation below argued for staying on Instagram Login and is kept for its
+reasoning, not as advice. The account is being moved back onto its Facebook
+Page, so:
+
+| What                     | Now                                                         |
+| ------------------------ | ----------------------------------------------------------- |
+| Host and credential      | `graph.facebook.com`, Page access token                     |
+| `INSTAGRAM_ACCESS_TOKEN` | stays **unset** — that is what selects this path            |
+| Webhook signature        | `META_APP_SECRET`; retire `META_INSTAGRAM_APP_SECRET` after |
+| Apply for                | `instagram_basic`, `instagram_manage_comments`, `pages_*`   |
+
+Two things make this cheaper than the migration that broke the channel on the
+26th. The code needs **no deploy** — `endpoint()` already resolves to the Page
+path while `INSTAGRAM_ACCESS_TOKEN` is unset, and `signingCandidates` tries both
+secrets, so verification survives the cutover in either direction. And the
+scoped ids are **the same on both connections**, verified from the hour they ran
+in parallel: one sender's IGSID appeared in a `messaging` delivery signed by the
+Instagram secret and a `standby` delivery signed by the app secret, seconds
+apart. No contact fragments, no thread loses its window. `docs/PROJECT-STATE.md`
+§6.28 has the ordering rule — the one way to get this wrong is unsetting the
+Instagram secret before the account has moved.
+
+It also folds Instagram back onto the Messenger path, so the pending Business
+Asset User Profile Access approval covers both platforms rather than Facebook
+alone (§5.2).
+
+Still open, and unchanged by the switch: **something outside this system is
+answering this inbox** — 1,166 outbound echoes against 1,037 inbound messages
+over 36 hours. A screencast of a reply Graph refuses is a rejected submission,
+so settle that first.
+
+### The superseded recommendation, and what it was waiting on
 
 **Submit `instagram_business_manage_comments`** — that is, stay on Instagram
 Login — alongside `instagram_business_basic`, `instagram_business_manage_messages`

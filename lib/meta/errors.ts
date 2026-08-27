@@ -125,15 +125,17 @@ export function explainMetaProfileError(error: MetaApiError, platform: MetaPlatf
   // all and sending somebody to that dashboard would cost them the afternoon.
   if (isInstagramLinkageRefusal(error, platform)) {
     return withReference(
-      `${base}\n\nThis is not an App Review problem. Graph is saying the Page token has no ` +
-        `route to an Instagram-scoped id, which is what an account connected through ` +
-        `**Instagram Login** answers: it is not linked to the Page, it carries its own token, ` +
-        `and it is served from graph.instagram.com. Set **INSTAGRAM_ACCESS_TOKEN** and the ` +
-        `lookup moves to that host by itself — \`endpoint()\` in lib/meta/client.ts keys on ` +
-        `the token being present, not on a mode flag. Until it is set, every Instagram profile ` +
-        `read, send and moderation call goes to the wrong host with the wrong credential, and ` +
-        `Business Asset User Profile Access cannot rescue it, because the request never reaches ` +
-        `the feature.`,
+      `${base}\n\nThis is not an App Review problem: Graph is saying the Page token has no ` +
+        `route to this Instagram-scoped id, which is what it answers when the professional ` +
+        `account is not linked to the Page. **Two configurations fix it and they are ` +
+        `opposites.** If the account is meant to be reached through its **Facebook Page**, ` +
+        `finish linking it there and leave INSTAGRAM_ACCESS_TOKEN unset. If it is meant to ` +
+        `stay on **Instagram Login**, set INSTAGRAM_ACCESS_TOKEN and the lookup moves to ` +
+        `graph.instagram.com by itself — \`endpoint()\` in lib/meta/client.ts keys on that ` +
+        `token being present, not on a mode flag. Until one of the two is true, every ` +
+        `Instagram profile read, send and moderation call goes out with a credential that ` +
+        `cannot address the account, and Business Asset User Profile Access cannot rescue it, ` +
+        `because the request never reaches the feature.`,
       error,
     );
   }
