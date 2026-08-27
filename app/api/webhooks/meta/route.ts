@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { db } from '@/db/client';
 import { webhookEvents } from '@/db/schema';
 import { metaAppSecret, metaInstagramAppSecret, metaVerifyToken } from '@/lib/env';
-import { signingCandidates, unverifiedReason } from '@/lib/meta/signing';
+import { noteVerifyingSecret, signingCandidates, unverifiedReason } from '@/lib/meta/signing';
 import type { MetaWebhookPayload } from '@/lib/meta/types';
 import { enqueue } from '@/lib/queue';
 import { SIGNATURE_HEADER, verifyChallenge, verifySignature } from '@/lib/whatsapp/verify';
@@ -78,6 +78,11 @@ export async function POST(request: Request) {
   const matched =
     candidates.find((candidate) => verifySignature(rawBody, signature, candidate.secret)) ?? null;
   const signatureVerified = matched !== null;
+
+  // Which of the two signed it, said once per instance. An Instagram account on
+  // Instagram Login and one on its Facebook Page are indistinguishable from a
+  // verified delivery alone, and they take different App Review permissions.
+  if (matched) noteVerifyingSecret(payload.object, matched.name);
 
   const channel = payload.object === 'instagram' ? 'instagram' : 'facebook';
 

@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest';
-import { signingCandidates, unverifiedReason } from './signing';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  noteVerifyingSecret,
+  resetVerifyingSecretNotice,
+  signingCandidates,
+  unverifiedReason,
+} from './signing';
 
 const BOTH = { appSecret: 'app-secret', instagramAppSecret: 'ig-secret' };
 
@@ -57,5 +62,49 @@ describe('unverifiedReason', () => {
     // A different problem with the same symptom, and the one a fresh deployment
     // has: no secret to check against rather than the wrong one.
     expect(unverifiedReason([])).toMatch(/no app secret is configured/);
+  });
+});
+
+describe('noteVerifyingSecret', () => {
+  afterEach(() => {
+    resetVerifyingSecretNotice();
+    vi.restoreAllMocks();
+  });
+
+  it('says which secret verified, once', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    noteVerifyingSecret('instagram', 'META_INSTAGRAM_APP_SECRET');
+    noteVerifyingSecret('instagram', 'META_INSTAGRAM_APP_SECRET');
+    noteVerifyingSecret('instagram', 'META_INSTAGRAM_APP_SECRET');
+
+    // Once, not three times: this endpoint takes 152,000 deliveries a week, and
+    // a line per delivery is noise that trains people to ignore the log.
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log.mock.calls[0]![0]).toContain('META_INSTAGRAM_APP_SECRET');
+  });
+
+  it('says it again when the answer changes', () => {
+    // The transition that matters: an account moved between the two setups is
+    // otherwise invisible, because both produce a verified delivery.
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    noteVerifyingSecret('instagram', 'META_INSTAGRAM_APP_SECRET');
+    noteVerifyingSecret('instagram', 'META_APP_SECRET');
+
+    expect(log).toHaveBeenCalledTimes(2);
+    expect(log.mock.calls[1]![0]).toContain('META_APP_SECRET');
+  });
+
+  it('stays quiet for WhatsApp and Page deliveries', () => {
+    // Only Instagram has two possible signers, so only Instagram has anything
+    // to report — and those two objects are the busy ones.
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    noteVerifyingSecret('whatsapp_business_account', 'META_APP_SECRET');
+    noteVerifyingSecret('page', 'META_APP_SECRET');
+    noteVerifyingSecret(undefined, 'META_APP_SECRET');
+
+    expect(log).not.toHaveBeenCalled();
   });
 });

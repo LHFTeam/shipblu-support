@@ -69,6 +69,42 @@ export function signingCandidates(
   );
 }
 
+/**
+ * Says which secret is verifying Instagram deliveries — once, and again only if
+ * it changes.
+ *
+ * Written because its absence cost an answer. When the outage in
+ * `docs/PROJECT-STATE.md` §6.26 ended, the deliveries started verifying again
+ * and there was no way to tell *how*: a corrected Instagram app secret and an
+ * account moved back onto its Facebook Page produce the identical
+ * `signature_verified = true`. Those are different configurations with different
+ * App Review permissions (`instagram_business_manage_comments` versus
+ * `instagram_manage_comments`), so the difference is not a curiosity — it decides
+ * what gets submitted, and it was left to be guessed at.
+ *
+ * Once per process rather than per delivery, on the same reasoning as
+ * `warnIfOnlyLegacy` in `lib/env.ts`: this is a fact about configuration, it
+ * changes on the order of never, and 152,000 deliveries a week through the same
+ * endpoint means anything logged per request is noise that trains people to
+ * ignore the log. Module state, so each web instance says it once — with
+ * autoscale at 1→3 that is at most three lines, which is a feature: it also
+ * catches one instance running against stale configuration.
+ */
+let notedSecret: string | null = null;
+
+export function noteVerifyingSecret(object: string | undefined, name: string): void {
+  if (object !== 'instagram') return;
+  if (name === notedSecret) return;
+
+  notedSecret = name;
+  console.log(`[webhook:meta] instagram deliveries are verifying with ${name}`);
+}
+
+/** Test-only, as `resetEnvCache` is: module state outlives a single test. */
+export function resetVerifyingSecretNotice(): void {
+  notedSecret = null;
+}
+
 /** What the rejection log and the stored row say, given what was tried. */
 export function unverifiedReason(candidates: SigningCandidate[]): string {
   if (candidates.length === 0) {

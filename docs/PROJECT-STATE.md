@@ -1223,6 +1223,26 @@ where not signature_verified group by 1` rather than a log line nobody was
     morning. A rejected-delivery count belongs somewhere a human sees without
     asking; nobody has decided where.
 
+    **Resolved 2026-08-27 01:29:01 UTC.** A credential was corrected at 01:26
+    and the `service_updated` deploy carrying it went live at 01:29:22;
+    Instagram deliveries verified from that minute on, and the ones since are
+    all processed into tickets — `conversations` on that channel went from 2 to
+    4 within the hour. **Final tally: 3,044 deliveries rejected over 17 hours
+    and 52 minutes**, from 07:37:39 on the 26th to 01:29:01 on the 27th, of
+    which 1,736 carried a message. None is recoverable.
+
+    **What the fix does not tell us is which configuration we are now on**, and
+    that is the gap worth reading twice. A corrected Instagram app secret and an
+    account moved back onto its Facebook Page produce the identical
+    `signature_verified = true` — and they are different setups with different
+    App Review permissions. The verification path knew which candidate matched
+    and threw it away, on the reasoning that logging it was marginal. It was not
+    marginal: it was the one fact the App Review submission hangs on, discarded
+    at the moment it became knowable. `noteVerifyingSecret` now names the
+    matching secret in the web log once per instance, and again if it ever
+    changes, so the next deployment of this answers it without anybody
+    reconstructing it from a deploy timeline.
+
 ## 7. Verification already done
 
 - **WhatsApp, end to end on production.** A synthetic webhook was enqueued; the
