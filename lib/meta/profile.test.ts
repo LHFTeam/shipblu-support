@@ -8,7 +8,7 @@ import {
   profileDisplayName,
   profileFields,
 } from './client';
-import { isProfilePermissionRefusal } from './errors';
+import { explainMetaProfileError, isProfilePermissionRefusal } from './errors';
 
 /**
  * The User Profile API is the only thing that ever tells this system who a
@@ -129,13 +129,16 @@ describe('fetchProfile', () => {
 });
 
 describe('isProfilePermissionRefusal', () => {
-  function error(code: number | null, subcode: number | null = null) {
-    return new MetaApiError('nope', 400, code, subcode, false);
+  function error(code: number | null, subcode: number | null = null, message = 'nope') {
+    return new MetaApiError(message, 400, code, subcode, false);
   }
 
-  it('recognises the refusal an unapproved app gets', () => {
-    // 100/33 is the one that actually arrives, and its sentence names neither
-    // the app nor the feature.
+  it('recognises the refusal an unapproved app actually gets', () => {
+    // Code 3 is the one production returns — eleven times over the first day of
+    // live lookups — and it went unrecognised, so the log said "refused" and
+    // never said why. 100/33 is what Meta documents and has not been seen here;
+    // both are kept because either can arrive.
+    expect(isProfilePermissionRefusal(error(3))).toBe(true);
     expect(isProfilePermissionRefusal(error(100, 33))).toBe(true);
     expect(isProfilePermissionRefusal(error(200))).toBe(true);
     expect(isProfilePermissionRefusal(error(10))).toBe(true);
@@ -149,6 +152,48 @@ describe('isProfilePermissionRefusal', () => {
     expect(isProfilePermissionRefusal(error(190))).toBe(false);
     expect(isProfilePermissionRefusal(error(613))).toBe(false);
     expect(isProfilePermissionRefusal(error(null))).toBe(false);
+  });
+
+  it('names the feature on the refusal that carries no hint of it', () => {
+    const explained = explainMetaProfileError(
+      error(3, null, 'Application does not have the capability to make this API call.'),
+      'facebook',
+    );
+
+    expect(explained).toContain('Business Asset User Profile Access');
+    expect(explained).toContain('code 3');
+  });
+
+  it('sends an Instagram linkage refusal to the credential, not to App Review', () => {
+    // The Page token cannot resolve an Instagram-scoped id when the account is
+    // on Instagram Login. Naming App Review here would be the expensive kind of
+    // wrong: the feature could be granted tomorrow and this would still fail.
+    const explained = explainMetaProfileError(
+      error(
+        100,
+        null,
+        '(#100) The page is not linked to an Instagram account or the linked IG account is ' +
+          'not professional account',
+      ),
+      'instagram',
+    );
+
+    expect(explained).toContain('INSTAGRAM_ACCESS_TOKEN');
+    expect(explained).toContain('graph.instagram.com');
+    expect(explained).not.toContain('App Review for the Meta app');
+
+    // Both fixes, because they are opposites and the log line is read by
+    // somebody who may not know which setup the account is on today.
+    expect(explained).toContain('Facebook Page');
+  });
+
+  it('leaves the same sentence alone on Facebook, where it cannot mean that', () => {
+    const explained = explainMetaProfileError(
+      error(100, null, 'The page is not linked to an Instagram account'),
+      'facebook',
+    );
+
+    expect(explained).not.toContain('INSTAGRAM_ACCESS_TOKEN');
   });
 });
 

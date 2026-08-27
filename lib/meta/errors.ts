@@ -74,17 +74,27 @@ function isUnspecified(error: MetaApiError): boolean {
 /**
  * How Graph refuses a profile read the app is not approved for.
  *
+ *   3       "Application does not have the capability to make this API call."
+ *           **The one production actually returns.** Eleven Messenger lookups
+ *           between 2026-08-26 15:26 and 2026-08-27 11:56 UTC were refused this
+ *           way, none of them matched this set as it stood, and so the sentence
+ *           this file exists to print never printed once — the same silence that
+ *           cost eight sends over the Human Agent feature. It is also the only
+ *           code here that names the *app* rather than the object, which is why
+ *           it is the least ambiguous of the four.
  *   100/33  "Unsupported get request. Object with ID … does not exist, cannot
  *           be loaded due to missing permissions, or does not support this
- *           operation." The usual answer, and note what it conflates: a
- *           deleted user and an unapproved app produce the identical sentence.
+ *           operation." What Meta's documentation describes, and note what it
+ *           conflates: a deleted user and an unapproved app produce the
+ *           identical sentence. Kept for that reason, not because it has ever
+ *           arrived here.
  *   200     "Permissions error" — the explicit form.
  *   10      "Application does not have permission for this action" on a GET.
  *           The same number means "outside the messaging window" on a send,
  *           which is why this set is scoped to profile reads and not shared
  *           with `explainMetaSendError` above.
  */
-const PROFILE_PERMISSION_CODES = new Set([10, 200]);
+const PROFILE_PERMISSION_CODES = new Set([3, 10, 200]);
 const UNSUPPORTED_GET_CODE = 100;
 const UNSUPPORTED_GET_SUBCODE = 33;
 
@@ -111,6 +121,25 @@ export function explainMetaProfileError(error: MetaApiError, platform: MetaPlatf
   if (error.code === ACCESS_TOKEN_CODE)
     return withReference(explainAuthError(error.code, base), error);
 
+  // Checked before the permission branch, because this one is not App Review at
+  // all and sending somebody to that dashboard would cost them the afternoon.
+  if (isInstagramLinkageRefusal(error, platform)) {
+    return withReference(
+      `${base}\n\nThis is not an App Review problem: Graph is saying the Page token has no ` +
+        `route to this Instagram-scoped id, which is what it answers when the professional ` +
+        `account is not linked to the Page. **Two configurations fix it and they are ` +
+        `opposites.** If the account is meant to be reached through its **Facebook Page**, ` +
+        `finish linking it there and leave INSTAGRAM_ACCESS_TOKEN unset. If it is meant to ` +
+        `stay on **Instagram Login**, set INSTAGRAM_ACCESS_TOKEN and the lookup moves to ` +
+        `graph.instagram.com by itself — \`endpoint()\` in lib/meta/client.ts keys on that ` +
+        `token being present, not on a mode flag. Until one of the two is true, every ` +
+        `Instagram profile read, send and moderation call goes out with a credential that ` +
+        `cannot address the account, and Business Asset User Profile Access cannot rescue it, ` +
+        `because the request never reaches the feature.`,
+      error,
+    );
+  }
+
   if (isProfilePermissionRefusal(error)) {
     const product = platform === 'instagram' ? 'Instagram' : 'Messenger';
 
@@ -126,6 +155,31 @@ export function explainMetaProfileError(error: MetaApiError, platform: MetaPlatf
   }
 
   return withReference(base, error);
+}
+
+/**
+ * A Page token asked about an Instagram id it cannot reach.
+ *
+ * `(#100) The page is not linked to an Instagram account or the linked IG
+ * account is not professional account`. Six Instagram lookups on 2026-08-27
+ * came back this way, from graph.facebook.com, because no
+ * `INSTAGRAM_ACCESS_TOKEN` was set and `endpoint()` therefore fell back to the
+ * Page token and the Facebook host. It is a bare 100, so
+ * `isProfilePermissionRefusal` rightly declines it — and without this it would
+ * be explained as a malformed request, which is the one reading that would send
+ * the next person looking for the fault in this repo.
+ *
+ * Matched on the wording as well as the code, deliberately. A bare 100 usually
+ * *is* a malformed request, and answering a field name we typed wrong with
+ * "check your Instagram connection" trades one wrong diagnosis for another. If
+ * Meta rewords the sentence this stops matching and the generic explanation
+ * returns: silent rather than confidently wrong.
+ */
+function isInstagramLinkageRefusal(error: MetaApiError, platform: MetaPlatform): boolean {
+  if (platform !== 'instagram') return false;
+  if (error.code !== UNSUPPORTED_GET_CODE || error.subcode !== null) return false;
+
+  return /not linked to an instagram account|not professional account/i.test(error.message);
 }
 
 // --- Comment moderation -----------------------------------------------------
