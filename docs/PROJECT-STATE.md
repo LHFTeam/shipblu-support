@@ -1243,6 +1243,39 @@ where not signature_verified group by 1` rather than a log line nobody was
     changes, so the next deployment of this answers it without anybody
     reconstructing it from a deploy timeline.
 
+    **And the answer, read at 02:38 UTC, is "both".** Instagram deliveries
+    verify against `META_INSTAGRAM_APP_SECRET` _and_ `META_APP_SECRET`,
+    alternating within seconds on one web instance, and the split is by
+    envelope: 9 `messaging` deliveries and 5 `standby` ones in the same burst.
+    Two credentials, one Instagram account, both live. Either the account is
+    connected through Instagram Login _and_ through its linked Facebook Page on
+    the same app — one app holds both secrets, and that is what the Instagram
+    Login setup is — or two apps are subscribed and both point here. Nothing
+    visible from this side separates those.
+
+    Three consequences, none of them optional:
+
+    - **Neither secret can be removed.** Dropping either resumes 403s for that
+      half of the traffic. `signingCandidates` trying both is not belt and
+      braces here; it is load-bearing.
+    - **Something else holds thread control.** `standby` is the handover
+      protocol saying so, which is the condition `lib/meta/thread.ts` already
+      refuses sends for — and a plausible reading of the six dead `send_meta`
+      rows in §5.2, five of which failed _inside_ the window with Graph naming
+      no cause. Worth checking before blaming Human Agent.
+    - **The App Review answer is no longer "pick the name that matches the
+      connection"**, because two connections are live. Which permission to
+      submit depends on which of them the helpdesk is meant to be, and that is a
+      decision nobody has made — see `plans/instagram-comment-management.md`.
+
+    It also broke the notice that found it. Keyed on the secret alone and
+    re-announcing on change, it logged a line per delivery once the two started
+    alternating — the exact noise the once-only design existed to prevent, from
+    an assumption ("a signing secret changes on the order of never") that was
+    false within the hour. It is keyed on secret _and_ envelope now, which bounds
+    it at a handful of lines and makes the pair — which credential signs which
+    channel — the thing it reports.
+
 ## 7. Verification already done
 
 - **WhatsApp, end to end on production.** A synthetic webhook was enqueued; the

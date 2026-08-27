@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  deliveryEnvelope,
   noteVerifyingSecret,
   resetVerifyingSecretNotice,
   signingCandidates,
@@ -65,45 +66,75 @@ describe('unverifiedReason', () => {
   });
 });
 
+describe('deliveryEnvelope', () => {
+  it('names the handover channel a delivery came in on', () => {
+    expect(deliveryEnvelope({ entry: [{ messaging: [{}] }] })).toBe('messaging');
+    expect(deliveryEnvelope({ entry: [{ standby: [{}] }] })).toBe('standby');
+    expect(deliveryEnvelope({ entry: [{ changes: [{}] }] })).toBe('changes');
+  });
+
+  it('does not mistake an empty array for the channel', () => {
+    // Meta sends `messaging: []` on some deliveries, and calling that
+    // "messaging" would report the wrong channel for the secret that signed it.
+    expect(deliveryEnvelope({ entry: [{ messaging: [], standby: [{}] }] })).toBe('standby');
+    expect(deliveryEnvelope({ entry: [{}] })).toBe('empty');
+    expect(deliveryEnvelope({})).toBe('empty');
+  });
+});
+
 describe('noteVerifyingSecret', () => {
   afterEach(() => {
     resetVerifyingSecretNotice();
     vi.restoreAllMocks();
   });
 
-  it('says which secret verified, once', () => {
+  it('says which secret signed which channel, once per pair', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
 
-    noteVerifyingSecret('instagram', 'META_INSTAGRAM_APP_SECRET');
-    noteVerifyingSecret('instagram', 'META_INSTAGRAM_APP_SECRET');
-    noteVerifyingSecret('instagram', 'META_INSTAGRAM_APP_SECRET');
+    noteVerifyingSecret('instagram', 'META_INSTAGRAM_APP_SECRET', 'messaging');
+    noteVerifyingSecret('instagram', 'META_INSTAGRAM_APP_SECRET', 'messaging');
+    noteVerifyingSecret('instagram', 'META_INSTAGRAM_APP_SECRET', 'messaging');
 
-    // Once, not three times: this endpoint takes 152,000 deliveries a week, and
-    // a line per delivery is noise that trains people to ignore the log.
     expect(log).toHaveBeenCalledTimes(1);
     expect(log.mock.calls[0]![0]).toContain('META_INSTAGRAM_APP_SECRET');
+    expect(log.mock.calls[0]![0]).toContain('messaging');
   });
 
-  it('says it again when the answer changes', () => {
-    // The transition that matters: an account moved between the two setups is
-    // otherwise invisible, because both produce a verified delivery.
+  it('stays quiet when two secrets alternate, which is the live case', () => {
+    /*
+      The bug this replaced. Keyed on the secret alone and re-announcing on
+      change, this logged a line per delivery on the real deployment, where the
+      `messaging` and `standby` copies of one account's traffic are signed
+      differently and interleave within seconds. Four pairs, four lines, however
+      many hundred deliveries.
+    */
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
 
-    noteVerifyingSecret('instagram', 'META_INSTAGRAM_APP_SECRET');
-    noteVerifyingSecret('instagram', 'META_APP_SECRET');
+    for (let i = 0; i < 50; i += 1) {
+      noteVerifyingSecret('instagram', 'META_INSTAGRAM_APP_SECRET', 'messaging');
+      noteVerifyingSecret('instagram', 'META_APP_SECRET', 'standby');
+    }
 
     expect(log).toHaveBeenCalledTimes(2);
-    expect(log.mock.calls[1]![0]).toContain('META_APP_SECRET');
+  });
+
+  it('reports the same secret again on a channel it has not been seen on', () => {
+    // Which credential signs which channel is the whole answer, so the pair is
+    // the unit — not the secret, and not the channel.
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    noteVerifyingSecret('instagram', 'META_APP_SECRET', 'standby');
+    noteVerifyingSecret('instagram', 'META_APP_SECRET', 'messaging');
+
+    expect(log).toHaveBeenCalledTimes(2);
   });
 
   it('stays quiet for WhatsApp and Page deliveries', () => {
-    // Only Instagram has two possible signers, so only Instagram has anything
-    // to report — and those two objects are the busy ones.
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
 
-    noteVerifyingSecret('whatsapp_business_account', 'META_APP_SECRET');
-    noteVerifyingSecret('page', 'META_APP_SECRET');
-    noteVerifyingSecret(undefined, 'META_APP_SECRET');
+    noteVerifyingSecret('whatsapp_business_account', 'META_APP_SECRET', 'messages');
+    noteVerifyingSecret('page', 'META_APP_SECRET', 'standby');
+    noteVerifyingSecret(undefined, 'META_APP_SECRET', 'messaging');
 
     expect(log).not.toHaveBeenCalled();
   });

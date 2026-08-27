@@ -123,16 +123,36 @@ hours. "One Meta app, one credential" is not recoverable by reverting anyway:
 Messenger and WhatsApp keep the Page and the app secret regardless, so the
 two-credential world exists either way.
 
-**One confirmation is still outstanding, and it is a short one.** Instagram
-verifies again as of 01:29:01 on the 27th, which rules out the alarming
-possibility — a second Meta app delivering to this callback URL, which would have
-moved the submission to that app entirely. What it does not settle is whether the
-account is on Instagram Login with a corrected app secret, or back on its
-Facebook Page: both verify identically, and they take the two different
-permission names. `noteVerifyingSecret` now writes the answer to the web log once
-per instance — `instagram deliveries are verifying with …` — so the next deploy
-prints it. Read that line before submitting; everything above assumes it names
-`META_INSTAGRAM_APP_SECRET`.
+**The confirmation came back "both", which reopens the question.** Read at 02:38
+UTC on the 27th: Instagram deliveries verify against `META_INSTAGRAM_APP_SECRET`
+_and_ `META_APP_SECRET`, alternating within seconds, split by envelope — the
+`messaging` copies of the account's traffic against one, the handover protocol's
+`standby` copies against the other. §6.26 has the numbers.
+
+So the premise of the table above — that an account is connected one way at a
+time — is false for this account. Two connections are live at once, which means:
+
+- **The permission still cannot be both**, for the reason it never could: App
+  Review wants a screencast per permission, and only the setup the app actually
+  calls Graph through can produce one. What has changed is that the _code_ can
+  now be pointed at either, so which one gets exercised is a configuration
+  choice rather than a discovered fact.
+- **The choice is now a real decision, not a lookup.** It is: which of the two
+  connections should this helpdesk own? Keeping the Instagram Login one means
+  `instagram_business_manage_comments` and `INSTAGRAM_ACCESS_TOKEN` pointed at
+  `graph.instagram.com`. Keeping the Page one means `instagram_manage_comments`
+  and the Page token. The recommendation above still stands on its own reasoning
+  — the account is already reachable that way and the code handles it — but it is
+  now a preference to confirm rather than a fact to read off a webhook.
+- **Something else holds thread control of this inbox**, which `standby` is
+  Meta's way of saying. That is worth settling _before_ the submission, not
+  after: a screencast of a reply Graph refuses is a rejected submission, and
+  `lib/meta/thread.ts` refuses those sends locally for exactly this reason.
+  §5.2's six dead `send_meta` rows may be this rather than Human Agent.
+
+Whoever picks up the submission should decide the first bullet with somebody who
+knows why both connections exist, then disconnect the one the helpdesk is not
+going to own. Submitting while both are live risks demonstrating the wrong half.
 
 ## What the console does now
 
