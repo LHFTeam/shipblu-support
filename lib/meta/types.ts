@@ -54,6 +54,24 @@ export type MetaMessagingEvent = {
   reaction?: { mid?: string; action?: string; emoji?: string; reaction?: string };
   delivery?: { mids?: string[]; watermark?: number };
   read?: { mids?: string[]; watermark?: number };
+  /**
+   * Conversation Routing, delivered on the `messaging_handovers` field.
+   *
+   * Three shapes rather than one: two of them report a move that has happened
+   * and name both apps, while `request_thread_control` reports an *ask* — it
+   * reaches the current owner and names only who is asking, because nothing has
+   * moved yet.
+   */
+  pass_thread_control?: MetaHandover;
+  take_thread_control?: MetaHandover;
+  request_thread_control?: { requested_owner_app_id?: string | number; metadata?: string };
+};
+
+export type MetaHandover = {
+  /** Null when the thread was idle, so nobody was holding it. */
+  previous_owner_app_id?: string | number | null;
+  new_owner_app_id?: string | number | null;
+  metadata?: string;
 };
 
 export type MetaRawAttachment = {
@@ -129,6 +147,28 @@ export type NormalisedComment = {
   raw: Record<string, unknown>;
 };
 
+/**
+ * A thread control move Meta told us about.
+ *
+ * `newOwnerAppId` null means the thread went idle. A `requested` event moves
+ * nothing — it is another app asking us, as the current owner, to hand over —
+ * and is normalised alongside the other two so a handler can see the whole
+ * conversation about ownership in one place rather than in two.
+ */
+export type NormalisedHandover = {
+  platform: MetaPlatform;
+  kind: 'passed' | 'taken' | 'requested';
+  /** The customer whose thread moved. Page-scoped, as everything else here is. */
+  psid: string;
+  accountId: string | null;
+  previousOwnerAppId: string | null;
+  newOwnerAppId: string | null;
+  /** Who is asking, on a `requested` event. Null on the other two. */
+  requestedByAppId: string | null;
+  metadata: string | null;
+  at: Date;
+};
+
 export type NormalisedReceipt = {
   platform: MetaPlatform;
   kind: 'delivered' | 'read';
@@ -141,6 +181,7 @@ export type NormalisedMetaWebhook = {
   messages: NormalisedDirectMessage[];
   comments: NormalisedComment[];
   receipts: NormalisedReceipt[];
+  handovers: NormalisedHandover[];
   /** Echoes of our own outbound messages, counted but never ingested. */
   echoes: number;
 };

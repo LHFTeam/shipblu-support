@@ -1090,11 +1090,44 @@ Each cost real time. Most are also comments in the code.
     an agent is not invited to write, and again in the send job because thread
     control can move in between.
 
-    **Neither is fixable in code.** Sending as `101449698657189` needs that
-    page's own token, and sending at all needs Freshchat to hand thread control
-    over. Until both are true, connecting a page to the Meta app produces
-    readable tickets that cannot be answered — which is worth knowing before the
-    next page is connected, because the tickets look completely normal.
+    **The page half is still not fixable in code.** Sending as
+    `101449698657189` needs that page's own token. Connecting a page to the Meta
+    app without one produces readable tickets that cannot be answered, which is
+    worth knowing before the next page is connected, because the tickets look
+    completely normal.
+
+    **The thread-control half now has a console fix**, added with
+    `lib/meta/control.ts`. Meta renamed the handover protocol to _Conversation
+    Routing_ and kept the endpoints, so an agent can read
+    `GET /{account}/thread_owner` and move ownership from the composer:
+
+    - `take_thread_control` succeeds when the thread is idle or when this app is
+      the page's primary receiver. Otherwise Graph refuses with
+      `100 / 2534037` — "the action is invalid since it's not the thread owner"
+      — and the console falls back to `request_thread_control`, which _asks_
+      Freshchat to hand over and which Freshchat may ignore. The console reports
+      that as a request, never as a transfer, because the difference decides
+      whether the next reply will be accepted.
+    - `release_thread_control` returns the thread to idle, where the page's
+      **default app** answers. There is no way to ask Meta which app that is, so
+      the console does not claim to know.
+
+    Two things gate it operationally, and neither is in this repo:
+
+    - The Meta app must be subscribed to the **`messaging_handovers`** webhook
+      field on the `page` object, in the App Dashboard. Without it a handover
+      away from us is silent and `conversations.meta_control_app_id` goes stale
+      — the console would keep offering a reply box over a thread Freshchat has
+      taken back. (Meta's own Conversation Routing page spells the field
+      `messaging_handover`, singular, in its prerequisites list and
+      `messaging_handovers` on the event reference. The event reference is the
+      one that matches the App Dashboard.)
+    - A **default application** must be set in Page settings for
+      `take_thread_control` to be enabled at all; Meta blocks it under
+      zero-config behaviour. `GET /me?fields=messaging_feature_status` reports
+      `msgr_multi_app` and `ig_multi_app`, which is how to check whether routing
+      is on for Messenger and for Instagram separately — Instagram is gated on
+      its own flag and can be off while Messenger is on.
 
 23. **A debounce is not backpressure, and a global invalidation can freeze an
     I/O-bound service while CPU looks idle.** On 2026-08-25 the customer-bot

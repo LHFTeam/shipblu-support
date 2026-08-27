@@ -146,6 +146,27 @@ export const conversations = pgTable(
     sourceSystem: sourceSystemEnum('source_system').notNull().default('native'),
     externalId: text('external_id'),
 
+    // --- Meta thread control ---------------------------------------------
+    /**
+     * The app Meta last told us owns this Messenger or Instagram thread, and
+     * when that was established. A null app id with a set timestamp means idle
+     * — genuinely nobody — which is not the same as never having looked.
+     *
+     * Here rather than derived from the timeline because the timeline records
+     * the wrong instant. `standby` is stamped on an inbound message and is true
+     * of the moment that message arrived; control moves between messages, and
+     * an agent who takes it needs the composer to unblock now, not when the
+     * customer next writes. So this is a snapshot with its own timestamp, and
+     * `lib/meta/control.ts` decides which of the two is newer rather than
+     * either overwriting the other — the inbound row stays exactly what Meta
+     * delivered.
+     *
+     * Written by the console's control button and by a `messaging_handovers`
+     * webhook, and by nothing else.
+     */
+    metaControlAppId: text('meta_control_app_id'),
+    metaControlCheckedAt: timestamp('meta_control_checked_at', { withTimezone: true }),
+
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),

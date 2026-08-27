@@ -101,6 +101,7 @@ export function ConversationView({
   canned,
   canSideConversation,
   canModerateComments,
+  canMetaControl,
   currentAgentId,
 }: {
   conversation: ConversationDetail;
@@ -117,6 +118,8 @@ export function ConversationView({
   canSideConversation: boolean;
   /** Whether this agent may hide or delete a public comment. */
   canModerateComments: boolean;
+  /** May this agent move Meta thread control. */
+  canMetaControl: boolean;
   currentAgentId: string;
 }) {
   return (
@@ -144,6 +147,7 @@ export function ConversationView({
             recipients={recipients}
             canned={canned}
             canSideConversation={canSideConversation}
+            canMetaControl={canMetaControl}
           />
         )}
       </div>
@@ -722,6 +726,27 @@ function describeEvent(type: string, data: Record<string, unknown>): string {
       return 'made the comment public again';
     case 'comment_deleted':
       return 'deleted the comment from the post';
+    /*
+     * Thread control, which decides whether a Facebook or Instagram reply can
+     * be delivered at all. Worth a timeline entry rather than only a button
+     * state: a ticket that went quiet because another app took the thread back
+     * is otherwise indistinguishable from one nobody answered.
+     */
+    case 'meta_control_taken':
+      return 'took control of this conversation for this app';
+    case 'meta_control_released':
+      return "released control — the page's default app answers from here on";
+    case 'meta_control_requested':
+      return `asked ${String(data.previousOwner ?? 'the current owner')} to hand this conversation over`;
+    case 'meta_control_changed': {
+      if (data.kind === 'requested') {
+        return `asked to take control of this conversation (${String(data.requestedByAppId ?? 'an app')})`;
+      }
+      const to = String(data.newOwner ?? 'another app');
+      return data.newOwnerAppId
+        ? `handed control of this conversation to ${to}`
+        : 'released control of this conversation — it is idle';
+    }
     case 'sla_recalculated':
       return data.reason === 'group_hours'
         ? "re-counted the due dates on the new group's business hours"

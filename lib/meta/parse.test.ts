@@ -349,3 +349,128 @@ describe('parseMetaWebhook', () => {
     expect(parseMetaWebhook(messengerPayload()).messages[0]?.sentAt.getUTCFullYear()).toBe(2025);
   });
 });
+
+describe('handover events', () => {
+  /*
+    These arrive on the `messaging_handovers` field, in the same `messaging`
+    array as ordinary messages and carrying no `message` object at all. The
+    parser used to return early on that, which meant every one of them was
+    dropped — and a dropped handover is what leaves the console confidently
+    offering a reply box over a thread another app has taken back.
+  */
+  it('reads a pass_thread_control event', () => {
+    const parsed = parseMetaWebhook({
+      object: 'page',
+      entry: [
+        {
+          id: 'PAGE',
+          messaging: [
+            {
+              sender: { id: 'PSID-1' },
+              recipient: { id: 'PAGE' },
+              timestamp: 1458692752478,
+              pass_thread_control: {
+                previous_owner_app_id: '263902037430900',
+                new_owner_app_id: 123456789,
+                metadata: 'over to you',
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(parsed.messages).toHaveLength(0);
+    expect(parsed.handovers).toHaveLength(1);
+    expect(parsed.handovers[0]).toMatchObject({
+      platform: 'facebook',
+      kind: 'passed',
+      psid: 'PSID-1',
+      accountId: 'PAGE',
+      previousOwnerAppId: '263902037430900',
+      // Numeric in Meta's own example, string in the field beside it.
+      newOwnerAppId: '123456789',
+      metadata: 'over to you',
+    });
+  });
+
+  it('reads a take_thread_control event that came from an idle thread', () => {
+    const parsed = parseMetaWebhook({
+      object: 'instagram',
+      entry: [
+        {
+          id: 'IG',
+          messaging: [
+            {
+              sender: { id: 'PSID-2' },
+              timestamp: 1458692752478,
+              take_thread_control: {
+                previous_owner_app_id: null,
+                new_owner_app_id: '999',
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(parsed.handovers[0]).toMatchObject({
+      platform: 'instagram',
+      kind: 'taken',
+      previousOwnerAppId: null,
+      newOwnerAppId: '999',
+    });
+  });
+
+  it('reads a request as an ask that names only the asker', () => {
+    const parsed = parseMetaWebhook({
+      object: 'page',
+      entry: [
+        {
+          id: 'PAGE',
+          messaging: [
+            {
+              sender: { id: 'PSID-3' },
+              timestamp: 1458692752478,
+              request_thread_control: { requested_owner_app_id: 123456789 },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(parsed.handovers[0]).toMatchObject({
+      kind: 'requested',
+      requestedByAppId: '123456789',
+      newOwnerAppId: null,
+      previousOwnerAppId: null,
+    });
+  });
+
+  /*
+    An app that loses thread control keeps receiving the conversation in
+    `standby` — so the handover that took it away is delivered there too, and
+    dropping standby handovers would lose exactly the events that make a stored
+    "we own this" wrong.
+  */
+  it('reads a handover delivered in the standby channel', () => {
+    const parsed = parseMetaWebhook({
+      object: 'page',
+      entry: [
+        {
+          id: 'PAGE',
+          standby: [
+            {
+              sender: { id: 'PSID-4' },
+              timestamp: 1458692752478,
+              take_thread_control: { previous_owner_app_id: '1', new_owner_app_id: '2' },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(parsed.handovers).toHaveLength(1);
+    expect(parsed.handovers[0]?.newOwnerAppId).toBe('2');
+  });
+});

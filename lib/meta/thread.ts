@@ -1,3 +1,4 @@
+import { anotherAppHoldsThread } from './control';
 import type { MetaPlatform } from './types';
 
 /**
@@ -102,9 +103,8 @@ export function metaThreadState(input: MetaThreadInput): MetaThreadState {
       explanation:
         `Another app holds thread control on this ${product} inbox, so this ticket is ` +
         `readable here but cannot be answered from here — ${product} accepts a reply only ` +
-        `from the app that owns the thread. The messages arrive in the handover protocol's ` +
-        `standby channel, which is what says so. Answer in whichever tool is the primary ` +
-        `receiver, or hand thread control to this app in the Meta app's Messenger settings.`,
+        `from the app that owns the thread. Take thread control from the composer to answer ` +
+        `here, or answer in whichever tool is the primary receiver.`,
     };
   }
 
@@ -112,17 +112,30 @@ export function metaThreadState(input: MetaThreadInput): MetaThreadState {
 }
 
 /**
- * The thread state of a ticket, from the customer's most recent message.
+ * The thread state of a ticket, from the customer's most recent message and
+ * from whatever the console last established about thread control.
  *
  * Thread control moves, and it moves without telling us: the same customer can
- * be answerable today and handed to another inbox tool tomorrow. So the state
+ * be answerable today and handed to another inbox tool tomorrow. So the account
  * is read from the newest inbound message rather than from the oldest or from
  * the conversation, which carries no record of it.
+ *
+ * Control is the exception, and it has to be. An agent who transfers the thread
+ * to this app needs the composer to unblock immediately, and the newest inbound
+ * message will go on saying `standby` until the customer writes again — by then
+ * they have lost the reply they were trying to send. So a control snapshot
+ * newer than that message outranks it, which is what `anotherAppHoldsThread`
+ * arbitrates; with no snapshot the flag decides exactly as it always did.
  */
 export function metaThreadStateFromMessage(input: {
   platform: MetaPlatform;
   configuredAccountId: string | null;
+  /** `META_APP_ID`. Without it a snapshot cannot be compared and is ignored. */
+  ourAppId?: string | null;
   lastInboundMeta: Record<string, unknown> | null | undefined;
+  lastInboundAt?: Date | null;
+  /** What `conversations.metaControlAppId` / `metaControlCheckedAt` hold. */
+  control?: { appId: string | null; checkedAt: Date | null } | null;
 }): MetaThreadState {
   const meta = input.lastInboundMeta ?? {};
   const accountId = typeof meta.accountId === 'string' ? meta.accountId : null;
@@ -131,8 +144,13 @@ export function metaThreadStateFromMessage(input: {
     platform: input.platform,
     inboundAccountId: accountId,
     configuredAccountId: input.configuredAccountId,
-    // Absent on every row written before the flag was recorded. Those threads
-    // were answerable, so a missing value must not read as "cannot send".
-    standby: meta.standby === true,
+    standby: anotherAppHoldsThread({
+      ourAppId: input.ourAppId ?? null,
+      control: input.control ?? null,
+      // Absent on every row written before the flag was recorded. Those threads
+      // were answerable, so a missing value must not read as "cannot send".
+      lastInboundStandby: meta.standby === true,
+      lastInboundAt: input.lastInboundAt ?? null,
+    }),
   });
 }

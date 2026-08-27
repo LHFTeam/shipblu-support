@@ -158,6 +158,19 @@ function deliveryId(payload: MetaWebhookPayload): string | null {
       if (event.delivery?.watermark)
         parts.push(`d:${event.sender?.id}:${event.delivery.watermark}`);
       if (event.read?.watermark) parts.push(`r:${event.sender?.id}:${event.read.watermark}`);
+
+      // Handovers carry no id either, and unlike a receipt they are not
+      // idempotent to re-apply: each one writes a timeline entry. The sender,
+      // the timestamp and which of the three it is are what distinguish one
+      // delivery from the next.
+      const handover = event.pass_thread_control
+        ? 'pass'
+        : event.take_thread_control
+          ? 'take'
+          : event.request_thread_control
+            ? 'request'
+            : null;
+      if (handover) parts.push(`h:${handover}:${event.sender?.id}:${event.timestamp}`);
     }
 
     for (const change of entry.changes ?? []) {

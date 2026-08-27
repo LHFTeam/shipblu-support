@@ -1,10 +1,12 @@
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels, conversationEvents, conversations, messages, ticketStatuses } from '@/db/schema';
+import { describeAppId } from '@/lib/meta/control';
 import type {
   MetaPlatform,
   NormalisedComment,
   NormalisedDirectMessage,
+  NormalisedHandover,
   NormalisedReceipt,
 } from '@/lib/meta/types';
 import { enqueue } from '@/lib/queue';
@@ -322,6 +324,91 @@ export async function applyMetaReceipt(receipt: NormalisedReceipt): Promise<numb
   }
 
   return updated;
+}
+
+/**
+ * Records a thread control move Meta told us about.
+ *
+ * This is what keeps the console's stored answer from going stale behind its
+ * back. An agent takes a Messenger thread, and an hour later the marketing bot
+ * takes it back — the button and the reply box would both go on saying this app
+ * owns the conversation, and every reply typed into it would fail at the Send
+ * API with Graph's contentless refusal. So the webhook is believed over
+ * anything we stored ourselves.
+ *
+ * A `requested` event is recorded on the timeline and changes no ownership: it
+ * is another app asking, and it moves control only if we answer it. Nothing
+ * here answers it — honouring a request is a decision about who works the
+ * ticket, and it belongs to a person rather than to a webhook handler.
+ *
+ * Returns whether a conversation was found. A handover for a customer with no
+ * ticket is normal: it happens on threads this deployment has never been the
+ * receiver for, and there is nothing to record it against.
+ */
+export async function applyMetaHandover(handover: NormalisedHandover): Promise<boolean> {
+  const found = await findConversationByPsid(handover.psid, handover.platform);
+  if (!found) return false;
+
+  if (handover.kind !== 'requested') {
+    await db
+      .update(conversations)
+      .set({
+        metaControlAppId: handover.newOwnerAppId,
+        metaControlCheckedAt: handover.at,
+      })
+      .where(eq(conversations.id, found.id));
+  }
+
+  await db.insert(conversationEvents).values({
+    conversationId: found.id,
+    type: 'meta_control_changed',
+    // No agent did this — another app did, through Meta.
+    actorLabel: 'Meta handover',
+    data: {
+      platform: handover.platform,
+      kind: handover.kind,
+      previousOwnerAppId: handover.previousOwnerAppId,
+      previousOwner: describeAppId(handover.previousOwnerAppId),
+      newOwnerAppId: handover.newOwnerAppId,
+      newOwner: describeAppId(handover.newOwnerAppId),
+      requestedByAppId: handover.requestedByAppId,
+      metadata: handover.metadata,
+      at: handover.at.toISOString(),
+    },
+  });
+
+  return true;
+}
+
+/**
+ * The live direct-message ticket for a page-scoped id.
+ *
+ * Keyed off the inbound message rather than off the contact, because a PSID is
+ * what the handover names and a contact can carry several identities. Comment
+ * tickets are excluded by `externalId is null` — a comment has no thread and no
+ * owner to move.
+ */
+async function findConversationByPsid(
+  psid: string,
+  platform: MetaPlatform,
+): Promise<{ id: string; number: number } | null> {
+  const rows = await db
+    .select({ id: conversations.id, number: conversations.number })
+    .from(conversations)
+    .innerJoin(messages, eq(messages.conversationId, conversations.id))
+    .where(
+      and(
+        eq(messages.fromAddress, psid),
+        eq(messages.direction, 'inbound'),
+        eq(conversations.channel, platform),
+        isNull(conversations.externalId),
+        isNull(conversations.deletedAt),
+      ),
+    )
+    .orderBy(desc(conversations.lastMessageAt))
+    .limit(1);
+
+  return rows[0] ?? null;
 }
 
 // --- Shared -----------------------------------------------------------------

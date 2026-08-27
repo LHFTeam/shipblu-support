@@ -48,6 +48,12 @@ import {
 import { metaWindowState } from '@/lib/meta/window';
 import { metaReplyTarget } from '@/lib/tickets/meta-thread';
 import {
+  applyMetaControl,
+  MetaControlError,
+  readMetaControl,
+  type MetaControlView,
+} from '@/lib/tickets/meta-control';
+import {
   attachShipment,
   attachShippingAccount,
   detachShipment,
@@ -579,6 +585,128 @@ export async function sendTemplateReply(
 
   refresh(row.conversation.number);
   return ok();
+}
+
+// --- Meta thread control ----------------------------------------------------
+
+/**
+ * Facebook and Instagram let one app at a time answer a conversation. These two
+ * actions are how an agent finds out which app that is, and moves it.
+ *
+ * Both refuse a comment ticket. A comment is answered through the comment
+ * endpoints, which are addressed by comment id rather than by page and thread,
+ * and have no owner to move.
+ */
+
+export type MetaControlActionState = {
+  error: string | null;
+  ok?: boolean;
+  nonce?: number;
+  view: MetaControlView | null;
+  /** What actually happened, so the composer can say "asked" rather than "took". */
+  result: 'taken' | 'released' | 'requested' | null;
+};
+
+async function loadControllableConversation(agent: SessionAgent, conversationId: string) {
+  const row = await loadConversation(agent, conversationId);
+  if (!row) return null;
+
+  const channel = row.conversation.channel;
+  if (channel !== 'facebook' && channel !== 'instagram') return null;
+  if (row.conversation.externalId?.includes(':comment:')) return null;
+
+  return { row, platform: channel };
+}
+
+/**
+ * Who holds the thread right now.
+ *
+ * Read-only to this console and a write to Meta's servers only in the sense
+ * that it asks them a question — but still behind the same permission as moving
+ * control, because the answer names which other tool a business is running and
+ * that is not something every ticket viewer needs.
+ */
+export async function readConversationControl(
+  conversationId: string,
+): Promise<MetaControlActionState> {
+  const agent = await requireAgent();
+  if (!can(agent, 'ticket.meta_control')) {
+    return {
+      error: 'You do not have permission to manage thread control',
+      view: null,
+      result: null,
+    };
+  }
+
+  const found = await loadControllableConversation(agent, conversationId);
+  if (!found) return { error: null, view: null, result: null };
+
+  try {
+    const view = await readMetaControl(conversationId, found.platform);
+    return { error: view.error, view, result: null };
+  } catch (error) {
+    console.error('[meta:control] read failed', error);
+    return {
+      error: 'Could not reach Meta to check who holds this thread.',
+      view: null,
+      result: null,
+    };
+  }
+}
+
+export async function transferConversationControl(
+  _state: MetaControlActionState,
+  formData: FormData,
+): Promise<MetaControlActionState> {
+  const agent = await requireAgent();
+  if (!can(agent, 'ticket.meta_control')) {
+    return {
+      error: 'You do not have permission to manage thread control',
+      view: null,
+      result: null,
+    };
+  }
+
+  const conversationId = String(formData.get('conversationId') ?? '');
+  const requested = String(formData.get('intent') ?? '');
+  // Never trusted from the form: an intent is a decision about somebody else's
+  // inbox, and the form was rendered from a reading that may be minutes old.
+  const intent: 'take' | 'release' = requested === 'release' ? 'release' : 'take';
+
+  const found = await loadControllableConversation(agent, conversationId);
+  if (!found) return { error: 'Ticket not found', view: null, result: null };
+
+  const readOnly = refuseIfReadOnly(found.row.conversation.channel);
+  if (readOnly) return { error: readOnly.error, view: null, result: null };
+
+  try {
+    const outcome = await applyMetaControl({
+      conversationId,
+      platform: found.platform,
+      intent,
+      actorAgentId: agent.id,
+      actorName: agent.name,
+      ticketNumber: found.row.conversation.number,
+    });
+
+    // The composer's reply box is gated on the thread verdict, which this just
+    // changed. Without the revalidate the button flips and the box does not.
+    refresh(found.row.conversation.number);
+
+    return {
+      error: null,
+      ok: true,
+      nonce: Date.now(),
+      view: outcome.view,
+      result: outcome.result,
+    };
+  } catch (error) {
+    if (error instanceof MetaControlError) {
+      return { error: error.message, view: null, result: null };
+    }
+    console.error('[meta:control] transfer failed', error);
+    return { error: 'Could not reach Meta to move thread control.', view: null, result: null };
+  }
 }
 
 // --- Ticket properties ------------------------------------------------------

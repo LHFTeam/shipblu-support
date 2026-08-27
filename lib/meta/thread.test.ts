@@ -3,6 +3,7 @@ import { metaThreadState, metaThreadStateFromMessage } from './thread';
 
 const PAGE = '955333171001884';
 const OTHER_PAGE = '101449698657189';
+const OUR_APP = '744102188101923';
 
 describe('metaThreadState', () => {
   it('lets a reply go out on the configured page', () => {
@@ -160,5 +161,53 @@ describe('metaThreadStateFromMessage', () => {
     });
 
     expect(state.canSend).toBe(true);
+  });
+
+  /*
+    Taking thread control has to unblock the composer immediately. The newest
+    inbound message keeps its `standby` flag forever — it is a record of the
+    moment it arrived — so a verdict that only ever read that flag would go on
+    refusing replies until the customer wrote again, which is precisely when the
+    agent no longer needs to be the one starting the conversation.
+  */
+  it('lets a control snapshot taken after the last message unblock the ticket', () => {
+    const state = metaThreadStateFromMessage({
+      platform: 'facebook',
+      configuredAccountId: PAGE,
+      ourAppId: OUR_APP,
+      lastInboundMeta: { accountId: PAGE, standby: true },
+      lastInboundAt: new Date('2026-08-01T10:00:00Z'),
+      control: { appId: OUR_APP, checkedAt: new Date('2026-08-01T10:05:00Z') },
+    });
+
+    expect(state.canSend).toBe(true);
+  });
+
+  it('blocks again once a newer message arrives in standby', () => {
+    const state = metaThreadStateFromMessage({
+      platform: 'facebook',
+      configuredAccountId: PAGE,
+      ourAppId: OUR_APP,
+      lastInboundMeta: { accountId: PAGE, standby: true },
+      lastInboundAt: new Date('2026-08-01T11:00:00Z'),
+      control: { appId: OUR_APP, checkedAt: new Date('2026-08-01T10:05:00Z') },
+    });
+
+    expect(state.canSend).toBe(false);
+    expect(state.reason).toBe('standby');
+  });
+
+  it('blocks when a fresh snapshot names another app', () => {
+    const state = metaThreadStateFromMessage({
+      platform: 'facebook',
+      configuredAccountId: PAGE,
+      ourAppId: OUR_APP,
+      lastInboundMeta: { accountId: PAGE },
+      lastInboundAt: new Date('2026-08-01T10:00:00Z'),
+      control: { appId: '263902037430900', checkedAt: new Date('2026-08-01T10:05:00Z') },
+    });
+
+    expect(state.canSend).toBe(false);
+    expect(state.reason).toBe('standby');
   });
 });

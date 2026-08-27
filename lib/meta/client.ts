@@ -1,5 +1,6 @@
 import { env } from '@/lib/env';
 import { commentRequest, type CommentOperation } from './comments';
+import { parseThreadOwner, type ThreadOwnerReading } from './control';
 import type { MetaPlatform } from './types';
 
 /**
@@ -554,4 +555,129 @@ export async function downloadAttachment(
   }
 
   return { content: Buffer.concat(chunks), contentType };
+}
+
+// --- Thread control ---------------------------------------------------------
+
+/*
+  Conversation Routing, which is what Meta now calls the handover protocol.
+
+  Every endpoint below is documented on `/{page-id}`. They are addressed here
+  through `accountId(platform)` and routed through `graph(platform, …)` — the
+  same node, host and token `sendDirectMessage` uses — because a control call
+  aimed at a different account from the send it is meant to unblock would be
+  worse than no button at all. Instagram in particular resolves to a different
+  host when `INSTAGRAM_ACCESS_TOKEN` is set, and taking control on one host to
+  send on another would silently do nothing useful.
+
+  The PSID is page-scoped in exactly the same way the send is, which is why
+  `lib/tickets/meta-thread.ts` resolves both from the one inbound row.
+
+  Instagram routing is gated separately by Meta, behind the `ig_multi_app` flag
+  on `GET /me?fields=messaging_feature_status`. Nothing here checks it: an
+  account without it is refused by Graph with a message worth showing, and a
+  pre-flight probe would add a round trip to every press to predict a refusal we
+  are about to receive anyway.
+*/
+
+/** Meta's confirmation for every control write. It sends nothing else. */
+type SuccessFlag = { success?: boolean };
+
+/**
+ * Who Graph says holds thread control, or null when it would not say.
+ *
+ * `recipient` is a bare id here, not the `{id: …}` object the send API and the
+ * control writes take. That asymmetry is Meta's, not a slip.
+ */
+export async function fetchThreadOwner(
+  platform: MetaPlatform,
+  psid: string,
+): Promise<ThreadOwnerReading> {
+  const body = await graph<unknown>(platform, `${accountId(platform)}/thread_owner`, {
+    method: 'GET',
+    query: { recipient: psid },
+  });
+
+  return parseThreadOwner(body);
+}
+
+/**
+ * Makes this app the thread owner.
+ *
+ * Allowed when the thread is idle or when this app is the page's primary
+ * receiver. Otherwise Graph refuses — see `isNotThreadOwner` — and the caller's
+ * fallback is `requestThreadControl`, which asks the current owner instead.
+ */
+export async function takeThreadControl(
+  platform: MetaPlatform,
+  psid: string,
+  metadata?: string,
+): Promise<void> {
+  await controlCall(platform, 'take_thread_control', psid, metadata);
+}
+
+/**
+ * Returns the thread to idle, where the page's default app answers.
+ *
+ * This rather than `pass_thread_control` at the default app's id: Meta
+ * documents release as the way to hand a conversation back, and it needs no
+ * knowledge of which app that is. Passing would require this deployment to hold
+ * a copy of the page's default app id, which is configured in Page settings and
+ * changes there without telling us.
+ */
+export async function releaseThreadControl(
+  platform: MetaPlatform,
+  psid: string,
+  metadata?: string,
+): Promise<void> {
+  await controlCall(platform, 'release_thread_control', psid, metadata);
+}
+
+/**
+ * Asks the current owner to hand the thread over.
+ *
+ * The polite route, and the only one open to an app that is not the primary
+ * receiver. The owner receives a `request_thread_control` webhook and may
+ * honour it or ignore it, so this returns having asked — never having got.
+ */
+export async function requestThreadControl(
+  platform: MetaPlatform,
+  psid: string,
+  metadata?: string,
+): Promise<void> {
+  await controlCall(platform, 'request_thread_control', psid, metadata);
+}
+
+async function controlCall(
+  platform: MetaPlatform,
+  edge: string,
+  psid: string,
+  metadata: string | undefined,
+): Promise<void> {
+  const result = await graph<SuccessFlag>(platform, `${accountId(platform)}/${edge}`, {
+    method: 'POST',
+    body: { recipient: { id: psid }, ...(metadata ? { metadata } : {}) },
+  });
+
+  // Graph answers `{"success": true}` and signals failure with an HTTP error,
+  // which `graph()` has already thrown by here. A 200 carrying `success: false`
+  // is undocumented; treating it as success would report a handover that did
+  // not happen, and every caller of this writes that claim to the database.
+  if (result && result.success === false) {
+    throw new MetaApiError(`${edge} returned success: false`, 200, null, null, false);
+  }
+}
+
+/**
+ * Graph's "you are not the thread owner" refusal.
+ *
+ * `100 / 2534037` — "The action is invalid since it's not the thread owner."
+ * It is the documented answer to taking a thread this app is not the primary
+ * receiver for, and the signal to fall back to asking the owner rather than
+ * reporting a failure the agent can do nothing with.
+ */
+export const NOT_THREAD_OWNER_SUBCODE = 2534037;
+
+export function isNotThreadOwner(error: unknown): boolean {
+  return error instanceof MetaApiError && error.subcode === NOT_THREAD_OWNER_SUBCODE;
 }

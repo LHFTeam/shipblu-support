@@ -13,6 +13,7 @@ import { renderTemplatePreview, templateShape } from '@/lib/whatsapp/templates';
 import { formatRemaining, windowState } from '@/lib/whatsapp/window';
 import type { PickerEntry } from '@/lib/side-conversations/queries';
 import { addNote, sendReply, sendTemplateReply, type ActionState } from '../../actions';
+import { MetaControlBar } from './meta-control';
 import { StartSideConversationForm } from './side-conversations';
 import type { TemplateOption } from './view';
 
@@ -29,6 +30,7 @@ export function Composer({
   recipients,
   canned,
   canSideConversation,
+  canMetaControl,
 }: {
   conversation: ConversationDetail;
   templates: TemplateOption[];
@@ -36,6 +38,8 @@ export function Composer({
   /** Reusable replies this agent may insert — already scoped to them. */
   canned: CannedResponseOption[];
   canSideConversation: boolean;
+  /** May this agent move thread control on a Facebook or Instagram ticket. */
+  canMetaControl: boolean;
 }) {
   const isWhatsApp = conversation.channel === 'whatsapp';
   const isMeta = conversation.channel === 'facebook' || conversation.channel === 'instagram';
@@ -214,6 +218,20 @@ export function Composer({
             <span className="text-xs opacity-60 lg:ms-auto lg:shrink-0">{notice}</span>
           ) : null}
         </div>
+
+        {/*
+          Above the body rather than inside the reply tab, because the two
+          states it serves are on opposite sides of that boundary: a thread
+          another app owns has no reply form to sit in, and one this app owns
+          has a form the agent is typing into and should not have to leave to
+          hand the conversation back.
+        */}
+        {isMeta && !isCommentThread && canMetaControl ? (
+          <MetaControlBar
+            conversationId={conversation.id}
+            standby={metaThread?.reason === 'standby'}
+          />
+        ) : null}
 
         <div className="app-scroll min-h-0 flex-1 overflow-y-auto p-3">
           {tab === 'reply' ? (

@@ -25,6 +25,18 @@ export const PERMISSIONS = [
    * hand out and a different thing to take away.
    */
   'ticket.side_conversation',
+  /**
+   * Taking or releasing thread control on a Facebook or Instagram conversation.
+   *
+   * Separate from `ticket.reply` even though it usually exists to make one
+   * possible. A reply is addressed to the customer; this reaches past them and
+   * changes which *tool* owns the conversation — taking it interrupts whatever
+   * the other app was doing mid-flow, and releasing it hands the customer to a
+   * default app nobody here is watching. Granted to agents, because the alternative
+   * is escalating every Messenger ticket that lands in standby, and kept as its own
+   * key so it can be taken off one person without taking replying away too.
+   */
+  'ticket.meta_control',
   'ticket.assign',
   /**
    * Hiding or deleting a customer's public comment on one of our own social
@@ -92,6 +104,7 @@ const AGENT: Permission[] = [
   'ticket.reply',
   'ticket.note',
   'ticket.side_conversation',
+  'ticket.meta_control',
   'ticket.assign',
   'ticket.edit_fields',
   'contact.view',

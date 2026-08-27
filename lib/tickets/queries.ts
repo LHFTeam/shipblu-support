@@ -28,6 +28,7 @@ import {
 } from '@/db/schema';
 import type { SessionAgent } from '@/lib/auth/session';
 import { can } from '@/lib/auth/permissions';
+import { env } from '@/lib/env';
 import { configuredAccountId } from '@/lib/meta/client';
 import { metaThreadStateFromMessage, type MetaThreadState } from '@/lib/meta/thread';
 import type { CustomFieldValues, TicketFieldDef } from './custom-fields';
@@ -598,7 +599,13 @@ export async function getConversation(
     metaThread = metaThreadStateFromMessage({
       platform,
       configuredAccountId: configuredAccountId(platform),
+      ourAppId: env().META_APP_ID ?? null,
       lastInboundMeta: (lastInbound?.message.meta ?? null) as Record<string, unknown> | null,
+      lastInboundAt: lastInbound?.message.createdAt ?? null,
+      control: {
+        appId: row.conversation.metaControlAppId,
+        checkedAt: row.conversation.metaControlCheckedAt,
+      },
     });
   }
 

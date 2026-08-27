@@ -7,6 +7,7 @@ import type {
   MetaRawAttachment,
   MetaWebhookPayload,
   NormalisedComment,
+  NormalisedHandover,
   NormalisedMetaWebhook,
   NormalisedReceipt,
 } from './types';
@@ -30,6 +31,7 @@ export function parseMetaWebhook(payload: unknown): NormalisedMetaWebhook {
     messages: [],
     comments: [],
     receipts: [],
+    handovers: [],
     echoes: 0,
   };
 
@@ -87,6 +89,14 @@ function readMessagingEvent(
     return;
   }
 
+  // Read before the message check below, not after: a handover event carries no
+  // `message` at all, so the early return there would drop every one of them.
+  const handover = readHandover(event, platform, accountId);
+  if (handover) {
+    result.handovers.push(handover);
+    return;
+  }
+
   const message = event.message;
   if (!message) return;
 
@@ -117,6 +127,66 @@ function readMessagingEvent(
     standby,
     raw: event as unknown as Record<string, unknown>,
   });
+}
+
+/**
+ * A thread control move, from the `messaging_handovers` webhook field.
+ *
+ * Nothing is dropped for arriving in `standby`. An app that loses control keeps
+ * receiving the thread there, so a handover *away* from us is delivered exactly
+ * where we can no longer act on it — and it is the one we most need to record,
+ * because it is what makes a stored "we own this" wrong.
+ */
+function readHandover(
+  event: MetaMessagingEvent,
+  platform: MetaPlatform,
+  accountId: string | null,
+): NormalisedHandover | null {
+  const psid = event.sender?.id;
+  if (!psid) return null;
+
+  const at = fromEpoch(event.timestamp);
+  const base = { platform, psid, accountId: event.recipient?.id ?? accountId, at };
+
+  const moved = event.pass_thread_control
+    ? ({ kind: 'passed', raw: event.pass_thread_control } as const)
+    : event.take_thread_control
+      ? ({ kind: 'taken', raw: event.take_thread_control } as const)
+      : null;
+
+  if (moved) {
+    return {
+      ...base,
+      kind: moved.kind,
+      previousOwnerAppId: appId(moved.raw.previous_owner_app_id),
+      newOwnerAppId: appId(moved.raw.new_owner_app_id),
+      requestedByAppId: null,
+      metadata: moved.raw.metadata ?? null,
+    };
+  }
+
+  const request = event.request_thread_control;
+  if (!request) return null;
+
+  return {
+    ...base,
+    kind: 'requested',
+    previousOwnerAppId: null,
+    newOwnerAppId: null,
+    requestedByAppId: appId(request.requested_owner_app_id),
+    metadata: request.metadata ?? null,
+  };
+}
+
+/**
+ * Meta sends app ids as strings in some of these fields and as bare JSON
+ * numbers in others — its own documented examples do both inside one payload.
+ * Normalised to a string so a comparison against `META_APP_ID` can be `===`.
+ */
+function appId(value: string | number | null | undefined): string | null {
+  if (typeof value === 'string') return value || null;
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return null;
 }
 
 /**
