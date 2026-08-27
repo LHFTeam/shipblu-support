@@ -13,9 +13,10 @@ referring to another answer.
 
 `user_messenger_contact` has been **dropped from this submission** and has no
 section here; see [Dropped](#dropped-from-this-submission) for why, so nobody
-adds it back next cycle.
+adds it back next cycle. `instagram_business_manage_messages` is very likely to
+follow it — its section carries the check that decides.
 
-§ [Before you submit](#before-you-submit) is not for pasting. It lists three
+§ [Before you submit](#before-you-submit) is not for pasting. It lists two
 remaining requested items that the code does not currently back, and four
 permissions the built features need but the list omits. Read it first: the
 fastest way to fail this review is to describe behaviour a reviewer cannot see
@@ -146,29 +147,44 @@ own "App Details" and verification notes too:
 
 ## instagram_business_manage_messages
 
-**Answer**
+> ⚠️ **Probably drop this — decide before you submit.** The draft answer below
+> justified requesting it _alongside_ `instagram_manage_messages`, on the
+> reasoning that the two are the same capability under two authorisation paths
+> and holding both keeps the inbox alive through a re-link. `plans/instagram-comment-management.md`
+> on `main` establishes that this reasoning is wrong, for the comment pair and
+> equally for this messaging pair: an Instagram account is connected **one way at
+> a time** — one host, one token, one signing secret — so the app can only ever
+> exercise the set matching the live connection. App Review wants a screencast
+> per permission, and a submission is approved or rejected **as a whole**, so the
+> unusable half of the pair is a permission with nothing to demonstrate dragging
+> down the half that works.
+>
+> So apply for the one that matches how ShipBlu's account is actually connected:
+>
+> | Connected through | Apply for                                                        |
+> | ----------------- | ---------------------------------------------------------------- |
+> | its Facebook Page | `instagram_basic`, `instagram_manage_messages`, `pages_*`        |
+> | Instagram Login   | `instagram_business_basic`, `instagram_business_manage_messages` |
+>
+> Today the app sends through the Page token against `graph.facebook.com`, and
+> `INSTAGRAM_ACCESS_TOKEN` / `META_INSTAGRAM_APP_SECRET` are an optional pair
+> that no deployment had set before that PR — so unless someone has since moved
+> the account onto Instagram Login, **the Page-connected row is the live one** and
+> this permission is the one to drop. Confirm which is set in the production
+> environment group before deciding; that check is the whole decision.
 
-> This is the same customer support function described for our Instagram Direct
-> inbox, requested for the Instagram Login configuration of the messaging API.
->
-> ShipBlu operates one Instagram professional account as a support channel.
-> Inbound Direct messages are delivered to our webhook endpoint, stored, and
-> turned into support tickets in the agent console; each person's messages
-> thread onto one live ticket so an agent reads a conversation rather than
-> disconnected fragments, and any photo or story reply they send is attached to
-> that ticket so the agent can see the parcel being described. When an agent
-> types a reply, the app sends it to that customer through the messaging API.
-> Every outbound message is a person answering a person who contacted us first
-> — no broadcasts, no promotional sends, no automated marketing on this
-> channel.
->
-> We are requesting this permission alongside `instagram_manage_messages`
-> because the two cover the same capability under the two supported
-> authorisation paths (the Instagram account linked to our Facebook Page, and
-> Instagram Login on the professional account directly). We want the connection
-> between ShipBlu Support and ShipBlu's Instagram account to survive a change in
-> how that account is linked, rather than having the support inbox go dark
-> mid-shift and require a new review cycle to restore.
+**Answer** — only if the account is on Instagram Login
+
+> ShipBlu operates one Instagram professional account as a customer support
+> channel, connected through Instagram Login. Inbound Direct messages are
+> delivered to our webhook endpoint, stored, and turned into support tickets in
+> the agent console; each person's messages thread onto one live ticket so an
+> agent reads a conversation rather than disconnected fragments, and any photo or
+> story reply they send is attached to that ticket so the agent can see the
+> parcel being described. When an agent types a reply, the app sends it to that
+> customer through the messaging API. Every outbound message is a person
+> answering a person who contacted us first — no broadcasts, no promotional
+> sends, no automated marketing on this channel.
 >
 > Value to the person: a customer who asks about their delivery on Instagram
 > gets an answer from a human, in their own language, with their history and
@@ -250,26 +266,15 @@ own "App Details" and verification notes too:
 
 ## Business Asset User Profile Access (feature)
 
-> ⚠️ **Not exercised by the current build.** `fetchProfile()` in
-> `lib/meta/client.ts` is the function that would call the Graph API for these
-> User Fields, and **nothing calls it** — it is exported and dead. The only name
-> the app has today is `senderName`, taken from `event.sender?.username` in the
-> webhook payload itself (`lib/meta/parse.ts`), which Instagram sends and
-> Messenger does not. So an Instagram ticket carries a username that did not come
-> from this feature, and a Facebook ticket carries no name at all. Wire
-> `fetchProfile` into `ingestMetaMessage` before recording — see
-> [Before you submit](#before-you-submit). The answers below describe the app
-> with that call in place.
-
 **Answer** — for "How will this app use Business Asset User Profile Access?"
 
 > This feature is what puts a customer's name on their support ticket.
 >
 > When a person messages ShipBlu's Facebook Page or Instagram account, the
 > webhook gives us a page-scoped ID and nothing else. The app calls the Graph
-> API for that one person's display name, at the moment their first message
-> arrives, and stores it on the contact record their ticket hangs off. We
-> request only the name; we do not request the profile picture or
+> API for that one person's profile — their name, their Instagram username where
+> they have one, and their profile picture — the first time they write in, and
+> stores it on the contact record their ticket hangs off. We do not request
 > `ids_for_business`, and we request nothing at all about people who have not
 > messaged us.
 >
@@ -302,15 +307,17 @@ tell us how you intend to use it"
 > ShipBlu's own Facebook Page and Instagram professional account; ShipBlu
 > Support is our in-house helpdesk and is not offered to any other business. We
 > read a profile only for a person who has sent one of those assets a message,
-> only at the point that message becomes a support ticket, and we read only
-> their display name. We do not request the profile picture or
-> `ids_for_business`, and we make no profile call for anyone who has not
-> contacted us.
+> and only at the point that message becomes a support ticket. We read their
+> name, their Instagram username where they have one, and their profile
+> picture. We do not request `ids_for_business`, and we make no profile call for
+> anyone who has not contacted us.
 >
 > **What we use it for.** One purpose: identifying the customer to the support
 > agent handling their ticket, so the agent can see who they are talking to,
 > address them by name, and recognise them as the same person if they come back
-> on another channel about the same parcel.
+> on another channel about the same parcel. The picture serves that same
+> purpose and nothing else — it is the avatar beside their name in the inbox,
+> which is how an agent working several conversations at once keeps them apart.
 >
 > **What we will not do with it.** We do not use this data for advertising,
 > targeting, audience building, lookalikes or measurement. We do not sell,
@@ -322,11 +329,14 @@ tell us how you intend to use it"
 > outside source.
 >
 > **Storage, access and retention.** The name is stored on the contact record in
-> our own Postgres database in the EU (eu-central-1), reachable only by
-> authenticated ShipBlu support agents through a role-based permission system;
-> the console is not public and there is no external API that exposes it. Raw
-> webhook payloads, which contain the original Meta identifiers, are deleted
-> automatically 30 days after processing. We retain the name for as long as the
+> our own Postgres database in the EU (eu-central-1), and the picture is copied
+> into our own private object store in the same region rather than being
+> hot-linked from Meta's CDN — served to agents through short-lived signed URLs.
+> Both are reachable only by authenticated ShipBlu support agents through a
+> role-based permission system; the console is not public and there is no
+> external API that exposes either. Raw webhook payloads, which contain the
+> original Meta identifiers, are deleted automatically 30 days after
+> processing. We retain the name for as long as the
 > person is an active support contact, and we delete a person's stored profile
 > data on request.
 
@@ -481,21 +491,56 @@ tell us how you intend to use it"
 
 ## Before you submit
 
-### Three requested items the code does not back
+### Two requested items the code does not back
 
 Meta reviews the screencast against the description. A permission whose
 described behaviour is not visible in the recording is the most common cause of
 rejection, and a rejection on one item delays the whole submission.
 
-| Item                                 | The problem                                                                                                                                                                                                                     | Options                                                                                                                                                                                                                                                                                                                                                                                                 |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `whatsapp_business_manage_events`    | It covers logging conversion events to Meta **for ads targeting, optimisation and reporting**. This is a helpdesk. There is no ad account in the loop, no conversion event, and no code that could produce one.                 | **Drop it.** It belongs to a marketing submission, if ShipBlu ever runs click-to-WhatsApp ads. Nothing in the support product is blocked by not having it.                                                                                                                                                                                                                                              |
-| `Business Asset User Profile Access` | `fetchProfile()` in `lib/meta/client.ts` is exported and never called. The name on an Instagram ticket comes from `event.sender?.username` in the webhook payload, not from this feature; a Facebook ticket has no name at all. | **Build it — it is small and it is the one on this list worth building.** Call `fetchProfile` from `ingestMetaMessage` in `lib/tickets/ingest-meta.ts` when `senderName` is null, and pass the result into `resolveContact` as `displayName`. That makes the answer true, makes the recording possible, and fixes a live defect: every Facebook contact in the database today is a bare page-scoped id. |
-| `pages_user_gender`                  | Nothing in the codebase reads, stores or displays gender. `contacts` has no column for it.                                                                                                                                      | Either drop it, or build it first. The Arabic-inflection case is genuinely strong and it is a small change — a nullable `gender` column on `contacts`, written by the same profile lookup that already writes the name, read by the Arabic message templates. Then the answer above is true and demonstrable.                                                                                           |
+| Item                              | The problem                                                                                                                                                                                                     | Options                                                                                                                                                                                                                                                                                                       |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `whatsapp_business_manage_events` | It covers logging conversion events to Meta **for ads targeting, optimisation and reporting**. This is a helpdesk. There is no ad account in the loop, no conversion event, and no code that could produce one. | **Drop it.** It belongs to a marketing submission, if ShipBlu ever runs click-to-WhatsApp ads. Nothing in the support product is blocked by not having it.                                                                                                                                                    |
+| `pages_user_gender`               | Nothing in the codebase reads, stores or displays gender. `contacts` has no column for it.                                                                                                                      | Either drop it, or build it first. The Arabic-inflection case is genuinely strong and it is a small change — a nullable `gender` column on `contacts`, written by the same profile lookup that already writes the name, read by the Arabic message templates. Then the answer above is true and demonstrable. |
 
 Dropping a permission now costs nothing: it can be requested in a later
 submission once the feature exists, and a smaller submission that passes beats a
 larger one that comes back.
+
+### Built, on `main`, by another session
+
+**Business Asset User Profile Access** — this was written up here as unbacked,
+and it was, but the fix landed independently while this document was being
+prepared: PRs #82 and #85, `Actually call Meta's User Profile API, and put the
+name on the contact` and `Fix the profile lookup's recovery paths and bound its
+downloads`. What is on `main` is more thorough than what this document first
+described, and the answers above have been rewritten to match it rather than the
+other way round.
+
+How it actually works, for whoever records the screencast:
+
+- The lookup is a **queued job**, `fetch_meta_profile`, not an inline call on the
+  ingest path. `ingestMetaMessage` asks `needsChannelProfile()` and enqueues; the
+  job's own retry and dead-letter handling applies, and a slow or refusing Graph
+  cannot delay a ticket being created.
+- Whether to ask is gated on `contact_identities.profile_fetched_at` rather than
+  on the contact being new, so a customer whose profile failed the first time is
+  asked again and one already on file is not re-read.
+- `fetchProfile` **throws** rather than swallowing failures, so
+  `lib/meta/errors.ts` can separate "this app is not approved for the feature" —
+  a dashboard problem affecting every customer — from "this person has no name to
+  give", which is normal and final. This is the distinction the earlier
+  swallow-everything version could not make.
+- It fetches the **profile picture** as well as the name, and copies it into our
+  own bucket rather than storing Meta's URL. Both BAUPA answers above have been
+  corrected accordingly — the earlier drafts said we do not request the picture,
+  which would have been a false statement to Meta.
+- Existing contacts **are** backfilled: `npm run job -- backfill_meta_profiles`
+  enqueues one job per contact through the same handler the live path uses.
+
+One consequence for the recording is unchanged: use a Facebook customer whose
+profile has **never been fetched**, since an identity already stamped
+`profile_fetched_at` is skipped. A brand-new test account is the simplest way to
+guarantee that.
 
 ### Dropped from this submission
 
@@ -541,9 +586,25 @@ without them the comment half of the social channels fails after approval:
   comment on a Page post. This is the whole public-comment workflow.
 - **`pages_read_engagement`** — reading the Page's own posts and comment
   content, which is what a comment ticket is built from.
-- **`instagram_manage_comments`** — the same for Instagram comments.
+- **`instagram_manage_comments`** — the same for Instagram comments, and note
+  that it gates the **private reply** too, not only hide and delete. The
+  composer has offered private replies since the channel landed, so this is not
+  optional for a comment ticket even if nobody ever hides anything.
 - **`instagram_basic`** — reading the Instagram professional account's own
   metadata; effectively a prerequisite for the Instagram permissions above.
+
+The Instagram pair here follows the same rule as the messaging pair: apply for
+`instagram_manage_comments` on a Page-connected account and
+`instagram_business_manage_comments` on Instagram Login, **never both**.
+`plans/instagram-comment-management.md` works this through in full and is the
+reference — it is where the reasoning lives, not here.
+
+That plan also settles the access level, which is worth knowing before somebody
+argues for Standard Access on single-tenant grounds: Standard Access only covers
+app users holding a role on the app, and this is a support inbox whose entire
+traffic is members of the public who hold none. An Instagram private reply needs
+Advanced Access, the Human Agent feature and business verification regardless —
+so all of it belongs in this one submission rather than being deferred.
 
 If the plan is deliberately to launch with DMs only and add comments later, that
 is a reasonable call — but then also confirm the app is not subscribed to the
@@ -566,11 +627,15 @@ For each channel, one continuous take covering:
    number from a real account.
 2. That message appearing in the agent console as a ticket — showing the
    customer's **real name** on it, which is what evidences Business Asset User
-   Profile Access. This only works once `fetchProfile` is wired up; on today's
-   build a Facebook ticket shows a bare page-scoped id, which demonstrates the
-   opposite of what the answer claims. Record a Facebook DM specifically, not
-   just Instagram: Instagram's webhook supplies a username on its own, so an
-   Instagram-only take does not evidence the feature.
+   Profile Access, along with their picture as the avatar beside it. Record a
+   Facebook DM specifically, not just Instagram: Instagram's webhook supplies a
+   username on its own, so an Instagram-only take does not evidence the feature.
+   It must also be someone whose profile has **never been fetched** — the lookup
+   is gated on `contact_identities.profile_fetched_at`, so an identity already
+   stamped is skipped and shows whatever name it was filed under. A brand-new
+   test account is the simplest way to guarantee that. The lookup is a queued
+   job, so allow a beat for it to land rather than cutting the moment the ticket
+   appears.
 3. An agent typing and sending a reply, and the customer's device receiving it.
 4. For **Human Agent**: a thread whose last customer message is more than 24
    hours old, showing the console's own window indicator and a reply going out
