@@ -8,7 +8,7 @@ import {
   profileDisplayName,
   profileFields,
 } from './client';
-import { isProfilePermissionRefusal } from './errors';
+import { explainMetaProfileError, isProfilePermissionRefusal } from './errors';
 
 /**
  * The User Profile API is the only thing that ever tells this system who a
@@ -134,8 +134,13 @@ describe('isProfilePermissionRefusal', () => {
   }
 
   it('recognises the refusal an unapproved app gets', () => {
-    // 100/33 is the one that actually arrives, and its sentence names neither
-    // the app nor the feature.
+    // Code 3 is the one production actually returns — "Application does not have
+    // the capability to make this API call." Every Messenger lookup on
+    // 2026-08-26/27 was refused this way while it was missing from the set, so
+    // the App Review sentence never printed for the case it was written for.
+    expect(isProfilePermissionRefusal(error(3))).toBe(true);
+    // 100/33 names neither the app nor the feature, and is what the docs
+    // describe.
     expect(isProfilePermissionRefusal(error(100, 33))).toBe(true);
     expect(isProfilePermissionRefusal(error(200))).toBe(true);
     expect(isProfilePermissionRefusal(error(10))).toBe(true);
@@ -200,5 +205,56 @@ describe('downloadAttachment size cap', () => {
 
     const result = await downloadAttachment('https://cdn/p.jpg');
     expect(result.content.length).toBe(5000);
+  });
+});
+
+describe('explainMetaProfileError', () => {
+  function graphError(code: number, message: string, subcode: number | null = null) {
+    return new MetaApiError(message, 400, code, subcode, false, null, 'trace-1');
+  }
+
+  it('names Business Asset User Profile Access on the capability refusal', () => {
+    // The whole diagnostic value of this feature. Without code 3 in the set,
+    // this sentence never reached the worker log.
+    const text = explainMetaProfileError(
+      graphError(3, 'Application does not have the capability to make this API call.'),
+      'facebook',
+    );
+
+    expect(text).toContain('Business Asset User Profile Access');
+    expect(text).toContain('App Review');
+    // Code 3 states the cause outright, so it must not hedge about the customer
+    // being gone — that would invite exactly the wrong investigation.
+    expect(text).not.toContain('both when the person is gone');
+    expect(text).toContain('(Meta: code 3');
+  });
+
+  it('sends the Instagram link failure to the Page settings, not to App Review', () => {
+    // A bare 100 saying the page is not linked is a configuration problem that
+    // approval cannot fix. Pointing it at App Review wastes the trip.
+    const text = explainMetaProfileError(
+      graphError(
+        100,
+        'The page is not linked to an Instagram account or the linked IG account is not ' +
+          'professional account',
+      ),
+      'instagram',
+    );
+
+    expect(text).toContain('configuration');
+    expect(text).toContain('professional');
+    expect(text).toContain('INSTAGRAM_ACCOUNT_ID');
+    expect(text).not.toContain('Business Asset User Profile Access');
+  });
+
+  it('leaves an unrecognised refusal as Meta wrote it, plus the reference', () => {
+    const text = explainMetaProfileError(
+      graphError(100, '(#100) Tried accessing nonexisting field'),
+      'facebook',
+    );
+
+    expect(text).toContain('nonexisting field');
+    expect(text).not.toContain('App Review');
+    expect(text).toContain('(Meta: code 100');
   });
 });

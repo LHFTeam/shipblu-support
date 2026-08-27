@@ -642,14 +642,31 @@ provider. Each is a round trip somebody has to actually watch:
   imported it**, so no profile call has ever left this system. Now wired: a
   `fetch_meta_profile` job per person on first sight, `backfill_meta_profiles`
   for the archive, and the picture copied into our own bucket because
-  `profile_pic` is a signed CDN URL that expires. What is still unverified is
-  the approval itself. Graph answers an unapproved app with `100/33 "Unsupported
-get request"` — the same sentence it uses for a deleted user — so
-  `isProfilePermissionRefusal` singles that out and the worker log names the
-  feature rather than leaving it to be guessed at, which is the lesson from the
-  bullet above. Run `npm run job -- backfill_meta_profiles` once the app is
-  approved and read the worker log; a run that names every contact and a run
-  that refuses all 22 are both unambiguous.
+  `profile_pic` is a signed CDN URL that expires.
+
+  **Answered on 2026-08-27, and the answer is two different problems.** 16 real
+  lookups ran and every one was refused, in two distinct ways, with nothing
+  written: all 29 Meta identities still hold a null `profile_fetched_at`.
+
+  - **Facebook: `(#3) Application does not have the capability to make this API
+call.`** (HTTP 400, no subcode, e.g. trace `Atd8Vvy9gSxtvIvt-INHquE`). This
+    is the approval answer — **Business Asset User Profile Access is not
+    granted**, or the app holds only Standard rather than Advanced Access.
+  - **Instagram: `(#100) The page is not linked to an Instagram account or the
+linked IG account is not professional account`.** Not a permission problem
+    and App Review will not fix it: the Page↔Instagram link, or an account that
+    is personal rather than professional. Approval alone leaves Instagram exactly
+    where it is, so this needs chasing separately.
+
+  Note what that cost: `isProfilePermissionRefusal` was assembled from the docs
+  and recognised `100/33`, `200` and `10` — **not code 3** — so for twelve
+  Facebook refusals the sentence naming the feature never printed, which was the
+  entire point of writing it. Both codes are handled now. The recovery path is
+  unaffected and needs no re-run planning: a refusal deliberately does not stamp
+  `profile_fetched_at`, so the next message from each customer re-asks and the
+  archive repairs itself the moment the capability lands. `npm run job --
+backfill_meta_profiles` is only needed for people who never write in again.
+
 - **Instagram comment management, which cannot be exercised yet at all.** Three
   separate things gate it, in order, and none is code:
   1. `META_INSTAGRAM_APP_SECRET` in `shipblu-support-production`, or every

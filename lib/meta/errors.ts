@@ -72,19 +72,33 @@ function isUnspecified(error: MetaApiError): boolean {
 // --- Profile lookups --------------------------------------------------------
 
 /**
- * How Graph refuses a profile read the app is not approved for.
+ * How Graph refuses a read the app has not been granted the capability for.
  *
+ *   3       "Application does not have the capability to make this API call."
+ *           **The one production actually returns.** Every Messenger profile
+ *           lookup between 2026-08-26 and 2026-08-27 was refused this way
+ *           (HTTP 400, no subcode, e.g. trace `Atd8Vvy9gSxtvIvt-INHquE`) while
+ *           this set held only the three below — so the App Review sentence
+ *           underneath never printed for the one case it was written for, and
+ *           the refusal read as an unexplained failure. It was omitted because
+ *           the set was assembled from the docs rather than from a real refusal.
  *   100/33  "Unsupported get request. Object with ID … does not exist, cannot
  *           be loaded due to missing permissions, or does not support this
- *           operation." The usual answer, and note what it conflates: a
- *           deleted user and an unapproved app produce the identical sentence.
+ *           operation." Note what it conflates: a deleted user and an
+ *           unapproved app produce the identical sentence.
  *   200     "Permissions error" — the explicit form.
  *   10      "Application does not have permission for this action" on a GET.
  *           The same number means "outside the messaging window" on a send,
- *           which is why this set is scoped to profile reads and not shared
- *           with `explainMetaSendError` above.
+ *           which is why this set is scoped to reads and not shared with
+ *           `explainMetaSendError` above.
+ *
+ * A bare `100` is deliberately absent: it is Graph's generic "bad request",
+ * covering a field name we got wrong and the Instagram linkage failure below.
+ * Treating it as a missing approval would send somebody to App Review to look
+ * for a feature that is already granted.
  */
-const PROFILE_PERMISSION_CODES = new Set([10, 200]);
+const CAPABILITY_CODE = 3;
+const PROFILE_PERMISSION_CODES = new Set([CAPABILITY_CODE, 10, 200]);
 const UNSUPPORTED_GET_CODE = 100;
 const UNSUPPORTED_GET_SUBCODE = 33;
 
@@ -93,6 +107,26 @@ export function isProfilePermissionRefusal(error: MetaApiError): boolean {
   if (PROFILE_PERMISSION_CODES.has(error.code)) return true;
 
   return error.code === UNSUPPORTED_GET_CODE && error.subcode === UNSUPPORTED_GET_SUBCODE;
+}
+
+/**
+ * The Instagram refusal that is **not** about permissions.
+ *
+ *   (#100) The page is not linked to an Instagram account or the linked IG
+ *          account is not professional account
+ *
+ * Every Instagram profile lookup in production returns this, and no amount of
+ * App Review will change it: the Page and the Instagram account are not linked,
+ * or the account is personal rather than professional. It arrives as a bare
+ * `100`, which is also what a malformed field list returns, so the wording is
+ * the only thing that identifies it — the same reasoning as everywhere else in
+ * this file, where the code alone does not say enough.
+ */
+function isInstagramLinkFailure(error: MetaApiError): boolean {
+  if (error.code !== UNSUPPORTED_GET_CODE) return false;
+
+  const text = `${error.userMessage ?? ''} ${error.message}`.toLowerCase();
+  return text.includes('not linked to an instagram account') || text.includes('professional');
 }
 
 /**
@@ -111,16 +145,43 @@ export function explainMetaProfileError(error: MetaApiError, platform: MetaPlatf
   if (error.code === ACCESS_TOKEN_CODE)
     return withReference(explainAuthError(error.code, base), error);
 
+  // Checked before the permission case, because this is the refusal that would
+  // otherwise be read as one. Sending somebody to App Review for it wastes the
+  // trip: the feature could be granted tomorrow and every Instagram lookup would
+  // still fail exactly like this.
+  if (isInstagramLinkFailure(error)) {
+    return withReference(
+      `${base}\n\nThis is a **configuration** problem, not an approval one, and App Review ` +
+        `cannot fix it. The Instagram account must be a *professional* account (Business or ` +
+        `Creator) and it must be linked to the Facebook Page this app sends from — check the ` +
+        `Page's Linked Accounts settings and that INSTAGRAM_ACCOUNT_ID names that account. ` +
+        `Until both are true, every Instagram profile lookup fails this way no matter which ` +
+        `permissions the app holds.`,
+      error,
+    );
+  }
+
   if (isProfilePermissionRefusal(error)) {
     const product = platform === 'instagram' ? 'Instagram' : 'Messenger';
 
+    // Code 3 names the cause outright — the app lacks the capability — so it
+    // needs no hedging. The others genuinely cannot tell an unapproved app from
+    // a customer who is gone, and saying so is what stops the reader concluding
+    // it was this one person.
+    const ambiguity =
+      error.code === CAPABILITY_CODE
+        ? `Graph is saying the app does not hold the capability, which is not a property of ` +
+          `this customer — it will refuse every ${product} profile identically.`
+        : `Graph answers this way both when the person is gone and when the app is not ` +
+          `approved, and the two are not distinguishable from the message — so check the ` +
+          `feature before assuming it is the customer.`;
+
     return withReference(
-      `${base}\n\nGraph refused a ${product} profile read. It answers this way both when the ` +
-        `person is gone and when the app is not approved for **Business Asset User Profile ` +
-        `Access**, and the two are not distinguishable from the message — so check that feature ` +
-        `under App Review for the Meta app before assuming it is the customer. If it is not ` +
-        `granted, every ${product} ticket stays filed under a bare numeric id, which is what ` +
-        `this call exists to prevent.`,
+      `${base}\n\nGraph refused a ${product} profile read. ${ambiguity} Check **Business Asset ` +
+        `User Profile Access** under App Review for the Meta app. Until it is granted, every ` +
+        `${product} ticket stays filed under a bare numeric id, which is what this call exists ` +
+        `to prevent — and nothing is lost meanwhile: the identity is left unstamped, so approval ` +
+        `repairs the archive by itself.`,
       error,
     );
   }
