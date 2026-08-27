@@ -45,6 +45,7 @@ import {
   readCommentModeration,
   requested as requestModeration,
 } from '@/lib/meta/moderation';
+import { describeProfileRefresh, refreshChannelProfile } from '@/lib/meta/profile-refresh';
 import { metaWindowState } from '@/lib/meta/window';
 import { metaReplyTarget } from '@/lib/tickets/meta-thread';
 import {
@@ -82,6 +83,12 @@ import { windowState } from '@/lib/whatsapp/window';
 export type ActionState = {
   error: string | null;
   ok?: boolean;
+  /**
+   * What happened, when succeeding quietly would leave the agent guessing.
+   * Most actions change something visible on the page and need none; a profile
+   * refresh whose whole output is Meta's answer needs one.
+   */
+  message?: string;
   /**
    * Changes on every success. The composer keys its form on this so a second
    * consecutive send still clears the textarea — `ok: true` alone is the same
@@ -467,6 +474,92 @@ export async function moderateComment(
 
   refresh(row.conversation.number);
   return ok();
+}
+
+/**
+ * Asks Meta again who this customer is, because an agent said so.
+ *
+ * Every other profile lookup in the system is a job, and this one is not. The
+ * rule those follow — anything slow, external or retryable is queued — exists so
+ * that filing a customer's ticket never depends on Graph being up, and so that
+ * unattended work can be retried. Neither applies to a person pressing a button
+ * and waiting: the queue's retries are what the agent's second click already is,
+ * and the *whole output of this action is Meta's answer*, which a job would
+ * write to a worker log the agent cannot read. That log is precisely where the
+ * last month's diagnosis went to die (§6.27), so putting it back there would be
+ * repeating the mistake this button exists to end.
+ *
+ * The Graph call itself is `refreshChannelProfile`, shared with the job, so the
+ * two paths cannot answer differently for the same customer.
+ */
+export async function refreshRequesterProfile(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const agent = await requireAgent();
+  if (!can(agent, 'contact.edit')) {
+    return { error: 'You do not have permission to edit contacts' };
+  }
+
+  const row = await loadConversation(agent, String(formData.get('conversationId') ?? ''));
+  if (!row) return { error: 'Ticket not found' };
+
+  const readOnly = refuseIfReadOnly(row.conversation.channel);
+  if (readOnly) return readOnly;
+
+  const channel = row.conversation.channel;
+  if (channel !== 'facebook' && channel !== 'instagram') {
+    return { error: 'Only Facebook and Instagram customers have a profile to look up' };
+  }
+
+  // The identity is re-read here rather than posted by the form: a scoped id in
+  // a FormData field is an argument to a Graph call, and the ticket is the only
+  // thing entitled to say which customer this is.
+  const identities = await db
+    .select({ identifier: contactIdentities.identifier })
+    .from(contactIdentities)
+    .where(
+      and(
+        eq(contactIdentities.contactId, row.conversation.requesterContactId),
+        eq(contactIdentities.channel, channel),
+      ),
+    )
+    .limit(1);
+
+  const identity = identities[0];
+  if (!identity) return { error: 'This customer has no ' + channel + ' identity on file' };
+
+  const result = await refreshChannelProfile({
+    contactId: row.conversation.requesterContactId,
+    platform: channel,
+    userId: identity.identifier,
+    // The point of the button. Without it a contact already answered for — with
+    // a name Meta has since changed, or a picture that failed to copy — would
+    // return "already looked up" and the agent would have no way to force it.
+    force: true,
+  });
+
+  // Recorded for the outcomes that say something durable about this ticket. A
+  // refusal is worth as much as a success here: it is the evidence that the app
+  // asked and was turned down, on a date, at somebody's request.
+  if (result.kind === 'applied' || result.kind === 'refused') {
+    await db.insert(conversationEvents).values({
+      conversationId: row.conversation.id,
+      type: result.kind === 'applied' ? 'profile_refreshed' : 'profile_refresh_refused',
+      actorAgentId: agent.id,
+      data:
+        result.kind === 'applied'
+          ? { name: result.name, picture: result.picture }
+          : { permission: result.permission },
+    });
+  }
+
+  refresh(row.conversation.number);
+
+  const described = describeProfileRefresh(result);
+  return result.kind === 'applied' || result.kind === 'skipped'
+    ? { ...ok(), message: described }
+    : { error: described };
 }
 
 /**
