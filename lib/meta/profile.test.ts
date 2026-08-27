@@ -162,6 +162,15 @@ describe('isProfilePermissionRefusal', () => {
 
     expect(explained).toContain('Business Asset User Profile Access');
     expect(explained).toContain('code 3');
+
+    // The token type comes first, and it is the whole lesson of 2026-08-27: the
+    // message named only App Review, the token was a System User token, and a
+    // day went into the wrong dashboard. An explanation that lists one cause
+    // for an error with three is how that happens again.
+    expect(explained).toContain('Access Token Debugger');
+    expect(explained.indexOf('Token Debugger')).toBeLessThan(
+      explained.indexOf('Business Asset User Profile Access'),
+    );
   });
 
   it('sends an Instagram linkage refusal to the credential, not to App Review', () => {

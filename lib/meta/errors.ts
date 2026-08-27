@@ -144,12 +144,18 @@ export function explainMetaProfileError(error: MetaApiError, platform: MetaPlatf
     const product = platform === 'instagram' ? 'Instagram' : 'Messenger';
 
     return withReference(
-      `${base}\n\nGraph refused a ${product} profile read. It answers this way both when the ` +
-        `person is gone and when the app is not approved for **Business Asset User Profile ` +
-        `Access**, and the two are not distinguishable from the message — so check that feature ` +
-        `under App Review for the Meta app before assuming it is the customer. If it is not ` +
-        `granted, every ${product} ticket stays filed under a bare numeric id, which is what ` +
-        `this call exists to prevent.`,
+      `${base}\n\nGraph refused a ${product} profile read. Three different faults produce this ` +
+        `and they need three different fixes, so check them in this order.\n\n` +
+        `**1. The token type.** A page-scoped id can only be resolved by that Page's own token. ` +
+        `A System User or User token is refused exactly this way, whatever its scopes say — and ` +
+        `on 2026-08-27 that was the cause, after a day spent reading it as a missing approval. ` +
+        `Paste META_PAGE_ACCESS_TOKEN into Meta's Access Token Debugger: it must say Type: Page.` +
+        `\n\n**2. The approval.** If the token is a Page token, this is **Business Asset User ` +
+        `Profile Access** at Advanced Access. The tell is decisive: people with a role on the ` +
+        `Meta app are exempt, so if your own account resolves and a customer does not, it is ` +
+        `this and only App Review fixes it.\n\n**3. The customer.** Graph says the same thing ` +
+        `for somebody who has deleted their account. Only conclude this once the first two are ` +
+        `ruled out, because it is the one that looks like nothing is wrong.`,
       error,
     );
   }

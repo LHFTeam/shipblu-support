@@ -687,8 +687,17 @@ provider. Each is a round trip somebody has to actually watch:
   the same channel and it has not been diagnosed; the trace ids are on the
   message rows.
 
-- **Meta's Business Asset User Profile Access — now exercised, and refused every
-  time.** The User Profile API is the only thing that can tell this system who a
+- **Meta's Business Asset User Profile Access — now working for role-holders,
+  and refused for everybody else.** _Updated 2026-08-27 14:40 UTC._ The first
+  cause was never the approval: `META_PAGE_ACCESS_TOKEN` held a **System User**
+  token, which cannot resolve a page-scoped id whatever its scopes say (§6.28).
+  With a real Page token in place, the app owner's own Facebook and Instagram
+  accounts both resolve — name and picture — while a customer is still refused.
+  So the approval described below is a real requirement; it was simply
+  underneath a configuration fault that produced the identical error. What
+  follows is the record of finding that out, and should be read with §6.28.
+
+  The User Profile API is the only thing that can tell this system who a
   Messenger or Instagram customer is — their webhooks carry a scoped id and
   nothing else, unlike WhatsApp, which puts the profile name in the payload. The
   wiring landed on 2026-08-26 and has been calling Graph since: **17
@@ -1397,7 +1406,10 @@ where not signature_verified group by 1` rather than a log line nobody was
     never counted against it. **The counter measures granted usage, not
     attempted usage**, which means it stays at zero until approval and can never
     be evidence about whether the code works. The log and the `jobs` table
-    answer that question; the dashboard does not.
+    answer that question; the dashboard does not. (Written while every call was
+    being refused. Successful calls began on 2026-08-27 once the token was
+    fixed — §6.28 — so this is now checkable against the dashboard rather than
+    inferred from a zero.)
 
     The expensive half is what the refusals said. `isProfilePermissionRefusal`
     matched Meta's documented answer — `100/33`, plus 200 and 10 — and Facebook
@@ -1422,8 +1434,59 @@ the linked IG account is not professional account`, from
     §1's rule about breaking a count down along the dimension that can fail
     applies to failures too: "17 refused" reads as one problem and was two.
 
-28. **Moving Instagram back onto its Facebook Page: the code needs no deploy,
-    and the order of the two steps is the whole risk.** Decided 2026-08-27 —
+28. **`META_PAGE_ACCESS_TOKEN` held a System User token, and that was the whole
+    Meta outage.** Resolved 2026-08-27, after a day spent reading it as an App
+    Review problem.
+
+    A page-scoped id can only be resolved by that Page's own token. The value in
+    `META_PAGE_ACCESS_TOKEN` was a **System User** token belonging to a different
+    integration ("ShipBlu Merchant Backend"), minted under the Helpdesk app. Its
+    scopes were complete and correct — `pages_messaging`, `pages_read_engagement`,
+    `pages_manage_metadata`, `instagram_basic`, `instagram_manage_messages`, all
+    present — which is exactly why nobody looked at it: **the scope list is the
+    thing everyone checks, and it was innocent.** Graph's answer was
+    `(#3) Application does not have the capability to make this API call`, which
+    reads as "the app is not approved" and is really "this actor is not the
+    Page". Replacing it with the Page's own token (`GET /{page-id}?fields=
+access_token`, authorised with the System User token, which never expires)
+    fixed Facebook and Instagram in the same minute.
+
+    **Check `Type: Page` in Meta's Access Token Debugger before believing any
+    Graph refusal that names a capability.** Scopes are not the same question,
+    and a token can carry every scope you need and still be the wrong kind.
+
+    Two conclusions recorded earlier died with it:
+
+    - **Instagram is reachable through the Facebook Page after all.** The
+      `(#100) The page is not linked to an Instagram account` refusals were the
+      same wrong token, not a missing Page↔Instagram link. With the Page token,
+      ticket #6478 resolved on `graph.facebook.com` at 14:36 UTC. The earlier
+      version of this entry read that error as proof the account was on
+      Instagram Login and that `INSTAGRAM_ACCESS_TOKEN` had to be set; **it is
+      not proof of anything, and the variable stays unset.** An error message
+      about a relationship between two objects is not evidence about that
+      relationship when the caller is not one of them.
+    - **The counter argument in §6.27 is now testable.** Real successful calls
+      are being made, so whether the App Dashboard's usage figure moves is a
+      question with an answer rather than an inference from zero.
+
+    **The approval is still needed, and is now the only thing left.** With the
+    token fixed, an account holding a role on the Meta app resolves and a member
+    of the public does not: #6410 and #6478 both named at 14:35–14:37 UTC, while
+    #8125 — a customer with twelve messages since 25 August — was refused
+    `permission: true` between the two successes. That is precisely the Standard
+    Access boundary, so **Business Asset User Profile Access at Advanced Access
+    is a genuine requirement** and not a misdiagnosis. Both things were true at
+    once, and the token was masking the one underneath.
+
+    The upside: a role-holder's account now produces a real, successful call, so
+    the screencast App Review asks for can finally be recorded.
+
+29. **Moving Instagram back onto its Facebook Page: the code needs no deploy,
+    and the order of the two steps is the whole risk.** Decided 2026-08-27, and
+    see §6.28 — the evidence that the account was on Instagram Login turned out
+    to be a wrong-token error, so the premise below is weaker than it reads.
+    Kept because the mechanics are right whenever the move is made.
     the helpdesk owns the **Page-connected** Instagram account, not the
     Instagram Login one, which reverses the recommendation standing in
     `plans/instagram-comment-management.md`.
