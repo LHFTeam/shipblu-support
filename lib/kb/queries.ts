@@ -2,6 +2,7 @@ import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { kbArticles, kbCategories, kbFolders, kbRedirects } from '@/db/schema';
 import type { Locale } from './locale';
+import { hybridMatch, hybridRank } from './rank';
 import { ANONYMOUS, articleVisibleTo, folderVisibleTo, type KbViewer } from './visibility';
 
 /**
@@ -495,12 +496,11 @@ export type SearchHit = ArticleSummary & { categorySlug: string; rank: number };
 /**
  * Full-text search with a trigram fallback.
  *
- * Postgres ships no Arabic text search configuration, so the vector is built
- * with `simple` — which does no stemming at all. That makes exact-ish matching
- * good and morphological matching nonexistent, in both languages. Trigram
- * similarity covers the gap: it is what finds "shippment" and what makes
- * Arabic search work at all, since `simple` will not relate a word to the same
- * word with a prefixed conjunction.
+ * The matching and ranking themselves live in `./rank.ts`, shared with the
+ * agent console's search. What is specific to this function is the viewer: the
+ * console sees every published article and decides per row whether it may be
+ * linked to a customer, while this one must never return a row the reader is
+ * not allowed to see at all.
  */
 export async function searchArticles(
   viewer: KbViewer,
@@ -514,12 +514,7 @@ export async function searchArticles(
   // Written once and reused for both the projection and the ordering. Ordering
   // by output position instead would have sorted by `title`, which reads as
   // "search is alphabetical" rather than as a bug.
-  const rank = sql<number>`
-    greatest(
-      ts_rank(${kbArticles.searchVector}, websearch_to_tsquery('simple', ${trimmed})),
-      similarity(${kbArticles.title}, ${trimmed}) * 0.6
-    )
-  `;
+  const rank = hybridRank(trimmed);
 
   const rows = await db
     .select({
@@ -538,10 +533,7 @@ export async function searchArticles(
         eq(kbArticles.locale, locale),
         articleVisibleTo(viewer),
         folderVisibleTo(viewer),
-        sql`(
-          ${kbArticles.searchVector} @@ websearch_to_tsquery('simple', ${trimmed})
-          OR ${kbArticles.title} % ${trimmed}
-        )`,
+        hybridMatch(trimmed),
       ),
     )
     .orderBy(desc(rank), asc(kbArticles.title))

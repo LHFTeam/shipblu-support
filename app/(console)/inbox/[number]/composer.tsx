@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { ChevronDownIcon, ChevronUpIcon } from '@/components/icons';
 import { Button, ErrorText, Input, Label, Select, Textarea } from '@/components/ui';
 import { useNow } from '@/components/use-now';
+import type { AgentArticleHit } from '@/lib/kb/agent-search';
 import type { CannedResponseOption, ConversationDetail } from '@/lib/tickets/queries';
 import { insertCanned } from '@/lib/tickets/canned';
 import { describeWindow, metaWindowState } from '@/lib/meta/window';
@@ -13,10 +14,24 @@ import { renderTemplatePreview, templateShape } from '@/lib/whatsapp/templates';
 import { formatRemaining, windowState } from '@/lib/whatsapp/window';
 import type { PickerEntry } from '@/lib/side-conversations/queries';
 import { addNote, sendReply, sendTemplateReply, type ActionState } from '../../actions';
+import { KnowledgePanel } from './knowledge';
 import { StartSideConversationForm } from './side-conversations';
 import type { TemplateOption } from './view';
 
 const INITIAL: ActionState = { error: null };
+
+/**
+ * What the knowledge panel needs, or null when the agent lacks `kb.view`.
+ *
+ * Passed as one object rather than two props so "this agent has no knowledge
+ * panel" is a single null to check, in the same shape the sidebar's optional
+ * sections use.
+ */
+export type KnowledgeContext = {
+  suggestions: AgentArticleHit[];
+  /** The customer's language, read off the script of what they last wrote. */
+  locale: 'ar' | 'en';
+};
 
 type Tab = 'reply' | 'note' | 'template' | 'side';
 
@@ -28,6 +43,7 @@ export function Composer({
   templates,
   recipients,
   canned,
+  knowledge,
   canSideConversation,
 }: {
   conversation: ConversationDetail;
@@ -35,6 +51,7 @@ export function Composer({
   recipients: PickerEntry[];
   /** Reusable replies this agent may insert — already scoped to them. */
   canned: CannedResponseOption[];
+  knowledge: KnowledgeContext | null;
   canSideConversation: boolean;
 }) {
   const isWhatsApp = conversation.channel === 'whatsapp';
@@ -233,6 +250,7 @@ export function Composer({
                 conversationId={conversation.id}
                 isCommentThread={isCommentThread}
                 canned={canned}
+                knowledge={knowledge}
                 onSent={onSent}
               />
             )
@@ -306,11 +324,13 @@ function ReplyForm({
   conversationId,
   isCommentThread = false,
   canned,
+  knowledge,
   onSent,
 }: {
   conversationId: string;
   isCommentThread?: boolean;
   canned: CannedResponseOption[];
+  knowledge: KnowledgeContext | null;
   onSent?: () => void;
 }) {
   const [state, action] = useActionState(sendReply, INITIAL);
@@ -335,16 +355,18 @@ function ReplyForm({
   */
   const [usedId, setUsedId] = useState('');
 
-  function insert(response: CannedResponseOption) {
+  /*
+    Two things insert into this box now — a canned response and an article link
+    — and they want identical caret handling and different bookkeeping. Taking
+    text rather than a row keeps `insertCanned`'s off-by-one in one place and
+    leaves `usage_count`, which is about canned responses specifically, to the
+    one caller that owes it.
+  */
+  const insertText = useCallback((snippet: string) => {
     const box = bodyRef.current;
     if (!box) return;
 
-    const { text, caret } = insertCanned(
-      box.value,
-      response.bodyText,
-      box.selectionStart,
-      box.selectionEnd,
-    );
+    const { text, caret } = insertCanned(box.value, snippet, box.selectionStart, box.selectionEnd);
 
     // Written straight to the node, because the textarea is uncontrolled — the
     // form is keyed on the send nonce so the browser keeps the agent's draft
@@ -353,8 +375,15 @@ function ReplyForm({
     box.value = text;
     box.focus();
     box.setSelectionRange(caret, caret);
-    setUsedId(response.id);
-  }
+  }, []);
+
+  const insertCannedResponse = useCallback(
+    (response: CannedResponseOption) => {
+      insertText(response.bodyText);
+      setUsedId(response.id);
+    },
+    [insertText],
+  );
 
   return (
     <form key={state.nonce ?? 0} action={action} className="flex flex-col gap-2">
@@ -380,7 +409,15 @@ function ReplyForm({
         required
       />
 
-      <CannedPicker responses={canned} onPick={insert} />
+      <CannedPicker responses={canned} onPick={insertCannedResponse} />
+
+      {knowledge ? (
+        <KnowledgePanel
+          suggestions={knowledge.suggestions}
+          locale={knowledge.locale}
+          onInsert={insertText}
+        />
+      ) : null}
 
       {isCommentThread ? (
         <label className="flex items-start gap-2 rounded-md border border-[var(--border)] p-2 text-xs">

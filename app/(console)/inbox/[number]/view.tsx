@@ -31,7 +31,7 @@ import { readOnlyReason } from '@/lib/tickets/channel-policy';
 import type { PickerEntry } from '@/lib/side-conversations/queries';
 import { CommentModeration } from './comment-moderation';
 import { ProfileRefresh } from './profile-refresh';
-import { Composer } from './composer';
+import { Composer, type KnowledgeContext } from './composer';
 import { SideConversationCard, SideConversationsField } from './side-conversations';
 
 /**
@@ -100,6 +100,7 @@ export function ConversationView({
   recipients,
   fields,
   canned,
+  knowledge,
   canSideConversation,
   canModerateComments,
   canEditContact,
@@ -116,6 +117,8 @@ export function ConversationView({
   recipients: PickerEntry[];
   /** Reusable replies, already scoped to this agent's own and their groups'. */
   canned: CannedResponseOption[];
+  /** Null when the agent lacks `kb.view`, or on a channel with no composer. */
+  knowledge: KnowledgeContext | null;
   canSideConversation: boolean;
   /** Whether this agent may hide or delete a public comment. */
   canModerateComments: boolean;
@@ -147,6 +150,7 @@ export function ConversationView({
             templates={templates}
             recipients={recipients}
             canned={canned}
+            knowledge={knowledge}
             canSideConversation={canSideConversation}
           />
         )}

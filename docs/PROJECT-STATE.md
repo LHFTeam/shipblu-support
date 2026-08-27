@@ -194,6 +194,63 @@ now takes an object (`object=instagram` adds `comments`, `object=page` adds
 customer's comment, and `plans/instagram-comment-management.md` carries the
 order of operations — none of which is code, and the code is inert without it.
 
+And now **the knowledge base inside the composer**. Until this, `searchArticles`
+had three callers and every one was customer-facing — the help centre, the
+widget, the tracking page — so the one person who reads articles for a living
+had no way to reach one without leaving the ticket. The reply tab now carries a
+Knowledge panel under the textarea, beside the canned picker: up to three
+articles suggested from the ticket before the agent types, a debounced search
+over the same tsvector-plus-trigram ranking the help centre uses, each hit
+readable as plain text in place, and a one-click insert of its title and public
+URL at the caret through the same `insertCanned` the canned responses use.
+
+It is under the composer rather than in the sidebar on purpose. Every helpdesk
+worth copying puts knowledge where the agent's hands already are — Zendesk in
+the context panel, Help Scout behind `/`, Intercom behind ⌘K — and the sidebar
+here is `hidden … xl:block`, so on a laptop under 1280px and on every phone the
+panel would simply not exist. `composer.tsx` had already named this shape as the
+successor to the canned `<select>`: "if the list ever grows past what a dropdown
+can carry, the folder grouping below is already the shape a search would filter".
+112 articles is that point. It is expanded in place, so the no-modals rule holds.
+
+**A folder's visibility overrides its articles', and the link gate had to be
+built on that rather than on the article row.** Every one of the 112 articles
+carries `visibility = 'public'`; four of them sit in folders marked
+`agents_only` — working hours, and one per internal team — and are invisible on
+the public help centre because `folderVisibleTo` gates them. Reading the article
+row alone would have offered a one-click link to a page that 404s for every
+customer, which is precisely the hole the required-`KbViewer` design exists to
+close. The effective level is computed in SQL over both columns
+(`effectiveVisibility` in `lib/kb/agent-search.ts`) and decides the control:
+insert freely for `public`, insert with a warning for `logged_in`, read-only for
+`agents_only` and for `selected_companies`, which is servable in principle and
+matches nobody today. Those four internal articles are empty Freshdesk
+placeholders right now, so the gate currently guards nothing worth sending —
+which is the wrong way round to read it. The first sentence somebody writes into
+the working-hours article is the one that must not become a customer link.
+
+Three smaller decisions worth knowing. The agent search is a **third** read
+model, `lib/kb/agent-search.ts`, beside the viewer-gated `queries.ts` and the
+authoring `admin.ts` — an agent may read anything published and link only what
+the recipient can open, and folding that into either of the others would have
+put an agent branch inside the rule that keeps internal content out of Google.
+Suggestions are a **disjunction**, not a phrase: `websearch_to_tsquery` ANDs its
+terms, so handing it a whole customer message returns nothing, and `lib/kb/seed.ts`
+reduces the message to at most six content words joined with `OR` — dropping any
+token carrying a digit, because a tracking number is the most-repeated string in
+these tickets and matches no article ever written. And the endpoint is
+`/api/knowledge`, deliberately **not** under `/api/kb`, which `proxy.ts` lists in
+`PUBLIC_PREFIXES`; it authorises itself with `kb.view`, which is already on the
+agent role baseline.
+
+Measured before it was built, and the figures are why bodies travel with the
+search results rather than behind a second fetch: mean body 995 characters, p95
+2,830, longest 3,904, so three suggestions is about 3KB on a page that already
+carries an entire message timeline. Two articles have no body text at all — the
+Arabic and English packaging guides are images and nothing else — and the panel
+says so rather than showing an empty box. Those images are still hot-linked from
+`s3.amazonaws.com/cdn.freshdesk.com` and will die with the Freshdesk account.
+
 **The bot channel is live, and everything else is not.** This is the single most
 important thing to understand about the current state, and the easiest to read
 backwards.
@@ -771,6 +828,19 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
 - One imported article's detected language disagrees with its category. The
   importer counts and reports these rather than silently refiling them; someone
   who reads Arabic should look at it.
+- **A folder or category name is not searchable, in the console or on the help
+  centre.** `kb_articles.search_vector` is generated from the title and body
+  only, so "ساعات العمل" finds nothing even though a folder is called exactly
+  that — and those names are often the words a person thinks in. Fixing it means
+  changing the generated column, so it is a migration rather than a query
+  change. Surfaced by the composer's knowledge panel, where an agent typing a
+  team or topic name is the obvious first thing to try.
+- **`KB_PUBLIC_HOST` is unset, and the composer now pastes URLs built from it.**
+  `publicBaseUrl()` falls back to `APP_URL`, and the links still resolve —
+  `proxy.ts` rewrites any `/{locale}/…` path under `/help` on every hostname —
+  but an agent inserting an article link today sends a customer the Render
+  service URL. Not a reason to hold the feature; a reason the variable should be
+  set before a real customer is answered. §5.1 has it in the cutover list.
 - ~~`logged_in` and `selected_companies` knowledge base articles are still not
   served.~~ Both are evaluated now. `publiclyVisible()` is gone; every query in
   `lib/kb/queries.ts` takes a `KbViewer`, resolved from the portal session by
