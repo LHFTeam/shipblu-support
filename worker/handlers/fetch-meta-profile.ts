@@ -107,7 +107,41 @@ function report(platform: string, userId: string, result: ProfileRefreshResult):
       console.warn(`${prefix} could not be read this time: ${result.error.message}`);
       return;
     case 'applied':
-      console.log(`${prefix} → ${describeProfileRefresh(result)}`);
+      console.log(
+        `${prefix} → ${describeProfileRefresh(result)}` +
+          `${result.locale ? ` locale ${result.locale}.` : ''}` +
+          // Whether one arrived, never which. Gender is special-category
+          // personal data, nothing in this system branches on it, and a
+          // backfill writes one of these lines per identified customer into
+          // Render's log retention — the operational signal is that the field
+          // came back, not its value.
+          `${result.gender ? ' Gender recorded.' : ''}`,
+      );
+
+      /*
+        The second sentence this function exists for, and the same argument as
+        the refusal above: it is not about this customer.
+
+        `extendedFieldsRefused` means Graph rejected the request carrying
+        `locale` and `gender` and accepted the one without them, which narrows
+        the cause to exactly those two permissions and separates it from a
+        customer who set neither. Both leave the columns empty and only one is
+        fixed by an approval.
+
+        Per person rather than once per run because the backfill's whole output
+        is these lines: a run where every contact says this and a run where none
+        does are the two unambiguous answers.
+      */
+      if (result.extendedFieldsRefused) {
+        console.warn(
+          `${prefix}: locale and gender were refused, the rest was not — the Meta app holds ` +
+            `Business Asset User Profile Access but not pages_user_locale / ` +
+            `pages_user_gender. Check those two under App Review. The name and picture are ` +
+            `saved and the identity is stamped, so once they are granted this contact is only ` +
+            `revisited by \`npm run job -- backfill_meta_profiles force=true\` — an unforced ` +
+            `run selects nothing.`,
+        );
+      }
       return;
   }
 }

@@ -1,9 +1,11 @@
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { Avatar } from '@/components/avatar';
+import { InfoTip } from '@/components/tooltip';
 import { Badge, Card, PageHeader } from '@/components/ui';
 import { requirePermission } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
+import { DEFAULT_CONTACT_LOCALE } from '@/lib/contacts/locale';
 import { conversationsForContact, getContact } from '@/lib/contacts/queries';
 import {
   mergeCandidates,
@@ -13,6 +15,7 @@ import {
 } from '@/lib/contacts/merge';
 import { shipmentsForContact, shippingAccountsForContact } from '@/lib/shipments/queries';
 import { formatDateTime } from '@/lib/format';
+import { LOCALE_NAMES, type Locale } from '@/lib/kb/locale';
 import { ConversationTable } from '../conversation-table';
 import { SyncBadge } from '../page';
 import { AccountLinks, RoleToggles } from './forms';
@@ -126,6 +129,9 @@ export default async function ContactPage({
                 <span className="w-20 shrink-0 opacity-60">{identity.channel}</span>
                 <span className="min-w-0 break-all">{identity.identifier}</span>
                 {identity.isVerified ? <Badge tone="success">verified</Badge> : null}
+                {/* What the channel itself reported, which can be more specific
+                    than the language above — `en_GB` where we only store 'en'. */}
+                {identity.profileLocale ? <Badge>{identity.profileLocale}</Badge> : null}
               </li>
             ))}
             {contact.identities.length === 0 ? <li className="opacity-50">None.</li> : null}
@@ -135,6 +141,36 @@ export default async function ContactPage({
               Company: {contact.companyName}
             </p>
           ) : null}
+
+          <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-xs">
+            <div className="flex gap-2">
+              <dt className="opacity-60">Language</dt>
+              <dd>
+                {LOCALE_NAMES[contact.locale as Locale] ?? contact.locale}
+                {/*
+                  'en' is the column default, so it means "English" and "nobody
+                  has told us" equally — and an agent about to write to somebody
+                  deserves to know which. Anything else was learned.
+                */}
+                {contact.locale === DEFAULT_CONTACT_LOCALE ? (
+                  <InfoTip label="this contact's language">
+                    English is the default every contact starts at, so this reads the same whether
+                    the customer told us or nobody ever asked. A profile lookup deliberately does
+                    not change it &mdash; a Facebook interface language is not a support-language
+                    preference, and this value decides what an auto-reply and a survey go out in on
+                    every channel. What the channel itself reported is shown beside the identity
+                    above.
+                  </InfoTip>
+                ) : null}
+              </dd>
+            </div>
+            {contact.gender ? (
+              <div className="flex gap-2">
+                <dt className="opacity-60">Gender</dt>
+                <dd>{contact.gender}</dd>
+              </div>
+            ) : null}
+          </dl>
         </Card>
 
         <Card>

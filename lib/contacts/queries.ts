@@ -30,13 +30,21 @@ export type ContactDetail = {
   /** Whether a profile picture is on file, so the page can skip a 404. */
   hasAvatar: boolean;
   locale: string;
+  gender: string | null;
   isBlocked: boolean;
   isShipper: boolean;
   isRecipient: boolean;
   companyId: string | null;
   companyName: string | null;
   createdAt: Date;
-  identities: { id: string; channel: string; identifier: string; isVerified: boolean }[];
+  identities: {
+    id: string;
+    channel: string;
+    identifier: string;
+    isVerified: boolean;
+    /** What this channel said, e.g. Messenger's `ar_AR`. Null on most rows. */
+    profileLocale: string | null;
+  }[];
 };
 
 export async function getContact(contactId: string): Promise<ContactDetail | null> {
@@ -59,6 +67,7 @@ export async function getContact(contactId: string): Promise<ContactDetail | nul
       channel: contactIdentities.channel,
       identifier: contactIdentities.identifier,
       isVerified: contactIdentities.isVerified,
+      profileLocale: contactIdentities.profileLocale,
     })
     .from(contactIdentities)
     .where(eq(contactIdentities.contactId, contactId))
@@ -71,6 +80,7 @@ export async function getContact(contactId: string): Promise<ContactDetail | nul
     phone: row.contact.primaryPhone,
     hasAvatar: row.contact.avatarPath !== null,
     locale: row.contact.locale,
+    gender: row.contact.gender,
     isBlocked: row.contact.isBlocked,
     isShipper: row.contact.isShipper,
     isRecipient: row.contact.isRecipient,

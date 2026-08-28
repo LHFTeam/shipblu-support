@@ -159,6 +159,18 @@ async function graph<T>(
     method: 'GET' | 'POST' | 'DELETE';
     body?: unknown;
     query?: Record<string, string>;
+    /**
+     * Suppress the warning below for a request whose failure is expected and
+     * handled by the caller.
+     *
+     * Only `fetchProfile`'s extended attempt sets it. That call is *designed*
+     * to fail until two App Review permissions land, and logging a Graph error
+     * for each one would put a red line above every successful profile lookup
+     * in the backfill — whose entire output is those lines, and whose value is
+     * that a clean run means something. The caller logs the one sentence that
+     * is actually true instead.
+     */
+    quiet?: boolean;
   },
 ): Promise<T> {
   const { base, token } = endpoint(platform);
@@ -215,10 +227,12 @@ async function graph<T>(
     // either origin depending on which credential is configured, and "wrong
     // host for this token" is refused with the same unhelpful sentence as
     // everything else Graph declines.
-    console.warn(
-      `[meta] ${platform} ${init.method} ${url.host}/${path} failed with ` +
-        `${response.status}: ${text.slice(0, 1000)}`,
-    );
+    if (!init.quiet) {
+      console.warn(
+        `[meta] ${platform} ${init.method} ${url.host}/${path} failed with ` +
+          `${response.status}: ${text.slice(0, 1000)}`,
+      );
+    }
 
     throw new MetaApiError(
       body?.error?.message ?? text.slice(0, 500) ?? `Graph API returned ${response.status}`,
@@ -396,27 +410,61 @@ export type MetaProfile = {
    * anything — see `contacts.avatarPath`.
    */
   pictureUrl: string | null;
+  /**
+   * Facebook's own locale code — `ar_AR`, `en_US` — not one of ours. Narrowed
+   * by `appLocale()` in `lib/meta/profile.ts`; kept raw here because the region
+   * half is the only record of which Arabic or which English somebody reads,
+   * and our own column cannot hold it.
+   */
+  locale: string | null;
+  gender: string | null;
+  /**
+   * The locale and gender were asked for and Graph refused *them* — the name
+   * and picture in this same object came back from a second, narrower request.
+   *
+   * Distinguishing that from "this person set neither" is the whole reason the
+   * fallback exists: both leave the two fields null, and only one of them is
+   * fixed by an approval. The caller logs the difference.
+   */
+  extendedFieldsRefused: boolean;
 };
 
 /**
- * The fields the **Business Asset User Profile Access** feature grants, per
- * platform.
+ * The fields to ask for, per platform.
  *
- * Every one of them is gated behind that single feature and nothing else, which
- * is why they are requested together: a partial list would not lower the
- * approval bar, it would only leave the console with less to show. The three
- * fields Meta gates *separately* — `locale` (`pages_user_locale`), `timezone`
- * (`pages_user_timezone`) and `gender` (`pages_user_gender`) — are deliberately
- * absent. Asking for one we are not approved for fails the whole request, so
- * the name we do have rights to would be lost along with it.
+ * The base list is what **Business Asset User Profile Access** grants on its
+ * own. Every field in it is gated behind that single feature and nothing else,
+ * which is why they are requested together: a partial list would not lower the
+ * approval bar, it would only leave the console with less to show.
  *
- * Instagram names the same idea with a different vocabulary: no first/last
- * split, and a `username` that is the handle an agent would actually recognise.
+ * `extended` adds the two fields Meta gates *separately*, and which this app now
+ * has requests in for: `locale` (`pages_user_locale`) and `gender`
+ * (`pages_user_gender`). They are a separate list rather than simply appended to
+ * the base one because **asking for a field the app is not approved for fails
+ * the whole request**, taking the name and the picture down with it — which is
+ * why they were left out entirely until somebody wanted them. `fetchProfile`
+ * asks for the extended list first and falls back to the base one, so an app
+ * holding only the feature still learns who the customer is.
+ *
+ * `timezone` (`pages_user_timezone`) is still absent: nothing reads
+ * `contacts.timezone` and it is a third permission to justify to App Review for
+ * a column no screen shows.
+ *
+ * Instagram has no extended list at all. Its User Profile API offers neither
+ * field, and `pages_user_*` are Page permissions — asking `graph.instagram.com`
+ * for `locale` is a malformed request, not an unapproved one, so it would fail
+ * forever rather than start working on approval. Instagram also names the base
+ * idea with a different vocabulary: no first/last split, and a `username` that
+ * is the handle an agent would actually recognise.
  */
-export function profileFields(platform: MetaPlatform): string {
-  return platform === 'instagram'
-    ? 'name,username,profile_pic'
-    : 'first_name,last_name,name,profile_pic';
+export function profileFields(
+  platform: MetaPlatform,
+  options: { extended?: boolean } = {},
+): string {
+  if (platform === 'instagram') return 'name,username,profile_pic';
+
+  const base = 'first_name,last_name,name,profile_pic';
+  return options.extended ? `${base},locale,gender` : base;
 }
 
 type RawProfile = {
@@ -425,6 +473,8 @@ type RawProfile = {
   first_name?: string;
   last_name?: string;
   profile_pic?: string;
+  locale?: string;
+  gender?: string;
 };
 
 /**
@@ -464,15 +514,63 @@ export function profileDisplayName(result: RawProfile): string | null {
  * distinction.
  */
 export async function fetchProfile(platform: MetaPlatform, userId: string): Promise<MetaProfile> {
-  const result = await graph<RawProfile>(platform, userId, {
-    method: 'GET',
-    query: { fields: profileFields(platform) },
-  });
+  const read = (fields: string, quiet = false) =>
+    graph<RawProfile>(platform, userId, { method: 'GET', query: { fields }, quiet });
 
+  // Instagram has no extended fields to ask for, so it never pays for the
+  // attempt — one request, the same as before.
+  if (platform === 'instagram') return shape(await read(profileFields(platform)), false);
+
+  try {
+    return shape(await read(profileFields(platform, { extended: true }), true), false);
+  } catch (error) {
+    /*
+      Retried narrower on *any* final refusal, not only the one that looks like
+      a missing permission.
+
+      Graph rejects the whole request when any single field is unapproved, so
+      before `pages_user_locale` and `pages_user_gender` are granted this first
+      call fails for every customer — and giving up there would lose the name
+      and the picture too, which is the regression the fields were kept out of
+      the list to avoid in the first place.
+
+      The condition is deliberately not `isProfilePermissionRefusal`. That
+      predicate is tuned for a refusal of the *node* — 100/33, 200, 10 — and
+      excludes a bare 100 on purpose, because on a node read that means "a field
+      name we got wrong". But a bare 100 is exactly what Graph returns for a
+      field it will not give us: `(#100) Tried accessing nonexisting field
+      (locale) on node type (User)`, with no subcode. Keying the fallback on the
+      narrower predicate would therefore have missed the case it exists for and
+      let the name be lost anyway — the precise failure this is written to
+      prevent. **Which shape arrives here has never been observed against the
+      real Graph** (no Meta profile has ever been fetched in production, see
+      `docs/PROJECT-STATE.md` §5.2), so the retry must not depend on guessing
+      it.
+
+      Transient failures still propagate: a rate limit or a 5xx is the job's to
+      retry with backoff, and asking again immediately would only spend the
+      second call on the same refusal.
+    */
+    if (!(error instanceof MetaApiError) || error.isTransient) throw error;
+
+    /*
+      The narrower call's own failure is what surfaces, not this one. If the
+      base fields are refused too then the cause is the feature rather than
+      these two permissions, and `explainMetaProfileError` has a different
+      sentence for it.
+    */
+    return shape(await read(profileFields(platform)), true);
+  }
+}
+
+function shape(result: RawProfile | null, extendedFieldsRefused: boolean): MetaProfile {
   return {
     name: profileDisplayName(result ?? {}),
     username: result?.username?.trim() || null,
     pictureUrl: result?.profile_pic || null,
+    locale: result?.locale?.trim() || null,
+    gender: result?.gender?.trim() || null,
+    extendedFieldsRefused,
   };
 }
 

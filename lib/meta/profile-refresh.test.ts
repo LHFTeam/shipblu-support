@@ -3,6 +3,27 @@ import { MetaApiError } from './client';
 import { describeProfileRefresh, type ProfileRefreshResult } from './profile-refresh';
 
 /**
+ * An `applied` result with the fields this suite does not care about filled in.
+ *
+ * The locale and gender that ride along on that result are a property of the
+ * profile call, not of the sentence being asserted here, so they are defaulted
+ * rather than repeated in every case.
+ */
+function applied(
+  over: Partial<Extract<ProfileRefreshResult, { kind: 'applied' }>>,
+): ProfileRefreshResult {
+  return {
+    kind: 'applied',
+    name: null,
+    picture: 'none',
+    locale: null,
+    gender: false,
+    extendedFieldsRefused: false,
+    ...over,
+  };
+}
+
+/**
  * What the agent is told, which on this feature is the entire product.
  *
  * The console's retry button exists because a refusal was only ever written to
@@ -27,7 +48,7 @@ describe('describeProfileRefresh', () => {
   });
 
   it('does not claim a name when Meta had none to give', () => {
-    const said = describeProfileRefresh({ kind: 'applied', name: null, picture: 'none' });
+    const said = describeProfileRefresh(applied({ name: null, picture: 'none' }));
 
     expect(said).toContain('no name or picture');
     // The bug this guards: "Got null" or a cheerful success that leaves the
@@ -40,23 +61,15 @@ describe('describeProfileRefresh', () => {
     // The name is already saved at this point, so "failed" would be wrong and
     // an unqualified success would leave a contact permanently faceless while
     // Meta holds a picture for them.
-    const said = describeProfileRefresh({ kind: 'applied', name: 'Layla', picture: 'retry' });
+    const said = describeProfileRefresh(applied({ name: 'Layla', picture: 'retry' }));
 
     expect(said).toContain('Layla');
     expect(said).toContain('try again');
   });
 
   it('separates a name with a picture from a name without one', () => {
-    const withPicture = describeProfileRefresh({
-      kind: 'applied',
-      name: 'Ali Hassan',
-      picture: 'stored',
-    });
-    const withoutPicture = describeProfileRefresh({
-      kind: 'applied',
-      name: 'Ali Hassan',
-      picture: 'none',
-    });
+    const withPicture = describeProfileRefresh(applied({ name: 'Ali Hassan', picture: 'stored' }));
+    const withoutPicture = describeProfileRefresh(applied({ name: 'Ali Hassan', picture: 'none' }));
 
     expect(withPicture).toContain('picture');
     expect(withoutPicture).not.toContain('picture');
@@ -98,8 +111,8 @@ describe('describeProfileRefresh', () => {
       { kind: 'unconfigured', detail: 'X' },
       { kind: 'refused', reason: 'no', permission: false },
       { kind: 'transient', error: new MetaApiError('later', 500, null, null, true) },
-      { kind: 'applied', name: 'A', picture: 'stored' },
-      { kind: 'applied', name: null, picture: 'none' },
+      applied({ name: 'A', picture: 'stored' }),
+      applied({ name: null, picture: 'none' }),
     ];
 
     for (const result of all) {

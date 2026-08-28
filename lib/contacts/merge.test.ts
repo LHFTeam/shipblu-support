@@ -11,6 +11,7 @@ function side(overrides: Partial<MergeSide> = {}): MergeSide {
     companyId: null,
     timezone: null,
     locale: 'en',
+    gender: null,
     customFields: {},
     isBlocked: false,
     isShipper: false,
