@@ -104,6 +104,7 @@ export function ConversationView({
   canSideConversation,
   canModerateComments,
   canEditContact,
+  canClose,
   currentAgentId,
 }: {
   conversation: ConversationDetail;
@@ -124,6 +125,8 @@ export function ConversationView({
   canModerateComments: boolean;
   /** Whether this agent may re-read the customer's profile from Meta. */
   canEditContact: boolean;
+  /** Whether this agent may end the customer's thread. See `ticket.close`. */
+  canClose: boolean;
   currentAgentId: string;
 }) {
   return (
@@ -162,6 +165,7 @@ export function ConversationView({
         agents={agents}
         groups={groups}
         fields={fields}
+        canClose={canClose}
         currentAgentId={currentAgentId}
       />
     </div>
@@ -588,6 +592,7 @@ function Sidebar({
   agents,
   groups,
   fields,
+  canClose,
   currentAgentId,
 }: {
   conversation: ConversationDetail;
@@ -595,16 +600,29 @@ function Sidebar({
   agents: { id: string; name: string; email: string }[];
   groups: { id: string; name: string }[];
   fields: TicketFieldDef[];
+  canClose: boolean;
   currentAgentId: string;
 }) {
   return (
     <aside className="app-scroll hidden w-64 shrink-0 overflow-y-auto border-s border-[var(--border)] bg-[var(--surface)] p-3 xl:block">
-      <Field label="Status">
+      <Field
+        label="Status"
+        // One line rather than an InfoTip: an agent who used to have Closed in
+        // this list needs to know where it went without going looking, and the
+        // sidebar is too dense to spend a paragraph on it.
+        hint={canClose ? undefined : 'Resolved tickets close themselves after 3 days.'}
+      >
         <FieldSelect
           conversationId={conversation.id}
           field="status"
           value={conversation.statusId}
-          options={statuses.map((s) => ({ value: s.id, label: s.name }))}
+          options={statuses
+            // The ticket's own status stays in the list whatever it is: dropping
+            // it would leave the select showing some other status as though the
+            // ticket were in it, which is worse than offering an option the
+            // action will refuse anyway.
+            .filter((s) => canClose || s.category !== 'closed' || s.id === conversation.statusId)
+            .map((s) => ({ value: s.id, label: s.name }))}
         />
       </Field>
 

@@ -702,6 +702,13 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
       const status = statuses[0];
       if (!status) return { error: 'Unknown status' };
 
+      // Checked here rather than only by hiding the option, because the option
+      // arrives back as a FormData string and the picker is not the authority
+      // on what an agent may send.
+      if (status.category === 'closed' && !can(agent, 'ticket.close')) {
+        return { error: 'Only a supervisor can close a ticket — resolve it instead' };
+      }
+
       if (status.category === 'resolved') {
         const incomplete = await refuseIfIncomplete(row.conversation.customFields);
         if (incomplete) return incomplete;
@@ -890,11 +897,19 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
   return ok();
 }
 
-/** Used by "reply and resolve", which should not need a second round trip. */
+/**
+ * Used by "reply and resolve", which should not need a second round trip.
+ *
+ * `closed` is absent from the union on purpose. It is the one category behind a
+ * permission (`ticket.close`), and this function takes a category rather than a
+ * status id from a form, so a future caller passing 'closed' would be a closure
+ * that skipped the check in `updateTicket` with nothing to notice it. Leaving it
+ * out makes that a compile error instead of a hole.
+ */
 async function applyStatusCategory(
   agent: SessionAgent,
   conversationId: string,
-  category: 'open' | 'pending' | 'resolved' | 'closed',
+  category: 'open' | 'pending' | 'resolved',
 ): Promise<void> {
   const rows = await db
     .select({
@@ -917,7 +932,7 @@ async function applyStatusCategory(
         statusId: status.id,
         resolvedAt: category === 'resolved' ? new Date() : null,
         ...(category === 'resolved' ? { resolvedByAgentId: agent.id } : {}),
-        closedAt: category === 'closed' ? new Date() : null,
+        closedAt: null,
       })
       .where(eq(conversations.id, conversationId));
 

@@ -41,6 +41,31 @@ export const PERMISSIONS = [
    * who moderates all day can be given it without being promoted.
    */
   'ticket.moderate_comment',
+  /**
+   * Moving a ticket into a closed status.
+   *
+   * Separate from every other status change because closing is not a stronger
+   * way of saying resolved — it is the thing that ends the customer's thread.
+   * Every channel decides whether an inbound message continues the last
+   * conversation or opens a new one by stopping at `closed`
+   * (`lib/widget/session.ts`, `lib/tickets/ingest-whatsapp.ts`,
+   * `lib/tickets/ingest-meta.ts`), so an agent closing a ticket is deciding that
+   * the customer's next message arrives as a stranger with no history attached,
+   * and there is no undo an agent can reach for: the customer has to write in
+   * again before anyone can put it back.
+   *
+   * Withheld from agents so that the ordinary way a ticket closes is the
+   * three-day rule in `lib/automations/defaults.ts` — time, after the customer
+   * has had the window to disagree — rather than a judgement made at the moment
+   * somebody wants the ticket off their screen. Resolving is still theirs, and
+   * resolving is what the reports measure.
+   *
+   * Supervisor and up, alongside `ticket.delete` and `ticket.merge`, for the
+   * reason those two sit there: the effect is outside the team and outside the
+   * console. It is a plain permission, so one trusted agent can be given it
+   * without being promoted.
+   */
+  'ticket.close',
   'ticket.delete',
   'ticket.merge',
   'ticket.edit_fields',
@@ -102,6 +127,7 @@ const AGENT: Permission[] = [
 const SUPERVISOR: Permission[] = [
   ...AGENT,
   'ticket.view.all',
+  'ticket.close',
   'ticket.merge',
   'contact.merge',
   'ticket.moderate_comment',

@@ -45,6 +45,7 @@ export default async function ConversationPage({
   const canSideConversation = can(agent, 'ticket.side_conversation');
   const canModerateComments = can(agent, 'ticket.moderate_comment');
   const canEditContact = can(agent, 'contact.edit');
+  const canClose = can(agent, 'ticket.close');
 
   /*
     What the ticket suggests it is about, for the composer's knowledge panel.
@@ -112,6 +113,7 @@ export default async function ConversationPage({
         canSideConversation={canSideConversation}
         canModerateComments={canModerateComments}
         canEditContact={canEditContact}
+        canClose={canClose}
         currentAgentId={agent.id}
       />
       <FocusBeat conversationId={conversation.id} />

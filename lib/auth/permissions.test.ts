@@ -64,6 +64,23 @@ describe('contact.merge', () => {
   });
 });
 
+describe('ticket.close', () => {
+  it('is withheld from agents but not from supervisors', () => {
+    // Resolving is the agent's judgement and the reports measure it. Closing is
+    // what stops the customer's next message landing on this history, and the
+    // three-day rule is meant to be what usually makes that call.
+    expect(can({ role: 'agent', permissions: {} }, 'ticket.close')).toBe(false);
+    expect(can({ role: 'supervisor', permissions: {} }, 'ticket.close')).toBe(true);
+    expect(can({ role: 'admin', permissions: {} }, 'ticket.close')).toBe(true);
+  });
+
+  it('can be handed to one agent without promoting them', () => {
+    expect(can({ role: 'agent', permissions: { 'ticket.close': true } }, 'ticket.close')).toBe(
+      true,
+    );
+  });
+});
+
 describe('admin.locations', () => {
   it('is an admin setting, like the rest of the register of who works where', () => {
     expect(can({ role: 'supervisor', permissions: {} }, 'admin.locations')).toBe(false);
