@@ -594,7 +594,31 @@ is code:
   re-run it if the parser ever learns to read a shape it currently skips. §7 has
   the figures.
 - **Unset config:** `EMAIL_API_KEY`, `EMAIL_FROM_ADDRESS`, `EMAIL_REPLY_DOMAIN`,
-  `EMAIL_WEBHOOK_SECRET`, `KB_PUBLIC_HOST`, `WIDGET_ALLOWED_ORIGINS`.
+  `EMAIL_WEBHOOK_SECRET`, `WIDGET_ALLOWED_ORIGINS`.
+
+  **`KB_PUBLIC_HOST` was on this list and should not have been. It is set, to
+  `support.shipblu.com`, and that domain still serves Freshdesk.** Measured
+  2026-08-28: `/widget/embed.js` on production embeds
+  `https://support.shipblu.com`, so that is what `publicBaseUrl()` returns;
+  `support.shipblu.com/en/a/packaging-guidelines` answers **404** while the same
+  path on `shipblu-support.onrender.com` answers 200; and Render's HTTP metrics
+  broken down by host show **zero** requests reaching this service on
+  `support.shipblu.com` over 48 hours. The DNS has never been pointed here.
+
+  So every absolute URL built from `publicBaseUrl()` currently names a host that
+  does not serve this app. That is the sitemap, `robots.txt`, every canonical
+  tag and `metadataBase`, the widget embed script, **portal
+  account-verification and password-reset emails** (`lib/portal/emails.ts:21`)
+  and **CSAT survey links** (`lib/csat/index.ts:91`) — the last two go to real
+  customers. Unsetting the variable would repair all of them at once by falling
+  back to `APP_URL`; that is a one-variable change nobody has made yet, and it
+  is the cheapest item on this list.
+
+  The knowledge panel and the article editor no longer depend on it: both build
+  their links with `requestBaseUrl()` from the request's own `Host`, so they
+  follow whatever domain the console is being served on. Nothing else was
+  moved — a published address should stay published, and switching the sitemap
+  to a request host would be a genuine mistake.
   `META_APP_ID` joined the shared group with this change and is _not_ on that
   list — it is an app id rather than a secret, only
   `subscribe_meta_webhooks` reads it, and nothing needed it before. The last of
@@ -602,6 +626,7 @@ is code:
   frames the hostname that served it, so the help centre's own iframe is
   same-origin either side of the custom domain going live. It is for the day the
   widget goes on shipblu.com.
+
 - **Presence has never been observed with more than one agent.** It is written
   from the presence stream and verified against a local Postgres, but the multi-tab
   case is handled by expiry rather than by reference counting: closing one of two
@@ -885,12 +910,15 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   changing the generated column, so it is a migration rather than a query
   change. Surfaced by the composer's knowledge panel, where an agent typing a
   team or topic name is the obvious first thing to try.
-- **`KB_PUBLIC_HOST` is unset, and the composer now pastes URLs built from it.**
-  `publicBaseUrl()` falls back to `APP_URL`, and the links still resolve —
-  `proxy.ts` rewrites any `/{locale}/…` path under `/help` on every hostname —
-  but an agent inserting an article link today sends a customer the Render
-  service URL. Not a reason to hold the feature; a reason the variable should be
-  set before a real customer is answered. §5.1 has it in the cutover list.
+- ~~`KB_PUBLIC_HOST` is unset, and the composer now pastes URLs built from
+  it.~~ **Both halves of that were wrong**, and it is worth keeping as a lesson
+  rather than deleting: the variable is _set_, to a domain that still answers as
+  Freshdesk, so the links did not "still resolve" — every one of them 404'd. The
+  claim came from reading §5.1's unset-config list instead of asking production,
+  which is exactly what "verify, do not infer" is for; one `curl` of
+  `/widget/embed.js` showed the real value in a second. Article links in the
+  composer and the editor now come from `requestBaseUrl()` and follow the host
+  the agent is on. §5.1 carries what is still broken for everything else.
 - ~~`logged_in` and `selected_companies` knowledge base articles are still not
   served.~~ Both are evaluated now. `publiclyVisible()` is gone; every query in
   `lib/kb/queries.ts` takes a `KbViewer`, resolved from the portal session by

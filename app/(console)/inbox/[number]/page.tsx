@@ -1,9 +1,11 @@
+import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
 import { requireAgent } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
 import { suggestForAgent } from '@/lib/kb/agent-search';
 import { detectLocale } from '@/lib/kb/language';
 import { seedTerms } from '@/lib/kb/seed';
+import { requestBaseUrl } from '@/lib/kb/site';
 import { listSideConversationRecipients } from '@/lib/side-conversations/queries';
 import {
   getConversation,
@@ -68,6 +70,11 @@ export default async function ConversationPage({
   const kbLocale = detectLocale(lastInbound?.bodyText, conversation.subject);
   const terms = wantsKnowledge ? seedTerms(conversation.subject, lastInbound?.bodyText) : [];
 
+  // The host this agent is actually on, so the article they open and the link
+  // they paste both resolve. `publicBaseUrl()` names the address we publish,
+  // which is only the same thing once that domain serves this app.
+  const kbOrigin = requestBaseUrl(await headers());
+
   // Which business account this ticket's number belongs to, because that is
   // what decides the templates the agent may pick — not the installation.
   const whatsappAccountId =
@@ -91,7 +98,7 @@ export default async function ConversationPage({
       // and `suggestForAgent` returns nothing for fewer than two terms — so a
       // ticket with nothing to go on costs no query and renders no panel
       // furniture, the same way the help centre's blocks remove themselves.
-      terms.length ? suggestForAgent(kbLocale, terms) : Promise.resolve([]),
+      terms.length ? suggestForAgent(kbOrigin, kbLocale, terms) : Promise.resolve([]),
     ]);
 
   return (
