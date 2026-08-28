@@ -30,8 +30,9 @@ Eleven new requests, two renewals:
 | `public_profile` (renewal)         | nothing — mandatory for every app, cannot be removed       | Keep       |
 | `email` (renewal)                  | nothing — agent auth is a password, `lib/auth/password.ts` | **Remove** |
 
-¹ Keep the permission; the screencast is the problem — nothing in the app
-performs a page-level subscribe, so the demo is the dashboard flow.
+¹ The app performs this one now: `subscribe_meta_webhooks object=page` writes
+`POST /{page-id}/subscribed_apps` as well as the app-level subscription, so
+there is a real call to point at rather than a dashboard action.
 
 The Instagram pair is now right. `instagram_basic` and `instagram_manage_messages`
 are the **Page-connected** family, and the account is back on that setup, so
@@ -235,9 +236,12 @@ first.
 
 ## The order to work in
 
-1. Make the seven calls in the table above from the Graph API Explorer, with a
-   Page token held by an app role-holder. Nothing needs approving first and
-   nothing needs deploying; Standard Access already covers it.
+1. Make the seven calls in the table above, with a Page token held by an app
+   role-holder. Six are Graph API Explorer one-liners; the seventh is
+   `npm run job -- subscribe_meta_webhooks object=page`, which is worth running
+   rather than hand-writing because it merges the field list instead of
+   replacing it. Nothing needs approving first; Standard Access already covers
+   all of it.
 2. Wait for the calls to log — up to two days — and check that **Request
    advanced access** has ungreyed on each permission.
 3. Add `pages_show_list`, `pages_read_user_content`, `pages_manage_engagement`,

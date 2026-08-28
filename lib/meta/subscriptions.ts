@@ -13,6 +13,16 @@ import { env, metaAppSecret, metaVerifyToken } from '@/lib/env';
  * subscribe_meta_webhooks` and nowhere else, which is why nothing here retries:
  * a person is watching the output, and a failure they can read beats a retry
  * that hides which half of a two-step change actually landed.
+ *
+ * **A Page webhook has two subscriptions, not one, and this module now writes
+ * both.** Meta's own sentence is that "only fields with subscriptions at both
+ * the page and app levels will get Webhooks": `POST /{app-id}/subscriptions`
+ * says which fields the *app* wants, and `POST /{page-id}/subscribed_apps`
+ * installs the app on the Page and says which fields *that Page* sends. Only
+ * the first was ever implemented, and the second is the reason `feed` has never
+ * delivered a single event — 0 of 4,503 `page` and `instagram` deliveries carry
+ * a `changes` entry. The two halves are addressed differently and authenticated
+ * differently: the app token for one, the Page token for the other.
  */
 
 const GRAPH_VERSION = 'v23.0';
@@ -142,9 +152,9 @@ function appCredentials(): { appId: string; token: string } {
 }
 
 /**
- * Every call this module makes is against `/{app-id}/subscriptions`, so the path
- * is built here rather than by each caller. That is not tidiness: composing it
- * at the call site meant an unset `META_APP_ID` produced the path
+ * The app-level half: `/{app-id}/subscriptions`, authenticated with the app
+ * token. The path is built here rather than by each caller — composing it at the
+ * call site meant an unset `META_APP_ID` produced the path
  * `undefined/subscriptions` and a baffling Graph error, instead of the message
  * above naming the variable to set.
  */
@@ -229,11 +239,19 @@ export type SubscriptionPlan = {
  * So the merge is the safety-critical part of this job rather than an
  * implementation detail, and it is tested directly.
  */
-export function planFieldSubscription(
-  existing: GraphSubscription,
+/**
+ * Merge `want` into `current` without ever losing a field.
+ *
+ * Shared by both levels because both writes replace the list rather than adding
+ * to it, and because a merge that is right in one place and wrong in the other
+ * is the same outage with a different cause. Meta does not document the
+ * page-level write as replacing — but writing the merged list is correct under
+ * either reading, and assuming "adds" is the assumption that costs a channel.
+ */
+function mergeFields(
+  current: string[],
   want: readonly string[],
-): SubscriptionPlan {
-  const current = existing.fields.map((field) => field.name);
+): { current: string[]; merged: string[]; adding: string[] } {
   const adding = want.filter((field) => !current.includes(field));
   const merged = [...current, ...adding];
 
@@ -245,6 +263,18 @@ export function planFieldSubscription(
       `Refusing to write a field list that drops ${lost.join(', ')} — this is a bug`,
     );
   }
+
+  return { current, merged, adding };
+}
+
+export function planFieldSubscription(
+  existing: GraphSubscription,
+  want: readonly string[],
+): SubscriptionPlan {
+  const { current, merged, adding } = mergeFields(
+    existing.fields.map((field) => field.name),
+    want,
+  );
 
   if (!existing.callback_url) {
     throw new GraphSubscriptionError(
@@ -286,5 +316,152 @@ export async function applyFieldSubscription(plan: SubscriptionPlan): Promise<vo
       // `change.value`, so an omitted flag would deliver empty webhooks.
       include_values: 'true',
     },
+  });
+}
+
+// --- The page-level half: /{page-id}/subscribed_apps ------------------------
+
+/**
+ * What one app's installation on a Page looks like.
+ *
+ * `subscribed_fields` is absent rather than empty on an app installed with no
+ * fields, so it is optional here and normalised at the read.
+ */
+export type PageSubscribedApp = {
+  id: string;
+  name?: string;
+  subscribed_fields?: string[];
+};
+
+export type PageSubscriptionPlan = {
+  pageId: string;
+  /** False when this app is not installed on the Page at all yet. */
+  installed: boolean;
+  current: string[];
+  merged: string[];
+  adding: string[];
+};
+
+/**
+ * A Page-token call against `/{page-id}/subscribed_apps`.
+ *
+ * Separate from `graph` above because almost nothing about it matches: a
+ * different node, a different token, and a failure that means something else.
+ * The app token cannot install an app on a Page — that is a decision only
+ * somebody with `CREATE_CONTENT`, `MANAGE` or `MODERATE` on the Page can make,
+ * so Meta requires a token minted for such a person.
+ *
+ * The token goes in the header for the same reason the app token does: a URL is
+ * the part of a request that ends up in logs and error messages.
+ */
+async function pageGraph<T>(
+  pageId: string,
+  init: { method: 'GET' | 'POST'; query?: Record<string, string> },
+): Promise<T> {
+  const token = env().META_PAGE_ACCESS_TOKEN;
+  if (!token) {
+    throw new GraphSubscriptionError(
+      'META_PAGE_ACCESS_TOKEN is not set. Installing this app on a Page needs a ' +
+        'Page access token; the app token that writes the app-level subscription ' +
+        'cannot do it.',
+    );
+  }
+
+  const url = new URL(`${GRAPH_BASE}/${pageId}/subscribed_apps`);
+  for (const [key, value] of Object.entries(init.query ?? {})) {
+    url.searchParams.set(key, value);
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: init.method,
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  } catch (error) {
+    throw new GraphSubscriptionError(
+      `Graph API unreachable: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  const text = await response.text();
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    body = null;
+  }
+
+  if (!response.ok) {
+    const error = (body as { error?: Record<string, unknown> } | null)?.error ?? {};
+    const message = typeof error.message === 'string' ? error.message : `HTTP ${response.status}`;
+
+    throw new GraphSubscriptionError(
+      // The two permissions are named because this call is the one that fails
+      // for want of them, and Graph's own sentence names neither. Both are
+      // dependencies nobody requests deliberately — see
+      // `plans/meta-app-review-submission.md`.
+      `${message}\n\nThis call needs a Page token whose person can MANAGE the Page, ` +
+        `and the pages_manage_metadata and pages_show_list permissions. A token ` +
+        `missing either is refused with a message that names neither.`,
+      response.status,
+      typeof error.code === 'number' ? error.code : null,
+      typeof error.fbtrace_id === 'string' ? error.fbtrace_id : null,
+    );
+  }
+
+  return body as T;
+}
+
+/**
+ * The fields this app is subscribed to *on the Page*, or null if it is not
+ * installed there.
+ *
+ * Null and `[]` are different answers and the caller says different things
+ * about them: an app that is not installed has never received a Page event at
+ * all, and an app installed with no fields is subscribed to nothing. Both are
+ * fixed by the same write, but only the first explains a channel that has never
+ * worked.
+ */
+export async function readPageSubscription(pageId: string): Promise<string[] | null> {
+  const appId = env().META_APP_ID;
+  if (!appId) {
+    throw new GraphSubscriptionError(
+      'META_APP_ID must be set to tell which of the apps installed on the Page is ours',
+    );
+  }
+
+  const body = await pageGraph<{ data?: PageSubscribedApp[] }>(pageId, { method: 'GET' });
+
+  // Matched on the app id rather than taking the first entry: a Page can have
+  // several apps installed, and writing another one's field list would be both
+  // wrong and invisible.
+  const ours = body.data?.find((app) => app.id === appId);
+  if (!ours) return null;
+
+  return ours.subscribed_fields ?? [];
+}
+
+export function planPageSubscription(
+  pageId: string,
+  current: string[] | null,
+  want: readonly string[],
+): PageSubscriptionPlan {
+  const merged = mergeFields(current ?? [], want);
+
+  return { pageId, installed: current !== null, ...merged };
+}
+
+/**
+ * Install the app on the Page with the merged field list.
+ *
+ * The same call both installs and updates — there is no separate install step —
+ * which is why a Page that has never had the app on it needs no different
+ * handling here.
+ */
+export async function applyPageSubscription(plan: PageSubscriptionPlan): Promise<void> {
+  await pageGraph(plan.pageId, {
+    method: 'POST',
+    query: { subscribed_fields: plan.merged.join(',') },
   });
 }
