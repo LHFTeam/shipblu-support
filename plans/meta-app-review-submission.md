@@ -59,25 +59,100 @@ and none of them is an event log.
 Login flow exists in `app/(auth)/`. `public_profile` is mandatory on every app
 and cannot be dropped.
 
-## Three permissions the product needs and the list does not have
+## Five permissions the product needs and the list does not have
 
-This is the larger problem, and the move back to the Page changes which name to
-ask for.
+This is the larger problem, and an earlier version of this file got two of the
+names wrong. The comment feature merged in #87 and **not one of its permissions
+is requested.** Meta's dependency graph, read from the permission reference
+rather than assumed:
 
-- **`instagram_manage_comments`.** PR #87 shipped Instagram comment management:
-  public reply, private reply, hide, unhide, delete, behind
-  `ticket.moderate_comment`. On the Page-connected setup this is the name — not
-  `instagram_business_manage_comments`, which is the Instagram Login family's.
-  It gates the **private reply** as well as hide and delete, so a comment ticket
-  does not work without it even if nobody ever hides anything.
-- **`pages_manage_engagement`.** The same four verbs on Facebook.
-  `lib/meta/comments.ts` builds the Facebook shape for every one of them
-  (`{comment-id}/comments`, `{comment-id}/private_replies`, `is_hidden`, DELETE),
-  and `lib/meta/errors.ts` names `pages_manage_engagement` in the failure an
-  agent reads.
-- **`pages_read_engagement`.** Reading the Page's own posts and the comments on
-  them — the `feed` webhook path in `REQUIRED_PAGE_FIELDS`, which
-  `lib/meta/parse.ts` filters down to comments.
+| Permission                  | Why it is needed                                          | Depends on                                                    |
+| --------------------------- | --------------------------------------------------------- | ------------------------------------------------------------- |
+| `pages_show_list`           | dependency of nearly every Page permission below          | —                                                             |
+| `pages_read_user_content`   | read _and delete_ other people's comments on Page posts   | `pages_show_list`                                             |
+| `pages_manage_engagement`   | create, edit and hide comments on the Page                | `pages_read_user_content`, `pages_show_list`                  |
+| `pages_read_engagement`     | read the Page's own content — and an Instagram dependency | `pages_show_list`                                             |
+| `instagram_manage_comments` | the same four verbs on Instagram                          | `instagram_basic`, `pages_read_engagement`, `pages_show_list` |
+
+Two corrections worth stating plainly, because the first version of this file
+would have produced a submission that still could not moderate a comment:
+
+- **The Facebook read permission is `pages_read_user_content`, not
+  `pages_read_engagement`.** `pages_read_engagement` covers content the _Page_
+  posted; a customer's comment is user-generated content, and reading or
+  deleting it is `pages_read_user_content`. Both are needed here, for different
+  reasons — the second only because Instagram depends on it.
+- **`pages_show_list` has to be requested explicitly.** It is the dependency of
+  everything else in the table and it is on no line of the current submission.
+  Meta's guidance for a dependency is to submit it and name the main permission
+  in the use-case description.
+
+`instagram_manage_comments` is the right name now that the account is back on
+its Facebook Page; `instagram_business_manage_comments` is the Instagram Login
+family's and would be the wrong one to ask for.
+
+## The "no API calls have ever been made" gate
+
+**Request advanced access** stays greyed out until Meta has logged one
+successful call against the permission. That reads like a deadlock — the call
+needs the permission, the permission needs the call — and it is not one.
+
+**Standard Access is automatic and needs no review.** Every Business app has it
+for every permission its type allows. What it limits is _whose_ data you may
+touch: only people with a role on the app (admin, developer, tester), and the
+Pages they manage. Since ShipBlu owns the Page and the Instagram account, every
+call below is makeable today, against real assets, with nothing approved.
+
+This is the same exemption `docs/PROJECT-STATE.md` §5.2 already uses to get
+Business Asset User Profile Access moving, restated for comments.
+
+Meta accepts calls made **by the app or by the Graph API Explorer**, so the
+fastest unlock needs no deploy. One call per permission, from a Page token held
+by somebody who is both an app role-holder and a Page admin:
+
+| Permission                  | One call that logs it                                                 |
+| --------------------------- | --------------------------------------------------------------------- |
+| `pages_show_list`           | `GET /me/accounts`                                                    |
+| `pages_read_user_content`   | `GET /{page-id}/posts` → `GET /{post-id}/comments`                    |
+| `pages_manage_engagement`   | `POST /{comment-id}` with `is_hidden=true` (then unhide)              |
+| `pages_read_engagement`     | `GET /{page-id}?fields=name,fan_count`                                |
+| `instagram_basic`           | `GET /{page-id}?fields=instagram_business_account` → `/{ig-id}/media` |
+| `instagram_manage_comments` | `GET /{ig-media-id}/comments` → hide or reply to one                  |
+| `pages_manage_metadata`     | `POST /{page-id}/subscribed_apps` with `subscribed_fields=feed`       |
+
+Order matters in one place only: the comment ids for the two `manage` rows come
+from the two `read` rows above them, so run each pair together.
+
+The call is logged within about two days and must fall inside the 30 days before
+submission — so do this immediately before submitting, not months ahead.
+
+**The last row is not busywork.** `POST /{page-id}/subscribed_apps` is exactly
+the call that subscribes the Page to the `feed` field, which has never been
+subscribed and is why **no comment webhook has ever arrived** — 0 of 4,503
+`page` and `instagram` deliveries carry a `changes` entry, checked again on
+2026-08-28. The app subscribes at the _app_ level in `subscribe_meta_webhooks`
+(`POST /{app-id}/subscriptions`) and there is no page-level equivalent in the
+codebase, so this one has to be made by hand or written.
+
+## The screencast problem nobody has hit yet
+
+Worth knowing before recording rather than after a rejection. Meta's screencast
+requirement for both `pages_manage_engagement` and `instagram_manage_comments`
+opens with:
+
+> Demonstrate the complete Facebook login process on your app platform, showing
+> how your app user grants your app this permission.
+
+**This app has no Facebook Login.** Agents sign in with a password
+(`lib/auth/password.ts`), there is no OAuth flow in `app/(auth)/`, and the Page
+was connected through the App Dashboard. There is nothing to film for that first
+beat, and the same sentence appears on several of the permissions already
+submitted.
+
+That is a question for Meta's reviewer notes rather than a thing to build: a
+single-tenant app serving only its owner's Page has no third-party user to
+consent, and the use-case description has to say so. Do not discover it halfway
+through a recording.
 
 ## Locale and gender, now that they are wanted
 
@@ -160,16 +235,20 @@ first.
 
 ## The order to work in
 
-1. Drop **Page Public Content Access** and **`whatsapp_business_manage_events`**
-   from the submission; neither has a call site to film.
-2. Add **`instagram_manage_comments`**, **`pages_manage_engagement`** and
-   **`pages_read_engagement`** — the comment feature is merged and none of its
-   permissions is requested.
-3. Subscribe `comments` on `instagram` and `feed` on `page`; no comment webhook
-   has ever arrived, so there is no comment ticket to demonstrate against.
-4. Get the profile footage through the role-holder exemption
-   (`docs/PROJECT-STATE.md` §5.2) rather than waiting on approval.
-5. Record.
+1. Make the seven calls in the table above from the Graph API Explorer, with a
+   Page token held by an app role-holder. Nothing needs approving first and
+   nothing needs deploying; Standard Access already covers it.
+2. Wait for the calls to log — up to two days — and check that **Request
+   advanced access** has ungreyed on each permission.
+3. Add `pages_show_list`, `pages_read_user_content`, `pages_manage_engagement`,
+   `pages_read_engagement` and `instagram_manage_comments` to the submission.
+4. Drop **Page Public Content Access** and **`whatsapp_business_manage_events`**;
+   neither has a call site to film.
+5. Settle the Facebook-login beat in the reviewer notes before recording.
+6. With `feed` and `comments` finally subscribed (step 1's last row does the
+   Page half), have a role-holder comment on one of the account's own posts and
+   work the resulting ticket in the console — reply, hide, unhide, delete. That
+   is the footage, and it is also the first time this feature will have run.
 
-Steps 1–4 are configuration and dashboard work. None of them is code, and the
-code is inert without them.
+Steps 1–5 are dashboard work. Step 6 is the first end-to-end exercise of code
+that has been merged since #87 and has never executed in production.
