@@ -226,7 +226,19 @@ justify for `contacts.timezone`, which no screen reads and nothing writes.
 
 ## What cannot be demonstrated today
 
-This section moved. The blockers are live-infrastructure state, they changed
+**The blocker is now known and it is not a permission.** Freshworks is still the
+live support service and still the account's default Meta app, so it holds
+thread control on both the Messenger and Instagram inboxes and every event
+reaches this system as `standby` — readable, not answerable. Every screencast on
+this submission that requires the app to _send_ is therefore impossible until
+the cutover swaps the default app, and a recording of a reply Graph refuses is a
+rejected submission. `docs/PROJECT-STATE.md` §5.1 has the arrangement; it is
+deliberate and temporary, not a fault to chase.
+
+That reorders the whole list below: the seven unlock calls and the permission
+edits can be done now, and the recording cannot.
+
+The rest of this section moved. The blockers are live-infrastructure state, they changed
 twice while this file was being written, and keeping a second copy of them here
 is how a stale one gets believed. `docs/PROJECT-STATE.md` §5.2 is the record:
 the profile refusals and the role-holder exemption that produces the footage,

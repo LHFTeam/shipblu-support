@@ -517,6 +517,36 @@ In rough priority order. Nothing here is blocked by anything else.
 The system cannot take a single real ticket until this is done, and none of it
 is code:
 
+- **Freshworks is still the live support service, and it is still the default
+  Meta app on the account.** This is the fact that explains the single most
+  confusing thing about the Meta channels, and it is deliberate rather than
+  broken: ShipBlu is still being supported out of Freshworks while this app is
+  under construction, so the Freshworks app (Freshchat — `app_id`
+  576817601276249, `metadata: "freshchannel"`) is the Page's default app and
+  **holds thread control** on both the Messenger and Instagram inboxes.
+
+  The consequence is that every Meta event reaches this system in the handover
+  protocol's `standby` array rather than `messaging`. A secondary receiver may
+  **read** a thread and may not **send** on it, so the console can show every
+  Facebook and Instagram conversation and answer none of them, and
+  `lib/meta/thread.ts` refuses those sends before Graph does (§6.22). Nothing
+  about that is a credential, an approval or a bug — do not go looking for one.
+
+  **The plan is a swap, not a negotiation.** When this service is ready, the
+  Freshworks app is removed from the Meta account and this service's Meta app
+  becomes the default; thread control follows the default app. Until that
+  happens, treat every Meta channel as read-only in practice however the code
+  is configured.
+
+  Two things follow that are easy to get wrong. **The App Review screencasts
+  cannot be recorded before the swap** — `pages_messaging` and the comment
+  permissions all require footage of the app _sending_, and a recording of a
+  reply Graph refuses is a rejected submission
+  (`plans/meta-app-review-submission.md`). And **the swap is the cutover's point
+  of no return** for these channels: the moment Freshworks stops being default,
+  the Meta inboxes are answered here or not at all, so the channel rows, the
+  agents and the groups below need to be in place first rather than after.
+
 - **Channel rows.** `channels` holds one row, `whatsapp_bot`, and it is the
   observed bot number rather than anything the team answers (§1). Email
   mailboxes, the _human_ WhatsApp business number, the Facebook page and
@@ -1247,7 +1277,10 @@ Each cost real time. Most are also comments in the code.
       thread control** — the echoes name it: `app_id` 576817601276249,
       `metadata: "freshchannel"`, so Freshchat is the primary receiver on that
       inbox and we are a secondary one. A secondary receiver may read the thread
-      and may not send on it.
+      and may not send on it. **This is expected and not a fault**: Freshworks is
+      still the live support service and still the default Meta app on the
+      account, and it stays that way until the cutover swaps them — §5.1 has the
+      arrangement and what it blocks.
 
     The code made the second one invisible: `parseMetaWebhook` flattened
     `standby` into `messaging` and the distinction was gone one line into the
@@ -1652,9 +1685,11 @@ access_token`, authorised with the System User token, which never expires)
     (§6.22) — this app can read every Instagram and Messenger conversation and
     answer none of them. That is not a credential problem and no approval fixes
     it; thread control has to be passed to this app in the Meta app's Messenger
-    settings, or taken from whatever holds it. It is also the thing that makes
-    an App Review screencast impossible: a recording of a reply Graph refuses is
-    a rejected submission.
+    settings — which is the cutover, not a config fix. **The app holding it is
+    Freshworks**, still the live support service and still the account's default
+    Meta app by design; §5.1 has the arrangement and the swap that ends it. It
+    is also the thing that makes an App Review screencast impossible until then:
+    a recording of a reply Graph refuses is a rejected submission.
 
 30. **`npm run db:seed` is not part of any deploy, so adding a row to
     `db/seed.ts` does not put it in production.** `render.yaml` runs
