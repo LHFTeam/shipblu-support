@@ -793,10 +793,22 @@ on node type (User)` with no subcode, which that predicate declines by design,
      Instagram delivery keeps being answered 403 (§6.26). Nothing about comments
      can be tested while inbound Instagram is rejected.
   2. `npm run job -- subscribe_meta_webhooks object=instagram`, to add the
-     `comments` field. **Zero comment webhooks have ever arrived** — of 2,854
-     Meta deliveries since 19 August, not one carries a `changes` entry — so
-     `ingestMetaComment` has never run in production and there are no comment
-     threads to look at.
+     `comments` field, and `object=page` for `feed`. **Zero comment webhooks
+     have ever arrived** — re-checked 2026-08-28, still 0 of 4,503 `page` and
+     `instagram` deliveries carrying a `changes` entry — so `ingestMetaComment`
+     has never run in production and there are no comment threads to look at.
+
+     **A Page webhook has two subscriptions and this job only ever wrote one.**
+     Meta delivers a field only when it is subscribed at _both_ the app level
+     (`POST /{app-id}/subscriptions`) and the Page level
+     (`POST /{page-id}/subscribed_apps`), and the second had no implementation
+     at all — which is why `feed` sat in `REQUIRED_PAGE_FIELDS` for weeks
+     delivering nothing while the app-level list looked correct. `object=page`
+     now does both halves, the Page one with a Page token rather than the app
+     token, and the app-level "nothing to add" no longer returns early past it.
+     That write also needs `pages_manage_metadata` and `pages_show_list` on the
+     token, which is worth knowing because Graph's refusal names neither.
+
   3. The App Review approval itself, which nothing has confirmed. Graph refuses
      an unapproved hide or delete with `100/33 "Unsupported post request"`, the
      same sentence it uses for a comment that is already gone;

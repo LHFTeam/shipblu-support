@@ -4,7 +4,9 @@ import {
   GraphSubscriptionError,
   INSTAGRAM_OBJECT,
   planFieldSubscription,
+  planPageSubscription,
   REQUIRED_INSTAGRAM_FIELDS,
+  REQUIRED_PAGE_FIELDS,
   REQUIRED_WHATSAPP_FIELDS,
   resolveObject,
   WHATSAPP_OBJECT,
@@ -154,5 +156,67 @@ describe('resolveObject', () => {
     // typo must not reach `planFieldSubscription` with no fields to want.
     expect(() => resolveObject('instgram')).toThrow(GraphSubscriptionError);
     expect(() => resolveObject('instgram')).toThrow(/not a webhook object/);
+  });
+});
+
+/**
+ * The Page half, which is the half that was missing.
+ *
+ * A Page field is delivered only when it is subscribed at *both* the app level
+ * and the Page level. Only the first was ever written, which is why `feed` sat
+ * in `REQUIRED_PAGE_FIELDS` for weeks and delivered nothing at all — 0 of 4,503
+ * `page` and `instagram` deliveries carried a `changes` entry. These cover the
+ * same property as the app-level merge above, because the write has the same
+ * shape and the same way of going wrong.
+ */
+describe('planPageSubscription', () => {
+  const PAGE = '101449698657189';
+
+  it('adds feed while keeping the messaging fields already installed', () => {
+    const plan = planPageSubscription(
+      PAGE,
+      ['messages', 'messaging_postbacks'],
+      REQUIRED_PAGE_FIELDS,
+    );
+
+    expect(plan.adding).toEqual(['feed']);
+    expect(plan.merged).toEqual(['messages', 'messaging_postbacks', 'feed']);
+    // The field nothing asked for survives. Writing only what this codebase
+    // knows about would silently unsubscribe whatever else the Page carries.
+    expect(plan.merged).toContain('messaging_postbacks');
+  });
+
+  it('reports an app that is not installed on the Page at all', () => {
+    /*
+      Null is not the same answer as `[]`, and this is the distinction that
+      explains a channel which has never once worked: an app absent from the
+      Page has never been able to receive an event, however correct the
+      app-level subscription looked.
+    */
+    const plan = planPageSubscription(PAGE, null, REQUIRED_PAGE_FIELDS);
+
+    expect(plan.installed).toBe(false);
+    expect(plan.current).toEqual([]);
+    expect(plan.merged).toEqual(['messages', 'feed']);
+  });
+
+  it('distinguishes installed-with-nothing from not installed', () => {
+    const plan = planPageSubscription(PAGE, [], REQUIRED_PAGE_FIELDS);
+
+    expect(plan.installed).toBe(true);
+    expect(plan.merged).toEqual(['messages', 'feed']);
+  });
+
+  it('is a no-op once both fields are on the Page', () => {
+    // Re-running this job is the normal way to check it, so "nothing to add"
+    // has to be reachable rather than a write that reorders the list.
+    const plan = planPageSubscription(PAGE, ['messages', 'feed'], REQUIRED_PAGE_FIELDS);
+
+    expect(plan.adding).toEqual([]);
+    expect(plan.merged).toEqual(['messages', 'feed']);
+  });
+
+  it('carries the page id through to the write', () => {
+    expect(planPageSubscription(PAGE, [], REQUIRED_PAGE_FIELDS).pageId).toBe(PAGE);
   });
 });
