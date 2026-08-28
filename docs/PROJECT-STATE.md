@@ -793,7 +793,12 @@ on node type (User)` with no subcode, which that predicate declines by design,
      Instagram delivery keeps being answered 403 (§6.26). Nothing about comments
      can be tested while inbound Instagram is rejected.
   2. `npm run job -- subscribe_meta_webhooks object=instagram`, to add the
-     `comments` field, and `object=page` for `feed`. **Zero comment webhooks
+     `comments` field, and `object=page` for `feed`. **The `page` half is now
+     done** — run 2026-08-28 18:00 UTC. It confirmed the diagnosis exactly: the
+     app level already listed `feed` among 29 fields, the Page level carried 18
+     and `feed` was not one of them, and the write added it. Nothing has arrived
+     through it yet, because a `feed` event needs somebody to comment; that
+     comment is the outstanding step, and it is also the App Review footage. **Zero comment webhooks
      have ever arrived** — re-checked 2026-08-28, still 0 of 4,503 `page` and
      `instagram` deliveries carrying a `changes` entry — so `ingestMetaComment`
      has never run in production and there are no comment threads to look at.
@@ -1559,6 +1564,37 @@ access_token`, authorised with the System User token, which never expires)
     That was the one failure mode that would have made this migration
     unaffordable, and it is ruled out by data rather than by Meta's docs.
 
+    **It was unset too early, and Instagram has been dropping messages since.**
+    _Confirmed from the data 2026-08-28 18:00 UTC._ The warning above describes
+    what then happened, hour by hour:
+
+    | Hour (UTC)         | verified | unverified | reason stored                                    |
+    | ------------------ | -------- | ---------- | ------------------------------------------------ |
+    | 27 Aug 01:00       | 30       | 127        | `… META_INSTAGRAM_APP_SECRET or META_APP_SECRET` |
+    | 27 Aug 02:00       | 14       | 0          | —                                                |
+    | 27 Aug 11:00       | 2        | 0          | —                                                |
+    | 27 Aug 12:00       | 2        | 18         | `signature did not match META_APP_SECRET`        |
+    | 27 Aug 13:00 → now | 0        | 844        | `signature did not match META_APP_SECRET`        |
+
+    Two clean hours of 100% verification, then the reason stops naming
+    `META_INSTAGRAM_APP_SECRET` — which `signingCandidates` only omits when the
+    variable is unset — and verification goes to zero and stays there. **844
+    Instagram deliveries dropped between 27 Aug 12:52 and now, still ongoing.**
+
+    The reason line is the diagnosis on its own: it names the candidates that
+    were _tried_, so "did not match META_APP_SECRET" alone means one secret was
+    offered where two were needed. The account is therefore still signing with
+    its Instagram app secret — the move to the Page has not taken effect, whatever
+    the dashboard shows.
+
+    **The fix is to put `META_INSTAGRAM_APP_SECRET` back**, and it is safe
+    regardless of which setup the account is really on: both candidates are
+    tried, so a restored variable cannot break a Page-connected account. Then
+    wait for the log to say Instagram is verifying against `META_APP_SECRET`
+    before removing it again — which is what the paragraph above already said,
+    and is worth reading twice because the cost of getting it wrong is a day of
+    a customer channel.
+
 30. **`npm run db:seed` is not part of any deploy, so adding a row to
     `db/seed.ts` does not put it in production.** `render.yaml` runs
     `preDeployCommand: npm run db:migrate` and nothing else; the seed is a
@@ -1588,6 +1624,32 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     Any new rule about a state the sweep does not select for has the same shape
     of failure — silent, and indistinguishable from a condition that does not
     match.
+
+32. **A second phone number on the same WABA can fail signature verification
+    while the first one passes, and nothing says so.** _Found 2026-08-28._
+    `whatsapp_accounts` holds two rows and both leave `token_env_var` null, so
+    both fall back to the same credential — and signature verification does not
+    look at the phone number at all. Yet within WABA `128772296801141`:
+
+    - `128318316834446` — 3,444 deliveries in 48 hours, **100% verified**.
+    - `838961722630554` — 7 verified on 18 August, 5 more up to 27 Aug 15:25,
+      then **150 consecutive failures** through 18:00 on 28 August, still
+      arriving.
+
+    Same WABA id in the payload, same `facebookexternalua`, same endpoint. An
+    HMAC does not depend on which number a message was sent to, so "the second
+    number is misconfigured" cannot be the whole story: the plausible reading is
+    that its deliveries are signed by a _different app_ — an alternate callback
+    or a second app subscribed to the same WABA — and this is **not established**.
+
+    What is established is that a real inbound number has been dropping messages
+    for a day, that it worked before 27 Aug 15:25, and that the break falls in
+    the same afternoon as the Instagram one (§6.29). Do not assume they share a
+    cause; do check what changed in the App Dashboard that afternoon. The query
+    that finds this is the delivery breakdown **split by
+    `value.metadata.phone_number_id`** — totalling by WABA reports 96% healthy
+    and hides it completely, which is exactly the shape `AGENTS.md` asks counts
+    to be broken down along.
 
     **What the switch does not settle: who is actually answering this inbox.**
     Over 36 hours the `instagram` object delivered 1,037 inbound messages and
