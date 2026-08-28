@@ -1595,6 +1595,39 @@ access_token`, authorised with the System User token, which never expires)
     and is worth reading twice because the cost of getting it wrong is a day of
     a customer channel.
 
+    **And the move itself has not taken effect, which is the finding under the
+    finding.** The intent is Facebook Login only, with Instagram Login
+    disconnected — in which case no Instagram app secret would be needed and
+    every delivery would verify against `META_APP_SECRET`. The traffic says
+    otherwise. All 1,254 `instagram` deliveries since 27 August are the same
+    account, `17841448759001625`, and they split three ways:
+
+    | Shape       | Verified | Count | Window                        |
+    | ----------- | -------- | ----- | ----------------------------- |
+    | `messaging` | no       | 1,204 | 27 Aug 00:04 → still arriving |
+    | `messaging` | yes      | 41    | 27 Aug 01:29 → 11:46 only     |
+    | `standby`   | yes      | 9     | 27 Aug 02:38 → 13:08 only     |
+
+    Read it as two connections, not one. `messaging` verified **only** during
+    the hours `META_INSTAGRAM_APP_SECRET` was set, so it is signed by the
+    Instagram app secret — that is the Instagram Login setup, still primary,
+    still delivering. `standby` verified at 13:08, _after_ the variable was
+    unset, so it was signed by `META_APP_SECRET` — that is the Page-connected
+    side, which was working and has produced nothing since.
+
+    `META_APP_SECRET` itself is not in question: `page` and
+    `whatsapp_business_account` deliveries verify against it 100% over the same
+    hours. Only the `instagram` object fails, which is what makes "a second
+    signing identity is still live" the only reading left.
+
+    So the sequence is: restore the variable to stop dropping messages, then
+    disconnect the account under **Instagram → API setup with Instagram login**
+    in the App Dashboard — the setup being removed is what stops the Instagram
+    secret signing — and confirm `messaging` deliveries start verifying against
+    `META_APP_SECRET`. Removing the variable is the _last_ step, not the first.
+    Disconnecting in the dashboard and unsetting the variable are two changes,
+    and doing the second without the first is exactly what produced the 844.
+
 30. **`npm run db:seed` is not part of any deploy, so adding a row to
     `db/seed.ts` does not put it in production.** `render.yaml` runs
     `preDeployCommand: npm run db:migrate` and nothing else; the seed is a
