@@ -1628,6 +1628,34 @@ access_token`, authorised with the System User token, which never expires)
     Disconnecting in the dashboard and unsetting the variable are two changes,
     and doing the second without the first is exactly what produced the 844.
 
+    **Resolved 2026-08-28 18:19 UTC by disconnecting, and the intent was right
+    all along.** The account was disconnected under Instagram Login and
+    Instagram verification recovered within minutes — no Instagram app secret
+    restored, and none needed. The turnaround is exact:
+
+    | Time (UTC)    | Shape       | Verified | n   |
+    | ------------- | ----------- | -------- | --- |
+    | → 18:08:31    | `messaging` | no       | 766 |
+    | 18:08 → 18:19 | —           | —        | 0   |
+    | 18:19:43      | `standby`   | **yes**  | 5   |
+
+    So `META_INSTAGRAM_APP_SECRET` stays unset and §6.26's optional pair is now
+    genuinely dormant. The lesson survives with its order corrected: unsetting
+    the variable was not the mistake, doing it _before_ the disconnection was —
+    and the fix was never to restore the variable but to finish the move.
+
+    **What it uncovered is worse than what it fixed: everything now arrives in
+    `standby`, on both platforms.** Over the 24 hours to 18:20 the verified
+    traffic is 5 Instagram `standby` and 40 Page `standby` against 3 Page
+    `messaging`. Standby means another app is the primary receiver for that
+    inbox, so `metaThreadState` refuses the send before it is made
+    (§6.22) — this app can read every Instagram and Messenger conversation and
+    answer none of them. That is not a credential problem and no approval fixes
+    it; thread control has to be passed to this app in the Meta app's Messenger
+    settings, or taken from whatever holds it. It is also the thing that makes
+    an App Review screencast impossible: a recording of a reply Graph refuses is
+    a rejected submission.
+
 30. **`npm run db:seed` is not part of any deploy, so adding a row to
     `db/seed.ts` does not put it in production.** `render.yaml` runs
     `preDeployCommand: npm run db:migrate` and nothing else; the seed is a
