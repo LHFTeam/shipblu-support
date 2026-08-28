@@ -517,6 +517,36 @@ In rough priority order. Nothing here is blocked by anything else.
 The system cannot take a single real ticket until this is done, and none of it
 is code:
 
+- **Freshworks is still the live support service, and it is still the default
+  Meta app on the account.** This is the fact that explains the single most
+  confusing thing about the Meta channels, and it is deliberate rather than
+  broken: ShipBlu is still being supported out of Freshworks while this app is
+  under construction, so the Freshworks app (Freshchat — `app_id`
+  576817601276249, `metadata: "freshchannel"`) is the Page's default app and
+  **holds thread control** on both the Messenger and Instagram inboxes.
+
+  The consequence is that every Meta event reaches this system in the handover
+  protocol's `standby` array rather than `messaging`. A secondary receiver may
+  **read** a thread and may not **send** on it, so the console can show every
+  Facebook and Instagram conversation and answer none of them, and
+  `lib/meta/thread.ts` refuses those sends before Graph does (§6.22). Nothing
+  about that is a credential, an approval or a bug — do not go looking for one.
+
+  **The plan is a swap, not a negotiation.** When this service is ready, the
+  Freshworks app is removed from the Meta account and this service's Meta app
+  becomes the default; thread control follows the default app. Until that
+  happens, treat every Meta channel as read-only in practice however the code
+  is configured.
+
+  Two things follow that are easy to get wrong. **The App Review screencasts
+  cannot be recorded before the swap** — `pages_messaging` and the comment
+  permissions all require footage of the app _sending_, and a recording of a
+  reply Graph refuses is a rejected submission
+  (`plans/meta-app-review-submission.md`). And **the swap is the cutover's point
+  of no return** for these channels: the moment Freshworks stops being default,
+  the Meta inboxes are answered here or not at all, so the channel rows, the
+  agents and the groups below need to be in place first rather than after.
+
 - **Channel rows.** `channels` holds one row, `whatsapp_bot`, and it is the
   observed bot number rather than anything the team answers (§1). Email
   mailboxes, the _human_ WhatsApp business number, the Facebook page and
@@ -793,7 +823,12 @@ on node type (User)` with no subcode, which that predicate declines by design,
      Instagram delivery keeps being answered 403 (§6.26). Nothing about comments
      can be tested while inbound Instagram is rejected.
   2. `npm run job -- subscribe_meta_webhooks object=instagram`, to add the
-     `comments` field, and `object=page` for `feed`. **Zero comment webhooks
+     `comments` field, and `object=page` for `feed`. **The `page` half is now
+     done** — run 2026-08-28 18:00 UTC. It confirmed the diagnosis exactly: the
+     app level already listed `feed` among 29 fields, the Page level carried 18
+     and `feed` was not one of them, and the write added it. Nothing has arrived
+     through it yet, because a `feed` event needs somebody to comment; that
+     comment is the outstanding step, and it is also the App Review footage. **Zero comment webhooks
      have ever arrived** — re-checked 2026-08-28, still 0 of 4,503 `page` and
      `instagram` deliveries carrying a `changes` entry — so `ingestMetaComment`
      has never run in production and there are no comment threads to look at.
@@ -1242,7 +1277,10 @@ Each cost real time. Most are also comments in the code.
       thread control** — the echoes name it: `app_id` 576817601276249,
       `metadata: "freshchannel"`, so Freshchat is the primary receiver on that
       inbox and we are a secondary one. A secondary receiver may read the thread
-      and may not send on it.
+      and may not send on it. **This is expected and not a fault**: Freshworks is
+      still the live support service and still the default Meta app on the
+      account, and it stays that way until the cutover swaps them — §5.1 has the
+      arrangement and what it blocks.
 
     The code made the second one invisible: `parseMetaWebhook` flattened
     `standby` into `messaging` and the distinction was gone one line into the
@@ -1559,6 +1597,100 @@ access_token`, authorised with the System User token, which never expires)
     That was the one failure mode that would have made this migration
     unaffordable, and it is ruled out by data rather than by Meta's docs.
 
+    **It was unset too early, and Instagram has been dropping messages since.**
+    _Confirmed from the data 2026-08-28 18:00 UTC._ The warning above describes
+    what then happened, hour by hour:
+
+    | Hour (UTC)         | verified | unverified | reason stored                                    |
+    | ------------------ | -------- | ---------- | ------------------------------------------------ |
+    | 27 Aug 01:00       | 30       | 127        | `… META_INSTAGRAM_APP_SECRET or META_APP_SECRET` |
+    | 27 Aug 02:00       | 14       | 0          | —                                                |
+    | 27 Aug 11:00       | 2        | 0          | —                                                |
+    | 27 Aug 12:00       | 2        | 18         | `signature did not match META_APP_SECRET`        |
+    | 27 Aug 13:00 → now | 0        | 844        | `signature did not match META_APP_SECRET`        |
+
+    Two clean hours of 100% verification, then the reason stops naming
+    `META_INSTAGRAM_APP_SECRET` — which `signingCandidates` only omits when the
+    variable is unset — and verification goes to zero and stays there. **844
+    Instagram deliveries dropped between 27 Aug 12:52 and now, still ongoing.**
+
+    The reason line is the diagnosis on its own: it names the candidates that
+    were _tried_, so "did not match META_APP_SECRET" alone means one secret was
+    offered where two were needed. The account is therefore still signing with
+    its Instagram app secret — the move to the Page has not taken effect, whatever
+    the dashboard shows.
+
+    **The fix is to put `META_INSTAGRAM_APP_SECRET` back**, and it is safe
+    regardless of which setup the account is really on: both candidates are
+    tried, so a restored variable cannot break a Page-connected account. Then
+    wait for the log to say Instagram is verifying against `META_APP_SECRET`
+    before removing it again — which is what the paragraph above already said,
+    and is worth reading twice because the cost of getting it wrong is a day of
+    a customer channel.
+
+    **And the move itself has not taken effect, which is the finding under the
+    finding.** The intent is Facebook Login only, with Instagram Login
+    disconnected — in which case no Instagram app secret would be needed and
+    every delivery would verify against `META_APP_SECRET`. The traffic says
+    otherwise. All 1,254 `instagram` deliveries since 27 August are the same
+    account, `17841448759001625`, and they split three ways:
+
+    | Shape       | Verified | Count | Window                        |
+    | ----------- | -------- | ----- | ----------------------------- |
+    | `messaging` | no       | 1,204 | 27 Aug 00:04 → still arriving |
+    | `messaging` | yes      | 41    | 27 Aug 01:29 → 11:46 only     |
+    | `standby`   | yes      | 9     | 27 Aug 02:38 → 13:08 only     |
+
+    Read it as two connections, not one. `messaging` verified **only** during
+    the hours `META_INSTAGRAM_APP_SECRET` was set, so it is signed by the
+    Instagram app secret — that is the Instagram Login setup, still primary,
+    still delivering. `standby` verified at 13:08, _after_ the variable was
+    unset, so it was signed by `META_APP_SECRET` — that is the Page-connected
+    side, which was working and has produced nothing since.
+
+    `META_APP_SECRET` itself is not in question: `page` and
+    `whatsapp_business_account` deliveries verify against it 100% over the same
+    hours. Only the `instagram` object fails, which is what makes "a second
+    signing identity is still live" the only reading left.
+
+    So the sequence is: restore the variable to stop dropping messages, then
+    disconnect the account under **Instagram → API setup with Instagram login**
+    in the App Dashboard — the setup being removed is what stops the Instagram
+    secret signing — and confirm `messaging` deliveries start verifying against
+    `META_APP_SECRET`. Removing the variable is the _last_ step, not the first.
+    Disconnecting in the dashboard and unsetting the variable are two changes,
+    and doing the second without the first is exactly what produced the 844.
+
+    **Resolved 2026-08-28 18:19 UTC by disconnecting, and the intent was right
+    all along.** The account was disconnected under Instagram Login and
+    Instagram verification recovered within minutes — no Instagram app secret
+    restored, and none needed. The turnaround is exact:
+
+    | Time (UTC)    | Shape       | Verified | n   |
+    | ------------- | ----------- | -------- | --- |
+    | → 18:08:31    | `messaging` | no       | 766 |
+    | 18:08 → 18:19 | —           | —        | 0   |
+    | 18:19:43      | `standby`   | **yes**  | 5   |
+
+    So `META_INSTAGRAM_APP_SECRET` stays unset and §6.26's optional pair is now
+    genuinely dormant. The lesson survives with its order corrected: unsetting
+    the variable was not the mistake, doing it _before_ the disconnection was —
+    and the fix was never to restore the variable but to finish the move.
+
+    **What it uncovered is worse than what it fixed: everything now arrives in
+    `standby`, on both platforms.** Over the 24 hours to 18:20 the verified
+    traffic is 5 Instagram `standby` and 40 Page `standby` against 3 Page
+    `messaging`. Standby means another app is the primary receiver for that
+    inbox, so `metaThreadState` refuses the send before it is made
+    (§6.22) — this app can read every Instagram and Messenger conversation and
+    answer none of them. That is not a credential problem and no approval fixes
+    it; thread control has to be passed to this app in the Meta app's Messenger
+    settings — which is the cutover, not a config fix. **The app holding it is
+    Freshworks**, still the live support service and still the account's default
+    Meta app by design; §5.1 has the arrangement and the swap that ends it. It
+    is also the thing that makes an App Review screencast impossible until then:
+    a recording of a reply Graph refuses is a rejected submission.
+
 30. **`npm run db:seed` is not part of any deploy, so adding a row to
     `db/seed.ts` does not put it in production.** `render.yaml` runs
     `preDeployCommand: npm run db:migrate` and nothing else; the seed is a
@@ -1588,6 +1720,32 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     Any new rule about a state the sweep does not select for has the same shape
     of failure — silent, and indistinguishable from a condition that does not
     match.
+
+32. **A second phone number on the same WABA can fail signature verification
+    while the first one passes, and nothing says so.** _Found 2026-08-28._
+    `whatsapp_accounts` holds two rows and both leave `token_env_var` null, so
+    both fall back to the same credential — and signature verification does not
+    look at the phone number at all. Yet within WABA `128772296801141`:
+
+    - `128318316834446` — 3,444 deliveries in 48 hours, **100% verified**.
+    - `838961722630554` — 7 verified on 18 August, 5 more up to 27 Aug 15:25,
+      then **150 consecutive failures** through 18:00 on 28 August, still
+      arriving.
+
+    Same WABA id in the payload, same `facebookexternalua`, same endpoint. An
+    HMAC does not depend on which number a message was sent to, so "the second
+    number is misconfigured" cannot be the whole story: the plausible reading is
+    that its deliveries are signed by a _different app_ — an alternate callback
+    or a second app subscribed to the same WABA — and this is **not established**.
+
+    What is established is that a real inbound number has been dropping messages
+    for a day, that it worked before 27 Aug 15:25, and that the break falls in
+    the same afternoon as the Instagram one (§6.29). Do not assume they share a
+    cause; do check what changed in the App Dashboard that afternoon. The query
+    that finds this is the delivery breakdown **split by
+    `value.metadata.phone_number_id`** — totalling by WABA reports 96% healthy
+    and hides it completely, which is exactly the shape `AGENTS.md` asks counts
+    to be broken down along.
 
     **What the switch does not settle: who is actually answering this inbox.**
     Over 36 hours the `instagram` object delivered 1,037 inbound messages and
