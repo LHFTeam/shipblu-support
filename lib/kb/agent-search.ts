@@ -4,7 +4,6 @@ import { kbVisibilityEnum } from '@/db/schema/enums';
 import { kbArticles, kbCategories, kbFolders } from '@/db/schema';
 import type { Locale } from './locale';
 import { hybridMatch, hybridRank } from './rank';
-import { publicBaseUrl } from './site';
 
 /**
  * The knowledge base as an agent answering a ticket sees it.
@@ -137,7 +136,7 @@ type Row = {
   visibility: ArticleVisibility;
 };
 
-function toHit(row: Row, base: string): AgentArticleHit {
+function toHit(row: Row, origin: string): AgentArticleHit {
   const truncated = row.body.length > MAX_BODY_CHARS;
 
   return {
@@ -154,7 +153,7 @@ function toHit(row: Row, base: string): AgentArticleHit {
     // The article's own locale, never the panel's: an Arabic search that
     // surfaced the English translation must link to the English one, or the
     // agent sends a URL for a row that does not exist.
-    url: `${base}/${row.locale}/a/${encodeURI(row.slug)}`,
+    url: `${origin}/${row.locale}/a/${encodeURI(row.slug)}`,
   };
 }
 
@@ -162,8 +161,17 @@ function published(locale: Locale, match: SQL): SQL {
   return and(eq(kbArticles.status, 'published'), eq(kbArticles.locale, locale), match)!;
 }
 
-/** Articles matching what the agent typed, best first. */
+/**
+ * Articles matching what the agent typed, best first.
+ *
+ * `origin` comes first for the same reason `searchArticles` in `./queries.ts`
+ * takes its viewer first: it is the context the read happens in, not an option.
+ * It is passed rather than read here because only the caller knows which origin
+ * this is for — `requestBaseUrl()` for anything an agent or their customer will
+ * click, `publicBaseUrl()` for anything we publish.
+ */
 export async function searchForAgent(
+  origin: string,
   locale: Locale,
   query: string,
   limit = 8,
@@ -182,8 +190,7 @@ export async function searchForAgent(
     .orderBy(desc(rank), asc(kbArticles.title))
     .limit(limit);
 
-  const base = publicBaseUrl();
-  return rows.map((row) => toHit(row, base));
+  return rows.map((row) => toHit(row, origin));
 }
 
 /**
@@ -204,6 +211,7 @@ export async function searchForAgent(
  * operator.
  */
 export async function suggestForAgent(
+  origin: string,
   locale: Locale,
   terms: string[],
   limit = 3,
@@ -223,6 +231,5 @@ export async function suggestForAgent(
     .orderBy(desc(rank), asc(kbArticles.title))
     .limit(limit);
 
-  const base = publicBaseUrl();
-  return rows.map((row) => toHit(row, base));
+  return rows.map((row) => toHit(row, origin));
 }

@@ -1,8 +1,9 @@
 import Link from 'next/link';
+import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
 import { requirePermission } from '@/lib/auth/guard';
 import { getArticleForEdit, listFolderOptions, listVersions } from '@/lib/kb/admin';
-import { publicBaseUrl } from '@/lib/kb/site';
+import { requestBaseUrl } from '@/lib/kb/site';
 import { ArticleEditor } from '../editor';
 import { ArticleSidebar } from './sidebar';
 
@@ -17,9 +18,14 @@ export default async function EditArticlePage({ params }: { params: Promise<{ id
 
   const [folders, versions] = await Promise.all([listFolderOptions(), listVersions(id)]);
 
+  // Built from the host this editor is being served on rather than from
+  // `publicBaseUrl()`. This link exists to be clicked by the person who just
+  // wrote the article, and the published hostname is only the right answer once
+  // it serves this app — until the domain cuts over it is a 404 wearing the
+  // canonical address.
   const publicUrl =
     article.status === 'published' && article.visibility === 'public'
-      ? `${publicBaseUrl()}/${article.locale}/a/${article.slug}`
+      ? `${requestBaseUrl(await headers())}/${article.locale}/a/${encodeURI(article.slug)}`
       : null;
 
   return (

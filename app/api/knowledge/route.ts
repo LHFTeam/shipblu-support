@@ -2,6 +2,7 @@ import { can } from '@/lib/auth/permissions';
 import { getSessionAgent } from '@/lib/auth/session';
 import { searchForAgent } from '@/lib/kb/agent-search';
 import { DEFAULT_LOCALE, isLocale } from '@/lib/kb/locale';
+import { requestBaseUrl } from '@/lib/kb/site';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,5 +33,10 @@ export async function GET(request: Request) {
   const requested = params.get('locale') ?? DEFAULT_LOCALE;
   const locale = isLocale(requested) ? requested : DEFAULT_LOCALE;
 
-  return Response.json({ articles: await searchForAgent(locale, query) });
+  // The origin the agent is on, not the one we publish: an article they cannot
+  // open is no use to them, and `KB_PUBLIC_HOST` may name a domain that does
+  // not serve this app yet.
+  const origin = requestBaseUrl(request.headers);
+
+  return Response.json({ articles: await searchForAgent(origin, locale, query) });
 }
