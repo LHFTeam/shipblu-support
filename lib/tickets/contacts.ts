@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { companies, contactIdentities, contacts } from '@/db/schema';
 import { normaliseEmail, normaliseIdentifier } from '@/lib/auth/normalise';
@@ -127,25 +127,46 @@ export async function applyChannelProfile(input: {
   identifier: string;
   name: string | null;
   avatarPath: string | null;
+  /** The channel's own locale code, e.g. Messenger's `ar_AR`. Stored verbatim. */
+  profileLocale?: string | null;
+  /** 'male' or 'female', already normalised. */
+  gender?: string | null;
   /** False when the answer was incomplete and the identity should stay open. */
   markFetched: boolean;
 }): Promise<void> {
   const identifier = normaliseIdentifier(input.channel, input.identifier);
   const name = input.name?.trim() || null;
+  const profileLocale = input.profileLocale?.trim() || null;
+  const gender = input.gender?.trim() || null;
+
+  const identityPatch = {
+    ...(name ? { displayName: name } : {}),
+    ...(profileLocale ? { profileLocale } : {}),
+    ...(input.markFetched ? { profileFetchedAt: new Date() } : {}),
+  };
 
   await db.transaction(async (tx) => {
-    await tx
-      .update(contactIdentities)
-      .set({
-        ...(name ? { displayName: name } : {}),
-        ...(input.markFetched ? { profileFetchedAt: new Date() } : {}),
-      })
-      .where(
-        and(
-          eq(contactIdentities.channel, input.channel),
-          eq(contactIdentities.identifier, identifier),
-        ),
-      );
+    /*
+      Skipped when there is nothing to write, because Drizzle throws
+      `No values to set` on an empty patch rather than emitting a harmless
+      no-op UPDATE — and it throws *inside the transaction*, so a profile that
+      answered with a picture and no name would take the avatar and gender
+      writes below down with it and fail the job with a message naming neither
+      the contact nor the cause. Reachable whenever a locked-down profile is
+      read and the avatar download fails: no name, no locale, and `markFetched`
+      false.
+    */
+    if (Object.keys(identityPatch).length > 0) {
+      await tx
+        .update(contactIdentities)
+        .set(identityPatch)
+        .where(
+          and(
+            eq(contactIdentities.channel, input.channel),
+            eq(contactIdentities.identifier, identifier),
+          ),
+        );
+    }
 
     // Two statements rather than one patch, because the two columns have
     // different rules and folding them together makes the stricter rule win:
@@ -170,6 +191,13 @@ export async function applyChannelProfile(input: {
             sql`(${contacts.name} IS NULL OR ${contacts.name} = '')`,
           ),
         );
+    }
+
+    if (gender) {
+      await tx
+        .update(contacts)
+        .set({ gender })
+        .where(and(eq(contacts.id, input.contactId), isNull(contacts.gender)));
     }
   });
 }

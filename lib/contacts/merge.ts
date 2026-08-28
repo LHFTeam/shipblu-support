@@ -12,6 +12,7 @@ import {
   shipments,
   type MergedCounts,
 } from '@/db/schema';
+import { DEFAULT_CONTACT_LOCALE as DEFAULT_LOCALE } from './locale';
 
 /**
  * Merging two contacts.
@@ -52,6 +53,7 @@ export type MergeSide = {
   companyId: string | null;
   timezone: string | null;
   locale: string;
+  gender: string | null;
   customFields: Record<string, unknown>;
   isBlocked: boolean;
   isShipper: boolean;
@@ -64,17 +66,6 @@ export type MergeRefusal =
   'not_found' | 'same_contact' | 'already_merged' | 'target_merged' | 'target_deleted';
 
 export type MergeResult = { ok: true; moved: MergedCounts } | { ok: false; reason: MergeRefusal };
-
-/**
- * The locale every contact starts at, whether or not anybody knows.
- *
- * `contacts.locale` is `not null default 'en'`, so 'en' means either "this
- * person reads English" or "nobody has ever said" — and those are different
- * facts that the column cannot tell apart. Reconciliation treats it as the
- * second, which is why a merge can adopt the loser's locale but never replace a
- * locale that was actually chosen.
- */
-const DEFAULT_LOCALE = 'en';
 
 function blank(value: string | null): boolean {
   return value === null || value.trim() === '';
@@ -119,6 +110,7 @@ export type ContactPatch = Partial<
     | 'timezone'
     | 'companyId'
     | 'locale'
+    | 'gender'
     | 'customFields'
     | 'isShipper'
     | 'isRecipient'
@@ -149,6 +141,7 @@ export function reconcileContact(survivor: MergeSide, loser: MergeSide): Contact
     patch.avatarPath = loser.avatarPath;
   }
   if (blank(survivor.timezone) && !blank(loser.timezone)) patch.timezone = loser.timezone;
+  if (blank(survivor.gender) && !blank(loser.gender)) patch.gender = loser.gender;
   if (!survivor.companyId && loser.companyId) patch.companyId = loser.companyId;
 
   // Only ever replaces the default — see DEFAULT_LOCALE.
@@ -187,6 +180,7 @@ const MERGE_COLUMNS = {
   companyId: contacts.companyId,
   timezone: contacts.timezone,
   locale: contacts.locale,
+  gender: contacts.gender,
   customFields: contacts.customFields,
   isBlocked: contacts.isBlocked,
   isShipper: contacts.isShipper,

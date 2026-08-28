@@ -10,6 +10,7 @@ import {
   MetaContentTooLargeError,
 } from '@/lib/meta/client';
 import { explainMetaProfileError, isProfilePermissionRefusal } from '@/lib/meta/errors';
+import { normaliseGender } from '@/lib/meta/profile';
 import type { MetaPlatform } from '@/lib/meta/types';
 import { buildAvatarPath, isStorableAvatarType, uploadObject } from '@/lib/storage';
 import { applyChannelProfile } from '@/lib/tickets/contacts';
@@ -51,6 +52,16 @@ export type ProfileRefreshResult =
       name: string | null;
       /** `retry` means Meta holds a picture we failed to copy this time. */
       picture: 'stored' | 'none' | 'retry';
+      /** The channel's own locale code, when it gave one. */
+      locale: string | null;
+      /** Whether a gender came back — never which, see the caller's log line. */
+      gender: boolean;
+      /**
+       * Graph refused `locale` and `gender` specifically, and answered the
+       * narrower request. Separates "not approved for those two" from "this
+       * person set neither", which look identical in the columns.
+       */
+      extendedFieldsRefused: boolean;
     };
 
 export async function refreshChannelProfile(input: {
@@ -135,6 +146,24 @@ export async function refreshChannelProfile(input: {
     // equivalent, so `name` is all there is.
     name: profile.name ?? profile.username,
     avatarPath: avatar.path,
+    /*
+      Kept on the *identity* and deliberately not copied into `contacts.locale`.
+
+      That column is not a record of what a channel reported, it is the answer
+      to "which language do we address this person in", and everything reading
+      it treats 'ar' as a settled preference: `preferredLocale` returns 'ar'
+      without so much as looking at what the customer wrote, and `send_csat`
+      and the customer portal branch on it the same way. A Facebook *interface*
+      language is not that. Writing it through would mean one Messenger message
+      from a merchant whose Facebook is set to Arabic silently switches their
+      out-of-hours email auto-reply and their CSAT survey to Arabic — on every
+      channel, including ones where they have only ever written English.
+
+      Reading the language off the message body, which is what happens today,
+      is both better evidence and reversible.
+    */
+    profileLocale: profile.locale,
+    gender: normaliseGender(profile.gender),
     // The name is written either way — it is the part that makes a ticket
     // readable — but a picture we could not fetch this time leaves the identity
     // open, so the next message asks again.
@@ -145,6 +174,9 @@ export async function refreshChannelProfile(input: {
     kind: 'applied',
     name: profile.name ?? profile.username ?? null,
     picture: avatar.retryable ? 'retry' : avatar.path ? 'stored' : 'none',
+    locale: profile.locale,
+    gender: normaliseGender(profile.gender) !== null,
+    extendedFieldsRefused: profile.extendedFieldsRefused,
   };
 }
 

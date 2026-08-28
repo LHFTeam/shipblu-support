@@ -758,6 +758,32 @@ linked IG account is not professional account`.** Six refusals, and **not an
   **did not print once in 17 refusals.** Fixed, with code 3 in the set and the
   Instagram linkage refusal explained separately; §6.27.
 
+  **The profile call now also asks for `locale` and `gender`**, gated behind
+  `pages_user_locale` and `pages_user_gender` on top of the feature above.
+  Because Graph rejects the whole request over one unapproved field, appending
+  them would have cost the _name_ as well until both landed — so `fetchProfile`
+  asks for them first and retries with the base fields on any non-transient
+  refusal. The retry deliberately does not key on `isProfilePermissionRefusal`:
+  an ungranted field answers `(#100) Tried accessing nonexisting field (locale)
+on node type (User)` with no subcode, which that predicate declines by design,
+  and keying on it would have missed the case the retry exists for. Transient
+  failures still reach the queue's own backoff.
+
+  The values land in `contacts.gender` and `contact_identities.profile_locale`.
+  **`contacts.locale` is deliberately not written**, which is worth knowing
+  before somebody "fixes" it: that column decides what an auto-reply and a CSAT
+  survey go out in on _every_ channel — `preferredLocale` returns 'ar' from it
+  without reading the message at all — and nothing had ever set it, so that
+  branch was dead. Filling it from a Facebook interface language would wake it
+  up and switch a merchant's English email auto-replies to Arabic.
+
+  Two caveats on the log line that names the two permissions. It proves they are
+  missing only when Graph _refuses_; if Graph answers 200 with the fields simply
+  omitted, that reads identically to a customer who set neither. And the
+  identity is stamped either way, so a later approval is picked up only by
+  `npm run job -- backfill_meta_profiles force=true` — an unforced run selects
+  nothing.
+
 - **Instagram comment management, which cannot be exercised yet at all.** Three
   separate things gate it, in order, and none is code:
   1. `META_INSTAGRAM_APP_SECRET` in `shipblu-support-production`, or every

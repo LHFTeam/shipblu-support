@@ -72,6 +72,20 @@ export const contacts = pgTable(
     timezone: text('timezone'),
     locale: text('locale').notNull().default('en'),
 
+    /**
+     * 'male' or 'female' as Messenger reported it, or null — which is both "we
+     * have never been told" and "they have not set one". Meta omits the field
+     * for anyone who has chosen a custom gender or none, so there is no third
+     * value to store; `normaliseGender()` drops anything else rather than
+     * putting a raw Graph token in front of an agent.
+     *
+     * Free text rather than an enum on purpose. An enum would have to be
+     * migrated to admit a value some future channel reports, and this column
+     * exists to be *displayed*, never to be branched on — nothing in this
+     * system changes behaviour based on it, and nothing should.
+     */
+    gender: text('gender'),
+
     customFields: jsonb('custom_fields').$type<Record<string, unknown>>().notNull().default({}),
 
     /** Excluded from the inbox and never auto-replied to. */
@@ -212,6 +226,29 @@ export const contactIdentities = pgTable(
 
     /** Display name as reported by the channel, e.g. the WhatsApp profile name. */
     displayName: text('display_name'),
+
+    /**
+     * The locale this channel reported, in the channel's own vocabulary —
+     * `ar_AR`, `en_US`, `fr_FR` from Messenger.
+     *
+     * The *only* place a reported locale is stored — nothing copies it into
+     * `contacts.locale`. That column answers "which language do we address this
+     * person in", and everything reading it treats 'ar' as a settled
+     * preference: `preferredLocale` returns 'ar' without looking at what the
+     * customer wrote, and the CSAT job and the customer portal branch on it the
+     * same way. A Facebook *interface* language is not that, and letting one
+     * through would switch a merchant's email auto-replies to Arabic on the
+     * strength of a setting they made on a different site. See
+     * `DEFAULT_CONTACT_LOCALE` in `lib/contacts/locale.ts` for what that column
+     * does mean.
+     *
+     * Kept verbatim, per channel, which is also the only thing that can answer
+     * a contact whose two channels disagree.
+     *
+     * Only Messenger sets it. Instagram's profile API has no locale field and
+     * WhatsApp's webhook carries no locale at all.
+     */
+    profileLocale: text('profile_locale'),
 
     /**
      * When a channel's profile API last answered for this identity — successfully

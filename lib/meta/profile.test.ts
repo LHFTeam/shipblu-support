@@ -9,6 +9,7 @@ import {
   profileFields,
 } from './client';
 import { explainMetaProfileError, isProfilePermissionRefusal } from './errors';
+import { normaliseGender } from './profile';
 
 /**
  * The User Profile API is the only thing that ever tells this system who a
@@ -22,12 +23,6 @@ import { explainMetaProfileError, isProfilePermissionRefusal } from './errors';
  * that returned null on any failure could not tell them apart — which is how a
  * missing approval hides as a run of private profiles.
  */
-
-function respondWith(status: number, body: unknown) {
-  const fetchMock = vi.fn(async () => new Response(JSON.stringify(body), { status }));
-  vi.stubGlobal('fetch', fetchMock);
-  return fetchMock;
-}
 
 beforeEach(() => {
   process.env.DATABASE_URL = 'postgres://localhost/test';
@@ -57,14 +52,37 @@ describe('profileFields', () => {
     expect(profileFields('instagram')).toBe('name,username,profile_pic');
   });
 
-  it('asks for nothing gated behind a separate permission', () => {
-    // locale, timezone and gender each need their own approval. One field we do
-    // not hold rights to fails the request, taking the name down with it.
+  it('keeps the separately-gated fields out of the base list', () => {
+    // The list that must survive on Business Asset User Profile Access alone.
+    // One field we do not hold rights to fails the whole request, taking the
+    // name down with it, so this is the list `fetchProfile` falls back to.
     for (const platform of ['facebook', 'instagram'] as const) {
       expect(profileFields(platform)).not.toContain('locale');
-      expect(profileFields(platform)).not.toContain('timezone');
       expect(profileFields(platform)).not.toContain('gender');
     }
+  });
+
+  it('adds exactly locale and gender when extended', () => {
+    expect(profileFields('facebook', { extended: true })).toBe(
+      'first_name,last_name,name,profile_pic,locale,gender',
+    );
+  });
+
+  it('never asks for timezone', () => {
+    // A third permission (pages_user_timezone) for a column no screen reads.
+    // Requesting it would fail every profile call until it too was approved.
+    expect(profileFields('facebook', { extended: true })).not.toContain('timezone');
+  });
+
+  it('has no extended list on Instagram', () => {
+    /*
+      Its User Profile API has neither field, and `pages_user_*` are Page
+      permissions. Asking graph.instagram.com for `locale` is a malformed
+      request rather than an unapproved one — it would fail forever instead of
+      starting to work on approval, and the fallback would hide that by making
+      every Instagram lookup cost two calls in perpetuity.
+    */
+    expect(profileFields('instagram', { extended: true })).toBe('name,username,profile_pic');
   });
 });
 
@@ -90,12 +108,35 @@ describe('profileDisplayName', () => {
 });
 
 describe('fetchProfile', () => {
-  it('reads the name, handle and picture off a Messenger response', async () => {
-    const fetchMock = respondWith(200, {
-      first_name: 'Ali',
-      last_name: 'Hassan',
-      profile_pic: 'https://cdn.example/pic.jpg?token=abc',
+  /** Graph's answers, in order, one per call. */
+  function respondInTurn(...responses: [number, unknown][]) {
+    let call = 0;
+    const fetchMock = vi.fn(async () => {
+      const [status, body] = responses[Math.min(call++, responses.length - 1)]!;
+      return new Response(JSON.stringify(body), { status });
     });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  const REFUSAL = {
+    error: { message: 'Unsupported get request.', code: 100, error_subcode: 33 },
+  };
+
+  function fieldsOf(fetchMock: ReturnType<typeof respondInTurn>, index: number): string | null {
+    const call = fetchMock.mock.calls.at(index) as unknown as [URL | string];
+    return new URL(String(call[0])).searchParams.get('fields');
+  }
+
+  it('reads the name, handle and picture off a Messenger response', async () => {
+    const fetchMock = respondInTurn([
+      200,
+      {
+        first_name: 'Ali',
+        last_name: 'Hassan',
+        profile_pic: 'https://cdn.example/pic.jpg?token=abc',
+      },
+    ]);
 
     const profile = await fetchProfile('facebook', 'psid-1');
 
@@ -103,28 +144,122 @@ describe('fetchProfile', () => {
       name: 'Ali Hassan',
       username: null,
       pictureUrl: 'https://cdn.example/pic.jpg?token=abc',
+      locale: null,
+      gender: null,
+      extendedFieldsRefused: false,
     });
 
     const call = fetchMock.mock.calls.at(0) as unknown as [URL | string];
-    const url = new URL(String(call[0]));
-    expect(url.pathname).toContain('psid-1');
-    expect(url.searchParams.get('fields')).toBe('first_name,last_name,name,profile_pic');
+    expect(new URL(String(call[0])).pathname).toContain('psid-1');
   });
 
-  it('reads an Instagram handle', async () => {
-    respondWith(200, { name: 'Layla', username: 'layla.ships', profile_pic: 'https://cdn/p.jpg' });
+  it('reads the locale and gender when Graph gives them', async () => {
+    const fetchMock = respondInTurn([200, { name: 'Ali', locale: 'ar_AR', gender: 'male' }]);
+
+    const profile = await fetchProfile('facebook', 'psid-1');
+
+    // Verbatim, not narrowed. `appLocale` decides what our own column gets, and
+    // the region half is only recoverable from here.
+    expect(profile.locale).toBe('ar_AR');
+    expect(profile.gender).toBe('male');
+    expect(profile.extendedFieldsRefused).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fieldsOf(fetchMock, 0)).toContain('locale,gender');
+  });
+
+  it('keeps the name when only the extra fields are refused', async () => {
+    /*
+      The regression this whole fallback exists to prevent. Graph rejects the
+      *whole* request over one unapproved field, so an app holding Business
+      Asset User Profile Access but not pages_user_locale / pages_user_gender
+      would learn nothing at all about a customer it has every right to name.
+    */
+    const fetchMock = respondInTurn([400, REFUSAL], [200, { name: 'Ali Hassan' }]);
+
+    const profile = await fetchProfile('facebook', 'psid-1');
+
+    expect(profile.name).toBe('Ali Hassan');
+    expect(profile.locale).toBeNull();
+    expect(profile.gender).toBeNull();
+    // The flag is the difference between "refused" and "this person set
+    // neither" — both leave the columns null and only one is fixed by an
+    // approval.
+    expect(profile.extendedFieldsRefused).toBe(true);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fieldsOf(fetchMock, 0)).toBe('first_name,last_name,name,profile_pic,locale,gender');
+    expect(fieldsOf(fetchMock, 1)).toBe('first_name,last_name,name,profile_pic');
+  });
+
+  it('does not claim a refusal when the customer simply set neither', async () => {
+    const fetchMock = respondInTurn([200, { name: 'Ali Hassan' }]);
+
+    const profile = await fetchProfile('facebook', 'psid-1');
+
+    expect(profile.extendedFieldsRefused).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads an Instagram handle in one call', async () => {
+    const fetchMock = respondInTurn([
+      200,
+      { name: 'Layla', username: 'layla.ships', profile_pic: 'https://cdn/p.jpg' },
+    ]);
 
     const profile = await fetchProfile('instagram', 'igsid-1');
     expect(profile.name).toBe('Layla');
     expect(profile.username).toBe('layla.ships');
+
+    // No extended attempt to spend: Instagram has no such fields.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fieldsOf(fetchMock, 0)).toBe('name,username,profile_pic');
   });
 
-  it('throws rather than swallowing a refusal', async () => {
-    respondWith(400, {
-      error: { message: 'Unsupported get request.', code: 100, error_subcode: 33 },
-    });
+  it('throws when the narrower request is refused too', async () => {
+    // Both refused means the feature itself is missing, not the two field
+    // permissions — the caller explains that case, so it must still surface.
+    const fetchMock = respondInTurn([400, REFUSAL]);
 
     await expect(fetchProfile('facebook', 'psid-1')).rejects.toBeInstanceOf(MetaApiError);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('falls back on a bare 100, which is what an ungranted field actually returns', async () => {
+    /*
+      The regression the first version of this shipped with. `(#100) Tried
+      accessing nonexisting field (locale) on node type (User)` carries no
+      subcode, so `isProfilePermissionRefusal` — which excludes a bare 100 on
+      purpose — returns false for it. Keying the fallback on that predicate
+      meant the retry never fired for the one case it exists to cover, and the
+      name was lost exactly as if the fields had simply been appended.
+    */
+    const fetchMock = respondInTurn(
+      [
+        400,
+        {
+          error: {
+            message: '(#100) Tried accessing nonexisting field (locale) on node type (User)',
+            code: 100,
+          },
+        },
+      ],
+      [200, { name: 'Ali Hassan' }],
+    );
+
+    const profile = await fetchProfile('facebook', 'psid-1');
+
+    expect(profile.name).toBe('Ali Hassan');
+    expect(profile.extendedFieldsRefused).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry a transient failure', async () => {
+    // A rate limit belongs to the job's own backoff. Asking again immediately
+    // spends the second call on the same refusal and tells nobody anything.
+    const fetchMock = respondInTurn([400, { error: { message: 'calls per second', code: 613 } }]);
+
+    await expect(fetchProfile('facebook', 'psid-1')).rejects.toBeInstanceOf(MetaApiError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -254,5 +389,22 @@ describe('downloadAttachment size cap', () => {
 
     const result = await downloadAttachment('https://cdn/p.jpg');
     expect(result.content.length).toBe(5000);
+  });
+});
+
+describe('normaliseGender', () => {
+  it('accepts the two values Graph documents', () => {
+    expect(normaliseGender('male')).toBe('male');
+    expect(normaliseGender('female')).toBe('female');
+    expect(normaliseGender('Female')).toBe('female');
+  });
+
+  it('drops anything else rather than showing an agent a raw token', () => {
+    // Meta omits the field for a custom or unset gender, so there is no third
+    // value to map — an unexpected string is a surprise, not a datum.
+    expect(normaliseGender('unknown')).toBeNull();
+    expect(normaliseGender('custom')).toBeNull();
+    expect(normaliseGender(null)).toBeNull();
+    expect(normaliseGender('  ')).toBeNull();
   });
 });
