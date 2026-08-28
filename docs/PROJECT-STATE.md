@@ -274,9 +274,12 @@ today, all of them filed under bare numeric ids and none of them answered by
 anybody. That is not the channel being configured — no `channels` row exists for
 either — it is the app being connected to a page and an account that the public
 can already write to. There is still no email mailbox row, no human WhatsApp row,
-no `webchat` row and no `portal` row. `sla_policies` and `automation_rules` are both still empty, so the
-crons that sweep them run over nothing every 5 and 15 minutes. `locations` is
-still empty, all sixteen of them.
+no `webchat` row and no `portal` row. `sla_policies` is still empty, so the SLA
+cron sweeps nothing every 5 minutes. `automation_rules` holds exactly **one**
+rule as of 2026-08-28 — "Close resolved tickets after 3 days", seeded by
+`db/seed.ts` and inserted into production by hand (§6.30) — which is the first
+work the 15-minute sweep has ever had. `locations` is still empty, all sixteen
+of them.
 
 So: **the system still cannot take a real human support ticket**, and the
 remaining work is mostly not code — it is configuration, live-provider
@@ -1543,6 +1546,36 @@ access_token`, authorised with the System User token, which never expires)
     contact fragments into two, and no open thread loses its 24-hour window.
     That was the one failure mode that would have made this migration
     unaffordable, and it is ruled out by data rather than by Meta's docs.
+
+30. **`npm run db:seed` is not part of any deploy, so adding a row to
+    `db/seed.ts` does not put it in production.** `render.yaml` runs
+    `preDeployCommand: npm run db:migrate` and nothing else; the seed is a
+    manual script. This is easy to miss because the seed's own doc comment says
+    it is "safe to re-run after every deploy", which reads as a description of
+    what happens rather than of what it would survive.
+
+    It bit the three-day close rule: the rule is a `db/seed.ts` entry, and
+    merging it would have shipped a feature that did not exist in the only
+    database that matters. The row was inserted directly instead, verified
+    against an empty `automation_rules` first (`select` before `insert`, §5) and
+    reversible with
+    `delete from automation_rules where name = 'Close resolved tickets after 3 days'`.
+
+    Adding `&& npm run db:seed` to both `preDeployCommand`s would close the gap
+    permanently and is deliberately not done yet — it changes the deploy
+    contract for two services to fix a problem that has so far occurred once.
+    Until it is, treat anything added to the seed as needing a hand-run against
+    each environment, and say so in the PR.
+
+31. **A time-based rule can only act on a ticket the sweep can see.**
+    `liveTickets` in `lib/automations/index.ts` is the population, and it filters
+    by status category. It excluded `resolved` until 2026-08-28, which made
+    "close a ticket that has been resolved for three days" unwritable as a rule:
+    an admin could compose it in the UI, save it, watch it sit at `is_active =
+true` with a null `last_run_at`, and find nothing wrong with the rule itself.
+    Any new rule about a state the sweep does not select for has the same shape
+    of failure — silent, and indistinguishable from a condition that does not
+    match.
 
     **What the switch does not settle: who is actually answering this inbox.**
     Over 36 hours the `instagram` object delivered 1,037 inbound messages and

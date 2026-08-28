@@ -16,6 +16,13 @@ import { activeRules, applyRules, liveTickets } from '@/lib/automations';
  * ones inside the window. The cap exists because a rules pass over an unbounded
  * backlog is the kind of job that quietly takes an hour; when it bites, the run
  * says so rather than looking like it covered everything.
+ *
+ * `liveTickets` includes resolved tickets, so a large backlog of them sits at
+ * the front of this ordering and can crowd out the open ones a chase rule is
+ * for. It drains — the close rule takes each of them out of the population for
+ * good — but if the capped-run line stays in the log for hours after a deploy,
+ * that is what is happening, and the answer is a bigger cap for a few runs
+ * rather than a slower schedule.
  */
 const MAX_TICKETS_PER_RUN = 1000;
 

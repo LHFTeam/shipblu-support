@@ -373,13 +373,19 @@ async function sendCannedReply(
 }
 
 /**
- * The population the time-based sweep considers: live tickets only.
+ * The population the time-based sweep considers: everything not yet closed.
  *
- * Resolved and closed tickets are excluded because a Supervisor rule is about
- * chasing what is still outstanding, and spam is excluded because acting on it
- * is how an automation ends up replying to a bounce loop. Read-only channels are
- * excluded because a rule that fires on "no reply in 4 hours" would otherwise
- * send an auto-reply into a conversation the customer is having with a bot.
+ * Resolved is in scope because closing a ticket is itself a time-based rule —
+ * the awaiting-confirmation window has to expire somewhere, and a sweep that
+ * only saw open and pending could never be the thing that ends it. Closed is
+ * excluded because it is terminal: a rule cannot act on a ticket it can no
+ * longer change the meaning of, and leaving closed in would grow this scan by
+ * the whole archive to no purpose.
+ *
+ * Spam is excluded because acting on it is how an automation ends up replying to
+ * a bounce loop. Read-only channels are excluded because a rule that fires on
+ * "no reply in 4 hours" would otherwise send an auto-reply into a conversation
+ * the customer is having with a bot.
  */
 export async function liveTickets(limit: number): Promise<TicketRow[]> {
   return db
@@ -396,7 +402,7 @@ export async function liveTickets(limit: number): Promise<TicketRow[]> {
         isNull(conversations.deletedAt),
         eq(conversations.isSpam, false),
         notInArray(conversations.channel, readOnlyChannels()),
-        inArray(ticketStatuses.category, ['open', 'pending']),
+        inArray(ticketStatuses.category, ['open', 'pending', 'resolved']),
       ),
     )
     .orderBy(conversations.lastMessageAt)

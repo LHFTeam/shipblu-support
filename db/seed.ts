@@ -1,6 +1,7 @@
-import { sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
+import { SEEDED_RULES } from '@/lib/automations/defaults';
 import { closeDb, db } from './client';
-import { businessHours, channels, groups, ticketStatuses } from './schema';
+import { automationRules, businessHours, channels, groups, ticketStatuses } from './schema';
 import type { WeeklySchedule } from './schema/config';
 
 /**
@@ -108,6 +109,32 @@ async function main() {
     .returning({ id: channels.id });
 
   console.log(bot.length ? '  customer bot channel: created' : '  customer bot channel: present');
+
+  // The rules that decide when a ticket stops being the customer's to reply to.
+  //
+  // Guarded by a lookup rather than `onConflictDoNothing`, because unlike
+  // statuses, groups and channels this table has no unique index on `name` —
+  // and adding one to make the seed tidier would be a migration that locks a
+  // table for the sake of an insert that runs once. An admin who edits or
+  // deactivates one of these keeps their version: the name is the identity, so
+  // re-running finds it and leaves it alone.
+  let rulesCreated = 0;
+  for (const rule of SEEDED_RULES) {
+    const existing = await db
+      .select({ id: automationRules.id })
+      .from(automationRules)
+      .where(and(eq(automationRules.name, rule.name), eq(automationRules.trigger, rule.trigger)))
+      .limit(1);
+
+    if (existing.length) continue;
+
+    await db.insert(automationRules).values(rule);
+    rulesCreated += 1;
+  }
+
+  console.log(
+    `  automation rules: ${rulesCreated} created, ${SEEDED_RULES.length - rulesCreated} already present`,
+  );
 
   const counts = await db.execute<{ statuses: number }>(
     sql`select count(*)::int as statuses from ticket_statuses`,
