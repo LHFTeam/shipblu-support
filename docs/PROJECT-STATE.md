@@ -842,8 +842,52 @@ on node type (User)` with no subcode, which that predicate declines by design,
   `npm run job -- backfill_meta_profiles force=true` — an unforced run selects
   nothing.
 
-- **Instagram comment management, which cannot be exercised yet at all.** Three
-  separate things gate it, in order, and none is code:
+- **Instagram comment management. Facebook comments now work; Instagram's are
+  gated by the permission itself.** _Updated 2026-08-29._ Both pipelines were
+  proven this morning and they landed in different places:
+
+  - **Facebook: working end to end.** A real comment on a Page post arrived as
+    `page` / `feed` / `item: comment`, verified and processed, and
+    `ingestMetaComment` created **ticket #10939** — the first comment ticket this
+    system has ever made. Meta also sent a `reaction` on the same post, which
+    `parseMetaWebhook` correctly dropped.
+  - **Instagram: only Meta's test payload.** The "Send to Server" sample from the
+    Webhooks page arrived and produced **ticket #10942** ("This is an example.",
+    entry id `0`, comment id `1231231234`). That proves the callback, the
+    signature check, the Instagram comment parser and the ingest all work — and
+    proves nothing about the account, because the test button posts straight to
+    the callback whatever the account is subscribed to. **No real Instagram
+    comment has ever arrived.**
+
+  **The `instagram` object is the right one, and the subscription is right.**
+  Confirmed by running the job: `comments` is already in the app-level field
+  list, and the Page-level subscription was written on 2026-08-28. So the
+  webhooks are not the problem, and this is where the search should stop rather
+  than continue into the dashboard.
+
+  **What actually gates it is the permission we have not applied for.** Meta's
+  own prerequisites for receiving the `comments` field are: the app subscribed to
+  it, Page subscriptions enabled on the connected Page, the permissions
+  `instagram_manage_comments` + `pages_manage_metadata` + one of
+  `pages_read_engagement` / `pages_show_list`, **Advanced Access**, **a verified
+  business**, and a media owner whose account is not private. The first two are
+  done; `instagram_manage_comments` is on no line of the App Review submission
+  (`plans/meta-app-review-submission.md`), and Advanced Access is exactly what
+  that submission is for.
+
+  That is a real chicken-and-egg and it is **asymmetric between the two
+  platforms**: `feed` on a Page needs only `pages_manage_metadata` and
+  `pages_show_list`, which the token already has, so Facebook comment footage can
+  be recorded today. Instagram's cannot, because the permission being applied for
+  is the same one that would let the notification arrive. The way through is
+  Meta's role-holder exemption under Standard Access — a comment from somebody
+  holding a role on the app — or a support conversation; it is not another
+  subscribe job. Check the two cheap conditions first, though: the account must
+  be **public**, and it is worth testing a comment from a _different_ account,
+  since nothing in Meta's docs confirms self-comments notify.
+
+  The three items below predate all of this and are kept for the order they set
+  out:
   1. `META_INSTAGRAM_APP_SECRET` in `shipblu-support-production`, or every
      Instagram delivery keeps being answered 403 (§6.26). Nothing about comments
      can be tested while inbound Instagram is rejected.
