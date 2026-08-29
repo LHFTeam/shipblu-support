@@ -158,13 +158,21 @@ projects:
               # on staging too, long after production's outage ended.
               #
               # The Meta credentials are one set for three channels, because one
-              # Meta app serves WhatsApp, Messenger and Instagram. There used to
-              # be a WHATSAPP_ACCESS_TOKEN, WHATSAPP_APP_SECRET and
-              # WHATSAPP_VERIFY_TOKEN alongside them with the code falling back
-              # to them; the duplication meant the same secret was pasted twice
-              # and a rotation done once left the other copy stale — which is
-              # how the access token spent a day expired while nobody could tell
-              # which of the two names the failing call had read.
+              # Meta app serves WhatsApp, Messenger and Instagram. A parallel
+              # WhatsApp-specific set used to sit alongside them with the code
+              # falling back to it; the duplication meant the same secret was
+              # pasted twice and a rotation done once left the other copy stale
+              # — which is how the access token spent a day expired while
+              # nobody could tell which of the two names the failing call had
+              # read.
+              #
+              # Those names are retired and nothing looks for them any more, not
+              # even to warn. An environment still holding one reads as
+              # unconfigured: every inbound webhook fails signature
+              # verification, is stored unverified and answered 403, and the log
+              # blames a forgery rather than a value that needs copying. Check
+              # META_APP_SECRET and META_VERIFY_TOKEN are set on any environment
+              # that predates this.
               #
               # They are in *this* group rather than the shared one so that
               # staging cannot inherit them. Meta has no test mode: a send from
