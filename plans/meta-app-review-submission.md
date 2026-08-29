@@ -92,6 +92,15 @@ would have produced a submission that still could not moderate a comment:
 its Facebook Page; `instagram_business_manage_comments` is the Instagram Login
 family's and would be the wrong one to ask for.
 
+**And it gates receiving the webhook at all, not just acting on one — which is
+the part that bites.** Meta lists it among the prerequisites for the `comments`
+field, alongside Advanced Access and a verified business. Verified on
+2026-08-29: the `instagram` object is subscribed to `comments` at the app level,
+the Page subscription is in place, and a real Instagram comment still produces
+nothing while Meta's own test payload sails through. So this is not a permission
+that merely unlocks the Hide and Delete buttons — without it there is no
+Instagram comment ticket to put buttons on.
+
 ## The "no API calls have ever been made" gate
 
 **Request advanced access** stays greyed out until Meta has logged one
@@ -226,7 +235,16 @@ justify for `contacts.timezone`, which no screen reads and nothing writes.
 
 ## What cannot be demonstrated today
 
-**The blocker is now known and it is not a permission.** Freshworks is still the
+**Instagram comments have a blocker that _is_ a permission, and it is circular.**
+`instagram_manage_comments` is a prerequisite for the `comments` webhook, not
+just for acting on one, so the footage cannot be recorded before approval and
+the approval wants the footage. Facebook is not symmetric: `feed` needs only
+`pages_manage_metadata` and `pages_show_list`, which the token already has, so a
+Facebook comment ticket exists today (#10939) and can be filmed. For Instagram
+the way through is the role-holder exemption under Standard Access, or Meta
+support — not another subscribe job.
+
+**The other blocker is not a permission.** Freshworks is still the
 live support service and still the account's default Meta app, so it holds
 thread control on both the Messenger and Instagram inboxes and every event
 reaches this system as `standby` — readable, not answerable. Every screencast on
