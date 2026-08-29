@@ -860,10 +860,37 @@ on node type (User)` with no subcode, which that predicate declines by design,
     comment has ever arrived.**
 
   **The `instagram` object is the right one, and the subscription is right.**
-  Confirmed by running the job: `comments` is already in the app-level field
-  list, and the Page-level subscription was written on 2026-08-28. So the
-  webhooks are not the problem, and this is where the search should stop rather
-  than continue into the dashboard.
+  Confirmed twice, so nobody needs to check a third time. First by running the
+  job, which reads before it writes and reported nothing to add. Then by **Meta's
+  own Webhook Debugger** (App Dashboard → Webhooks → enter the Page id), which is
+  the authoritative view and answered on 2026-08-29:
+
+  - _Subscribed IG webhooks for this app_ — `comments`, `live_comments`,
+    `message_edit`, `message_reactions`, `messages`, `messaging_handover`,
+    `mentions`, `messaging_seen`, `messaging_postbacks`, `standby`.
+  - _Subscribed fields by app for page 101449698657189_ — the eighteen messaging
+    fields **plus `feed`**, which is the write from 2026-08-28 confirmed by Meta
+    rather than only by our own read-back.
+  - _Instagram account linked to page_ — **`shipblu`**. This is the one that had
+    been assumed rather than checked: after the Instagram Login disconnection it
+    was an open question whether the account was linked to the Page at all, and
+    it is.
+  - _Manage Messaging toggle_ — **On**.
+
+  So every configuration axis is provably correct and the search should stop
+  here rather than continue into the dashboard. Two things the debugger also
+  showed, neither urgent:
+
+  - **A second Page is connected to the app**, "Love Bites" (`955333171001884`) —
+    dormant, 4 deliveries all on 19 August. It is the id §6.22 records as the old
+    `FACEBOOK_PAGE_ID`; the 2026-08-28 job run reported `101449698657189`, so the
+    variable has since been corrected.
+  - **Seven subscribed IG fields nothing reads** — `live_comments`, `mentions`,
+    `messaging_seen`, `messaging_postbacks`, `message_edit`, `message_reactions`,
+    `messaging_handover`. `REQUIRED_INSTAGRAM_FIELDS` is deliberately only
+    `messages` and `comments` (an unread field costs a `webhook_events` row and a
+    job per event, forever), but the app-level subscription carries all ten
+    anyway. That is why 3,992 Instagram deliveries have produced so few tickets.
 
   **What actually gates it is the permission we have not applied for.** Meta's
   own prerequisites for receiving the `comments` field are: the app subscribed to
