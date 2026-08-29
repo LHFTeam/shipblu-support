@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { appUrl, env, metaAppSecret, metaVerifyToken, replyDomain, resetEnvCache } from './env';
 
 /**
@@ -67,47 +67,16 @@ describe('Meta credentials', () => {
     expect(metaVerifyToken()).toBe('verify-token');
   });
 
-  it('does not read the retired WhatsApp keys', () => {
-    // The point of collapsing the two sets is that there is one place to look.
-    // Quietly honouring the old key would leave a half-migrated environment
-    // working right up until someone rotated the credential and updated only
-    // the new name.
-    process.env.WHATSAPP_APP_SECRET = 'legacy-secret';
-    process.env.WHATSAPP_VERIFY_TOKEN = 'legacy-token';
+  it('reads as unconfigured rather than throwing when the keys are absent', () => {
+    // There is one name per credential and nothing is consulted in its place,
+    // so an environment still holding a retired name lands here. That is the
+    // deliberate cost: `verifySignature` returns false and the webhook route
+    // stores the payload unverified and answers 403, rather than a fallback
+    // keeping a half-migrated environment alive until the next rotation.
     resetEnvCache();
 
     expect(metaAppSecret()).toBeUndefined();
     expect(metaVerifyToken()).toBeUndefined();
-  });
-
-  it('names the missed migration step when only the retired key is set', () => {
-    // Otherwise this surfaces as "stored an unverified payload" and a 403 on
-    // every inbound message, which reads as a forgery rather than as a value
-    // that needs copying.
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
-    process.env.WHATSAPP_APP_SECRET = 'legacy-secret';
-    resetEnvCache();
-
-    metaAppSecret();
-
-    expect(logged).toHaveBeenCalledOnce();
-    const [message] = logged.mock.calls[0]!;
-    expect(message).toContain('META_APP_SECRET');
-    expect(message).toContain('WHATSAPP_APP_SECRET');
-
-    logged.mockRestore();
-  });
-
-  it('stays quiet once the Meta key is set', () => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
-    process.env.META_APP_SECRET = 'app-secret';
-    process.env.WHATSAPP_APP_SECRET = 'legacy-secret';
-    resetEnvCache();
-
-    metaAppSecret();
-
-    expect(logged).not.toHaveBeenCalled();
-    logged.mockRestore();
   });
 
   it('keeps the WhatsApp ids, which name a number rather than authorise a call', () => {

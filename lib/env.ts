@@ -134,12 +134,22 @@ const schema = z.object({
    * One credential each, shared by all three products, because one Meta app
    * serves all three.
    *
-   * There used to be a WHATSAPP_* set alongside these, with the Meta keys
-   * falling back to them — the idea being that a second app could serve
+   * There used to be a WhatsApp-specific set alongside these, with the Meta
+   * keys falling back to it — the idea being that a second app could serve
    * WhatsApp separately. Nobody did that, and the duplication cost more than
    * the flexibility was worth: the same token had to be pasted twice, which
    * meant a rotation done once left the other copy stale, and the fallback made
    * it ambiguous which of the two a given call had actually used.
+   *
+   * Those names are gone, and nothing looks for them any more — not even to
+   * warn. That is the trade-off to know about before touching this: an
+   * environment still holding only the retired name reads as unconfigured, so
+   * `verifySignature` returns false, every inbound webhook is stored unverified
+   * and answered 403, and the log says "stored an unverified payload" — which
+   * reads as a forgery rather than as a value that needs copying. Meta
+   * eventually disables a subscription that keeps failing. Confirm
+   * `META_APP_SECRET` and `META_VERIFY_TOKEN` are set before cutting an
+   * environment over.
    *
    * `META_PAGE_ACCESS_TOKEN` sends on every channel and lists WhatsApp
    * templates. `META_APP_SECRET` verifies X-Hub-Signature-256 on every inbound
@@ -255,7 +265,7 @@ export function appUrl(): string {
  * Messenger and Instagram alike.
  */
 export function metaAppSecret(): string | undefined {
-  return env().META_APP_SECRET ?? warnIfOnlyLegacy('META_APP_SECRET', 'WHATSAPP_APP_SECRET');
+  return env().META_APP_SECRET;
 }
 
 /**
@@ -271,41 +281,7 @@ export function metaInstagramAppSecret(): string | undefined {
 
 /** The token Meta echoes back during the subscription handshake. */
 export function metaVerifyToken(): string | undefined {
-  return env().META_VERIFY_TOKEN ?? warnIfOnlyLegacy('META_VERIFY_TOKEN', 'WHATSAPP_VERIFY_TOKEN');
-}
-
-/** Warned about at most once per key, so a busy webhook does not flood the log. */
-const warnedLegacyKeys = new Set<string>();
-
-/**
- * Names the missed migration step when the retired WHATSAPP_* key is still set
- * and its Meta replacement is not.
- *
- * Worth the few lines because of how this fails otherwise. A missing app secret
- * does not error — it makes `verifySignature` return false, and the webhook
- * route then stores the payload as unverified and answers 403. Every inbound
- * WhatsApp message is dropped, the log says "stored an unverified payload", and
- * that reads as a forgery or a wrong secret rather than as a value that needs
- * copying from one environment variable to another. Meta eventually disables a
- * subscription that keeps failing, so the quiet version of this is expensive.
- *
- * Deliberately does not *use* the legacy value: the point of collapsing the two
- * sets is that there is one place to look, and silently reading the old key
- * would leave a half-migrated environment working until the day someone
- * rotated the credential and only updated the new one.
- */
-function warnIfOnlyLegacy(current: string, legacy: string): undefined {
-  if (!process.env[legacy] || warnedLegacyKeys.has(legacy)) return undefined;
-
-  warnedLegacyKeys.add(legacy);
-  console.error(
-    `${current} is not set, but the retired ${legacy} still is. WhatsApp, ` +
-      `Messenger and Instagram now share one credential set: copy the value ` +
-      `into ${current} in the shipblu-support-production environment group and remove ` +
-      `${legacy}. Until then every inbound Meta webhook fails verification.`,
-  );
-
-  return undefined;
+  return env().META_VERIFY_TOKEN;
 }
 
 /** Domain that plus-addressed reply tokens are built against. */
@@ -321,15 +297,7 @@ export function replyDomain(): string {
   return domain;
 }
 
-/**
- * Only for tests, which mutate process.env between cases.
- *
- * Clears the warn-once record too: it is knowledge about the environment just
- * as much as the parsed values are, and a case that expects the legacy warning
- * would otherwise pass or fail on whether an earlier case had already tripped
- * it.
- */
+/** Only for tests, which mutate process.env between cases. */
 export function resetEnvCache(): void {
   cached = null;
-  warnedLegacyKeys.clear();
 }
