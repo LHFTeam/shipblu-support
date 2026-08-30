@@ -4,7 +4,7 @@ import { shipments } from '@/db/schema';
 import { agentTracking, publicTracking, type AgentTracking, type PublicTracking } from './detail';
 import { normaliseTrackingNumber } from './format';
 import { fetchDeliveryOrder } from './platform';
-import { syncShipment } from './sync';
+import { currentEstimateFor, syncShipment } from './sync';
 
 /**
  * Answering "where is my parcel" for somebody who is not signed in.
@@ -47,7 +47,12 @@ export async function publicTrackingFor(trackingNumber: string): Promise<PublicT
   if (!canonical) return null;
 
   const rows = await db
-    .select({ id: shipments.id, data: shipments.data, syncState: shipments.syncState })
+    .select({
+      id: shipments.id,
+      data: shipments.data,
+      currentEstimatedDate: shipments.currentEstimatedDate,
+      syncState: shipments.syncState,
+    })
     .from(shipments)
     .where(eq(shipments.trackingNumber, canonical))
     .limit(1);
@@ -72,10 +77,12 @@ export async function publicTrackingFor(trackingNumber: string): Promise<PublicT
 
   // The freshly written payload where the sync ran, the stored one where the TTL
   // said not to bother or the platform could not be reached.
-  if (result.kind === 'synced') return publicTracking(result.order.raw);
+  if (result.kind === 'synced') {
+    return publicTracking(result.order.raw, result.currentEstimatedDate);
+  }
   if (result.kind === 'not_found') return null;
 
-  return publicTracking(row.data);
+  return publicTracking(row.data, row.currentEstimatedDate);
 }
 
 /**
@@ -88,7 +95,19 @@ export async function publicTrackingFor(trackingNumber: string): Promise<PublicT
 async function readThrough(canonical: string): Promise<PublicTracking | null> {
   try {
     const order = await fetchDeliveryOrder(canonical, { timeoutMs: PUBLIC_LOOKUP_TIMEOUT_MS });
-    return order ? publicTracking(order.raw) : null;
+    if (!order) return null;
+
+    /*
+     * The second call, on the anonymous path too — a number this system has
+     * never seen still deserves today's estimate rather than the one it was
+     * booked with. Through the same `currentEstimateFor` the stored path uses,
+     * so the skip-when-delivered rule and the echoed-tracking-number check
+     * cannot come out differently depending on whether a ticket happens to
+     * mention the parcel. It never throws, and it costs nothing for a delivered
+     * parcel, which is the majority of what gets looked up.
+     */
+    const estimate = await currentEstimateFor(order, { timeoutMs: PUBLIC_LOOKUP_TIMEOUT_MS });
+    return publicTracking(order.raw, estimate);
   } catch (error) {
     // Logged rather than surfaced: the customer gets the page's ordinary "no
     // status yet", which is true from where they are standing, and the operator
@@ -122,10 +141,10 @@ export async function agentTrackingFor(trackingNumber: string): Promise<AgentTra
   if (!canonical) return null;
 
   const rows = await db
-    .select({ data: shipments.data })
+    .select({ data: shipments.data, currentEstimatedDate: shipments.currentEstimatedDate })
     .from(shipments)
     .where(eq(shipments.trackingNumber, canonical))
     .limit(1);
 
-  return rows[0] ? agentTracking(rows[0].data) : null;
+  return rows[0] ? agentTracking(rows[0].data, rows[0].currentEstimatedDate) : null;
 }

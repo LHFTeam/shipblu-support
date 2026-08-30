@@ -66,6 +66,16 @@ describe('stageFor', () => {
     expect(stageFor('return_to_origin')).toBe('returned');
   });
 
+  it('keeps an attempted delivery on the line, so an estimate is still fetched', () => {
+    // `terminal` decides whether the current-estimate endpoint is called at all
+    // (lib/shipments/sync.ts). A parcel whose delivery was attempted is still
+    // coming, and is exactly the parcel whose estimate has moved — the one this
+    // was built against was booked for 2026-08-22 and now reads 2026-09-01.
+    expect(stageDisplay('delivery_attempted').terminal).toBe(false);
+    expect(stageDisplay('return_to_origin').terminal).toBe(true);
+    expect(stageDisplay('delivered').terminal).toBe(true);
+  });
+
   it('never reads a pickup step as the parcel being under way', () => {
     // The courier is going to collect it. Telling a recipient it is on its way
     // while it is still on a shelf in the shop is the error worth pinning.

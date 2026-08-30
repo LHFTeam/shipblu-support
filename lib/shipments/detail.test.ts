@@ -183,3 +183,31 @@ describe('agentTracking', () => {
     expect(view?.city).toBeNull();
   });
 });
+
+describe('the current estimate', () => {
+  it("prefers today's estimate over the one the parcel was booked with", () => {
+    // The two really do differ: the live parcel this was built against was
+    // booked for the 29th and currently reads the 31st.
+    const view = publicTracking(stored(), '2026-08-31');
+    expect(view?.estimatedDate).toBe('2026-08-31');
+  });
+
+  it('falls back to the booked estimate when there is no current one', () => {
+    expect(publicTracking(stored(), null)?.estimatedDate).toBe('2026-08-29');
+    expect(publicTracking(stored())?.estimatedDate).toBe('2026-08-29');
+  });
+
+  it('keeps both for the console, so an agent can say why it moved', () => {
+    const view = agentTracking(stored(), '2026-08-31');
+    expect(view?.estimatedDate).toBe('2026-08-31');
+    expect(view?.bookedEstimatedDate).toBe('2026-08-29');
+  });
+
+  it('still lets nothing personal through when an estimate is supplied', () => {
+    // The projection grew a parameter; the guarantee it exists for has not.
+    const serialised = JSON.stringify(publicTracking(stored(), '2026-08-31'));
+    for (const secret of ['Testfirst', 'secret.recipient@example.com', '01111111111', '1245']) {
+      expect(serialised).not.toContain(secret);
+    }
+  });
+});

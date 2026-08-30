@@ -218,34 +218,18 @@ export type FetchOptions = {
 };
 
 /**
- * Ask the platform about one tracking number.
+ * One GET, with the error taxonomy both endpoints share.
  *
- * `null` means the platform is certain it has no such parcel — a 404, which is
- * a definite answer and is recorded as `not_found` rather than retried. Anything
- * else throws, and `isTransient` says whether asking again could help.
- *
- * No `?pin=`: the parameter exists in the documented URL and the endpoint does
- * not check it (see the file docstring), so sending one would suggest a
- * protection that is not there.
+ * `null` means the platform is certain it has no such thing — a 404, which is a
+ * definite answer and is recorded rather than retried. Anything else throws, and
+ * `isTransient` says whether asking again could help.
  */
-export async function fetchDeliveryOrder(
-  trackingNumber: string,
-  options: FetchOptions = {},
-): Promise<DeliveryOrder | null> {
-  const canonical = normaliseTrackingNumber(trackingNumber);
-  if (!canonical) throw new ShipbluApiError('No tracking number to look up', null, false);
-
-  const base = (options.baseUrl ?? env().SHIPBLU_API_URL ?? DEFAULT_SHIPBLU_API_URL).replace(
-    /\/+$/,
-    '',
-  );
-  const url = `${base}/api/v1/delivery-order/${encodeURIComponent(canonical)}/`;
-
+async function getJson(url: string, subject: string, timeoutMs: number): Promise<unknown | null> {
   let response: Response;
   try {
     response = await fetch(url, {
       headers: { Accept: 'application/json' },
-      signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
     // A timeout, a DNS failure, a reset connection. None of these is an answer,
@@ -264,24 +248,138 @@ export async function fetchDeliveryOrder(
     // wrongly, and will be just as wrong on the next attempt.
     const isTransient = response.status === 429 || response.status >= 500;
     throw new ShipbluApiError(
-      `Delivery platform returned ${response.status} for ${canonical}`,
+      `Delivery platform returned ${response.status} for ${subject}`,
       response.status,
       isTransient,
     );
   }
 
-  let body: unknown;
   try {
-    body = await response.json();
+    return await response.json();
   } catch {
     // A 200 carrying something that is not JSON is a proxy or a captive portal
-    // answering instead of the platform. Worth another try.
+    // answering instead of the platform — and this API really does serve an HTML
+    // error page for a malformed path, so it is a shape worth naming.
     throw new ShipbluApiError(
-      `Delivery platform returned a 200 that was not JSON for ${canonical}`,
+      `Delivery platform returned a 200 that was not JSON for ${subject}`,
       response.status,
       true,
     );
   }
+}
 
-  return mapDeliveryOrder(body);
+function baseUrlFor(override?: string): string {
+  return (override ?? env().SHIPBLU_API_URL ?? DEFAULT_SHIPBLU_API_URL).replace(/\/+$/, '');
+}
+
+/**
+ * Ask the platform about one tracking number.
+ *
+ * No `?pin=`: the parameter exists in the documented URL and the endpoint does
+ * not check it (see the file docstring), so sending one would suggest a
+ * protection that is not there.
+ */
+export async function fetchDeliveryOrder(
+  trackingNumber: string,
+  options: FetchOptions = {},
+): Promise<DeliveryOrder | null> {
+  const canonical = normaliseTrackingNumber(trackingNumber);
+  if (!canonical) throw new ShipbluApiError('No tracking number to look up', null, false);
+
+  const url = `${baseUrlFor(options.baseUrl)}/api/v1/delivery-order/${encodeURIComponent(canonical)}/`;
+  const body = await getJson(url, canonical, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+
+  return body === null ? null : mapDeliveryOrder(body);
+}
+
+/** What `/orders/<id>/current-estimated-date/` says today. */
+export type CurrentEstimate = {
+  orderId: string;
+  /** Echoed by the endpoint; used to prove the id and the parcel agree. */
+  trackingNumber: string | null;
+  /** A calendar date, `YYYY-MM-DD`. Never an instant — see below. */
+  date: string;
+};
+
+const currentEstimateSchema = z.object({
+  order_id: z.union([z.number(), z.string()]).nullish(),
+  tracking_number: z.union([z.number(), z.string()]).nullish(),
+  current_estimated_date: z.string().nullish(),
+});
+
+/**
+ * The freshest estimated delivery date for one parcel.
+ *
+ * This is a second endpoint, keyed by the platform's **numeric order id** rather
+ * than by the tracking number — passing the tracking number here returns 404,
+ * verified — which is the whole reason `shipments.platform_order_id` exists.
+ *
+ * It answers a different question from `data.estimated_date`. That one is the
+ * estimate the parcel was booked with and does not move; this one is what the
+ * platform believes today, and on the parcel this was built against the two
+ * differ by two days.
+ *
+ * `null` means the platform has no such order, or has no estimate for it.
+ */
+export async function fetchCurrentEstimatedDate(
+  orderId: string,
+  options: FetchOptions = {},
+): Promise<CurrentEstimate | null> {
+  const id = orderId.trim();
+  // Digits only, and checked rather than trusted: this value is interpolated
+  // into a path, and a malformed one makes the API serve an HTML error page
+  // instead of JSON — a confusing failure to debug from a worker log.
+  if (!/^\d+$/.test(id)) {
+    throw new ShipbluApiError(`Not a platform order id: ${orderId}`, null, false);
+  }
+
+  const url = `${baseUrlFor(options.baseUrl)}/api/v1/orders/${id}/current-estimated-date/`;
+  const body = await getJson(url, `order ${id}`, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  if (body === null) return null;
+
+  const parsed = currentEstimateSchema.safeParse(body);
+  if (!parsed.success) {
+    throw new ShipbluApiError(
+      `Current-estimate response did not parse for order ${id}`,
+      null,
+      false,
+    );
+  }
+
+  const date = calendarDateFrom(parsed.data.current_estimated_date);
+  if (!date) return null;
+
+  return {
+    orderId: parsed.data.order_id != null ? String(parsed.data.order_id) : id,
+    trackingNumber:
+      parsed.data.tracking_number != null
+        ? normaliseTrackingNumber(String(parsed.data.tracking_number))
+        : null,
+    date,
+  };
+}
+
+/**
+ * The calendar date out of whatever the platform sent, by reading its digits.
+ *
+ * **The time component of `current_estimated_date` is an artifact and must be
+ * discarded, not converted.** The endpoint returns a full instant —
+ * `2026-08-31T23:49:51.999811+03:00` — and two calls three seconds apart return
+ * times three seconds apart: the date is the estimate, the clock is simply the
+ * moment you asked. Preserving it would invite somebody to render "arriving
+ * 11:49pm".
+ *
+ * Taken as the leading `YYYY-MM-DD` of the string rather than by parsing to a
+ * `Date` and formatting, and that is the load-bearing choice. The value carries
+ * a `+03:00` offset, so the date as written *is* the Cairo date the platform
+ * means; converting through an instant and reading the date back in any other
+ * zone moves it. A request answered at 00:30 Cairo returns
+ * `...T00:30+03:00`, whose UTC date is **the day before** — so the obvious
+ * `new Date(value).toISOString().slice(0, 10)` is correct for most of the day
+ * and silently wrong for three hours of every night.
+ */
+function calendarDateFrom(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null;
+  const match = /^(\d{4}-\d{2}-\d{2})/.exec(value.trim());
+  return match ? match[1]! : null;
 }

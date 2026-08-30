@@ -136,6 +136,13 @@ export default async function ShipmentPage({ params }: { params: Promise<{ track
                 {/* Calendar dates, printed as the strings they are. Passing one
                     through a Date would move it a day west of Greenwich. */}
                 <Row label="Estimated" value={detail.estimatedDate} />
+                {/* Only when it has moved. Printing "booked 29th / estimated
+                    29th" on every parcel is a row that says nothing; printing it
+                    when they differ answers the call it generates. */}
+                {detail.bookedEstimatedDate &&
+                detail.bookedEstimatedDate !== detail.estimatedDate ? (
+                  <Row label="Booked for" value={detail.bookedEstimatedDate} />
+                ) : null}
                 <Row label="Preferred" value={detail.preferredDate} />
                 <Row
                   label="Picked up"
@@ -155,6 +162,7 @@ export default async function ShipmentPage({ params }: { params: Promise<{ track
             <Card>
               <h3 className="mb-2 text-xs font-medium opacity-60">Parties</h3>
               <dl className="flex flex-col gap-1.5 text-xs">
+                <Row label="Platform order id" value={detail.platformId} />
                 <Row label="Merchant" value={detail.merchantName} />
                 <Row label="Merchant phone" value={detail.merchantPhone} />
                 <Row label="Recipient" value={detail.recipientName} />

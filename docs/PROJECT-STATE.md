@@ -2404,6 +2404,37 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     (§1) and the reason it draws it. **Widening `ShipmentDetail` to carry `data`
     is the one-line change that would publish all of it.**
 
+39. **The current-estimate endpoint returns a timestamp whose time half is
+    noise, and it is keyed by an id the tracking number cannot stand in for.**
+    _2026-08-30, established against the live API._
+
+    `GET /api/v1/orders/<id>/current-estimated-date/` answers
+    `{"order_id":3150567,"tracking_number":"1755021358719","current_estimated_date":"2026-08-31T23:49:51.999811+03:00"}`.
+    Two things about that value cost time if you assume otherwise.
+
+    **The time is the moment you asked.** Two calls three seconds apart returned
+    `23:49:51` and `23:49:54` — it tracks the request clock, not the parcel. Only
+    the calendar date is data. `lib/shipments/platform.ts` therefore takes the
+    leading `YYYY-MM-DD` by regex rather than parsing to a `Date`: the value
+    carries `+03:00`, so `new Date(v).toISOString().slice(0,10)` is right for
+    twenty-one hours a day and silently a day early for the other three. There is
+    a test pinning exactly that boundary.
+
+    **The tracking number is not an id here.** Passing `1755021358719` to this
+    endpoint 404s; only `3150567` works. That is the whole reason
+    `shipments.platform_order_id` exists as a column — without it the endpoint is
+    unreachable for any parcel whose delivery-order payload we are not currently
+    holding. A malformed id makes the API serve an **HTML error page** rather
+    than JSON, so the client rejects anything non-numeric before the round trip.
+
+    **It keeps answering after delivery, with a future date.** Parcel
+    1755021358719 was delivered on the 30th and the endpoint still reported the
+    31st. `currentEstimateFor` therefore skips the call for any parcel whose
+    stage is terminal and stores null, so the column empties when a parcel lands
+    instead of keeping the last guess made before it did. The gap between the two
+    estimates is real and worth surfacing: on 1591424095705 the parcel was booked
+    for 2026-08-22 and currently reads 2026-09-01.
+
 ## 7. Verification already done
 
 - **WhatsApp, end to end on production.** A synthetic webhook was enqueued; the

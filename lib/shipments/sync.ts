@@ -2,7 +2,14 @@ import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { shipments } from '@/db/schema';
 import { normaliseTrackingNumber } from './format';
-import { fetchDeliveryOrder, ShipbluApiError, type DeliveryOrder } from './platform';
+import {
+  fetchCurrentEstimatedDate,
+  fetchDeliveryOrder,
+  ShipbluApiError,
+  type DeliveryOrder,
+  type FetchOptions,
+} from './platform';
+import { stageDisplay } from './status';
 
 /**
  * Bringing one shipment up to date with the delivery platform.
@@ -53,7 +60,16 @@ export type ShipmentSyncResult =
   | { kind: 'transient'; error: ShipbluApiError }
   /** Permanently wrong — a bad request, an unreadable body. Never stamped. */
   | { kind: 'refused'; error: ShipbluApiError }
-  | { kind: 'synced'; order: DeliveryOrder };
+  | {
+      kind: 'synced';
+      order: DeliveryOrder;
+      /**
+       * The freshest estimate, when one was asked for and answered. Null both
+       * when the parcel has arrived — nothing is estimated any more — and when
+       * the second call failed, which is why the log line distinguishes them.
+       */
+      currentEstimatedDate: string | null;
+    };
 
 export async function syncShipment(input: {
   /** Either identifies the parcel; the row is re-read whichever is given. */
@@ -106,6 +122,8 @@ export async function syncShipment(input: {
     return { kind: 'not_found' };
   }
 
+  const currentEstimatedDate = await currentEstimateFor(order, { timeoutMs: input.timeoutMs });
+
   const now = new Date();
   await db
     .update(shipments)
@@ -116,6 +134,8 @@ export async function syncShipment(input: {
       // `status.ts`, which never writes anything back.
       statusLabel: order.status,
       statusAt: order.statusAt,
+      platformOrderId: order.platformId,
+      currentEstimatedDate,
       syncState: 'synced',
       lastSyncedAt: now,
       data: order.raw,
@@ -123,7 +143,56 @@ export async function syncShipment(input: {
     })
     .where(eq(shipments.id, row.id));
 
-  return { kind: 'synced', order };
+  return { kind: 'synced', order, currentEstimatedDate };
+}
+
+/**
+ * The second call, and the rules about when it is worth making.
+ *
+ * **Never fails the sync.** The delivery order is the thing the tracking page
+ * cannot render without; a refreshed estimate is an improvement on it. Letting
+ * the second call throw would mean a platform hiccup on an enhancement discarded
+ * a status we had already successfully read.
+ *
+ * **Not asked for a parcel that has arrived.** The endpoint keeps answering for
+ * a delivered parcel, and answers with a date in the *future* — on the parcel
+ * this was built against, delivered on the 30th, it still reports the 31st. That
+ * is worse than no answer: it is a wrong answer that looks authoritative. So a
+ * terminal parcel stores null, which also means the column empties when a parcel
+ * lands rather than keeping the last guess made before it did.
+ *
+ * **The echoed tracking number is checked.** The endpoint returns the parcel it
+ * thinks the id belongs to; if that is not the parcel we asked about, the id we
+ * stored is wrong and the safe move is to record no estimate rather than to put
+ * another parcel's date on this one.
+ */
+export async function currentEstimateFor(
+  order: DeliveryOrder,
+  options: FetchOptions = {},
+): Promise<string | null> {
+  if (stageDisplay(order.status).terminal) return null;
+
+  try {
+    const estimate = await fetchCurrentEstimatedDate(order.platformId, options);
+    if (!estimate) return null;
+
+    if (estimate.trackingNumber && estimate.trackingNumber !== order.trackingNumber) {
+      console.error(
+        `[shipments] order ${order.platformId} answers for ${estimate.trackingNumber}, not ` +
+          `${order.trackingNumber} — not storing an estimate`,
+      );
+      return null;
+    }
+
+    return estimate.date;
+  } catch (error) {
+    console.warn(
+      `[shipments] could not read the current estimate for ${order.trackingNumber}: ${
+        error instanceof Error ? error.message : error
+      }`,
+    );
+    return null;
+  }
 }
 
 async function findShipment(input: { shipmentId?: string; trackingNumber?: string }) {
@@ -167,6 +236,11 @@ export function describeShipmentSync(result: ShipmentSyncResult): string {
     case 'refused':
       return `refused: ${result.error.message}`;
     case 'synced':
-      return `${result.order.status}${result.order.statusAt ? ` at ${result.order.statusAt.toISOString()}` : ''} (${result.order.events.length} events)`;
+      return (
+        `${result.order.status}` +
+        `${result.order.statusAt ? ` at ${result.order.statusAt.toISOString()}` : ''}` +
+        ` (${result.order.events.length} events` +
+        `${result.currentEstimatedDate ? `, due ${result.currentEstimatedDate}` : ''})`
+      );
   }
 }

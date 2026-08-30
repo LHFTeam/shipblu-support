@@ -1,5 +1,6 @@
 import { relations } from 'drizzle-orm';
 import {
+  date,
   index,
   jsonb,
   pgTable,
@@ -154,6 +155,49 @@ export const shipments = pgTable(
      */
     statusLabel: text('status_label'),
     statusAt: timestamp('status_at', { withTimezone: true }),
+
+    /**
+     * The delivery platform's own numeric id for this parcel.
+     *
+     * Its own column rather than `(source_system, external_id)`, which is the
+     * pair that looks made for it. Two reasons. Setting `external_id` alone
+     * leaves `source_system` saying `native`, so the pair would read "native
+     * record #3150567" — false, and the unique index across it would be
+     * asserting something nobody meant. Setting it honestly would need a new
+     * `source_system` value, and `ALTER TYPE ... ADD VALUE` is a heavier
+     * migration than a nullable column for no gain: nothing reads either field
+     * on this table, and the parcel's identity here is `tracking_number`, which
+     * already carries a unique index.
+     *
+     * It is stored because it is not interchangeable with the tracking number.
+     * `/api/v1/orders/<id>/current-estimated-date/` takes this id and **404s on
+     * the tracking number** — verified — so without it that endpoint is
+     * unreachable for any parcel whose payload we did not just fetch.
+     *
+     * Not unique-indexed. It should be unique, but a wrong duplicate arriving
+     * from the platform would then fail the sync of an unrelated parcel, and a
+     * failed sync is a worse outcome than two rows agreeing on an id nothing
+     * joins on.
+     */
+    platformOrderId: text('platform_order_id'),
+
+    /**
+     * The freshest estimated delivery date, from the platform's own endpoint.
+     *
+     * A `date`, not a `timestamptz`, and read back as a string. The endpoint
+     * returns a full instant — `2026-08-31T23:49:51.999811+03:00` — but **the
+     * time component is an artifact, not data**: two calls three seconds apart
+     * return times three seconds apart, tracking the request clock rather than
+     * anything about the parcel. Only the calendar date carries meaning, so
+     * storing the instant would preserve noise and invite somebody to render
+     * "arriving 11:49pm".
+     *
+     * Kept apart from `data.estimated_date`, which is the estimate the parcel
+     * was booked with and does not move. The two disagree in the ordinary case —
+     * booked 2026-08-29, currently 2026-08-31 on the parcel this was built
+     * against — and an agent asked "why does it say the 29th" needs both.
+     */
+    currentEstimatedDate: date('current_estimated_date', { mode: 'string' }),
 
     syncState: shipmentSyncStateEnum('sync_state').notNull().default('stub'),
     lastSyncedAt: timestamp('last_synced_at', { withTimezone: true }),

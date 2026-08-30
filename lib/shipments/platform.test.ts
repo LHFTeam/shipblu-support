@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  fetchCurrentEstimatedDate,
   fetchDeliveryOrder,
   mapDeliveryOrder,
   ShipbluApiError,
@@ -296,5 +297,113 @@ describe('fetchDeliveryOrder', () => {
     const mock = stubFetch(() => Response.json(deliveryOrderPayload()));
     await expect(fetchDeliveryOrder('   ', { baseUrl: BASE })).rejects.toThrow(ShipbluApiError);
     expect(mock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The second endpoint: `/api/v1/orders/<id>/current-estimated-date/`.
+ *
+ * Its whole subtlety is in one field. It answers with a full instant —
+ * `2026-08-31T23:49:51.999811+03:00` — and **the time is not data**: two live
+ * calls three seconds apart came back three seconds apart, tracking the request
+ * clock. Only the date means anything, and reading it the obvious way is wrong
+ * for three hours of every night.
+ */
+describe('fetchCurrentEstimatedDate', () => {
+  const BASE = 'https://platform.test';
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function stubFetch(handler: (url: string) => Response | Promise<Response>) {
+    const mock = vi.fn(async (url: string | URL) => handler(String(url)));
+    vi.stubGlobal('fetch', mock);
+    return mock;
+  }
+
+  it('asks the orders endpoint by numeric id', async () => {
+    const mock = stubFetch(() =>
+      Response.json({
+        order_id: 3150567,
+        tracking_number: '1755021358719',
+        current_estimated_date: '2026-08-31T23:49:51.999811+03:00',
+      }),
+    );
+
+    const estimate = await fetchCurrentEstimatedDate('3150567', { baseUrl: BASE });
+
+    expect(String(mock.mock.calls[0]![0])).toBe(
+      `${BASE}/api/v1/orders/3150567/current-estimated-date/`,
+    );
+    expect(estimate?.date).toBe('2026-08-31');
+    expect(estimate?.trackingNumber).toBe('1755021358719');
+  });
+
+  /**
+   * The bug this function is written to avoid.
+   *
+   * `new Date('2026-08-31T00:30:00+03:00').toISOString().slice(0, 10)` is
+   * `2026-08-30` — the day before the platform means. Reading the digits the
+   * platform wrote is correct at every hour; converting through an instant is
+   * correct for twenty-one of them.
+   */
+  it('reads the date the platform wrote, not the date in UTC', async () => {
+    stubFetch(() =>
+      Response.json({
+        order_id: 1,
+        tracking_number: null,
+        current_estimated_date: '2026-08-31T00:30:00.000000+03:00',
+      }),
+    );
+
+    const estimate = await fetchCurrentEstimatedDate('1', { baseUrl: BASE });
+
+    expect(estimate?.date).toBe('2026-08-31');
+    // Proof the naive reading really would have differed here.
+    expect(new Date('2026-08-31T00:30:00.000000+03:00').toISOString().slice(0, 10)).toBe(
+      '2026-08-30',
+    );
+  });
+
+  it('reads a bare calendar date too', async () => {
+    stubFetch(() => Response.json({ order_id: 1, current_estimated_date: '2026-09-01' }));
+    expect((await fetchCurrentEstimatedDate('1', { baseUrl: BASE }))?.date).toBe('2026-09-01');
+  });
+
+  it('reads no estimate as no estimate', async () => {
+    stubFetch(() => Response.json({ order_id: 1, current_estimated_date: null }));
+    await expect(fetchCurrentEstimatedDate('1', { baseUrl: BASE })).resolves.toBeNull();
+  });
+
+  it('reads a 404 as a definite answer', async () => {
+    stubFetch(() => Response.json({ detail: 'Not found.' }, { status: 404 }));
+    await expect(fetchCurrentEstimatedDate('999999999', { baseUrl: BASE })).resolves.toBeNull();
+  });
+
+  it('refuses anything that is not a numeric id, without a round trip', async () => {
+    const mock = stubFetch(() => Response.json({}));
+
+    // The id is interpolated into a path, and a malformed one makes this API
+    // serve an HTML error page rather than JSON — verified against the real one.
+    for (const bad of ['abc', '', '12a', '../3150567']) {
+      await expect(fetchCurrentEstimatedDate(bad, { baseUrl: BASE })).rejects.toMatchObject({
+        isTransient: false,
+      });
+    }
+    expect(mock).not.toHaveBeenCalled();
+  });
+
+  it('treats an unreachable platform as transient', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('socket hang up');
+      }),
+    );
+
+    await expect(fetchCurrentEstimatedDate('3150567', { baseUrl: BASE })).rejects.toMatchObject({
+      isTransient: true,
+    });
   });
 });

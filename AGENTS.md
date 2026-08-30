@@ -209,6 +209,15 @@ straight through — or the number space becomes a way to fill `shipments`.
 `preferred_date`) stay strings: `new Date('2026-08-29')` is midnight UTC, which
 is 02:00 in Cairo and the day before further west.
 
+A second endpoint, `/api/v1/orders/<platform_order_id>/current-estimated-date/`,
+gives the estimate the platform holds _today_ — ten days from the booked one on
+a real parcel — and is keyed by the numeric order id, which is why
+`shipments.platform_order_id` is stored: the tracking number 404s there. It
+returns a full instant whose **time component is an artifact of when you asked**
+(two calls three seconds apart differ by three seconds), so take the leading
+`YYYY-MM-DD` and never convert through a `Date` — the value carries `+03:00`, so
+a call answered after 21:00 UTC reads as the previous day in UTC.
+
 **Background work.** Anything slow, external or retryable is a job — with one
 narrow exception, written down because it looks like a violation: a control an
 agent presses and _waits on_, whose entire output is the provider's answer, calls
