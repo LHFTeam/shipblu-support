@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { humaniseStatus, stageDisplay, stageFor, statusLabel, TRACKING_STEPS } from './status';
+import {
+  commentText,
+  humaniseStatus,
+  PHRASE_GROUPS,
+  stageDisplay,
+  stageFor,
+  statusLabel,
+  TRACKING_STEPS,
+} from './status';
 
 /**
  * The cases worth pinning are the ones where a wrong answer is worse than no
@@ -153,6 +161,12 @@ describe('statusLabel', () => {
     );
   });
 
+  it('words a failed attempt the way ShipBlu words it', () => {
+    // Specified rather than chosen: this is the phrase ShipBlu uses for it, and
+    // the page agreeing with the SMS about the same parcel is the whole point.
+    expect(statusLabel('ar', 'delivery_attempted')).toBe('محاولة تسليم غير ناجحة');
+  });
+
   it('leaves English alone, so the page still agrees with the platform word for word', () => {
     expect(statusLabel('en', 'out_for_delivery')).toBe('Out for delivery');
     expect(statusLabel('en', 'delivered')).toBe('Delivered');
@@ -190,5 +204,97 @@ describe('statusLabel', () => {
     expect(statusLabel('ar', null)).toBe('');
     expect(statusLabel('ar', '')).toBe('');
     expect(statusLabel('en', undefined)).toBe('');
+  });
+});
+
+describe('phrase keys', () => {
+  /**
+   * The keys are the primary key of `shipment_phrases`, so a duplicate would
+   * silently give two phrases one override — an admin renaming "delivered"
+   * would find a courier reason had changed too. Cheap to pin, impossible to
+   * notice by reading.
+   */
+  it('are unique across every table', () => {
+    const keys = PHRASE_GROUPS.flatMap((group) => group.rows.map((row) => row.key));
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it('are safe to store and to put in a URL', () => {
+    for (const key of PHRASE_GROUPS.flatMap((group) => group.rows.map((row) => row.key))) {
+      expect(key).toMatch(/^[a-z][a-z0-9_]*$/);
+    }
+  });
+});
+
+describe('statusLabel overrides', () => {
+  it('prefers the wording an admin saved', () => {
+    expect(statusLabel('ar', 'delivered', { delivered: 'اتسلمت' })).toBe('اتسلمت');
+  });
+
+  it('falls back to the default when the override is blank', () => {
+    // Clearing the box in the admin screen is how a phrase is reset, so a blank
+    // override must never reach the page as an empty badge.
+    expect(statusLabel('ar', 'delivered', { delivered: '   ' })).toBe(
+      statusLabel('ar', 'delivered'),
+    );
+  });
+
+  it('does not let one phrase override another', () => {
+    const overrides = { delivered: 'اتسلمت' };
+    expect(statusLabel('ar', 'out_for_delivery', overrides)).toBe(
+      statusLabel('ar', 'out_for_delivery'),
+    );
+  });
+
+  it('leaves the English page alone whatever is saved', () => {
+    expect(statusLabel('en', 'delivered', { delivered: 'اتسلمت' })).toBe('Delivered');
+  });
+});
+
+describe('commentText', () => {
+  /**
+   * Both of these are real: production stores an English reason code, a dash,
+   * and whatever the courier typed in Arabic. Under an Arabic status that left
+   * the most useful line on the page half in a language the reader may not have.
+   */
+  it('translates the reason code and keeps the courier own words', () => {
+    expect(commentText('ar', 'Customer refused to accept the shipment - الاوردر ناقص')).toBe(
+      'العميل رفض استلام الشحنة - الاوردر ناقص',
+    );
+    expect(commentText('ar', 'Customer Rescheduled - مسافر')).toBe(
+      'العميل طلب تأجيل التسليم - مسافر',
+    );
+  });
+
+  it('never splits the note itself on a dash inside it', () => {
+    expect(
+      commentText('ar', 'Customer refused to accept the shipment - الاوردر ناقص - مش هيستلم'),
+    ).toBe('العميل رفض استلام الشحنة - الاوردر ناقص - مش هيستلم');
+  });
+
+  it('shows an unrecognised comment exactly as it arrived', () => {
+    // The same refusal statusLabel makes: half-English beats confidently wrong
+    // about why a parcel did not arrive.
+    expect(commentText('ar', 'test')).toBe('test');
+    expect(commentText('ar', 'Held at customs - رسوم')).toBe('Held at customs - رسوم');
+  });
+
+  it('leaves a comment the courier already wrote in Arabic alone', () => {
+    expect(commentText('ar', 'الاوردر ناقص - مش هيستلم')).toBe('الاوردر ناقص - مش هيستلم');
+  });
+
+  it('does not touch the English page', () => {
+    expect(commentText('en', 'Customer Rescheduled - مسافر')).toBe('Customer Rescheduled - مسافر');
+  });
+
+  it('takes an admin override for the reason too', () => {
+    expect(
+      commentText('ar', 'Customer Rescheduled - مسافر', { reason_rescheduled: 'العميل أجّل' }),
+    ).toBe('العميل أجّل - مسافر');
+  });
+
+  it('says nothing when there is no comment', () => {
+    expect(commentText('ar', null)).toBe('');
+    expect(commentText('ar', '   ')).toBe('');
   });
 });

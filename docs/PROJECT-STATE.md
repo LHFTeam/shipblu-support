@@ -214,11 +214,31 @@ translation. `/en/track` is unchanged and the console is unchanged — an agent 
 the ops team still read the platform's own word. A label no row matched is still
 shown verbatim in both languages, because nothing established what it says.
 
+The event history is worded the same way, and so is **the reason under it**.
+Production writes a tracking comment as an English reason code, a dash, and
+whatever the courier typed in Arabic — `Customer refused to accept the shipment -
+الاوردر ناقص`. Only the first half is ours: the second is one person's account of
+one parcel, and translating free text is how a page starts inventing facts. So
+`commentText` translates the reason code and leaves the note exactly as typed,
+and a reason code no row matched shows verbatim, dash and all.
+
+**The Arabic wording is admin-editable, because it is not ours to be certain
+about.** Whether a failed attempt reads as `محاولة تسليم غير ناجحة` is a question
+about what ShipBlu's own SMS says to the same customer about the same parcel, and
+getting it wrong recreates the disagreement that kept the page in English.
+`/admin/tracking` (permission `admin.fields`) edits every phrase;
+`shipment_phrases` stores **overrides only**, so the table is empty on the day it
+ships, clearing a box deletes the row and restores the default, and adding a
+phrase in code stays a deploy rather than a data migration. The read path keeps
+`lib/shipments/status.ts` pure — the page loads the overrides and passes them in
+— because that module is imported by the worker and tested with no database.
+
 Reading `data->'tracking_events'` across production to check that table turned up
 **two statuses the platform emits that nobody had listed**: `delivery_attempted`
 and `return_to_origin`. Both were already covered by keyword; the lesson is the
 method, not the miss — the eight known statuses came off one real delivery order,
-and one parcel does not show a vocabulary.
+and one parcel does not show a vocabulary. The same read is what turned up the
+comment format above; nobody had looked at that field at all.
 
 And now **Instagram comment management**, which is the App Review item
 `instagram_business_manage_comments` and which turned out to rest on four things

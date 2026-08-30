@@ -1,7 +1,14 @@
 import type { ReactNode } from 'react';
 import { CheckIcon } from '@/components/icons';
 import { formatTimestamp, t, type Locale, type StringKey } from '@/lib/kb/locale';
-import { stageDisplay, statusLabel, TRACKING_STEPS, type StatusTone } from '@/lib/shipments/status';
+import {
+  commentText,
+  stageDisplay,
+  statusLabel,
+  TRACKING_STEPS,
+  type PhraseOverrides,
+  type StatusTone,
+} from '@/lib/shipments/status';
 import type { TrackingEvent } from '@/lib/shipments/platform';
 
 /**
@@ -172,11 +179,24 @@ export function LastUpdate({ locale, when }: { locale: Locale; when: ReactNode }
  * the worst of both: the customer can read that the parcel is out for delivery
  * but not one line of how it got there.
  *
+ * The comment under a row goes through `commentText`, which translates the
+ * courier's reason code and leaves the courier's own words alone. On a failed
+ * delivery that line is the one the recipient came for, and it is the only place
+ * on this page where our wording and a human being's sit in the same sentence.
+ *
  * `dir="ltr"` on the timestamp for the same reason the number field has it: a
  * date and time is a run of Latin digits, and left to inherit RTL the browser
  * reorders the parts.
  */
-export function Timeline({ locale, events }: { locale: Locale; events: TrackingEvent[] }) {
+export function Timeline({
+  locale,
+  events,
+  overrides,
+}: {
+  locale: Locale;
+  events: TrackingEvent[];
+  overrides: PhraseOverrides;
+}) {
   if (events.length === 0) return null;
 
   const newestFirst = events.slice().reverse();
@@ -217,7 +237,7 @@ export function Timeline({ locale, events }: { locale: Locale; events: TrackingE
                       : 'text-[var(--kb-heading)]/80'
                   }
                 >
-                  {statusLabel(locale, event.status)}
+                  {statusLabel(locale, event.status, overrides)}
                 </p>
                 <time
                   dir="ltr"
@@ -227,7 +247,9 @@ export function Timeline({ locale, events }: { locale: Locale; events: TrackingE
                   {formatTimestamp(locale, event.at)}
                 </time>
                 {event.comment ? (
-                  <p className="mt-0.5 text-xs text-[var(--kb-muted)]">{event.comment}</p>
+                  <p className="mt-0.5 text-xs text-[var(--kb-muted)]">
+                    {commentText(locale, event.comment, overrides)}
+                  </p>
                 ) : null}
               </div>
             </li>
