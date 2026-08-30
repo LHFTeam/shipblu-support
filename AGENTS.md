@@ -13,15 +13,16 @@ wins over both.
 
 - Run `npm install` before anything else. A fresh clone has no `node_modules`
   and every check below fails with a module-resolution error until it does.
-- Run all four checks before every push: `tsc`, `eslint`, `vitest`, `build`.
 - Never push to `main`. Branch → PR → merge.
-- Never hand-edit `db/migrations/` or anything else generated. See
-  [Do not edit](#do-not-edit).
-- Never `FORCE` row level security. The app connects as the table owner; FORCE
-  breaks every query in the system.
 - Sanitise attacker-controlled HTML on write, never on read.
 - Verify state before any write against live infrastructure. See
   [Tool use](#tool-use-and-live-infrastructure).
+
+Most of what this list used to carry is now enforced on every pull request — see
+[What CI checks](#what-ci-checks). What is left is what a machine cannot check: a
+push to `main` it cannot prevent, a sanitiser call it cannot place on the right
+side of the read/write boundary, and a production write it cannot verify for
+you.
 
 ## Read these first
 
@@ -76,19 +77,45 @@ npx prettier --write AGENTS.md         # one file
 
 `tsc` has no useful single-file mode here; run `npm run typecheck` whole.
 
-## Before every push — all four, always
+## What CI checks
+
+`.github/workflows/ci.yml` runs on every pull request, in three jobs:
+
+| Job          | What it runs                                                          |
+| ------------ | --------------------------------------------------------------------- |
+| `verify`     | `tsc`, `eslint`, `format:check`, `vitest`, `build` — one job each     |
+| `repo-rules` | `scripts/ci/repo-rules.mjs`, and migration drift against `db/schema/` |
+| `database`   | migrations, `db/sql/` and every DB-only job handler, on real Postgres |
+
+Run the same thing locally when you want the answer sooner:
 
 ```bash
 npx tsc --noEmit && npx eslint . && npx vitest run && npm run build
+node scripts/ci/repo-rules.mjs
 ```
 
-All four are clean on `main`; keep them that way. **`npm run build` is not
-optional.** Several failure modes in this project — React's export-condition
-resolution under the wrong `NODE_ENV`, ambiguous route segments — appear only
-at build time and never in `tsc` or the dev server. `npm run build` pins
-`NODE_ENV=production` deliberately; if a build fails with
+**`npm run build` is not optional, which is why CI runs it separately.** Several
+failure modes in this project — React's export-condition resolution under the
+wrong `NODE_ENV`, ambiguous route segments — appear only at build time and never
+in `tsc` or the dev server. `npm run build` pins `NODE_ENV=production`
+deliberately; if a build fails with
 `Cannot read properties of null (reading 'useContext')`, check the environment,
 not the React version.
+
+`scripts/ci/repo-rules.mjs` is where the conventions that used to be prose in
+this file now live — the env-var catalogue, the job registry, the `db/sql`
+rules, the confinement of the delivery payload, and the rest. Each check carries
+the reason it exists. If one of them is wrong, change it there and say why in
+the same commit; do not add your call site to an exemption list.
+
+Three things CI still cannot check, so they remain yours:
+
+- **Which side of the read/write boundary a sanitiser call sits on.** CI keeps
+  `sanitize-html` in one module. It cannot tell that you called it on the way in.
+- **Raw SQL outside a job handler.** The `database` job runs the handlers; a
+  query in a page or an action is still only ever executed in production.
+- **Anything about live infrastructure.** See
+  [Tool use](#tool-use-and-live-infrastructure).
 
 ## Layout
 
@@ -112,7 +139,9 @@ Put logic in `lib/`, not in route files. A page or action authorises, calls into
 
 ## Do not edit
 
-Generated or managed elsewhere. Change the source, or the tool that writes them:
+Generated or managed elsewhere. Change the source, or the tool that writes them.
+CI regenerates the migrations and fails on any diff, and rejects a pull request
+that modifies or deletes a migration that already exists:
 
 | Path                | Change it via                                 |
 | ------------------- | --------------------------------------------- |
@@ -135,9 +164,10 @@ hand-police them.
 taken and what the naive alternative would have broken. Match it. A comment
 restating the code is noise here. Same for commit messages.
 
-**Server actions** (`app/**/actions.ts`) start `'use server'` and follow one
-shape: authorise (`requireAgent()` / `requirePermission()` plus `can()`), write,
-`revalidatePath()`, return a state object with `error: string | null`. Never
+**Server actions** (`app/**/actions.ts`) start `'use server'` — CI checks the
+directive — and follow one shape: authorise (`requireAgent()` /
+`requirePermission()` plus `can()`), write, `revalidatePath()`, return a state
+object with `error: string | null`. Never
 trust an id or address arriving in a `FormData` field — re-read the row
 server-side.
 
@@ -155,7 +185,8 @@ so nothing may open a pool or read env at module scope. Schema changes go in
 `db/schema/` then `npm run db:generate`. Files in `db/sql/` must be idempotent
 and must not use `CREATE INDEX CONCURRENTLY`; the whole file runs in one
 implicit transaction. New tables get RLS enabled by a loop in `db/sql/` — do not
-add it by hand.
+add it by hand. All three are checked, the first two by replaying the files and
+the last by asking the database which tables ended up covered.
 
 **The delivery platform.** `lib/shipments/platform.ts` is the only thing that
 knows how to read a parcel off `api.shipblu.com`, `lib/shipments/sync.ts` the
@@ -163,16 +194,18 @@ only thing that writes what it says, and `lib/shipments/detail.ts` the only thin
 that reads `shipments.data` back out. Three rules hold there. The endpoint's
 `?pin=` is **not checked**, so a tracking number is the only credential guarding
 the recipient's name, address, phone and COD amount — the payload therefore lands
-only in `shipments.data`, and `ShipmentDetail` must never grow a `data` field or
-the public tracking page publishes all of it (`docs/PROJECT-STATE.md` §6.38).
+only in `shipments.data`, and the public shape must never grow a passthrough
+field or the tracking page publishes all of it (`docs/PROJECT-STATE.md` §6.38).
 Anything drawing that payload goes through `publicTracking()` or
 `agentTracking()`, which build a fresh object from a named field list rather than
 spreading what they were given: a page picking its own fields off `data` makes
-the privacy promise only as good as the newest page. An unauthenticated lookup
+the privacy promise only as good as the newest page. CI enforces both halves —
+who may touch the column, and that the public type stays a named list. An unauthenticated lookup
 also never writes a row — `lib/shipments/lookup.ts` reads an unknown number
 straight through — or the number space becomes a way to fill `shipments`.
-`tracking_events` arrive in **no order at all**, so nothing may read `events[0]`
-or the last element as "latest". And the calendar dates (`estimated_date`,
+`tracking_events` arrive in **no order at all**, so nothing outside
+`platform.ts` — which sorts them — may read `events[0]` or the last element as
+"latest". And the calendar dates (`estimated_date`,
 `preferred_date`) stay strings: `new Date('2026-08-29')` is midnight UTC, which
 is 02:00 in Cairo and the day before further west.
 
@@ -189,8 +222,8 @@ stays in one shared function the job and the action both use
 (`lib/meta/profile-refresh.ts`), so the two paths cannot answer differently for
 the same subject. Everything else is a job: add the type
 to `JobType` in `lib/queue/index.ts`, a handler under `worker/handlers/`, and
-register it in `worker/handlers/index.ts` — an unregistered type fails loudly
-rather than being dropped. Use `dedupeKey` for anything a webhook retry could
+register it in `worker/handlers/index.ts`. CI checks that the three agree, and
+that every cron in `render.yaml` names a type that exists. Use `dedupeKey` for anything a webhook retry could
 duplicate — but note that **a key is spent for good, not until its job
 finishes**: `jobs_dedupe_idx` is a plain unique index over the whole table, so
 the conflict target still matches a job that completed months ago, and a job that
@@ -206,7 +239,8 @@ return 200 immediately; they never do the work inline.
 options are reachable without hand-inserting a `jobs` row.
 
 **Environment variables** are declared in `lib/env.ts` (Zod, parsed lazily) and
-in `render.yaml` in the same commit. Three env groups hold them:
+in `render.yaml` in the same commit — CI fails a pull request where the two
+disagree, in either direction. Three env groups hold them:
 `shipblu-shared` for what is identical in every environment, `shipblu-support-production` for
 anything that can reach a real customer or the production database, and
 `shipblu-support-staging` for staging's own — declare a value in exactly one of them.
@@ -250,8 +284,9 @@ long enough to explain itself. `InfoTip` from `components/tooltip.tsx` is the
 console's answer — an ⓘ that opens on hover, focus _and_ tap, portalled to
 `document.body` because every admin table and the content column clip their own
 overflow. Reach for a `Field` hint when the explanation should always be on
-screen, `InfoTip` when it should be one gesture away, and never `title=`: it
-never appears on a phone, which is where the console is read.
+screen, and `InfoTip` when it should be one gesture away. Never `title=` on a DOM
+element — it never appears on a phone, which is where the console is read, and
+CI rejects it.
 
 **Bilingual and RTL.** Arabic is the default locale and the front door; every
 public URL keeps an explicit locale segment. Use `direction()` from
@@ -289,17 +324,24 @@ where bugs actually hide — email threading order, quote stripping, the WhatsAp
 24-hour boundary, business hours across DST, Arabic slugs, the condition
 language — not on glue code. Add one when you fix a bug of that kind.
 
-**No database means no SQL is ever executed by the pre-push loop.** All four
-checks pass on a query Postgres will reject: `tsc` type-checks the Drizzle
-builder, not the statement it emits, and a raw `sql` fragment is a template
-string to every tool in the loop. `backfill_meta_profiles` shipped green and
-died on its first real run with `operator does not exist: text = channel` —
-`meta->>'platform'` is `text` and `contact_identities.channel` is an enum, and
-nothing local could have known. So anything with a raw `sql` fragment, a
-`->>`, a cast or a join across an enum gets **run against the real database
-before it is pushed**: `execute_sql` on the production project answers it in
-one call, and reading the row count back is also how you learn the predicate
-selects what you meant.
+**Vitest runs without a database, so no SQL is executed there.** A query
+Postgres will reject still passes every static check: `tsc` type-checks the
+Drizzle builder, not the statement it emits, and a raw `sql` fragment is a
+template string to all of them. `backfill_meta_profiles` shipped green and died
+on its first real run with `operator does not exist: text = channel` —
+`meta->>'platform'` is `text` and `contact_identities.channel` is an enum.
+
+The `database` CI job closes that for job handlers. It applies the migrations to
+an empty Postgres 17, replays `db/sql/` twice to prove it is idempotent, and then
+runs every handler whose work is SQL and needs no credential. An empty database
+is enough: Postgres plans a statement before it matches no rows, and planning is
+where that error is raised.
+
+It does not cover queries in pages and actions. So a raw `sql` fragment, a
+`->>`, a cast or a join across an enum **outside a job handler** still gets run
+against the real database before it is pushed — `execute_sql` on the production
+project answers it in one call, and reading the row count back is also how you
+learn the predicate selects what you meant.
 
 Playwright (`npm run test:e2e`) exists but is not part of the pre-push loop.
 
@@ -353,7 +395,9 @@ deleting it, and drop the sections that genuinely do not apply.
 ## Security — non-negotiable
 
 - Secrets never enter the repo. `render.yaml` uses `sync: false` or the env
-  group, always without values. Never echo a credential in any direction.
+  group, always without values. Never echo a credential in any direction. CI
+  rejects a committed `.env` and a `sync: false` inside an env group, but it
+  cannot unsay a credential you pasted into a comment or a log.
 - Email bodies and imported KB HTML are attacker-controlled. **Sanitise on
   write, never on read**, through `lib/html/sanitize.ts`.
 - Attachment paths derive from ids we generate, never from a supplied filename.
@@ -364,7 +408,8 @@ deleting it, and drop the sections that genuinely do not apply.
   server-side; a free-text address is checked against the requester's own
   identities and our mailbox in the action, not only in the composer.
 - `X-Frame-Options: DENY` everywhere except `/widget`, which uses
-  `frame-ancestors` with an explicit allowlist.
+  `frame-ancestors` with an explicit allowlist. CI checks both are still in
+  `next.config.ts`.
 
 ## Verify, do not infer
 
@@ -389,4 +434,8 @@ that changed, a trap that cost you an hour — update this file or
 `docs/PROJECT-STATE.md` in the same PR that taught it to you.
 
 `CLAUDE.md` and `.github/copilot-instructions.md` are symlinks to this file.
-Edit `AGENTS.md`; never replace a symlink with a copy.
+Edit `AGENTS.md`; CI fails if either becomes a copy.
+
+If what you learned is mechanical — a shape two files have to share, a name that
+has to match — prefer a check in `scripts/ci/repo-rules.mjs` over a paragraph
+here. A rule in prose is enforced by whoever last read the prose.

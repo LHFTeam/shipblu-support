@@ -1,0 +1,13 @@
+# Generated, and listed in AGENTS.md under "Do not edit". Prettier rewriting a
+# drizzle snapshot is a hand-edit of a generated file like any other, and it
+# would put the whole of db/migrations/meta permanently out of sync with what
+# `npm run db:generate` writes next.
+db/migrations/
+
+# Build output and dependencies.
+.next/
+out/
+node_modules/
+playwright-report/
+test-results/
+package-lock.json

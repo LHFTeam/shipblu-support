@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { Avatar } from '@/components/avatar';
 import { ChannelBadge } from '@/components/channel';
 import { ChevronLeftIcon } from '@/components/icons';
+import { Tooltip } from '@/components/tooltip';
 import { Badge, Select } from '@/components/ui';
 import { useNow } from '@/components/use-now';
 import { formatBytes, formatDateTime, formatRelative } from '@/lib/format';
@@ -1135,9 +1136,9 @@ function ShipmentsField({ conversation }: { conversation: ConversationDetail }) 
               {shipment.syncState === 'synced' && shipment.statusAt ? (
                 <>
                   {' · '}
-                  <span title={formatDateTime(shipment.statusAt)}>
+                  <Tooltip content={formatDateTime(shipment.statusAt)}>
                     {formatRelative(shipment.statusAt)}
-                  </span>
+                  </Tooltip>
                 </>
               ) : null}
             </p>
@@ -1293,9 +1294,9 @@ function RefreshShipmentButton({
 
         <span className="text-xs opacity-50">
           {lastSyncedAt ? (
-            <span title={formatDateTime(lastSyncedAt)}>
+            <Tooltip content={formatDateTime(lastSyncedAt)}>
               checked {formatRelative(lastSyncedAt)} ago
-            </span>
+            </Tooltip>
           ) : (
             'never checked'
           )}

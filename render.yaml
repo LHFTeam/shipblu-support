@@ -303,6 +303,17 @@ projects:
             branch: main
             buildCommand: npm ci --include=dev && npm run build
             startCommand: npm run worker
+            # Dashboard-owned, listed rather than declared, and normally absent:
+            #
+            #   WORKER_CONCURRENCY        jobs in flight at once (default 5)
+            #   WORKER_POLL_INTERVAL_MS   idle poll interval (default 1000)
+            #
+            # Both have defaults in lib/env.ts that are the intended steady
+            # state, so these exist to turn the worker up or down without a
+            # deploy — the one knob worth having when a backlog is draining too
+            # slowly. Named here because the blueprint is meant to describe
+            # everything the system reads, including what it reads only when
+            # somebody overrides a default.
             envVars:
               - fromGroup: shipblu-shared
               - fromGroup: shipblu-support-production

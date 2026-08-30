@@ -31,7 +31,10 @@ function ringOrder(candidates: Candidate[], cursorAgentId: string | null): Candi
 }
 
 /** The next agent in the rota. Null only when there are no candidates. */
-export function pickRoundRobin(candidates: Candidate[], cursorAgentId: string | null): string | null {
+export function pickRoundRobin(
+  candidates: Candidate[],
+  cursorAgentId: string | null,
+): string | null {
   return ringOrder(candidates, cursorAgentId)[0]?.agentId ?? null;
 }
 

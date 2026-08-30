@@ -76,7 +76,7 @@ describe('parseActions', () => {
 });
 
 describe('auto_assign', () => {
-  it('defaults to the group\'s own strategy and the ticket\'s own group', () => {
+  it("defaults to the group's own strategy and the ticket's own group", () => {
     expect(parseAction({ type: 'auto_assign' })).toEqual({
       type: 'auto_assign',
       groupId: null,

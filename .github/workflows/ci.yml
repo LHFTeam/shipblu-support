@@ -1,0 +1,190 @@
+name: CI
+
+# Everything AGENTS.md used to ask an agent to run before pushing, plus the
+# checks it could only ask them to remember.
+#
+# The four-command pre-push loop (tsc, eslint, vitest, build) is the `verify`
+# job. `repo-rules` is the prose that a machine can check. `database` is the gap
+# AGENTS.md called out and could not close: the unit tests run without a
+# database, so no SQL was ever executed before a push — `backfill_meta_profiles`
+# shipped with all four checks green and died on its first real run with
+# `operator does not exist: text = channel`. Here it runs against real Postgres.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A force-push or a follow-up commit makes the previous run's answer irrelevant.
+# Main is exempt: its runs are the record of what was merged.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+env:
+  # Node 22, matching the `engines` pin in package.json (>=22 <23).
+  NODE_VERSION: '22'
+
+jobs:
+  # -------------------------------------------------------------------------
+  # The pre-push loop.
+  #
+  # One job per check rather than one job running all of them, so a red run says
+  # which check failed in the job list instead of only in the log — and so a
+  # typecheck failure does not hide a test failure behind it.
+  # -------------------------------------------------------------------------
+  verify:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: typecheck
+            run: npx tsc --noEmit
+          - name: lint
+            run: npx eslint .
+          - name: format
+            run: npm run format:check
+          - name: test
+            run: npx vitest run
+          - name: build
+            # `npm run build` pins NODE_ENV=production deliberately. Several
+            # failure modes here — React's export-condition resolution under the
+            # wrong NODE_ENV, ambiguous route segments — appear only at build
+            # time and never in tsc or the dev server, which is why this is not
+            # optional. A build failing with "Cannot read properties of null
+            # (reading 'useContext')" is the environment, not the React version.
+            run: npm run build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: ${{ matrix.run }}
+
+  # -------------------------------------------------------------------------
+  # The rules that used to live only in prose.
+  # -------------------------------------------------------------------------
+  repo-rules:
+    name: repo rules
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The migrations-are-append-only check diffs against the base branch,
+          # which needs more than the default single commit.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+
+      - name: AGENTS.md invariants
+        run: node scripts/ci/repo-rules.mjs
+
+      # db/migrations is generated from db/schema by `npm run db:generate`. If
+      # regenerating produces a diff, either a migration was hand-edited or a
+      # schema change was committed without one — and the next generated
+      # migration would then be diffed against a schema state the database was
+      # never in. `drizzle-kit generate` opens no connection, so this needs no
+      # database.
+      - name: Migrations match db/schema
+        run: |
+          npx drizzle-kit generate
+          if ! git diff --quiet -- db/migrations; then
+            echo "::error::db/migrations is out of sync with db/schema."
+            echo "Run 'npm run db:generate' and commit the result; never hand-edit a migration."
+            git --no-pager diff --stat -- db/migrations
+            exit 1
+          fi
+          echo "db/migrations is in sync with db/schema."
+
+  # -------------------------------------------------------------------------
+  # SQL, executed.
+  #
+  # Postgres 17 to match production and staging: db/migrate.ts opts out of the
+  # role-level `transaction_timeout`, which is a 17-and-later setting it checks
+  # the server version before touching.
+  # -------------------------------------------------------------------------
+  database:
+    name: database
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: shipblu_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/shipblu_ci
+      DATABASE_URL_SESSION: postgresql://postgres:postgres@localhost:5432/shipblu_ci
+      # Long enough for the Zod schema, and a placeholder: nothing in this job
+      # signs anything a person will ever receive.
+      APP_SECRET: ci-placeholder-secret-at-least-32-characters-long
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+
+      # Proves the migrations and every file in db/sql actually execute. `tsc`
+      # type-checks the Drizzle builder, not the statement it emits, and a raw
+      # `sql` fragment is a template string to every other check in this file.
+      - name: Apply migrations to an empty database
+        run: npm run db:migrate
+
+      # db/sql is replayed after every deploy, so each file has to survive being
+      # run again. The second run is the assertion.
+      - name: Replay is idempotent
+        run: npm run db:migrate
+
+      - name: Row level security invariants
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/ci/db-invariants.sql
+
+      # The jobs whose whole body is SQL, run against the schema that was just
+      # built. Their predicates match nothing on an empty database, which is
+      # fine — Postgres still plans every statement, and planning is where
+      # `operator does not exist: text = channel` is raised. That is the class of
+      # failure this job exists for.
+      #
+      # Only jobs that need neither network nor credentials are listed.
+      # check_meta_permissions and import_freshdesk_kb are deliberately absent:
+      # both fail on a missing credential before reaching any SQL.
+      - name: Job handlers execute their SQL
+        run: |
+          set -euo pipefail
+          for job in \
+            cleanup \
+            sla_sweep \
+            assign_sweep \
+            run_time_automations \
+            snapshot_backlog \
+            rollup_metrics \
+            sync_whatsapp_templates \
+            "backfill_meta_profiles limit=1" \
+            "backfill_shipment_links limit=1" \
+            "backfill_message_locations limit=1"
+          do
+            echo "::group::npm run job -- $job"
+            npm run job -- $job
+            echo "::endgroup::"
+          done
