@@ -465,6 +465,22 @@ log nobody meant to fill. Read through `process.env` in `lib/webhooks/log.ts`
 rather than `env()`, for the reason `SHIPMENT_TRACKING_PATTERN` is: a diagnostic
 must never be able to fail the request it was only meant to describe.
 
+**Two things this got wrong on the first attempt, both worth keeping.** It was
+declared `z.enum(['true','false'])`, which reads as careful and is the opposite:
+`env()` parses the whole schema and is reached by the database client, the auth
+helpers and every page and action, so `True` or `1` or a trailing space would
+have thrown for the _entire application_ rather than quietly disabling logging —
+a debug flag that takes the site down when mistyped. It is `z.string()` now, and
+the strictness lives in the reader, where it costs nothing. **Tightening the type
+of a diagnostic is not free: it moves a typo from "the tool is off" to "the app
+is down".**
+
+It also emitted one log line **per header**. Render splits an app log on
+newlines, so a single `console.log` became ~20 entries per delivery, and on Linux
+`process.stdout` to a pipe is a _synchronous_ write — log volume on this path is
+paid on the event loop, not in the background. Headers are one line now, the body
+another; a delivery is at most three entries.
+
 ### The three-group split is not applied on Render yet
 
 `render.yaml` describes it; the dashboard still has the single `shipblu-shared`
