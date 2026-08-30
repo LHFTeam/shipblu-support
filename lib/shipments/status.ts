@@ -98,6 +98,15 @@ const DISPLAY: Record<ShipmentStage, Omit<StageDisplay, 'stage'>> = {
  * could claim it, and `returned to sender` never reads as `delivered`. Terminal
  * and exceptional states are therefore listed first.
  *
+ * **Eight of these are no longer guesses.** `created`, `pickup_requested`,
+ * `out_for_pickup`, `picked_up`, `in_transit`, `en_route`, `out_for_delivery`
+ * and `delivered` are the statuses `api.shipblu.com` actually emits, read off a
+ * real delivery order. Three of them — `pickup_requested`, `out_for_pickup` and
+ * `en_route` — reached `unknown` before that was checked, which on the tracking
+ * page means a bare label with no stepper and no tone for a large part of every
+ * parcel's life. The rest of the table stays as it was: still a keyword reading
+ * of free text, still `unknown` rather than a guess when nothing matches.
+ *
  * A keyword matches as a whole word or whole phrase, not as a substring. That is
  * the difference between `new` meaning a freshly created shipment and `new`
  * matching the middle of `renewed`; with separators already flattened to single
@@ -183,6 +192,11 @@ const KEYWORDS: ReadonlyArray<readonly [ShipmentStage, readonly string[]]> = [
     [
       'in transit',
       'transit',
+      // The platform's own linehaul step. Observed immediately *before*
+      // `in_transit` on delivery day rather than as a synonym for the courier
+      // being at the door, so it belongs here and not in `out_for_delivery` —
+      // which is where the English reading of the words alone would put it.
+      'en route',
       'picked up',
       'pickup complete',
       'collected',
@@ -209,6 +223,12 @@ const KEYWORDS: ReadonlyArray<readonly [ShipmentStage, readonly string[]]> = [
       'awaiting pickup',
       'pending pickup',
       'ready for pickup',
+      // Both are pre-pickup: the parcel is still the merchant's, and a courier
+      // being *sent to collect it* has not moved it. Reading either as transit
+      // would tell a recipient their parcel is on its way while it is still on a
+      // shelf in the shop.
+      'pickup requested',
+      'out for pickup',
       'scheduled',
       'booked',
       'تم الإنشاء',

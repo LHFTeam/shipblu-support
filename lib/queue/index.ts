@@ -13,6 +13,8 @@ export type JobType =
   | 'download_media'
   | 'fetch_meta_profile'
   | 'sync_whatsapp_templates'
+  | 'sync_shipment'
+  | 'sync_stale_shipments'
   | 'subscribe_meta_webhooks'
   | 'check_meta_permissions'
   | 'sla_sweep'

@@ -161,13 +161,23 @@ language is shown to everyone with its own `lang` and `dir` rather than withheld
 because the silent failure is an Arabic reader, who is the majority here, getting
 no warning at all.
 
-**The tracking page has nothing to show yet, and that is not a bug in the page.**
-Nothing in this system writes `shipments.status_label` — the detector creates
-stubs, and the platform sync that would fill them in is designed in
-`plans/shipment-customer-tracking.md` §7 and not built. So every lookup today
-lands on "no delivery status for this number yet" and offers support instead. The
-page is written for both answers and starts working, with no change to it, on the
-day that sync lands. Two things were deliberately left out of it against the
+**The platform sync now exists, so the tracking page can answer.**
+`plans/shipment-customer-tracking.md` §7 designed this seam and left it unbuilt,
+and its absence was why nothing in this system had ever written
+`shipments.status_label`. `lib/shipments/platform.ts` reads
+`GET /api/v1/delivery-order/<number>/` off `api.shipblu.com`,
+`lib/shipments/sync.ts` writes the label, its instant, `sync_state` and the whole
+response into `data`, and the `sync_shipment` job carries it. The page needed no
+change of its own, exactly as it was written to.
+
+One thing still gates it end to end, and it is not in the page: **nothing
+schedules the sweep.** `sync_stale_shipments` is registered and runnable by hand
+(`npm run job -- sync_stale_shipments`) but has no cron entry in `render.yaml`,
+because how often a moving parcel should be re-read is a question about the
+platform's rate limits that nobody has answered. Detection itself is no longer
+the blocker — the default pattern now matches the real thirteen-digit format —
+so the stubs will arrive; until the sweep is scheduled or a sync is triggered by
+hand, a lookup still lands on "no delivery status for this number yet". Two things were deliberately left out of it against the
 design that prompted the work: the recipient's name, address, phone and COD
 amount behind a "confirm the last four digits" gate — a four-digit gate on a page
 anyone can reload is a few thousand guesses, and the phone number it checks
@@ -2311,6 +2321,33 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     still reads it, still decides, and now gets a sentence that explains the
     refusal when they act. Revisit only if comment tickets become common enough
     that agents are regularly writing replies into nothing.
+
+38. **The delivery-order endpoint's `?pin=` is not checked, so a tracking number
+    is the only credential protecting a customer's name, address and phone.**
+    _2026-08-30, established by requesting the same parcel three ways._
+
+    `GET https://api.shipblu.com/api/v1/delivery-order/<number>/` was fetched
+    with `?pin=` empty, with `?pin=1234`, and with no `pin` parameter at all. All
+    three returned **byte-identical bodies** — `diff` on the saved responses is
+    empty. The body carries the recipient's full name, email address, phone
+    number, street address, GPS coordinates to six decimal places, and the
+    cash-on-delivery amount.
+
+    So the pin is decoration. Anyone holding a thirteen-digit number — a
+    neighbour, a doorman, whoever the merchant forwarded it to, or a script
+    walking the number space — can read all of that, and the numbers are
+    sequential-looking millisecond timestamps rather than anything unguessable.
+    **This is a property of the platform, not of this repo, and it is the one
+    finding here that somebody outside this codebase has to act on.**
+
+    What this repo does about it, which is containment rather than a fix:
+    `syncShipment` writes the payload only to `shipments.data`, and no public
+    page selects that column. `getShipmentByTrackingNumber` returns a
+    `ShipmentDetail` whose field list does not include `data`, which is what
+    keeps `/help/<locale>/track` rendering a status and a stepper instead of
+    somebody's address — the same line the tracking page already drew for itself
+    (§1) and the reason it draws it. **Widening `ShipmentDetail` to carry `data`
+    is the one-line change that would publish all of it.**
 
 ## 7. Verification already done
 
