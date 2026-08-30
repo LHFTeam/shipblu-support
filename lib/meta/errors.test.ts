@@ -213,3 +213,107 @@ describe('explainMetaModerationError', () => {
     expect(explained).not.toContain('App Review');
   });
 });
+
+describe('a reply to a comment Graph will not accept', () => {
+  /** How Graph refuses a POST to a node that is gone. */
+  const unsupportedPost = () =>
+    new MetaApiError('Unsupported post request.', 400, 100, 33, false, null, 'AaBb');
+
+  it('names the deleted comment first, because nothing else ever will', () => {
+    /*
+      Established by deleting a real comment on 2026-08-30 and watching the
+      Render request log: Instagram sends no webhook for a deletion — no verb,
+      no empty change, no request. So the ticket goes on showing the comment and
+      this refusal is the only signal an agent ever gets. Before this branch it
+      printed "Unsupported post request." and a code, which reads as a broken
+      integration rather than as a customer changing their mind.
+    */
+    const explained = explainMetaSendError(unsupportedPost(), {
+      platform: 'instagram',
+      connection: 'instagram_login',
+      sendKind: 'comment_reply',
+    });
+
+    expect(explained).toContain('The comment is gone');
+    expect(explained).toContain('no webhook when a comment is deleted');
+    // Ordered by likelihood: the approval fails every comment reply, not this one.
+    expect(explained.indexOf('The comment is gone')).toBeLessThan(
+      explained.indexOf('The approval'),
+    );
+  });
+
+  it('names the permission for the connection the reply went out over', () => {
+    const direct = explainMetaSendError(unsupportedPost(), {
+      platform: 'instagram',
+      connection: 'instagram_login',
+      sendKind: 'comment_reply',
+    });
+    expect(direct).toContain('instagram_business_manage_comments');
+
+    const page = explainMetaSendError(unsupportedPost(), {
+      platform: 'instagram',
+      connection: 'facebook_page',
+      sendKind: 'comment_reply',
+    });
+    expect(page).toContain('instagram_manage_comments');
+    expect(page).not.toContain('instagram_business_manage_comments');
+  });
+
+  it('raises the one-level-deep thread only where it can happen', () => {
+    // Instagram's `replies` edge belongs to the root comment alone. Facebook has
+    // no such rule, so offering it there would be a wrong lead.
+    const instagram = explainMetaSendError(unsupportedPost(), {
+      platform: 'instagram',
+      connection: 'instagram_login',
+      sendKind: 'comment_reply',
+    });
+    expect(instagram).toContain('one level deep');
+
+    const facebook = explainMetaSendError(unsupportedPost(), {
+      platform: 'facebook',
+      connection: 'facebook_page',
+      sendKind: 'comment_reply',
+    });
+    expect(facebook).not.toContain('one level deep');
+    expect(facebook).toContain('pages_manage_engagement');
+  });
+
+  it('adds the once-ever rule for a private reply', () => {
+    // The one send in the product that cannot be retried, and it is refused in
+    // this same shape when it has already been used.
+    const explained = explainMetaSendError(unsupportedPost(), {
+      platform: 'instagram',
+      connection: 'instagram_login',
+      sendKind: 'private_reply',
+    });
+
+    expect(explained).toContain('exactly once per comment');
+    expect(explained).toContain('seven days');
+  });
+
+  it('leaves a direct message alone', () => {
+    // The branch is scoped to comment sends. A DM refused with 100 has its own
+    // causes and this sentence would be a wrong lead.
+    const explained = explainMetaSendError(unsupportedPost(), {
+      platform: 'instagram',
+      connection: 'instagram_login',
+      sendKind: 'dm',
+      tag: 'RESPONSE',
+    });
+
+    expect(explained).not.toContain('The comment is gone');
+  });
+
+  it('stays quiet on a code it was not written for', () => {
+    // Silent beats confidently wrong: nothing here has been observed against the
+    // real Graph, so an unfamiliar refusal keeps Meta's own words.
+    const rateLimited = new MetaApiError('Rate limit', 400, 613, null, true, null, 'AaBb');
+    const explained = explainMetaSendError(rateLimited, {
+      platform: 'instagram',
+      connection: 'instagram_login',
+      sendKind: 'comment_reply',
+    });
+
+    expect(explained).not.toContain('The comment is gone');
+  });
+});

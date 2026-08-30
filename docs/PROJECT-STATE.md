@@ -2197,16 +2197,102 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     live is itself the diagnosis: the secret was set in Render under a name the
     code did not read. Same shape as §6.26 and §6.29, third occurrence.
 
-    Two things are still **not** settled and should not be assumed:
+    **Confirmed end to end at 16:20:30 UTC**, minutes after the deploy went live.
+    One burst carried both connections, each labelled and each verifying against
+    its own secret: an `instagram_login` `changes`/`comments` delivery, and five
+    `facebook_page` `standby` deliveries over the following 35 seconds. The
+    comment became ticket #13745 in 614 ms — the first real Instagram comment
+    this system has ever ingested.
+
+    Two things the real payload settled that had been guesses in the code:
+
+    - **A top-level Instagram comment carries no `parent_id`.** Meta's sample
+      does, alongside a distinct `media.id`, which is what made the shape look
+      ambiguous for months — the sample is describing a _reply_. The guard in
+      `lib/meta/parse.ts` stays but is now belt over braces.
+    - **The Instagram `comments` value has no `verb` field at all**, unlike
+      Facebook's `feed`. There is no deletion shape to look for, which is the
+      next entry.
+
+    Three things are still **not** settled and should not be assumed:
 
     - Whether the direct connection delivers `comments` for the general public at
-      Standard Access. Every delivery so far has been a comment the account left
-      on its own media, which Standard Access covers on its own; a comment from
-      somebody else arriving is what would settle it.
+      Standard Access. **The 16:20 delivery does not settle it**: it came from
+      `ali.nasser47`, which holds a role on the Meta app, and Standard Access
+      covers a role holder on assets they administer. So this is exactly the
+      §6.34 boundary that made the Page connection's comments look broken, and it
+      still needs a comment from an account with no role on the app. Until then
+      the Instagram comment App Review item stays blocking.
     - Whether Meta ever sends `standby` on the Instagram Login connection. It has
       never been observed and there is no primary receiver for it to be second
       to, but the code handles it rather than assuming: a `standby` recorded by
       the direct connection blocks a send over the direct connection.
+    - Whether a **message send** works over the direct connection. Still
+      untested, and it is the half the whole design rests on — the argument that
+      Instagram is answerable before the Freshworks swap is a prediction until a
+      DM reply lands.
+
+    **A write over the direct connection does work, and that much is no longer a
+    prediction.** At 16:29 UTC an agent deleted a comment from the ticket and the
+    round trip completed on the first attempt:
+
+    | Time (UTC)  | What                                                        |
+    | ----------- | ----------------------------------------------------------- |
+    | 16:29:05.90 | comment `18554566741078148` verified on `instagram_login`   |
+    | 16:29:06.35 | ticket #13746 opened                                        |
+    | 16:29:23.56 | agent pressed delete; `moderate_meta_comment` enqueued      |
+    | 16:29:26.47 | `DELETE graph.instagram.com/…` accepted, job ok in 2,895 ms |
+
+    `[moderate_meta_comment] delete instagram comment … via instagram_login`, and
+    the `comment_deleted` event carries the connection. **This is the first
+    authenticated Graph write this system has ever made over Instagram Login**,
+    and it settles two things a webhook could not: the token authenticates for
+    writes and not merely for signing, and `instagram_business_manage_comments`
+    is genuinely granted rather than assumed.
+
+    What it does **not** settle is the send. `POST /{ig-id}/messages` is a
+    different endpoint under a different permission
+    (`instagram_business_manage_messages`), and it is the one that carries the
+    standby argument. Do not read a successful delete as evidence for it.
+
+37. **A deleted Instagram comment produces no webhook, so a ticket outlives the
+    thing it is about and nothing says so.** _2026-08-30, established by deleting
+    a real comment and watching._
+
+    The comment behind ticket #13745 was deleted at some point between 16:21 and
+    16:28 UTC. **No HTTP request reached `/api/webhooks/meta` in that window** —
+    checked in Render's _request_ log, not `webhook_events`, which is what makes
+    it conclusive: the database cannot distinguish "never arrived" from
+    "arrived and was rejected before storage" (§6.33), and the request log can.
+    Not a `remove` verb, not an empty change, no request at all.
+
+    **Neither direction produces one.** Tested twice: once with the commenter
+    deleting their own comment, and once at 16:29 with the account deleting one
+    through our own moderation control (§6.36's round trip). Silence both times.
+    The second matters less — we made that change and know its outcome — but it
+    rules out the reading that Meta does notify on deletion and the first test
+    simply missed it.
+
+    Facebook is different and no better: a deletion arrives as `feed` with
+    `verb: remove`, and `OPENING_VERBS` in `lib/meta/parse.ts` drops it. The
+    ticket is not marked either way.
+
+    So on both platforms the ticket keeps the customer's words and goes on
+    presenting them as live. That is defensible — the delivery is the record, and
+    a deletion should not erase what we were told — but it has a sharp edge:
+    **the first and only time anybody learns the comment is gone is when an
+    agent's reply is refused.** Until now that refusal printed Graph's bare
+    "Unsupported post request" plus a code, which reads as a broken integration
+    rather than as a customer changing their mind. `explainMetaSendError` now has
+    a branch for it naming the three causes in likelihood order — deleted,
+    wrong node (Instagram threads are one level deep), unapproved permission.
+
+    What is deliberately _not_ done: polling comment ids to detect deletions.
+    That is a Graph call per open comment ticket per interval, to discover
+    something that changes nothing about how the ticket is handled — the agent
+    still reads it, still decides, and now gets a sentence that explains the
+    refusal when they act. Revisit only if comment tickets become common enough
+    that agents are regularly writing replies into nothing.
 
 ## 7. Verification already done
 
