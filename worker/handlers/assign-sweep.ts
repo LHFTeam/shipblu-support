@@ -34,9 +34,7 @@ export async function assignSweep(): Promise<void> {
   const assigned = await assignWaiting();
   const escalated = await escalateStale();
 
-  console.log(
-    `[assign_sweep] reclaimed=${reclaimed} assigned=${assigned} escalated=${escalated}`,
-  );
+  console.log(`[assign_sweep] reclaimed=${reclaimed} assigned=${assigned} escalated=${escalated}`);
 }
 
 /** Groups that hand tickets out on their own. Nothing runs for a manual group. */
@@ -261,4 +259,3 @@ async function escalateStale(): Promise<number> {
 
   return escalated;
 }
-

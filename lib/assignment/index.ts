@@ -136,10 +136,7 @@ export async function assignConversation(
    * that team's queue, and that is where somebody will look for it.
    */
   if (options.groupId && options.groupId !== conversation.groupId) {
-    await db
-      .update(conversations)
-      .set({ groupId })
-      .where(eq(conversations.id, conversationId));
+    await db.update(conversations).set({ groupId }).where(eq(conversations.id, conversationId));
     await db.insert(conversationEvents).values({
       conversationId,
       type: 'group_changed',
@@ -270,10 +267,7 @@ export async function assignConversation(
  * and being full look identical to the caller otherwise, and only one of them
  * means "do not give this person work".
  */
-async function loadRoster(
-  tx: Pick<typeof db, 'select'>,
-  groupId: string,
-): Promise<CandidateRow[]> {
+async function loadRoster(tx: Pick<typeof db, 'select'>, groupId: string): Promise<CandidateRow[]> {
   const rows = await tx
     .select({
       agentId: agents.id,
