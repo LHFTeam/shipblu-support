@@ -2227,9 +2227,33 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
       never been observed and there is no primary receiver for it to be second
       to, but the code handles it rather than assuming: a `standby` recorded by
       the direct connection blocks a send over the direct connection.
-    - Whether a reply, as opposed to a delivery, actually works over the direct
-      connection. Nothing has been sent yet. §6.36's whole point is that it
-      should now be possible; that is a prediction until a reply lands.
+    - Whether a **message send** works over the direct connection. Still
+      untested, and it is the half the whole design rests on — the argument that
+      Instagram is answerable before the Freshworks swap is a prediction until a
+      DM reply lands.
+
+    **A write over the direct connection does work, and that much is no longer a
+    prediction.** At 16:29 UTC an agent deleted a comment from the ticket and the
+    round trip completed on the first attempt:
+
+    | Time (UTC)  | What                                                        |
+    | ----------- | ----------------------------------------------------------- |
+    | 16:29:05.90 | comment `18554566741078148` verified on `instagram_login`   |
+    | 16:29:06.35 | ticket #13746 opened                                        |
+    | 16:29:23.56 | agent pressed delete; `moderate_meta_comment` enqueued      |
+    | 16:29:26.47 | `DELETE graph.instagram.com/…` accepted, job ok in 2,895 ms |
+
+    `[moderate_meta_comment] delete instagram comment … via instagram_login`, and
+    the `comment_deleted` event carries the connection. **This is the first
+    authenticated Graph write this system has ever made over Instagram Login**,
+    and it settles two things a webhook could not: the token authenticates for
+    writes and not merely for signing, and `instagram_business_manage_comments`
+    is genuinely granted rather than assumed.
+
+    What it does **not** settle is the send. `POST /{ig-id}/messages` is a
+    different endpoint under a different permission
+    (`instagram_business_manage_messages`), and it is the one that carries the
+    standby argument. Do not read a successful delete as evidence for it.
 
 37. **A deleted Instagram comment produces no webhook, so a ticket outlives the
     thing it is about and nothing says so.** _2026-08-30, established by deleting
@@ -2241,6 +2265,13 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     it conclusive: the database cannot distinguish "never arrived" from
     "arrived and was rejected before storage" (§6.33), and the request log can.
     Not a `remove` verb, not an empty change, no request at all.
+
+    **Neither direction produces one.** Tested twice: once with the commenter
+    deleting their own comment, and once at 16:29 with the account deleting one
+    through our own moderation control (§6.36's round trip). Silence both times.
+    The second matters less — we made that change and know its outcome — but it
+    rules out the reading that Meta does notify on deletion and the first test
+    simply missed it.
 
     Facebook is different and no better: a deletion arrives as `feed` with
     `verb: remove`, and `OPENING_VERBS` in `lib/meta/parse.ts` drops it. The
