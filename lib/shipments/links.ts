@@ -1,5 +1,6 @@
 import { and, eq, exists, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
+import { enqueue } from '@/lib/queue';
 import {
   contactShippingAccounts,
   contacts,
@@ -131,6 +132,22 @@ export async function linkShipmentsFromMessage(input: {
  * Race-safe the same way `resolveContact` is: the unique index is the real
  * guard, and two webhooks arriving together collapse onto one row rather than
  * producing two shipments for one parcel.
+ *
+ * **A row that was just created asks the platform about itself.** The enqueue
+ * lives here rather than at the two call sites so it cannot be forgotten by the
+ * third: every path that first learns of a parcel — the detector, an agent
+ * typing a number, whatever comes next — leaves exactly one `sync_shipment`
+ * behind it. Only on creation, so a customer repeating their number in eleven
+ * replies still costs one lookup rather than eleven, and the console's refresh
+ * button stays the way to ask again on purpose.
+ *
+ * No `dedupeKey`, for the reason `worker/handlers/sync-shipment.ts` sets out at
+ * length: the index behind it is unique over the whole table, so a key spent on
+ * this parcel today would silently swallow every future sync of it.
+ *
+ * A queue that cannot be written to must not stop the link being made. The
+ * ticket is the thing the customer is waiting on; a status that arrives late,
+ * or on the sweep instead, costs nobody anything.
  */
 export async function upsertShipmentStub(trackingNumber: string): Promise<string> {
   const canonical = normaliseTrackingNumber(trackingNumber);
@@ -142,7 +159,15 @@ export async function upsertShipmentStub(trackingNumber: string): Promise<string
     .onConflictDoNothing({ target: shipments.trackingNumber })
     .returning({ id: shipments.id });
 
-  if (inserted[0]) return inserted[0].id;
+  if (inserted[0]) {
+    const shipmentId = inserted[0].id;
+    try {
+      await enqueue('sync_shipment', { shipmentId });
+    } catch (error) {
+      console.error(`[shipments] could not queue a sync for ${canonical}`, error);
+    }
+    return shipmentId;
+  }
 
   const existing = await db
     .select({ id: shipments.id })

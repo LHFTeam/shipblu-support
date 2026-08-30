@@ -158,12 +158,19 @@ implicit transaction. New tables get RLS enabled by a loop in `db/sql/` — do n
 add it by hand.
 
 **The delivery platform.** `lib/shipments/platform.ts` is the only thing that
-knows how to read a parcel off `api.shipblu.com`, and `lib/shipments/sync.ts` the
-only thing that writes what it says. Three rules hold there. The endpoint's
+knows how to read a parcel off `api.shipblu.com`, `lib/shipments/sync.ts` the
+only thing that writes what it says, and `lib/shipments/detail.ts` the only thing
+that reads `shipments.data` back out. Three rules hold there. The endpoint's
 `?pin=` is **not checked**, so a tracking number is the only credential guarding
 the recipient's name, address, phone and COD amount — the payload therefore lands
 only in `shipments.data`, and `ShipmentDetail` must never grow a `data` field or
 the public tracking page publishes all of it (`docs/PROJECT-STATE.md` §6.38).
+Anything drawing that payload goes through `publicTracking()` or
+`agentTracking()`, which build a fresh object from a named field list rather than
+spreading what they were given: a page picking its own fields off `data` makes
+the privacy promise only as good as the newest page. An unauthenticated lookup
+also never writes a row — `lib/shipments/lookup.ts` reads an unknown number
+straight through — or the number space becomes a way to fill `shipments`.
 `tracking_events` arrive in **no order at all**, so nothing may read `events[0]`
 or the last element as "latest". And the calendar dates (`estimated_date`,
 `preferred_date`) stay strings: `new Date('2026-08-29')` is midnight UTC, which

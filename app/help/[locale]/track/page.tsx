@@ -3,16 +3,16 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { PackageSearchIcon } from '@/components/icons';
-import { formatTimestamp, isLocale, t, type Locale } from '@/lib/kb/locale';
+import { formatCalendarDate, formatTimestamp, isLocale, t, type Locale } from '@/lib/kb/locale';
 import { popularArticles, searchArticles } from '@/lib/kb/queries';
 import { allow, clientIpFrom } from '@/lib/kb/rate-limit';
 import { kbViewer } from '@/lib/kb/viewer';
 import { normaliseTrackingNumber } from '@/lib/shipments/format';
-import { getShipmentByTrackingNumber } from '@/lib/shipments/queries';
-import { stageDisplay } from '@/lib/shipments/status';
+import { publicTrackingFor } from '@/lib/shipments/lookup';
+import { humaniseStatus, stageDisplay } from '@/lib/shipments/status';
 import { ArticleList, ArticleRow, PageBody, PageHeader, Panel } from '../chrome';
 import { TrackForm } from './form';
-import { LastUpdate, StatusBadge, Stepper } from './result';
+import { LastUpdate, StatusBadge, Stepper, Timeline } from './result';
 
 export const dynamic = 'force-dynamic';
 
@@ -152,7 +152,22 @@ async function Lookup({ locale, canonical }: { locale: Locale; canonical: string
     );
   }
 
-  const shipment = await getShipmentByTrackingNumber(canonical);
+  /*
+   * A read-through against the shipping platform, not a database read.
+   *
+   * `publicTrackingFor` refreshes a parcel this system already knows about and
+   * reads an unknown number straight from the platform without storing anything
+   * — see `lib/shipments/lookup.ts` for why an anonymous lookup is not allowed
+   * to create a row. It never throws: a platform that is down leaves the stored
+   * status, or the page's ordinary "no status yet".
+   *
+   * What comes back is deliberately not a `ShipmentDetail`. `PublicTracking`
+   * carries a status, its instant and the event history and *structurally
+   * cannot* carry a name, an address, a phone number or the COD amount — which
+   * is what keeps the promise this page makes in `trackPrivacyNote` true by
+   * construction rather than by review (`docs/PROJECT-STATE.md` §6.38).
+   */
+  const tracking = await publicTrackingFor(canonical);
 
   /*
    * One object or none, rather than a shipment and a display beside it. Every
@@ -160,16 +175,19 @@ async function Lookup({ locale, canonical }: { locale: Locale; canonical: string
    * and folding the label, its timestamp and its stage into a single nullable
    * value is what makes that one check instead of three that can disagree.
    *
-   * Today it is always null: nothing in this system writes `status_label` yet,
-   * because the platform sync that would is designed and not built. The page is
-   * written for both answers rather than for the one it currently gets, so the
-   * day that sync lands this page starts working with no changes here.
+   * The label is humanised but not translated: the platform sends
+   * `out_for_delivery`, and an underscore in front of a customer is a typography
+   * failure, while rewriting it into our own words would have them read one
+   * thing here and another in ShipBlu's SMS about the same parcel. `stageFor`
+   * still reads the raw token, which is what the keyword table is written for.
    */
-  const status = shipment?.statusLabel
+  const status = tracking
     ? {
-        label: shipment.statusLabel,
-        at: shipment.statusAt,
-        ...stageDisplay(shipment.statusLabel),
+        label: humaniseStatus(tracking.status),
+        at: tracking.statusAt,
+        events: tracking.events,
+        estimatedDate: tracking.estimatedDate,
+        ...stageDisplay(tracking.status),
       }
     : null;
 
@@ -222,7 +240,28 @@ async function Lookup({ locale, canonical }: { locale: Locale; canonical: string
           </div>
         ) : null}
 
-        {status !== null ? (
+        {/*
+          The estimated date, and only while it is still a prediction. Printing
+          "estimated delivery: Saturday" under a parcel that was delivered on
+          Sunday reads as a correction nobody asked for, and under a returned one
+          it is simply false — `terminal` is the same flag the stepper uses to
+          decide the journey is over.
+        */}
+        {status !== null && status.estimatedDate && !status.terminal ? (
+          <p className="mt-5 text-sm text-[var(--kb-muted)]">
+            {t(locale, 'trackEstimated')}:{' '}
+            <span className="font-medium text-[var(--kb-heading)]">
+              {formatCalendarDate(locale, status.estimatedDate)}
+            </span>
+          </p>
+        ) : null}
+
+        {/*
+          One or the other, never both. The timeline's first row is the last
+          update and carries its own time, so showing `LastUpdate` above it would
+          print the same instant twice under two headings.
+        */}
+        {status !== null && status.events.length === 0 ? (
           <div className="mt-6">
             <LastUpdate
               locale={locale}
@@ -236,6 +275,12 @@ async function Lookup({ locale, canonical }: { locale: Locale; canonical: string
                 )
               }
             />
+          </div>
+        ) : null}
+
+        {status !== null && status.events.length > 0 ? (
+          <div className="mt-6 border-t border-[var(--kb-border)] pt-5">
+            <Timeline locale={locale} events={status.events} />
           </div>
         ) : null}
 

@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { setShipmentParty, type ContactActionState } from '../../actions';
+import { refreshShipmentDetail, setShipmentParty, type ContactActionState } from '../../actions';
 
 const INITIAL: ContactActionState = { error: null };
 
@@ -103,6 +103,66 @@ export function PartyField({
           {error ? <p className="text-xs text-red-600 dark:text-red-400">{error}</p> : null}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * "Fetch latest" for the shipment page.
+ *
+ * Says when the parcel was last read, for the reason the ticket sidebar's twin
+ * does: a status with no date beside it invites an agent to repeat it to a
+ * customer as though it were current.
+ *
+ * Available to anyone who can view the page rather than only to editors — the
+ * action gates on `contact.view` — because the read-only agent answering the
+ * phone is exactly who needs it.
+ */
+export function RefreshShipmentButton({
+  trackingNumber,
+  lastSyncedAt,
+}: {
+  trackingNumber: string;
+  /** Pre-formatted by the server: this is a client component, and a raw Date
+      here would render one timezone on the server and another in the browser. */
+  lastSyncedAt: string | null;
+}) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function run() {
+    setBusy(true);
+    setError(null);
+
+    const formData = new FormData();
+    formData.set('trackingNumber', trackingNumber);
+
+    const result = await refreshShipmentDetail(INITIAL, formData);
+    setBusy(false);
+    setError(result.error);
+
+    // Even on a refusal: `not_found` is written to the row by the sync, so the
+    // badge and the copy beside it have changed.
+    router.refresh();
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void run()}
+          className="rounded-md border border-[var(--border)] px-2 py-1 text-xs hover:bg-[var(--muted)] disabled:opacity-40"
+        >
+          {busy ? 'Fetching…' : 'Fetch latest'}
+        </button>
+        <span className="text-xs opacity-50">
+          {lastSyncedAt ? `checked ${lastSyncedAt}` : 'never checked'}
+        </span>
+      </div>
+      {error ? <p className="text-xs text-red-600 dark:text-red-400">{error}</p> : null}
     </div>
   );
 }

@@ -8,6 +8,7 @@ import { requireAgent } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
 import { mergeContacts, type MergeRefusal } from '@/lib/contacts/merge';
 import { normaliseSbid, normaliseTrackingNumber } from '@/lib/shipments/format';
+import { syncShipment } from '@/lib/shipments/sync';
 import {
   addContactToShippingAccount,
   refreshContactRoles,
@@ -228,4 +229,52 @@ export async function mergeContactInto(
   revalidatePath('/contacts');
   revalidatePath('/inbox');
   return ok();
+}
+
+/**
+ * Re-read one parcel from the shipping platform, from the shipment page.
+ *
+ * The same press-and-wait control as the ticket sidebar's and, deliberately, the
+ * same `syncShipment` underneath — two buttons that called the platform two ways
+ * would eventually disagree about one parcel, which is the failure AGENTS.md's
+ * exception is written to prevent.
+ *
+ * Gated on `contact.view` rather than `contact.edit`: this changes nothing an
+ * agent asserted, it re-reads a fact the platform owns and that anyone holding
+ * the tracking number can already read. Requiring the edit permission would stop
+ * exactly the read-only agent who most needs the button — the one answering the
+ * phone.
+ */
+export async function refreshShipmentDetail(
+  _state: ContactActionState,
+  formData: FormData,
+): Promise<ContactActionState> {
+  const agent = await requireAgent();
+  if (!can(agent, 'contact.view')) {
+    return { error: 'You do not have permission to view shipments' };
+  }
+
+  const trackingNumber = normaliseTrackingNumber(String(formData.get('trackingNumber') ?? ''));
+  if (!trackingNumber) return { error: 'Shipment not found' };
+
+  // By tracking number, re-read here: the unique index makes it the parcel's
+  // identity, and it is the only field the page had to begin with.
+  const result = await syncShipment({ trackingNumber, force: true });
+
+  revalidatePath(`/contacts/shipments/${encodeURIComponent(trackingNumber)}`);
+
+  switch (result.kind) {
+    case 'synced':
+      return { error: null };
+    case 'not_found':
+      return { error: 'The shipping platform does not recognise this number' };
+    case 'gone':
+      return { error: 'Shipment not found' };
+    case 'transient':
+      return { error: 'The shipping platform could not be reached. Try again in a moment.' };
+    case 'refused':
+      return { error: `The shipping platform refused the lookup: ${result.error.message}` };
+    case 'skipped':
+      return { error: null };
+  }
 }

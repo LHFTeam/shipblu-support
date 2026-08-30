@@ -275,3 +275,24 @@ export function stageDisplay(label: string | null | undefined): StageDisplay {
   const stage = stageFor(label);
   return { stage, ...DISPLAY[stage] };
 }
+
+/**
+ * A platform status token, made readable — typography, not translation.
+ *
+ * The platform sends machine tokens: `out_for_delivery`, `pickup_requested`.
+ * Printing one raw puts an underscore in front of a customer; translating it
+ * into our own vocabulary would mean they read one thing here and a different
+ * thing in the SMS ShipBlu sent them about the same parcel, which is the reason
+ * `StatusBadge` shows the platform's word in the first place. Replacing the
+ * separators and capitalising the first letter changes neither the word nor the
+ * language — `out_for_delivery` and `Out for delivery` are the same string to a
+ * reader and only one of them looks like a database column.
+ *
+ * A no-op on Arabic, which carries no separators to replace and has no case for
+ * `toUpperCase` to change.
+ */
+export function humaniseStatus(label: string): string {
+  const flat = label.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!flat) return '';
+  return flat.charAt(0).toUpperCase() + flat.slice(1);
+}

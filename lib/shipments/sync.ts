@@ -61,6 +61,15 @@ export async function syncShipment(input: {
   trackingNumber?: string;
   /** Ignore the freshness guard. The sweep and any manual control set it. */
   force?: boolean;
+  /**
+   * Shortens the platform round trip, for a caller somebody is waiting on.
+   *
+   * The default suits a queue, where ten seconds costs nothing and a slow answer
+   * still beats no answer. A page render is the opposite case: the customer is
+   * looking at a blank screen, and a stored status shown quickly is worth more
+   * than a current one shown late.
+   */
+  timeoutMs?: number;
 }): Promise<ShipmentSyncResult> {
   const row = await findShipment(input);
   if (!row) return { kind: 'gone' };
@@ -74,7 +83,7 @@ export async function syncShipment(input: {
 
   let order: DeliveryOrder | null;
   try {
-    order = await fetchDeliveryOrder(row.trackingNumber);
+    order = await fetchDeliveryOrder(row.trackingNumber, { timeoutMs: input.timeoutMs });
   } catch (error) {
     if (!(error instanceof ShipbluApiError)) throw error;
     return error.isTransient ? { kind: 'transient', error } : { kind: 'refused', error };

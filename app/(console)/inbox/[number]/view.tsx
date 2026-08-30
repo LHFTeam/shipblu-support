@@ -19,10 +19,12 @@ import {
   type SharedLocation,
 } from '@/lib/tickets/shared-location';
 import { describeRequesterRole } from '@/lib/shipments/roles';
+import { humaniseStatus } from '@/lib/shipments/status';
 import { formatRemaining, windowState } from '@/lib/whatsapp/window';
 import {
   linkShipment,
   linkShippingAccount,
+  refreshShipment,
   unlinkShipment,
   unlinkShippingAccount,
   updateTicket,
@@ -1124,10 +1126,20 @@ function ShipmentsField({ conversation }: { conversation: ConversationDetail }) 
 
             <p className="mt-0.5 opacity-60">
               {shipment.syncState === 'synced'
-                ? (shipment.statusLabel ?? 'No status yet')
+                ? shipment.statusLabel
+                  ? humaniseStatus(shipment.statusLabel)
+                  : 'No status yet'
                 : shipment.syncState === 'not_found'
                   ? 'Not a shipment on the platform'
                   : 'Not synced yet'}
+              {shipment.syncState === 'synced' && shipment.statusAt ? (
+                <>
+                  {' · '}
+                  <span title={formatDateTime(shipment.statusAt)}>
+                    {formatRelative(shipment.statusAt)}
+                  </span>
+                </>
+              ) : null}
             </p>
             <p className="opacity-60">{describeRequesterRole(shipment.requesterRole)}</p>
 
@@ -1139,6 +1151,13 @@ function ShipmentsField({ conversation }: { conversation: ConversationDetail }) 
               ) : null}
               {shipment.linkSource === 'detected' ? <Badge>auto</Badge> : null}
             </div>
+
+            <RefreshShipmentButton
+              conversationId={conversation.id}
+              shipmentId={shipment.shipmentId}
+              trackingNumber={shipment.trackingNumber}
+              lastSyncedAt={shipment.lastSyncedAt}
+            />
           </li>
         ))}
         {conversation.shipments.length === 0 ? (
@@ -1208,6 +1227,85 @@ type LinkAction = (
   state: { error: string | null },
   formData: FormData,
 ) => Promise<{ error: string | null }>;
+
+/**
+ * "Fetch the latest" for one parcel.
+ *
+ * The agent presses it and waits — `refreshShipment` calls the shipping platform
+ * in the action rather than queueing, because the entire output of the button is
+ * the platform's answer and a customer is on the line for it. AGENTS.md records
+ * that exception and its one condition, which is that the provider call stays in
+ * `syncShipment`, shared with the job.
+ *
+ * It says when the parcel was last read rather than only offering to read it
+ * again. "Delivered" with no date beside it invites an agent to repeat it to a
+ * customer as though it were current; "checked 4d ago" is the fact that makes
+ * pressing the button an informed decision instead of a nervous habit.
+ *
+ * Errors render in place. A platform that cannot be reached is the single most
+ * likely outcome of pressing this, and a button that silently does nothing is
+ * how an agent ends up telling a customer a four-day-old status is live.
+ */
+function RefreshShipmentButton({
+  conversationId,
+  shipmentId,
+  trackingNumber,
+  lastSyncedAt,
+}: {
+  conversationId: string;
+  shipmentId: string;
+  trackingNumber: string;
+  lastSyncedAt: Date | null;
+}) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function run() {
+    setBusy(true);
+    setError(null);
+
+    const formData = new FormData();
+    formData.set('conversationId', conversationId);
+    formData.set('shipmentId', shipmentId);
+
+    const result = await refreshShipment({ error: null }, formData);
+    setBusy(false);
+    setError(result.error);
+
+    // Refreshed even on a refusal: `not_found` is written to the row by the
+    // sync, so the line above this button has changed and needs re-reading.
+    router.refresh();
+  }
+
+  return (
+    <div className="mt-1.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void run()}
+          aria-label={`Fetch the latest status for ${trackingNumber}`}
+          className="rounded border border-[var(--border)] px-1.5 py-0.5 text-xs hover:bg-[var(--muted)] disabled:opacity-40"
+        >
+          {busy ? 'Fetching…' : 'Fetch latest'}
+        </button>
+
+        <span className="text-xs opacity-50">
+          {lastSyncedAt ? (
+            <span title={formatDateTime(lastSyncedAt)}>
+              checked {formatRelative(lastSyncedAt)} ago
+            </span>
+          ) : (
+            'never checked'
+          )}
+        </span>
+      </div>
+
+      {error ? <p className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</p> : null}
+    </div>
+  );
+}
 
 function LinkInput({
   action,

@@ -170,6 +170,25 @@ and its absence was why nothing in this system had ever written
 response into `data`, and the `sync_shipment` job carries it. The page needed no
 change of its own, exactly as it was written to.
 
+Both ends are wired to it now. The public page reads through
+`lib/shipments/lookup.ts` — refreshing a parcel this system knows about, reading
+an unknown number straight from the platform without storing anything — and draws
+the real event history, newest first, with the estimated date while it is still a
+prediction. In the console, an agent who types a tracking number gets one
+`sync_shipment` queued for it automatically (`upsertShipmentStub` enqueues on
+creation, so a customer repeating their number eleven times still costs one
+lookup), and a **Fetch latest** control on both the ticket sidebar and the
+shipment page calls the platform in the action and waits — the same press-and-wait
+exception `refreshRequesterProfile` uses, over the same `syncShipment` the job
+runs. Both controls show when the parcel was last read, because a status with no
+date beside it invites an agent to repeat it to a customer as current.
+
+What separates the two audiences is `lib/shipments/detail.ts`: `publicTracking()`
+and `agentTracking()` are the only readers of `shipments.data`, and each builds a
+fresh object from a named field list. Verified against the live payload for
+1755021358719 — none of the ten real personal values in it reach the public
+shape, and all of them reach the agent one.
+
 One thing still gates it end to end, and it is not in the page: **nothing
 schedules the sweep.** `sync_stale_shipments` is registered and runnable by hand
 (`npm run job -- sync_stale_shipments`) but has no cron entry in `render.yaml`,
