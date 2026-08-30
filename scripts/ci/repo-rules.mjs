@@ -48,6 +48,24 @@ const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: ROOT, encoding: '
 
 const trackedSource = tracked.filter((f) => /\.(ts|tsx|mts|mjs)$/.test(f));
 
+/**
+ * The checks themselves are not application code and are never scanned.
+ *
+ * A checker necessarily contains the patterns it looks for. This file holds the
+ * literal `from 'sanitize-html'` it searches for, and db-invariants.sql raises
+ * an exception whose message says FORCE ROW LEVEL SECURITY — so scanning
+ * scripts/ci reports every rule as violated by the rule.
+ *
+ * Excluded here, once, rather than by a special case inside each check: the next
+ * rule added would otherwise flag itself the first time it runs on a branch
+ * where these files are tracked. That is exactly how this was found — the checks
+ * passed while the files were still untracked and failed the moment they were
+ * committed.
+ */
+const CHECKER_PREFIX = 'scripts/ci/';
+const scannable = tracked.filter((f) => !f.startsWith(CHECKER_PREFIX));
+const scannableSource = trackedSource.filter((f) => !f.startsWith(CHECKER_PREFIX));
+
 /** Line number of the first match, for an error message that points somewhere. */
 function lineOf(contents, index) {
   return contents.slice(0, index).split('\n').length;
@@ -447,7 +465,7 @@ function checkPostMigrationSql() {
  */
 function checkNoForceRls() {
   scan(
-    tracked.filter((f) => /\.(sql|ts|tsx)$/.test(f)),
+    scannable.filter((f) => /\.(sql|ts|tsx)$/.test(f)),
     /FORCE\s+ROW\s+LEVEL\s+SECURITY/gi,
     (file, line) => {
       fail(
@@ -487,9 +505,7 @@ function checkShipmentPayloadConfinement() {
     'lib/shipments/platform.ts',
   ]);
 
-  const candidates = trackedSource.filter(
-    (f) => !allowed.has(f) && !f.endsWith('.test.ts') && !f.startsWith('scripts/'),
-  );
+  const candidates = scannableSource.filter((f) => !allowed.has(f) && !f.endsWith('.test.ts'));
 
   scan(candidates, /\bshipments\.data\b/g, (file, line) => {
     fail(
@@ -518,7 +534,7 @@ function checkShipmentPayloadConfinement() {
    * in the array as "latest". mapDeliveryOrder owns the ordering rules.
    */
   scan(
-    trackedSource.filter(
+    scannableSource.filter(
       (f) =>
         f.includes('shipment') &&
         !f.endsWith('.test.ts') &&
@@ -564,7 +580,7 @@ function checkServerActions() {
  */
 function checkSanitiserConfinement() {
   scan(
-    trackedSource.filter((f) => f !== 'lib/html/sanitize.ts'),
+    scannableSource.filter((f) => f !== 'lib/html/sanitize.ts'),
     /from 'sanitize-html'|require\('sanitize-html'\)/g,
     (file, line) => {
       fail(
@@ -582,7 +598,7 @@ function checkSanitiserConfinement() {
  */
 function checkSlugConfinement() {
   scan(
-    trackedSource.filter((f) => !f.startsWith('lib/kb/slug')),
+    scannableSource.filter((f) => !f.startsWith('lib/kb/slug')),
     /\.replace\([^)]*\[\^a-z0-9\][^)]*\)/gi,
     (file, line) => {
       fail(
@@ -622,7 +638,7 @@ function checkNoDomTitleAttribute() {
   ]);
 
   scan(
-    tracked.filter((f) => f.endsWith('.tsx') && !predating.has(f)),
+    scannable.filter((f) => f.endsWith('.tsx') && !predating.has(f)),
     /<[a-z][a-zA-Z0-9]*(?:\s+[^<>]*?)?\stitle=/g,
     (file, line) => {
       fail(
