@@ -104,6 +104,21 @@ const schema = z.object({
    */
   SHIPMENT_IGNORE: z.string().optional(),
 
+  /**
+   * Base URL of the ShipBlu delivery platform, without a trailing slash.
+   *
+   * Optional, and read through `env()` rather than `process.env` — unlike the
+   * three pattern variables above, nothing on the search-parser path imports the
+   * platform client, so there is no context where validating the schema here
+   * could fail a request that only wanted to parse a query.
+   *
+   * It exists at all so staging can be pointed at a sandbox, and so a bad
+   * production host is one dashboard edit rather than a deploy. Absent means the
+   * real platform: `lib/shipments/platform.ts` falls back to
+   * `DEFAULT_SHIPBLU_API_URL`.
+   */
+  SHIPBLU_API_URL: z.url().optional(),
+
   SUPABASE_URL: z.url().optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
   SUPABASE_STORAGE_BUCKET: z.string().default('attachments'),

@@ -82,6 +82,7 @@ ungrouped:
         #   SHIPMENT_TRACKING_PATTERN   what a tracking number looks like
         #   SHIPMENT_SBID_PATTERN       what an SBID looks like
         #   SHIPMENT_IGNORE             references never to link
+        #   SHIPBLU_API_URL             the delivery platform's base URL
         #
         # Shared rather than per-environment because both halves of one system
         # have to agree on the answer: the web service applies the pattern when
@@ -91,6 +92,15 @@ ungrouped:
         # lib/shipments/detect.ts, which are deliberately conservative until the
         # real ShipBlu formats are confirmed — so all three are normally absent,
         # and exist only to correct those defaults without a deploy.
+        #
+        # SHIPBLU_API_URL is the same kind of thing and normally absent too:
+        # unset means DEFAULT_SHIPBLU_API_URL in lib/shipments/platform.ts, which
+        # is the real platform. It is here so a bad host is one dashboard edit
+        # rather than a deploy, and so staging can be pointed somewhere harmless
+        # — note that today staging would otherwise read *production* parcels,
+        # which is a read of real customer data from a suspended environment.
+        # It is shared for the same reason the patterns are: the worker syncs and
+        # the web service renders what it wrote.
 
 projects:
   # These three names are the dashboard's, capitalisation included. A Blueprint

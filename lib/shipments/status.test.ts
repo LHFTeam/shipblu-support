@@ -34,6 +34,36 @@ describe('stageFor', () => {
     expect(stageFor('محاولة ٢')).toBe('attempted');
   });
 
+  /**
+   * The eight statuses `api.shipblu.com` actually emits, read off a real
+   * delivery order rather than guessed.
+   *
+   * Pinned as a set because the failure they had is invisible one at a time:
+   * three of them reached `unknown`, which draws a bare label with no stepper
+   * and no tone — and they cover the whole first half of a parcel's life, so a
+   * customer checking early saw nothing useful and nobody watching a delivered
+   * parcel would ever have noticed.
+   */
+  it('recognises every status the platform actually sends', () => {
+    expect(stageFor('created')).toBe('created');
+    expect(stageFor('pickup_requested')).toBe('created');
+    expect(stageFor('out_for_pickup')).toBe('created');
+    expect(stageFor('picked_up')).toBe('in_transit');
+    expect(stageFor('in_transit')).toBe('in_transit');
+    expect(stageFor('en_route')).toBe('in_transit');
+    expect(stageFor('out_for_delivery')).toBe('out_for_delivery');
+    expect(stageFor('delivered')).toBe('delivered');
+  });
+
+  it('never reads a pickup step as the parcel being under way', () => {
+    // The courier is going to collect it. Telling a recipient it is on its way
+    // while it is still on a shelf in the shop is the error worth pinning.
+    for (const label of ['pickup_requested', 'out_for_pickup']) {
+      expect(stageDisplay(label).step).toBe(0);
+      expect(stageDisplay(label).terminal).toBe(false);
+    }
+  });
+
   it('falls back to unknown rather than guessing', () => {
     expect(stageFor(null)).toBe('unknown');
     expect(stageFor('')).toBe('unknown');

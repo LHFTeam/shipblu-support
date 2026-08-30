@@ -157,6 +157,18 @@ and must not use `CREATE INDEX CONCURRENTLY`; the whole file runs in one
 implicit transaction. New tables get RLS enabled by a loop in `db/sql/` — do not
 add it by hand.
 
+**The delivery platform.** `lib/shipments/platform.ts` is the only thing that
+knows how to read a parcel off `api.shipblu.com`, and `lib/shipments/sync.ts` the
+only thing that writes what it says. Three rules hold there. The endpoint's
+`?pin=` is **not checked**, so a tracking number is the only credential guarding
+the recipient's name, address, phone and COD amount — the payload therefore lands
+only in `shipments.data`, and `ShipmentDetail` must never grow a `data` field or
+the public tracking page publishes all of it (`docs/PROJECT-STATE.md` §6.38).
+`tracking_events` arrive in **no order at all**, so nothing may read `events[0]`
+or the last element as "latest". And the calendar dates (`estimated_date`,
+`preferred_date`) stay strings: `new Date('2026-08-29')` is midnight UTC, which
+is 02:00 in Cairo and the day before further west.
+
 **Background work.** Anything slow, external or retryable is a job — with one
 narrow exception, written down because it looks like a violation: a control an
 agent presses and _waits on_, whose entire output is the provider's answer, calls
