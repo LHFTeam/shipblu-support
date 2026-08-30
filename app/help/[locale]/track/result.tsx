@@ -1,21 +1,17 @@
 import type { ReactNode } from 'react';
 import { CheckIcon } from '@/components/icons';
 import { formatTimestamp, t, type Locale, type StringKey } from '@/lib/kb/locale';
-import {
-  humaniseStatus,
-  stageDisplay,
-  TRACKING_STEPS,
-  type StatusTone,
-} from '@/lib/shipments/status';
+import { stageDisplay, statusLabel, TRACKING_STEPS, type StatusTone } from '@/lib/shipments/status';
 import type { TrackingEvent } from '@/lib/shipments/platform';
 
 /**
  * How a shipment's state is drawn on the public tracking page.
  *
  * The one rule this file exists to hold: nothing here invents a fact. The badge
- * shows the label the shipping platform sent, in its own words; the stepper is
- * drawn only when `lib/shipments/status.ts` recognised that label well enough to
- * place it; and neither appears at all when there is no status. A tracking page
+ * shows the status the shipping platform sent — worded in the reader's language,
+ * but never saying more than the platform said; the stepper is drawn only when
+ * `lib/shipments/status.ts` recognised that label well enough to place it; and
+ * neither appears at all when there is no status. A tracking page
  * that fills its gaps with plausible-looking furniture is worse than one that
  * says it does not know — the person reading it is standing somewhere waiting
  * for a box, and will believe what it says.
@@ -38,14 +34,13 @@ const TONE_CLASS: Record<StatusTone, string> = {
 };
 
 /**
- * The status, as the platform wrote it.
+ * The status, in the language the page is being read in.
  *
  * The dot repeats the tone in a second channel so the badge is not colour
  * alone — the design system is explicit that a bare coloured square is never
- * the status. But the word is what carries the meaning, and it is the
- * platform's word rather than a translation of it. Rewriting "Out for delivery" into our
- * own vocabulary would mean a customer reading one thing here and a different
- * thing in the SMS ShipBlu sent them about the same parcel.
+ * the status. But the word is what carries the meaning, which is why it is not
+ * left in the platform's English on an Arabic page: `statusLabel` in
+ * `lib/shipments/status.ts` decides the wording, and this only draws it.
  */
 export function StatusBadge({ label, tone }: { label: string; tone: StatusTone }) {
   return (
@@ -172,6 +167,11 @@ export function LastUpdate({ locale, when }: { locale: Locale; when: ReactNode }
  * at all — so this reverses a known order rather than establishing one, which is
  * why it can be a single `slice().reverse()` and not a comparator.
  *
+ * Every row is worded by `statusLabel`, the same function the badge above uses.
+ * A history that stayed in the platform's English under an Arabic badge would be
+ * the worst of both: the customer can read that the parcel is out for delivery
+ * but not one line of how it got there.
+ *
  * `dir="ltr"` on the timestamp for the same reason the number field has it: a
  * date and time is a run of Latin digits, and left to inherit RTL the browser
  * reorders the parts.
@@ -217,7 +217,7 @@ export function Timeline({ locale, events }: { locale: Locale; events: TrackingE
                       : 'text-[var(--kb-heading)]/80'
                   }
                 >
-                  {humaniseStatus(event.status)}
+                  {statusLabel(locale, event.status)}
                 </p>
                 <time
                   dir="ltr"
