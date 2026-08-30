@@ -930,12 +930,11 @@ on node type (User)` with no subcode, which that predicate declines by design,
   1. The account must be **public** — "The Instagram professional account that
      owns the media objects must be public to receive notifications for comments
      or @mentions."
-  2. The **Page-level** subscription must carry `comments`. Meta's setup call is
-     `POST /me/subscribed_apps?subscribed_fields=comments,messages`, where `/me`
-     is the linked Facebook Page id on this connection. This job never wrote it:
-     `subscribePage` ran for `object=page` alone, with `messages,feed`. Fixed —
-     `object=instagram` now does the Page half too, merging rather than
-     replacing so `feed` survives.
+  2. ~~The Page-level subscription must carry `comments`.~~ **Wrong, and
+     disproved by Meta's Webhook Debugger the same day** — see §6.35. For a
+     Page-connected account the app-level subscription is the only one that
+     carries Instagram fields; the Page's list uses Page vocabulary, which has
+     no `comments` in it. Both halves check out on this account already.
 
   `npm run job -- check_meta_permissions` reports the grant and now also warns,
   on the _passing_ line, that this one capability needs Advanced Access on top.
@@ -1995,12 +1994,51 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
       list would otherwise send somebody back into the parser for.
     - **Missing ≠ declined.** Declined means somebody unticked it in the dialog;
       missing means it was never in the dialog. Different fixes.
-    - **A second gate was hiding behind the first.** The Page-level
-      `subscribed_apps` list never carried `comments` — `subscribePage` ran for
-      `object=page` alone. Meta's setup call is `POST /me/subscribed_apps
-?subscribed_fields=comments,messages` against the linked Page id. Fixed, so
-      the approval turns the channel on instead of starting a fourth search.
+    - **There is no second gate.** A Page-level `comments` subscription looked
+      like one for a few hours; §6.35 is why it is not, and why the doc example
+      that suggested it was describing the other Instagram connection entirely.
     - The account must also be **public** for comment notifications.
+
+35. **Meta's Webhook Debugger answers the subscription question outright, and a
+    doc example does not.** _2026-08-30._ App Dashboard → **Webhook Debugger**
+    takes Page ids and reports, for each: the app's subscribed IG webhook fields,
+    the app's subscribed fields _for that Page_, whether an Instagram account is
+    linked, and the Manage Messaging toggle. Run it before theorising about a
+    subscription — it is one screen, it is authoritative, and it writes nothing.
+
+    For Page `101449698657189` (ShipBlu):
+
+    - **Subscribed IG webhooks for this app**: `comments`, `live_comments`,
+      `message_edit`, `message_reactions`, `messages`, `messaging_handover`,
+      `mentions`, `messaging_seen`, `messaging_postbacks`, `standby`.
+    - **Subscribed fields by app for page**: the messaging set plus `standby` and
+      `feed`. **No `comments`, and correctly so.**
+    - **Instagram account linked to page**: `shipblu`.
+    - **Manage Messaging toggle**: On.
+
+    Every subscription-shaped explanation is now closed: `comments` is subscribed
+    at the app level, the account is linked, the Page is installed, messaging is
+    on. What is left is the access level (§6.34) — the one thing this screen does
+    not show.
+
+    **It also corrects a fix made hours earlier in the same investigation.** The
+    Instagram webhook setup doc shows
+    `POST /me/subscribed_apps?subscribed_fields=comments,messages`, which was read
+    as "the Page subscription must carry `comments`" and turned into code. It does
+    not. The debugger states the rule for this connection in one line — _"For
+    Instagram, app level webhook subscription is required via the Webhooks
+    product"_ — and the doc's own curl gives it away on a closer look: it is
+    addressed to `graph.instagram.com/{ig-account-id}`, the **Instagram Login**
+    product, where `/me` is the Instagram account and `comments` is one of its
+    fields. Here the account is connected through its Facebook Page,
+    `subscribed_apps` is addressed to the Page, and Page vocabulary has no
+    `comments` at all — Facebook's comments arrive under `feed`. Reverted.
+
+    The generalisation, which §6.26 already taught about app secrets and which
+    keeps costing more than it should: **the two Instagram connections differ in
+    the host, the token, the ids _and_ the field vocabulary.** A Meta doc example
+    proves nothing until you check which host its URL names, and when that is
+    ambiguous the debugger settles it without touching production.
 
 ## 7. Verification already done
 

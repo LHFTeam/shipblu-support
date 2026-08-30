@@ -2,7 +2,6 @@ import { configuredAccountId } from '@/lib/meta/client';
 import {
   applyFieldSubscription,
   applyPageSubscription,
-  INSTAGRAM_OBJECT,
   PAGE_OBJECT,
   planFieldSubscription,
   planPageSubscription,
@@ -29,8 +28,8 @@ import type { ClaimedJob } from '@/lib/queue';
  * the entire point, and it is not something to improvise at a shell prompt
  * against production.
  *
- * **`object=page` and `object=instagram` each do two writes, because both have
- * two subscriptions.** Meta only delivers a field subscribed at *both* the app level
+ * **`object=page` does two writes, because a Page webhook has two
+ * subscriptions.** Meta only delivers a field subscribed at *both* the app level
  * and the Page level, and until now this job did the app half alone — which is
  * why `feed` has never delivered an event despite being in
  * `REQUIRED_PAGE_FIELDS`. The second write installs this app on the Page with
@@ -65,7 +64,7 @@ export async function subscribeMetaWebhooks(job?: ClaimedJob): Promise<void> {
     half because there was nothing to add there would skip the half that is
     actually missing, and report success.
   */
-  if (object === PAGE_OBJECT || object === INSTAGRAM_OBJECT) await subscribePage(want);
+  if (object === PAGE_OBJECT) await subscribePage(want);
 }
 
 async function subscribeApp(object: string, want: readonly string[]): Promise<void> {
@@ -129,29 +128,34 @@ async function subscribeApp(object: string, want: readonly string[]): Promise<vo
 }
 
 /**
- * The Page half of a subscription — now for Instagram as well as for the Page.
+ * The Page half of a Page subscription.
  *
- * This used to run only for `object=page`, on the reasoning that
- * `subscribed_apps` takes *Page* field names and that whether a Page-connected
- * Instagram account needs anything beyond the app being installed was not
- * established. **Meta's documentation establishes it**: the Instagram webhook
- * setup is a `POST /me/subscribed_apps?subscribed_fields=comments,messages`,
- * where `/me` is "your app user's Instagram professional account ID or the
- * Facebook Page ID that is linked to it" — so on this connection the Page id is
- * the target and `comments` belongs in its field list. The old comment was an
- * honest "we have not checked"; it is checked now.
+ * **Only for `object=page`, and Instagram deliberately does not get one.** This
+ * was briefly changed to run for Instagram too, on the strength of Meta's
+ * Instagram webhook setup doc showing
+ * `POST /me/subscribed_apps?subscribed_fields=comments,messages`. That reading
+ * was wrong and the mistake is worth keeping written down, because the page it
+ * came from does not say which connection it is describing in the example
+ * itself: the curl is addressed to **`graph.instagram.com/{ig-account-id}`**,
+ * which is the *Instagram Login* product. There `/me` is the Instagram account
+ * and `comments` is one of its fields. On this deployment the account is
+ * connected through its **Facebook Page**, `subscribed_apps` is addressed to the
+ * Page, and it takes Page field names — a vocabulary with no `comments` in it at
+ * all. Facebook's comments arrive under `feed`.
  *
- * That makes the Page's list a union across both products rather than one
- * product's list, which is why `planPageSubscription` merges instead of
- * replacing: writing Instagram's two fields wholesale would drop `feed` and take
- * Facebook comments down with it — the exact accident the merge exists to
- * prevent. The read-back below is what catches the other direction, a field name
- * Graph will not accept on a Page.
+ * Meta's own Webhook Debugger states the rule for this connection outright:
+ * *"For Instagram, app level webhook subscription is required via the Webhooks
+ * product."* Confirmed against Page `101449698657189` on 2026-08-30 — the app's
+ * IG subscription lists `comments`, the Page's field list does not and is not
+ * supposed to, and the account shows as linked with messaging on.
  *
- * This is the second gate, not the first. Delivery also needs Advanced Access on
- * `instagram_manage_comments` (§6.34), so a correct field list here does not by
- * itself make a comment arrive — it makes the approval, when it lands, turn the
- * channel on rather than start another search.
+ * So writing Instagram's fields here would have put an invalid field name into a
+ * live, working Page's list. The merge and the read-back would have caught it
+ * loudly rather than breaking `feed`, but a guess that survives only because the
+ * safety net holds is still a guess. §6.26's lesson generalises past app
+ * secrets: **the two Instagram connections differ in the host, the token, the
+ * ids and the field vocabulary, so a doc example proves nothing until you check
+ * which one it is addressed to.**
  *
  * Run after the app-level write rather than before, so a run that fails here
  * leaves the app-level list already correct and the second half is all that is
