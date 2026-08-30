@@ -84,8 +84,10 @@ END $$;
 DO $$
 DECLARE
   tables int;
+  names text;
 BEGIN
-  SELECT count(*) INTO tables
+  SELECT count(*), string_agg(c.relname, ' ' ORDER BY c.relname)
+  INTO tables, names
   FROM pg_class c
   JOIN pg_namespace n ON n.oid = c.relnamespace
   WHERE n.nspname = 'public' AND c.relkind = 'r';
@@ -94,5 +96,10 @@ BEGIN
     RAISE EXCEPTION 'only % tables in public — the migrations did not fully apply', tables;
   END IF;
 
+  -- The names, not only the count. A count that is one higher than the schema
+  -- defines is the kind of silent difference AGENTS.md asks to be broken down
+  -- along the dimension that can fail: it says something was created that the
+  -- migrations did not create, and only the list says what.
   RAISE NOTICE 'ok: % tables, all with RLS enabled and none forcing it', tables;
+  RAISE NOTICE 'covered: %', names;
 END $$;
