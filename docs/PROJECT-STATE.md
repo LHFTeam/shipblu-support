@@ -924,17 +924,25 @@ on node type (User)` with no subcode, which that predicate declines by design,
   Advanced Access, so it is silent. **The asymmetry is the field, not the
   account.**
 
-  Two things still have to be true when the approval lands, and both are
-  checkable now:
+  **Every other precondition is now confirmed, so the approval is the only step
+  left.** Both of the conditions that were open on 2026-08-30 have been checked
+  and both hold:
 
-  1. The account must be **public** — "The Instagram professional account that
-     owns the media objects must be public to receive notifications for comments
-     or @mentions."
+  1. **The account is public** — checked 2026-08-30. Meta requires it: "The
+     Instagram professional account that owns the media objects must be public to
+     receive notifications for comments or @mentions."
   2. ~~The Page-level subscription must carry `comments`.~~ **Wrong, and
      disproved by Meta's Webhook Debugger the same day** — see §6.35. For a
      Page-connected account the app-level subscription is the only one that
      carries Instagram fields; the Page's list uses Page vocabulary, which has
      no `comments` in it. Both halves check out on this account already.
+
+  So when Advanced Access lands, nothing else has to be changed or run for the
+  first comment to arrive: `comments` is already subscribed at the app level, the
+  account is linked and public, the Page is installed, and `ingestMetaComment`
+  has already been exercised end to end on both platforms (#10939, #10942). If a
+  comment still does not arrive after approval, that is new information — start
+  at §6.35's debugger, not at the parser.
 
   `npm run job -- check_meta_permissions` reports the grant and now also warns,
   on the _passing_ line, that this one capability needs Advanced Access on top.
@@ -1997,7 +2005,8 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     - **There is no second gate.** A Page-level `comments` subscription looked
       like one for a few hours; §6.35 is why it is not, and why the doc example
       that suggested it was describing the other Instagram connection entirely.
-    - The account must also be **public** for comment notifications.
+    - The account must also be **public** for comment notifications — checked
+      2026-08-30 and it is, so the approval is the only step left.
 
 35. **Meta's Webhook Debugger answers the subscription question outright, and a
     doc example does not.** _2026-08-30._ App Dashboard → **Webhook Debugger**
