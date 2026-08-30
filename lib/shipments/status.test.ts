@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { stageDisplay, stageFor, TRACKING_STEPS } from './status';
+import { humaniseStatus, stageDisplay, stageFor, TRACKING_STEPS } from './status';
 
 /**
  * The cases worth pinning are the ones where a wrong answer is worse than no
@@ -93,5 +93,25 @@ describe('stageDisplay', () => {
   it('takes a returned parcel off the line to delivered', () => {
     expect(stageDisplay('Returned to sender').step).toBeNull();
     expect(stageDisplay('Delivered').step).toBe(TRACKING_STEPS.length - 1);
+  });
+});
+
+describe('humaniseStatus', () => {
+  it('makes a machine token readable without changing the word', () => {
+    expect(humaniseStatus('out_for_delivery')).toBe('Out for delivery');
+    expect(humaniseStatus('pickup_requested')).toBe('Pickup requested');
+    expect(humaniseStatus('en_route')).toBe('En route');
+  });
+
+  it('leaves Arabic alone', () => {
+    // No separators to replace, and no case for toUpperCase to change.
+    expect(humaniseStatus('تم التسليم')).toBe('تم التسليم');
+  });
+
+  it('does not translate, only reformats', () => {
+    // The word stays the platform's own — this is the property that keeps the
+    // page agreeing with the SMS ShipBlu sent about the same parcel.
+    expect(humaniseStatus('Delivered')).toBe('Delivered');
+    expect(humaniseStatus('')).toBe('');
   });
 });

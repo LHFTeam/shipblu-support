@@ -57,6 +57,14 @@ export type LinkedShipment = {
   shipmentId: string;
   trackingNumber: string;
   statusLabel: string | null;
+  /** When the platform says the status changed — not when we last asked. */
+  statusAt: Date | null;
+  /**
+   * When we last asked, which is a different question and the one an agent on a
+   * call needs answered. "Delivered, as of a status we read four days ago" is
+   * the sentence a refresh button exists for.
+   */
+  lastSyncedAt: Date | null;
   syncState: 'stub' | 'synced' | 'not_found';
   sbid: string | null;
   requesterRole: RequesterRole;
@@ -413,6 +421,8 @@ export async function shipmentsForConversation(
       shipmentId: shipments.id,
       trackingNumber: shipments.trackingNumber,
       statusLabel: shipments.statusLabel,
+      statusAt: shipments.statusAt,
+      lastSyncedAt: shipments.lastSyncedAt,
       syncState: shipments.syncState,
       shipperContactId: shipments.shipperContactId,
       recipientContactId: shipments.recipientContactId,
@@ -430,6 +440,8 @@ export async function shipmentsForConversation(
     shipmentId: row.shipmentId,
     trackingNumber: row.trackingNumber,
     statusLabel: row.statusLabel,
+    statusAt: row.statusAt,
+    lastSyncedAt: row.lastSyncedAt,
     syncState: row.syncState,
     sbid: row.sbid,
     requesterRole: deriveRequesterRole(requesterContactId, {

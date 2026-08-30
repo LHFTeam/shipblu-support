@@ -45,7 +45,10 @@ export function TrackForm({
         autoComplete="off"
         autoCapitalize="characters"
         spellCheck={false}
-        placeholder="SB1234567890"
+        /* A real number's shape — thirteen digits — but not a real number.
+           Putting a live one here would publish that parcel's recipient to
+           anyone who pressed enter on the example (PROJECT-STATE §6.38). */
+        placeholder="1700000000000"
         /* 16px, like the hero search field: iOS Safari zooms into anything
            smaller when it takes focus and never zooms back out. */
         className="h-11 w-full rounded-lg border border-[var(--kb-border-strong)] bg-[var(--kb-surface)] px-3 text-base tabular-nums text-[var(--kb-heading)] outline-none placeholder:text-[var(--kb-muted)]/60 focus:border-[var(--kb-band)]"

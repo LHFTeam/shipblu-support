@@ -1,7 +1,13 @@
 import type { ReactNode } from 'react';
 import { CheckIcon } from '@/components/icons';
-import { t, type Locale, type StringKey } from '@/lib/kb/locale';
-import { TRACKING_STEPS, type StatusTone } from '@/lib/shipments/status';
+import { formatTimestamp, t, type Locale, type StringKey } from '@/lib/kb/locale';
+import {
+  humaniseStatus,
+  stageDisplay,
+  TRACKING_STEPS,
+  type StatusTone,
+} from '@/lib/shipments/status';
+import type { TrackingEvent } from '@/lib/shipments/platform';
 
 /**
  * How a shipment's state is drawn on the public tracking page.
@@ -131,11 +137,12 @@ export function Stepper({ locale, current }: { locale: Locale; current: number }
  * When the status last moved — the whole of the shipment history this system
  * holds.
  *
- * `shipments` carries a single `status_label` and `status_at`, not a list of
- * events: the platform sync that would bring a real history is designed but not
- * built (`plans/shipment-customer-tracking.md` §7). So this is deliberately one
- * row and is labelled "last update" rather than "history" — a timeline drawn
- * with one dot on it invites the reader to wonder what happened to the rest.
+ * Used only where the platform sent a status but no events to go with it. Where
+ * there is a history, `Timeline` below draws it and carries its own times, and
+ * showing both would print the newest event's timestamp twice under two
+ * different headings — a timeline drawn with one dot on it invites the reader to
+ * wonder what happened to the rest, and a "last update" sitting above a list
+ * whose first row says the same thing invites them to wonder which is right.
  *
  * Only the time, not the status word: that word is already the badge four lines
  * above, and printing it twice on a card this short reads as two separate facts
@@ -151,3 +158,100 @@ export function LastUpdate({ locale, when }: { locale: Locale; when: ReactNode }
     </div>
   );
 }
+
+/**
+ * Every event the platform has recorded, newest first.
+ *
+ * Newest first because the question this page is opened to answer is "what has
+ * happened *now*", and a customer on a phone should not have to scroll a
+ * ten-row journey to reach the row they came for. The stepper above already
+ * carries the shape of the journey; this carries its detail.
+ *
+ * Ordering is not done here. `mapDeliveryOrder` sorts oldest-first once, on the
+ * way out of the platform client, because the endpoint sends these in no order
+ * at all — so this reverses a known order rather than establishing one, which is
+ * why it can be a single `slice().reverse()` and not a comparator.
+ *
+ * `dir="ltr"` on the timestamp for the same reason the number field has it: a
+ * date and time is a run of Latin digits, and left to inherit RTL the browser
+ * reorders the parts.
+ */
+export function Timeline({ locale, events }: { locale: Locale; events: TrackingEvent[] }) {
+  if (events.length === 0) return null;
+
+  const newestFirst = events.slice().reverse();
+
+  return (
+    <section>
+      <h2 className="mb-3 text-xs font-semibold tracking-wide text-[var(--kb-muted)] uppercase">
+        {t(locale, 'trackHistory')}
+      </h2>
+
+      <ol className="flex flex-col">
+        {newestFirst.map((event, index) => {
+          const latest = index === 0;
+          const { tone } = stageDisplay(event.status);
+
+          return (
+            <li key={`${event.status}-${event.at.toISOString()}`} className="flex gap-3">
+              {/* The rail: a dot per event and a line between them, drawn as one
+                  column so the line ends at the last dot rather than running on
+                  past it. */}
+              <div className="flex flex-col items-center">
+                <span
+                  aria-hidden
+                  className={`mt-1.5 size-2.5 shrink-0 rounded-full ${
+                    latest ? TONE_DOT[tone] : 'bg-[var(--kb-border-strong)]'
+                  }`}
+                />
+                {index < newestFirst.length - 1 ? (
+                  <span aria-hidden className="w-px flex-1 bg-[var(--kb-border)]" />
+                ) : null}
+              </div>
+
+              <div className={index < newestFirst.length - 1 ? 'pb-4' : ''}>
+                <p
+                  className={
+                    latest
+                      ? 'font-semibold text-[var(--kb-heading)]'
+                      : 'text-[var(--kb-heading)]/80'
+                  }
+                >
+                  {humaniseStatus(event.status)}
+                </p>
+                <time
+                  dir="ltr"
+                  dateTime={event.at.toISOString()}
+                  className="text-xs text-[var(--kb-muted)] tabular-nums"
+                >
+                  {formatTimestamp(locale, event.at)}
+                </time>
+                {event.comment ? (
+                  <p className="mt-0.5 text-xs text-[var(--kb-muted)]">{event.comment}</p>
+                ) : null}
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
+
+/**
+ * The dot colour for the newest event only.
+ *
+ * Written out rather than interpolated, for the reason `TONE_CLASS` above is:
+ * Tailwind reads these as source text and a built class name is never generated.
+ * Only the newest row is toned — colouring all ten turns a history into a
+ * fairground and stops the current status being the thing the eye lands on.
+ */
+const TONE_DOT: Record<StatusTone, string> = {
+  'in-transit': 'bg-[var(--color-status-in-transit-fg)]',
+  'out-for-delivery': 'bg-[var(--color-status-out-for-delivery-fg)]',
+  delivered: 'bg-[var(--color-status-delivered-fg)]',
+  attempted: 'bg-[var(--color-status-attempted-fg)]',
+  returned: 'bg-[var(--color-status-returned-fg)]',
+  exception: 'bg-[var(--color-status-exception-fg)]',
+  unknown: 'bg-[var(--color-status-unknown-fg)]',
+};

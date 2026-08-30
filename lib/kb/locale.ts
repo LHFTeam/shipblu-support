@@ -100,6 +100,9 @@ const STRINGS = {
     trackAskSupport: 'Ask support about this shipment',
     trackPrivacyNote:
       'Anyone with this tracking number can see its status, so this page never shows a name, an address or a phone number.',
+    trackHistory: 'History',
+    trackEstimated: 'Estimated delivery',
+    trackLive: 'Checked with the shipping platform just now',
     trackStepPickedUp: 'Picked up',
     trackStepInTransit: 'In transit',
     trackStepOutForDelivery: 'Out for delivery',
@@ -250,6 +253,9 @@ const STRINGS = {
     trackAskSupport: 'اسأل الدعم عن هذه الشحنة',
     trackPrivacyNote:
       'أي شخص يملك رقم التتبّع يستطيع رؤية حالة الشحنة، لذلك لا تعرض هذه الصفحة اسمًا أو عنوانًا أو رقم هاتف.',
+    trackHistory: 'السجل',
+    trackEstimated: 'موعد التسليم المتوقع',
+    trackLive: 'تم التحقق من منصة الشحن الآن',
     trackStepPickedUp: 'تم الاستلام',
     trackStepInTransit: 'في الطريق',
     trackStepOutForDelivery: 'خرجت للتسليم',
@@ -407,6 +413,32 @@ export function formatTimestamp(locale: Locale, value: Date | string): string {
     timeStyle: 'short',
     timeZone: 'Africa/Cairo',
   }).format(new Date(value));
+}
+
+/**
+ * A bare `YYYY-MM-DD` from the shipping platform, formatted as the day it names.
+ *
+ * **`timeZone: 'UTC'`, and that is the opposite of every other formatter here on
+ * purpose.** A calendar date carries no time and no offset, so `new Date()`
+ * fixes it to midnight UTC; formatting *that* instant in Africa/Cairo would move
+ * it to 02:00 the same day, which is harmless — but the same code west of
+ * Greenwich renders the day before, and the platform's estimated delivery date
+ * would read as a day early for anyone reading from Europe or the Americas.
+ * Formatting in the zone the parse implied is what makes the output the date the
+ * platform actually sent, in every reader's location.
+ *
+ * Only for the platform's calendar dates. Anything that is a real instant —
+ * every tracking event, every message — goes through `formatTimestamp`, which is
+ * correct precisely because it converts to Cairo.
+ */
+export function formatCalendarDate(locale: Locale, value: string): string {
+  const parsed = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return value;
+
+  return new Intl.DateTimeFormat(locale === 'ar' ? 'ar-EG' : 'en-GB', {
+    dateStyle: 'long',
+    timeZone: 'UTC',
+  }).format(parsed);
 }
 
 /** Dates render in the reader's locale but always in ShipBlu's timezone. */
