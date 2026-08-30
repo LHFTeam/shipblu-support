@@ -729,35 +729,44 @@ is code:
   tabs marks the agent offline and the surviving tab's next beat — up to 25
   seconds later — puts them back. That window is a brief skip in the rota, which
   is the cheaper error, but nobody has watched it happen with a real team.
-- **The shipment detection patterns are still a guess — and the zero they
-  produce is not evidence against them.** `SHIPMENT_TRACKING_PATTERN` and
-  `SHIPMENT_SBID_PATTERN` are unset, so the defaults in
-  `lib/shipments/detect.ts` are in force: a tracking number must carry letters
-  _and_ digits, and an SBID must be anchored on its keyword. Nobody has told us
-  the real formats. That is deliberate rather than an oversight — the two failure
-  modes are not symmetric, and an under-detection is repaired by one agent click
-  plus a backfill re-run, while an over-detection puts junk shipments on real
-  tickets and eventually out over an API.
+- **The tracking format is now known, and the SBID pattern is still a guess.**
+  The shipping team gave the real format on 2026-08-30: **a run of at least
+  thirteen digits, optionally carrying letters**, `1755021358719` being one. It
+  is an epoch-millisecond timestamp, which is why every one in the archive is
+  exactly thirteen digits and will stay thirteen until 2286. That is now the
+  default in `lib/shipments/detect.ts`; `SHIPMENT_TRACKING_PATTERN` stays unset,
+  so nothing has to be configured in Render for it to take effect — a deploy is
+  the whole change.
 
-  `shipments` is empty across 9,544 messages, which looks exactly like the
-  under-detection predicted above. **It is not.** 837 of those messages contain a
-  run of six or more digits, and reading them shows what the digits are: GPS
-  coordinate fractions from shared pins, and Egyptian postal codes inside
-  geocoded addresses — `Gharbia Governorate 6745022`. Only 14 messages carry
-  anything with the letters-and-digits shape at all. There is no evidence of a
-  single real tracking number in the archive, which is unsurprising: the only
-  live channel is the bot, and a customer talking to a bot is answering its
-  prompts rather than quoting an AWB. So zero is the correct output here, and
-  widening the pattern to bare seven-digit numbers on the strength of that 837
-  would have attached junk shipments to hundreds of real tickets. See §6.17.
+  The old default demanded letters _and_ digits and therefore matched nothing.
+  Replaying the new one over production says it now finds **24 of the 24 real
+  tracking numbers in the archive and nothing else**: across 44,388 messages only
+  25 contain a thirteen-digit run, 24 are unmistakable (`رقم التتبع`,
+  `go.shipblu.com/en/1903828629327`, `1632778410963 ده رقم التتبع`), and the
+  25th is a spam link whose 19-digit query-string parameter the guards reject.
+  Nothing in the archive has letters in it at all, so that half of the format is
+  supported on the shipping team's word and unattested.
 
-  Get the real formats from the shipping team; do not infer them from this
-  archive. The variables live in the `shipblu-shared` group because the web
-  service and the worker have to agree: the worker links on the pattern, the
-  console searches on
-  it, and a service that disagreed would link a ticket the search could never
-  find again. After correcting one, run the backfill from `/admin/import` — the
-  live path only ever sees new messages.
+  **What is still unverified is the top of the range.** "At least thirteen" is
+  the promise, every observed number is exactly thirteen, and the default has no
+  upper bound — so a long numeric id in a future channel is the shape most likely
+  to produce a false link. The guards in `isPlausible` are what carry that
+  decision, and three of them exist only because the default now matches bare
+  digits: the dialled-international mobile `00201014428154`, the fraction of a
+  round-tripped GPS coordinate (§6.17), and a payment card, which under a
+  bare-digit pattern would be written into `shipments` under a unique index and
+  shown to every agent. That last one is a leak, not a junk row.
+
+  `SHIPMENT_SBID_PATTERN` is untouched and still a guess: nobody has said what an
+  SBID looks like, so it stays keyword-anchored, and a bare number is still never
+  read as one.
+
+  The variables live in the `shipblu-shared` group because the web service and
+  the worker have to agree: the worker links on the pattern, the console searches
+  on it, and a service that disagreed would link a ticket the search could never
+  find again. **After this deploys, run the backfill from `/admin/import`** — the
+  live path only ever sees new messages, so the 24 above stay unlinked until it
+  runs, and it has still never been run once (§6.20).
 
 - **`/admin/import` now has a second card** whose figures answer whether the
   pattern is right: it splits links into those the detector found and those
@@ -1407,6 +1416,15 @@ Each cost real time. Most are also comments in the code.
     hid a real gap; here, a total invented one that was not there. Same lesson
     either way — before acting on an aggregate, read the rows underneath it.
     Both times the rows were one query away.
+
+    **Follow-up, 2026-08-30.** The real format arrived — thirteen-plus digits,
+    bare — and it vindicates the restraint twice over. Widening to _six_ digits
+    on the strength of that 837 would have been wrong; widening to thirteen,
+    which is what the format actually is, matches 24 real numbers and one spam
+    link. The archive that looked like evidence of under-detection was hiding 24
+    genuine tracking numbers all along, none of which the letters-and-digits
+    default could ever have caught. Reading the rows is what distinguished the
+    two widenings, and it was the same one query both times.
 
 18. **A module reachable from the search parser must not call `env()`.**
     `lib/shipments/detect.ts` reads its three variables straight from

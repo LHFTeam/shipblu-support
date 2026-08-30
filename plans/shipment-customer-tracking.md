@@ -262,7 +262,7 @@ shipment; delete a link; throw.
 
 **Explicit prefixes, plus inference.** `track:` / `tracking:` / `awb:` and
 `sbid:` / `account:` narrow to a single clause — which is what keeps
-`track:SB123456789` one index lookup instead of a trigram scan of every message
+`track:1755021358719` one index lookup instead of a trigram scan of every message
 body. A prefix with an empty rest degrades to an ordinary text search rather than
 returning nothing. Without a prefix, a query that is _exactly one_ reference also
 sets the field, but `scope` stays `'any'` so the existing five clauses still run.
