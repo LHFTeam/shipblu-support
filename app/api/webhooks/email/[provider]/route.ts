@@ -3,6 +3,7 @@ import { db } from '@/db/client';
 import { webhookEvents } from '@/db/schema';
 import { emailProvider } from '@/lib/email/providers';
 import { enqueue } from '@/lib/queue';
+import { logIncomingWebhook } from '@/lib/webhooks/log';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,6 +31,17 @@ export async function POST(request: Request, context: { params: Promise<{ provid
   } catch {
     return NextResponse.json({ error: 'unreadable body' }, { status: 400 });
   }
+
+  // Before verification and before parsing — see the note on the Meta endpoint.
+  // Postmark authenticates with Basic Auth, so the logger redacts the
+  // Authorization header rather than printing EMAIL_WEBHOOK_SECRET.
+  logIncomingWebhook({
+    source: `email:${providerName}`,
+    method: request.method,
+    url: request.url,
+    headers: request.headers,
+    rawBody,
+  });
 
   const headers: Record<string, string> = {};
   request.headers.forEach((value, key) => {

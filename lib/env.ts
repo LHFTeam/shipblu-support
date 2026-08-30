@@ -216,6 +216,19 @@ const schema = z.object({
   FRESHDESK_API_KEY: z.string().optional(),
 
   /** Worker tuning. */
+  /**
+   * `true` prints every inbound webhook delivery — headers and raw body — before
+   * it is verified or parsed. For a debugging session, not for steady state: it
+   * puts customer message content into the Render log, and the log is a less
+   * protected place than the database. Credentials are stripped regardless.
+   *
+   * Read through `process.env` in `lib/webhooks/log.ts` rather than through
+   * `env()`, for the reason `SHIPMENT_TRACKING_PATTERN` above is: a diagnostic
+   * must not be able to fail the request it was only meant to describe. Declared
+   * here anyway so it is discoverable and paired with `render.yaml`.
+   */
+  LOG_ALL_INCOMING_WEBHOOKS: z.enum(['true', 'false']).optional(),
+
   WORKER_CONCURRENCY: z.coerce.number().int().positive().default(5),
   WORKER_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(1000),
 });

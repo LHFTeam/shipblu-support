@@ -3,6 +3,7 @@ import { db } from '@/db/client';
 import { webhookEvents } from '@/db/schema';
 import { metaAppSecret, metaVerifyToken } from '@/lib/env';
 import { enqueue } from '@/lib/queue';
+import { logIncomingWebhook } from '@/lib/webhooks/log';
 import { SIGNATURE_HEADER, verifyChallenge, verifySignature } from '@/lib/whatsapp/verify';
 import type { WhatsAppWebhookPayload } from '@/lib/whatsapp/types';
 
@@ -51,6 +52,15 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: 'unreadable body' }, { status: 400 });
   }
+
+  // Before verification and before parsing — see the note on the Meta endpoint.
+  logIncomingWebhook({
+    source: 'whatsapp',
+    method: request.method,
+    url: request.url,
+    headers: request.headers,
+    rawBody,
+  });
 
   const signatureVerified = appSecret
     ? verifySignature(rawBody, request.headers.get(SIGNATURE_HEADER), appSecret)

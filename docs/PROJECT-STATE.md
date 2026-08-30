@@ -426,6 +426,45 @@ When you add a variable, add it to `render.yaml` in the same commit. The
 blueprint is meant to describe the running system; it is not documentation that
 drifts.
 
+### Seeing an inbound webhook: `LOG_ALL_INCOMING_WEBHOOKS`
+
+Set it to `true` on the **`shipblu-support` web service** and every inbound
+delivery — Meta, WhatsApp and email — is printed with its headers and raw body.
+Grep the logs for `[webhook:all]`. Unset it again afterwards.
+
+It exists because the most expensive question about this system is also the one
+the database cannot answer: **did the delivery arrive at all?** `webhook_events`
+is written _after_ the signature check, and not written at all for a duplicate.
+So "rejected", "malformed", "deduped" and "never sent" are the same absence of a
+row — four states with four different fixes, and no way to tell them apart. The
+Meta investigations in §6 each lost hours inside a parser for events that had
+never reached the endpoint.
+
+So it logs at the top of each handler, **before** verification, JSON parsing and
+the duplicate check. Nothing downstream can suppress it; that ordering is the
+whole feature.
+
+Three things to know before switching it on:
+
+- **It prints customer message content**, names and phone numbers, into the
+  Render log — a less protected place than the database. Inherent: a redacted
+  payload could not answer the question. Treat it as a session, not a setting.
+- **Credentials never print.** `authorization` is redacted, and that is not
+  hypothetical — Postmark authenticates with Basic Auth, so the inbound email
+  endpoint receives `EMAIL_WEBHOOK_SECRET` on every delivery. `cookie`,
+  `proxy-authorization` and `x-api-key` go with it. `x-hub-signature-256` is
+  deliberately **kept**: an HMAC rather than a secret, already persisted by the
+  routes on that reasoning, and a signature that is missing or mismatched is one
+  of the failures this is for.
+- **The Meta `GET` handshake is deliberately not logged.** Its query string
+  carries `hub.verify_token`.
+
+Only `true` turns it on — `1`, `TRUE` and `yes` are all off rather than
+helpfully coerced, because the cost of a half-set flag is customer content in a
+log nobody meant to fill. Read through `process.env` in `lib/webhooks/log.ts`
+rather than `env()`, for the reason `SHIPMENT_TRACKING_PATTERN` is: a diagnostic
+must never be able to fail the request it was only meant to describe.
+
 ### The three-group split is not applied on Render yet
 
 `render.yaml` describes it; the dashboard still has the single `shipblu-shared`
