@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversationEvents, messages } from '@/db/schema';
 import { deleteComment, MetaApiError, setCommentHidden } from '@/lib/meta/client';
+import { metaConnection } from '@/lib/meta/connection';
 import { explainMetaModerationError } from '@/lib/meta/errors';
 import {
   eventTypeFor,
@@ -64,6 +65,13 @@ export async function moderateMetaComment(job: ClaimedJob): Promise<void> {
 
   const before = readCommentModeration(row.meta);
 
+  // The route the moderation call will take, for the log and the explanation.
+  // Not read off the comment's own `meta`: the connection recorded there is
+  // whichever delivery reached ingest first, while the one that matters is
+  // whichever holds a usable credential now — and both address the same comment
+  // id with the same paths.
+  const connection = metaConnection(comment.platform);
+
   // A retry that arrives after the work landed must not ask Graph again: an
   // unhide-then-retry would undo a hide the agent still wants, and a repeated
   // delete is refused with an error that reads like the ticket is broken.
@@ -92,6 +100,7 @@ export async function moderateMetaComment(job: ClaimedJob): Promise<void> {
       error instanceof MetaApiError
         ? explainMetaModerationError(error, {
             platform: comment.platform,
+            connection,
             action: action as ModerationAction,
           })
         : message;
@@ -122,12 +131,12 @@ export async function moderateMetaComment(job: ClaimedJob): Promise<void> {
     // A moderation nobody can be named for is one this job did on a retry after
     // the agent's row was removed; the label keeps the event attributable.
     actorLabel: agentId ? null : 'moderate_meta_comment',
-    data: { commentId: comment.commentId, platform: comment.platform },
+    data: { commentId: comment.commentId, platform: comment.platform, connection },
   });
 
   console.log(
     `[moderate_meta_comment] ${action} ${comment.platform} comment ${comment.commentId} ` +
-      `on message ${messageId}`,
+      `on message ${messageId} via ${connection}`,
   );
 }
 

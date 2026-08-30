@@ -4,6 +4,7 @@ import {
   GraphSubscriptionError,
   INSTAGRAM_OBJECT,
   planFieldSubscription,
+  planInstagramLoginSubscription,
   planPageSubscription,
   REQUIRED_INSTAGRAM_FIELDS,
   REQUIRED_PAGE_FIELDS,
@@ -169,6 +170,60 @@ describe('resolveObject', () => {
  * same property as the app-level merge above, because the write has the same
  * shape and the same way of going wrong.
  */
+describe('planInstagramLoginSubscription', () => {
+  const IG_ACCOUNT = '17841448759001625';
+
+  it('keeps a field the account already carries that this codebase does not know about', () => {
+    // The whole reason this reads before it writes. The POST replaces the field
+    // list, so an account somebody subscribed to `mentions` by hand in the
+    // dashboard loses it the first time this job runs — silently, and reported
+    // as success.
+    const plan = planInstagramLoginSubscription(
+      IG_ACCOUNT,
+      ['messages', 'mentions'],
+      REQUIRED_INSTAGRAM_FIELDS,
+    );
+
+    expect(plan.adding).toEqual(['comments']);
+    expect(plan.merged).toEqual(['messages', 'mentions', 'comments']);
+  });
+
+  it('reports an account with no subscription at all', () => {
+    /*
+      Null against `[]` again, and it answers a different question here than it
+      does on the Page: the direct connection's account-level subscription is
+      the one thing the App Dashboard does not show, so an account that has
+      never been subscribed looks identical to one whose permission is
+      unapproved — right up to this line.
+    */
+    const plan = planInstagramLoginSubscription(IG_ACCOUNT, null, REQUIRED_INSTAGRAM_FIELDS);
+
+    expect(plan.subscribed).toBe(false);
+    expect(plan.current).toEqual([]);
+    expect(plan.merged).toEqual(['messages', 'comments']);
+  });
+
+  it('is a no-op once both fields are subscribed', () => {
+    const plan = planInstagramLoginSubscription(
+      IG_ACCOUNT,
+      ['messages', 'comments'],
+      REQUIRED_INSTAGRAM_FIELDS,
+    );
+
+    expect(plan.adding).toEqual([]);
+    expect(plan.subscribed).toBe(true);
+  });
+
+  it('carries the Instagram account id through to the write', () => {
+    // Meta's example addresses `/me`. Naming the id is what makes a token
+    // pointing at the wrong account a refusal rather than a subscription
+    // quietly written somewhere else.
+    expect(
+      planInstagramLoginSubscription(IG_ACCOUNT, [], REQUIRED_INSTAGRAM_FIELDS).accountId,
+    ).toBe(IG_ACCOUNT);
+  });
+});
+
 describe('planPageSubscription', () => {
   const PAGE = '101449698657189';
 

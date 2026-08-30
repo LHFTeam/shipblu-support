@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetEnvCache } from '@/lib/env';
-import { ACCESS_TOKEN_CODE, MetaApiError, sendDirectMessage } from './client';
+import { ACCESS_TOKEN_CODE, MetaApiError, replyToComment, sendDirectMessage } from './client';
 
 /**
  * As in the WhatsApp client, `isTransient` decides whether a handler retries or
@@ -44,6 +44,8 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  delete process.env.INSTAGRAM_ACCESS_TOKEN;
+  delete process.env.INSTAGRAM_ACCOUNT_ID;
   resetEnvCache();
 });
 
@@ -82,5 +84,93 @@ describe('Meta error classification', () => {
     const error = await classify();
     expect(error.status).toBe(0);
     expect(error.isTransient).toBe(true);
+  });
+});
+
+describe('which connection a call goes out over', () => {
+  /**
+   * The URL the client actually requested. Everything about routing is in it:
+   * the host says which connection, the `access_token` query parameter says
+   * which credential. Both are wrong in ways Graph refuses with a sentence that
+   * names neither.
+   */
+  function captureUrl(): { url: () => URL } {
+    const fetchMock = vi.fn(
+      async (_url: URL | string) => new Response(JSON.stringify({ id: 'ok' }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    return { url: () => new URL(String(fetchMock.mock.calls[0]![0])) };
+  }
+
+  it('sends Instagram over graph.instagram.com with the Instagram token', async () => {
+    // The direct connection. Its token is not interchangeable with the Page's:
+    // sending one to the other host is refused, and the refusal names neither.
+    process.env.INSTAGRAM_ACCESS_TOKEN = 'ig-token';
+    process.env.INSTAGRAM_ACCOUNT_ID = '17841448759001625';
+    resetEnvCache();
+
+    const { url } = captureUrl();
+    await sendDirectMessage({
+      platform: 'instagram',
+      recipientId: 'igsid-1',
+      text: 'hello',
+      tag: 'RESPONSE',
+    });
+
+    expect(url().host).toBe('graph.instagram.com');
+    expect(url().searchParams.get('access_token')).toBe('ig-token');
+    expect(url().pathname).toContain('17841448759001625/messages');
+  });
+
+  it('keeps Facebook on graph.facebook.com with the Page token', async () => {
+    // Unchanged by the second connection existing, and it has to be: a Page has
+    // no second way to be reached, and the Instagram token cannot address one.
+    process.env.INSTAGRAM_ACCESS_TOKEN = 'ig-token';
+    resetEnvCache();
+
+    const { url } = captureUrl();
+    await sendDirectMessage({
+      platform: 'facebook',
+      recipientId: 'psid-1',
+      text: 'hello',
+      tag: 'RESPONSE',
+    });
+
+    expect(url().host).toBe('graph.facebook.com');
+    expect(url().searchParams.get('access_token')).toBe('token');
+  });
+
+  it('falls back to the Page for Instagram when the direct connection is unset', async () => {
+    // Every deployment before the second connection existed, and staging today.
+    // Unset must mean exactly the old behaviour.
+    delete process.env.INSTAGRAM_ACCESS_TOKEN;
+    process.env.INSTAGRAM_ACCOUNT_ID = '17841448759001625';
+    resetEnvCache();
+
+    const { url } = captureUrl();
+    await sendDirectMessage({
+      platform: 'instagram',
+      recipientId: 'igsid-1',
+      text: 'hello',
+      tag: 'RESPONSE',
+    });
+
+    expect(url().host).toBe('graph.facebook.com');
+    expect(url().searchParams.get('access_token')).toBe('token');
+  });
+
+  it('routes comment operations the same way as messages', async () => {
+    // The paths are identical on both hosts, which is exactly why this is easy
+    // to get wrong: a comment reply posted to the wrong origin is refused with
+    // `100 "Unsupported post request"` — the same sentence as a deleted comment.
+    process.env.INSTAGRAM_ACCESS_TOKEN = 'ig-token';
+    process.env.INSTAGRAM_ACCOUNT_ID = '17841448759001625';
+    resetEnvCache();
+
+    const { url } = captureUrl();
+    await replyToComment({ platform: 'instagram', commentId: '18618316756031483', message: 'hi' });
+
+    expect(url().host).toBe('graph.instagram.com');
+    expect(url().pathname).toContain('18618316756031483/replies');
   });
 });

@@ -1,3 +1,5 @@
+import type { MetaConnection } from './connection';
+
 /**
  * Facebook and Instagram, which Meta delivers through one webhook shape with
  * two objects: `page` for a Facebook Page and `instagram` for an Instagram
@@ -92,6 +94,16 @@ export type MetaAttachment = {
 
 export type NormalisedDirectMessage = {
   platform: MetaPlatform;
+  /**
+   * The connection this delivery came in on.
+   *
+   * Carried through to the message row because it is the only place it is
+   * knowable — the payloads are identical and only the signature differs — and
+   * because `standby` below means nothing without it. Null only when replaying
+   * a row stored before the two connections were told apart; a guess written
+   * there would be indistinguishable from a fact afterwards.
+   */
+  connection: MetaConnection | null;
   /** Meta's message id. The idempotency key for ingest. */
   mid: string;
   /** Page-scoped id of the customer. Stable per page, useless across pages. */
@@ -100,7 +112,9 @@ export type NormalisedDirectMessage = {
   accountId: string | null;
   /**
    * Arrived in the handover protocol's `standby` array, meaning another app
-   * holds thread control and this one may read the thread but not answer it.
+   * holds thread control on **the connection above** — which is why the two
+   * travel together. A Page's handover has no authority over a reply sent with
+   * the Instagram account's own token.
    */
   standby: boolean;
   senderName: string | null;
@@ -113,6 +127,8 @@ export type NormalisedDirectMessage = {
 
 export type NormalisedComment = {
   platform: MetaPlatform;
+  /** The connection this delivery came in on, null on a pre-migration replay. */
+  connection: MetaConnection | null;
   commentId: string;
   /**
    * The comment this one replies to, or null for a top-level comment. Used to

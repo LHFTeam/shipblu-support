@@ -58,7 +58,11 @@ export async function processWebhook(job: ClaimedJob): Promise<void> {
     }
 
     if (event.channel === 'facebook' || event.channel === 'instagram') {
-      await processMetaWebhook({ id: event.id, payload: event.payload });
+      await processMetaWebhook({
+        id: event.id,
+        payload: event.payload,
+        connection: event.connection,
+      });
       await db
         .update(webhookEvents)
         .set({ processedAt: new Date() })

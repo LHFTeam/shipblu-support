@@ -199,11 +199,28 @@ group, so each group lists its dashboard-owned keys as a comment beside its
 literal ones. A module reachable from the search parser must read `process.env` directly
 rather than `env()`, which validates the whole schema (see
 `lib/shipments/detect.ts`). The one place "one Meta app, one credential" does not
-hold is an Instagram account connected through **Instagram Login**: it signs its
-webhooks with its own app secret and is served from `graph.instagram.com` with
-its own token (`META_INSTAGRAM_APP_SECRET`, `INSTAGRAM_ACCESS_TOKEN`, both
-optional). Getting that wrong is silent in both directions — see
-`docs/PROJECT-STATE.md` §6.26. A WhatsApp business account's access token is read
+hold is Instagram, which this app is connected to **twice**: through the Facebook
+Page the account is linked to, and directly through **Instagram Login**. The
+second is a separate identity inside the same app — its own host
+(`graph.instagram.com`), its own token (`INSTAGRAM_ACCESS_TOKEN`), its own app
+secret (`INSTAGRAM_APP_SECRET`, also read as `META_INSTAGRAM_APP_SECRET`) and its
+own App Review vocabulary (`instagram_business_*` rather than `instagram_*`).
+`lib/meta/connection.ts` names the two and decides which one a call goes out
+over; nothing else may re-derive that. Three rules follow, each of which has
+already cost a customer channel:
+
+- **Both app secrets are tried on every `instagram` delivery, and neither can be
+  removed while both connections are live.** Unsetting one resumes 403s for that
+  half of the traffic — §6.26 and §6.29 cost 3,888 dropped deliveries between
+  them, and the second was the fix for the first applied a step too early.
+- **`standby` is a fact about one connection, not about the account.** The
+  handover protocol belongs to the Page, so a Page delivery arriving in `standby`
+  says nothing about a reply sent with the Instagram account's own token.
+- **A Meta doc example proves nothing until you check which host its URL names.**
+  The two connections differ in the host, the token, the ids _and_ the field
+  vocabulary — §6.35.
+
+A WhatsApp business account's access token is read
 directly from `process.env`, for a different reason: its variable's _name_ is a
 database value, so it cannot be in the schema — and must therefore start `WHATSAPP_TOKEN_`, or
 an admin typing a variable name would be choosing which secret gets sent to Meta

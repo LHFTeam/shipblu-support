@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { webhookEvents } from '@/db/schema';
+import type { MetaConnection } from '@/lib/meta/connection';
 import { parseMetaWebhook } from '@/lib/meta/parse';
 import { applyMetaReceipt, ingestMetaComment, ingestMetaMessage } from '@/lib/tickets/ingest-meta';
 
@@ -11,9 +12,18 @@ import { applyMetaReceipt, ingestMetaComment, ingestMetaMessage } from '@/lib/ti
  * processed independently and failures are collected. The job only fails — and
  * so only retries — when *everything* in the batch failed, which distinguishes
  * a real outage from one malformed comment.
+ *
+ * The connection travels on the row rather than being worked out here: the two
+ * Instagram connections post identical bodies and are separated only by which
+ * app secret verified the signature, which is known at the endpoint and nowhere
+ * else. Null on anything stored before the column existed.
  */
-export async function processMetaWebhook(event: { id: string; payload: unknown }): Promise<void> {
-  const parsed = parseMetaWebhook(event.payload);
+export async function processMetaWebhook(event: {
+  id: string;
+  payload: unknown;
+  connection: string | null;
+}): Promise<void> {
+  const parsed = parseMetaWebhook(event.payload, readConnection(event.connection));
 
   const failures: string[] = [];
   let messages = 0;
@@ -71,7 +81,13 @@ export async function processMetaWebhook(event: { id: string; payload: unknown }
   }
 
   console.log(
-    `[meta] ${event.id}: ${messages} message(s), ${comments} comment(s), ` +
-      `${receipts} receipt(s), ${parsed.echoes} echo(es) ignored`,
+    `[meta] ${event.id} via ${event.connection ?? 'an unrecorded connection'}: ` +
+      `${messages} message(s), ${comments} comment(s), ${receipts} receipt(s), ` +
+      `${parsed.echoes} echo(es) ignored`,
   );
+}
+
+/** The stored connection, or null for anything that is not one we know. */
+function readConnection(value: string | null): MetaConnection | null {
+  return value === 'facebook_page' || value === 'instagram_login' ? value : null;
 }

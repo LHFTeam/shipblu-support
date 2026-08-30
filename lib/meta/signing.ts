@@ -1,11 +1,13 @@
+import type { MetaConnection } from './connection';
+
 /**
  * Which app secret an inbound Meta delivery is signed with.
  *
  * One Meta app was assumed to mean one signing secret, and for WhatsApp,
  * Messenger and a Page-connected Instagram account that is true. It stops being
- * true the moment an Instagram professional account is connected through
- * **Instagram Login** instead: that setup issues its own *Instagram app secret*
- * — a separate value from the app's Basic-settings app secret — and signs the
+ * true the moment an Instagram professional account is also connected through
+ * **Instagram Login**: that setup issues its own *Instagram app secret* — a
+ * separate value from the app's Basic-settings app secret — and signs the
  * `instagram` object's deliveries with it.
  *
  * Nothing about the payload says which one was used. The object, the entry id,
@@ -19,21 +21,42 @@
  *
  * So the candidates are tried in order rather than one being chosen. Both
  * belong to us; accepting a delivery signed by either is not a weakening, and it
- * is what lets an account be moved between the two setups without a deploy
- * timed to the minute. The *names* travel with the values so a failure can say
- * which variables were tried without ever printing one.
+ * is what lets both connections be live at once — which is the configuration
+ * this deployment actually runs. The *names* travel with the values so a failure
+ * can say which variables were tried without ever printing one, and the
+ * *connection* travels with them so a success can say which of the two setups
+ * delivered it. Nothing else can: it is the only signal in the request that
+ * separates them.
  */
 
 export type SigningCandidate = {
   /** The environment variable name, for the log line. Never the value. */
   name: string;
   secret: string;
+  /** Which connection a delivery signed with this secret came in on. */
+  connection: MetaConnection;
 };
 
 export type SigningSecrets = {
+  /** `META_APP_SECRET` — the app's Basic-settings secret. */
   appSecret: string | undefined;
-  /** From Instagram → API setup with Instagram login. */
+  /**
+   * `INSTAGRAM_APP_SECRET`, from Instagram → API setup with Instagram login.
+   * Meta's own name for it in the dashboard, and the name to use.
+   */
   instagramAppSecret: string | undefined;
+  /**
+   * `META_INSTAGRAM_APP_SECRET` — the same value under the name this repo
+   * shipped first.
+   *
+   * Both are read, and that is deliberate rather than tidy. An Instagram app
+   * secret going unread costs a customer channel: §6.26 dropped 3,044
+   * deliveries over eighteen hours and §6.29 another 844, both because the
+   * value was not where the code looked. A second name costs one HMAC on a
+   * delivery that was going to be hashed anyway — identical values are
+   * deduplicated below — and it makes a rename survivable in either direction.
+   */
+  legacyInstagramAppSecret: string | undefined;
 };
 
 /**
@@ -49,11 +72,7 @@ export function signingCandidates(
   secrets: SigningSecrets,
 ): SigningCandidate[] {
   const app: SigningCandidate[] = secrets.appSecret
-    ? [{ name: 'META_APP_SECRET', secret: secrets.appSecret }]
-    : [];
-
-  const instagram: SigningCandidate[] = secrets.instagramAppSecret
-    ? [{ name: 'META_INSTAGRAM_APP_SECRET', secret: secrets.instagramAppSecret }]
+    ? [{ name: 'META_APP_SECRET', secret: secrets.appSecret, connection: 'facebook_page' }]
     : [];
 
   // Only the `instagram` object can be signed by the Instagram app secret.
@@ -61,9 +80,17 @@ export function signingCandidates(
   // that cannot be the right one, on the busiest path in the system.
   if (object !== 'instagram') return app;
 
+  const instagram: SigningCandidate[] = [
+    { name: 'INSTAGRAM_APP_SECRET', secret: secrets.instagramAppSecret },
+    { name: 'META_INSTAGRAM_APP_SECRET', secret: secrets.legacyInstagramAppSecret },
+  ]
+    .filter((candidate): candidate is { name: string; secret: string } => Boolean(candidate.secret))
+    .map((candidate) => ({ ...candidate, connection: 'instagram_login' as const }));
+
   return [...instagram, ...app].filter(
     // A deployment that sets the same value under both names would otherwise
-    // have every Instagram delivery hashed twice.
+    // have every Instagram delivery hashed twice — which is exactly what a
+    // rename in progress looks like.
     (candidate, index, all) =>
       all.findIndex((other) => other.secret === candidate.secret) === index,
   );
@@ -88,7 +115,7 @@ export function deliveryEnvelope(payload: {
 }
 
 /**
- * Says which secret is verifying Instagram deliveries, once per combination of
+ * Says which connection is delivering Instagram traffic, once per combination of
  * secret and envelope.
  *
  * Written because its absence cost an answer. When the outage in
@@ -116,18 +143,21 @@ const noted = new Set<string>();
 
 export function noteVerifyingSecret(
   object: string | undefined,
-  name: string,
+  candidate: SigningCandidate,
   envelope: string,
 ): void {
   // Only Instagram has two possible signers, and the other two objects carry
   // the overwhelming majority of the traffic.
   if (object !== 'instagram') return;
 
-  const key = `${name}:${envelope}`;
+  const key = `${candidate.name}:${envelope}`;
   if (noted.has(key)) return;
 
   noted.add(key);
-  console.log(`[webhook:meta] instagram ${envelope} deliveries are verifying with ${name}`);
+  console.log(
+    `[webhook:meta] instagram ${envelope} deliveries are verifying with ${candidate.name} ` +
+      `— ${candidate.connection}`,
+  );
 }
 
 /** Test-only, as `resetEnvCache` is: module state outlives a single test. */

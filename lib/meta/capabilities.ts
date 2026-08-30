@@ -32,9 +32,22 @@
  * permission is diagnosed rather than re-debugged.
  */
 
+import type { MetaConnection } from './connection';
+
 export type Capability = {
   /** How somebody would describe the thing they are trying to do. */
   name: string;
+  /**
+   * The connection whose credential this capability is a property of.
+   *
+   * Not decoration. Instagram appears twice in this table under two different
+   * permission vocabularies — `instagram_manage_comments` through the Facebook
+   * Page, `instagram_business_manage_comments` through Instagram Login — and a
+   * token carrying one is *correctly* missing the other. Without this field the
+   * diagnostic reports half its rows as blocked on a perfectly configured app,
+   * which trains everybody to skim past it.
+   */
+  connection: MetaConnection;
   /** What is observed when it is missing — the symptom, not the mechanism. */
   symptom: string;
   permissions: readonly string[];
@@ -55,21 +68,25 @@ export type Capability = {
 export const CAPABILITIES: readonly Capability[] = [
   {
     name: 'Messenger direct messages',
+    connection: 'facebook_page',
     symptom: 'Facebook DMs neither arrive nor send',
     permissions: ['pages_messaging'],
   },
   {
     name: 'Facebook comment webhooks',
+    connection: 'facebook_page',
     symptom: 'no ticket is opened when somebody comments on a Page post',
     permissions: ['pages_manage_metadata', 'pages_show_list'],
   },
   {
     name: 'Facebook comment moderation',
+    connection: 'facebook_page',
     symptom: 'hide, unhide and delete are refused; public replies still work',
     permissions: ['pages_read_user_content', 'pages_manage_engagement', 'pages_show_list'],
   },
   {
-    name: 'Instagram direct messages',
+    name: 'Instagram direct messages (Facebook Page connection)',
+    connection: 'facebook_page',
     symptom: 'Instagram DMs neither arrive nor send',
     permissions: ['instagram_basic', 'instagram_manage_messages'],
   },
@@ -82,7 +99,8 @@ export const CAPABILITIES: readonly Capability[] = [
       `comments` field does not — without `instagram_manage_comments` Meta sends
       nothing, and the account looks identical to one nobody has commented on.
     */
-    name: 'Instagram comment webhooks and moderation',
+    name: 'Instagram comment webhooks and moderation (Facebook Page connection)',
+    connection: 'facebook_page',
     symptom: 'no ticket is opened when somebody comments on a post, while DMs still arrive',
     // Meta's list for Instagram API with Facebook Login, verbatim.
     permissions: [
@@ -99,8 +117,37 @@ export const CAPABILITIES: readonly Capability[] = [
   },
   {
     name: "Customer's locale and gender on the contact",
+    connection: 'facebook_page',
     symptom: 'names and pictures still resolve; the two extra fields stay empty',
     permissions: ['pages_user_locale', 'pages_user_gender'],
+  },
+  {
+    /*
+      The same two capabilities again, spelled the other way.
+
+      Not duplication: these are the permissions of a different authorisation
+      against a different host, and an app connected both ways holds both sets at
+      once. Reading one set's absence as the other's problem is what §6.29 did for
+      a day — an `instagram_business_*` name in App Review was taken as proof of
+      which connection the account was on, when in fact it only says which
+      connection somebody last submitted for.
+    */
+    name: 'Instagram direct messages (direct connection)',
+    connection: 'instagram_login',
+    symptom: 'Instagram DMs arrive but every reply is refused by graph.instagram.com',
+    permissions: ['instagram_business_basic', 'instagram_business_manage_messages'],
+  },
+  {
+    name: 'Instagram comment webhooks and moderation (direct connection)',
+    connection: 'instagram_login',
+    symptom: 'no ticket is opened when somebody comments on a post, while DMs still arrive',
+    permissions: ['instagram_business_basic', 'instagram_business_manage_comments'],
+    advancedAccess:
+      'Meta requires Advanced Access to deliver `comments` to the general public. The direct ' +
+      'connection did start delivering them at Standard Access on 2026-08-30, but every ' +
+      'delivery so far has been a comment left by the account on its own media — which ' +
+      "Standard Access covers, and which says nothing about a customer's. Treat a public " +
+      "comment arriving as the thing that settles it, not the account's own.",
   },
 ];
 
@@ -127,26 +174,36 @@ export type CapabilityReport = {
 export function diagnoseCapabilities(
   scopes: Iterable<string>,
   declined: Iterable<string> = [],
+  /**
+   * Which connection's token these scopes came from.
+   *
+   * Rows belonging to the other connection are left out rather than reported
+   * missing. A Page token is *supposed* to lack `instagram_business_basic`, and
+   * saying otherwise turns a correct configuration into six blocked lines.
+   */
+  connection: MetaConnection = 'facebook_page',
 ): CapabilityReport[] {
   const granted = new Set(scopes);
   const refused = new Set(declined);
 
-  return CAPABILITIES.map((capability) => {
-    const permissions = capability.permissions.map((permission) => ({
-      permission,
-      status: granted.has(permission)
-        ? ('granted' as const)
-        : refused.has(permission)
-          ? ('declined' as const)
-          : ('missing' as const),
-    }));
+  return CAPABILITIES.filter((capability) => capability.connection === connection).map(
+    (capability) => {
+      const permissions = capability.permissions.map((permission) => ({
+        permission,
+        status: granted.has(permission)
+          ? ('granted' as const)
+          : refused.has(permission)
+            ? ('declined' as const)
+            : ('missing' as const),
+      }));
 
-    return {
-      capability,
-      permissions,
-      blocked: permissions.some((entry) => entry.status !== 'granted'),
-    };
-  });
+      return {
+        capability,
+        permissions,
+        blocked: permissions.some((entry) => entry.status !== 'granted'),
+      };
+    },
+  );
 }
 
 /**
@@ -157,6 +214,12 @@ export function diagnoseCapabilities(
  * whole module exists to prevent is a permission the code depends on that is not
  * in the list somebody pastes into a login dialog.
  */
-export function requiredScopes(): string[] {
-  return [...new Set(CAPABILITIES.flatMap((capability) => capability.permissions))].sort();
+export function requiredScopes(connection: MetaConnection = 'facebook_page'): string[] {
+  return [
+    ...new Set(
+      CAPABILITIES.filter((capability) => capability.connection === connection).flatMap(
+        (capability) => capability.permissions,
+      ),
+    ),
+  ].sort();
 }

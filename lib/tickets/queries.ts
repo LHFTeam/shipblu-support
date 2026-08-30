@@ -29,6 +29,7 @@ import {
 import type { SessionAgent } from '@/lib/auth/session';
 import { can } from '@/lib/auth/permissions';
 import { configuredAccountId } from '@/lib/meta/client';
+import { metaConnection } from '@/lib/meta/connection';
 import { metaThreadStateFromMessage, type MetaThreadState } from '@/lib/meta/thread';
 import type { CustomFieldValues, TicketFieldDef } from './custom-fields';
 import {
@@ -597,6 +598,7 @@ export async function getConversation(
 
     metaThread = metaThreadStateFromMessage({
       platform,
+      connection: metaConnection(platform),
       configuredAccountId: configuredAccountId(platform),
       lastInboundMeta: (lastInbound?.message.meta ?? null) as Record<string, unknown> | null,
     });

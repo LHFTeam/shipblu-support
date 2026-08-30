@@ -34,6 +34,21 @@ export const webhookEvents = pgTable(
     /** Provider's own event id, when it supplies one. */
     providerEventId: text('provider_event_id'),
 
+    /**
+     * Which of a provider's connections delivered this — `facebook_page` or
+     * `instagram_login` for Meta, null for a provider that has only one.
+     *
+     * Recorded because nothing downstream can work it out. Both Meta
+     * connections deliver the same `instagram` payload, byte-identical apart
+     * from the signature, and the only thing that separates them is which app
+     * secret verified it — a fact known once, here, at the endpoint. It is also
+     * part of `provider_event_id`, so a delivery from each connection is stored
+     * rather than the second being deduplicated away: a per-connection count is
+     * the answer to "is the direct connection actually delivering?", which has
+     * been unanswerable through two outages.
+     */
+    connection: text('connection'),
+
     payload: jsonb('payload').$type<unknown>().notNull(),
     headers: jsonb('headers').$type<Record<string, string>>().notNull().default({}),
 

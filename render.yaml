@@ -129,11 +129,28 @@ projects:
               #   FACEBOOK_PAGE_ID
               #   INSTAGRAM_ACCOUNT_ID
               #
-              #   META_INSTAGRAM_APP_SECRET  signs the `instagram` object's
-              #                              webhooks when the account is on
-              #                              Instagram Login
-              #   INSTAGRAM_ACCESS_TOKEN     sends and moderates there, against
-              #                              graph.instagram.com
+              # The direct Instagram connection. This account is connected
+              # both through its Facebook Page and through Instagram Login, and
+              # the second setup is a separate identity inside the same app —
+              # its own host, credential and app secret. See
+              # lib/meta/connection.ts.
+              #
+              #   INSTAGRAM_APP_SECRET       signs the `instagram` object's
+              #                              webhooks delivered by that
+              #                              connection. Both secrets are tried,
+              #                              so neither can be removed while both
+              #                              connections are live.
+              #   META_INSTAGRAM_APP_SECRET  the same value under the name this
+              #                              repo shipped first; still read, so a
+              #                              rename cannot drop a channel. Unset
+              #                              once the log says Instagram is
+              #                              verifying with INSTAGRAM_APP_SECRET.
+              #   INSTAGRAM_ACCESS_TOKEN     sends, replies and moderates there,
+              #                              against graph.instagram.com. Setting
+              #                              it is what routes Instagram off the
+              #                              Page token — and it must be set
+              #                              *with* the secret above, never
+              #                              before it.
               #   WHATSAPP_PHONE_NUMBER_ID
               #   WHATSAPP_WABA_ID
               #

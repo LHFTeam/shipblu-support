@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
+import type { MetaConnection } from './connection';
 import { parseMetaWebhook } from './parse';
+
+/**
+ * The connection is not in the payload — both Instagram connections send the
+ * same body — so it is supplied by the caller. Defaulted here so the cases that
+ * are about parsing say nothing about routing.
+ */
+function parse(payload: unknown, connection: MetaConnection = 'facebook_page') {
+  return parseMetaWebhook(payload, connection);
+}
 
 /** A Messenger batch, in the shape Meta actually posts. */
 function messengerPayload(overrides: Record<string, unknown> = {}) {
@@ -25,7 +35,7 @@ function messengerPayload(overrides: Record<string, unknown> = {}) {
 
 describe('parseMetaWebhook', () => {
   it('reads a Messenger direct message', () => {
-    const parsed = parseMetaWebhook(messengerPayload());
+    const parsed = parse(messengerPayload());
 
     expect(parsed.messages).toHaveLength(1);
     expect(parsed.messages[0]).toMatchObject({
@@ -38,7 +48,7 @@ describe('parseMetaWebhook', () => {
   });
 
   it('reads an Instagram direct message', () => {
-    const parsed = parseMetaWebhook({
+    const parsed = parse({
       object: 'instagram',
       entry: [
         {
@@ -63,7 +73,7 @@ describe('parseMetaWebhook', () => {
   });
 
   it('marks a message from the handover standby channel', () => {
-    const parsed = parseMetaWebhook({
+    const parsed = parse({
       object: 'page',
       entry: [
         {
@@ -89,13 +99,13 @@ describe('parseMetaWebhook', () => {
   });
 
   it('does not mark an ordinary message as standby', () => {
-    const parsed = parseMetaWebhook(messengerPayload());
+    const parsed = parse(messengerPayload());
 
     expect(parsed.messages[0]?.standby).toBe(false);
   });
 
   it('keeps the two apart when one batch carries both', () => {
-    const parsed = parseMetaWebhook({
+    const parsed = parse({
       object: 'page',
       entry: [
         {
@@ -130,7 +140,7 @@ describe('parseMetaWebhook', () => {
   it('ignores echoes of our own outbound messages', () => {
     // The bug this prevents: filing our own agent reply as if the customer had
     // written it, and then replying to ourselves forever.
-    const parsed = parseMetaWebhook(
+    const parsed = parse(
       messengerPayload({ message: { mid: 'm_echo', text: 'our reply', is_echo: true } }),
     );
 
@@ -139,12 +149,12 @@ describe('parseMetaWebhook', () => {
   });
 
   it('drops a message with no id, which could not be deduplicated', () => {
-    const parsed = parseMetaWebhook(messengerPayload({ message: { text: 'no id' } }));
+    const parsed = parse(messengerPayload({ message: { text: 'no id' } }));
     expect(parsed.messages).toHaveLength(0);
   });
 
   it('describes an attachment-only message instead of leaving it blank', () => {
-    const parsed = parseMetaWebhook(
+    const parsed = parse(
       messengerPayload({
         message: {
           mid: 'm_img',
@@ -160,7 +170,7 @@ describe('parseMetaWebhook', () => {
   });
 
   it('reads a Facebook comment and knows a top-level one from a reply', () => {
-    const top = parseMetaWebhook({
+    const top = parse({
       object: 'page',
       entry: [
         {
@@ -193,7 +203,7 @@ describe('parseMetaWebhook', () => {
       fromName: 'Mona',
     });
 
-    const reply = parseMetaWebhook({
+    const reply = parse({
       object: 'page',
       entry: [
         {
@@ -221,7 +231,7 @@ describe('parseMetaWebhook', () => {
 
   it('ignores the page commenting on its own post', () => {
     // That is our agent's public reply coming back to us.
-    const parsed = parseMetaWebhook({
+    const parsed = parse({
       object: 'page',
       entry: [
         {
@@ -247,7 +257,7 @@ describe('parseMetaWebhook', () => {
   });
 
   it('ignores likes, shares and edits, which are not tickets', () => {
-    const parsed = parseMetaWebhook({
+    const parsed = parse({
       object: 'page',
       entry: [
         {
@@ -265,7 +275,7 @@ describe('parseMetaWebhook', () => {
   });
 
   it('reads an Instagram comment', () => {
-    const parsed = parseMetaWebhook({
+    const parsed = parse({
       object: 'instagram',
       entry: [
         {
@@ -296,7 +306,7 @@ describe('parseMetaWebhook', () => {
   });
 
   it('keeps an Instagram reply threaded on its parent comment', () => {
-    const parsed = parseMetaWebhook({
+    const parsed = parse({
       object: 'instagram',
       entry: [
         {
@@ -323,7 +333,7 @@ describe('parseMetaWebhook', () => {
   it('does not thread an Instagram comment onto its own media', () => {
     // `ingestMetaComment` keys the ticket on the parent, so a parent_id naming
     // the media would put every top-level comment on the post onto one ticket.
-    const parsed = parseMetaWebhook({
+    const parsed = parse({
       object: 'instagram',
       entry: [
         {
@@ -348,7 +358,7 @@ describe('parseMetaWebhook', () => {
   });
 
   it('reads delivery and read receipts', () => {
-    const parsed = parseMetaWebhook({
+    const parsed = parse({
       object: 'page',
       entry: [
         {
@@ -367,16 +377,16 @@ describe('parseMetaWebhook', () => {
   it('returns nothing rather than throwing on rubbish', () => {
     // A throw makes Meta redeliver the whole batch, including the parts we
     // understood, and repeated failures disable the subscription.
-    expect(parseMetaWebhook(null).messages).toEqual([]);
-    expect(parseMetaWebhook('nope').comments).toEqual([]);
-    expect(parseMetaWebhook({ object: 'whatsapp_business_account' }).messages).toEqual([]);
-    expect(parseMetaWebhook({ object: 'page', entry: [{}] }).messages).toEqual([]);
+    expect(parse(null).messages).toEqual([]);
+    expect(parse('nope').comments).toEqual([]);
+    expect(parse({ object: 'whatsapp_business_account' }).messages).toEqual([]);
+    expect(parse({ object: 'page', entry: [{}] }).messages).toEqual([]);
   });
 
   it('reads both second and millisecond timestamps', () => {
     // Comments arrive in seconds, messaging events in milliseconds, with
     // nothing in the payload to say which.
-    const seconds = parseMetaWebhook({
+    const seconds = parse({
       object: 'page',
       entry: [
         {
@@ -399,6 +409,6 @@ describe('parseMetaWebhook', () => {
     });
 
     expect(seconds.comments[0]?.createdAt.getUTCFullYear()).toBe(2025);
-    expect(parseMetaWebhook(messengerPayload()).messages[0]?.sentAt.getUTCFullYear()).toBe(2025);
+    expect(parse(messengerPayload()).messages[0]?.sentAt.getUTCFullYear()).toBe(2025);
   });
 });
