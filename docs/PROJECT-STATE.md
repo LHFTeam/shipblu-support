@@ -1981,6 +1981,24 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     parser and says nothing whatsoever about what Meta will send unprompted. The
     subscription question is answered by the `permissions` webhooks in §5.2.
 
+    **There is now a switch for the general version of this.** Set
+    `LOG_ALL_INCOMING_WEBHOOKS=true` on the `shipblu-support` web service and
+    every inbound delivery — Meta, WhatsApp and email — is printed with its
+    headers and raw body _before_ signature verification, JSON parsing and the
+    duplicate check, so nothing downstream can hide it. That is the ordering
+    that matters: `webhook_events` is written after the signature check and not
+    at all for a duplicate, so the database cannot distinguish "rejected",
+    "malformed", "deduped" and "never sent" — and this investigation burned an
+    afternoon on exactly that ambiguity.
+
+    Turn it off again afterwards. It puts customer message content into the
+    Render log, which is less protected than the database; credential headers
+    (`authorization` — Postmark sends `EMAIL_WEBHOOK_SECRET` there on every
+    delivery — plus `cookie` and `x-api-key`) are redacted regardless, and
+    `x-hub-signature-256` is deliberately kept because it is evidence rather
+    than a secret. The Meta GET handshake is deliberately **not** logged: its
+    query string carries `hub.verify_token`.
+
 34. **Two different things gate a Meta capability, and the Instagram `comments`
     webhook is gated by the rarer one.** _Found 2026-08-30, over three wrong
     turns — record the whole path, because each turn was individually
