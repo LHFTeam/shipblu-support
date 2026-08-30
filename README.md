@@ -242,7 +242,7 @@ long text.
 
 The inbox search also takes two prefixes, `track:` and `sbid:` (with `tracking:`, `awb:`
 and `account:` as aliases). A prefix **narrows** the search to that one clause rather
-than adding to the others, which is what makes it worth typing: `track:SB123456789`
+than adding to the others, which is what makes it worth typing: `track:1755021358719`
 becomes a single probe of the unique index on `shipments.tracking_number` instead of a
 query that still considers every message body. An unprefixed query that is exactly one
 reference sets the same field without narrowing, so the usual clauses still run.

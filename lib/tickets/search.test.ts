@@ -92,14 +92,21 @@ describe('parseSearchTerm — shipments', () => {
   });
 
   it('infers a bare tracking number without narrowing the search', () => {
-    const term = parseSearchTerm('SB123456789');
-    expect(term.trackingNumber).toBe('SB123456789');
+    const term = parseSearchTerm('1755021358719');
+    expect(term.trackingNumber).toBe('1755021358719');
     expect(term.scope).toBe('any');
-    expect(term.pattern).toBe('%SB123456789%');
+    expect(term.pattern).toBe('%1755021358719%');
   });
 
   it('does not infer from a sentence that merely contains one', () => {
-    expect(parseSearchTerm('where is SB123456789').trackingNumber).toBeNull();
+    expect(parseSearchTerm('where is 1755021358719').trackingNumber).toBeNull();
+  });
+
+  it('reads a tracking number an agent pasted with a hash in front of it', () => {
+    // A ticket reference is still read as one — the highest number in production
+    // is 13,747, so nothing of tracking length competes for the `#` namespace.
+    const term = parseSearchTerm('#1195223624566');
+    expect(term.trackingNumber).toBe('1195223624566');
   });
 
   it('leaves a pasted phone number alone', () => {
