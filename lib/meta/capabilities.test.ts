@@ -20,7 +20,12 @@ describe('diagnoseCapabilities', () => {
     expect(comments?.blocked).toBe(true);
     expect(
       comments?.permissions.filter((p) => p.status !== 'granted').map((p) => p.permission),
-    ).toEqual(['instagram_manage_comments', 'pages_read_engagement', 'pages_show_list']);
+    ).toEqual([
+      'instagram_manage_comments',
+      'pages_manage_metadata',
+      'pages_read_engagement',
+      'pages_show_list',
+    ]);
   });
 
   it('separates a permission nobody asked for from one somebody unticked', () => {
@@ -40,6 +45,21 @@ describe('diagnoseCapabilities', () => {
   it('clears every capability when the full scope list is granted', () => {
     const entries = diagnoseCapabilities(requiredScopes());
     expect(entries.filter((entry) => entry.blocked)).toEqual([]);
+  });
+
+  it('warns that Instagram comments need Advanced Access even when fully granted', () => {
+    // The trap this flag exists for: every permission granted, and Meta still
+    // delivers nothing until App Review approves it.
+    const entries = report(requiredScopes());
+    const comments = entries.get('Instagram comment webhooks and moderation');
+
+    expect(comments?.blocked).toBe(false);
+    expect(comments?.capability.advancedAccess).toContain('Advanced Access');
+
+    // The rows that are genuinely satisfied by a grant alone must not carry it,
+    // or the warning stops meaning anything.
+    expect(entries.get('Instagram direct messages')?.capability.advancedAccess).toBeUndefined();
+    expect(entries.get('Messenger direct messages')?.capability.advancedAccess).toBeUndefined();
   });
 
   it('covers every permission the table names in the scope list to request', () => {

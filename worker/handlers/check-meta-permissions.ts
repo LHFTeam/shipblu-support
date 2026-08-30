@@ -108,6 +108,14 @@ export async function checkMetaPermissions(): Promise<void> {
 
     if (gaps.length === 0) {
       console.log(`[meta:permissions] OK      ${report.capability.name}`);
+
+      // A granted permission is not the same as a delivered webhook, and for
+      // exactly one row here it is not even close. Saying so on the *passing*
+      // line is the point: the failure mode this prevents is reading a clean
+      // grant list as "so the problem must be our parser".
+      if (report.capability.advancedAccess) {
+        console.warn(`[meta:permissions]         but: ${report.capability.advancedAccess}`);
+      }
       continue;
     }
 

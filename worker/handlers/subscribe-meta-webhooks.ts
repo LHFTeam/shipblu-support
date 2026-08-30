@@ -2,6 +2,7 @@ import { configuredAccountId } from '@/lib/meta/client';
 import {
   applyFieldSubscription,
   applyPageSubscription,
+  INSTAGRAM_OBJECT,
   PAGE_OBJECT,
   planFieldSubscription,
   planPageSubscription,
@@ -28,8 +29,8 @@ import type { ClaimedJob } from '@/lib/queue';
  * the entire point, and it is not something to improvise at a shell prompt
  * against production.
  *
- * **`object=page` does two writes, because a Page webhook has two
- * subscriptions.** Meta only delivers a field subscribed at *both* the app level
+ * **`object=page` and `object=instagram` each do two writes, because both have
+ * two subscriptions.** Meta only delivers a field subscribed at *both* the app level
  * and the Page level, and until now this job did the app half alone — which is
  * why `feed` has never delivered an event despite being in
  * `REQUIRED_PAGE_FIELDS`. The second write installs this app on the Page with
@@ -64,7 +65,7 @@ export async function subscribeMetaWebhooks(job?: ClaimedJob): Promise<void> {
     half because there was nothing to add there would skip the half that is
     actually missing, and report success.
   */
-  if (object === PAGE_OBJECT) await subscribePage(want);
+  if (object === PAGE_OBJECT || object === INSTAGRAM_OBJECT) await subscribePage(want);
 }
 
 async function subscribeApp(object: string, want: readonly string[]): Promise<void> {
@@ -128,14 +129,29 @@ async function subscribeApp(object: string, want: readonly string[]): Promise<vo
 }
 
 /**
- * The Page half of a Page subscription.
+ * The Page half of a subscription — now for Instagram as well as for the Page.
  *
- * Only for `object=page`. Instagram's own object is deliberately not attempted
- * here: `subscribed_apps` takes *Page* field names, and whether a Page-connected
- * Instagram account needs anything beyond the app being installed on its Page is
- * not something this codebase has established. Guessing would write a field list
- * against a live Page on the strength of an assumption, which is the shape of
- * every Meta outage in `docs/PROJECT-STATE.md` §6.
+ * This used to run only for `object=page`, on the reasoning that
+ * `subscribed_apps` takes *Page* field names and that whether a Page-connected
+ * Instagram account needs anything beyond the app being installed was not
+ * established. **Meta's documentation establishes it**: the Instagram webhook
+ * setup is a `POST /me/subscribed_apps?subscribed_fields=comments,messages`,
+ * where `/me` is "your app user's Instagram professional account ID or the
+ * Facebook Page ID that is linked to it" — so on this connection the Page id is
+ * the target and `comments` belongs in its field list. The old comment was an
+ * honest "we have not checked"; it is checked now.
+ *
+ * That makes the Page's list a union across both products rather than one
+ * product's list, which is why `planPageSubscription` merges instead of
+ * replacing: writing Instagram's two fields wholesale would drop `feed` and take
+ * Facebook comments down with it — the exact accident the merge exists to
+ * prevent. The read-back below is what catches the other direction, a field name
+ * Graph will not accept on a Page.
+ *
+ * This is the second gate, not the first. Delivery also needs Advanced Access on
+ * `instagram_manage_comments` (§6.34), so a correct field list here does not by
+ * itself make a comment arrive — it makes the approval, when it lands, turn the
+ * channel on rather than start another search.
  *
  * Run after the app-level write rather than before, so a run that fails here
  * leaves the app-level list already correct and the second half is all that is

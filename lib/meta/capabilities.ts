@@ -1,30 +1,35 @@
 /**
  * What each Meta permission actually buys, and which of them a token is missing.
  *
- * Written after an afternoon spent reading a missing *grant* as a missing App
- * Review approval — they are different things and only one of them was ever the
- * problem here (`docs/PROJECT-STATE.md` §6.34).
+ * Two different things gate a Meta capability and they are constantly confused
+ * here — this table exists so `check_meta_permissions` can name which one is
+ * actually in the way (`docs/PROJECT-STATE.md` §6.34).
  *
- * **Adding a permission to an App Review submission grants nothing.** A
- * submission asks for **Advanced Access**, which is what lets an app use a
- * permission for the general public, and it changes nothing at all until it is
- * approved. Every permission also has **Standard Access**, which needs no
- * review and works immediately — but only for people holding a role on the app
- * (admin, developer, tester) and only on assets those people administer. An
- * admin testing with their own account is exactly the case Standard Access is
- * for, so "we are waiting on App Review" is the wrong answer to "my own comment
- * did not arrive".
+ * **The grant.** The permission has to be in the scope list of the
+ * authorisation that minted the token. A permission nobody requested is granted
+ * to nobody, and Meta reports that as silence rather than as an error.
  *
- * What Standard Access still requires is that the permission was **asked for
- * and granted**: it has to be in the scope list of the authorisation that
- * produced the token. A permission nobody requested is not granted to anybody,
- * role holder or not, and Meta reports that as silence rather than as an error —
- * the webhook simply never fires.
+ * **The access level.** Every permission has **Standard Access**, which needs no
+ * review but works only for people holding a role on the app (admin, developer,
+ * tester) on assets they administer, and **Advanced Access**, which reaches the
+ * general public and is what an App Review submission asks for.
  *
- * Hence this table. It is the map from a capability somebody is trying to use to
- * the permissions that have to be in that scope list, so `check_meta_permissions`
- * can name the missing one instead of leaving it to be inferred from which half
- * of a channel went quiet.
+ * For nearly everything here, an admin testing on their own account is covered
+ * by Standard Access and App Review is irrelevant until launch. **The Instagram
+ * `comments` webhook is the documented exception**, and it is worth stating
+ * flatly because assuming the general rule cost a day: Meta requires *Advanced
+ * Access* to receive `comments` and `live_comments` notifications at all. An app
+ * admin commenting on their own public post gets nothing until the submission is
+ * approved. That is why the account can have DMs working — `instagram_manage_
+ * messages` is fine at Standard Access for a role holder — while comments stay
+ * silent no matter how the token is regenerated.
+ *
+ *   "Your app must have successfully completed App Review (advanced access) to
+ *    receive webhooks notifications for comments and live_comments webhooks
+ *    fields."
+ *
+ * `advancedAccess` marks the rows where that applies, so a granted-but-silent
+ * permission is diagnosed rather than re-debugged.
  */
 
 export type Capability = {
@@ -33,6 +38,13 @@ export type Capability = {
   /** What is observed when it is missing — the symptom, not the mechanism. */
   symptom: string;
   permissions: readonly string[];
+  /**
+   * Set where Meta requires Advanced Access, i.e. an approved App Review
+   * submission, even for a role holder on their own assets. The string is the
+   * reason, printed beside the grant so "every permission is granted and it is
+   * still silent" is a diagnosis rather than the start of another search.
+   */
+  advancedAccess?: string;
 };
 
 /**
@@ -72,12 +84,18 @@ export const CAPABILITIES: readonly Capability[] = [
     */
     name: 'Instagram comment webhooks and moderation',
     symptom: 'no ticket is opened when somebody comments on a post, while DMs still arrive',
+    // Meta's list for Instagram API with Facebook Login, verbatim.
     permissions: [
       'instagram_basic',
       'instagram_manage_comments',
+      'pages_manage_metadata',
       'pages_read_engagement',
       'pages_show_list',
     ],
+    advancedAccess:
+      'Meta requires Advanced Access to deliver `comments` at all — an approved App Review ' +
+      'submission. Standard Access does not cover this one even for an app admin on their own ' +
+      'public post, which is why regenerating the token changes nothing.',
   },
   {
     name: "Customer's locale and gender on the contact",
