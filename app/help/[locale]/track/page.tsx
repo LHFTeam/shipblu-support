@@ -9,6 +9,7 @@ import { allow, clientIpFrom } from '@/lib/kb/rate-limit';
 import { kbViewer } from '@/lib/kb/viewer';
 import { normaliseTrackingNumber } from '@/lib/shipments/format';
 import { publicTrackingFor } from '@/lib/shipments/lookup';
+import { phraseOverrides } from '@/lib/shipments/phrases';
 import { stageDisplay, statusLabel } from '@/lib/shipments/status';
 import { ArticleList, ArticleRow, PageBody, PageHeader, Panel } from '../chrome';
 import { TrackForm } from './form';
@@ -167,7 +168,16 @@ async function Lookup({ locale, canonical }: { locale: Locale; canonical: string
    * is what keeps the promise this page makes in `trackPrivacyNote` true by
    * construction rather than by review (`docs/PROJECT-STATE.md` §6.38).
    */
-  const tracking = await publicTrackingFor(canonical);
+  /*
+   * Alongside it, the Arabic wording an admin has chosen in `/admin/tracking`.
+   * In parallel because the two have nothing to say to each other and the
+   * platform call is allowed four seconds; `phraseOverrides` never throws, so a
+   * wording that could not be read leaves the defaults rather than the page.
+   */
+  const [tracking, overrides] = await Promise.all([
+    publicTrackingFor(canonical),
+    phraseOverrides(),
+  ]);
 
   /*
    * One object or none, rather than a shipment and a display beside it. Every
@@ -184,7 +194,7 @@ async function Lookup({ locale, canonical }: { locale: Locale; canonical: string
    */
   const status = tracking
     ? {
-        label: statusLabel(locale, tracking.status),
+        label: statusLabel(locale, tracking.status, overrides),
         at: tracking.statusAt,
         events: tracking.events,
         estimatedDate: tracking.estimatedDate,
@@ -285,7 +295,7 @@ async function Lookup({ locale, canonical }: { locale: Locale; canonical: string
 
         {status !== null && status.events.length > 0 ? (
           <div className="mt-6 border-t border-[var(--kb-border)] pt-5">
-            <Timeline locale={locale} events={status.events} />
+            <Timeline locale={locale} events={status.events} overrides={overrides} />
           </div>
         ) : null}
 

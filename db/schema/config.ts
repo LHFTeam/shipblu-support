@@ -438,3 +438,31 @@ export const autoResponses = pgTable(
     index('auto_responses_active_idx').on(t.isActive),
   ],
 );
+
+/**
+ * The Arabic wording the public tracking page shows for a delivery status or a
+ * courier's reason code.
+ *
+ * **Overrides only.** Every phrase already has a default compiled into
+ * `lib/shipments/status.ts`, and a row here exists only where somebody decided
+ * ours was not ShipBlu's. That is what makes this table safe to be empty — which
+ * it is on the day it ships — and what makes adding a new phrase in code a
+ * deploy rather than a data migration. Clearing the box in the admin screen
+ * deletes the row rather than storing an empty string, so "reset to default" is
+ * a real action and not a second kind of blank.
+ *
+ * Keyed by the phrase's stable `key` rather than by the platform's status token:
+ * several tokens read as one phrase — `picked_up`, `pickup_complete` and
+ * `collected` are all `picked_up` — and keying on the token would ask an admin to
+ * type the same Arabic three times and keep the three in step forever.
+ *
+ * `ar` and no `en` column, deliberately. English readers see the platform's own
+ * word, which is the property `/en/track` exists to have; a column that let an
+ * admin restate ShipBlu's English in our own words would quietly undo it.
+ */
+export const shipmentPhrases = pgTable('shipment_phrases', {
+  key: text('key').primaryKey(),
+  ar: text('ar').notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedBy: uuid('updated_by').references(() => agents.id, { onDelete: 'set null' }),
+});

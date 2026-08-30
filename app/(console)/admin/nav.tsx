@@ -47,6 +47,10 @@ const SECTIONS: { title: string; links: { href: string; label: string }[] }[] = 
     ],
   },
   {
+    title: 'Help centre',
+    links: [{ href: '/admin/tracking', label: 'Tracking wording' }],
+  },
+  {
     title: 'Channels',
     links: [
       { href: '/admin/channels', label: 'Channels' },

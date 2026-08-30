@@ -95,6 +95,48 @@ const DISPLAY: Record<ShipmentStage, Omit<StageDisplay, 'stage'>> = {
 };
 
 /**
+ * One entry of a phrase table: what it means, how it is recognised, and how it
+ * reads in Arabic when nobody has overridden it.
+ */
+/**
+ * Admin-saved wording, keyed by `Phrase.key`. A key with no entry keeps the
+ * default compiled into this file.
+ */
+export type PhraseOverrides = Readonly<Record<string, string>>;
+
+type Phrase = {
+  /**
+   * The stable name this row is stored and overridden under.
+   *
+   * It is the row's identity, not its wording: an admin's override in
+   * `shipment_phrases` points at this key, so renaming one silently drops that
+   * override back to the default. Add a row rather than repurposing a key.
+   */
+  key: string;
+  /**
+   * The Arabic reading of this row, and only Arabic.
+   *
+   * There is no `en` column because there is nothing to put in it: the platform
+   * writes its statuses in English, so `humaniseStatus` already shows an English
+   * reader the platform's own word — which is the property `/en/track` is meant
+   * to have (see `statusLabel`). A column that restated those words in ours
+   * would be a second English vocabulary to keep in step with ShipBlu's, for no
+   * reader.
+   *
+   * A *default*, not the last word: `/admin/tracking` overrides any of these
+   * without a deploy, because whether a phrase matches ShipBlu's own Arabic is
+   * a question for the people who write ShipBlu's Arabic.
+   *
+   * Each string says only what its keywords establish. Where a row covers
+   * several outcomes that a customer would act on differently — cancelled,
+   * lost, damaged — they are separate rows rather than one reassuring phrase
+   * covering all three.
+   */
+  ar: string;
+  keywords: readonly string[];
+};
+
+/**
  * The delivery vocabulary: one row per thing a status can mean.
  *
  * Rows carry three things, and they are in one table rather than three because
@@ -134,40 +176,34 @@ const DISPLAY: Record<ShipmentStage, Omit<StageDisplay, 'stage'>> = {
  * interchangeably are listed out rather than stemmed — six extra strings beat a
  * stemmer that has to be right in two languages.
  */
-const VOCABULARY: ReadonlyArray<{
-  stage: ShipmentStage;
-  /**
-   * The Arabic reading of this row, and only Arabic.
-   *
-   * There is no `en` column because there is nothing to put in it: the platform
-   * writes its statuses in English, so `humaniseStatus` already shows an English
-   * reader the platform's own word — which is the property `/en/track` is meant
-   * to have (see `statusLabel`). A column that restated those words in ours
-   * would be a second English vocabulary to keep in step with ShipBlu's, for no
-   * reader.
-   *
-   * Each string says only what its keywords establish. Where a row covers
-   * several outcomes that a customer would act on differently — cancelled,
-   * lost, damaged — they are separate rows rather than one reassuring phrase
-   * covering all three.
-   */
-  ar: string;
-  keywords: readonly string[];
-}> = [
-  { stage: 'exception', ar: 'أُلغيت الشحنة', keywords: ['cancelled', 'canceled', 'ملغي', 'ملغاة'] },
-  { stage: 'exception', ar: 'الشحنة مفقودة', keywords: ['lost', 'مفقود', 'مفقودة'] },
-  { stage: 'exception', ar: 'الشحنة تالفة', keywords: ['damaged', 'تالف', 'تالفة'] },
+const VOCABULARY: ReadonlyArray<Phrase & { stage: ShipmentStage }> = [
   {
+    key: 'cancelled',
+    stage: 'exception',
+    ar: 'أُلغيت الشحنة',
+    keywords: ['cancelled', 'canceled', 'ملغي', 'ملغاة'],
+  },
+  { key: 'lost', stage: 'exception', ar: 'الشحنة مفقودة', keywords: ['lost', 'مفقود', 'مفقودة'] },
+  {
+    key: 'damaged',
+    stage: 'exception',
+    ar: 'الشحنة تالفة',
+    keywords: ['damaged', 'تالف', 'تالفة'],
+  },
+  {
+    key: 'on_hold',
     stage: 'exception',
     ar: 'الشحنة متوقفة مؤقتًا',
     keywords: ['on hold', 'held', 'معلق', 'معلقة'],
   },
   {
+    key: 'under_review',
     stage: 'exception',
     ar: 'الشحنة قيد المراجعة',
     keywords: ['exception', 'investigation', 'قيد المراجعة'],
   },
   {
+    key: 'returned',
     stage: 'returned',
     ar: 'مرتجعة إلى الراسل',
     keywords: [
@@ -185,6 +221,7 @@ const VOCABULARY: ReadonlyArray<{
     ],
   },
   {
+    key: 'delivered',
     stage: 'delivered',
     ar: 'تم التسليم',
     keywords: [
@@ -198,21 +235,25 @@ const VOCABULARY: ReadonlyArray<{
     ],
   },
   {
+    key: 'unreachable',
     stage: 'attempted',
     ar: 'لم يرد المستلم',
     keywords: ['unreachable', 'no answer', 'not answering', 'لم يرد'],
   },
   {
+    key: 'rescheduled',
     stage: 'attempted',
     ar: 'تم تأجيل التسليم',
     keywords: ['rescheduled', 'postponed', 'اعادة جدولة', 'إعادة جدولة', 'مؤجل', 'مؤجلة'],
   },
   {
+    key: 'attempted',
     stage: 'attempted',
-    ar: 'تعذّر التسليم',
+    ar: 'محاولة تسليم غير ناجحة',
     keywords: ['attempt', 'attempts', 'attempted', 'failed attempt', 'محاولة', 'تعذر التسليم'],
   },
   {
+    key: 'out_for_delivery',
     stage: 'out_for_delivery',
     ar: 'خرجت للتسليم',
     keywords: [
@@ -228,6 +269,7 @@ const VOCABULARY: ReadonlyArray<{
     ],
   },
   {
+    key: 'en_route',
     stage: 'in_transit',
     // The platform's own linehaul step. Observed immediately *before*
     // `in_transit` on delivery day rather than as a synonym for the courier
@@ -237,29 +279,48 @@ const VOCABULARY: ReadonlyArray<{
     keywords: ['en route', 'line haul', 'في الطريق للفرع'],
   },
   {
+    key: 'picked_up',
     stage: 'in_transit',
     ar: 'تم استلام الشحنة من التاجر',
     keywords: ['picked up', 'pickup complete', 'collected', 'تم الاستلام من التاجر', 'تم الشحن'],
   },
   {
+    key: 'at_hub',
     stage: 'in_transit',
     ar: 'وصلت إلى الفرع',
     keywords: ['received at', 'arrived at', 'at hub', 'بالفرع'],
   },
-  { stage: 'in_transit', ar: 'غادرت الفرع', keywords: ['departed'] },
-  { stage: 'in_transit', ar: 'جارٍ الفرز', keywords: ['sorting', 'sorted', 'فرز'] },
-  { stage: 'in_transit', ar: 'الشحنة في الطريق', keywords: ['in transit', 'transit'] },
+  { key: 'departed', stage: 'in_transit', ar: 'غادرت الفرع', keywords: ['departed'] },
   {
+    key: 'sorting',
+    stage: 'in_transit',
+    ar: 'جارٍ الفرز',
+    keywords: ['sorting', 'sorted', 'فرز'],
+  },
+  {
+    key: 'in_transit',
+    stage: 'in_transit',
+    ar: 'الشحنة في الطريق',
+    keywords: ['in transit', 'transit'],
+  },
+  {
+    key: 'out_for_pickup',
     stage: 'created',
-    // Both are pre-pickup: the parcel is still the merchant's, and a courier
-    // being *sent to collect it* has not moved it. Reading either as transit
-    // would tell a recipient their parcel is on its way while it is still on a
-    // shelf in the shop.
+    // Both this and `pickup_requested` are pre-pickup: the parcel is still the
+    // merchant's, and a courier being *sent to collect it* has not moved it.
+    // Reading either as transit would tell a recipient their parcel is on its
+    // way while it is still on a shelf in the shop.
     ar: 'خرج المندوب لاستلام الشحنة',
     keywords: ['out for pickup'],
   },
-  { stage: 'created', ar: 'تم طلب استلام الشحنة', keywords: ['pickup requested'] },
   {
+    key: 'pickup_requested',
+    stage: 'created',
+    ar: 'تم طلب استلام الشحنة',
+    keywords: ['pickup requested'],
+  },
+  {
+    key: 'awaiting_pickup',
     stage: 'created',
     ar: 'بانتظار الاستلام من التاجر',
     keywords: [
@@ -271,9 +332,43 @@ const VOCABULARY: ReadonlyArray<{
     ],
   },
   {
+    key: 'created',
     stage: 'created',
     ar: 'تم إنشاء الشحنة',
     keywords: ['created', 'draft', 'new', 'scheduled', 'booked', 'تم الإنشاء', 'تم الانشاء'],
+  },
+];
+
+/**
+ * The reason a courier gave, as it arrives on a `tracking_events` comment.
+ *
+ * Production writes these as two halves joined by a dash — an English reason
+ * code the ops tool offers, then whatever the courier typed, in Arabic:
+ * `Customer refused to accept the shipment - الاوردر ناقص`. Under an Arabic
+ * status that is the worst line on the page, because on a failed delivery the
+ * reason is the part the recipient actually needs.
+ *
+ * Only the first half is ours to translate. The second is a human being's own
+ * words about this one parcel and stays exactly as it was typed — translating
+ * free text is how a page starts inventing facts, which is the one thing this
+ * module refuses to do.
+ *
+ * **Two rows, because production has shown two reason codes.** This is a much
+ * thinner reading of the platform than `VOCABULARY` above, and it is stated
+ * plainly rather than padded out with plausible-looking guesses: an unmatched
+ * reason shows verbatim, exactly as an unmatched status does, and the admin
+ * screen is where a new one gets added the day somebody sees it.
+ */
+const REASONS: ReadonlyArray<Phrase> = [
+  {
+    key: 'reason_refused',
+    ar: 'العميل رفض استلام الشحنة',
+    keywords: ['refused', 'refused to accept', 'rejected', 'declined'],
+  },
+  {
+    key: 'reason_rescheduled',
+    ar: 'العميل طلب تأجيل التسليم',
+    keywords: ['rescheduled', 'customer rescheduled', 'postponed', 'reschedule'],
   },
 ];
 
@@ -297,24 +392,23 @@ function flatten(label: string): string {
 }
 
 /**
- * The vocabulary row a label names, or null when nothing in the table matches.
+ * The row of a phrase table that a piece of free text names, or null when
+ * nothing in it matches.
  *
  * One walk shared by `stageFor` and `statusLabel`, so a badge can never show the
  * Arabic of one row while the stepper is drawn from another.
  */
-function rowFor(label: string | null | undefined): (typeof VOCABULARY)[number] | null {
-  if (!label) return null;
-  const flat = flatten(label);
+function rowFor<T extends Phrase>(table: readonly T[], text: string | null | undefined): T | null {
+  if (!text) return null;
+  const flat = flatten(text);
   if (!flat) return null;
 
-  return (
-    VOCABULARY.find((row) => row.keywords.some((keyword) => flat.includes(` ${keyword} `))) ?? null
-  );
+  return table.find((row) => row.keywords.some((keyword) => flat.includes(` ${keyword} `))) ?? null;
 }
 
 /** The stage a label names, or `unknown` when nothing in the table matches. */
 export function stageFor(label: string | null | undefined): ShipmentStage {
-  return rowFor(label)?.stage ?? 'unknown';
+  return rowFor(VOCABULARY, label)?.stage ?? 'unknown';
 }
 
 /** The stage plus everything the tracking page draws from it. */
@@ -379,9 +473,94 @@ const ARABIC_SCRIPT = /\p{Script=Arabic}/u;
  *   thing would be churn with a chance of being wrong — the keyword table
  *   carries Arabic spellings so the *stage* still reads correctly, which is all
  *   that is needed once the words themselves are already legible.
+ *
+ * `overrides` is what `/admin/tracking` saved, keyed by `Phrase.key`. Passed in
+ * rather than read here on purpose: this module is imported by the worker and
+ * tested with no database at all, so the one place that needs the admin's
+ * wording — the public page — loads it and hands it over. See
+ * `lib/shipments/phrases.ts`.
  */
-export function statusLabel(locale: Locale, label: string | null | undefined): string {
+export function statusLabel(
+  locale: Locale,
+  label: string | null | undefined,
+  overrides: PhraseOverrides = {},
+): string {
   if (!label) return '';
   if (locale !== 'ar' || ARABIC_SCRIPT.test(label)) return humaniseStatus(label);
-  return rowFor(label)?.ar ?? humaniseStatus(label);
+
+  const row = rowFor(VOCABULARY, label);
+  return row ? phrase(row, overrides) : humaniseStatus(label);
 }
+
+/**
+ * Where the platform's own wording ends and the courier's own words begin.
+ *
+ * Matched at the *start* of the comment and only there. A dash inside the
+ * courier's note is ordinary — `الاوردر ناقص - مش هيستلم` — and splitting on
+ * every one of them would scatter a sentence somebody typed.
+ */
+const REASON_SPLIT = /^([^\-–—]{2,80})\s*[-–—]\s*(.+)$/s;
+
+/**
+ * A tracking event's comment, with the half that is ours to translate translated.
+ *
+ * Production writes a comment as an English reason code, a dash, and whatever
+ * the courier typed: `Customer refused to accept the shipment - الاوردر ناقص`.
+ * The first half is a fixed vocabulary and the second is one human being's
+ * account of one parcel, so exactly one of them can be translated without
+ * inventing anything — and on a failed delivery the reason is the line the
+ * recipient most needs.
+ *
+ * A comment with no reason code we recognise is shown exactly as it arrived,
+ * dash and all. That is the same refusal `statusLabel` makes: the page would
+ * rather be half-English than confidently wrong about why a parcel did not
+ * arrive.
+ */
+export function commentText(
+  locale: Locale,
+  comment: string | null | undefined,
+  overrides: PhraseOverrides = {},
+): string {
+  if (!comment) return '';
+  const text = comment.trim();
+  if (locale !== 'ar' || !text) return text;
+
+  const split = REASON_SPLIT.exec(text);
+  const head = split ? split[1]!.trim() : text;
+  const rest = split ? split[2]!.trim() : '';
+
+  // Already Arabic, so there is no reason code in front of it to translate.
+  if (ARABIC_SCRIPT.test(head)) return text;
+
+  const row = rowFor(REASONS, head);
+  if (!row) return text;
+
+  const reason = phrase(row, overrides);
+  return rest ? `${reason} - ${rest}` : reason;
+}
+
+/**
+ * The default wording, unless an admin has replaced it.
+ *
+ * An override that is blank or only whitespace is treated as absent rather than
+ * as an empty label: a status badge with nothing in it says less than the
+ * English word it replaced, and the admin screen's way to undo an override is
+ * to clear the box.
+ */
+function phrase(row: Phrase, overrides: PhraseOverrides): string {
+  return overrides[row.key]?.trim() || row.ar;
+}
+
+/**
+ * Every phrase the tracking page can show, for the screen that edits them.
+ *
+ * Exported as data rather than rendered here so `/admin/tracking` can list the
+ * defaults, the keywords each row answers to, and whichever of them somebody has
+ * overridden — a screen that only showed the overrides would be a list of
+ * whatever was already changed, which is no way to find the phrase you want.
+ */
+export const PHRASE_GROUPS: ReadonlyArray<{ kind: 'status' | 'reason'; rows: readonly Phrase[] }> =
+  [
+    { kind: 'status', rows: VOCABULARY },
+    { kind: 'reason', rows: REASONS },
+  ];
