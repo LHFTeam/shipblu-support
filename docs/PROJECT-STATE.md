@@ -875,6 +875,30 @@ on node type (User)` with no subcode, which that predicate declines by design,
   (`plans/meta-app-review-submission.md`), and Advanced Access is exactly what
   that submission is for.
 
+  **Meta has now confirmed that in writing, and the confirmation was sitting in
+  our own table.** _2026-08-30._ Reconnecting the account fires `object:
+"permissions"` webhooks, one per grant, and we store them like any other
+  delivery. Both reconnections on 2026-08-29 — 15:53 and 16:45 UTC — sent exactly
+  two, and no others have ever arrived:
+
+  ```sql
+  select c->>'field', c->'value'->>'verb', count(*)
+  from webhook_events w,
+       lateral jsonb_array_elements(w.payload->'entry') e,
+       lateral jsonb_array_elements(e->'changes') c
+  where w.payload->>'object' = 'permissions' group by 1, 2;
+  -- instagram_basic            granted  2
+  -- instagram_manage_messages  granted  2
+  ```
+
+  `instagram_manage_messages` granted and `instagram_manage_comments` absent is
+  precisely the split the account shows: DMs arrive, comments never do. This is
+  the cheapest check there is for "which half of Instagram is live", it needs no
+  Graph call and no dashboard, and it should be the first query run the next time
+  a channel works in one direction only. It also closes the two cheap conditions
+  the item below asks to rule out first — a private account or a self-comment
+  would not produce this asymmetry, since neither is permission-shaped.
+
   That is a real chicken-and-egg and it is **asymmetric between the two
   platforms**: `feed` on a Page needs only `pages_manage_metadata` and
   `pages_show_list`, which the token already has, so Facebook comment footage can
@@ -1832,6 +1856,43 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     **The permission set flips with the connection**: `instagram_basic` +
     `instagram_manage_comments` + the `pages_*` items, not the
     `instagram_business_*` pair. See the table in the plan.
+
+33. **Meta's "Send to Server" test button works exactly once, then reports
+    success forever while doing nothing.** _Found 2026-08-30._ The button posts a
+    _byte-identical_ sample on every press. `deliveryId()` derives the delivery
+    key from the batch contents, so every press produces the same
+    `c:17865799348089039:add`, the unique index rejects it, `onConflictDoNothing`
+    returns no row, and the endpoint answers `200 {"status":"duplicate"}` without
+    enqueuing anything. Meta shows a green "successfully sent" for a delivery
+    that reached a ticket only on the very first press in the life of the table —
+    ours was 2026-08-29 09:50:44, ticket #10942.
+
+    That is correct behaviour for real traffic and it should not be relaxed: a
+    genuine Meta redelivery of a real comment must be dropped. What was wrong is
+    that the drop was **silent**, so "we deduped it" and "it never arrived" — a
+    parser bug and a permission problem, with nothing in common — looked
+    identical from the outside. It sent an afternoon into the comment parser
+    looking for a fault in code that had already handled the same payload
+    correctly the day before. The endpoint now logs the colliding key.
+
+    Reading the request log tells the two apart before any code is opened. The
+    test button and real traffic use **different user agents**, and the response
+    size splits on the outcome:
+
+    | `userAgent`                | Meaning               | `responseBytes` |
+    | -------------------------- | --------------------- | --------------- |
+    | `facebookexternalua`       | real delivery         | 408 = queued    |
+    | `Webhooks/1.0 (fb.me/...)` | dashboard test button | 412 = duplicate |
+
+    On 2026-08-30 the three presses at 13:23:52, 13:24:50 and 13:25:31 were all
+    `Webhooks/1.0`, all 200, all 412 bytes, and `webhook_events` has no row after
+    13:19:59. To actually exercise the pipeline again, delete that one row — or
+    read the log line — rather than pressing the button harder.
+
+    **A green test button is not evidence the account is subscribed, either.** It
+    posts straight at the callback, so it proves the URL, the signature and the
+    parser and says nothing whatsoever about what Meta will send unprompted. The
+    subscription question is answered by the `permissions` webhooks in §5.2.
 
 ## 7. Verification already done
 
