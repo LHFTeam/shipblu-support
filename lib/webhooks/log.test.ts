@@ -70,14 +70,14 @@ describe('describeIncomingWebhook', () => {
     expect(output).not.toContain('c2hpcGJsdTpzdXBlci1zZWNyZXQ=');
     expect(output).not.toContain('abc123');
     expect(output).not.toContain('k-live-9999');
-    expect(output).toContain('authorization: [redacted]');
-    expect(output).toContain('cookie: [redacted]');
-    expect(output).toContain('x-api-key: [redacted]');
+    expect(output).toContain('authorization=[redacted]');
+    expect(output).toContain('cookie=[redacted]');
+    expect(output).toContain('x-api-key=[redacted]');
 
     // The signature is evidence, not a credential, and a mismatch is one of the
     // failures this tool exists to show.
-    expect(output).toContain('x-hub-signature-256: sha256=deadbeef');
-    expect(output).toContain('user-agent: facebookexternalua');
+    expect(output).toContain('x-hub-signature-256=sha256=deadbeef');
+    expect(output).toContain('user-agent=facebookexternalua');
   });
 
   it('prints the path and the body, not the server origin', () => {
@@ -90,18 +90,36 @@ describe('describeIncomingWebhook', () => {
     expect(output).toContain('{"object":"instagram"}');
   });
 
+  it('keeps every header on one line, whatever the header count', () => {
+    /*
+      Render splits an app log on newlines, so a line per header meant ~20 log
+      entries per delivery on the busiest inbound path in the system — and on
+      Linux a write to a stdout pipe is synchronous, so that volume is paid on
+      the event loop.
+    */
+    const many = new Headers();
+    for (let i = 0; i < 25; i += 1) many.set(`x-custom-${i}`, String(i));
+
+    const lines = describeIncomingWebhook(delivery({ headers: many }));
+
+    // One summary line, one header line, one body line. Never one per header.
+    expect(lines).toHaveLength(3);
+    expect(lines[1]).toContain('x-custom-0=0');
+    expect(lines[1]).toContain('x-custom-24=24');
+  });
+
   it('truncates a long body and says how much it dropped', () => {
     const body = 'x'.repeat(9000);
     const output = describeIncomingWebhook(delivery({ rawBody: body })).join('\n');
 
-    expect(output).toContain('9000 byte body');
+    expect(output).toContain('9000b');
     expect(output).toContain('… 1000 more bytes');
     expect(output).not.toContain('x'.repeat(8001));
   });
 
   it('says so rather than printing a blank line for an empty body', () => {
     const output = describeIncomingWebhook(delivery({ rawBody: '' })).join('\n');
-    expect(output).toContain('0 byte body');
+    expect(output).toContain('0b');
     expect(output).toContain('(empty)');
   });
 });

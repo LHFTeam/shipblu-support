@@ -76,26 +76,45 @@ export type IncomingWebhook = {
  */
 export function describeIncomingWebhook(delivery: IncomingWebhook): string[] {
   const path = safePath(delivery.url);
-  const lines = [`[webhook:all] ${delivery.source} ${delivery.method} ${path}`];
 
-  const names = [...delivery.headers.keys()].sort();
-  for (const name of names) {
-    const key = name.toLowerCase();
-    const value = REDACTED_HEADERS.has(key) ? '[redacted]' : delivery.headers.get(name);
-    lines.push(`[webhook:all]   ${key}: ${value}`);
-  }
+  /*
+    Headers on **one** line rather than one line each.
+
+    Render splits an app log on newlines, so the first version of this turned a
+    single `console.log` into roughly twenty separate log entries per delivery —
+    twenty for the headers, more for a multi-line body. That is a twentyfold
+    amplification of the log pipeline's work on the busiest inbound path in the
+    system, for output nobody reads header-by-header anyway, and on Linux
+    `process.stdout` to a pipe is a *synchronous* write: the cost of log volume
+    here is paid on the event loop, not in the background.
+
+    One entry is also simply better to read — a delivery is one thing, and
+    grepping `[webhook:all]` should return one line per delivery, not a wall.
+  */
+  const headers = [...delivery.headers.keys()]
+    .sort()
+    .map((name) => {
+      const key = name.toLowerCase();
+      return `${key}=${REDACTED_HEADERS.has(key) ? '[redacted]' : delivery.headers.get(name)}`;
+    })
+    .join(' ');
 
   const body = delivery.rawBody;
-  lines.push(`[webhook:all]   ${body.length} byte body:`);
+  const lines = [
+    `[webhook:all] ${delivery.source} ${delivery.method} ${path} ${body.length}b`,
+    `[webhook:all]   ${headers}`,
+  ];
 
+  // The body keeps its own entry: it is the part worth reading, it legitimately
+  // contains newlines, and separating it means the header line stays greppable.
   if (body.length <= MAX_BODY) {
-    lines.push(body || '(empty)');
+    lines.push(`[webhook:all]   body: ${body || '(empty)'}`);
   } else {
     // Truncated rather than dropped, and it says by how much: a body that is
     // merely long is still worth most of its first 8 KB, and a silent cut would
     // be read as a malformed payload.
     lines.push(
-      `${body.slice(0, MAX_BODY)}\n[webhook:all]   … ${body.length - MAX_BODY} more bytes`,
+      `[webhook:all]   body: ${body.slice(0, MAX_BODY)} … ${body.length - MAX_BODY} more bytes`,
     );
   }
 

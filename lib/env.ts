@@ -226,8 +226,19 @@ const schema = z.object({
    * `env()`, for the reason `SHIPMENT_TRACKING_PATTERN` above is: a diagnostic
    * must not be able to fail the request it was only meant to describe. Declared
    * here anyway so it is discoverable and paired with `render.yaml`.
+   *
+   * **`z.string()` and not `z.enum(['true','false'])`, which is what it was.**
+   * A strict enum here does not validate a debug flag, it arms one: this schema
+   * is parsed as a whole by `env()`, which the database client, the auth helpers
+   * and every page and action reach, so a value of `True` or `1` or `"true "`
+   * would not have quietly disabled logging — it would have thrown for the
+   * entire application, on every request, with a message about a variable that
+   * has nothing to do with the page that failed. A tightened type on a
+   * *diagnostic* is worth nothing and risks everything; the reader in
+   * `lib/webhooks/log.ts` already treats anything but exactly `true` as off,
+   * which is where that strictness belongs.
    */
-  LOG_ALL_INCOMING_WEBHOOKS: z.enum(['true', 'false']).optional(),
+  LOG_ALL_INCOMING_WEBHOOKS: z.string().optional(),
 
   WORKER_CONCURRENCY: z.coerce.number().int().positive().default(5),
   WORKER_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(1000),
