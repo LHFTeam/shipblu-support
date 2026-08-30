@@ -426,6 +426,45 @@ When you add a variable, add it to `render.yaml` in the same commit. The
 blueprint is meant to describe the running system; it is not documentation that
 drifts.
 
+### Seeing an inbound webhook: `LOG_ALL_INCOMING_WEBHOOKS`
+
+Set it to `true` on the **`shipblu-support` web service** and every inbound
+delivery — Meta, WhatsApp and email — is printed with its headers and raw body.
+Grep the logs for `[webhook:all]`. Unset it again afterwards.
+
+It exists because the most expensive question about this system is also the one
+the database cannot answer: **did the delivery arrive at all?** `webhook_events`
+is written _after_ the signature check, and not written at all for a duplicate.
+So "rejected", "malformed", "deduped" and "never sent" are the same absence of a
+row — four states with four different fixes, and no way to tell them apart. The
+Meta investigations in §6 each lost hours inside a parser for events that had
+never reached the endpoint.
+
+So it logs at the top of each handler, **before** verification, JSON parsing and
+the duplicate check. Nothing downstream can suppress it; that ordering is the
+whole feature.
+
+Three things to know before switching it on:
+
+- **It prints customer message content**, names and phone numbers, into the
+  Render log — a less protected place than the database. Inherent: a redacted
+  payload could not answer the question. Treat it as a session, not a setting.
+- **Credentials never print.** `authorization` is redacted, and that is not
+  hypothetical — Postmark authenticates with Basic Auth, so the inbound email
+  endpoint receives `EMAIL_WEBHOOK_SECRET` on every delivery. `cookie`,
+  `proxy-authorization` and `x-api-key` go with it. `x-hub-signature-256` is
+  deliberately **kept**: an HMAC rather than a secret, already persisted by the
+  routes on that reasoning, and a signature that is missing or mismatched is one
+  of the failures this is for.
+- **The Meta `GET` handshake is deliberately not logged.** Its query string
+  carries `hub.verify_token`.
+
+Only `true` turns it on — `1`, `TRUE` and `yes` are all off rather than
+helpfully coerced, because the cost of a half-set flag is customer content in a
+log nobody meant to fill. Read through `process.env` in `lib/webhooks/log.ts`
+rather than `env()`, for the reason `SHIPMENT_TRACKING_PATTERN` is: a diagnostic
+must never be able to fail the request it was only meant to describe.
+
 ### The three-group split is not applied on Render yet
 
 `render.yaml` describes it; the dashboard still has the single `shipblu-shared`
@@ -1941,6 +1980,24 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     posts straight at the callback, so it proves the URL, the signature and the
     parser and says nothing whatsoever about what Meta will send unprompted. The
     subscription question is answered by the `permissions` webhooks in §5.2.
+
+    **There is now a switch for the general version of this.** Set
+    `LOG_ALL_INCOMING_WEBHOOKS=true` on the `shipblu-support` web service and
+    every inbound delivery — Meta, WhatsApp and email — is printed with its
+    headers and raw body _before_ signature verification, JSON parsing and the
+    duplicate check, so nothing downstream can hide it. That is the ordering
+    that matters: `webhook_events` is written after the signature check and not
+    at all for a duplicate, so the database cannot distinguish "rejected",
+    "malformed", "deduped" and "never sent" — and this investigation burned an
+    afternoon on exactly that ambiguity.
+
+    Turn it off again afterwards. It puts customer message content into the
+    Render log, which is less protected than the database; credential headers
+    (`authorization` — Postmark sends `EMAIL_WEBHOOK_SECRET` there on every
+    delivery — plus `cookie` and `x-api-key`) are redacted regardless, and
+    `x-hub-signature-256` is deliberately kept because it is evidence rather
+    than a secret. The Meta GET handshake is deliberately **not** logged: its
+    query string carries `hub.verify_token`.
 
 34. **Two different things gate a Meta capability, and the Instagram `comments`
     webhook is gated by the rarer one.** _Found 2026-08-30, over three wrong

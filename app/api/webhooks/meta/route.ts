@@ -10,6 +10,7 @@ import {
 } from '@/lib/meta/signing';
 import type { MetaWebhookPayload } from '@/lib/meta/types';
 import { enqueue } from '@/lib/queue';
+import { logIncomingWebhook } from '@/lib/webhooks/log';
 import { SIGNATURE_HEADER, verifyChallenge, verifySignature } from '@/lib/whatsapp/verify';
 
 export const dynamic = 'force-dynamic';
@@ -62,6 +63,17 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: 'unreadable body' }, { status: 400 });
   }
+
+  // Before verification and before parsing, so a delivery this endpoint is about
+  // to reject — bad signature, unreadable JSON, duplicate id — is still seen.
+  // Off unless LOG_ALL_INCOMING_WEBHOOKS is true.
+  logIncomingWebhook({
+    source: 'meta',
+    method: request.method,
+    url: request.url,
+    headers: request.headers,
+    rawBody,
+  });
 
   // Parsed before the signature is checked, which the body being *read* rather
   // than rewritten makes safe. It is the payload's own `object` that says which

@@ -253,6 +253,18 @@ projects:
                 sync: false
               - key: FRESHDESK_API_KEY
                 sync: false
+              # Debug switch, normally unset. `true` prints every inbound webhook
+              # — headers and raw body — before it is verified or parsed, which
+              # is the only way to tell a delivery that was rejected from one
+              # that never arrived. Deliberately on the web service alone: it is
+              # the only service with an inbound endpoint, and scoping it here
+              # keeps it out of the group and off the worker and crons.
+              #
+              # Turn it off again after the session. It puts customer message
+              # content into the Render log, which is a less protected place than
+              # the database; credentials are redacted regardless.
+              - key: LOG_ALL_INCOMING_WEBHOOKS
+                sync: false
               # Re-declaring any group key here would shadow the group and take
               # the service value instead.
 
