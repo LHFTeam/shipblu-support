@@ -232,16 +232,18 @@ function readComment(
     platform,
     connection,
     commentId,
-    // Same guard as Facebook's above, for the same reason and one Instagram has
-    // not yet been observed to need: `ingestMetaComment` keys the ticket on
-    // `parent_id ?? comment_id`, so a `parent_id` naming the *media* rather than
-    // a parent comment would collapse every top-level comment on that post onto
-    // one ticket. Meta documents `parent_id` as present only on a reply, but no
-    // real Instagram comment has ever reached this branch to confirm it — the
-    // permission that gates delivery is still unapproved (§6.30) — and the
-    // sample payload carries `parent_id` alongside a distinct `media.id`, so the
-    // shape it takes on a top-level comment is genuinely unverified. A reply's
-    // parent is always a comment, so this cannot discard a real thread link.
+    // Same guard as Facebook's above, for the same reason: `ingestMetaComment`
+    // keys the ticket on `parent_id ?? comment_id`, so a `parent_id` naming the
+    // *media* rather than a parent comment would collapse every top-level
+    // comment on that post onto one ticket.
+    //
+    // **Settled by a real payload on 2026-08-30**, having been an open question
+    // for as long as this branch had never run: a top-level comment carries no
+    // `parent_id` at all. Meta's own sample does carry one alongside a distinct
+    // `media.id`, which is what made the shape look ambiguous — the sample is
+    // describing a reply. The guard stays, because it costs nothing and a
+    // reply's parent is always a comment, so it cannot discard a real thread
+    // link; but it is now belt over braces rather than the load-bearing part.
     parentCommentId: value.parent_id && value.parent_id !== mediaId ? value.parent_id : null,
     postId: mediaId,
     from: value.from?.id ?? '',

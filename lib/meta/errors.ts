@@ -69,6 +69,31 @@ export function explainMetaSendError(error: MetaApiError, context: MetaSendConte
     );
   }
 
+  /*
+    A reply posted at a comment Graph would not accept.
+
+    Checked before the direct-message branches only in the sense that it cannot
+    collide with them — they require `sendKind === 'dm'` — but it is the branch
+    that matters most in practice, because **nothing else in the system will
+    ever say a comment is gone.** Verified on 2026-08-30 at the request log
+    rather than the database, which rules out a delivery that arrived and was
+    not stored: a comment deleted on Instagram produces no webhook at all. Not a
+    `remove` verb, not an empty change — no HTTP request. So the ticket goes on
+    showing a comment that no longer exists publicly, and the first and only
+    time anybody learns otherwise is when an agent's reply is refused.
+
+    Facebook is not the same: a deletion arrives as `feed` with `verb: remove`,
+    which `lib/meta/parse.ts` drops. It still does not mark the ticket, so the
+    reply fails the same way — the sentence below is worth printing on both.
+  */
+  if (context.sendKind !== 'dm' && isCommentTargetRefusal(error)) {
+    return withReference(
+      `${base}\n\n${commentTargetExplanation(context)}`,
+      error,
+      context.connection,
+    );
+  }
+
   // Inside the 24 hours the refusal has no tag to blame, and the two causes
   // that used to produce it are now refused before the request is made — so
   // what is left is genuinely unaccounted for, and saying which possibilities
@@ -86,6 +111,83 @@ export function explainMetaSendError(error: MetaApiError, context: MetaSendConte
 
 function isUnspecified(error: MetaApiError): boolean {
   return error.code === null || UNSPECIFIED_CODES.has(error.code);
+}
+
+/**
+ * Graph would not accept the comment this reply was addressed to.
+ *
+ * `100/33` is Meta's documented "Object with ID … does not exist, cannot be
+ * loaded due to missing permissions, or does not support this operation", and a
+ * bare `100` is the same refusal without the subcode. Both say the node was
+ * rejected and neither says which of the three reasons it was — which is the
+ * whole point of the sentence below.
+ *
+ * **Not observed against the real Graph**, like most of this file: no comment
+ * reply has ever been refused in production, because none has ever been sent.
+ * So it is matched on Meta's documented shape and kept narrow deliberately —
+ * anything else falls through to the generic branch, which prints Graph's own
+ * words and the reference. Silent beats confidently wrong, the same trade
+ * `isInstagramLinkageRefusal` makes. If a real refusal arrives wearing a
+ * different code, read it out of the log and widen this rather than guessing
+ * now (§6.27: a diagnostic keyed on a code nobody verified is silent exactly
+ * when it is needed).
+ */
+const COMMENT_TARGET_CODE = 100;
+const COMMENT_TARGET_SUBCODE = 33;
+
+function isCommentTargetRefusal(error: MetaApiError): boolean {
+  if (error.code !== COMMENT_TARGET_CODE) return false;
+  return error.subcode === COMMENT_TARGET_SUBCODE || error.subcode === null;
+}
+
+/**
+ * The three things this refusal can mean, in the order they are worth checking.
+ *
+ * Ordered by likelihood rather than by severity, which is the opposite of how
+ * the profile explanation is ordered and is right here: a customer deleting
+ * their own comment is ordinary and needs no fix, while an unapproved
+ * permission would have failed every comment reply rather than this one.
+ */
+function commentTargetExplanation(context: MetaSendContext): string {
+  const permission =
+    context.platform === 'facebook'
+      ? '`pages_manage_engagement`'
+      : context.connection === 'instagram_login'
+        ? '`instagram_business_manage_comments`'
+        : '`instagram_manage_comments`';
+
+  const oneOff =
+    context.sendKind === 'private_reply'
+      ? `\n\n**A private reply is also allowed exactly once per comment, ever, and only ` +
+        `within seven days of it.** If one has already been sent against this comment, or the ` +
+        `seven days have passed, Graph refuses it in this same shape. That send is not ` +
+        `retried automatically for exactly this reason.`
+      : '';
+
+  const wrongNode =
+    context.platform === 'instagram' && context.sendKind === 'comment_reply'
+      ? `\n\n**2. The wrong comment was addressed.** Instagram threads are one level deep: ` +
+        `every reply hangs off the *top-level* comment, and \`replies\` is an edge of that ` +
+        `comment alone. Posting to a reply's own \`replies\` edge asks for an edge that does ` +
+        `not exist and is refused this way. \`commentReplyTarget\` resolves the root from the ` +
+        `ticket's \`external_id\`, so this means the ticket began mid-thread and the root was ` +
+        `never ingested.`
+      : '';
+
+  return (
+    `Graph refused the comment this reply was addressed to. Three things produce this and ` +
+    `they need different responses.\n\n` +
+    `**1. The comment is gone.** The customer deleted it, or the post was removed. This is ` +
+    `the likeliest cause and there is nothing to fix — but nothing told us either: ` +
+    `**Instagram sends no webhook when a comment is deleted**, so the ticket still shows it ` +
+    `and this refusal is the first sign. Open the post and check before reading further.` +
+    wrongNode +
+    `\n\n**${wrongNode ? '3' : '2'}. The approval.** Comment management needs ${permission} ` +
+    `at Advanced Access. That one fails *every* comment reply rather than this one, so it is ` +
+    `only the answer if no reply has ever succeeded — \`npm run job -- check_meta_permissions\` ` +
+    `says which permissions the credential actually carries.` +
+    oneOff
+  );
 }
 
 // --- Profile lookups --------------------------------------------------------
