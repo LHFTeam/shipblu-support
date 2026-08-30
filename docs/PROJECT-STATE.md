@@ -204,6 +204,22 @@ against is the thing being protected — and a WhatsApp contact card, because no
 public ShipBlu number exists anywhere in this codebase or its configuration and a
 support channel printed on a help centre has to be one that answers.
 
+**The tracking page now answers in the language it is being read in.** It drew
+the platform's English status — `Out for delivery` — in the middle of an Arabic
+page, on the one line the page exists for, for readers who are Egyptian parcel
+recipients rather than merchants with a platform login. `lib/shipments/status.ts`
+holds one vocabulary table now: each row carries the stage, the Arabic wording
+and the keywords that recognise it, so a keyword can no longer be added without a
+translation. `/en/track` is unchanged and the console is unchanged — an agent and
+the ops team still read the platform's own word. A label no row matched is still
+shown verbatim in both languages, because nothing established what it says.
+
+Reading `data->'tracking_events'` across production to check that table turned up
+**two statuses the platform emits that nobody had listed**: `delivery_attempted`
+and `return_to_origin`. Both were already covered by keyword; the lesson is the
+method, not the miss — the eight known statuses came off one real delivery order,
+and one parcel does not show a vocabulary.
+
 And now **Instagram comment management**, which is the App Review item
 `instagram_business_manage_comments` and which turned out to rest on four things
 that were all broken at once. The comment pipeline had never run: of 2,854 Meta

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { humaniseStatus, stageDisplay, stageFor, TRACKING_STEPS } from './status';
+import { humaniseStatus, stageDisplay, stageFor, statusLabel, TRACKING_STEPS } from './status';
 
 /**
  * The cases worth pinning are the ones where a wrong answer is worse than no
@@ -35,8 +35,9 @@ describe('stageFor', () => {
   });
 
   /**
-   * The eight statuses `api.shipblu.com` actually emits, read off a real
-   * delivery order rather than guessed.
+   * The ten statuses `api.shipblu.com` actually emits — eight read off a real
+   * delivery order, `delivery_attempted` and `return_to_origin` off every
+   * `tracking_events` entry stored in production.
    *
    * Pinned as a set because the failure they had is invisible one at a time:
    * three of them reached `unknown`, which draws a bare label with no stepper
@@ -52,7 +53,9 @@ describe('stageFor', () => {
     expect(stageFor('in_transit')).toBe('in_transit');
     expect(stageFor('en_route')).toBe('in_transit');
     expect(stageFor('out_for_delivery')).toBe('out_for_delivery');
+    expect(stageFor('delivery_attempted')).toBe('attempted');
     expect(stageFor('delivered')).toBe('delivered');
+    expect(stageFor('return_to_origin')).toBe('returned');
   });
 
   it('never reads a pickup step as the parcel being under way', () => {
@@ -113,5 +116,79 @@ describe('humaniseStatus', () => {
     // page agreeing with the SMS ShipBlu sent about the same parcel.
     expect(humaniseStatus('Delivered')).toBe('Delivered');
     expect(humaniseStatus('')).toBe('');
+  });
+});
+
+/** The ten statuses production has actually seen. See `stageFor` above. */
+const PLATFORM_STATUSES = [
+  'created',
+  'pickup_requested',
+  'out_for_pickup',
+  'picked_up',
+  'in_transit',
+  'en_route',
+  'out_for_delivery',
+  'delivery_attempted',
+  'delivered',
+  'return_to_origin',
+] as const;
+
+describe('statusLabel', () => {
+  /**
+   * The bug this exists to stop coming back: `/ar/track` is the front door of
+   * the help centre, its readers are Egyptian recipients holding a parcel
+   * number, and the one line they opened the page for was in English.
+   */
+  it('words every status the platform actually sends in Arabic', () => {
+    for (const token of PLATFORM_STATUSES) {
+      expect(statusLabel('ar', token)).toMatch(/\p{Script=Arabic}/u);
+    }
+  });
+
+  it('gives each of them a wording of its own', () => {
+    // Eight statuses collapsing into three phrases would tell a customer
+    // waiting for a pickup and one waiting for a courier the same thing.
+    expect(new Set(PLATFORM_STATUSES.map((token) => statusLabel('ar', token))).size).toBe(
+      PLATFORM_STATUSES.length,
+    );
+  });
+
+  it('leaves English alone, so the page still agrees with the platform word for word', () => {
+    expect(statusLabel('en', 'out_for_delivery')).toBe('Out for delivery');
+    expect(statusLabel('en', 'delivered')).toBe('Delivered');
+  });
+
+  it('never translates a label it did not recognise', () => {
+    // No row matched means nothing established what the label says. Inventing an
+    // Arabic phrase for it would put a fact on the page the payload never sent.
+    expect(statusLabel('ar', 'AWAITING_CUSTOMS_CLEARANCE')).toBe('AWAITING CUSTOMS CLEARANCE');
+  });
+
+  it('does not rewrite a label the platform already sent in Arabic', () => {
+    expect(statusLabel('ar', 'تم التسليم')).toBe('تم التسليم');
+    expect(statusLabel('ar', 'خرجت للتسليم')).toBe('خرجت للتسليم');
+  });
+
+  it('never lets the Arabic wording contradict the stepper', () => {
+    // The two are read off the same row, so a badge saying the parcel is out for
+    // delivery while the stepper lights "in transit" cannot be written.
+    expect(statusLabel('ar', 'returned to sender')).toBe(statusLabel('ar', 'RTO completed'));
+    expect(stageFor('returned to sender')).toBe('returned');
+  });
+
+  it('keeps outcomes a customer would act on differently apart', () => {
+    // All four are the `exception` stage and all four end the parcel's journey
+    // in a different place. One reassuring phrase for the set would be the kind
+    // of invented fact the rest of this module refuses to draw.
+    const wordings = ['Cancelled', 'Lost in transit', 'Damaged', 'On hold'].map((label) =>
+      statusLabel('ar', label),
+    );
+    expect(new Set(wordings).size).toBe(wordings.length);
+  });
+
+  it('says nothing at all when there is no status', () => {
+    expect(statusLabel('ar', null)).toBe('');
+    expect(statusLabel('ar', '')).toBe('');
+    expect(statusLabel('en', undefined)).toBe('');
   });
 });

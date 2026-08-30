@@ -9,7 +9,7 @@ import { allow, clientIpFrom } from '@/lib/kb/rate-limit';
 import { kbViewer } from '@/lib/kb/viewer';
 import { normaliseTrackingNumber } from '@/lib/shipments/format';
 import { publicTrackingFor } from '@/lib/shipments/lookup';
-import { humaniseStatus, stageDisplay } from '@/lib/shipments/status';
+import { stageDisplay, statusLabel } from '@/lib/shipments/status';
 import { ArticleList, ArticleRow, PageBody, PageHeader, Panel } from '../chrome';
 import { TrackForm } from './form';
 import { LastUpdate, StatusBadge, Stepper, Timeline } from './result';
@@ -175,15 +175,16 @@ async function Lookup({ locale, canonical }: { locale: Locale; canonical: string
    * and folding the label, its timestamp and its stage into a single nullable
    * value is what makes that one check instead of three that can disagree.
    *
-   * The label is humanised but not translated: the platform sends
-   * `out_for_delivery`, and an underscore in front of a customer is a typography
-   * failure, while rewriting it into our own words would have them read one
-   * thing here and another in ShipBlu's SMS about the same parcel. `stageFor`
-   * still reads the raw token, which is what the keyword table is written for.
+   * The label is read in the page's own language: `out_for_delivery` reaches an
+   * English reader as `Out for delivery` and an Arabic one as `خرجت للتسليم`.
+   * `statusLabel` carries why the Arabic page translates where the English one
+   * only reformats, and why an unrecognised label is still shown verbatim in
+   * both. `stageDisplay` reads the raw token either way, which is what the
+   * vocabulary table's keywords are written for.
    */
   const status = tracking
     ? {
-        label: humaniseStatus(tracking.status),
+        label: statusLabel(locale, tracking.status),
         at: tracking.statusAt,
         events: tracking.events,
         estimatedDate: tracking.estimatedDate,
@@ -192,11 +193,15 @@ async function Lookup({ locale, canonical }: { locale: Locale; canonical: string
     : null;
 
   /*
-   * The articles are chosen by searching the knowledge base for the platform's
-   * own status wording — "out for delivery" finds the articles about what that
-   * means. A hand-written article list per status would be a second place to
-   * maintain every time the knowledge base is edited, and it would go stale
-   * silently, in the direction nobody notices.
+   * The articles are chosen by searching the knowledge base for the status as
+   * this page just worded it — "out for delivery" finds the English articles
+   * about what that means, and "خرجت للتسليم" the Arabic ones. Searching on the
+   * platform's English token in both languages is what this used to do, and it
+   * asked an Arabic knowledge base an English question: the column that is meant
+   * to catch a customer at their worst moment came back empty for the half of
+   * readers most likely to need it. A hand-written article list per status would
+   * be a second place to maintain every time the knowledge base is edited, and
+   * it would go stale silently, in the direction nobody notices.
    *
    * When there is no status to search on, or the search found nothing, the
    * most-read articles stand in under their own heading rather than under
