@@ -875,6 +875,78 @@ on node type (User)` with no subcode, which that predicate declines by design,
   (`plans/meta-app-review-submission.md`), and Advanced Access is exactly what
   that submission is for.
 
+  **Meta has now confirmed that in writing, and the confirmation was sitting in
+  our own table.** _2026-08-30._ Reconnecting the account fires `object:
+"permissions"` webhooks, one per grant, and we store them like any other
+  delivery. Both reconnections on 2026-08-29 — 15:53 and 16:45 UTC — sent exactly
+  two, and no others have ever arrived:
+
+  ```sql
+  select c->>'field', c->'value'->>'verb', count(*)
+  from webhook_events w,
+       lateral jsonb_array_elements(w.payload->'entry') e,
+       lateral jsonb_array_elements(e->'changes') c
+  where w.payload->>'object' = 'permissions' group by 1, 2;
+  -- instagram_basic            granted  2
+  -- instagram_manage_messages  granted  2
+  ```
+
+  `instagram_manage_messages` granted and `instagram_manage_comments` absent is
+  precisely the split the account shows: DMs arrive, comments never do. This is
+  the cheapest check there is for "which half of Instagram is live", it needs no
+  Graph call and no dashboard, and it should be the first query run the next time
+  a channel works in one direction only. It also closes the two cheap conditions
+  the item below asks to rule out first — a private account or a self-comment
+  would not produce this asymmetry, since neither is permission-shaped.
+
+  **App Review _is_ the blocker, and the `comments` field is Meta's documented
+  exception to how access levels normally work.** _Settled from the docs
+  2026-08-30, after an intermediate answer here claimed the opposite._ The
+  general rule is real — Standard Access needs no review and covers a role
+  holder on their own assets — and it does not apply to this field:
+
+  > "Your app must have successfully completed App Review (advanced access) to
+  > receive webhooks notifications for `comments` and `live_comments` webhooks
+  > fields."
+
+  Meta's Instagram webhooks reference states it twice more: "Advanced Access is
+  required to receive `comments` and `live_comments` webhook notifications", and
+  the requirements table gives the access level for both as Advanced. So an app
+  **admin** commenting on their **own** public post receives nothing until the
+  submission is approved, and no amount of regenerating the Page token changes
+  that. Confirmed against the live account across three attempts on 2026-08-30 —
+  after adding the permission to the submission and after a token regeneration
+  and redeploy, still zero `changes` deliveries and, for the comments
+  themselves, no HTTP request from Meta at all.
+
+  This is exactly why the channel is split: `instagram_manage_messages` is fine
+  at Standard Access for a role holder, so DMs arrive, while `comments` needs
+  Advanced Access, so it is silent. **The asymmetry is the field, not the
+  account.**
+
+  **Every other precondition is now confirmed, so the approval is the only step
+  left.** Both of the conditions that were open on 2026-08-30 have been checked
+  and both hold:
+
+  1. **The account is public** — checked 2026-08-30. Meta requires it: "The
+     Instagram professional account that owns the media objects must be public to
+     receive notifications for comments or @mentions."
+  2. ~~The Page-level subscription must carry `comments`.~~ **Wrong, and
+     disproved by Meta's Webhook Debugger the same day** — see §6.35. For a
+     Page-connected account the app-level subscription is the only one that
+     carries Instagram fields; the Page's list uses Page vocabulary, which has
+     no `comments` in it. Both halves check out on this account already.
+
+  So when Advanced Access lands, nothing else has to be changed or run for the
+  first comment to arrive: `comments` is already subscribed at the app level, the
+  account is linked and public, the Page is installed, and `ingestMetaComment`
+  has already been exercised end to end on both platforms (#10939, #10942). If a
+  comment still does not arrive after approval, that is new information — start
+  at §6.35's debugger, not at the parser.
+
+  `npm run job -- check_meta_permissions` reports the grant and now also warns,
+  on the _passing_ line, that this one capability needs Advanced Access on top.
+
   That is a real chicken-and-egg and it is **asymmetric between the two
   platforms**: `feed` on a Page needs only `pages_manage_metadata` and
   `pages_show_list`, which the token already has, so Facebook comment footage can
@@ -1832,6 +1904,150 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     **The permission set flips with the connection**: `instagram_basic` +
     `instagram_manage_comments` + the `pages_*` items, not the
     `instagram_business_*` pair. See the table in the plan.
+
+33. **Meta's "Send to Server" test button works exactly once, then reports
+    success forever while doing nothing.** _Found 2026-08-30._ The button posts a
+    _byte-identical_ sample on every press. `deliveryId()` derives the delivery
+    key from the batch contents, so every press produces the same
+    `c:17865799348089039:add`, the unique index rejects it, `onConflictDoNothing`
+    returns no row, and the endpoint answers `200 {"status":"duplicate"}` without
+    enqueuing anything. Meta shows a green "successfully sent" for a delivery
+    that reached a ticket only on the very first press in the life of the table —
+    ours was 2026-08-29 09:50:44, ticket #10942.
+
+    That is correct behaviour for real traffic and it should not be relaxed: a
+    genuine Meta redelivery of a real comment must be dropped. What was wrong is
+    that the drop was **silent**, so "we deduped it" and "it never arrived" — a
+    parser bug and a permission problem, with nothing in common — looked
+    identical from the outside. It sent an afternoon into the comment parser
+    looking for a fault in code that had already handled the same payload
+    correctly the day before. The endpoint now logs the colliding key.
+
+    Reading the request log tells the two apart before any code is opened. The
+    test button and real traffic use **different user agents**, and the response
+    size splits on the outcome:
+
+    | `userAgent`                | Meaning               | `responseBytes` |
+    | -------------------------- | --------------------- | --------------- |
+    | `facebookexternalua`       | real delivery         | 408 = queued    |
+    | `Webhooks/1.0 (fb.me/...)` | dashboard test button | 412 = duplicate |
+
+    On 2026-08-30 the three presses at 13:23:52, 13:24:50 and 13:25:31 were all
+    `Webhooks/1.0`, all 200, all 412 bytes, and `webhook_events` has no row after
+    13:19:59. To actually exercise the pipeline again, delete that one row — or
+    read the log line — rather than pressing the button harder.
+
+    **A green test button is not evidence the account is subscribed, either.** It
+    posts straight at the callback, so it proves the URL, the signature and the
+    parser and says nothing whatsoever about what Meta will send unprompted. The
+    subscription question is answered by the `permissions` webhooks in §5.2.
+
+34. **Two different things gate a Meta capability, and the Instagram `comments`
+    webhook is gated by the rarer one.** _Found 2026-08-30, over three wrong
+    turns — record the whole path, because each turn was individually
+    reasonable._
+
+    **The grant.** A permission has to be in the scope list of the authorisation
+    that minted the token. Meta reports an unrequested permission as silence, not
+    as an error.
+
+    **The access level.** Every permission has Standard Access — no review, but
+    only for app admins, developers and testers on assets they administer — and
+    Advanced Access, which reaches the general public and is what an App Review
+    submission asks for.
+
+    For nearly everything, an admin testing on their own account is covered by
+    Standard Access and App Review is irrelevant until launch. That general rule
+    is correct, and applying it here was still wrong:
+
+    > "Your app must have successfully completed App Review (advanced access) to
+    > receive webhooks notifications for `comments` and `live_comments` webhooks
+    > fields."
+
+    **`comments` is the documented exception.** Advanced Access is required to
+    _receive the notification at all_ — not merely to moderate, and not merely
+    for the public. An app admin commenting on their own public post gets
+    nothing.
+
+    The three wrong turns, in order, since the next person will be tempted by
+    each:
+
+    1. _"The parser is broken."_ It is not, and it never was: a real Facebook
+       comment made ticket #10939 and Meta's Instagram sample made #10942, both
+       on 2026-08-29. What made it look broken was the dashboard test button
+       silently deduping (§6.33).
+    2. _"Apply for the permission."_ Adding `instagram_manage_comments` to the
+       submission grants nothing — a submission is a request for Advanced Access
+       and does nothing until approved. A comment posted straight afterwards
+       still produced no delivery.
+    3. _"App Review is irrelevant, it is only the grant."_ The general rule,
+       misapplied to the one field it does not cover. Regenerating the Page
+       token and redeploying changed nothing, correctly.
+
+    **The evidence that settles it without reading any of this again**: the
+    channel is split by _field_, not by account. `instagram_manage_messages` is
+    fine at Standard Access, so DMs arrive — 100+ verified `standby` deliveries
+    on 2026-08-30 alone. `comments` needs Advanced Access, so across the entire
+    life of the table exactly one `changes` delivery exists on the `instagram`
+    object and it is Meta's own test payload. **Zero real Instagram comments have
+    ever reached the endpoint, so no amount of reading the ingest path can
+    explain them.** When a channel works in one direction only, check whether the
+    two directions have different access levels before opening any parser.
+
+    Carry forward:
+
+    - **Granted ≠ delivered.** Check the access level as well as the grant.
+      `npm run job -- check_meta_permissions` now warns on the _passing_ line
+      where Advanced Access is required on top, which is the case a clean grant
+      list would otherwise send somebody back into the parser for.
+    - **Missing ≠ declined.** Declined means somebody unticked it in the dialog;
+      missing means it was never in the dialog. Different fixes.
+    - **There is no second gate.** A Page-level `comments` subscription looked
+      like one for a few hours; §6.35 is why it is not, and why the doc example
+      that suggested it was describing the other Instagram connection entirely.
+    - The account must also be **public** for comment notifications — checked
+      2026-08-30 and it is, so the approval is the only step left.
+
+35. **Meta's Webhook Debugger answers the subscription question outright, and a
+    doc example does not.** _2026-08-30._ App Dashboard → **Webhook Debugger**
+    takes Page ids and reports, for each: the app's subscribed IG webhook fields,
+    the app's subscribed fields _for that Page_, whether an Instagram account is
+    linked, and the Manage Messaging toggle. Run it before theorising about a
+    subscription — it is one screen, it is authoritative, and it writes nothing.
+
+    For Page `101449698657189` (ShipBlu):
+
+    - **Subscribed IG webhooks for this app**: `comments`, `live_comments`,
+      `message_edit`, `message_reactions`, `messages`, `messaging_handover`,
+      `mentions`, `messaging_seen`, `messaging_postbacks`, `standby`.
+    - **Subscribed fields by app for page**: the messaging set plus `standby` and
+      `feed`. **No `comments`, and correctly so.**
+    - **Instagram account linked to page**: `shipblu`.
+    - **Manage Messaging toggle**: On.
+
+    Every subscription-shaped explanation is now closed: `comments` is subscribed
+    at the app level, the account is linked, the Page is installed, messaging is
+    on. What is left is the access level (§6.34) — the one thing this screen does
+    not show.
+
+    **It also corrects a fix made hours earlier in the same investigation.** The
+    Instagram webhook setup doc shows
+    `POST /me/subscribed_apps?subscribed_fields=comments,messages`, which was read
+    as "the Page subscription must carry `comments`" and turned into code. It does
+    not. The debugger states the rule for this connection in one line — _"For
+    Instagram, app level webhook subscription is required via the Webhooks
+    product"_ — and the doc's own curl gives it away on a closer look: it is
+    addressed to `graph.instagram.com/{ig-account-id}`, the **Instagram Login**
+    product, where `/me` is the Instagram account and `comments` is one of its
+    fields. Here the account is connected through its Facebook Page,
+    `subscribed_apps` is addressed to the Page, and Page vocabulary has no
+    `comments` at all — Facebook's comments arrive under `feed`. Reverted.
+
+    The generalisation, which §6.26 already taught about app secrets and which
+    keeps costing more than it should: **the two Instagram connections differ in
+    the host, the token, the ids _and_ the field vocabulary.** A Meta doc example
+    proves nothing until you check which host its URL names, and when that is
+    ambiguous the debugger settles it without touching production.
 
 ## 7. Verification already done
 

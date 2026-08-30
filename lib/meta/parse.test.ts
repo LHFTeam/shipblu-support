@@ -292,6 +292,59 @@ describe('parseMetaWebhook', () => {
       fromName: 'mona',
       text: 'How much to Alexandria?',
     });
+    expect(parsed.comments[0]?.parentCommentId).toBeNull();
+  });
+
+  it('keeps an Instagram reply threaded on its parent comment', () => {
+    const parsed = parseMetaWebhook({
+      object: 'instagram',
+      entry: [
+        {
+          id: 'ig-account',
+          changes: [
+            {
+              field: 'comments',
+              value: {
+                id: 'igc_2',
+                text: 'Same question',
+                from: { id: 'igu_2', username: 'omar' },
+                media: { id: 'igm_1' },
+                parent_id: 'igc_1',
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(parsed.comments[0]?.parentCommentId).toBe('igc_1');
+  });
+
+  it('does not thread an Instagram comment onto its own media', () => {
+    // `ingestMetaComment` keys the ticket on the parent, so a parent_id naming
+    // the media would put every top-level comment on the post onto one ticket.
+    const parsed = parseMetaWebhook({
+      object: 'instagram',
+      entry: [
+        {
+          id: 'ig-account',
+          changes: [
+            {
+              field: 'comments',
+              value: {
+                id: 'igc_3',
+                text: 'Do you ship to Aswan?',
+                from: { id: 'igu_3', username: 'sara' },
+                media: { id: 'igm_1' },
+                parent_id: 'igm_1',
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(parsed.comments[0]?.parentCommentId).toBeNull();
   });
 
   it('reads delivery and read receipts', () => {

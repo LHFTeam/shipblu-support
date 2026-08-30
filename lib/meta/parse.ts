@@ -213,11 +213,23 @@ function readComment(
   if (!commentId) return null;
   if (value.from?.id && entry.id && value.from.id === entry.id) return null;
 
+  const mediaId = value.media?.id ?? null;
+
   return {
     platform,
     commentId,
-    parentCommentId: value.parent_id ?? null,
-    postId: value.media?.id ?? null,
+    // Same guard as Facebook's above, for the same reason and one Instagram has
+    // not yet been observed to need: `ingestMetaComment` keys the ticket on
+    // `parent_id ?? comment_id`, so a `parent_id` naming the *media* rather than
+    // a parent comment would collapse every top-level comment on that post onto
+    // one ticket. Meta documents `parent_id` as present only on a reply, but no
+    // real Instagram comment has ever reached this branch to confirm it — the
+    // permission that gates delivery is still unapproved (§6.30) — and the
+    // sample payload carries `parent_id` alongside a distinct `media.id`, so the
+    // shape it takes on a top-level comment is genuinely unverified. A reply's
+    // parent is always a comment, so this cannot discard a real thread link.
+    parentCommentId: value.parent_id && value.parent_id !== mediaId ? value.parent_id : null,
+    postId: mediaId,
     from: value.from?.id ?? '',
     fromName: value.from?.username ?? value.from?.name ?? null,
     text: (value.text ?? '').trim(),

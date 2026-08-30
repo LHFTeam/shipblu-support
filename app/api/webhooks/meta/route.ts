@@ -135,6 +135,20 @@ export async function POST(request: Request) {
 
   if (inserted.length === 0) {
     // Already have this delivery. 200 so Meta stops retrying.
+    //
+    // Said out loud, because a silent drop here is indistinguishable from a
+    // delivery that never arrived — and the two have opposite fixes. The
+    // dashboard's "Send to Server" button is where this bites: it posts a
+    // byte-identical sample every time, so `deliveryId` returns the same key on
+    // every press and only the *first* one in the life of the table ever
+    // reaches a ticket. Meta reports "successfully sent" for all of them, which
+    // reads as a broken pipeline. It cost an afternoon of looking at the parser
+    // for a comment the parser had already handled correctly the day before
+    // (§6.30). One line naming the key that collided answers it in a log search.
+    console.log(
+      `[webhook:meta] duplicate ${payload.object ?? 'unknown'} delivery, already stored as ` +
+        `${deliveryId(payload)} — not re-queued`,
+    );
     return NextResponse.json({ status: 'duplicate' }, { status: 200 });
   }
 

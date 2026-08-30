@@ -130,12 +130,32 @@ async function subscribeApp(object: string, want: readonly string[]): Promise<vo
 /**
  * The Page half of a Page subscription.
  *
- * Only for `object=page`. Instagram's own object is deliberately not attempted
- * here: `subscribed_apps` takes *Page* field names, and whether a Page-connected
- * Instagram account needs anything beyond the app being installed on its Page is
- * not something this codebase has established. Guessing would write a field list
- * against a live Page on the strength of an assumption, which is the shape of
- * every Meta outage in `docs/PROJECT-STATE.md` §6.
+ * **Only for `object=page`, and Instagram deliberately does not get one.** This
+ * was briefly changed to run for Instagram too, on the strength of Meta's
+ * Instagram webhook setup doc showing
+ * `POST /me/subscribed_apps?subscribed_fields=comments,messages`. That reading
+ * was wrong and the mistake is worth keeping written down, because the page it
+ * came from does not say which connection it is describing in the example
+ * itself: the curl is addressed to **`graph.instagram.com/{ig-account-id}`**,
+ * which is the *Instagram Login* product. There `/me` is the Instagram account
+ * and `comments` is one of its fields. On this deployment the account is
+ * connected through its **Facebook Page**, `subscribed_apps` is addressed to the
+ * Page, and it takes Page field names — a vocabulary with no `comments` in it at
+ * all. Facebook's comments arrive under `feed`.
+ *
+ * Meta's own Webhook Debugger states the rule for this connection outright:
+ * *"For Instagram, app level webhook subscription is required via the Webhooks
+ * product."* Confirmed against Page `101449698657189` on 2026-08-30 — the app's
+ * IG subscription lists `comments`, the Page's field list does not and is not
+ * supposed to, and the account shows as linked with messaging on.
+ *
+ * So writing Instagram's fields here would have put an invalid field name into a
+ * live, working Page's list. The merge and the read-back would have caught it
+ * loudly rather than breaking `feed`, but a guess that survives only because the
+ * safety net holds is still a guess. §6.26's lesson generalises past app
+ * secrets: **the two Instagram connections differ in the host, the token, the
+ * ids and the field vocabulary, so a doc example proves nothing until you check
+ * which one it is addressed to.**
  *
  * Run after the app-level write rather than before, so a run that fails here
  * leaves the app-level list already correct and the second half is all that is
