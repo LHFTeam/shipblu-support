@@ -34,7 +34,15 @@ export type PublicTracking = {
   statusAt: Date | null;
   /** Oldest first. The history a recipient is entitled to see. */
   events: TrackingEvent[];
-  /** A calendar date, kept as a string — never an instant. */
+  /**
+   * When the parcel is expected, as a `YYYY-MM-DD` string — never an instant.
+   *
+   * The platform's *current* estimate where we have one, the date the parcel was
+   * booked with otherwise. One field rather than two because a recipient asking
+   * "when is it coming" wants today's answer, not a history of answers; the
+   * console keeps both (`bookedEstimatedDate`) for the agent who is asked why it
+   * moved.
+   */
   estimatedDate: string | null;
 };
 
@@ -49,6 +57,14 @@ export type PublicTracking = {
  */
 export type AgentTracking = PublicTracking & {
   platformId: string | null;
+  /**
+   * The estimate the parcel was booked with, which does not move.
+   *
+   * Kept beside `estimatedDate` so an agent can see that it changed and by how
+   * much — on the parcel this was built against the two are two days apart, and
+   * "why does my confirmation say the 29th" is the call that generates.
+   */
+  bookedEstimatedDate: string | null;
   merchantName: string | null;
   merchantPhone: string | null;
   recipientName: string | null;
@@ -137,7 +153,11 @@ function readPayload(data: unknown): ReturnType<typeof mapDeliveryOrder> | null 
   }
 }
 
-export function publicTracking(data: unknown): PublicTracking | null {
+export function publicTracking(
+  data: unknown,
+  /** From `shipments.current_estimated_date`, or a live read. */
+  currentEstimatedDate?: string | null,
+): PublicTracking | null {
   const order = readPayload(data);
   if (!order) return null;
 
@@ -148,11 +168,14 @@ export function publicTracking(data: unknown): PublicTracking | null {
     status: order.status,
     statusAt: order.statusAt,
     events: order.events,
-    estimatedDate: order.estimatedDate,
+    estimatedDate: currentEstimatedDate ?? order.estimatedDate,
   };
 }
 
-export function agentTracking(data: unknown): AgentTracking | null {
+export function agentTracking(
+  data: unknown,
+  currentEstimatedDate?: string | null,
+): AgentTracking | null {
   const order = readPayload(data);
   if (!order) return null;
 
@@ -169,9 +192,10 @@ export function agentTracking(data: unknown): AgentTracking | null {
     status: order.status,
     statusAt: order.statusAt,
     events: order.events,
-    estimatedDate: order.estimatedDate,
+    estimatedDate: currentEstimatedDate ?? order.estimatedDate,
 
     platformId: fields.id != null ? String(fields.id) : null,
+    bookedEstimatedDate: order.estimatedDate,
     merchantName: order.merchantName,
     merchantPhone: fields.merchant?.store_phone ?? null,
     // `full_name` where the platform composed one, the two halves otherwise —
