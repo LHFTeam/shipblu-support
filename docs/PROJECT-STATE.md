@@ -899,6 +899,26 @@ on node type (User)` with no subcode, which that predicate declines by design,
   the item below asks to rule out first — a private account or a self-comment
   would not produce this asymmetry, since neither is permission-shaped.
 
+  **And App Review is not what is blocking it.** _Corrected 2026-08-30._ The
+  paragraph above and the item below both read the missing permission as
+  something to apply for; that is the wrong half of Meta's model, and following
+  it costs days of waiting on a review nobody needs. Advanced Access — what a
+  submission asks for — is only required to use a permission for **the general
+  public**. **Standard Access** needs no review, is available on these
+  permissions from the start, and covers exactly the case being tested here: a
+  person holding a role on the app (admin, developer or tester) using it on
+  assets they administer. Adding `instagram_manage_comments` to the submission
+  therefore grants nothing and changes nothing today, and a comment posted after
+  doing so still will not arrive (confirmed 2026-08-30: no `changes` delivery,
+  and no HTTP request from Meta at all).
+
+  What Standard Access still requires is that the permission was **asked for**.
+  It has to be in the scope list of the authorisation that produced the token,
+  and `instagram_manage_comments` never was — which is what the two-row
+  `permissions` result above is actually saying. The fix is to re-run the
+  authorisation with it in scope and confirm a third row appears. See §6.34, and
+  `npm run job -- check_meta_permissions` for what the live token holds.
+
   That is a real chicken-and-egg and it is **asymmetric between the two
   platforms**: `feed` on a Page needs only `pages_manage_metadata` and
   `pages_show_list`, which the token already has, so Facebook comment footage can
@@ -1893,6 +1913,48 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     posts straight at the callback, so it proves the URL, the signature and the
     parser and says nothing whatsoever about what Meta will send unprompted. The
     subscription question is answered by the `permissions` webhooks in §5.2.
+
+34. **A permission is granted, not approved, and App Review is the wrong lever
+    for a role holder.** _Found 2026-08-30, after sending the account's admin
+    down the App Review path for a day._
+
+    Meta has two access levels per permission and only one of them involves a
+    review:
+
+    | Level        | Who it covers                                                 | Needs App Review |
+    | ------------ | ------------------------------------------------------------- | ---------------- |
+    | **Standard** | app admins, developers and testers, on assets they administer | no               |
+    | **Advanced** | the general public                                            | yes              |
+
+    Standard Access is live from the start. So an admin testing Instagram
+    comments **on their own account** never needed App Review at all, and adding
+    `instagram_manage_comments` to the submission granted nothing: a submission
+    is a request for Advanced Access and does precisely nothing until approved.
+    A comment posted straight after adding it still produced no `changes`
+    delivery and no HTTP request from Meta whatsoever.
+
+    What Standard Access does require is that the permission was **requested**.
+    It has to appear in the scope list of the authorisation that minted the
+    token. `instagram_manage_comments` never did — which is what §5.2's
+    two-row `permissions` result was saying all along, and which is why DMs
+    (`instagram_manage_messages`, granted) work while comments
+    (`instagram_manage_comments`, never asked for) are silent. **Meta reports an
+    unrequested permission as silence, not as an error**, so the webhook simply
+    never fires and the account looks like one nobody has commented on.
+
+    The general shape, worth carrying to the next channel that half-works:
+
+    - **Granted ≠ approved.** Check the grant before the review, always. The
+      grant is free to check and the review costs days.
+    - **Missing ≠ declined.** Declined means somebody unticked it in the dialog;
+      missing means it was never in the dialog. Different fixes, different
+      places.
+    - `npm run job -- check_meta_permissions` now answers this directly, from
+      `debug_token` — scopes, `granular_scopes` (which asset each was granted
+      for) and the token `type` that §6.28 turned on. `lib/meta/capabilities.ts`
+      maps each capability to the permissions it needs, so the output names the
+      blocked feature rather than leaving it to be inferred from which half of a
+      channel went quiet.
 
 ## 7. Verification already done
 

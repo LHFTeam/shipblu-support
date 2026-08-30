@@ -3,6 +3,7 @@ import { assignSweep } from './assign-sweep';
 import { backfillMessageLocations } from './backfill-message-locations';
 import { backfillMetaProfiles } from './backfill-meta-profiles';
 import { backfillShipmentLinks } from './backfill-shipment-links';
+import { checkMetaPermissions } from './check-meta-permissions';
 import { cleanup } from './cleanup';
 import { downloadMediaJob } from './download-media';
 import { fetchMetaProfile } from './fetch-meta-profile';
@@ -37,6 +38,7 @@ export const handlers: Partial<Record<JobType, JobHandler>> = {
   backfill_message_locations: (job) => backfillMessageLocations(job),
   backfill_meta_profiles: (job) => backfillMetaProfiles(job),
   backfill_shipment_links: (job) => backfillShipmentLinks(job),
+  check_meta_permissions: () => checkMetaPermissions(),
   cleanup,
   download_media: downloadMediaJob,
   fetch_meta_profile: fetchMetaProfile,

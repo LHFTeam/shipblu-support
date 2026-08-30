@@ -14,6 +14,7 @@ export type JobType =
   | 'fetch_meta_profile'
   | 'sync_whatsapp_templates'
   | 'subscribe_meta_webhooks'
+  | 'check_meta_permissions'
   | 'sla_sweep'
   | 'assign_sweep'
   | 'run_time_automations'
