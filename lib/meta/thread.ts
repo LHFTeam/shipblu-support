@@ -1,3 +1,4 @@
+import type { MetaConnection } from './connection';
 import type { MetaPlatform } from './types';
 
 /**
@@ -23,10 +24,18 @@ export type MetaThreadState = {
   reason: 'ours' | 'standby' | 'other_account' | 'not_configured';
   /** Written for the agent reading the timeline, not for a log. */
   explanation: string | null;
+  /** The connection the reply would go out over. */
+  route: MetaConnection;
 };
 
 export type MetaThreadInput = {
   platform: MetaPlatform;
+  /**
+   * The connection a reply would go out over — `metaConnection(platform)`.
+   *
+   * It decides what `standby` means, which is the whole reason it is here.
+   */
+  connection: MetaConnection;
   /** The page or Instagram account the customer's message arrived on. */
   inboundAccountId: string | null;
   /** The account this deployment is configured to send from. */
@@ -36,17 +45,30 @@ export type MetaThreadInput = {
    * array, so another app holds thread control.
    */
   standby: boolean;
+  /**
+   * The connection that message was delivered on, or null on a row written
+   * before the two were told apart.
+   *
+   * `standby` is a fact about *one* connection, not about the account, so it
+   * only rules out a send over the connection that reported it.
+   */
+  inboundConnection: MetaConnection | null;
 };
-
-const OURS: MetaThreadState = { canSend: true, reason: 'ours', explanation: null };
 
 export function metaThreadState(input: MetaThreadInput): MetaThreadState {
   const product = input.platform === 'instagram' ? 'Instagram' : 'Messenger';
+  const ours: MetaThreadState = {
+    canSend: true,
+    reason: 'ours',
+    explanation: null,
+    route: input.connection,
+  };
 
   if (!input.configuredAccountId) {
     return {
       canSend: false,
       reason: 'not_configured',
+      route: input.connection,
       explanation:
         input.platform === 'instagram'
           ? 'INSTAGRAM_ACCOUNT_ID is not set, so no Instagram reply can be addressed.'
@@ -67,6 +89,7 @@ export function metaThreadState(input: MetaThreadInput): MetaThreadState {
     return {
       canSend: false,
       reason: 'other_account',
+      route: input.connection,
       explanation:
         `This ticket arrived on ${product} account ${input.inboundAccountId}, but this ` +
         `deployment sends from ${input.configuredAccountId}. The customer's id is scoped ` +
@@ -94,21 +117,55 @@ export function metaThreadState(input: MetaThreadInput): MetaThreadState {
     all; we are not the app Meta will accept a send from. Nothing about this
     changes with a retry, a token or an approval — thread control has to be
     passed to this app, which is a decision made in the other tool.
+
+    **But it is a fact about the Facebook Page's inbox, and only that.** The
+    handover protocol belongs to the Page: an app installed on a Page receives
+    `standby` when another installed app owns the thread. An Instagram
+    professional account connected directly through Instagram Login is not
+    installed on anything — it is authorised against the account itself, there is
+    no primary receiver to be second to, and its deliveries arrive in `messaging`
+    while the Page's copies of the same message arrive in `standby`. Both were
+    observed for one account, seconds apart (`docs/PROJECT-STATE.md` §6.29).
+
+    So a `standby` recorded by the Page connection must not veto a send going out
+    over the direct one — which is the state this deployment has been in since 28
+    August: every Instagram and Messenger delivery arriving in `standby` because
+    Freshworks is the Page's primary receiver, and every Instagram reply refused
+    here on the strength of it. Freshworks owning the Page inbox says nothing
+    about whether Instagram will accept a message sent with the account's own
+    token.
+
+    The inbound connection is checked as well as the route, because a flag
+    recorded by one connection describes that one. Null — every row written
+    before the distinction existed — is read as "the Page's", which is what those
+    rows were.
   */
-  if (input.standby) {
+  const standbyBlocks =
+    input.standby &&
+    input.connection === 'facebook_page' &&
+    (input.inboundConnection === null || input.inboundConnection === 'facebook_page');
+
+  if (standbyBlocks) {
     return {
       canSend: false,
       reason: 'standby',
+      route: input.connection,
       explanation:
         `Another app holds thread control on this ${product} inbox, so this ticket is ` +
         `readable here but cannot be answered from here — ${product} accepts a reply only ` +
         `from the app that owns the thread. The messages arrive in the handover protocol's ` +
         `standby channel, which is what says so. Answer in whichever tool is the primary ` +
-        `receiver, or hand thread control to this app in the Meta app's Messenger settings.`,
+        `receiver, hand thread control to this app in the Meta app's Messenger settings` +
+        (input.platform === 'instagram'
+          ? `, or connect the account directly under Instagram → API setup with Instagram ` +
+            `login and set INSTAGRAM_ACCESS_TOKEN, which routes replies around the Page ` +
+            `entirely`
+          : '') +
+        `.`,
     };
   }
 
-  return OURS;
+  return ours;
 }
 
 /**
@@ -121,6 +178,7 @@ export function metaThreadState(input: MetaThreadInput): MetaThreadState {
  */
 export function metaThreadStateFromMessage(input: {
   platform: MetaPlatform;
+  connection: MetaConnection;
   configuredAccountId: string | null;
   lastInboundMeta: Record<string, unknown> | null | undefined;
 }): MetaThreadState {
@@ -129,10 +187,17 @@ export function metaThreadStateFromMessage(input: {
 
   return metaThreadState({
     platform: input.platform,
+    connection: input.connection,
     inboundAccountId: accountId,
     configuredAccountId: input.configuredAccountId,
     // Absent on every row written before the flag was recorded. Those threads
     // were answerable, so a missing value must not read as "cannot send".
     standby: meta.standby === true,
+    inboundConnection: readConnection(meta.connection),
   });
+}
+
+/** The connection off a message's `meta`, ignoring anything it is not. */
+function readConnection(value: unknown): MetaConnection | null {
+  return value === 'facebook_page' || value === 'instagram_login' ? value : null;
 }

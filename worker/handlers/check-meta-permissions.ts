@@ -1,5 +1,6 @@
 import { env, metaAppSecret } from '@/lib/env';
 import { diagnoseCapabilities, requiredScopes } from '@/lib/meta/capabilities';
+import { instagramLoginConfigured } from '@/lib/meta/connection';
 
 /**
  * What the live Meta token actually carries, and which capability each gap stops.
@@ -25,10 +26,20 @@ import { diagnoseCapabilities, requiredScopes } from '@/lib/meta/capabilities';
  * `granular_scopes`, which says *per asset* who a permission was granted for.
  * That last one matters when an app administers more than one Page: a scope
  * granted for the wrong account reads as granted in every other view.
+ *
+ * **It reports on both connections, and it can say much less about the second
+ * one.** `debug_token` is a graph.facebook.com endpoint and an Instagram Login
+ * token is issued by the Instagram side of the app, which publishes no scope
+ * list of its own — so for the direct connection this asks the only question
+ * that host will answer, `GET /me`, and reports what that settles: whether the
+ * token works at all, and which account it belongs to. That is not nothing. Both
+ * Instagram outages this system has had were a credential in the wrong place,
+ * and both would have been answered by it in one line.
  */
 
 const GRAPH_VERSION = 'v23.0';
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
+const INSTAGRAM_GRAPH_BASE = `https://graph.instagram.com/${GRAPH_VERSION}`;
 
 type DebugToken = {
   type?: string;
@@ -101,7 +112,7 @@ export async function checkMetaPermissions(): Promise<void> {
 
   console.log('');
 
-  const reports = diagnoseCapabilities(scopes);
+  const reports = diagnoseCapabilities(scopes, [], 'facebook_page');
 
   for (const report of reports) {
     const gaps = report.permissions.filter((entry) => entry.status !== 'granted');
@@ -129,7 +140,8 @@ export async function checkMetaPermissions(): Promise<void> {
   const blocked = reports.filter((report) => report.blocked);
 
   if (blocked.length === 0) {
-    console.log('\n[meta:permissions] every capability this system uses is granted.');
+    console.log('\n[meta:permissions] every Facebook Page capability is granted.');
+    await checkInstagramLogin();
     return;
   }
 
@@ -148,4 +160,93 @@ export async function checkMetaPermissions(): Promise<void> {
       `App Review is only needed to reach the general public.`,
   );
   console.warn(`[meta:permissions] full scope list to request: ${requiredScopes().join(',')}`);
+
+  await checkInstagramLogin();
+}
+
+/**
+ * The direct Instagram connection, as far as its own host will describe it.
+ *
+ * Three things are checked and each has already been the whole cause of an
+ * outage here: that the token is *there*, that it is *valid*, and that it names
+ * the account the rest of the configuration points at. A token for the wrong
+ * account resolves perfectly and then refuses every send with a sentence about
+ * the object not existing.
+ *
+ * The scope list is printed rather than verified, and said to be so. Pretending
+ * to have checked it would be worse than saying it cannot be — the thing that
+ * cost §6.28 a day was a scope list everybody trusted because it looked right.
+ */
+type InstagramMe = { user_id?: string; id?: string; username?: string; error?: unknown };
+
+async function checkInstagramLogin(): Promise<void> {
+  console.log('');
+
+  if (!instagramLoginConfigured()) {
+    console.log(
+      '[meta:permissions] no direct Instagram connection — INSTAGRAM_ACCESS_TOKEN is unset, ' +
+        'so every Instagram call goes out over the Facebook Page above',
+    );
+    return;
+  }
+
+  const token = env().INSTAGRAM_ACCESS_TOKEN!;
+  const expected = env().INSTAGRAM_ACCOUNT_ID;
+
+  const url = new URL(`${INSTAGRAM_GRAPH_BASE}/me`);
+  url.searchParams.set('fields', 'user_id,username');
+
+  let body: InstagramMe | null = null;
+  let status = 0;
+
+  try {
+    // Header rather than query string: a URL is the part of a request that ends
+    // up in logs, and this one is a live credential.
+    const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    status = response.status;
+    body = (await response.json().catch(() => null)) as InstagramMe | null;
+  } catch (error) {
+    console.error(
+      `[meta:permissions] graph.instagram.com unreachable: ` +
+        `${error instanceof Error ? error.message : String(error)}`,
+    );
+    return;
+  }
+
+  if (status !== 200 || !body || body.error) {
+    console.error(
+      `[meta:permissions] INSTAGRAM_ACCESS_TOKEN is set but graph.instagram.com refused it ` +
+        `(HTTP ${status}): ${JSON.stringify(body?.error ?? body)}`,
+    );
+    console.error(
+      '[meta:permissions] every Instagram send, reply and moderation is routed to this ' +
+        'credential while it is set — see metaConnection() in lib/meta/connection.ts — so ' +
+        'this refusal is the whole Instagram channel, not one call.',
+    );
+    return;
+  }
+
+  // Meta calls it `user_id` on this host and `id` on the other. Both are the
+  // Instagram professional account id, and it is the same value the webhook's
+  // `entry.id` carries on either connection.
+  const accountId = body.user_id ?? body.id ?? null;
+
+  console.log(
+    `[meta:permissions] direct Instagram connection OK — @${body.username ?? 'unknown'} ` +
+      `(${accountId ?? 'no id returned'})`,
+  );
+
+  if (expected && accountId && accountId !== expected) {
+    console.warn(
+      `[meta:permissions] but INSTAGRAM_ACCOUNT_ID is ${expected}, and this token belongs to ` +
+        `${accountId}. Every reply is addressed to the configured id with this token, which ` +
+        `Graph refuses with a message about the object not existing.`,
+    );
+  }
+
+  console.warn(
+    `[meta:permissions] this host publishes no scope list, so the grant cannot be checked ` +
+      `from here — confirm in the App Dashboard under Instagram → API setup with Instagram ` +
+      `login: ${requiredScopes('instagram_login').join(', ')}`,
+  );
 }

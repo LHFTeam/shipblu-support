@@ -14,19 +14,32 @@ import { env, metaAppSecret, metaVerifyToken } from '@/lib/env';
  * a person is watching the output, and a failure they can read beats a retry
  * that hides which half of a two-step change actually landed.
  *
- * **A Page webhook has two subscriptions, not one, and this module now writes
- * both.** Meta's own sentence is that "only fields with subscriptions at both
- * the page and app levels will get Webhooks": `POST /{app-id}/subscriptions`
- * says which fields the *app* wants, and `POST /{page-id}/subscribed_apps`
- * installs the app on the Page and says which fields *that Page* sends. Only
- * the first was ever implemented, and the second is the reason `feed` has never
- * delivered a single event — 0 of 4,503 `page` and `instagram` deliveries carry
- * a `changes` entry. The two halves are addressed differently and authenticated
- * differently: the app token for one, the Page token for the other.
+ * **A webhook has two subscriptions, not one, and this module writes both.**
+ * Meta's own sentence is that "only fields with subscriptions at both the page
+ * and app levels will get Webhooks": `POST /{app-id}/subscriptions` says which
+ * fields the *app* wants, and an account-level write says which fields that
+ * account sends. Only the first was ever implemented, and the second is the
+ * reason `feed` had never delivered a single event — 0 of 4,503 `page` and
+ * `instagram` deliveries carried a `changes` entry.
+ *
+ * The account-level half is where the two Instagram connections part company,
+ * and there are three writes in this file rather than two because of it:
+ *
+ *   app level          POST graph.facebook.com/{app-id}/subscriptions      app token
+ *   Facebook Page      POST graph.facebook.com/{page-id}/subscribed_apps   Page token
+ *   direct Instagram   POST graph.instagram.com/{ig-id}/subscribed_apps    Instagram token
+ *
+ * The app level is shared: one app, one `instagram` object subscription, serving
+ * both connections. Each connection then owns its own account-level half, with a
+ * different host, a different credential and — for the Page — a different field
+ * vocabulary.
  */
 
 const GRAPH_VERSION = 'v23.0';
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
+
+/** Instagram Login's host, for the third subscription — see the bottom of this file. */
+const INSTAGRAM_GRAPH_BASE = `https://graph.instagram.com/${GRAPH_VERSION}`;
 
 /** The Webhooks objects this app subscribes to, one per product. */
 export const WHATSAPP_OBJECT = 'whatsapp_business_account';
@@ -68,6 +81,13 @@ export const REQUIRED_WHATSAPP_FIELDS = ['messages', 'message_echoes'] as const;
  * `live_comments` and `mentions` are deliberately absent. Both would deliver
  * events nothing ingests, and an unread webhook field is not free — it is a
  * `webhook_events` row and a job per event, forever.
+ *
+ * The same two names serve both Instagram connections, which is not a
+ * coincidence worth relying on elsewhere: `messages` and `comments` are spelled
+ * identically in the Instagram Login vocabulary and in the app-level Instagram
+ * one. The Page's vocabulary is a different matter entirely — it has no
+ * `comments` at all — which is why `REQUIRED_PAGE_FIELDS` is a separate list and
+ * not a reuse of this one.
  */
 export const REQUIRED_INSTAGRAM_FIELDS = ['messages', 'comments'] as const;
 
@@ -461,6 +481,163 @@ export function planPageSubscription(
  */
 export async function applyPageSubscription(plan: PageSubscriptionPlan): Promise<void> {
   await pageGraph(plan.pageId, {
+    method: 'POST',
+    query: { subscribed_fields: plan.merged.join(',') },
+  });
+}
+
+// --- The direct Instagram half: graph.instagram.com/{ig-id}/subscribed_apps ---
+
+/**
+ * The account-level subscription for the **Instagram Login** connection.
+ *
+ * A third subscription, and it belongs to neither of the two above. The app
+ * level (`/{app-id}/subscriptions`) is shared — one app, one `instagram` object
+ * subscription, serving both connections — but each connection then has its own
+ * account-level half, and they are addressed to different nodes on different
+ * hosts with different credentials:
+ *
+ *   Page connection      POST graph.facebook.com/{page-id}/subscribed_apps    Page token
+ *   Direct connection    POST graph.instagram.com/{ig-id}/subscribed_apps     Instagram token
+ *
+ * This is the call `subscribePage`'s comment once explained *not* to make, and
+ * the analysis there was right — it was the deployment that changed. Meta's
+ * Instagram webhook doc shows
+ * `POST /me/subscribed_apps?subscribed_fields=comments,messages` addressed to
+ * `graph.instagram.com`, which is this product and not the Page's, so writing
+ * `comments` into a Page's field list would have been an invalid field name in
+ * the wrong vocabulary. Now that the account is also connected through Instagram
+ * Login, that curl is exactly the right call — made to the host the doc actually
+ * names.
+ *
+ * Which is the whole lesson from §6.26 and §6.35 in one place: **the two
+ * connections differ in the host, the token, the ids and the field vocabulary,
+ * so an example proves nothing until you check which host its URL names.**
+ */
+function instagramToken(): string {
+  const token = env().INSTAGRAM_ACCESS_TOKEN;
+  if (!token) {
+    throw new GraphSubscriptionError(
+      'INSTAGRAM_ACCESS_TOKEN is not set, so the direct Instagram connection has no ' +
+        'credential to subscribe with. It is the Instagram user access token from ' +
+        'Instagram → API setup with Instagram login; the Page token cannot stand in for it.',
+    );
+  }
+  return token;
+}
+
+async function instagramGraph<T>(
+  accountId: string,
+  init: { method: 'GET' | 'POST'; query?: Record<string, string> },
+): Promise<T> {
+  const token = instagramToken();
+
+  const url = new URL(`${INSTAGRAM_GRAPH_BASE}/${accountId}/subscribed_apps`);
+  for (const [key, value] of Object.entries(init.query ?? {})) {
+    url.searchParams.set(key, value);
+  }
+
+  let response: Response;
+  try {
+    // Header rather than query string, as everywhere else here: a URL is the
+    // part of a request that ends up in logs and error messages.
+    response = await fetch(url, {
+      method: init.method,
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  } catch (error) {
+    throw new GraphSubscriptionError(
+      `graph.instagram.com unreachable: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  const text = await response.text();
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    body = null;
+  }
+
+  if (!response.ok) {
+    const error = (body as { error?: Record<string, unknown> } | null)?.error ?? {};
+    const message = typeof error.message === 'string' ? error.message : `HTTP ${response.status}`;
+
+    throw new GraphSubscriptionError(
+      `${message}\n\nThis call is addressed to graph.instagram.com and authenticated with ` +
+        `INSTAGRAM_ACCESS_TOKEN. A Page token sent here is refused with a message that names ` +
+        `neither, and so is an Instagram token sent to graph.facebook.com — check which of ` +
+        `the two credentials is in the variable before reading anything else into this.`,
+      response.status,
+      typeof error.code === 'number' ? error.code : null,
+      typeof error.fbtrace_id === 'string' ? error.fbtrace_id : null,
+    );
+  }
+
+  return body as T;
+}
+
+/**
+ * The fields the direct connection is subscribed to, or null when the account
+ * has no subscription at all.
+ *
+ * Meta documents the POST for this endpoint and not the GET, so the response is
+ * read defensively: any of `data[]`, its `subscribed_fields`, and the entries'
+ * own ids may be absent, and every one of those is a *different* shape from
+ * "subscribed to nothing". The distinction that matters is null versus `[]`,
+ * exactly as on the Page: null means no subscription has ever been made, which
+ * is what explains an account that has never delivered an event.
+ *
+ * It is read rather than skipped because the POST **replaces** the field list.
+ * That is documented for the app level and assumed here, on the same reasoning
+ * `mergeFields` already carries: writing the merged list is correct under either
+ * reading, and assuming "adds" is the assumption that costs a channel.
+ */
+export async function readInstagramLoginSubscription(accountId: string): Promise<string[] | null> {
+  const body = await instagramGraph<{ data?: { subscribed_fields?: string[] }[] }>(accountId, {
+    method: 'GET',
+  });
+
+  const entries = body?.data;
+  if (!Array.isArray(entries) || entries.length === 0) return null;
+
+  // Unioned across entries rather than taking the first. The token is scoped to
+  // one app so there should only ever be one, and an unexpected second entry
+  // must widen what we preserve rather than be silently dropped.
+  const fields = new Set<string>();
+  for (const entry of entries) {
+    for (const field of entry?.subscribed_fields ?? []) fields.add(field);
+  }
+
+  return [...fields];
+}
+
+export type InstagramLoginSubscriptionPlan = {
+  accountId: string;
+  /** False when the account carries no subscription for this app yet. */
+  subscribed: boolean;
+  current: string[];
+  merged: string[];
+  adding: string[];
+};
+
+export function planInstagramLoginSubscription(
+  accountId: string,
+  current: string[] | null,
+  want: readonly string[],
+): InstagramLoginSubscriptionPlan {
+  // The same merge as both other levels, deliberately: all three writes replace
+  // rather than add, and a merge that is right in one place and wrong in another
+  // is the same outage with a different cause.
+  const merged = mergeFields(current ?? [], want);
+
+  return { accountId, subscribed: current !== null, ...merged };
+}
+
+export async function applyInstagramLoginSubscription(
+  plan: InstagramLoginSubscriptionPlan,
+): Promise<void> {
+  await instagramGraph(plan.accountId, {
     method: 'POST',
     query: { subscribed_fields: plan.merged.join(',') },
   });

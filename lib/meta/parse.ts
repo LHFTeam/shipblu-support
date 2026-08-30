@@ -1,3 +1,4 @@
+import type { MetaConnection } from './connection';
 import type {
   MetaAttachment,
   MetaChange,
@@ -18,6 +19,11 @@ import type {
  * because throwing makes Meta redeliver the whole batch — including the parts
  * that were fine — and repeated failures eventually get the subscription
  * disabled.
+ *
+ * `connection` is passed in rather than derived. It is not in the payload —
+ * both Instagram connections send the same body and differ only in the
+ * signature — so the endpoint that verified it is the only thing that knows,
+ * and it stores the answer on the row this parser is handed.
  */
 
 const ATTACHMENT_TYPES = new Set(['image', 'video', 'audio', 'file', 'share', 'story', 'sticker']);
@@ -25,7 +31,10 @@ const ATTACHMENT_TYPES = new Set(['image', 'video', 'audio', 'file', 'share', 's
 /** Comment events worth acting on. `edited` and `remove` are not new tickets. */
 const OPENING_VERBS = new Set(['add']);
 
-export function parseMetaWebhook(payload: unknown): NormalisedMetaWebhook {
+export function parseMetaWebhook(
+  payload: unknown,
+  connection: MetaConnection | null,
+): NormalisedMetaWebhook {
   const result: NormalisedMetaWebhook = {
     messages: [],
     comments: [],
@@ -43,7 +52,7 @@ export function parseMetaWebhook(payload: unknown): NormalisedMetaWebhook {
     const accountId = entry.id ?? null;
 
     for (const event of entry.messaging ?? []) {
-      readMessagingEvent(event, platform, accountId, false, result);
+      readMessagingEvent(event, platform, connection, accountId, false, result);
     }
 
     // `standby` carries messages while another app holds the thread, which
@@ -54,11 +63,11 @@ export function parseMetaWebhook(payload: unknown): NormalisedMetaWebhook {
     // thread this app cannot send on, and Graph refuses that with nothing but
     // "An unknown error has occurred."
     for (const event of entry.standby ?? []) {
-      readMessagingEvent(event, platform, accountId, true, result);
+      readMessagingEvent(event, platform, connection, accountId, true, result);
     }
 
     for (const change of entry.changes ?? []) {
-      const comment = readComment(change, platform, entry);
+      const comment = readComment(change, platform, connection, entry);
       if (comment) result.comments.push(comment);
     }
   }
@@ -75,6 +84,7 @@ function platformOf(object: string | undefined): MetaPlatform | null {
 function readMessagingEvent(
   event: MetaMessagingEvent,
   platform: MetaPlatform,
+  connection: MetaConnection | null,
   accountId: string | null,
   standby: boolean,
   result: NormalisedMetaWebhook,
@@ -106,6 +116,7 @@ function readMessagingEvent(
 
   result.messages.push({
     platform,
+    connection,
     mid: message.mid,
     from,
     accountId: event.recipient?.id ?? accountId,
@@ -173,6 +184,7 @@ function readReceipt(event: MetaMessagingEvent, platform: MetaPlatform): Normali
 function readComment(
   change: MetaChange,
   platform: MetaPlatform,
+  connection: MetaConnection | null,
   entry: MetaEntry,
 ): NormalisedComment | null {
   const value = change?.value;
@@ -191,6 +203,7 @@ function readComment(
 
     return {
       platform,
+      connection,
       commentId: value.comment_id,
       // Meta sets parent_id to the post for a top-level comment and to the
       // parent comment for a reply, so "is this a reply?" is exactly "is the
@@ -217,6 +230,7 @@ function readComment(
 
   return {
     platform,
+    connection,
     commentId,
     // Same guard as Facebook's above, for the same reason and one Instagram has
     // not yet been observed to need: `ingestMetaComment` keys the ticket on

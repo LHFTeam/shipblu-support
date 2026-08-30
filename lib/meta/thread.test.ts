@@ -1,17 +1,30 @@
 import { describe, expect, it } from 'vitest';
-import { metaThreadState, metaThreadStateFromMessage } from './thread';
+import { metaThreadState, type MetaThreadInput, metaThreadStateFromMessage } from './thread';
 
 const PAGE = '955333171001884';
 const OTHER_PAGE = '101449698657189';
+const IG_ACCOUNT = '17841448759001625';
+
+/**
+ * The Page connection, which is what every case here was written against and
+ * what a deployment without `INSTAGRAM_ACCESS_TOKEN` still has. The cases about
+ * the direct connection name it explicitly.
+ */
+function onPage(overrides: Partial<MetaThreadInput> = {}): MetaThreadInput {
+  return {
+    platform: 'facebook',
+    connection: 'facebook_page',
+    inboundAccountId: PAGE,
+    configuredAccountId: PAGE,
+    standby: false,
+    inboundConnection: 'facebook_page',
+    ...overrides,
+  };
+}
 
 describe('metaThreadState', () => {
   it('lets a reply go out on the configured page', () => {
-    const state = metaThreadState({
-      platform: 'facebook',
-      inboundAccountId: PAGE,
-      configuredAccountId: PAGE,
-      standby: false,
-    });
+    const state = metaThreadState(onPage());
 
     expect(state.canSend).toBe(true);
     expect(state.reason).toBe('ours');
@@ -19,12 +32,7 @@ describe('metaThreadState', () => {
   });
 
   it('refuses a page-scoped id that belongs to another page', () => {
-    const state = metaThreadState({
-      platform: 'facebook',
-      inboundAccountId: OTHER_PAGE,
-      configuredAccountId: PAGE,
-      standby: false,
-    });
+    const state = metaThreadState(onPage({ inboundAccountId: OTHER_PAGE }));
 
     expect(state.canSend).toBe(false);
     expect(state.reason).toBe('other_account');
@@ -36,24 +44,20 @@ describe('metaThreadState', () => {
   });
 
   it('names the Instagram variable when the account is an Instagram one', () => {
-    const state = metaThreadState({
-      platform: 'instagram',
-      inboundAccountId: '17841480067102672',
-      configuredAccountId: '17800000000000000',
-      standby: false,
-    });
+    const state = metaThreadState(
+      onPage({
+        platform: 'instagram',
+        inboundAccountId: '17841480067102672',
+        configuredAccountId: '17800000000000000',
+      }),
+    );
 
     expect(state.reason).toBe('other_account');
     expect(state.explanation).toContain('INSTAGRAM_ACCOUNT_ID');
   });
 
   it('refuses a thread another app holds control of', () => {
-    const state = metaThreadState({
-      platform: 'facebook',
-      inboundAccountId: PAGE,
-      configuredAccountId: PAGE,
-      standby: true,
-    });
+    const state = metaThreadState(onPage({ standby: true }));
 
     expect(state.canSend).toBe(false);
     expect(state.reason).toBe('standby');
@@ -68,12 +72,7 @@ describe('metaThreadState', () => {
     addressed even after winning it.
   */
   it('reports the wrong page before the handover when both are true', () => {
-    const state = metaThreadState({
-      platform: 'facebook',
-      inboundAccountId: OTHER_PAGE,
-      configuredAccountId: PAGE,
-      standby: true,
-    });
+    const state = metaThreadState(onPage({ inboundAccountId: OTHER_PAGE, standby: true }));
 
     expect(state.reason).toBe('other_account');
     // …and still says the second half, so repointing the id is not attempted
@@ -82,23 +81,13 @@ describe('metaThreadState', () => {
   });
 
   it('does not mention the handover when only the page is wrong', () => {
-    const state = metaThreadState({
-      platform: 'facebook',
-      inboundAccountId: OTHER_PAGE,
-      configuredAccountId: PAGE,
-      standby: false,
-    });
+    const state = metaThreadState(onPage({ inboundAccountId: OTHER_PAGE }));
 
     expect(state.explanation).not.toContain('standby');
   });
 
   it('says so when nothing is configured to send from', () => {
-    const state = metaThreadState({
-      platform: 'facebook',
-      inboundAccountId: PAGE,
-      configuredAccountId: null,
-      standby: false,
-    });
+    const state = metaThreadState(onPage({ configuredAccountId: null }));
 
     expect(state.canSend).toBe(false);
     expect(state.reason).toBe('not_configured');
@@ -108,12 +97,7 @@ describe('metaThreadState', () => {
   // before the field existed has none either. Neither is evidence of a wrong
   // page, so neither may block a reply.
   it('does not refuse when the inbound account is unknown', () => {
-    const state = metaThreadState({
-      platform: 'facebook',
-      inboundAccountId: null,
-      configuredAccountId: PAGE,
-      standby: false,
-    });
+    const state = metaThreadState(onPage({ inboundAccountId: null }));
 
     expect(state.canSend).toBe(true);
   });
@@ -123,6 +107,7 @@ describe('metaThreadStateFromMessage', () => {
   it('reads the page and the handover flag off the last inbound message', () => {
     const state = metaThreadStateFromMessage({
       platform: 'facebook',
+      connection: 'facebook_page',
       configuredAccountId: PAGE,
       lastInboundMeta: { accountId: OTHER_PAGE, standby: true, metaKind: 'direct_message' },
     });
@@ -134,6 +119,7 @@ describe('metaThreadStateFromMessage', () => {
   it('treats a row written before the flag existed as answerable', () => {
     const state = metaThreadStateFromMessage({
       platform: 'facebook',
+      connection: 'facebook_page',
       configuredAccountId: PAGE,
       lastInboundMeta: { accountId: PAGE, metaKind: 'direct_message' },
     });
@@ -144,6 +130,7 @@ describe('metaThreadStateFromMessage', () => {
   it('survives a ticket with no inbound message to read', () => {
     const state = metaThreadStateFromMessage({
       platform: 'facebook',
+      connection: 'facebook_page',
       configuredAccountId: PAGE,
       lastInboundMeta: null,
     });
@@ -155,10 +142,123 @@ describe('metaThreadStateFromMessage', () => {
   it('only a true flag means standby', () => {
     const state = metaThreadStateFromMessage({
       platform: 'facebook',
+      connection: 'facebook_page',
       configuredAccountId: PAGE,
       lastInboundMeta: { accountId: PAGE, standby: 'yes' },
     });
 
     expect(state.canSend).toBe(true);
+  });
+});
+
+describe('metaThreadState across the two Instagram connections', () => {
+  /*
+    The bug this exists to prevent, and it was live for two days.
+
+    Freshworks is the primary receiver on the ShipBlu Page, so every Instagram
+    delivery reaching this app through the Page arrives in `standby`. That is a
+    fact about the Page's inbox. A reply sent through Instagram Login goes out
+    with the account's own token against graph.instagram.com, where the Page's
+    handover has no standing at all — but the flag was read as a property of the
+    account, so the console refused every Instagram reply on the strength of it
+    (docs/PROJECT-STATE.md §6.29).
+  */
+  it('lets the direct connection answer a thread the Page does not control', () => {
+    const state = metaThreadState({
+      platform: 'instagram',
+      connection: 'instagram_login',
+      inboundAccountId: IG_ACCOUNT,
+      configuredAccountId: IG_ACCOUNT,
+      standby: true,
+      inboundConnection: 'facebook_page',
+    });
+
+    expect(state.canSend).toBe(true);
+    expect(state.route).toBe('instagram_login');
+  });
+
+  it('still refuses when the Page connection is the only route', () => {
+    // The same ticket on a deployment with no Instagram token: nothing has
+    // changed for it, and it must not start claiming it can answer.
+    const state = metaThreadState({
+      platform: 'instagram',
+      connection: 'facebook_page',
+      inboundAccountId: IG_ACCOUNT,
+      configuredAccountId: IG_ACCOUNT,
+      standby: true,
+      inboundConnection: 'facebook_page',
+    });
+
+    expect(state.canSend).toBe(false);
+    expect(state.reason).toBe('standby');
+    // The way out is named, because it is a configuration change rather than a
+    // negotiation with whoever owns the Page inbox.
+    expect(state.explanation).toContain('INSTAGRAM_ACCESS_TOKEN');
+  });
+
+  it("reads a standby with no connection recorded as the Page's", () => {
+    // Every row written before the column existed. Those deliveries all came
+    // through the Page, so the flag on them describes the Page.
+    const state = metaThreadState({
+      platform: 'instagram',
+      connection: 'facebook_page',
+      inboundAccountId: IG_ACCOUNT,
+      configuredAccountId: IG_ACCOUNT,
+      standby: true,
+      inboundConnection: null,
+    });
+
+    expect(state.canSend).toBe(false);
+  });
+
+  it('does not carry a standby from one connection over to the other', () => {
+    // A flag recorded by the direct connection says nothing about the Page's
+    // thread control, and guessing "blocked" there would refuse a send that
+    // would have worked.
+    const state = metaThreadState({
+      platform: 'instagram',
+      connection: 'facebook_page',
+      inboundAccountId: IG_ACCOUNT,
+      configuredAccountId: IG_ACCOUNT,
+      standby: true,
+      inboundConnection: 'instagram_login',
+    });
+
+    expect(state.canSend).toBe(true);
+  });
+
+  it('reports the route it would send over', () => {
+    expect(metaThreadState(onPage()).route).toBe('facebook_page');
+  });
+});
+
+describe('metaThreadStateFromMessage and the connection on the row', () => {
+  it('reads the connection off the message', () => {
+    const state = metaThreadStateFromMessage({
+      platform: 'instagram',
+      connection: 'instagram_login',
+      configuredAccountId: IG_ACCOUNT,
+      lastInboundMeta: {
+        accountId: IG_ACCOUNT,
+        standby: true,
+        connection: 'facebook_page',
+        metaKind: 'direct_message',
+      },
+    });
+
+    expect(state.canSend).toBe(true);
+  });
+
+  it('ignores anything in the column that is not a connection', () => {
+    // jsonb, so it could hold anything at all.
+    const state = metaThreadStateFromMessage({
+      platform: 'instagram',
+      connection: 'facebook_page',
+      configuredAccountId: IG_ACCOUNT,
+      lastInboundMeta: { accountId: IG_ACCOUNT, standby: true, connection: 'whatsapp' },
+    });
+
+    expect(state.canSend).toBe(false);
+    expect(state.reason).toBe('standby');
   });
 });

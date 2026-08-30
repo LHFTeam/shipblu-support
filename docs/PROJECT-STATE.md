@@ -590,8 +590,19 @@ is code:
   **The plan is a swap, not a negotiation.** When this service is ready, the
   Freshworks app is removed from the Meta account and this service's Meta app
   becomes the default; thread control follows the default app. Until that
-  happens, treat every Meta channel as read-only in practice however the code
-  is configured.
+  happens, treat **Messenger** as read-only in practice however the code is
+  configured.
+
+  **Instagram is the exception as of 2026-08-30, and it is the way out of this
+  paragraph.** The account is now also connected directly through Instagram
+  Login, which is not installed on the Page and therefore not subject to the
+  Page's handover protocol at all: it receives its own copy of every event in
+  `messaging`, and a reply sent with its own token against `graph.instagram.com`
+  does not need thread control that Freshworks holds. So Instagram can be
+  answered from here before the swap — which also means the Instagram App Review
+  screencast can be recorded before it. `standby` on a Page delivery no longer
+  refuses an Instagram send; see §6.36 and `lib/meta/connection.ts`. Messenger
+  has no equivalent second route and still waits for the swap.
 
   Two things follow that are easy to get wrong. **The App Review screencasts
   cannot be recorded before the swap** — `pages_messaging` and the comment
@@ -2121,6 +2132,81 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     the host, the token, the ids _and_ the field vocabulary.** A Meta doc example
     proves nothing until you check which host its URL names, and when that is
     ambiguous the debugger settles it without touching production.
+
+36. **Both Instagram connections are live on purpose now, and almost everything
+    that reads as a property of "the Instagram account" is really a property of
+    one connection.** _2026-08-30._ The account is connected through its Facebook
+    Page **and** through Instagram Login, which §6.26 discovered by accident and
+    §6.29 spent two days trying to collapse back to one. Keeping both is the
+    right answer, and it changes what four separate signals mean.
+
+    |                | `facebook_page`                                  | `instagram_login`        |
+    | -------------- | ------------------------------------------------ | ------------------------ |
+    | host           | `graph.facebook.com`                             | `graph.instagram.com`    |
+    | credential     | `META_PAGE_ACCESS_TOKEN`                         | `INSTAGRAM_ACCESS_TOKEN` |
+    | signs webhooks | `META_APP_SECRET`                                | `INSTAGRAM_APP_SECRET`   |
+    | permissions    | `instagram_basic`, `instagram_manage_*`          | `instagram_business_*`   |
+    | handover       | yes — `standby` when another app owns the thread | none                     |
+
+    The ids are the one thing that does **not** differ: the same account id and
+    the same IGSID appear on both, verified from production traffic rather than
+    from Meta's docs (§6.29). That is what makes a connection a pure route — a
+    contact, a ticket and a 24-hour window mean the same thing on either — and it
+    is why this is a routing change rather than a data migration.
+
+    Four consequences, each of which was a bug until this landed:
+
+    - **`standby` belongs to the Page, not to the account.** Freshworks is the
+      Page's primary receiver, so every Instagram delivery reaching this app
+      through the Page arrives in `standby` — and that was read as "this account
+      cannot be answered", refusing every Instagram reply in the console. It says
+      nothing about a send made with the Instagram account's own token.
+      `lib/meta/thread.ts` now only lets a `standby` block a send **over the
+      connection that reported it**. This is the change that makes Instagram
+      answerable before the Freshworks swap (§5.1).
+    - **Which connection delivered an event is knowable exactly once**, at the
+      endpoint, from which app secret verified the signature. The payloads are
+      otherwise byte-identical — same object, same `entry.id`, same user agent.
+      It is stored on `webhook_events.connection` and copied onto the message's
+      `meta`, because nothing downstream can recover it.
+    - **The delivery key now includes the connection**, so both copies of a
+      message are stored instead of the second being deduplicated away. Ingest
+      still keys on the `mid`, so there is one ticket; what this buys is a
+      per-connection delivery count — the number that would have shown the Page
+      connection going silent within the hour on 27 August rather than the next
+      day — and a second chance at a batch whose job died.
+    - **An App Review permission name says which connection somebody submitted
+      for, not which one the account is on.** §6.29 read `instagram_business_*`
+      as evidence of the setup and was wrong. Both sets are needed now, and
+      `check_meta_permissions` reports them separately.
+
+    **`INSTAGRAM_APP_SECRET` is the name to use**, matching Meta's own dashboard
+    and pairing with `INSTAGRAM_ACCESS_TOKEN`. `META_INSTAGRAM_APP_SECRET` is
+    still read, deliberately: unsetting an Instagram app secret has twice taken
+    the channel down for the better part of a day (§6.26's 3,044 and §6.29's
+    844), and a second name costs one HMAC on a delivery that was going to be
+    hashed anyway. Identical values under both names are deduplicated. Unset the
+    old one only once the web log says
+    `instagram … deliveries are verifying with INSTAGRAM_APP_SECRET`.
+
+    **The live symptom that produced all this**, for the next person matching on
+    it: real Instagram `comments` deliveries began arriving at 15:22 UTC on
+    2026-08-30 — the first real ones ever — and every one was answered 403 with
+    `signature did not match META_APP_SECRET`. The reason line names the
+    candidates that were _tried_, so naming only one where two connections are
+    live is itself the diagnosis: the secret was set in Render under a name the
+    code did not read. Same shape as §6.26 and §6.29, third occurrence.
+
+    Two things are still **not** settled and should not be assumed:
+
+    - Whether the direct connection delivers `comments` for the general public at
+      Standard Access. Every delivery so far has been a comment the account left
+      on its own media, which Standard Access covers on its own; a comment from
+      somebody else arriving is what would settle it.
+    - Whether Meta ever sends `standby` on the Instagram Login connection. It has
+      never been observed and there is no primary receiver for it to be second
+      to, but the code handles it rather than assuming: a `standby` recorded by
+      the direct connection blocks a send over the direct connection.
 
 ## 7. Verification already done
 

@@ -12,6 +12,7 @@ describe('explainMetaSendError', () => {
   it('explains a generic refusal of a human-agent reply', () => {
     const explained = explainMetaSendError(refusal(1), {
       platform: 'instagram',
+      connection: 'instagram_login',
       sendKind: 'dm',
       tag: 'HUMAN_AGENT',
     });
@@ -27,6 +28,7 @@ describe('explainMetaSendError', () => {
   it('does not blame the human agent tag when the reply was inside 24 hours', () => {
     const explained = explainMetaSendError(refusal(1), {
       platform: 'instagram',
+      connection: 'instagram_login',
       sendKind: 'dm',
       tag: 'RESPONSE',
     });
@@ -38,7 +40,7 @@ describe('explainMetaSendError', () => {
   it('leaves a refusal that names its own rule alone', () => {
     const explained = explainMetaSendError(
       refusal(10, 'This message is sent outside of allowed window'),
-      { platform: 'facebook', sendKind: 'dm', tag: 'HUMAN_AGENT' },
+      { platform: 'facebook', connection: 'facebook_page', sendKind: 'dm', tag: 'HUMAN_AGENT' },
     );
 
     expect(explained).toContain('outside of allowed window');
@@ -48,7 +50,7 @@ describe('explainMetaSendError', () => {
   it('says a token is expired rather than leaving it to be read as a send problem', () => {
     const explained = explainMetaSendError(
       refusal(190, 'Error validating access token: Session has expired'),
-      { platform: 'facebook', sendKind: 'comment_reply' },
+      { platform: 'facebook', connection: 'facebook_page', sendKind: 'comment_reply' },
     );
 
     expect(explained).toContain('META_PAGE_ACCESS_TOKEN');
@@ -57,6 +59,7 @@ describe('explainMetaSendError', () => {
   it('keeps the identifiers Meta support asks for', () => {
     const explained = explainMetaSendError(refusal(1, UNKNOWN, 'Az9trace'), {
       platform: 'instagram',
+      connection: 'instagram_login',
       sendKind: 'dm',
       tag: 'HUMAN_AGENT',
     });
@@ -69,6 +72,7 @@ describe('explainMetaSendError', () => {
   it('says what has already been ruled out for a refusal inside the window', () => {
     const explained = explainMetaSendError(refusal(1), {
       platform: 'facebook',
+      connection: 'facebook_page',
       sendKind: 'dm',
       tag: 'RESPONSE',
     });
@@ -91,6 +95,7 @@ describe('explainMetaSendError', () => {
 
     const explained = explainMetaSendError(ours, {
       platform: 'facebook',
+      connection: 'facebook_page',
       sendKind: 'dm',
       tag: 'RESPONSE',
     });
@@ -110,6 +115,7 @@ describe('explainMetaSendError', () => {
 
     const explained = explainMetaSendError(unreachable, {
       platform: 'facebook',
+      connection: 'facebook_page',
       sendKind: 'dm',
       tag: 'RESPONSE',
     });
@@ -122,6 +128,7 @@ describe('explainMetaSendError', () => {
 
     const explained = explainMetaSendError(error, {
       platform: 'instagram',
+      connection: 'instagram_login',
       sendKind: 'dm',
       tag: 'RESPONSE',
     });
@@ -135,23 +142,41 @@ describe('explainMetaModerationError', () => {
   const unsupportedPost = () =>
     new MetaApiError('Unsupported post request.', 400, 100, 33, false, null, 'AaBb');
 
-  it('names the Instagram App Review permission, in both its spellings', () => {
-    const explained = explainMetaModerationError(unsupportedPost(), {
+  it('names the Instagram permission for the connection the call went out on', () => {
+    /*
+      One spelling, not both, and this changed once both connections went live.
+
+      The permission is `instagram_business_manage_comments` for Instagram Login
+      and `instagram_manage_comments` for a Page-connected account, and this app
+      holds both connections — so offering both names for one refusal is how an
+      approval gets requested against the flow that was not being used. The call
+      knows which host it went to; that decides which name to print.
+    */
+    const direct = explainMetaModerationError(unsupportedPost(), {
       platform: 'instagram',
+      connection: 'instagram_login',
       action: 'hide',
     });
 
-    // Both, because the permission is spelled one way for Instagram Login and
-    // another for a Page-connected account, and whoever opens the dashboard
-    // needs to find whichever one their app actually lists.
-    expect(explained).toContain('instagram_business_manage_comments');
-    expect(explained).toContain('instagram_manage_comments');
-    expect(explained).toContain('hide');
+    expect(direct).toContain('instagram_business_manage_comments');
+    expect(direct).toContain('graph.instagram.com');
+    expect(direct).toContain('hide');
+
+    const page = explainMetaModerationError(unsupportedPost(), {
+      platform: 'instagram',
+      connection: 'facebook_page',
+      action: 'hide',
+    });
+
+    expect(page).toContain('instagram_manage_comments');
+    expect(page).not.toContain('instagram_business_manage_comments');
+    expect(page).toContain('graph.facebook.com');
   });
 
   it('names the Page permission on Facebook', () => {
     const explained = explainMetaModerationError(unsupportedPost(), {
       platform: 'facebook',
+      connection: 'facebook_page',
       action: 'delete',
     });
 
@@ -161,7 +186,11 @@ describe('explainMetaModerationError', () => {
 
   it('keeps the numbers Meta support asks for', () => {
     expect(
-      explainMetaModerationError(unsupportedPost(), { platform: 'instagram', action: 'unhide' }),
+      explainMetaModerationError(unsupportedPost(), {
+        platform: 'instagram',
+        connection: 'instagram_login',
+        action: 'unhide',
+      }),
     ).toContain('trace AaBb');
   });
 
@@ -176,6 +205,7 @@ describe('explainMetaModerationError', () => {
 
     const explained = explainMetaModerationError(rateLimited, {
       platform: 'instagram',
+      connection: 'instagram_login',
       action: 'hide',
     });
 

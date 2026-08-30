@@ -183,24 +183,33 @@ const schema = z.object({
   INSTAGRAM_ACCOUNT_ID: z.string().optional(),
 
   /**
-   * The Instagram Login pair, and the one place the "one app, one credential"
-   * rule above does not hold.
+   * The direct Instagram connection, and the one place the "one app, one
+   * credential" rule above does not hold.
    *
-   * An Instagram professional account can be connected two ways. Through the
-   * **Facebook Page** it is linked to, which is what everything above assumes:
-   * the Page token sends, the app secret signs, and `graph.facebook.com` serves.
-   * Or through **Instagram Login**, which is its own setup inside the same Meta
-   * app, with its own access token, its own app secret, and `graph.instagram.com`
-   * as the host. The App Review permissions are named for the flow —
-   * `instagram_manage_comments` for the first, `instagram_business_manage_comments`
-   * for the second — which is the clearest signal of which one an app is on.
+   * An Instagram professional account can be connected two ways, and this app
+   * is connected **both** ways at once. Through the **Facebook Page** it is
+   * linked to, which is what everything above assumes: the Page token sends, the
+   * app secret signs, and `graph.facebook.com` serves. And through **Instagram
+   * Login**, which is its own setup inside the same Meta app, with its own
+   * access token, its own app secret, and `graph.instagram.com` as the host. The
+   * App Review permissions are named for the flow — `instagram_manage_comments`
+   * for the first, `instagram_business_manage_comments` for the second.
    *
-   * Both are optional and both default to the Page behaviour, because the
-   * difference is invisible until something is refused: a webhook signed with
-   * the Instagram app secret is answered 403 and stored unverified, and a Graph
-   * call made with the wrong token is refused with a sentence that names no
-   * cause. Set them together, and only when the account is on Instagram Login.
+   * The two are not alternatives here. Meta delivers the same event on both, so
+   * a webhook must verify against either secret, and an outbound call has to
+   * pick a route — see `lib/meta/connection.ts`, which is where that decision
+   * lives and why.
+   *
+   * Both keys stay optional, and unset is the Page-only deployment every
+   * environment had before the second connection existed: `metaConnection()`
+   * keys on `INSTAGRAM_ACCESS_TOKEN` being present rather than on a mode flag,
+   * so an environment holding neither behaves exactly as it did. Set them
+   * together. Setting the token without the secret is the worst of the three
+   * states — sends route to `graph.instagram.com` while every delivery that
+   * connection signs is answered 403 and dropped, which is §6.26 and §6.29 in
+   * `docs/PROJECT-STATE.md`, 3,888 lost deliveries between them.
    */
+  INSTAGRAM_APP_SECRET: z.string().optional(),
   META_INSTAGRAM_APP_SECRET: z.string().optional(),
   INSTAGRAM_ACCESS_TOKEN: z.string().optional(),
 
@@ -293,14 +302,24 @@ export function metaAppSecret(): string | undefined {
 }
 
 /**
- * The Instagram app secret, when the account is on Instagram Login.
+ * The Instagram app secret, under both names it can be set with.
  *
- * Undefined is the ordinary case, not a misconfiguration: an account connected
+ * `INSTAGRAM_APP_SECRET` is what Meta's dashboard calls it and what this repo
+ * asks for; `META_INSTAGRAM_APP_SECRET` is the name shipped first and still
+ * honoured. Returned as a pair rather than coalesced because the *names* are
+ * what `lib/meta/signing.ts` writes into `webhook_events.error` — "signature did
+ * not match INSTAGRAM_APP_SECRET or META_APP_SECRET" is a sentence that names
+ * which variables were read, and it is how both Instagram outages were finally
+ * diagnosed. Coalescing here would report a name that may hold nothing.
+ *
+ * Both undefined means the direct Instagram connection is not configured, which
+ * is a supported state and not a misconfiguration: an account reached only
  * through its Facebook Page is signed with `META_APP_SECRET` like everything
- * else, so the candidates in `lib/meta/signing.ts` fall back to it.
+ * else.
  */
-export function metaInstagramAppSecret(): string | undefined {
-  return env().META_INSTAGRAM_APP_SECRET;
+export function instagramAppSecrets(): { current?: string; legacy?: string } {
+  const e = env();
+  return { current: e.INSTAGRAM_APP_SECRET, legacy: e.META_INSTAGRAM_APP_SECRET };
 }
 
 /** The token Meta echoes back during the subscription handshake. */

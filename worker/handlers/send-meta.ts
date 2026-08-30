@@ -8,6 +8,7 @@ import {
   sendDirectMessage,
 } from '@/lib/meta/client';
 import { commentReplyTarget } from '@/lib/meta/comments';
+import { metaConnection } from '@/lib/meta/connection';
 import { explainMetaSendError } from '@/lib/meta/errors';
 import type { MetaPlatform } from '@/lib/meta/types';
 import { messagingTag, metaWindowState } from '@/lib/meta/window';
@@ -68,6 +69,11 @@ export async function sendMeta(job: ClaimedJob): Promise<void> {
 
   const sendKind = meta.sendKind ?? (await inferSendKind(row.conversation.id));
 
+  // Which host and credential this goes out with. Resolved once here so the log
+  // line, the failure explanation and the request itself cannot disagree about
+  // it — `endpoint()` in the client asks the same function.
+  const connection = metaConnection(platform);
+
   try {
     const externalId = await deliver(sendKind, platform, row, meta);
 
@@ -80,7 +86,7 @@ export async function sendMeta(job: ClaimedJob): Promise<void> {
       })
       .where(eq(messages.id, messageId));
 
-    console.log(`[send_meta] ${messageId} sent as ${sendKind} on ${platform}`);
+    console.log(`[send_meta] ${messageId} sent as ${sendKind} on ${platform} via ${connection}`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
 
@@ -91,6 +97,7 @@ export async function sendMeta(job: ClaimedJob): Promise<void> {
       error instanceof MetaApiError
         ? explainMetaSendError(error, {
             platform,
+            connection,
             sendKind,
             tag:
               sendKind === 'dm'

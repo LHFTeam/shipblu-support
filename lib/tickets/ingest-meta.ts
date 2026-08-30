@@ -123,6 +123,12 @@ export async function ingestMetaMessage(
           metaKind: 'direct_message',
           platform: message.platform,
           accountId: message.accountId,
+          // Which of the two Meta connections delivered this. Recorded beside
+          // `standby` rather than instead of it, because it is what makes the
+          // flag readable: handover belongs to the Facebook Page, so a standby
+          // reported by the Page connection says nothing about a reply sent
+          // with the Instagram account's own token.
+          connection: message.connection,
           // Whether this app may answer the thread at all, recorded per message
           // because thread control moves: the same customer can be answerable
           // today and handed to another inbox tool tomorrow.
@@ -246,6 +252,7 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
         meta: {
           metaKind: 'comment',
           platform: comment.platform,
+          connection: comment.connection,
           commentId: comment.commentId,
           parentCommentId: comment.parentCommentId,
           postId: comment.postId,

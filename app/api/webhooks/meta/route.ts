@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/db/client';
 import { webhookEvents } from '@/db/schema';
-import { metaAppSecret, metaInstagramAppSecret, metaVerifyToken } from '@/lib/env';
+import { instagramAppSecrets, metaAppSecret, metaVerifyToken } from '@/lib/env';
+import { deliveryId } from '@/lib/meta/delivery';
 import {
   deliveryEnvelope,
   noteVerifyingSecret,
@@ -22,10 +23,14 @@ export const dynamic = 'force-dynamic';
  * subscription and distinguishes them only by the `object` field. Splitting
  * them would mean two URLs to register and the same code twice.
  *
- * One endpoint does not mean one credential, though, and that is the trap: an
- * Instagram account connected through Instagram Login is signed with the
- * *Instagram* app secret rather than the app's. Which secrets can have signed a
- * delivery is decided by `lib/meta/signing.ts`, from the object in the body.
+ * One endpoint does not mean one credential, though, and that is the trap. This
+ * Instagram account is connected **twice** — through its Facebook Page and
+ * directly through Instagram Login — and the two setups sign with different app
+ * secrets while sending byte-identical bodies. Which secrets can have signed a
+ * delivery is decided by `lib/meta/signing.ts` from the object in the body, and
+ * *which one actually did* is the only thing that says which connection a
+ * delivery came in on. It is recorded on the row, because it is knowable here
+ * and nowhere downstream.
  *
  * Same discipline as the WhatsApp endpoint: persist the raw payload, enqueue,
  * return 200 fast. Nothing here parses a message or calls the Graph API — Meta
@@ -86,9 +91,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'invalid json' }, { status: 400 });
   }
 
+  const instagram = instagramAppSecrets();
   const candidates = signingCandidates(payload.object, {
     appSecret: metaAppSecret(),
-    instagramAppSecret: metaInstagramAppSecret(),
+    instagramAppSecret: instagram.current,
+    legacyInstagramAppSecret: instagram.legacy,
   });
 
   const signature = request.headers.get(SIGNATURE_HEADER);
@@ -97,10 +104,10 @@ export async function POST(request: Request) {
   const signatureVerified = matched !== null;
 
   // Which credential signed which channel, said once per combination. Both are
-  // in use here: the `messaging` copies of this account's traffic and the
-  // handover protocol's `standby` copies verify against different secrets, and
-  // the two setups they belong to take different App Review permissions.
-  if (matched) noteVerifyingSecret(payload.object, matched.name, deliveryEnvelope(payload));
+  // in use here: the same Instagram account is connected through its Facebook
+  // Page and directly through Instagram Login, the two sign with different
+  // secrets, and the App Review permissions differ between them.
+  if (matched) noteVerifyingSecret(payload.object, matched, deliveryEnvelope(payload));
 
   const channel = payload.object === 'instagram' ? 'instagram' : 'facebook';
 
@@ -121,7 +128,8 @@ export async function POST(request: Request) {
     .values({
       provider: 'meta',
       channel,
-      providerEventId: signatureVerified ? deliveryId(payload) : null,
+      providerEventId: matched ? deliveryId(payload, matched.connection) : null,
+      connection: matched?.connection ?? null,
       payload,
       headers,
       signatureVerified,
@@ -158,8 +166,9 @@ export async function POST(request: Request) {
     // for a comment the parser had already handled correctly the day before
     // (§6.30). One line naming the key that collided answers it in a log search.
     console.log(
-      `[webhook:meta] duplicate ${payload.object ?? 'unknown'} delivery, already stored as ` +
-        `${deliveryId(payload)} — not re-queued`,
+      `[webhook:meta] duplicate ${payload.object ?? 'unknown'} delivery on ` +
+        `${matched.connection}, already stored as ${deliveryId(payload, matched.connection)} ` +
+        `— not re-queued`,
     );
     return NextResponse.json({ status: 'duplicate' }, { status: 200 });
   }
@@ -173,37 +182,4 @@ export async function POST(request: Request) {
   );
 
   return NextResponse.json({ status: 'queued' }, { status: 200 });
-}
-
-/**
- * Delivery-level idempotency key, derived from the batch contents.
- *
- * Meta sends no event id of its own. Message ids and comment ids are stable
- * across redeliveries of the same batch and differ between distinct ones, which
- * is exactly the property needed. Null for a contentless delivery, because the
- * unique index treats nulls as distinct and storing them separately is better
- * than colliding unrelated empty batches onto one row.
- */
-function deliveryId(payload: MetaWebhookPayload): string | null {
-  const parts: string[] = [];
-
-  for (const entry of payload.entry ?? []) {
-    for (const event of [...(entry.messaging ?? []), ...(entry.standby ?? [])]) {
-      if (event.message?.mid) parts.push(`m:${event.message.mid}`);
-      // Receipts carry no id of their own; the watermark plus the sender is
-      // what makes one delivery distinguishable from the next.
-      if (event.delivery?.watermark)
-        parts.push(`d:${event.sender?.id}:${event.delivery.watermark}`);
-      if (event.read?.watermark) parts.push(`r:${event.sender?.id}:${event.read.watermark}`);
-    }
-
-    for (const change of entry.changes ?? []) {
-      const value = change.value;
-      const commentId = value?.comment_id ?? value?.id;
-      if (commentId) parts.push(`c:${commentId}:${value?.verb ?? 'add'}`);
-    }
-  }
-
-  if (parts.length === 0) return null;
-  return parts.sort().join('|').slice(0, 500);
 }

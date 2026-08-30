@@ -1,5 +1,6 @@
 import { env } from '@/lib/env';
 import { commentRequest, type CommentOperation } from './comments';
+import { type MetaConnection, metaConnection } from './connection';
 import type { MetaPlatform } from './types';
 
 /**
@@ -10,9 +11,11 @@ import type { MetaPlatform } from './types';
  * folding them together would produce a client whose every function takes a
  * "which product is this?" flag.
  *
- * Both platforms are addressed through the *Facebook Page* token. An Instagram
- * professional account is reached at `/{ig-account-id}/messages` with the same
- * page token, which is why there is one credential here and not two.
+ * Which host and which credential a call goes out with is not a property of the
+ * platform but of the *connection* — see `lib/meta/connection.ts`. Facebook has
+ * one; Instagram has two live at once, and `endpoint()` below is the single
+ * place that chooses. Everything else in this file names a platform and stays
+ * out of it.
  */
 
 const GRAPH_VERSION = 'v23.0';
@@ -89,28 +92,39 @@ function pageToken(): string {
 }
 
 /**
- * The host and credential to address a platform with.
+ * The host and credential the platform's chosen connection is addressed with.
  *
  * An Instagram professional account connected through **Instagram Login** is not
  * reachable with the Page token at all, and not on `graph.facebook.com` either:
  * it has its own access token and is served from `graph.instagram.com`. The
- * paths are identical, which is the only reason this is a two-field return
- * rather than a second client.
+ * paths are identical — `/{ig-account-id}/messages`, `/{comment-id}/replies` and
+ * the rest are spelled the same on both hosts — which is the only reason this is
+ * a three-field return rather than a second client.
  *
- * Keyed on whether `INSTAGRAM_ACCESS_TOKEN` is set rather than on a mode flag,
- * because the token is the thing that actually decides it: a deployment holding
- * an Instagram token has no use for the Page token on Instagram, and one holding
- * only the Page token cannot use the Instagram host whatever a flag said. Unset
- * is the Page-connected account every deployment had before this existed.
+ * Which connection is chosen is `metaConnection`'s decision and is made from
+ * configuration alone; the reasoning is there rather than here, because the
+ * console and the send job need the same answer without making a Graph call.
  */
-function endpoint(platform: MetaPlatform): { base: string; token: string } {
-  const instagramToken = env().INSTAGRAM_ACCESS_TOKEN;
+function endpoint(platform: MetaPlatform): {
+  base: string;
+  token: string;
+  connection: MetaConnection;
+} {
+  const connection = metaConnection(platform);
 
-  if (platform === 'instagram' && instagramToken) {
-    return { base: INSTAGRAM_GRAPH_BASE, token: instagramToken };
+  if (connection === 'instagram_login') {
+    const token = env().INSTAGRAM_ACCESS_TOKEN;
+    // Unreachable while `metaConnection` keys on this very value, and kept so
+    // that it stays unreachable: a future rule that picks this connection for
+    // some other reason must fail here rather than send `access_token=undefined`
+    // to Graph and be refused with a sentence about the token being malformed.
+    if (!token) {
+      throw new Error('INSTAGRAM_ACCESS_TOKEN is not configured — Instagram cannot send');
+    }
+    return { base: INSTAGRAM_GRAPH_BASE, token, connection };
   }
 
-  return { base: GRAPH_BASE, token: pageToken() };
+  return { base: GRAPH_BASE, token: pageToken(), connection };
 }
 
 /**
@@ -141,8 +155,9 @@ export function accountId(platform: MetaPlatform): string {
 
 export function isConfigured(platform: MetaPlatform): boolean {
   const e = env();
-  // Either credential will do for Instagram: which one is held is what decides
-  // the host and the token, and holding neither is what makes it unconfigured.
+  // Either credential will do for Instagram: whichever connection `endpoint()`
+  // picks is the one that has to hold a token, and holding neither is what makes
+  // it unconfigured.
   const hasToken =
     platform === 'instagram'
       ? Boolean(e.INSTAGRAM_ACCESS_TOKEN || e.META_PAGE_ACCESS_TOKEN)
@@ -173,7 +188,7 @@ async function graph<T>(
     quiet?: boolean;
   },
 ): Promise<T> {
-  const { base, token } = endpoint(platform);
+  const { base, token, connection } = endpoint(platform);
 
   const url = new URL(`${base}/${path}`);
   url.searchParams.set('access_token', token);
@@ -223,13 +238,14 @@ async function graph<T>(
     // Logged whole, because Graph's generic refusals ("An unknown error has
     // occurred.") carry their only distinguishing detail in the fields around
     // the message.
-    // The host is named as well as the path: an Instagram call can now go to
-    // either origin depending on which credential is configured, and "wrong
-    // host for this token" is refused with the same unhelpful sentence as
-    // everything else Graph declines.
+    // The connection is named as well as the path: an Instagram call goes to
+    // one of two origins with one of two credentials, and "wrong host for this
+    // token" is refused with the same unhelpful sentence as everything else
+    // Graph declines. Without it a log line cannot be read at all — the same
+    // request, the same error, two different fixes.
     if (!init.quiet) {
       console.warn(
-        `[meta] ${platform} ${init.method} ${url.host}/${path} failed with ` +
+        `[meta] ${platform} via ${connection} ${init.method} ${url.host}/${path} failed with ` +
           `${response.status}: ${text.slice(0, 1000)}`,
       );
     }

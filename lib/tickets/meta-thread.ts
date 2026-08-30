@@ -2,6 +2,7 @@ import { and, desc, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { messages } from '@/db/schema';
 import { configuredAccountId } from '@/lib/meta/client';
+import { metaConnection } from '@/lib/meta/connection';
 import { metaThreadStateFromMessage, type MetaThreadState } from '@/lib/meta/thread';
 import type { MetaPlatform } from '@/lib/meta/types';
 
@@ -38,6 +39,7 @@ export async function metaReplyTarget(
     recipientId: row?.fromAddress ?? null,
     thread: metaThreadStateFromMessage({
       platform,
+      connection: metaConnection(platform),
       configuredAccountId: configuredAccountId(platform),
       lastInboundMeta: (row?.meta ?? null) as Record<string, unknown> | null,
     }),

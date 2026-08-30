@@ -1,5 +1,6 @@
 import { explainAuthError } from '@/lib/whatsapp/errors';
 import { ACCESS_TOKEN_CODE, MetaApiError } from './client';
+import { CONNECTION_HOST, CONNECTION_LABEL, type MetaConnection } from './connection';
 import type { MetaPlatform } from './types';
 
 /**
@@ -19,6 +20,16 @@ import type { MetaPlatform } from './types';
 
 export type MetaSendContext = {
   platform: MetaPlatform;
+  /**
+   * The connection the send went out over.
+   *
+   * Recorded in the reference line rather than in the prose, because it is the
+   * first thing to check on an Instagram refusal and the last thing anybody can
+   * reconstruct afterwards: the two connections use different hosts, different
+   * credentials and differently named App Review permissions, and Graph refuses
+   * both with the same sentence.
+   */
+  connection: MetaConnection;
   sendKind: 'dm' | 'comment_reply' | 'private_reply';
   /** The tag a direct message went out with, when it was a direct message. */
   tag?: 'RESPONSE' | 'HUMAN_AGENT' | null;
@@ -48,10 +59,14 @@ export function explainMetaSendError(error: MetaApiError, context: MetaSendConte
   // An expired token fails every send on every channel identically, so say that
   // rather than letting an agent read it as something they or the customer did.
   if (error.code === ACCESS_TOKEN_CODE)
-    return withReference(explainAuthError(error.code, base), error);
+    return withReference(explainAuthError(error.code, base), error, context.connection);
 
   if (isUnspecified(error) && context.sendKind === 'dm' && context.tag === 'HUMAN_AGENT') {
-    return withReference(`${base}\n\n${humanAgentExplanation(context.platform)}`, error);
+    return withReference(
+      `${base}\n\n${humanAgentExplanation(context.platform)}`,
+      error,
+      context.connection,
+    );
   }
 
   // Inside the 24 hours the refusal has no tag to blame, and the two causes
@@ -59,10 +74,14 @@ export function explainMetaSendError(error: MetaApiError, context: MetaSendConte
   // what is left is genuinely unaccounted for, and saying which possibilities
   // have already been ruled out is what stops the next person re-checking them.
   if (isUnspecified(error) && context.sendKind === 'dm' && context.tag === 'RESPONSE') {
-    return withReference(`${base}\n\n${insideWindowExplanation(context.platform)}`, error);
+    return withReference(
+      `${base}\n\n${insideWindowExplanation(context.platform, context.connection)}`,
+      error,
+      context.connection,
+    );
   }
 
-  return withReference(base, error);
+  return withReference(base, error, context.connection);
 }
 
 function isUnspecified(error: MetaApiError): boolean {
@@ -127,15 +146,15 @@ export function explainMetaProfileError(error: MetaApiError, platform: MetaPlatf
     return withReference(
       `${base}\n\nThis is not an App Review problem: Graph is saying the Page token has no ` +
         `route to this Instagram-scoped id, which is what it answers when the professional ` +
-        `account is not linked to the Page. **Two configurations fix it and they are ` +
-        `opposites.** If the account is meant to be reached through its **Facebook Page**, ` +
-        `finish linking it there and leave INSTAGRAM_ACCESS_TOKEN unset. If it is meant to ` +
-        `stay on **Instagram Login**, set INSTAGRAM_ACCESS_TOKEN and the lookup moves to ` +
-        `graph.instagram.com by itself — \`endpoint()\` in lib/meta/client.ts keys on that ` +
-        `token being present, not on a mode flag. Until one of the two is true, every ` +
-        `Instagram profile read, send and moderation call goes out with a credential that ` +
-        `cannot address the account, and Business Asset User Profile Access cannot rescue it, ` +
-        `because the request never reaches the feature.`,
+        `account is not linked to the Page. It also means the call went out over the ` +
+        `**Facebook Page connection**, because that is the only one that uses the Page token ` +
+        `— so either the account is not linked to the Page, or it is meant to be reached ` +
+        `directly and INSTAGRAM_ACCESS_TOKEN is not set. Setting that token moves every ` +
+        `Instagram call to graph.instagram.com; \`metaConnection()\` in ` +
+        `lib/meta/connection.ts keys on it being present, not on a mode flag. Until one of ` +
+        `the two is true, every Instagram profile read, send and moderation call goes out ` +
+        `with a credential that cannot address the account, and Business Asset User Profile ` +
+        `Access cannot rescue it, because the request never reaches the feature.`,
       error,
     );
   }
@@ -207,20 +226,30 @@ function isInstagramLinkageRefusal(error: MetaApiError, platform: MetaPlatform):
  */
 export function explainMetaModerationError(
   error: MetaApiError,
-  context: { platform: MetaPlatform; action: 'hide' | 'unhide' | 'delete' },
+  context: {
+    platform: MetaPlatform;
+    connection: MetaConnection;
+    action: 'hide' | 'unhide' | 'delete';
+  },
 ): string {
   const base = error.userMessage ?? error.message;
 
   if (!cameFromGraph(error)) return base;
 
   if (error.code === ACCESS_TOKEN_CODE)
-    return withReference(explainAuthError(error.code, base), error);
+    return withReference(explainAuthError(error.code, base), error, context.connection);
 
   if (isProfilePermissionRefusal(error)) {
+    // Named for the connection the call actually went out over rather than
+    // offering both and letting the reader pick. Both spellings exist on this
+    // app because both connections are live, and handing somebody two
+    // permission names for one refusal is how an approval gets requested on the
+    // flow that was not being used.
     const permission =
       context.platform === 'instagram'
-        ? '**instagram_business_manage_comments** (or **instagram_manage_comments**, if the ' +
-          'account is connected through its Facebook Page)'
+        ? context.connection === 'instagram_login'
+          ? '**instagram_business_manage_comments**'
+          : '**instagram_manage_comments**'
         : '**pages_manage_engagement**';
 
     return withReference(
@@ -230,10 +259,11 @@ export function explainMetaModerationError(
         `under App Review before assuming the comment was deleted. Until it is granted, no ` +
         `comment can be hidden or deleted from here, while public replies keep working.`,
       error,
+      context.connection,
     );
   }
 
-  return withReference(base, error);
+  return withReference(base, error, context.connection);
 }
 
 /** Graph answered. A status of 0 with no code means the request never got there. */
@@ -270,16 +300,21 @@ function humanAgentExplanation(platform: MetaPlatform): string {
  * and an agent who has seen those would reasonably assume it is one of them
  * again.
  */
-function insideWindowExplanation(platform: MetaPlatform): string {
+function insideWindowExplanation(platform: MetaPlatform, connection: MetaConnection): string {
   const product = platform === 'instagram' ? 'Instagram' : 'Messenger';
 
   return (
     `This reply was inside the 24-hour window, on the account the ticket arrived on, ` +
     `and in a thread this app holds control of — so ${product} refused it for a reason ` +
-    `it did not give and none of the usual ones apply. Check the Meta app for a ` +
-    `restriction or a policy block, and whether the customer has blocked the ` +
-    `${platform === 'instagram' ? 'account' : 'page'}. The trace id below is what Meta ` +
-    `support asks for.`
+    `it did not give and none of the usual ones apply. It went out over ` +
+    `${CONNECTION_LABEL[connection]}, so check that one's credential and permissions ` +
+    `rather than the other's` +
+    (connection === 'instagram_login'
+      ? ` — INSTAGRAM_ACCESS_TOKEN and the instagram_business_* set, not the Page token`
+      : '') +
+    `. Then check the Meta app for a restriction or a policy block, and whether the ` +
+    `customer has blocked the ${platform === 'instagram' ? 'account' : 'page'}. The trace ` +
+    `id below is what Meta support asks for.`
   );
 }
 
@@ -290,13 +325,17 @@ function insideWindowExplanation(platform: MetaPlatform): string {
  * Only ever reached for an error Graph actually answered with; our own
  * refusals return above, before there is an empty reference to print.
  */
-function withReference(text: string, error: MetaApiError): string {
+function withReference(text: string, error: MetaApiError, connection?: MetaConnection): string {
   const parts = [
     `code ${error.code ?? '—'}`,
     `subcode ${error.subcode ?? '—'}`,
     `HTTP ${error.status}`,
   ];
   if (error.traceId) parts.push(`trace ${error.traceId}`);
+  // Which host answered. Two connections, two origins, identical refusals —
+  // and a refusal whose host is unknown cannot be told from one whose
+  // credential is.
+  if (connection) parts.push(`via ${CONNECTION_HOST[connection]}`);
 
   return `${text}\n\n(Meta: ${parts.join(', ')})`;
 }
