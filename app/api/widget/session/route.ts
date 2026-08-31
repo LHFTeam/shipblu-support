@@ -4,6 +4,7 @@ import { allow, clientIp } from '@/lib/kb/rate-limit';
 import { listMessages } from '@/lib/widget/conversation';
 import {
   findLiveConversation,
+  hasReplyDetails,
   issueVisitorToken,
   registerVisitor,
   resolveVisitor,
@@ -44,7 +45,10 @@ export async function POST(request: Request) {
     contactId = (await registerVisitor(token)).contactId;
   }
 
-  const conversationId = await findLiveConversation(contactId);
+  const [conversationId, detailsSaved] = await Promise.all([
+    findLiveConversation(contactId),
+    hasReplyDetails(contactId),
+  ]);
   const messages = conversationId ? await listMessages(conversationId) : [];
 
   const hours = await widgetHours();
@@ -57,6 +61,9 @@ export async function POST(request: Request) {
     // still reconcile with the server's ids.
     conversationId,
     messages,
+    // So the out-of-hours form is not put back in front of a visitor who has
+    // already told us where to reach them.
+    detailsSaved,
     online,
     opensAt: opensAt?.toISOString() ?? null,
     timezone: hours?.timezone ?? null,

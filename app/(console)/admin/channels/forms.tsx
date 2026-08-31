@@ -2,7 +2,7 @@
 
 import { useActionState, useState } from 'react';
 import { useFormStatus } from 'react-dom';
-import { Button, ErrorText, Field, Input, Select } from '@/components/ui';
+import { Badge, Button, ErrorText, Field, Input, Select } from '@/components/ui';
 import { saveChannel, type AdminState } from '../actions';
 
 const INITIAL: AdminState = { error: null };
@@ -146,5 +146,137 @@ function SubmitButton({
     <Button type="submit" disabled={pending} className={className}>
       {pending ? busy : idle}
     </Button>
+  );
+}
+
+export type FaqFolderChoice = {
+  id: string;
+  name: string;
+  categoryName: string;
+  categoryLocale: string;
+};
+
+/**
+ * The chat widget's settings, on the row that already routes it.
+ *
+ * The widget opens on a short list of questions rather than on an empty
+ * composer, and this is where an editor says which questions. A folder rather
+ * than a free list because the knowledge base already has the ordering — an
+ * editor drags articles within a folder — so pointing at one keeps a single
+ * place to curate instead of a second list here that drifts from it.
+ *
+ * Only public folders are offered. The widget reads with an anonymous viewer, so
+ * an `agents_only` folder would save cleanly and then show a customer nothing;
+ * the action refuses one too, because this list is a convenience and not a
+ * control.
+ */
+export function WebchatSettings({
+  channel,
+  groups,
+  folders,
+}: {
+  channel: {
+    id: string;
+    name: string;
+    defaultGroupId: string | null;
+    faqFolders: Record<string, string>;
+  };
+  groups: { id: string; name: string }[];
+  folders: FaqFolderChoice[];
+}) {
+  const [state, action] = useActionState(saveChannel, INITIAL);
+  const [editing, setEditing] = useState(false);
+
+  const chosen = (['ar', 'en'] as const)
+    .map((locale) => folders.find((folder) => folder.id === channel.faqFolders[locale]))
+    .filter((folder): folder is FaqFolderChoice => Boolean(folder));
+
+  if (!editing) {
+    return (
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <h3 className="flex flex-wrap items-center gap-2 text-sm font-medium">
+            Chat widget
+            {chosen.length === 0 ? <Badge tone="warning">no questions chosen</Badge> : null}
+          </h3>
+          <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">
+            {chosen.length === 0
+              ? 'The widget lists the most-read articles until a folder is chosen here.'
+              : chosen.map((folder) => `${folder.categoryLocale}: ${folder.name}`).join(' · ')}
+          </p>
+        </div>
+        <Button variant="secondary" onClick={() => setEditing(true)}>
+          Configure
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <form action={action} className="flex flex-col gap-3">
+      <input type="hidden" name="id" value={channel.id} />
+      <input type="hidden" name="type" value="webchat" />
+      <input type="hidden" name="name" value={channel.name} />
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        {(['ar', 'en'] as const).map((locale) => (
+          <Field
+            key={locale}
+            label={locale === 'ar' ? 'Arabic questions' : 'English questions'}
+            explain={
+              <>
+                The folder whose articles the widget lists, in the order the knowledge base editor
+                put them in. A folder has no language of its own — it takes its category&rsquo;s —
+                so each language is chosen separately. With none chosen the widget falls back to the
+                most-read articles, which is a reasonable list but nobody&rsquo;s decision.
+              </>
+            }
+          >
+            <Select name={`faqFolder_${locale}`} defaultValue={channel.faqFolders[locale] ?? ''}>
+              <option value="">Most-read articles</option>
+              {folders
+                .filter((folder) => folder.categoryLocale === locale)
+                .map((folder) => (
+                  <option key={folder.id} value={folder.id}>
+                    {folder.categoryName} → {folder.name}
+                  </option>
+                ))}
+            </Select>
+          </Field>
+        ))}
+      </div>
+
+      {/* Carried through because `saveChannel` writes the whole row: leaving it
+          out would silently un-route web chat while an admin was choosing which
+          articles to show. */}
+      <Field
+        label="Default group"
+        className="sm:w-56"
+        explain={
+          <>
+            Which group a chat starts in — and, because the widget reads that group&rsquo;s
+            schedule, the hours it calls &ldquo;we are here&rdquo;.
+          </>
+        }
+      >
+        <Select name="defaultGroupId" defaultValue={channel.defaultGroupId ?? ''}>
+          <option value="">None</option>
+          {groups.map((group) => (
+            <option key={group.id} value={group.id}>
+              {group.name}
+            </option>
+          ))}
+        </Select>
+      </Field>
+
+      <ErrorText>{state.error}</ErrorText>
+
+      <div className="flex gap-2">
+        <SubmitButton idle="Save widget" busy="Saving…" />
+        <Button type="button" variant="secondary" onClick={() => setEditing(false)}>
+          Cancel
+        </Button>
+      </div>
+    </form>
   );
 }

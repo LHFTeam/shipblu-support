@@ -8,6 +8,8 @@ import { requirePermission } from '@/lib/auth/guard';
 import { normaliseEmail } from '@/lib/auth/normalise';
 import { generateToken, hashToken } from '@/lib/auth/tokens';
 import { destroyAllSessionsForAgent } from '@/lib/auth/session';
+import { listFolderOptions } from '@/lib/kb/admin';
+import { LOCALES } from '@/lib/kb/locale';
 import { enqueue } from '@/lib/queue';
 import { appUrl } from '@/lib/env';
 
@@ -163,6 +165,44 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
     }
   }
 
+  /*
+   * Which knowledge base folder the chat widget lists, per locale.
+   *
+   * Re-read here rather than trusted, for the usual reason a form id is — but
+   * with a second check that is not about existence. The folder is read back
+   * with an anonymous viewer, so pointing the widget at an `agents_only` folder
+   * publishes nothing and looks configured: the customer sees an empty panel and
+   * the admin sees their choice saved. Production's Arabic staff handbook is
+   * four such folders whose articles are individually marked `published`, so
+   * this is the mistake worth refusing rather than tolerating.
+   *
+   * A folder also has no locale of its own — it inherits its category's — which
+   * is why each slot checks the one it was offered under.
+   */
+  const faqFolders: Record<string, string> = {};
+
+  if (type === 'webchat') {
+    const folders = await listFolderOptions();
+
+    for (const locale of LOCALES) {
+      const chosen = String(formData.get(`faqFolder_${locale}`) ?? '');
+      if (!chosen) continue;
+
+      const folder = folders.find((row) => row.id === chosen);
+      if (!folder) return { error: 'That knowledge base folder no longer exists' };
+      if (folder.categoryLocale !== locale) {
+        return { error: `${folder.name} is not in a ${locale} category` };
+      }
+      if (folder.visibility !== 'public') {
+        return {
+          error: `${folder.name} is not public, so the widget would show nothing from it`,
+        };
+      }
+
+      faqFolders[locale] = chosen;
+    }
+  }
+
   // Non-secret settings only. Access tokens and app secrets stay in the
   // environment, so a database dump never contains a usable credential.
   // Facebook and Instagram are addressed by ids that live in the environment
@@ -173,7 +213,12 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
       ? { phoneNumberId }
       : type === 'facebook' || type === 'instagram'
         ? {}
-        : { address };
+        : type === 'webchat'
+          ? // The widget has no address. The row used to store an empty one
+            // because this branch was the catch-all; production still carries
+            // `{"address": ""}` from that, and this replaces it.
+            { faqFolders }
+          : { address };
 
   const account = isWhatsApp ? whatsappAccountId : null;
 

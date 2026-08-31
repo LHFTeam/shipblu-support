@@ -371,12 +371,17 @@ export async function GET() {
 
     applyPlacement();
 
-    if (open) {
-      badge.style.display = 'none';
-      // Told on every open so the widget can mark the transcript read and
-      // focus its input — an iframe cannot detect being shown on its own.
-      frame.contentWindow.postMessage({ source: 'shipblu-host', type: 'opened' }, BASE);
-    }
+    // Told on every open *and* every close, because an iframe cannot detect
+    // being shown or hidden on its own — \`display:none\` fires no event inside
+    // it. The widget needs both halves: 'opened' is when it marks the
+    // transcript read, and without 'closed' a visitor who leaves the panel
+    // sitting on the conversation would never be badged for the reply that
+    // arrives after they look away.
+    if (open) badge.style.display = 'none';
+    frame.contentWindow.postMessage(
+      { source: 'shipblu-host', type: open ? 'opened' : 'closed' },
+      BASE
+    );
   }
 
   launcher.addEventListener('click', function () {

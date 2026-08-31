@@ -6,7 +6,9 @@ import { ChannelBadge } from '@/components/channel';
 import { Badge, Card, PageHeader } from '@/components/ui';
 import { requirePermission } from '@/lib/auth/guard';
 import { env } from '@/lib/env';
-import { ChannelForm } from './forms';
+import { listFolderOptions } from '@/lib/kb/admin';
+import { parseWidgetConfig } from '@/lib/widget/config';
+import { ChannelForm, WebchatSettings } from './forms';
 import { NewWhatsAppAccount, WhatsAppAccountEditor, type WhatsAppAccountRow } from './waba-forms';
 
 export const dynamic = 'force-dynamic';
@@ -14,7 +16,7 @@ export const dynamic = 'force-dynamic';
 export default async function ChannelsPage() {
   await requirePermission('admin.channels');
 
-  const [channelList, groupList, accountList, templateCounts] = await Promise.all([
+  const [channelList, groupList, accountList, templateCounts, folderList] = await Promise.all([
     db
       .select({
         id: channels.id,
@@ -40,7 +42,22 @@ export default async function ChannelsPage() {
       .from(whatsappTemplates)
       .where(eq(whatsappTemplates.status, 'APPROVED'))
       .groupBy(whatsappTemplates.whatsappAccountId),
+
+    listFolderOptions(),
   ]);
+
+  // Only public folders are offered: the widget reads with an anonymous viewer,
+  // so anything else saves cleanly and then shows a customer an empty panel.
+  const faqFolders = folderList
+    .filter((folder) => folder.visibility === 'public')
+    .map(({ id, name, categoryName, categoryLocale }) => ({
+      id,
+      name,
+      categoryName,
+      categoryLocale,
+    }));
+
+  const webchat = channelList.find((channel) => channel.type === 'webchat');
 
   const accountChoices = accountList.map((account) => ({ id: account.id, name: account.name }));
   const templatesByAccount = new Map(templateCounts.map((row) => [row.accountId, row.total]));
@@ -145,6 +162,24 @@ export default async function ChannelsPage() {
             );
           })}
         </ul>
+
+        {/* Above the "add a channel" form because it is a setting on a row that
+            already exists, not another row to create — and because the widget is
+            the one channel whose configuration a customer sees directly. */}
+        {webchat ? (
+          <Card className="mb-4">
+            <WebchatSettings
+              channel={{
+                id: webchat.id,
+                name: webchat.name,
+                defaultGroupId: webchat.defaultGroupId,
+                faqFolders: parseWidgetConfig(webchat.config).faqFolders,
+              }}
+              groups={groupList}
+              folders={faqFolders}
+            />
+          </Card>
+        ) : null}
 
         <ChannelForm groups={groupList} whatsappAccounts={accountChoices} />
       </section>
