@@ -192,4 +192,52 @@ export const kbArticlesRelations = relations(kbArticles, ({ one, many }) => ({
   folder: one(kbFolders, { fields: [kbArticles.folderId], references: [kbFolders.id] }),
   author: one(agents, { fields: [kbArticles.authorAgentId], references: [agents.id] }),
   versions: many(kbArticleVersions),
+  media: many(kbMedia),
+}));
+
+/**
+ * Images copied out of a third party's CDN and re-served from our own storage.
+ *
+ * The Freshdesk import brought the articles across but left every screenshot
+ * hot-linked to `s3.amazonaws.com/cdn.freshdesk.com` — 214 of them across 61
+ * articles. They resolve for exactly as long as that account stays open, and
+ * two of the articles are nothing but images, so closing it turns them into
+ * blank pages. This table is the record of each copy.
+ *
+ * `sourceUrl` is kept rather than discarded once the bytes are ours: it is both
+ * the idempotency key for a re-run and the way back if a rewrite has to be
+ * undone.
+ *
+ * A row per (article, source URL) rather than per distinct image, because the
+ * Arabic and English versions of an article reference the same remote file and
+ * each needs its own URL to serve — the visibility gate on the serving route is
+ * the owning article's, and the two halves of a translation pair are separate
+ * rows with separate visibility. The bytes are not duplicated: `storagePath` is
+ * derived from a hash of the source URL, so both rows address one object.
+ */
+export const kbMedia = pgTable(
+  'kb_media',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    articleId: uuid('article_id')
+      .notNull()
+      .references(() => kbArticles.id, { onDelete: 'cascade' }),
+
+    sourceUrl: text('source_url').notNull(),
+    storagePath: text('storage_path').notNull(),
+    contentType: text('content_type').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    checksum: text('checksum').notNull(),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // What makes a re-run a no-op instead of a second copy.
+    uniqueIndex('kb_media_article_source_idx').on(t.articleId, t.sourceUrl),
+    index('kb_media_article_idx').on(t.articleId),
+  ],
+);
+
+export const kbMediaRelations = relations(kbMedia, ({ one }) => ({
+  article: one(kbArticles, { fields: [kbMedia.articleId], references: [kbArticles.id] }),
 }));

@@ -121,3 +121,36 @@ export async function signedUrl(path: string, expiresInSeconds = 300): Promise<s
 
   return `${url}/storage/v1${body.signedURL}`;
 }
+
+/**
+ * The bytes of a stored object, read with the service key.
+ *
+ * The counterpart to `signedUrl` for the one case a signed URL cannot serve:
+ * knowledge base images are referenced by `src` inside stored article HTML, so
+ * their URL has to be stable for as long as the article is. A signed URL
+ * expires, and baking one into `body_html` would mean every article's pictures
+ * breaking a few minutes after the rewrite.
+ *
+ * So the bucket stays private and `/api/kb/media/[id]` streams from it after
+ * applying the article's own visibility rule — which is also what keeps a
+ * picture inside an `agents_only` article from being one guessed URL away,
+ * as it would be in a public bucket.
+ */
+export async function downloadObject(
+  path: string,
+): Promise<{ content: Buffer; contentType: string }> {
+  const { url, key, bucket } = config();
+
+  const response = await fetch(`${url}/storage/v1/object/${bucket}/${encodeURI(path)}`, {
+    headers: { Authorization: `Bearer ${key}` },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Storage download failed (${response.status}): ${await response.text()}`);
+  }
+
+  return {
+    content: Buffer.from(await response.arrayBuffer()),
+    contentType: response.headers.get('content-type') ?? 'application/octet-stream',
+  };
+}

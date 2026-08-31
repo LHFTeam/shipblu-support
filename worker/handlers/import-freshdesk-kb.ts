@@ -1,7 +1,7 @@
 import { and, eq, or } from 'drizzle-orm';
 import type { PgColumn } from 'drizzle-orm/pg-core';
 import { db } from '@/db/client';
-import { kbArticles, kbCategories, kbFolders, kbRedirects } from '@/db/schema';
+import { kbArticles, kbCategories, kbFolders, kbMedia, kbRedirects } from '@/db/schema';
 import { env } from '@/lib/env';
 import {
   discoverLanguageCode,
@@ -18,6 +18,7 @@ import {
   type FreshdeskFolder,
 } from '@/lib/freshdesk/client';
 import { htmlToText, preview, sanitiseArticleHtml } from '@/lib/html/sanitize';
+import { kbMediaPath, rewriteArticleMedia } from '@/lib/kb/media';
 import { detectCategoryLocale, detectLocale, looksUntranslated } from '@/lib/kb/language';
 import { LOCALES, LOCALE_NAMES, type Locale } from '@/lib/kb/locale';
 import { slugify, uniqueSlug } from '@/lib/kb/slug';
@@ -499,8 +500,31 @@ async function upsertArticle(
   // and hand-written markup, so it goes through the same sanitiser as anything
   // an agent writes. Sanitising at import rather than at render keeps the
   // stored row safe for every consumer.
-  const bodyHtml = sanitiseArticleHtml(article.description ?? '');
-  const bodyText = htmlToText(bodyHtml);
+  const imported = sanitiseArticleHtml(article.description ?? '');
+  const bodyText = htmlToText(imported);
+
+  const existing = await db
+    .select({ id: kbArticles.id, translationGroupId: kbArticles.translationGroupId })
+    .from(kbArticles)
+    .where(
+      and(
+        eq(kbArticles.sourceSystem, 'freshdesk'),
+        matchesExternalId(kbArticles.externalId, article.id, locale),
+      ),
+    )
+    .limit(1);
+
+  // Freshdesk still serves the article with its images pointing at its own CDN,
+  // so importing the description verbatim would undo `mirror_kb_media` every
+  // time this ran — the pictures would go back to loading from the account we
+  // are leaving, silently, on a job nobody associates with images. Re-applying
+  // the mirror here is what makes the two orderings equivalent: import then
+  // mirror, or mirror then import, both end with the copies we hold. A first
+  // import has nothing mirrored yet, so this is a no-op rather than an ordering
+  // constraint between the two jobs.
+  const bodyHtml = existing[0]
+    ? sanitiseArticleHtml(rewriteArticleMedia(imported, await mirroredFor(existing[0].id)))
+    : imported;
 
   const values = {
     title: article.title,
@@ -524,17 +548,6 @@ async function upsertArticle(
     unhelpfulCount: article.thumbs_down ?? 0,
     updatedAt: new Date(),
   };
-
-  const existing = await db
-    .select({ id: kbArticles.id, translationGroupId: kbArticles.translationGroupId })
-    .from(kbArticles)
-    .where(
-      and(
-        eq(kbArticles.sourceSystem, 'freshdesk'),
-        matchesExternalId(kbArticles.externalId, article.id, locale),
-      ),
-    )
-    .limit(1);
 
   if (existing[0]) {
     // The slug is deliberately not recomputed. It is the public URL, and a
@@ -605,4 +618,20 @@ async function writeRedirects(freshdeskId: number, articleId: string): Promise<v
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Source URL → the path we serve its copy from, for one article.
+ *
+ * Empty for every article until `mirror_kb_media` has run, which makes the
+ * rewrite above a no-op on a first import rather than something that has to be
+ * ordered after it.
+ */
+async function mirroredFor(articleId: string): Promise<Map<string, string>> {
+  const rows = await db
+    .select({ id: kbMedia.id, sourceUrl: kbMedia.sourceUrl })
+    .from(kbMedia)
+    .where(eq(kbMedia.articleId, articleId));
+
+  return new Map(rows.map((row) => [row.sourceUrl, kbMediaPath(row.id)]));
 }

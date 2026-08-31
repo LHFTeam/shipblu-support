@@ -24,6 +24,7 @@ export type JobType =
   | 'rollup_metrics'
   | 'snapshot_backlog'
   | 'import_freshdesk_kb'
+  | 'mirror_kb_media'
   | 'backfill_shipment_links'
   | 'backfill_message_locations'
   | 'backfill_meta_profiles'

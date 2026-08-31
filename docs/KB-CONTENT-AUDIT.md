@@ -177,9 +177,10 @@ on any article.
 **Now — cheap, and each removes a visible defect**
 
 - Strip the `You said:` artifact.
-- Re-host the 214 Freshdesk images into the attachments bucket and rewrite the
-  `src`s, before the vendor account closes rather than after. This one has a
-  clock on it that nobody here controls.
+- Run `mirror_kb_media` once the branch carrying it is deployed — that is the
+  214 Freshdesk images copied into the attachments bucket and the articles
+  repointed at them. It is the item with a clock on it that nobody here
+  controls, and the mechanism is now built and waiting on the deploy.
 - Add `alt` text on the way through, and give the two image-only articles a
   text layer beside the screenshots so they are searchable and translatable.
 - Merge the six duplicate pairs, keep one slug, add a `kb_redirects` row for the

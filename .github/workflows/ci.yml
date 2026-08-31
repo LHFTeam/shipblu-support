@@ -169,6 +169,9 @@ jobs:
       # Only jobs that need neither network nor credentials are listed.
       # check_meta_permissions and import_freshdesk_kb are deliberately absent:
       # both fail on a missing credential before reaching any SQL.
+      # mirror_kb_media qualifies because its selection query runs first and
+      # returns nothing on an empty database, so it never reaches the storage
+      # credentials — which is also the property that makes a re-run cheap.
       - name: Job handlers execute their SQL
         run: |
           set -euo pipefail
@@ -182,7 +185,8 @@ jobs:
             sync_whatsapp_templates \
             "backfill_meta_profiles limit=1" \
             "backfill_shipment_links limit=1" \
-            "backfill_message_locations limit=1"
+            "backfill_message_locations limit=1" \
+            "mirror_kb_media limit=1"
           do
             echo "::group::npm run job -- $job"
             npm run job -- $job
