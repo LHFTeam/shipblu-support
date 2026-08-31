@@ -161,6 +161,13 @@ export async function syncShipment(input: {
  * terminal parcel stores null, which also means the column empties when a parcel
  * lands rather than keeping the last guess made before it did.
  *
+ * **Nor for a parcel going back to the merchant.** It answers there too — it
+ * offered 2026-09-01 for a parcel already turned around — and an estimated
+ * *delivery* date on a parcel that will never be delivered is the same wrong
+ * answer aimed at the person least able to discount it. `rto_requested` is
+ * checked rather than the status, which stays `delivery_attempted` through the
+ * whole return.
+ *
  * **The echoed tracking number is checked.** The endpoint returns the parcel it
  * thinks the id belongs to; if that is not the parcel we asked about, the id we
  * stored is wrong and the safe move is to record no estimate rather than to put
@@ -170,7 +177,7 @@ export async function currentEstimateFor(
   order: DeliveryOrder,
   options: FetchOptions = {},
 ): Promise<string | null> {
-  if (stageDisplay(order.status).terminal) return null;
+  if (stageDisplay(order.status).terminal || order.rtoRequested) return null;
 
   try {
     const estimate = await fetchCurrentEstimatedDate(order.platformId, options);

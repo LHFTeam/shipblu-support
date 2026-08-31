@@ -103,6 +103,8 @@ const STRINGS = {
     trackHistory: 'History',
     trackEstimated: 'Estimated delivery',
     trackLive: 'Checked with the shipping platform just now',
+    trackReturning:
+      'This parcel is on its way back to the sender, so it will not be delivered to you. The merchant you ordered from can tell you what happens next.',
     trackStepPickedUp: 'Picked up',
     trackStepInTransit: 'In transit',
     trackStepOutForDelivery: 'Out for delivery',
@@ -256,6 +258,8 @@ const STRINGS = {
     trackHistory: 'السجل',
     trackEstimated: 'موعد التسليم المتوقع',
     trackLive: 'تم التحقق من منصة الشحن الآن',
+    trackReturning:
+      'هذه الشحنة في طريقها للرجوع إلى الراسل، ولن يتم تسليمها لك. تواصل مع التاجر الذي طلبت منه لمعرفة الخطوة التالية.',
     trackStepPickedUp: 'تم الاستلام',
     trackStepInTransit: 'في الطريق',
     trackStepOutForDelivery: 'خرجت للتسليم',

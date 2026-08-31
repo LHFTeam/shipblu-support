@@ -3,6 +3,7 @@ import { CheckIcon } from '@/components/icons';
 import { formatTimestamp, t, type Locale, type StringKey } from '@/lib/kb/locale';
 import {
   commentText,
+  returnStatusLabel,
   stageDisplay,
   statusLabel,
   TRACKING_STEPS,
@@ -67,6 +68,11 @@ const STEP_LABELS: Record<(typeof TRACKING_STEPS)[number], StringKey> = {
   delivered: 'trackStepDelivered',
 };
 
+/** The outbound step names in the reader's language. */
+export function deliveryStepLabels(locale: Locale): string[] {
+  return TRACKING_STEPS.map((step) => t(locale, STEP_LABELS[step]));
+}
+
 /**
  * The four steps, with everything up to the current one filled in.
  *
@@ -84,17 +90,57 @@ const STEP_LABELS: Record<(typeof TRACKING_STEPS)[number], StringKey> = {
  * this line entirely, and putting them on a bar that ends at "delivered" would
  * say the parcel is still on its way.
  */
-export function Stepper({ locale, current }: { locale: Locale; current: number }) {
+/**
+ * Which colour a bar is filled in.
+ *
+ * The return leg is not drawn in the brand band, and that is the point rather
+ * than decoration: two bars that look identical read as one journey continuing,
+ * which is exactly the impression a return must not give. The fill inverts the
+ * design system's `returned` pair — its foreground as the fill, its background
+ * as the text — so the contrast is one the system already guarantees rather than
+ * a colour picked here.
+ */
+const BAR_TONE = {
+  brand: {
+    fill: 'bg-[var(--kb-band)] text-[var(--kb-band-text)]',
+    line: 'bg-[var(--kb-band)]',
+  },
+  returning: {
+    fill: 'bg-[var(--color-status-returned-fg)] text-[var(--color-status-returned-bg)]',
+    line: 'bg-[var(--color-status-returned-fg)]',
+  },
+} as const;
+
+/**
+ * A progress bar over any list of step labels.
+ *
+ * Takes its labels rather than reading `TRACKING_STEPS` itself, because there
+ * are two journeys a parcel can be on and only one of them ends at the
+ * recipient. The outbound leg passes the four delivery steps; a return passes
+ * `RETURN_STEPS`, whose wording comes from `returnStepLabel` so an admin can
+ * correct the Arabic in `/admin/tracking` like any other phrase.
+ */
+export function Stepper({
+  labels,
+  current,
+  tone = 'brand',
+}: {
+  labels: readonly string[];
+  current: number;
+  tone?: keyof typeof BAR_TONE;
+}) {
+  const colour = BAR_TONE[tone];
+
   return (
     <ol className="flex">
-      {TRACKING_STEPS.map((step, index) => {
+      {labels.map((label, index) => {
         const done = index < current;
         const here = index === current;
         const reached = done || here;
 
         return (
           <li
-            key={step}
+            key={label}
             aria-current={here ? 'step' : undefined}
             className="flex min-w-0 flex-1 basis-0 flex-col gap-2"
           >
@@ -102,17 +148,17 @@ export function Stepper({ locale, current }: { locale: Locale; current: number }
               <span
                 className={`flex size-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${
                   reached
-                    ? 'bg-[var(--kb-band)] text-[var(--kb-band-text)]'
+                    ? colour.fill
                     : 'bg-[var(--kb-surface-2)] text-[var(--kb-muted)] ring-1 ring-[var(--kb-border-strong)] ring-inset'
                 }`}
               >
                 {done ? <CheckIcon size={12} /> : index + 1}
               </span>
-              {index < TRACKING_STEPS.length - 1 ? (
+              {index < labels.length - 1 ? (
                 <span
                   aria-hidden
                   className={`h-0.5 min-w-4 flex-1 rounded-full ${
-                    done ? 'bg-[var(--kb-band)]' : 'bg-[var(--kb-border)]'
+                    done ? colour.line : 'bg-[var(--kb-border)]'
                   }`}
                 />
               ) : null}
@@ -126,7 +172,7 @@ export function Stepper({ locale, current }: { locale: Locale; current: number }
                     : 'text-[var(--kb-muted)] opacity-60'
               }`}
             >
-              {t(locale, STEP_LABELS[step])}
+              {label}
             </span>
           </li>
         );
@@ -192,10 +238,20 @@ export function Timeline({
   locale,
   events,
   overrides,
+  returnFrom = null,
 }: {
   locale: Locale;
   events: TrackingEvent[];
   overrides: PhraseOverrides;
+  /**
+   * When the journey back began, so the rows after it can be read as the way
+   * back. Null on an ordinary parcel.
+   *
+   * Without this the history contradicts the bar above it: the same
+   * `in_transit` event means "on its way to you" outbound and "on its way back"
+   * during a return, and the delivery table only knows the first reading.
+   */
+  returnFrom?: Date | null;
 }) {
   if (events.length === 0) return null;
 
@@ -210,7 +266,10 @@ export function Timeline({
       <ol className="flex flex-col">
         {newestFirst.map((event, index) => {
           const latest = index === 0;
-          const { tone } = stageDisplay(event.status);
+          const onReturnLeg = returnFrom !== null && event.at.getTime() >= returnFrom.getTime();
+          // A parcel on its way back wears the returned tone, whatever the
+          // outbound reading of the same event would have been.
+          const tone = onReturnLeg ? 'returned' : stageDisplay(event.status).tone;
 
           return (
             <li key={`${event.status}-${event.at.toISOString()}`} className="flex gap-3">
@@ -237,7 +296,9 @@ export function Timeline({
                       : 'text-[var(--kb-heading)]/80'
                   }
                 >
-                  {statusLabel(locale, event.status, overrides)}
+                  {onReturnLeg
+                    ? returnStatusLabel(locale, event.status, overrides)
+                    : statusLabel(locale, event.status, overrides)}
                 </p>
                 <time
                   dir="ltr"

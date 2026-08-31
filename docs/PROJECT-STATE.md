@@ -2435,6 +2435,46 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     estimates is real and worth surfacing: on 1591424095705 the parcel was booked
     for 2026-08-22 and currently reads 2026-09-01.
 
+40. **A parcel being returned keeps reporting `delivery_attempted`, so the
+    tracking page drew the outbound bar for a parcel that will never arrive.**
+    _2026-08-31, found on live parcel 1591424095705._
+
+    The platform signals a return through `rto_requested`, and **not** through
+    the status. That parcel reads `status: "delivery_attempted"`,
+    `rto_requested: true`, with a `return_to_origin` event already fired. So
+    `stageFor` saw `delivery_attempted`, returned `attempted` → step 2 of 4, and
+    the page drew the delivery bar with "Out for delivery" lit and "Delivered"
+    still ahead — plus "Estimated delivery 1 September", because the estimate is
+    suppressed only on a `terminal` stage and `attempted` is not one.
+
+    The design was right and the input was wrong. `TRACKING_STEPS` already
+    carried the reasoning — "putting 'returned to sender' on a progress bar that
+    ends in 'delivered' says the parcel is still coming" — and `return_to_origin`
+    already mapped to `step: null`. It just keyed on a field the platform does
+    not update. **`rto_requested` is the authority; the status lags it for the
+    whole return.**
+
+    Two things follow, and the second is the one that is easy to miss:
+
+    - The return needs **its own bar**, because its steps are not the delivery
+      steps. `RETURN_STEPS` is the vocabulary ShipBlu's own team gave:
+      `return_to_origin` → returning to sender, `in_transit`/`en_route` → on the
+      way, `out_for_return` (and `return_attempted`, the same step tried again) →
+      out for return, `returned` → returned.
+    - It needs **its own words**, because the same event means opposite things on
+      the two legs. `in_transit` outbound is "on its way to you" and during a
+      return is "on its way back to the shop"; `return_to_origin` read through
+      the delivery table reaches an Arabic reader as `مرتجعة إلى الراسل` — the
+      past tense — above a bar whose first step has only just lit. Hence
+      `RETURN_VOCABULARY` and `returnStatusLabel`, and hence
+      `returnProgress` returning `startedAt`: the history rows on either side of
+      that instant are read through different tables.
+
+    The step is taken from the events **after** the return began, not from all of
+    them — every return is preceded by an outbound `in_transit`, and counting
+    those puts a parcel that has only just been turned around at "on the way
+    back".
+
 ## 7. Verification already done
 
 - **WhatsApp, end to end on production.** A synthetic webhook was enqueued; the

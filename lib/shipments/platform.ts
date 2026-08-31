@@ -74,6 +74,14 @@ export type DeliveryOrder = {
   events: TrackingEvent[];
   merchantName: string | null;
   /**
+   * The parcel is going back to the merchant.
+   *
+   * The authority on that, and not the same question as `status`: the platform
+   * leaves the status reading `delivery_attempted` after a return is under way,
+   * so this flag is the only field that changes when the decision is made.
+   */
+  rtoRequested: boolean;
+  /**
    * Calendar dates, kept as the `YYYY-MM-DD` strings they arrive as.
    *
    * Deliberately never parsed into a `Date`. These carry no time and no offset,
@@ -124,6 +132,7 @@ const deliveryOrderSchema = z.object({
     })
     .nullish(),
   tracking_events: z.array(trackingEventSchema).nullish(),
+  rto_requested: z.boolean().nullish(),
   estimated_date: z.string().nullish(),
   preferred_date: z.string().nullish(),
 });
@@ -157,6 +166,7 @@ export function mapDeliveryOrder(raw: unknown): DeliveryOrder {
     // account's own. Prefer the former where they differ, which is the string a
     // human would recognise on a ticket.
     merchantName: order.merchant?.display_name ?? order.merchant?.name ?? null,
+    rtoRequested: order.rto_requested === true,
     estimatedDate: order.estimated_date ?? null,
     preferredDate: order.preferred_date ?? null,
     // Safe by construction: the schema above only accepts an object, so anything

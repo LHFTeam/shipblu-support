@@ -205,7 +205,12 @@ also never writes a row — `lib/shipments/lookup.ts` reads an unknown number
 straight through — or the number space becomes a way to fill `shipments`.
 `tracking_events` arrive in **no order at all**, so nothing outside
 `platform.ts` — which sorts them — may read `events[0]` or the last element as
-"latest". And the calendar dates (`estimated_date`,
+"latest". A return is signalled by `rto_requested` and **not** by the status,
+which stays `delivery_attempted` for the whole of it, so anything deciding what a
+parcel is doing reads the flag: draw `RETURN_STEPS` rather than `TRACKING_STEPS`,
+and word the events after `returnProgress().startedAt` through
+`returnStatusLabel`, because `in_transit` means opposite things on the two legs
+(`docs/PROJECT-STATE.md` §6.40). And the calendar dates (`estimated_date`,
 `preferred_date`) stay strings: `new Date('2026-08-29')` is midnight UTC, which
 is 02:00 in Cairo and the day before further west.
 

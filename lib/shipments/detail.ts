@@ -44,6 +44,14 @@ export type PublicTracking = {
    * moved.
    */
   estimatedDate: string | null;
+  /**
+   * The parcel is on its way back to the merchant.
+   *
+   * Safe to publish: it says where the parcel is going, not who it belongs to,
+   * and it is the one fact that stops the page telling a recipient a returning
+   * parcel is still coming to them.
+   */
+  rtoRequested: boolean;
 };
 
 /**
@@ -169,6 +177,7 @@ export function publicTracking(
     statusAt: order.statusAt,
     events: order.events,
     estimatedDate: currentEstimatedDate ?? order.estimatedDate,
+    rtoRequested: order.rtoRequested,
   };
 }
 
@@ -193,6 +202,7 @@ export function agentTracking(
     statusAt: order.statusAt,
     events: order.events,
     estimatedDate: currentEstimatedDate ?? order.estimatedDate,
+    rtoRequested: order.rtoRequested,
 
     platformId: fields.id != null ? String(fields.id) : null,
     bookedEstimatedDate: order.estimatedDate,
