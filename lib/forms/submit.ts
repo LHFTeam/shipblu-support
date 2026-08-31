@@ -1,0 +1,294 @@
+import { db } from '@/db/client';
+import { conversationEvents } from '@/db/schema';
+import { normaliseEmail, looksLikeEmail } from '@/lib/auth/normalise';
+import type { Locale } from '@/lib/kb/locale';
+import { createTicket } from '@/lib/portal/tickets';
+import { resolveContact } from '@/lib/tickets/contacts';
+import { applyFieldValue } from '@/lib/tickets/custom-fields-parse';
+import {
+  fieldLabel,
+  isBlank,
+  type CustomFieldValues,
+  type TicketFieldDef,
+} from '@/lib/tickets/custom-fields';
+import { checkFormFiles, storeFormAttachments, type FileRefusal } from './attachments';
+import {
+  elementsFor,
+  isInput,
+  isRequired,
+  SYSTEM_KEYS,
+  type FormElement,
+  type SystemKey,
+  type Viewer,
+} from './elements';
+import { formName, type LoadedForm } from './queries';
+import { renderSubject } from './subject';
+import { renderAnswers } from './summary';
+import { resolveVisibility, type SystemValues } from './visibility';
+
+/**
+ * Turning a submitted form into a ticket.
+ *
+ * One function for all three ways a form is filled in — a signed-in customer, a
+ * visitor who is not, and an agent opening a ticket on somebody's behalf —
+ * because the three differ only in who the requester is. Splitting them would
+ * mean three places that each decide what "required" means and what a hidden
+ * field's answer is worth, and the console's copy would be the one nobody
+ * checked.
+ *
+ * Nothing here trusts the request about the form. The elements, the field
+ * definitions and the visibility are all read from the database or computed from
+ * the answers; the request supplies answers and nothing else.
+ */
+
+export type Requester =
+  | { kind: 'session'; contactId: string }
+  /** Identified by what the form itself asked for, plus an address for the log. */
+  | { kind: 'anonymous'; ip: string | null }
+  | { kind: 'agent'; contactId: string; agentId: string };
+
+export type SubmitResult =
+  | { ok: true; number: number; conversationId: string; attachmentsFailed: string[] }
+  /** Keys of the questions that were asked and not answered. */
+  | { ok: false; reason: 'missing'; keys: string[] }
+  /** Keys whose answer the field's own rules refused. */
+  | { ok: false; reason: 'invalid'; keys: string[] }
+  /** An anonymous form that cannot tell who is writing. */
+  | { ok: false; reason: 'requester' }
+  | { ok: false; reason: 'files'; refusal: FileRefusal };
+
+/** Where a system question's answer sits in the submitted form data. */
+export function systemFieldName(key: SystemKey): string {
+  return `system.${key}`;
+}
+
+/** Where a custom field's answer sits. Matches what the portal already used. */
+export function customFieldName(key: string): string {
+  return `custom.${key}`;
+}
+
+function readSystem(values: FormData, files: File[]): SystemValues {
+  const system: SystemValues = {};
+
+  for (const key of SYSTEM_KEYS) {
+    if (key === 'attachments') {
+      // A count, so `attachments gt 0` is expressible; there is nothing useful
+      // to compare the bytes against.
+      system.attachments = String(files.length);
+      continue;
+    }
+    const raw = values.get(systemFieldName(key));
+    if (typeof raw === 'string' && raw.trim()) system[key] = raw.trim();
+  }
+
+  return system;
+}
+
+/**
+ * Every answer, parsed against the definition rather than against the request.
+ *
+ * The submitted keys say which answers were given; the definitions say which
+ * fields exist, what type each is and what it will accept. Trusting the form for
+ * that would let anybody store anything under any key — including one an
+ * automation routes on.
+ */
+function readAnswers(
+  values: FormData,
+  elements: FormElement[],
+  fields: TicketFieldDef[],
+): { custom: CustomFieldValues; invalid: string[] } {
+  const byKey = new Map(fields.map((field) => [field.key, field]));
+  const invalid: string[] = [];
+  let custom: CustomFieldValues = {};
+
+  for (const element of elements) {
+    if (element.kind !== 'field') continue;
+
+    const def = byKey.get(element.key);
+    if (!def) continue;
+
+    const raw =
+      def.type === 'multi_select'
+        ? values.getAll(customFieldName(def.key)).map(String)
+        : String(values.get(customFieldName(def.key)) ?? '');
+
+    const applied = applyFieldValue(custom, def, raw);
+    if (applied.ok) custom = applied.values;
+    else invalid.push(def.key);
+  }
+
+  return { custom, invalid };
+}
+
+/**
+ * Who the ticket belongs to.
+ *
+ * The anonymous branch resolves the claimed address onto whatever contact
+ * already owns it, exactly as an inbound email does — that is what makes the
+ * unified inbox real, and it is also the exposure: a web form has no SPF or
+ * DKIM behind it, so a stranger can open a ticket that lands on a real
+ * customer's record and shows up in their portal.
+ *
+ * The answer is not to confirm the address before creating the ticket, which
+ * loses every customer who could not be bothered and which no helpdesk in this
+ * category does. It is to say so on the ticket: `submitForm` writes an
+ * `unverified_submitter` event carrying the claimed address and the client
+ * address, and the console shows it, so an agent reads the ticket knowing
+ * nobody proved who sent it.
+ *
+ * Two things this deliberately does not do. It does not pass a display name for
+ * an address that already exists — `resolveContact` only sets one when it
+ * creates the row, so a stranger cannot rename a known customer. And the
+ * identity it may create is unverified, so it grants no portal sign-in.
+ */
+async function resolveRequester(
+  requester: Requester,
+  system: SystemValues,
+): Promise<{ contactId: string; unverifiedEmail: string | null } | null> {
+  if (requester.kind !== 'anonymous') {
+    return { contactId: requester.contactId, unverifiedEmail: null };
+  }
+
+  const email = normaliseEmail(system.requester_email ?? '');
+  if (!email || !looksLikeEmail(email)) return null;
+
+  const resolved = await resolveContact({
+    channel: 'email',
+    identifier: email,
+    displayName: system.requester_name ?? null,
+  });
+
+  return { contactId: resolved.contactId, unverifiedEmail: email };
+}
+
+export async function submitForm(input: {
+  loaded: LoadedForm;
+  values: FormData;
+  requester: Requester;
+  locale: Locale;
+}): Promise<SubmitResult> {
+  const { form, fields } = input.loaded;
+
+  const viewer: Viewer = {
+    audience: input.requester.kind === 'agent' ? 'agent' : 'customer',
+    anonymous: input.requester.kind === 'anonymous',
+  };
+
+  // The same filter the page rendered with, so a question nobody was shown
+  // cannot be answered by a request that claims it was.
+  const offered = elementsFor(form.elements, viewer);
+
+  const checked = checkFormFiles(input.values.getAll('attachments'));
+  if (!checked.ok) return { ok: false, reason: 'files', refusal: checked.refusal };
+
+  const submitted = readAnswers(input.values, offered, fields);
+  const system = readSystem(input.values, checked.files);
+
+  // The second computation of visibility, and the one that counts: the browser's
+  // answer arrived as a POST anybody can write by hand.
+  const resolved = resolveVisibility(offered, submitted.custom, system);
+  const asked = new Set(
+    resolved.visible.filter(isInput).map((element) => `${element.kind}:${element.key}`),
+  );
+
+  const byKey = new Map(fields.map((field) => [field.key, field]));
+
+  // Reported only for questions that were actually asked. A field the conditions
+  // never revealed cannot be wrong, and refusing over one would show an error
+  // beside an input that is not on screen.
+  const invalid = submitted.invalid.filter((key) => asked.has(`field:${key}`));
+  if (invalid.length) return { ok: false, reason: 'invalid', keys: invalid };
+
+  const missing: string[] = [];
+  for (const element of resolved.visible) {
+    if (!isInput(element)) continue;
+
+    const def = element.kind === 'field' ? (byKey.get(element.key) ?? null) : null;
+    if (!isRequired(element, def)) continue;
+
+    const answered =
+      element.kind === 'field'
+        ? !isBlank(resolved.custom[element.key])
+        : element.key === 'attachments'
+          ? checked.files.length > 0
+          : Boolean(resolved.system[element.key]);
+
+    if (!answered) missing.push(element.key);
+  }
+  if (missing.length) return { ok: false, reason: 'missing', keys: missing };
+
+  const requester = await resolveRequester(input.requester, resolved.system);
+  if (!requester) return { ok: false, reason: 'requester' };
+
+  const placedFields = resolved.visible.filter(
+    (element): element is Extract<FormElement, { kind: 'field' }> => element.kind === 'field',
+  );
+
+  const subject = renderSubject(
+    form.subjectTemplate,
+    placedFields,
+    fields,
+    resolved.custom,
+    resolved.system,
+    input.locale,
+    formName(form, input.locale),
+  );
+
+  // The answers go into the message as well as into `custom_fields`, because the
+  // message is where a ticket is read and the sidebar is where it is edited.
+  const answers = renderAnswers(resolved.visible, fields, resolved.custom, input.locale);
+  const description = (resolved.system.description ?? '').trim();
+  const body = [description, answers].filter(Boolean).join('\n\n');
+
+  const created = await createTicket(requester.contactId, {
+    subject,
+    body,
+    customFields: resolved.custom,
+    formId: form.id,
+    groupId: form.defaultGroupId,
+    priority: priorityFrom(resolved.system) ?? form.defaultPriority,
+    type: form.defaultType,
+    tags: form.defaultTags,
+  });
+
+  if (requester.unverifiedEmail) {
+    await db.insert(conversationEvents).values({
+      conversationId: created.conversationId,
+      type: 'unverified_submitter',
+      actorLabel: 'form',
+      data: {
+        email: requester.unverifiedEmail,
+        form: form.slug,
+        ip: input.requester.kind === 'anonymous' ? input.requester.ip : null,
+      },
+    });
+  }
+
+  const attachmentsFailed = checked.files.length
+    ? (await storeFormAttachments({ ...created, files: checked.files })).failed
+    : [];
+
+  return {
+    ok: true,
+    number: created.number,
+    conversationId: created.conversationId,
+    attachmentsFailed,
+  };
+}
+
+/** Only an agent is offered the control, and only the four real values count. */
+function priorityFrom(system: SystemValues): 'low' | 'medium' | 'high' | 'urgent' | null {
+  const value = system.priority;
+  return value === 'low' || value === 'medium' || value === 'high' || value === 'urgent'
+    ? value
+    : null;
+}
+
+/** The labels of the questions a submission left unanswered, for an agent's error. */
+export function labelsFor(keys: string[], fields: TicketFieldDef[], locale: Locale): string[] {
+  const byKey = new Map(fields.map((field) => [field.key, field]));
+  return keys.map((key) => {
+    const def = byKey.get(key);
+    return def ? fieldLabel(def, locale) : key;
+  });
+}

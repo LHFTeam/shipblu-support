@@ -26,6 +26,25 @@ const nextConfig: NextConfig = {
   // Keeping these external stops Next from trying to bundle native/node-only deps.
   serverExternalPackages: ['postgres', '@node-rs/argon2'],
 
+  experimental: {
+    serverActions: {
+      /**
+       * A ticket form can carry photographs of a damaged parcel.
+       *
+       * The default is 1 MB, and going over it fails with an error that never
+       * mentions size — the submission simply does not arrive. This is set just
+       * above `MAX_FORM_TOTAL_BYTES` in `lib/forms/attachments.ts` on purpose,
+       * so the limit a customer actually meets is the one that can explain
+       * itself rather than Next's own rejection.
+       *
+       * It is not larger than that because the body is buffered in memory before
+       * any application code runs, so this number is also how much RAM a single
+       * hostile request can ask an instance for.
+       */
+      bodySizeLimit: '26mb',
+    },
+  },
+
   // Support tickets contain customer PII; never leak details through error pages.
   poweredByHeader: false,
 

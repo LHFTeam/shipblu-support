@@ -204,6 +204,32 @@ export function elementLabel(element: InputElement, fallback: string, locale: 'a
   return localised(element.labelAr, element.labelEn, locale, fallback);
 }
 
+/**
+ * Who is filling the form in, which decides whether some system questions are
+ * asked at all.
+ *
+ * `anonymous` is not the same as "on the help centre": a signed-in customer and
+ * an agent opening a ticket for somebody both already have a requester, and the
+ * question is only ever asked of the third case.
+ */
+export type Viewer = { audience: 'customer' | 'agent'; anonymous: boolean };
+
+/**
+ * The elements this viewer is actually shown.
+ *
+ * Called by the renderer and again by the submit path, from the same function,
+ * so a question the page did not ask cannot be answered by a request that
+ * claims it was.
+ */
+export function elementsFor(elements: FormElement[], viewer: Viewer): FormElement[] {
+  return elements.filter((element) => {
+    if (element.kind !== 'system') return true;
+    if (AGENT_ONLY_SYSTEM.includes(element.key)) return viewer.audience === 'agent';
+    if (CUSTOMER_ONLY_SYSTEM.includes(element.key)) return viewer.anonymous;
+    return true;
+  });
+}
+
 /** The sentence under the input, or null when the element does not carry one. */
 export function elementHelp(element: InputElement, locale: 'ar' | 'en'): string | null {
   const own = (locale === 'ar' ? element.helpAr : element.helpEn)?.trim();
