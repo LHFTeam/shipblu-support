@@ -34,6 +34,11 @@ const GROUPS = {
     description:
       'What the badge and each row of the history say. The platform sends these in English; this is what an Arabic reader sees instead.',
   },
+  return: {
+    title: 'Return statuses',
+    description:
+      'The journey back to the merchant, which reads differently from the journey out — the same in_transit event means "on its way to you" outbound and "on its way back" during a return, so it has its own wording here.',
+  },
   reason: {
     title: 'Courier reasons',
     description:

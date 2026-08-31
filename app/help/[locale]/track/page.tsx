@@ -10,10 +10,16 @@ import { kbViewer } from '@/lib/kb/viewer';
 import { normaliseTrackingNumber } from '@/lib/shipments/format';
 import { publicTrackingFor } from '@/lib/shipments/lookup';
 import { phraseOverrides } from '@/lib/shipments/phrases';
-import { stageDisplay, statusLabel } from '@/lib/shipments/status';
+import {
+  RETURN_STEPS,
+  returnProgress,
+  returnStepLabel,
+  stageDisplay,
+  statusLabel,
+} from '@/lib/shipments/status';
 import { ArticleList, ArticleRow, PageBody, PageHeader, Panel } from '../chrome';
 import { TrackForm } from './form';
-import { LastUpdate, StatusBadge, Stepper, Timeline } from './result';
+import { deliveryStepLabels, LastUpdate, StatusBadge, Stepper, Timeline } from './result';
 
 export const dynamic = 'force-dynamic';
 
@@ -192,13 +198,46 @@ async function Lookup({ locale, canonical }: { locale: Locale; canonical: string
    * both. `stageDisplay` reads the raw token either way, which is what the
    * vocabulary table's keywords are written for.
    */
+  /*
+   * Which journey this parcel is on, before anything is drawn.
+   *
+   * `rto_requested` rather than the status, because the platform leaves the
+   * status reading `delivery_attempted` for the whole of a return — see
+   * `returnProgress`. Null means the ordinary outbound case.
+   */
+  const returning = tracking
+    ? returnProgress({
+        rtoRequested: tracking.rtoRequested,
+        status: tracking.status,
+        events: tracking.events,
+      })
+    : null;
+
   const status = tracking
     ? {
-        label: statusLabel(locale, tracking.status, overrides),
-        at: tracking.statusAt,
+        /*
+         * On a return the badge says where the parcel is going, not where the
+         * outbound leg stopped. Showing `delivery_attempted` — which is what the
+         * platform still reports — would headline the page with the last thing
+         * that failed rather than the thing that is now happening.
+         *
+         * The step's own wording rather than a translation of the latest return
+         * event, because the two vocabularies disagree on tense at exactly the
+         * moment it matters: `return_to_origin` reads as `مرتجعة إلى الراسل` —
+         * *returned* — through the delivery table, above a bar whose first step
+         * has only just lit. The step is what the bar is showing, so the badge
+         * says the same thing.
+         */
+        label: returning
+          ? returnStepLabel(locale, returning.step, overrides)
+          : statusLabel(locale, tracking.status, overrides),
+        at: returning?.at ?? tracking.statusAt,
         events: tracking.events,
         estimatedDate: tracking.estimatedDate,
         ...stageDisplay(tracking.status),
+        // A returning parcel wears the returned tone whatever the stale status
+        // says, and leaves the outbound line entirely.
+        ...(returning ? { tone: 'returned' as const, step: null } : {}),
       }
     : null;
 
@@ -249,9 +288,26 @@ async function Lookup({ locale, canonical }: { locale: Locale; canonical: string
           <p className="mt-4 text-[var(--kb-muted)]">{t(locale, 'trackNoStatus')}</p>
         ) : null}
 
-        {status !== null && status.step !== null ? (
+        {/*
+          One bar or the other, never both, and never the outbound one during a
+          return: its last step is "Delivered", which is the single thing that is
+          not going to happen. The return bar is drawn in the `returned` tone so
+          the two do not read as one journey continuing.
+        */}
+        {status !== null && returning !== null ? (
           <div className="mt-6">
-            <Stepper locale={locale} current={status.step} />
+            <p className="mb-4 text-[var(--kb-heading)]">{t(locale, 'trackReturning')}</p>
+            <Stepper
+              tone="returning"
+              current={returning.step}
+              labels={RETURN_STEPS.map((_, index) => returnStepLabel(locale, index, overrides))}
+            />
+          </div>
+        ) : null}
+
+        {status !== null && returning === null && status.step !== null ? (
+          <div className="mt-6">
+            <Stepper current={status.step} labels={deliveryStepLabels(locale)} />
           </div>
         ) : null}
 
@@ -262,7 +318,7 @@ async function Lookup({ locale, canonical }: { locale: Locale; canonical: string
           it is simply false — `terminal` is the same flag the stepper uses to
           decide the journey is over.
         */}
-        {status !== null && status.estimatedDate && !status.terminal ? (
+        {status !== null && status.estimatedDate && !status.terminal && returning === null ? (
           <p className="mt-5 text-sm text-[var(--kb-muted)]">
             {t(locale, 'trackEstimated')}:{' '}
             <span className="font-medium text-[var(--kb-heading)]">
@@ -295,7 +351,12 @@ async function Lookup({ locale, canonical }: { locale: Locale; canonical: string
 
         {status !== null && status.events.length > 0 ? (
           <div className="mt-6 border-t border-[var(--kb-border)] pt-5">
-            <Timeline locale={locale} events={status.events} overrides={overrides} />
+            <Timeline
+              locale={locale}
+              events={status.events}
+              overrides={overrides}
+              returnFrom={returning?.startedAt ?? null}
+            />
           </div>
         ) : null}
 

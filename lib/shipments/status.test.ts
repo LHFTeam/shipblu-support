@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
-  commentText,
   humaniseStatus,
-  PHRASE_GROUPS,
+  RETURN_STEPS,
+  returnProgress,
+  returnStepLabel,
   stageDisplay,
   stageFor,
   statusLabel,
+  commentText,
+  PHRASE_GROUPS,
   TRACKING_STEPS,
 } from './status';
 
@@ -306,5 +309,169 @@ describe('commentText', () => {
   it('says nothing when there is no comment', () => {
     expect(commentText('ar', null)).toBe('');
     expect(commentText('ar', '   ')).toBe('');
+  });
+});
+
+/**
+ * The return leg.
+ *
+ * Built from the event history of a real parcel, 1591424095705, which is the
+ * one that exposed the bug: two failed delivery attempts, then
+ * `return_to_origin` — while the platform's top-level status stayed
+ * `delivery_attempted` and `rto_requested` went true.
+ */
+function at(iso: string) {
+  return new Date(iso);
+}
+
+const OUTBOUND = [
+  { status: 'created', at: at('2026-08-19T14:29:28+03:00') },
+  { status: 'picked_up', at: at('2026-08-19T18:32:24+03:00') },
+  { status: 'in_transit', at: at('2026-08-19T19:50:40+03:00') },
+  { status: 'en_route', at: at('2026-08-20T04:27:02+03:00') },
+  { status: 'out_for_delivery', at: at('2026-08-20T14:00:56+03:00') },
+  { status: 'delivery_attempted', at: at('2026-08-22T18:53:00+03:00') },
+  { status: 'in_transit', at: at('2026-08-22T19:48:10+03:00') },
+  { status: 'out_for_delivery', at: at('2026-08-29T17:45:20+03:00') },
+  { status: 'delivery_attempted', at: at('2026-08-30T16:51:45+03:00') },
+];
+
+const RETURN_STARTED = { status: 'return_to_origin', at: at('2026-08-30T16:51:45+03:00') };
+
+describe('returnProgress', () => {
+  it('is null for a parcel that is not going back', () => {
+    expect(
+      returnProgress({ rtoRequested: false, status: 'out_for_delivery', events: OUTBOUND }),
+    ).toBeNull();
+  });
+
+  /**
+   * The bug, pinned. The platform reports `delivery_attempted` for the whole of
+   * a return, so a page reading the status alone drew the outbound bar with
+   * "Delivered" still ahead for a parcel that will never arrive.
+   */
+  it('reads the flag, not the status, which stays delivery_attempted', () => {
+    const progress = returnProgress({
+      rtoRequested: true,
+      status: 'delivery_attempted',
+      events: [...OUTBOUND, RETURN_STARTED],
+    });
+
+    expect(progress).not.toBeNull();
+    expect(progress?.step).toBe(0);
+    expect(RETURN_STEPS[progress!.step]).toBe('returningToSender');
+    expect(progress?.startedAt?.toISOString()).toBe(at('2026-08-30T16:51:45+03:00').toISOString());
+  });
+
+  it('counts only the events after the return began', () => {
+    // The outbound leg is full of `in_transit`. Counting those would put a
+    // parcel that has only just been turned around at "on the way back".
+    const progress = returnProgress({
+      rtoRequested: true,
+      status: 'delivery_attempted',
+      events: [...OUTBOUND, RETURN_STARTED],
+    });
+
+    expect(progress?.step).toBe(0);
+  });
+
+  it('reads transit after the turnaround as the way back', () => {
+    const progress = returnProgress({
+      rtoRequested: true,
+      status: 'delivery_attempted',
+      events: [
+        ...OUTBOUND,
+        RETURN_STARTED,
+        { status: 'in_transit', at: at('2026-08-31T09:00:00+03:00') },
+      ],
+    });
+
+    expect(RETURN_STEPS[progress!.step]).toBe('onTheWay');
+  });
+
+  it('reads en_route on the way back the same way', () => {
+    const progress = returnProgress({
+      rtoRequested: true,
+      status: 'delivery_attempted',
+      events: [...OUTBOUND, RETURN_STARTED, { status: 'en_route', at: at('2026-08-31T09:00:00Z') }],
+    });
+
+    expect(RETURN_STEPS[progress!.step]).toBe('onTheWay');
+  });
+
+  it('reads out_for_return, and a failed return attempt as the same step', () => {
+    for (const token of ['out_for_return', 'return_attempted']) {
+      const progress = returnProgress({
+        rtoRequested: true,
+        status: 'delivery_attempted',
+        events: [...OUTBOUND, RETURN_STARTED, { status: token, at: at('2026-09-01T09:00:00Z') }],
+      });
+
+      expect(RETURN_STEPS[progress!.step]).toBe('outForReturn');
+    }
+  });
+
+  it('reads the end of the journey', () => {
+    const progress = returnProgress({
+      rtoRequested: true,
+      status: 'returned',
+      events: [...OUTBOUND, RETURN_STARTED, { status: 'returned', at: at('2026-09-02T09:00:00Z') }],
+    });
+
+    expect(RETURN_STEPS[progress!.step]).toBe('returned');
+  });
+
+  it('starts at the first step when only the flag says so', () => {
+    // A parcel turned around before any return event has arrived. The flag
+    // establishes the return and nothing more, so there is no platform word to
+    // show and the caller falls back to the step's own label.
+    const progress = returnProgress({
+      rtoRequested: true,
+      status: 'delivery_attempted',
+      events: OUTBOUND,
+    });
+
+    expect(progress?.step).toBe(0);
+    // No return event yet, so there is no moment to point at — the flag alone
+    // established the return.
+    expect(progress?.startedAt).toBeNull();
+  });
+
+  it('follows a return that came back to the hub after a failed attempt', () => {
+    // The latest event wins rather than the furthest: it answers "where is it
+    // now", and a parcel back at the hub really is back at the hub.
+    const progress = returnProgress({
+      rtoRequested: true,
+      status: 'delivery_attempted',
+      events: [
+        ...OUTBOUND,
+        RETURN_STARTED,
+        { status: 'return_attempted', at: at('2026-09-01T09:00:00Z') },
+        { status: 'in_transit', at: at('2026-09-01T18:00:00Z') },
+      ],
+    });
+
+    expect(RETURN_STEPS[progress!.step]).toBe('onTheWay');
+  });
+
+  it('treats a returned status as a return even with the flag unset', () => {
+    expect(
+      returnProgress({ rtoRequested: false, status: 'returned', events: OUTBOUND }),
+    ).not.toBeNull();
+  });
+});
+
+describe('returnStepLabel', () => {
+  it('names every step in both languages', () => {
+    for (let step = 0; step < RETURN_STEPS.length; step++) {
+      expect(returnStepLabel('en', step)).not.toBe('');
+      expect(returnStepLabel('ar', step)).not.toBe('');
+      // The Arabic must actually be Arabic, not the English falling through.
+      expect(returnStepLabel('ar', step)).toMatch(/\p{Script=Arabic}/u);
+    }
+  });
+
+  it('takes an admin override, like every other phrase', () => {
+    expect(returnStepLabel('ar', 0, { return_started: 'كلام التاجر' })).toBe('كلام التاجر');
   });
 });
