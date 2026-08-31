@@ -33,7 +33,7 @@ const nextConfig: NextConfig = {
        *
        * The default is 1 MB, and going over it fails with an error that never
        * mentions size — the submission simply does not arrive. This is set just
-       * above `MAX_FORM_TOTAL_BYTES` in `lib/forms/attachments.ts` on purpose,
+       * above `MAX_FORM_TOTAL_BYTES` in `lib/forms/files.ts` on purpose,
        * so the limit a customer actually meets is the one that can explain
        * itself rather than Next's own rejection.
        *

@@ -57,7 +57,7 @@ export default async function PortalHome({ params }: { params: Promise<{ locale:
         <Panel className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-2 p-5">
           <p className="text-sm text-[var(--kb-muted)]">{t(locale, 'searchKb')}</p>
           <Link
-            href={`/${locale}/portal/new`}
+            href={`/${locale}/forms`}
             className="sm:ms-auto rounded-md bg-[var(--button-primary)] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--button-primary-hover)]"
           >
             {t(locale, 'openTicket')}

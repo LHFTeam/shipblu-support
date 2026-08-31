@@ -373,7 +373,7 @@ async function Lookup({ locale, canonical }: { locale: Locale; canonical: string
         */}
         <div className="mt-6 flex flex-wrap gap-3 border-t border-[var(--kb-border)] pt-5">
           <Link
-            href={`/${locale}/portal/new?subject=${encodeURIComponent(subject)}`}
+            href={`/${locale}/forms?subject=${encodeURIComponent(subject)}`}
             className="rounded-md bg-[var(--button-primary)] px-3.5 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--button-primary-hover)]"
           >
             {t(locale, 'trackAskSupport')}

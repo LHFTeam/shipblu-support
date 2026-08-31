@@ -1,5 +1,6 @@
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
+import { listForms } from '@/lib/forms/queries';
 import { isLocale, t } from '@/lib/kb/locale';
 import { requireCustomer } from '@/lib/portal/guard';
 import { customerTicketFields } from '@/lib/portal/fields';
@@ -28,10 +29,20 @@ export default async function NewPortalTicket({
   const [{ locale }, query] = await Promise.all([params, searchParams]);
   if (!isLocale(locale)) notFound();
 
+  const subject = (query.subject ?? '').trim().slice(0, 200);
+
+  // Once an admin has built a form, that is the door. This page stays as the
+  // answer to "what happens before anybody has built one" — deleting it would
+  // mean a fresh installation has no way to open a ticket from the help centre
+  // at all, and `/forms` redirects back here for exactly that case.
+  const forms = await listForms('help_centre');
+  if (forms.length) {
+    redirect(`/${locale}/forms${subject ? `?subject=${encodeURIComponent(subject)}` : ''}`);
+  }
+
   await requireCustomer(locale, `/${locale}/portal/new`);
 
   const fields = await customerTicketFields();
-  const subject = (query.subject ?? '').trim().slice(0, 200);
 
   return (
     <>

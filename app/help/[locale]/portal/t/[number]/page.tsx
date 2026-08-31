@@ -98,7 +98,7 @@ export default async function PortalTicketPage({
               <ReplyBox locale={locale} number={ticket.number} />
             ) : (
               <Link
-                href={`/${locale}/portal/new`}
+                href={`/${locale}/forms`}
                 className="text-sm text-[var(--kb-link)] underline underline-offset-4"
               >
                 {t(locale, 'openTicket')}

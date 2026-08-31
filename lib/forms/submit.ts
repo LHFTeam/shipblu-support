@@ -1,5 +1,5 @@
 import { db } from '@/db/client';
-import { conversationEvents } from '@/db/schema';
+import { conversationEvents, messages } from '@/db/schema';
 import { normaliseEmail, looksLikeEmail } from '@/lib/auth/normalise';
 import type { Locale } from '@/lib/kb/locale';
 import { createTicket } from '@/lib/portal/tickets';
@@ -11,7 +11,8 @@ import {
   type CustomFieldValues,
   type TicketFieldDef,
 } from '@/lib/tickets/custom-fields';
-import { checkFormFiles, storeFormAttachments, type FileRefusal } from './attachments';
+import { storeFormAttachments } from './attachments';
+import { checkFormFiles, type FileRefusal } from './files';
 import {
   elementsFor,
   isInput,
@@ -267,6 +268,20 @@ export async function submitForm(input: {
   const attachmentsFailed = checked.files.length
     ? (await storeFormAttachments({ ...created, files: checked.files })).failed
     : [];
+
+  if (attachmentsFailed.length) {
+    // On the ticket, not only in a worker log. The customer is told their file
+    // did not arrive; the agent has to be told the same thing or the two of them
+    // are looking at different tickets — and "silent success is worse than a
+    // failure" is exactly this case.
+    await db.insert(messages).values({
+      conversationId: created.conversationId,
+      direction: 'inbound',
+      kind: 'system',
+      bodyText: `Could not store ${attachmentsFailed.join(', ')} — ask the customer to send it again.`,
+      deliveryStatus: 'delivered',
+    });
+  }
 
   return {
     ok: true,
