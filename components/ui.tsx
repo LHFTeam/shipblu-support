@@ -38,6 +38,13 @@ export function Button({
 
   return (
     <button
+      // HTML defaults a button inside a form to `submit`, and almost every
+      // Button here is a `<Button onClick={…}>` that opens an editor — which,
+      // the first time one of those was placed *inside* a form, meant clicking
+      // "show me the validation rules" saved the record instead. Defaulting to
+      // `button` makes the safe case the one you get by not thinking about it;
+      // `SubmitButton` is the only thing that submits, and it says so.
+      type="button"
       {...props}
       className={`inline-flex items-center justify-center gap-2 rounded-md font-medium transition-colors disabled:cursor-not-allowed ${sizing} ${styles} ${className}`}
     />

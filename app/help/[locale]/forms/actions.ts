@@ -3,6 +3,7 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { getSessionCustomer } from '@/lib/auth/customer-session';
+import { formPath } from '@/lib/forms/naming';
 import { getFormBySlug } from '@/lib/forms/queries';
 import { submitForm } from '@/lib/forms/submit';
 import { allow, clientIpFrom } from '@/lib/kb/rate-limit';
@@ -53,7 +54,7 @@ export async function submitTicketForm(
 
   const customer = await getSessionCustomer();
   if (loaded.form.requiresSignIn && !customer) {
-    redirect(`/${locale}/account/login?next=${encodeURIComponent(`/${locale}/forms/${slug}`)}`);
+    redirect(`/${locale}/account/login?next=${encodeURIComponent(formPath(locale, slug))}`);
   }
 
   const result = await submitForm({
@@ -97,5 +98,5 @@ export async function submitTicketForm(
   if (customer) redirect(`/${locale}/portal/t/${result.number}?created=1`);
 
   const failed = result.attachmentsFailed.length ? '&files=failed' : '';
-  redirect(`/${locale}/forms/${slug}?submitted=${result.number}${failed}`);
+  redirect(formPath(locale, slug, `?submitted=${result.number}${failed}`));
 }

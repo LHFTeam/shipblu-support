@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getSessionCustomer } from '@/lib/auth/customer-session';
 import { elementsFor } from '@/lib/forms/elements';
+import { formPath } from '@/lib/forms/naming';
 import { formConfirmation, formDescription, formName, getFormBySlug } from '@/lib/forms/queries';
 import { decodeSlugParam } from '@/lib/kb/slug';
 import { isLocale, t, tCount } from '@/lib/kb/locale';
@@ -34,7 +35,7 @@ export default async function FormPage({
   // customer who fills in eleven questions and is then sent to a login screen
   // comes back to an empty form.
   const customer = form.requiresSignIn
-    ? await requireCustomer(locale, `/${locale}/forms/${slug}`)
+    ? await requireCustomer(locale, formPath(locale, slug))
     : await getSessionCustomer();
 
   const submitted = Number(query.submitted);
@@ -53,7 +54,7 @@ export default async function FormPage({
             { label: t(locale, 'formsTitle'), href: `/${locale}/forms` },
           ]}
           title={name}
-          selfPath={`/${locale}/forms/${slug}`}
+          selfPath={formPath(locale, slug)}
         />
 
         <PageBody>
@@ -100,7 +101,7 @@ export default async function FormPage({
           { label: t(locale, 'formsTitle'), href: `/${locale}/forms` },
         ]}
         title={name}
-        selfPath={`/${locale}/forms/${slug}`}
+        selfPath={formPath(locale, slug)}
         meta={description || undefined}
       />
 

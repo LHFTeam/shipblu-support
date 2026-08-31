@@ -540,6 +540,27 @@ export async function getConversation(
   const row = rows[0];
   if (!row) return null;
 
+  /**
+   * Asked directly rather than read off the activity list below.
+   *
+   * That list is `limit(50)` newest-first and this event is always the oldest on
+   * the ticket — it is written the moment the ticket is created. Deriving the
+   * badge from it meant the "nobody proved who sent this" warning disappeared
+   * once fifty things had happened, which is exactly the escalated ticket where
+   * an agent most needs it.
+   */
+  const unverified = await db
+    .select({ id: conversationEvents.id })
+    .from(conversationEvents)
+    .where(
+      and(
+        eq(conversationEvents.conversationId, row.conversation.id),
+        eq(conversationEvents.type, 'unverified_submitter'),
+      ),
+    )
+    .limit(1);
+  const unverifiedSubmitter = unverified.length > 0;
+
   const [timeline, files, events, shipments, accounts, sides] = await Promise.all([
     db
       .select({
@@ -636,7 +657,7 @@ export async function getConversation(
     formName: row.formSlug
       ? formName({ nameAr: row.formNameAr!, nameEn: row.formNameEn!, slug: row.formSlug }, 'en')
       : null,
-    unverifiedSubmitter: events.some((event) => event.type === 'unverified_submitter'),
+    unverifiedSubmitter,
     metaThread,
     shipments,
     shippingAccounts: accounts,

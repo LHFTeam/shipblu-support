@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Field, Input, Select, Textarea, Toggle } from '@/components/ui';
-import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
+import { Collapsible, DangerAction, Disclosure, EditorForm } from '../forms-shared';
 import { deleteField, saveField } from '../settings-actions';
 
 type TicketField = {
@@ -127,84 +127,82 @@ function Fields({ field }: { field?: TicketField }) {
         />
       </Field>
 
-      <Disclosure label="Rules about the answer">
-        {() => (
-          <div className="flex flex-col gap-3">
-            <Field
-              label="Pattern the answer must match"
-              hint="A regular expression. Anchored automatically, so a partial match is not a pass."
-              explain={
-                <>
-                  For the fields where a wrong-looking answer is worse than no answer — a tracking
-                  number, a national ID. <code>SB[0-9]&#123;8&#125;</code> accepts SB12345678 and
-                  refuses everything else, including a message that merely contains one. Checked in
-                  the browser and again on the server; only the second is true.
-                </>
-              }
-            >
+      <Collapsible label="Rules about the answer">
+        <>
+          <Field
+            label="Pattern the answer must match"
+            hint="A regular expression. Anchored automatically, so a partial match is not a pass."
+            explain={
+              <>
+                For the fields where a wrong-looking answer is worse than no answer — a tracking
+                number, a national ID. <code>SB[0-9]&#123;8&#125;</code> accepts SB12345678 and
+                refuses everything else, including a message that merely contains one. Checked in
+                the browser and again on the server; only the second is true.
+              </>
+            }
+          >
+            <Input
+              name="pattern"
+              defaultValue={field?.validation?.pattern ?? ''}
+              placeholder="SB[0-9]{8}"
+            />
+          </Field>
+
+          <Field
+            label="What to say when it does not match"
+            as="group"
+            hint="The one validation message a customer actually reads. Blank falls back to a generic sentence in their language."
+          >
+            <div className="grid gap-2 sm:grid-cols-2">
               <Input
-                name="pattern"
-                defaultValue={field?.validation?.pattern ?? ''}
-                placeholder="SB[0-9]{8}"
+                name="patternMessageAr"
+                dir="rtl"
+                lang="ar"
+                aria-label="Pattern message, Arabic"
+                defaultValue={field?.validation?.patternMessageAr ?? ''}
+              />
+              <Input
+                name="patternMessageEn"
+                aria-label="Pattern message, English"
+                defaultValue={field?.validation?.patternMessageEn ?? ''}
+              />
+            </div>
+          </Field>
+
+          <div className="grid gap-3 sm:grid-cols-4">
+            <Field label="Smallest number">
+              <Input
+                name="min"
+                type="number"
+                step="any"
+                defaultValue={field?.validation?.min ?? ''}
               />
             </Field>
-
-            <Field
-              label="What to say when it does not match"
-              as="group"
-              hint="The one validation message a customer actually reads. Blank falls back to a generic sentence in their language."
-            >
-              <div className="grid gap-2 sm:grid-cols-2">
-                <Input
-                  name="patternMessageAr"
-                  dir="rtl"
-                  lang="ar"
-                  aria-label="Pattern message, Arabic"
-                  defaultValue={field?.validation?.patternMessageAr ?? ''}
-                />
-                <Input
-                  name="patternMessageEn"
-                  aria-label="Pattern message, English"
-                  defaultValue={field?.validation?.patternMessageEn ?? ''}
-                />
-              </div>
+            <Field label="Largest number">
+              <Input
+                name="max"
+                type="number"
+                step="any"
+                defaultValue={field?.validation?.max ?? ''}
+              />
             </Field>
-
-            <div className="grid gap-3 sm:grid-cols-4">
-              <Field label="Smallest number">
-                <Input
-                  name="min"
-                  type="number"
-                  step="any"
-                  defaultValue={field?.validation?.min ?? ''}
-                />
-              </Field>
-              <Field label="Largest number">
-                <Input
-                  name="max"
-                  type="number"
-                  step="any"
-                  defaultValue={field?.validation?.max ?? ''}
-                />
-              </Field>
-              <Field label="Shortest text">
-                <Input
-                  name="minLength"
-                  type="number"
-                  defaultValue={field?.validation?.minLength ?? ''}
-                />
-              </Field>
-              <Field label="Longest text">
-                <Input
-                  name="maxLength"
-                  type="number"
-                  defaultValue={field?.validation?.maxLength ?? ''}
-                />
-              </Field>
-            </div>
+            <Field label="Shortest text">
+              <Input
+                name="minLength"
+                type="number"
+                defaultValue={field?.validation?.minLength ?? ''}
+              />
+            </Field>
+            <Field label="Longest text">
+              <Input
+                name="maxLength"
+                type="number"
+                defaultValue={field?.validation?.maxLength ?? ''}
+              />
+            </Field>
           </div>
-        )}
-      </Disclosure>
+        </>
+      </Collapsible>
 
       <div className="grid gap-2 sm:grid-cols-2">
         <Toggle

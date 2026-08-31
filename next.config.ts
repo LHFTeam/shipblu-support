@@ -43,6 +43,21 @@ const nextConfig: NextConfig = {
        */
       bodySizeLimit: '26mb',
     },
+
+    /**
+     * And the same number again, for the copy `proxy.ts` forces.
+     *
+     * `serverActions.bodySizeLimit` alone is not enough: middleware runs on
+     * every route here, so Next clones the request body first, and that clone is
+     * capped separately at 10 MB. Going over does not fail — `body-streams.ts`
+     * truncates the stream and writes a `console.warn` nobody reads — so three
+     * 4 MB photos arrived as a corrupt multipart body and the submission failed
+     * with nothing the customer could act on.
+     *
+     * Bytes, not a string: this one is compared numerically against the default
+     * of 10485760.
+     */
+    proxyClientMaxBodySize: 27 * 1024 * 1024,
   },
 
   // Support tickets contain customer PII; never leak details through error pages.

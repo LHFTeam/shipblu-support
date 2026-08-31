@@ -1,3 +1,4 @@
+import { encodeSlugParam } from '@/lib/kb/slug';
 import { localised } from '@/lib/tickets/custom-fields';
 
 /**
@@ -33,4 +34,16 @@ export function formConfirmation(
   locale: 'ar' | 'en',
 ): string {
   return localised(form.confirmationAr, form.confirmationEn, locale, '');
+}
+
+/**
+ * A form's URL, with the slug encoded for a `Location` header.
+ *
+ * One function rather than a template literal at each call site, because the
+ * consequence of forgetting is not a broken link — it is an exception thrown
+ * after the ticket has already been written, so the customer sees a 500 for a
+ * submission that succeeded.
+ */
+export function formPath(locale: string, slug: string, query = ''): string {
+  return `/${locale}/forms/${encodeSlugParam(slug)}${query}`;
 }

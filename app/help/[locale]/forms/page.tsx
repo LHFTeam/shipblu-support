@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { getSessionCustomer } from '@/lib/auth/customer-session';
+import { formPath } from '@/lib/forms/naming';
 import { formDescription, formName, listForms } from '@/lib/forms/queries';
 import { isLocale, t } from '@/lib/kb/locale';
 import { PageBody, PageHeader } from '../chrome';
@@ -33,7 +34,7 @@ export default async function FormsIndex({
   const suffix = subject ? `?subject=${encodeURIComponent(subject)}` : '';
 
   if (forms.length === 0) redirect(`/${locale}/portal/new${suffix}`);
-  if (forms.length === 1) redirect(`/${locale}/forms/${forms[0]!.slug}${suffix}`);
+  if (forms.length === 1) redirect(formPath(locale, forms[0]!.slug, suffix));
 
   const customer = await getSessionCustomer();
 
@@ -56,7 +57,7 @@ export default async function FormsIndex({
               return (
                 <li key={form.id}>
                   <Link
-                    href={`/${locale}/forms/${form.slug}${suffix}`}
+                    href={formPath(locale, form.slug, suffix)}
                     className="kb-panel block p-4 transition-[box-shadow,border-color] hover:border-[var(--kb-border-strong)] hover:shadow-lg"
                   >
                     <span className="font-medium text-[var(--kb-heading)]">

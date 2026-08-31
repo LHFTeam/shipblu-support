@@ -179,7 +179,18 @@ export async function submitForm(input: {
   // cannot be answered by a request that claims it was.
   const offered = elementsFor(form.elements, viewer, fields);
 
-  const checked = checkFormFiles(input.values.getAll('attachments'));
+  // Files are an answer like any other, so they go through the same gate. Read
+  // only when the form asks for them at all: without this, a form with no
+  // attachment question still accepted and stored whatever a hand-made request
+  // carried — an unauthenticated write to the bucket on the one path designed so
+  // that a file cannot exist without the ticket explaining it.
+  const asksFiles = offered.some(
+    (element) => element.kind === 'system' && element.key === 'attachments',
+  );
+
+  const checked = asksFiles
+    ? checkFormFiles(input.values.getAll('attachments'))
+    : ({ ok: true, files: [] as File[] } as const);
   if (!checked.ok) return { ok: false, reason: 'files', refusal: checked.refusal };
 
   const submitted = readAnswers(input.values, offered, fields);
@@ -265,8 +276,16 @@ export async function submitForm(input: {
     });
   }
 
-  const attachmentsFailed = checked.files.length
-    ? (await storeFormAttachments({ ...created, files: checked.files })).failed
+  // And discarded outright when the question turned out not to be asked — the
+  // element can be behind a condition that did not fire, in which case the files
+  // are an answer to something nobody was shown.
+  const filesAsked = resolved.visible.some(
+    (element) => element.kind === 'system' && element.key === 'attachments',
+  );
+  const files = filesAsked ? checked.files : [];
+
+  const attachmentsFailed = files.length
+    ? (await storeFormAttachments({ ...created, files })).failed
     : [];
 
   if (attachmentsFailed.length) {
