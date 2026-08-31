@@ -15,6 +15,7 @@ import {
 import type { ConversationChannel } from '@/lib/tickets/channel-policy';
 import { normaliseSbid, normaliseTrackingNumber } from './format';
 import { deriveRequesterRole, type RequesterRole } from './roles';
+import { returnsForShipments } from './lookup';
 
 /**
  * Reading shipments, shipping accounts and what is attached to them.
@@ -59,6 +60,18 @@ export type LinkedShipment = {
   statusLabel: string | null;
   /** When the platform says the status changed — not when we last asked. */
   statusAt: Date | null;
+  /**
+   * Which step of the journey *back* this parcel is on, or null if it is not
+   * going back.
+   *
+   * Carried here because `status_label` cannot answer it: the platform leaves
+   * the status reading `delivery_attempted` for the whole of a return, so a
+   * sidebar drawing the label alone tells an agent on a call that a parcel is
+   * still coming (`docs/PROJECT-STATE.md` §6.40).
+   */
+  returnStep: number | null;
+  /** The freshest estimated delivery date, as a `YYYY-MM-DD` string. */
+  currentEstimatedDate: string | null;
   /**
    * When we last asked, which is a different question and the one an agent on a
    * call needs answered. "Delivered, as of a status we read four days ago" is
@@ -423,6 +436,7 @@ export async function shipmentsForConversation(
       statusLabel: shipments.statusLabel,
       statusAt: shipments.statusAt,
       lastSyncedAt: shipments.lastSyncedAt,
+      currentEstimatedDate: shipments.currentEstimatedDate,
       syncState: shipments.syncState,
       shipperContactId: shipments.shipperContactId,
       recipientContactId: shipments.recipientContactId,
@@ -436,12 +450,24 @@ export async function shipmentsForConversation(
     .where(eq(conversationShipments.conversationId, conversationId))
     .orderBy(desc(conversationShipments.createdAt));
 
+  /*
+   * Which of them are going back, asked for separately.
+   *
+   * `shipments.data` is the only place `rto_requested` lives, and reading that
+   * column is confined to `lookup.ts` and `detail.ts` — so this asks them for
+   * the answer rather than selecting the payload into a list query. One round
+   * trip for the whole list; see `returnsForShipments`.
+   */
+  const returns = await returnsForShipments(rows.map((row) => row.shipmentId));
+
   return rows.map((row) => ({
     shipmentId: row.shipmentId,
     trackingNumber: row.trackingNumber,
     statusLabel: row.statusLabel,
     statusAt: row.statusAt,
     lastSyncedAt: row.lastSyncedAt,
+    returnStep: returns.get(row.shipmentId)?.step ?? null,
+    currentEstimatedDate: row.currentEstimatedDate,
     syncState: row.syncState,
     sbid: row.sbid,
     requesterRole: deriveRequesterRole(requesterContactId, {

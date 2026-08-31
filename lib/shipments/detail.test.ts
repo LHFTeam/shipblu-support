@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { agentTracking, publicTracking } from './detail';
+import { agentTracking, publicTracking, storedReturn } from './detail';
 
 /**
  * The same payload shape the platform really returns, with invented personal
@@ -209,5 +209,46 @@ describe('the current estimate', () => {
     for (const secret of ['Testfirst', 'secret.recipient@example.com', '01111111111', '1245']) {
       expect(serialised).not.toContain(secret);
     }
+  });
+});
+
+describe('storedReturn', () => {
+  it('is null for a parcel that is not going back', () => {
+    expect(storedReturn(stored())).toBeNull();
+  });
+
+  it('reads the flag, not the status, straight off a stored payload', () => {
+    // The shape production actually holds for a returning parcel: the status
+    // still reads `delivery_attempted` and only the flag and an event say
+    // otherwise. This is what the ticket sidebar keys on.
+    const payload = stored();
+    payload.status = 'delivery_attempted';
+    payload.rto_requested = true;
+    (payload.tracking_events as unknown[]).push({
+      status: 'return_to_origin',
+      created: '2026-08-30T16:51:45+03:00',
+      comment: null,
+    });
+
+    const progress = storedReturn(payload);
+    expect(progress?.step).toBe(0);
+    expect(progress?.startedAt?.toISOString()).toBe('2026-08-30T13:51:45.000Z');
+  });
+
+  it('follows the return once it is moving', () => {
+    const payload = stored();
+    payload.rto_requested = true;
+    (payload.tracking_events as unknown[]).push(
+      { status: 'return_to_origin', created: '2026-08-30T16:51:45+03:00', comment: null },
+      { status: 'out_for_return', created: '2026-09-01T09:00:00+03:00', comment: null },
+    );
+
+    expect(storedReturn(payload)?.step).toBe(2);
+  });
+
+  it('reads an empty stub as nothing, not as an error', () => {
+    expect(storedReturn({})).toBeNull();
+    expect(storedReturn(null)).toBeNull();
+    expect(storedReturn({ junk: true })).toBeNull();
   });
 });
