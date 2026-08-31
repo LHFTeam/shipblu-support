@@ -18,7 +18,6 @@ import { webchatChannel } from './session';
 const FAQ_SIZE = 6;
 
 export type WidgetFaq = {
-  id: string;
   title: string;
   slug: string;
 };
@@ -42,12 +41,12 @@ export async function widgetFaqs(locale: Locale): Promise<WidgetFaq[]> {
   const folderId = parseWidgetConfig(channel?.config).faqFolders[locale];
 
   if (folderId) {
-    const curated = await folderArticles(ANONYMOUS, folderId, FAQ_SIZE);
+    const curated = await folderArticles(ANONYMOUS, locale, folderId, FAQ_SIZE);
     if (curated.length > 0) {
-      return curated.map(({ id, title, slug }) => ({ id, title, slug }));
+      return curated.map(({ title, slug }) => ({ title, slug }));
     }
   }
 
   const popular = await popularArticles(ANONYMOUS, locale, FAQ_SIZE);
-  return popular.map(({ id, title, slug }) => ({ id, title, slug }));
+  return popular.map(({ title, slug }) => ({ title, slug }));
 }

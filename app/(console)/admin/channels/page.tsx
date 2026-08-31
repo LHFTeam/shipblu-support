@@ -7,7 +7,7 @@ import { Badge, Card, PageHeader } from '@/components/ui';
 import { requirePermission } from '@/lib/auth/guard';
 import { env } from '@/lib/env';
 import { listFolderOptions } from '@/lib/kb/admin';
-import { parseWidgetConfig } from '@/lib/widget/config';
+import { offerableFaqFolders, parseWidgetConfig } from '@/lib/widget/config';
 import { ChannelForm, WebchatSettings } from './forms';
 import { NewWhatsAppAccount, WhatsAppAccountEditor, type WhatsAppAccountRow } from './waba-forms';
 
@@ -23,6 +23,7 @@ export default async function ChannelsPage() {
         type: channels.type,
         name: channels.name,
         config: channels.config,
+        createdAt: channels.createdAt,
         defaultGroupId: channels.defaultGroupId,
         whatsappAccountId: channels.whatsappAccountId,
         isActive: channels.isActive,
@@ -46,18 +47,23 @@ export default async function ChannelsPage() {
     listFolderOptions(),
   ]);
 
-  // Only public folders are offered: the widget reads with an anonymous viewer,
-  // so anything else saves cleanly and then shows a customer an empty panel.
-  const faqFolders = folderList
-    .filter((folder) => folder.visibility === 'public')
-    .map(({ id, name, categoryName, categoryLocale }) => ({
+  // The same rule `saveChannel` validates against, so the picker cannot offer a
+  // folder the action would refuse.
+  const faqFolders = offerableFaqFolders(folderList).map(
+    ({ id, name, categoryName, categoryLocale }) => ({
       id,
       name,
       categoryName,
       categoryLocale,
-    }));
+    }),
+  );
 
-  const webchat = channelList.find((channel) => channel.type === 'webchat');
+  // The same row `webchatChannel()` reads — oldest active first. Picking by a
+  // different rule would let an admin configure one row while the widget read
+  // another, and the setting would look saved and do nothing.
+  const webchat = channelList
+    .filter((channel) => channel.type === 'webchat' && channel.isActive)
+    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0];
 
   const accountChoices = accountList.map((account) => ({ id: account.id, name: account.name }));
   const templatesByAccount = new Map(templateCounts.map((row) => [row.accountId, row.total]));

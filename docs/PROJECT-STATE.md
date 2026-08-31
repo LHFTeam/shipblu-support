@@ -2495,10 +2495,32 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
   a `KbViewer` and applies **both** predicates — `folderArticles` in
   `lib/kb/queries.ts` is the shape to copy. And any admin control that _names_ a
   folder for a customer-facing surface has to exclude the non-public ones from
-  the picker and refuse them in the action, as `/admin/channels` does for the
-  widget: a staff folder chosen there saves cleanly and then shows the customer
-  an empty panel, so it reads as a broken feature rather than as a refused
+  the picker and refuse them in the action — one rule, in
+  `offerableFaqFolders`/`resolveFaqFolders` (`lib/widget/config.ts`), because a
+  picker offering more than the action accepts presents a choice that fails on
+  save. A staff folder chosen there would otherwise save cleanly and then show
+  the customer an empty panel, reading as a broken feature rather than a refused
   setting, and nobody goes looking for the cause.
+
+  `folderArticles` also carries `eq(kbArticles.locale, locale)` even though the
+  folder implies it. A folder has no locale of its own — it inherits its
+  category's — and only one console action enforces that an article filed in it
+  matches; the Freshdesk importer does not. Without the predicate one mis-filed
+  row puts an English FAQ in the Arabic widget, where every tap 404s, because
+  `getArticle` _does_ filter on locale.
+
+- **An unverified value written to `contacts` is an identity-matching key, even
+  with no `contact_identities` row.** _Found 2026-08-31, in review of the widget
+  work._ `mergeCandidates` (`lib/contacts/merge.ts`) matches on `primary_email`
+  **and** `primary_phone`, so anything the out-of-hours widget form stores
+  surfaces as a merge suggestion: a visitor who types a real customer's mobile
+  makes that customer appear beside their own throwaway contact, reason
+  `'phone'`. Nothing merges on its own — the decision stays with an agent, and
+  the address beside it has always had the same exposure — but "it gets no
+  identity row, so it is inert" is not a sound argument, and it had been written
+  into `attachVisitorDetails` before anyone checked the merge suggester.
+  Skipping the identity row narrows the blast radius from a routing rule to a
+  suggestion an agent can decline; it does not remove it.
 
 ## 7. Verification already done
 

@@ -25,8 +25,8 @@ const STORAGE_KEY = 'shipblu.widget.token';
 export function WidgetChat({
   locale,
   faqs,
-  online,
-  opensAt,
+  online: initialOnline,
+  opensAt: initialOpensAt,
 }: {
   locale: Locale;
   faqs: ArticleLink[];
@@ -48,10 +48,32 @@ export function WidgetChat({
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
 
+  /*
+   * Seeded by the server render, then refreshed by every session response.
+   *
+   * The panel is created once and can sit open across the moment the team opens
+   * or closes; a value fixed at render would keep telling a visitor at 18:05
+   * that we reply in a few minutes, and — because this also decides whether the
+   * out-of-hours form is asked for — would file their message with no way back.
+   * `/api/widget/session` already computes and returns both on every call,
+   * including the degraded 15s poll; before this nothing read them.
+   */
+  const [online, setOnline] = useState(initialOnline);
+  const [opensAt, setOpensAt] = useState(initialOpensAt);
+
   const [panelOpen, setPanelOpen] = useState(true);
   const [detailsSaved, setDetailsSaved] = useState(false);
 
   const seenCount = useRef(0);
+  /* One session request at a time. Without this, `talkToAgent` firing one and a
+     fast Send firing another both see `token` still null and both POST an empty
+     token — which the route answers by minting a *second* contact, filing the
+     message against whichever won, and orphaning the other. */
+  const minting = useRef<Promise<string | null> | null>(null);
+  /* Whether the visitor has navigated since mount. The resume request settles
+     after they may already have tapped something, and it must not drag them
+     back out of it. */
+  const navigated = useRef(false);
 
   // --- Session -------------------------------------------------------------
 
@@ -82,12 +104,19 @@ export function WidgetChat({
         setConversationId(data.conversationId);
         setMessages(data.messages);
         setDetailsSaved(Boolean(data.detailsSaved));
+        setOnline(Boolean(data.online));
+        setOpensAt((data.opensAt as string | null) ?? null);
         seenCount.current = data.messages.filter((m: Message) => m.from === 'agent').length;
         // A visitor coming back to a live conversation wants the reply they came
         // back for, not the FAQ list.
-        const opening = initialView({ messageCount: data.messages.length });
-        setThreadStarted(opening === 'thread');
-        setView(opening);
+        // Only if they have not already chosen a screen while this was in
+        // flight — otherwise a slow resume yanks a visitor out of the article
+        // they opened, or unmounts the thread they are typing into.
+        if (!navigated.current) {
+          const opening = initialView({ messageCount: data.messages.length });
+          if (opening === 'thread') setThreadStarted(true);
+          setView(opening);
+        }
       })
       .catch(() => {
         // Leaves the home screen up, which is rendered from props and needs
@@ -95,26 +124,54 @@ export function WidgetChat({
       });
   }, []);
 
-  /** The token, minting one on first use. Resolves null only if the server did. */
+  /**
+   * The token, minting one on first use. Resolves null only if the server did.
+   *
+   * Single-flight, and deliberately so. `talkToAgent` starts one without
+   * awaiting it so the screen changes immediately, and a visitor typing fast
+   * reaches `send` before `setToken` has landed — two callers, both seeing
+   * `token` as null. Without the shared promise each would POST an empty token,
+   * and `/api/widget/session` answers an unrecognised one by registering a new
+   * contact: two customer records, two tokens racing for the same localStorage
+   * key, and the message filed against whichever won.
+   *
+   * The stored token is read back inside the promise rather than trusted from
+   * the closure, so a resume that settled in the meantime is used instead of
+   * being overwritten.
+   */
   const ensureSession = useCallback(async (): Promise<string | null> => {
     if (token) return token;
+    if (minting.current) return minting.current;
 
-    const data = await fetch('/api/widget/session', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: '' }),
-    })
-      .then((response) => (response.ok ? response.json() : null))
-      .catch(() => null);
+    const request = (async () => {
+      const stored = localStorage.getItem(STORAGE_KEY) ?? '';
 
-    if (!data) return null;
+      const data = await fetch('/api/widget/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: stored }),
+      })
+        .then((response) => (response.ok ? response.json() : null))
+        .catch(() => null);
 
-    localStorage.setItem(STORAGE_KEY, data.token);
-    setToken(data.token);
-    setConversationId(data.conversationId);
-    setMessages(data.messages);
-    setDetailsSaved(Boolean(data.detailsSaved));
-    return data.token as string;
+      if (!data) return null;
+
+      localStorage.setItem(STORAGE_KEY, data.token);
+      setToken(data.token);
+      setConversationId(data.conversationId);
+      setMessages(data.messages);
+      setDetailsSaved(Boolean(data.detailsSaved));
+      setOnline(Boolean(data.online));
+      setOpensAt((data.opensAt as string | null) ?? null);
+      return data.token as string;
+    })();
+
+    minting.current = request;
+    try {
+      return await request;
+    } finally {
+      minting.current = null;
+    }
   }, [token]);
 
   // --- Live agent replies --------------------------------------------------
@@ -136,6 +193,8 @@ export function WidgetChat({
           if (data) {
             setConversationId(data.conversationId);
             setMessages(data.messages);
+            setOnline(Boolean(data.online));
+            setOpensAt((data.opensAt as string | null) ?? null);
           }
         })
         .catch(() => {});
@@ -200,8 +259,21 @@ export function WidgetChat({
     };
 
     window.addEventListener('message', onHostMessage);
+
+    /*
+     * Ask, rather than assume.
+     *
+     * `toggle` posts to `contentWindow` the instant it creates the iframe, so
+     * that first 'opened' lands on `about:blank` and is lost — as is a 'closed'
+     * from a visitor who shuts the panel before the frame finishes loading, and
+     * every locale switch re-points `src` and starts a fresh document. Any of
+     * those leaves a hidden panel believing it is visible, which silently
+     * swallows the unread badge. The host answers this with its real state.
+     */
+    postToHost({ type: 'hello' });
+
     return () => window.removeEventListener('message', onHostMessage);
-  }, []);
+  }, [postToHost]);
 
   // --- Navigation ----------------------------------------------------------
 
@@ -209,6 +281,7 @@ export function WidgetChat({
   // so the current view is the one to come back to.
   const openArticle = useCallback(
     (next: ArticleLink) => {
+      navigated.current = true;
       setArticle(next);
       setArticleFrom(view === 'article' ? 'home' : view);
       setView('article');
@@ -218,12 +291,14 @@ export function WidgetChat({
 
   /** Back goes where the visitor came from, which is not always the home screen. */
   const back = useCallback(() => {
+    navigated.current = true;
     setView((current) => (current === 'article' ? articleFrom : 'home'));
   }, [articleFrom]);
 
   const talkToAgent = useCallback(() => {
     // Shown immediately; the token is minted underneath. Waiting for the round
     // trip would make the one button on the screen feel broken.
+    navigated.current = true;
     setThreadStarted(true);
     setView('thread');
     void ensureSession();
@@ -376,6 +451,7 @@ export function WidgetChat({
             copy={copy}
             messages={messages}
             online={online}
+            active={view === 'thread'}
             detailsSaved={detailsSaved}
             onSend={send}
             onSaveDetails={async (details) => {

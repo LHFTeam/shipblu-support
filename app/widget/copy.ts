@@ -38,6 +38,7 @@ export const COPY = {
     detailsHint: 'An email address or a phone number — either is enough.',
     detailsSaved: 'Thanks — we will get back to you.',
     detailsMissing: 'Leave an email address or a phone number so we can reply.',
+    detailsInvalid: 'That does not look like an email address or a phone number.',
   },
   ar: {
     heading: 'دعم شيب بلو',
@@ -64,6 +65,7 @@ export const COPY = {
     detailsHint: 'بريد إلكتروني أو رقم هاتف — أيهما يكفي.',
     detailsSaved: 'شكرًا — سنعاود التواصل معك.',
     detailsMissing: 'اترك بريدًا إلكترونيًا أو رقم هاتف حتى نتمكن من الرد.',
+    detailsInvalid: 'هذا لا يبدو بريدًا إلكترونيًا أو رقم هاتف صحيحًا.',
   },
 } as const;
 

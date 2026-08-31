@@ -8,7 +8,7 @@
  * who is hardest to reproduce by hand — who hits it.
  */
 
-export type WidgetView = 'home' | 'article' | 'thread';
+export type { WidgetView } from '@/app/widget/types';
 
 /**
  * Home unless there is a conversation to come back to.
@@ -18,6 +18,6 @@ export type WidgetView = 'home' | 'article' | 'thread';
  * one and has said nothing; they get the home screen, same as a stranger. A
  * conversation with messages in it is the only thing that outranks the FAQs.
  */
-export function initialView({ messageCount }: { messageCount: number }): WidgetView {
+export function initialView({ messageCount }: { messageCount: number }): 'home' | 'thread' {
   return messageCount > 0 ? 'thread' : 'home';
 }

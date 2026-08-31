@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { t, type Locale } from '@/lib/kb/locale';
 import type { WidgetCopy } from './copy';
 import type { ArticleLink } from './types';
@@ -52,16 +52,33 @@ export function WidgetHome({
   // visitor's whole question, so it answers as soon as it can.
   const searchable = trimmed.length >= 3;
 
+  /*
+   * The query the last *dispatched* request was for.
+   *
+   * Responses can arrive out of order — "ship" fired before "shipment" can
+   * answer after it — and storing whichever lands last would leave `hits.query`
+   * naming a query the visitor has moved past. Nothing would re-fire, because
+   * the debounce for the current query already ran, so the panel would sit
+   * blank until they typed another character. Ignoring a response that is no
+   * longer the outstanding one costs nothing and cannot strand the list.
+   */
+  const outstanding = useRef('');
+
   useEffect(() => {
     if (trimmed.length < 3) return;
 
     const timer = setTimeout(() => {
+      outstanding.current = trimmed;
+
       void fetch(`/api/widget/search?q=${encodeURIComponent(trimmed)}&locale=${locale}`)
         .then((response) => (response.ok ? response.json() : null))
-        .then((data) =>
-          setHits({ query: trimmed, articles: (data?.articles as ArticleLink[]) ?? [] }),
-        )
-        .catch(() => setHits({ query: trimmed, articles: [] }));
+        .then((data) => {
+          if (outstanding.current !== trimmed) return;
+          setHits({ query: trimmed, articles: (data?.articles as ArticleLink[]) ?? [] });
+        })
+        .catch(() => {
+          if (outstanding.current === trimmed) setHits({ query: trimmed, articles: [] });
+        });
     }, 300);
 
     return () => clearTimeout(timer);
@@ -69,11 +86,16 @@ export function WidgetHome({
 
   const settled = hits.query === trimmed;
 
-  // Derived rather than cleared in the effect, so deleting back below the floor
-  // restores the FAQ list immediately instead of leaving the last search's hits
-  // up until a fetch that will never fire settles.
-  const showing = searchable ? (settled ? hits.articles : []) : faqs;
-  const heading = searchable ? copy.searchResults : copy.faqHeading;
+  /*
+   * The FAQ list stays up while a search is in flight.
+   *
+   * Blanking it on the third keystroke — and again on every keystroke after —
+   * leaves the panel empty for the debounce plus a round trip, which reads as
+   * the widget breaking rather than as it thinking. The list it replaces is the
+   * better thing to look at in the meantime.
+   */
+  const showing = searchable && settled ? hits.articles : faqs;
+  const heading = searchable && settled ? copy.searchResults : copy.faqHeading;
   const empty = searchable && settled && hits.articles.length === 0;
 
   return (

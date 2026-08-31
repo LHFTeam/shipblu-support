@@ -44,3 +44,67 @@ export function parseWidgetConfig(config: unknown): WidgetChannelConfig {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
+
+/** A folder as the FAQ picker needs it, whatever query produced it. */
+export type FaqFolderOption = {
+  id: string;
+  name: string;
+  categoryName: string;
+  categoryLocale: string;
+  visibility: string;
+};
+
+/**
+ * The folders the widget may be pointed at.
+ *
+ * One home for the rule, because it is needed twice — the admin page builds the
+ * picker from it and `saveChannel` refuses anything outside it — and a picker
+ * that offered more than the action accepted would present a choice that fails
+ * on save, while one that offered less would hide a legitimate folder.
+ *
+ * Non-public folders are excluded rather than shown and rejected: the widget
+ * reads with an anonymous viewer, so an `agents_only` folder yields an empty
+ * panel for the customer while looking configured on the admin's screen.
+ * Production's Arabic staff handbook is four such folders whose articles are
+ * each marked `published`/`public`, which is what makes the mistake plausible
+ * rather than theoretical.
+ */
+export function offerableFaqFolders<T extends { visibility: string }>(folders: T[]): T[] {
+  return folders.filter((folder) => folder.visibility === 'public');
+}
+
+export type FaqFolderProblem = { error: string } | { folders: Record<string, string> };
+
+/**
+ * Validates a chosen folder per locale against what is actually offerable.
+ *
+ * Re-read rather than trusted, like every other id arriving in a `FormData`
+ * field — and with the locale checked too, because a folder has no locale of
+ * its own and takes its category's, so the slot it was offered under is the only
+ * thing that ties it to a language.
+ */
+export function resolveFaqFolders(
+  chosenPerLocale: Partial<Record<Locale, string>>,
+  folders: FaqFolderOption[],
+): FaqFolderProblem {
+  const offerable = offerableFaqFolders(folders);
+  const resolved: Record<string, string> = {};
+
+  for (const locale of LOCALES) {
+    const chosen = chosenPerLocale[locale];
+    if (!chosen) continue;
+
+    const folder = folders.find((row) => row.id === chosen);
+    if (!folder) return { error: 'That knowledge base folder no longer exists' };
+    if (folder.categoryLocale !== locale) {
+      return { error: `${folder.name} is not in a ${locale} category` };
+    }
+    if (!offerable.some((row) => row.id === chosen)) {
+      return { error: `${folder.name} is not public, so the widget would show nothing from it` };
+    }
+
+    resolved[locale] = chosen;
+  }
+
+  return { folders: resolved };
+}

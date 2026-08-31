@@ -470,6 +470,7 @@ export async function getArticle(
  */
 export async function folderArticles(
   viewer: KbViewer,
+  locale: Locale,
   folderId: string,
   limit = 6,
 ): Promise<ArticleSummary[]> {
@@ -483,7 +484,17 @@ export async function folderArticles(
     .from(kbArticles)
     .innerJoin(kbFolders, eq(kbFolders.id, kbArticles.folderId))
     .where(
-      and(eq(kbArticles.folderId, folderId), articleVisibleTo(viewer), folderVisibleTo(viewer)),
+      and(
+        eq(kbArticles.folderId, folderId),
+        // Carried even though the folder implies it. A folder has no locale of
+        // its own, it inherits its category's, and only one console action
+        // enforces that an article matches — the Freshdesk importer does not. A
+        // mis-filed row would otherwise put an English FAQ in the Arabic widget,
+        // where every tap 404s because `getArticle` *does* filter on locale.
+        eq(kbArticles.locale, locale),
+        articleVisibleTo(viewer),
+        folderVisibleTo(viewer),
+      ),
     )
     .orderBy(asc(kbArticles.position), asc(kbArticles.title))
     .limit(limit);

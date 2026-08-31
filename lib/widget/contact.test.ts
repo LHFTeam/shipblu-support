@@ -56,3 +56,28 @@ describe('parseVisitorDetails', () => {
     expect(parseVisitorDetails({ name: '  ', email: 'nour@example.com' })?.name).toBeNull();
   });
 });
+
+/**
+ * The widget's own form judges the fields with this same function before it
+ * shows an error, so these cases are the boundary the two sides share. A value
+ * that passes here and fails there is the bug the sharing exists to prevent:
+ * the visitor sees nothing happen and believes they left a number.
+ */
+describe('parseVisitorDetails as the form sees it', () => {
+  it.each([
+    ['0100', 'a half-typed phone'],
+    ['nour', 'a half-typed email'],
+    ['  ', 'whitespace'],
+  ])('rejects %s (%s), which a non-empty check would accept', (value) => {
+    expect(parseVisitorDetails({ email: value })).toBeNull();
+    expect(parseVisitorDetails({ phone: value })).toBeNull();
+  });
+
+  it('accepts what the widget offers as a plausible Egyptian mobile', () => {
+    expect(parseVisitorDetails({ name: 'Nour', phone: '010 0123 4567' })).toEqual({
+      name: 'Nour',
+      email: null,
+      phone: '01001234567',
+    });
+  });
+});

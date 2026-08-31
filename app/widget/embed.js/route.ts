@@ -421,6 +421,25 @@ export async function GET() {
     var data = event.data;
     if (!data || data.source !== 'shipblu-widget') return;
 
+    /*
+     * The widget asking what state it is in.
+     *
+     * It cannot know: the 'opened' this script posts when it *creates* the frame
+     * lands on about:blank, a close before the frame loads is lost the same way,
+     * and \`setLocale\` re-points \`src\` and starts a new document. So the frame
+     * asks on mount and this answers with the truth, rather than the frame
+     * assuming it is visible and swallowing the unread badge while hidden.
+     */
+    if (data.type === 'hello') {
+      if (iframe && iframe.contentWindow) {
+        iframe.contentWindow.postMessage(
+          { source: 'shipblu-host', type: open ? 'opened' : 'closed' },
+          BASE
+        );
+      }
+      return;
+    }
+
     if (data.type === 'unread') {
       var count = Number(data.count) || 0;
       badge.textContent = count > 9 ? '9+' : String(count);

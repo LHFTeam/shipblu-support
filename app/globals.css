@@ -745,7 +745,7 @@ body {
 }
 
 .widget-article a {
-  color: var(--brand-600, oklch(0.55 0.16 250));
+  color: var(--color-brand-600);
   text-decoration: underline;
   text-underline-offset: 2px;
 }

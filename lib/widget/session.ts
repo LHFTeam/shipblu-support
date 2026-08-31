@@ -1,4 +1,5 @@
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull } from 'drizzle-orm';
+import { cache } from 'react';
 import { db } from '@/db/client';
 import { channels, contactIdentities, contacts, conversations, ticketStatuses } from '@/db/schema';
 import { generateToken, hashToken } from '@/lib/auth/tokens';
@@ -120,8 +121,19 @@ export async function widgetHours(): Promise<HoursConfig | null> {
   return groupHours(catalog, channel?.defaultGroupId ?? null);
 }
 
-/** The configured webchat channel, for default routing and the widget's settings. */
-export async function webchatChannel() {
+/**
+ * The configured webchat channel, for default routing and the widget's settings.
+ *
+ * `cache()` because the widget page needs this row twice on the load a visitor
+ * is watching — once for the FAQ folder and once for the schedule — and two
+ * identical queries on that path buy nothing.
+ *
+ * Ordered, because nothing stops an admin adding a second `webchat` row: without
+ * it Postgres may return either, and the admin page would configure one row
+ * while the widget read the other. Oldest wins, which is the row that has been
+ * routing tickets.
+ */
+export const webchatChannel = cache(async () => {
   const rows = await db
     .select({
       id: channels.id,
@@ -133,7 +145,8 @@ export async function webchatChannel() {
     })
     .from(channels)
     .where(and(eq(channels.type, 'webchat'), eq(channels.isActive, true)))
+    .orderBy(asc(channels.createdAt), asc(channels.id))
     .limit(1);
 
   return rows[0] ?? null;
-}
+});

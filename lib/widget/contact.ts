@@ -1,4 +1,4 @@
-import { normaliseEmail, normalisePhone } from '@/lib/auth/normalise';
+import { looksLikeEmail, normaliseEmail, normalisePhone } from '@/lib/auth/normalise';
 
 /**
  * The details a visitor leaves when nobody is available to chat.
@@ -15,11 +15,6 @@ export type VisitorDetails = {
   email: string | null;
   phone: string | null;
 };
-
-/** Deliberately loose, like the address check beside it: a valid-but-unusual
- *  address that we reject is a customer we lose, and one that we accept and
- *  cannot deliver to surfaces as a bounce, which is the right place for it. */
-const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
  * Digits only, and only a plausible count of them.
@@ -41,7 +36,11 @@ export function parseVisitorDetails(body: {
   const name = typeof body.name === 'string' ? body.name.trim().slice(0, 120) || null : null;
 
   const suppliedEmail = typeof body.email === 'string' ? body.email.trim().slice(0, 320) : '';
-  const email = EMAIL.test(suppliedEmail) ? normaliseEmail(suppliedEmail) : null;
+  // `looksLikeEmail` rather than a regex of our own: it is documented as the
+  // check worth making at a form boundary, and `contact_identities` enforces
+  // uniqueness on the normalised value, so two shape rules over the same column
+  // would eventually disagree about what is already taken.
+  const email = looksLikeEmail(suppliedEmail) ? normaliseEmail(suppliedEmail) : null;
 
   const suppliedPhone =
     typeof body.phone === 'string' ? normalisePhone(body.phone.slice(0, 40)) : '';

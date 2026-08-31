@@ -171,17 +171,27 @@ export async function appendVisitorMessage(
  * At least one of `email` and `phone` is present — `parseVisitorDetails` rejects
  * the pair being empty, because a name is not a way back.
  *
- * The two are stored differently, and the asymmetry is the point. The address
- * gets a `contact_identities` row so the visitor's later mail lands on this
- * history instead of opening a second customer record. **The phone number does
- * not.** The same argument appears to apply to WhatsApp, but the failure mode is
- * not symmetrical: a mistyped address usually belongs to nobody, while a
- * mistyped Egyptian mobile very likely belongs to a real person, and WhatsApp is
- * this system's busiest channel — so one wrong digit would thread a stranger's
- * future messages onto this contact, along with the transcript that named them.
- * `contacts.primary_phone` puts the number in front of the agent, which is what
- * it is for, and a genuine WhatsApp conversation mints the identity through
+ * The address gets a `contact_identities` row so the visitor's later mail lands
+ * on this history instead of opening a second customer record. **The phone
+ * number does not.** The same argument appears to apply to WhatsApp, but the
+ * failure mode is not symmetrical: a mistyped address usually belongs to nobody,
+ * while a mistyped Egyptian mobile very likely belongs to a real person, and
+ * WhatsApp is this system's busiest channel — so one wrong digit would thread a
+ * stranger's future messages onto this contact, along with the transcript that
+ * named them. A genuine WhatsApp conversation mints the identity through
  * `resolveContact` on its own.
+ *
+ * **That does not make the number inert, and it is worth being exact about
+ * why.** Both values land on `contacts`, and `mergeCandidates` matches on
+ * `primary_email` *and* `primary_phone` — so anything written here is an
+ * identity-matching key regardless of whether it also has an identity row, and a
+ * visitor who types a real customer's number will surface that customer as a
+ * merge suggestion on their own throwaway contact, reason `'phone'`. Nothing
+ * merges on its own; `lib/contacts/merge.ts` is explicit that the decision stays
+ * with an agent, and this is the same exposure the address beside it has always
+ * had. Skipping the identity row narrows the blast radius to a suggestion an
+ * agent can decline, rather than a routing rule that silently threads a
+ * stranger's inbound messages. It does not remove it.
  */
 export async function attachVisitorDetails(
   contactId: string,

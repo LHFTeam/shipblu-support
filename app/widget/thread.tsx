@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { Locale } from '@/lib/kb/locale';
+import { parseVisitorDetails } from '@/lib/widget/contact';
 import type { WidgetCopy } from './copy';
 import type { ArticleLink, Message } from './types';
 
@@ -18,6 +19,7 @@ export function WidgetThread({
   copy,
   messages,
   online,
+  active,
   detailsSaved,
   onSend,
   onSaveDetails,
@@ -27,6 +29,8 @@ export function WidgetThread({
   copy: WidgetCopy;
   messages: Message[];
   online: boolean;
+  /** Whether this view is the one showing. It stays mounted while hidden. */
+  active: boolean;
   detailsSaved: boolean;
   onSend: (body: string, details: OfflineDetails | null) => Promise<boolean>;
   onSaveDetails: (details: OfflineDetails) => Promise<boolean>;
@@ -36,7 +40,7 @@ export function WidgetThread({
   const [sending, setSending] = useState(false);
   const [suggestions, setSuggestions] = useState<ArticleLink[]>([]);
   const [details, setDetails] = useState<OfflineDetails>({ name: '', email: '', phone: '' });
-  const [detailsError, setDetailsError] = useState(false);
+  const [detailsError, setDetailsError] = useState<'missing' | 'invalid' | null>(null);
   const [savingDetails, setSavingDetails] = useState(false);
 
   const bottom = useRef<HTMLDivElement>(null);
@@ -64,15 +68,30 @@ export function WidgetThread({
    */
   const started = messages.some((message) => message.from === 'visitor');
 
+  /*
+   * Judged by the same function the route judges them with.
+   *
+   * `parseVisitorDetails` is pure, so importing it here rather than re-spelling
+   * "non-empty" closes the gap where a client check passes, the server's own
+   * rejects, and the visitor sees nothing at all happen — believing they left a
+   * number that was never stored.
+   */
+  const supplied = Boolean(details.email.trim() || details.phone.trim());
+  const usable = parseVisitorDetails(details) !== null;
+
   async function saveDetails() {
-    if (!details.email.trim() && !details.phone.trim()) {
-      setDetailsError(true);
+    if (!usable) {
+      setDetailsError(supplied ? 'invalid' : 'missing');
       return;
     }
-    setDetailsError(false);
+
+    setDetailsError(null);
     setSavingDetails(true);
-    await onSaveDetails(details);
+    const ok = await onSaveDetails(details);
     setSavingDetails(false);
+    // The server is the authority even though it runs the same check; a 429 or a
+    // dropped connection lands here too, and silence would read as success.
+    if (!ok) setDetailsError('invalid');
   }
 
   // --- Article suggestions, mid-typing ------------------------------------
@@ -95,9 +114,17 @@ export function WidgetThread({
   // instead of leaving stale ones on screen until the next fetch settles.
   const visibleSuggestions = draft.trim().length < 6 ? [] : suggestions;
 
+  /*
+   * Also keyed on `active`, because the thread stays mounted while hidden.
+   * `scrollIntoView` does nothing inside a `display:none` subtree, so a reply
+   * that arrives while the visitor is reading an article would scroll nowhere,
+   * and on Back nothing would re-run — leaving them at their old position with
+   * the reply they were waiting for below the fold.
+   */
   useEffect(() => {
+    if (!active) return;
     bottom.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, active]);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -105,20 +132,25 @@ export function WidgetThread({
     const body = draft.trim();
     if (!body || sending) return;
 
-    // Only enforced while the details are travelling with the message. Once
-    // there is a conversation they have their own button, and blocking a reply
-    // on them would trap a visitor inside a form.
-    if (askForDetails && !started && !details.email.trim() && !details.phone.trim()) {
-      setDetailsError(true);
-      return;
-    }
+    /*
+     * The details are asked for, never required.
+     *
+     * Refusing to send without them looks like insisting on a contact detail and
+     * is actually worse than that: `online` is false whenever no business hours
+     * are configured at all — `groupHours` returns null and the widget treats
+     * that as closed — so a deployment that has never set a schedule would
+     * refuse every first message anybody ever typed. Losing what they wrote is
+     * the bigger harm; the form stays on screen with its own button either way.
+     */
 
     setSending(true);
-    setDetailsError(false);
+    // Flagged, not blocking: the message goes either way, and the form stays up
+    // with its own button so an unusable number can be corrected.
+    setDetailsError(askForDetails && supplied && !usable ? 'invalid' : null);
     setDraft('');
     setSuggestions([]);
 
-    const sent = await onSend(body, askForDetails && !started ? details : null);
+    const sent = await onSend(body, askForDetails && !started && usable ? details : null);
     // Put the text back rather than losing it.
     if (!sent) setDraft(body);
     setSending(false);
@@ -184,7 +216,11 @@ export function WidgetThread({
             />
           </div>
           <p className={`mt-1.5 text-xs ${detailsError ? 'text-red-600' : 'opacity-50'}`}>
-            {detailsError ? copy.detailsMissing : copy.detailsHint}
+            {detailsError === 'invalid'
+              ? copy.detailsInvalid
+              : detailsError === 'missing'
+                ? copy.detailsMissing
+                : copy.detailsHint}
           </p>
 
           {started ? (

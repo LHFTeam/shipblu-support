@@ -90,11 +90,22 @@ export function WidgetArticle({
       if (!href) return;
 
       event.preventDefault();
+
       // Same-document jumps have nowhere to open and would land on a blank tab.
+      // The fragment goes to a CSS selector parser, which throws on the shapes
+      // imported bodies are full of — a bare `#` placeholder, or `#2`, since a
+      // CSS identifier may not be empty or start with a digit. An uncaught throw
+      // in a native listener, after `preventDefault`, is a dead link plus a
+      // console error, so the lookup is done by id instead.
       if (href.startsWith('#')) {
-        container.querySelector(href)?.scrollIntoView({ behavior: 'smooth' });
+        const id = decodeURIComponent(href.slice(1));
+        if (id)
+          container.querySelector(`[id="${CSS.escape(id)}"]`)?.scrollIntoView({
+            behavior: 'smooth',
+          });
         return;
       }
+
       window.open(anchor!.href, '_blank', 'noopener,noreferrer');
     };
 
