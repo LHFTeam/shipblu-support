@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { mapDeliveryOrder, type TrackingEvent } from './platform';
+import { returnProgress, type ReturnProgress } from './status';
 
 /**
  * Reading a stored delivery-order payload back out, for a named audience.
@@ -261,4 +262,31 @@ function readInstant(value: string | null | undefined): Date | null {
   if (!isFilled(value)) return null;
   const at = new Date(value);
   return Number.isNaN(at.getTime()) ? null : at;
+}
+
+/**
+ * Where a stored parcel has got to on its way back, or null if it is not going
+ * back at all.
+ *
+ * Here rather than at the call site because reading `shipments.data` is this
+ * module's job and nobody else's, and because the two inputs `returnProgress`
+ * needs — the flag and the event history — both live inside that column. A list
+ * screen wanting to know "is this one coming back" would otherwise either parse
+ * the payload itself or reach for `data->>'rto_requested'` in SQL, and the
+ * second is a raw fragment on a page rather than in a job handler, which is
+ * exactly the query AGENTS.md says gets run against production before it ships.
+ *
+ * Deliberately not folded into `agentTracking`: the console's ticket sidebar
+ * wants this one answer for each of several parcels and none of the address,
+ * phone or money that the full view carries.
+ */
+export function storedReturn(data: unknown): ReturnProgress | null {
+  const order = readPayload(data);
+  if (!order) return null;
+
+  return returnProgress({
+    rtoRequested: order.rtoRequested,
+    status: order.status,
+    events: order.events,
+  });
 }

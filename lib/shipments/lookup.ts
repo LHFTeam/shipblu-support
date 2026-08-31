@@ -1,7 +1,13 @@
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { shipments } from '@/db/schema';
-import { agentTracking, publicTracking, type AgentTracking, type PublicTracking } from './detail';
+import {
+  agentTracking,
+  publicTracking,
+  storedReturn,
+  type AgentTracking,
+  type PublicTracking,
+} from './detail';
 import { normaliseTrackingNumber } from './format';
 import { fetchDeliveryOrder } from './platform';
 import { currentEstimateFor, syncShipment } from './sync';
@@ -147,4 +153,40 @@ export async function agentTrackingFor(trackingNumber: string): Promise<AgentTra
     .limit(1);
 
   return rows[0] ? agentTracking(rows[0].data, rows[0].currentEstimatedDate) : null;
+}
+
+/**
+ * Which of these parcels are going back, and how far along each is.
+ *
+ * Here rather than in `queries.ts` because selecting `shipments.data` is
+ * confined to this module and `detail.ts` — the console's ticket sidebar needs
+ * the answer, not the payload, and a `select` on that column in a list query is
+ * how the confinement erodes. `scripts/ci/repo-rules.mjs` enforces it, and
+ * AGENTS.md is explicit that the fix is to move the call rather than add it to
+ * the exemption list.
+ *
+ * One round trip for the whole list rather than one each. The sidebar loads a
+ * handful of parcels, but a list query that grows a per-row query is the shape
+ * that stops being free without anybody noticing.
+ *
+ * Absent from the map means "not going back", which is the common case — the
+ * caller reads a miss as null rather than having to hold every id.
+ */
+export async function returnsForShipments(
+  shipmentIds: readonly string[],
+): Promise<Map<string, NonNullable<ReturnType<typeof storedReturn>>>> {
+  const found = new Map<string, NonNullable<ReturnType<typeof storedReturn>>>();
+  if (shipmentIds.length === 0) return found;
+
+  const rows = await db
+    .select({ id: shipments.id, data: shipments.data })
+    .from(shipments)
+    .where(inArray(shipments.id, [...shipmentIds]));
+
+  for (const row of rows) {
+    const progress = storedReturn(row.data);
+    if (progress) found.set(row.id, progress);
+  }
+
+  return found;
 }

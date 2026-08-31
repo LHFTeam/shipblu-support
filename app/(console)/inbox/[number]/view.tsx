@@ -20,7 +20,7 @@ import {
   type SharedLocation,
 } from '@/lib/tickets/shared-location';
 import { describeRequesterRole } from '@/lib/shipments/roles';
-import { humaniseStatus } from '@/lib/shipments/status';
+import { humaniseStatus, returnStepLabel, stageDisplay } from '@/lib/shipments/status';
 import { formatRemaining, windowState } from '@/lib/whatsapp/window';
 import {
   linkShipment,
@@ -1125,14 +1125,23 @@ function ShipmentsField({ conversation }: { conversation: ConversationDetail }) 
               />
             </div>
 
+            {/*
+              A returning parcel says so instead of showing its status, because
+              the platform's status is `delivery_attempted` for the whole of a
+              return — an agent reading it would tell a customer their parcel is
+              still coming (PROJECT-STATE §6.40). The return's own step is the
+              honest answer, and it is the one the customer is ringing about.
+            */}
             <p className="mt-0.5 opacity-60">
-              {shipment.syncState === 'synced'
-                ? shipment.statusLabel
-                  ? humaniseStatus(shipment.statusLabel)
-                  : 'No status yet'
-                : shipment.syncState === 'not_found'
-                  ? 'Not a shipment on the platform'
-                  : 'Not synced yet'}
+              {shipment.returnStep !== null
+                ? returnStepLabel('en', shipment.returnStep)
+                : shipment.syncState === 'synced'
+                  ? shipment.statusLabel
+                    ? humaniseStatus(shipment.statusLabel)
+                    : 'No status yet'
+                  : shipment.syncState === 'not_found'
+                    ? 'Not a shipment on the platform'
+                    : 'Not synced yet'}
               {shipment.syncState === 'synced' && shipment.statusAt ? (
                 <>
                   {' · '}
@@ -1142,9 +1151,22 @@ function ShipmentsField({ conversation }: { conversation: ConversationDetail }) 
                 </>
               ) : null}
             </p>
+
+            {/*
+              The date the customer is actually asking about, and only while it
+              is still a prediction: never under a returning parcel, which is not
+              being delivered to anybody, and never under a delivered one.
+            */}
+            {shipment.returnStep === null &&
+            shipment.currentEstimatedDate &&
+            !stageDisplay(shipment.statusLabel).terminal ? (
+              <p className="opacity-60">Due {shipment.currentEstimatedDate}</p>
+            ) : null}
+
             <p className="opacity-60">{describeRequesterRole(shipment.requesterRole)}</p>
 
             <div className="mt-1 flex flex-wrap items-center gap-1">
+              {shipment.returnStep !== null ? <Badge tone="warning">returning</Badge> : null}
               {shipment.sbid ? (
                 <Link href={`/contacts/accounts/${encodeURIComponent(shipment.sbid)}`}>
                   <Badge>SBID {shipment.sbid}</Badge>
