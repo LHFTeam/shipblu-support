@@ -83,7 +83,12 @@ export default async function NewTicketPage({
         ) : null}
 
         <Card>
-          <ConsoleTicketForm slug={slug} elements={elements} fields={fields} />
+          <ConsoleTicketForm
+            slug={slug}
+            elements={elements}
+            fields={fields}
+            defaultPriority={form.defaultPriority}
+          />
         </Card>
       </div>
     </div>

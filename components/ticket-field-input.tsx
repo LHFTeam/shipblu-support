@@ -51,7 +51,11 @@ export function TicketFieldInput({
   // server. The attribute is the fast answer that never reaches the network;
   // the server check is the one that is true.
   const mark = required && def.type !== 'checkbox';
-  const text = typeof value === 'string' ? value : '';
+  // `String(value)`, not a string check. `parseFieldValue` deliberately stores a
+  // number as a number, so any caller seeding this from `custom_fields` — which
+  // is what a shared input invites — rendered an empty box over a stored answer,
+  // and saving then cleared it.
+  const text = value === null || value === undefined ? '' : String(value);
 
   if (def.type === 'paragraph') {
     return (
@@ -68,18 +72,19 @@ export function TicketFieldInput({
   }
 
   if (def.type === 'checkbox') {
+    // The bare input, with no label of its own. Each surface labels it: the
+    // help centre puts the wording beside the box, the console's `Field` puts it
+    // above. Rendering one here as well nested a <label> inside a <label>, which
+    // is invalid and made the click target ambiguous.
     return (
-      <label className="flex items-center gap-2 text-sm">
-        <input
-          id={id}
-          type="checkbox"
-          name={name}
-          className="size-4"
-          checked={value === true}
-          onChange={(event) => onChange(event.target.checked)}
-        />
-        {label}
-      </label>
+      <input
+        id={id}
+        type="checkbox"
+        name={name}
+        className="size-4"
+        checked={value === true}
+        onChange={(event) => onChange(event.target.checked)}
+      />
     );
   }
 

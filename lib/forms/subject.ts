@@ -49,8 +49,19 @@ export function renderSubject(
   system: SystemValues,
   locale: Locale,
   fallback: string,
+  /**
+   * A subject the *link* supplied, not the customer.
+   *
+   * The tracking page sends `?subject=SB123 — …` so a ticket about a parcel
+   * arrives named after it, and the shipment detector links the two. It used to
+   * reach `conversations.subject` unconditionally; once forms owned the subject
+   * it was silently lost on every form that asks no subject question — which is
+   * every form with a template, the documented normal case. It is a fallback and
+   * never an answer, so it cannot override a template or what a customer typed.
+   */
+  seed = '',
 ): string {
-  const typed = (system.subject ?? '').trim();
+  const typed = (system.subject ?? '').trim() || seed.trim();
 
   if (!template || !template.trim()) {
     return (typed || fallback).slice(0, MAX_SUBJECT);

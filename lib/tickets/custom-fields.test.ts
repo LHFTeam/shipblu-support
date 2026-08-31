@@ -5,8 +5,10 @@ import {
   formatForInput,
   isBlank,
   listLabels,
+  formatOptionLines,
   localised,
   missingRequired,
+  parseOptionLines,
   optionLabel,
   type TicketFieldDef,
 } from './custom-fields';
@@ -301,5 +303,37 @@ describe('localised', () => {
       'عند الاستلام',
     );
     expect(optionLabel({ value: 'cod', label: 'COD' }, 'ar')).toBe('COD');
+  });
+});
+
+describe('option lines', () => {
+  it('round-trips a label containing a pipe', () => {
+    // The regression this guards: the parser was widened from two columns to
+    // three by positional destructuring, so "Cash on delivery | COD" was
+    // truncated and "COD" silently became the Arabic label — for an admin who
+    // had opened the field to change something else entirely.
+    const options = [{ value: 'cod', label: 'Cash on delivery | COD' }];
+    expect(parseOptionLines(formatOptionLines(options))).toEqual(options);
+  });
+
+  it('round-trips all three columns', () => {
+    const options = [
+      { value: 'cod', label: 'Cash on delivery', labelAr: 'الدفع عند الاستلام' },
+      { value: 'prepaid', label: 'Prepaid' },
+    ];
+    expect(parseOptionLines(formatOptionLines(options))).toEqual(options);
+  });
+
+  it('reads a bare value as its own label', () => {
+    expect(parseOptionLines('cairo\nalex')).toEqual([
+      { value: 'cairo', label: 'cairo' },
+      { value: 'alex', label: 'alex' },
+    ]);
+  });
+
+  it('reads the two-column form every existing field is stored in', () => {
+    expect(parseOptionLines('cod|Cash on delivery')).toEqual([
+      { value: 'cod', label: 'Cash on delivery' },
+    ]);
   });
 });

@@ -95,8 +95,13 @@ export async function submitTicketForm(
   // A signed-in customer goes to the ticket itself, where they can already read
   // and reply to it. A visitor who is not has no portal to be sent to, so the
   // form's own page becomes the receipt.
-  if (customer) redirect(`/${locale}/portal/t/${result.number}?created=1`);
-
+  //
+  // Both carry the attachment failure. Only the agent used to be told, through
+  // the system message `submitForm` writes — which left the customer looking at
+  // a confirmation for a ticket missing the photo it is about.
   const failed = result.attachmentsFailed.length ? '&files=failed' : '';
+
+  if (customer) redirect(`/${locale}/portal/t/${result.number}?created=1${failed}`);
+
   redirect(formPath(locale, slug, `?submitted=${result.number}${failed}`));
 }

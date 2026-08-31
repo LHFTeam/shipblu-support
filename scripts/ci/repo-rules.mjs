@@ -870,14 +870,19 @@ function checkFormSystemKeys() {
     return;
   }
 
+  // The console's new-ticket form deliberately has no map of its own: it uses
+  // `SYSTEM_LABELS_EN` from elements.ts, which the server needs too. What is
+  // left is the two that genuinely cannot share — the help centre's are
+  // per-locale `StringKey`s, and the builder's name the audience each question
+  // is for ("Their name (forms anybody can submit)").
   const renderers = [
+    'lib/forms/elements.ts',
     'app/help/[locale]/forms/[slug]/form.tsx',
-    'app/(console)/inbox/new/form.tsx',
     'app/(console)/admin/forms/elements-builder.tsx',
   ];
 
   for (const file of renderers) {
-    const labels = /SYSTEM_LABELS[^=]*=\s*\{([\s\S]*?)\n\};/.exec(read(file));
+    const labels = /SYSTEM_LABELS(?:_EN)?[^=]*=\s*\{([\s\S]*?)\n\};/.exec(read(file));
     if (!labels) {
       fail(rule, file, 'no SYSTEM_LABELS map found — a form question would render unlabelled');
       continue;

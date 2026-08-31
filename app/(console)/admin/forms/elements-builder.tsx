@@ -32,6 +32,8 @@ export type FieldChoice = {
    * build a public form that quietly asks one question fewer.
    */
   internal: boolean;
+  /** Deactivated. Still offered, because a form may already place it. */
+  retired: boolean;
 };
 
 const KINDS = [
@@ -302,7 +304,7 @@ function Target({
     item.kind === 'field'
       ? fields.map((field) => ({
           value: field.key,
-          label: field.internal ? `${field.label} (agents only)` : field.label,
+          label: `${field.label}${field.retired ? ' (deactivated)' : field.internal ? ' (agents only)' : ''}`,
         }))
       : SYSTEM_KEYS.map((key) => ({ value: key, label: SYSTEM_LABELS[key] }));
 
@@ -453,27 +455,30 @@ function blank(kind: Item['kind']): Item {
  * questions and nothing else, and a jsonb dump reads as what an admin built.
  */
 function toJson(items: Item[]): string {
-  const document = items
-    .filter((item) => (item.kind === 'heading' || item.kind === 'note' ? true : Boolean(item.key)))
-    .map((item) => {
-      const visibility =
-        item.visibility && Object.keys(item.visibility as object).length ? item.visibility : {};
+  // Nothing is filtered out here, and that is the point. Dropping a row whose
+  // field was never chosen is the same silent discard `saveTicketForm` refuses
+  // to make — it would leave the counts agreeing, the save reporting success,
+  // and the admin's half-built question gone. Posted as-is, it fails the parse
+  // and the save says so.
+  const document = items.map((item) => {
+    const visibility =
+      item.visibility && Object.keys(item.visibility as object).length ? item.visibility : {};
 
-      if (item.kind === 'heading' || item.kind === 'note') {
-        return { kind: item.kind, textAr: item.textAr, textEn: item.textEn, visibility };
-      }
+    if (item.kind === 'heading' || item.kind === 'note') {
+      return { kind: item.kind, textAr: item.textAr, textEn: item.textEn, visibility };
+    }
 
-      return {
-        kind: item.kind,
-        key: item.key,
-        ...(item.labelAr ? { labelAr: item.labelAr } : {}),
-        ...(item.labelEn ? { labelEn: item.labelEn } : {}),
-        ...(item.helpAr ? { helpAr: item.helpAr } : {}),
-        ...(item.helpEn ? { helpEn: item.helpEn } : {}),
-        ...(item.required ? { required: item.required === 'yes' } : {}),
-        visibility,
-      };
-    });
+    return {
+      kind: item.kind,
+      key: item.key,
+      ...(item.labelAr ? { labelAr: item.labelAr } : {}),
+      ...(item.labelEn ? { labelEn: item.labelEn } : {}),
+      ...(item.helpAr ? { helpAr: item.helpAr } : {}),
+      ...(item.helpEn ? { helpEn: item.helpEn } : {}),
+      ...(item.required ? { required: item.required === 'yes' } : {}),
+      visibility,
+    };
+  });
 
   return JSON.stringify(document, null, 2);
 }

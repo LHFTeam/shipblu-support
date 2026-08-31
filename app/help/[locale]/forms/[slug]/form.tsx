@@ -9,6 +9,7 @@ import {
   elementHelp,
   elementLabel,
   elementText,
+  elementToken,
   isRequired,
   type FormElement,
   type InputElement,
@@ -46,13 +47,6 @@ const SYSTEM_LABELS: Record<SystemKey, StringKey> = {
   priority: 'priority',
 };
 
-const PRIORITIES: { value: string; label: StringKey }[] = [
-  { value: 'low', label: 'priorityLow' },
-  { value: 'medium', label: 'priorityMedium' },
-  { value: 'high', label: 'priorityHigh' },
-  { value: 'urgent', label: 'priorityUrgent' },
-];
-
 export function TicketForm({
   locale,
   slug,
@@ -84,6 +78,10 @@ export function TicketForm({
     <form action={action} className="flex flex-col gap-4">
       <input type="hidden" name="locale" value={locale} />
       <input type="hidden" name="slug" value={slug} />
+      {/* Kept even when no subject question is on the form — it is the fallback
+          subject, not an answer, so `renderSubject` uses it only when nothing
+          else produced one. */}
+      <input type="hidden" name="subjectSeed" value={subject} />
 
       {visible.map((element, index) => {
         if (element.kind === 'heading') {
@@ -113,8 +111,8 @@ export function TicketForm({
             def={def}
             custom={custom}
             system={system}
-            missing={state.missing?.includes(element.key) ?? false}
-            invalid={state.invalid?.includes(element.key) ?? false}
+            missing={state.missing?.includes(elementToken(element)) ?? false}
+            invalid={state.invalid?.includes(elementToken(element)) ?? false}
             onCustom={(value) => setCustom({ ...custom, [element.key]: value })}
             onSystem={(value) => setSystem({ ...system, [element.key as SystemKey]: value })}
             onFiles={setFileCount}
@@ -202,6 +200,21 @@ function Question({
           onChange={onSystem}
           onFiles={onFiles}
         />
+      ) : def?.type === 'checkbox' ? (
+        <label className="flex items-center gap-2 text-sm">
+          <TicketFieldInput
+            id={id}
+            def={def}
+            locale={locale}
+            label={label}
+            value={custom[def.key]}
+            required={required}
+            invalid={missing || invalid}
+            onChange={onCustom}
+            surface="help"
+          />
+          {label}
+        </label>
       ) : (
         <TicketFieldInput
           id={id}
@@ -278,23 +291,10 @@ function SystemInput({
     );
   }
 
-  if (element.key === 'priority') {
-    return (
-      <select
-        id={id}
-        name={name}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="w-full rounded-md border border-[var(--kb-border)] bg-transparent px-3 py-2 text-sm"
-      >
-        {PRIORITIES.map((priority) => (
-          <option key={priority.value} value={priority.value}>
-            {t(locale, priority.label)}
-          </option>
-        ))}
-      </select>
-    );
-  }
+  // No `priority` branch, deliberately. `AGENT_ONLY_SYSTEM` means `elementsFor`
+  // never hands a customer that element, so a control here could only ever be
+  // dead code that a later reader mistakes for a feature — customers grading
+  // their own urgency is the queue that is entirely urgent.
 
   return (
     <Input

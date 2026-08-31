@@ -39,7 +39,8 @@ import { parseFormElements } from '@/lib/forms/elements';
 import { formsUsingField } from '@/lib/forms/queries';
 import { slugify } from '@/lib/kb/slug';
 import { parseCondition } from '@/lib/rules/conditions';
-import { listTicketFields } from '@/lib/tickets/queries';
+import { parseOptionLines, type TicketFieldDef } from '@/lib/tickets/custom-fields';
+import { listAllTicketFields } from '@/lib/tickets/queries';
 import { PHRASE_GROUPS } from '@/lib/shipments/status';
 import { parseTokenEnvVar } from '@/lib/whatsapp/accounts';
 
@@ -391,22 +392,7 @@ export async function saveField(_state: SettingsState, formData: FormData): Prom
     };
   }
 
-  // `value|Label|Arabic`. The third column is optional and additive: every
-  // existing two-column line keeps meaning exactly what it meant, and a choice
-  // nobody has translated still reads as its English label rather than as its
-  // stored value.
-  const options = text(formData, 'options')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const [value, label, arabic] = line.split('|');
-      return {
-        value: value!.trim(),
-        label: (label || value!).trim(),
-        labelAr: arabic?.trim() || undefined,
-      };
-    });
+  const options = parseOptionLines(text(formData, 'options'));
 
   const validation = readValidation(formData);
   if (!validation.ok) return { error: validation.error };
@@ -548,6 +534,34 @@ export async function deleteField(
 // --- Ticket forms -----------------------------------------------------------
 
 /**
+ * Which entries `parseFormElements` threw away, by position.
+ *
+ * "1 of 8 questions could not be saved" tells an admin that something is wrong
+ * and nothing about where, on a screen where the offending row often renders
+ * blank precisely because it is the broken one. Re-parsing each prefix is O(n²)
+ * on an array of a dozen, and it is exact — including for a duplicate, which is
+ * only droppable in the context of the entries before it.
+ */
+function droppedPositions(document: unknown[], fields: TicketFieldDef[]): number[] {
+  const dropped: number[] = [];
+  let kept = 0;
+
+  for (let index = 0; index < document.length; index += 1) {
+    const size = parseFormElements(document.slice(0, index + 1), fields).length;
+    if (size === kept) dropped.push(index + 1);
+    kept = size;
+  }
+
+  return dropped;
+}
+
+/** "3", "3 and 5", "3, 5 and 9". */
+function listPositions(positions: number[]): string {
+  if (positions.length <= 1) return positions.join('');
+  return `${positions.slice(0, -1).join(', ')} and ${positions[positions.length - 1]}`;
+}
+
+/**
  * Saves a form, storing the layout **as parsed** rather than as submitted.
  *
  * The builder posts the whole document in one hidden input so the server
@@ -587,7 +601,11 @@ export async function saveTicketForm(
   }
   if (!Array.isArray(document)) return { error: 'The form layout has to be a list of questions' };
 
-  const fields = await listTicketFields();
+  // Every field, not just the active ones. A deactivated field is one an admin
+  // retired, and parsing against the active list here would make every form that
+  // still places it refuse to save — including a save that only fixed a typo in
+  // the intro, with a message about a question the admin could no longer see.
+  const fields = await listAllTicketFields();
   const elements = parseFormElements(document, fields);
 
   // Loud rather than lossy. `parseFormElements` drops what it cannot understand
@@ -595,11 +613,9 @@ export async function saveTicketForm(
   // three questions is how an admin finds out weeks later that the form stopped
   // asking about the warehouse.
   if (elements.length !== document.length) {
-    const lost = document.length - elements.length;
+    const dropped = droppedPositions(document, fields);
     return {
-      error: `${lost} of ${document.length} question${
-        document.length === 1 ? '' : 's'
-      } could not be saved — a question names a field that no longer exists or is deactivated, repeats one already on the form, or has a condition that cannot be read.`,
+      error: `Could not save question ${listPositions(dropped)} — a question with nothing chosen, with no text, naming a field that no longer exists, repeating one already on the form, or with a condition that cannot be read.`,
     };
   }
 

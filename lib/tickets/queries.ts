@@ -729,7 +729,24 @@ export async function listStatuses() {
  * tickets gave it, and a rule still reading `custom.<key>` keeps working on them.
  */
 export async function listTicketFields(): Promise<TicketFieldDef[]> {
-  return db
+  return selectFields(true);
+}
+
+/**
+ * Every field, including the retired ones.
+ *
+ * For the two screens that must not pretend a deactivated field never existed:
+ * the form builder, which has to render a question already placed on a form, and
+ * `saveTicketForm`, which parses against this so that deactivating a field does
+ * not make every form placing it permanently unsavable. Everything a *customer*
+ * sees goes through `listTicketFields` and its active-only filter.
+ */
+export async function listAllTicketFields(): Promise<TicketFieldDef[]> {
+  return selectFields(false);
+}
+
+function selectFields(activeOnly: boolean): Promise<TicketFieldDef[]> {
+  const query = db
     .select({
       key: ticketFields.key,
       label: ticketFields.label,
@@ -744,8 +761,12 @@ export async function listTicketFields(): Promise<TicketFieldDef[]> {
       editableByCustomer: ticketFields.editableByCustomer,
     })
     .from(ticketFields)
-    .where(eq(ticketFields.isActive, true))
-    .orderBy(asc(ticketFields.position), asc(ticketFields.label));
+    .$dynamic();
+
+  return (activeOnly ? query.where(eq(ticketFields.isActive, true)) : query).orderBy(
+    asc(ticketFields.position),
+    asc(ticketFields.label),
+  );
 }
 
 /**

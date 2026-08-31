@@ -10,9 +10,9 @@ import {
   elementLabel,
   elementText,
   isRequired,
+  SYSTEM_LABELS_EN,
   type FormElement,
   type InputElement,
-  type SystemKey,
 } from '@/lib/forms/elements';
 import { resolveVisibility, type SystemValues } from '@/lib/forms/visibility';
 import {
@@ -38,28 +38,29 @@ import { createTicketFromForm, type ConsoleFormState } from './actions';
 
 const INITIAL: ConsoleFormState = { error: null };
 
-const SYSTEM_LABELS: Record<SystemKey, string> = {
-  subject: 'Subject',
-  description: 'What happened',
-  attachments: 'Attachments',
-  requester_name: 'Their name',
-  requester_email: 'Their email',
-  priority: 'Priority',
-};
-
 export function ConsoleTicketForm({
   slug,
   elements,
   fields,
+  defaultPriority,
 }: {
   slug: string;
   /** Already narrowed to the agent's view — see `elementsFor`. */
   elements: FormElement[];
   fields: TicketFieldDef[];
+  /** What the form would set if the agent does not touch the control. */
+  defaultPriority: string | null;
 }) {
   const [state, action] = useActionState(createTicketFromForm, INITIAL);
   const [custom, setCustom] = useState<CustomFieldValues>({});
-  const [system, setSystem] = useState<SystemValues>({});
+  // Seeded, not left empty. The select rendered `value={value || 'medium'}`
+  // while state stayed '', so the DOM submitted `medium` and the client's
+  // visibility pass read `priority: null` — a question conditioned on priority
+  // was never drawn and yet was treated as asked. It also meant every ticket
+  // opened here landed at medium, silently overriding the form's own default.
+  const [system, setSystem] = useState<SystemValues>(
+    defaultPriority ? { priority: defaultPriority } : { priority: 'medium' },
+  );
   const [fileCount, setFileCount] = useState(0);
 
   const byKey = new Map(fields.map((field) => [field.key, field]));
@@ -103,7 +104,7 @@ export function ConsoleTicketForm({
         if (element.kind === 'field' && !def) return null;
 
         const fallback =
-          element.kind === 'system' ? SYSTEM_LABELS[element.key] : fieldLabel(def!, 'en');
+          element.kind === 'system' ? SYSTEM_LABELS_EN[element.key] : fieldLabel(def!, 'en');
         const label = elementLabel(element, fallback, 'en');
         const required = isRequired(element, def);
         const id = `q-${element.kind}-${element.key}`;
@@ -112,7 +113,7 @@ export function ConsoleTicketForm({
           <Field
             key={`${element.kind}:${element.key}`}
             label={required ? `${label} *` : label}
-            as={def?.type === 'multi_select' ? 'group' : 'label'}
+            as={def?.type === 'multi_select' || def?.type === 'checkbox' ? 'group' : 'label'}
             hint={elementHelp(element, 'en') ?? undefined}
           >
             {element.kind === 'system' ? (
@@ -196,12 +197,7 @@ function SystemInput({
 
   if (element.key === 'priority') {
     return (
-      <Select
-        id={id}
-        name={name}
-        value={value || 'medium'}
-        onChange={(event) => onChange(event.target.value)}
-      >
+      <Select id={id} name={name} value={value} onChange={(event) => onChange(event.target.value)}>
         <option value="low">Low</option>
         <option value="medium">Medium</option>
         <option value="high">High</option>

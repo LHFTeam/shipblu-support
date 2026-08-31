@@ -332,11 +332,20 @@ Three rules hold, and each closes something a request could otherwise do:
 
 Files ride in the server action's multipart body; there is deliberately no
 upload endpoint, because on an open form that is an unauthenticated write to the
-storage bucket. `next.config.ts` sets `serverActions.bodySizeLimit` just above
+storage bucket. They go through the same gate as every other answer — read only
+when the form asks for them, discarded when the question was behind a condition
+that did not fire — since a file accepted outside that gate is the bucket write
+the missing endpoint was avoiding. `next.config.ts` sets `serverActions.bodySizeLimit` just above
 `MAX_FORM_TOTAL_BYTES` so the limit a customer meets is the one that can explain
 itself. `lib/forms/files.ts` is client-safe and `lib/forms/attachments.ts` is
 not — the same split `custom-fields.ts` makes, here because the shared file put
 `node:fs` in the browser bundle.
+
+A form's slug can be Arabic, so anything putting one into a server `redirect()`
+goes through `formPath` / `encodeSlugParam`. Next hands the path straight to
+`res.setHeader('Location', …)`, which Node rejects above 0xFF — a `<Link href>`
+needs none of this, which is why the read side was handled long before the write
+side was.
 
 **Bilingual and RTL.** Arabic is the default locale and the front door; every
 public URL keeps an explicit locale segment. Use `direction()` from

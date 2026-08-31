@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Field, Input, Select, Textarea, Toggle } from '@/components/ui';
+import { formatOptionLines } from '@/lib/tickets/custom-fields';
 import { Collapsible, DangerAction, Disclosure, EditorForm } from '../forms-shared';
 import { deleteField, saveField } from '../settings-actions';
 
@@ -110,19 +111,12 @@ function Fields({ field }: { field?: TicketField }) {
 
       <Field
         label="Choices"
-        hint="One per line, for dropdowns and multi-selects: value|Label|Arabic. The value is what a rule compares against and never changes; the two labels are what a person reads."
+        hint="One per line: value|Label|Arabic. The value is what a rule compares against and never changes; the labels are what a person reads. Write a literal pipe as \\|."
       >
         <Textarea
           name="options"
           rows={3}
-          defaultValue={(field?.options ?? [])
-            .map((option) => {
-              const parts = [option.value];
-              if (option.label !== option.value || option.labelAr) parts.push(option.label);
-              if (option.labelAr) parts.push(option.labelAr);
-              return parts.join('|');
-            })
-            .join('\n')}
+          defaultValue={formatOptionLines(field?.options ?? [])}
           placeholder={'cod|Cash on delivery|الدفع عند الاستلام\nprepaid|Prepaid|مدفوع مسبقًا'}
         />
       </Field>

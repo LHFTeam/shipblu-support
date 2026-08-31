@@ -106,19 +106,16 @@ export const ticketStatuses = pgTable(
 /**
  * One choice on a dropdown or multi-select.
  *
- * `label` is the admin- and agent-facing wording and is the only one that is
- * required; `labelAr` and `labelEn` are what a customer is shown on a form, and
- * a blank one falls back to `label`. Three strings rather than two because the
- * console is read in English by the team regardless of which languages the
- * customer-facing wording is written in — collapsing `label` into `labelEn`
- * would mean an admin who only writes Arabic leaves every console screen naming
- * the option by its raw stored value.
+ * Two strings, not three. `label` is the wording the console shows and the one
+ * an English reader gets; `labelAr` is the Arabic. There is deliberately no
+ * `labelEn`, because it would be a second English label that `localised` reaches
+ * only when `label` is blank — and `label` is never blank. Adding it would mean
+ * a column an admin can fill in that changes nothing.
  */
 export type TicketFieldOption = {
   value: string;
   label: string;
   labelAr?: string;
-  labelEn?: string;
 };
 
 /**

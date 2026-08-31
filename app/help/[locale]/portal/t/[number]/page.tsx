@@ -15,7 +15,7 @@ export default async function PortalTicketPage({
   searchParams,
 }: {
   params: Promise<{ locale: string; number: string }>;
-  searchParams: Promise<{ created?: string; replied?: string }>;
+  searchParams: Promise<{ created?: string; replied?: string; files?: string }>;
 }) {
   const { locale, number: rawNumber } = await params;
   if (!isLocale(locale)) notFound();
@@ -31,7 +31,7 @@ export default async function PortalTicketPage({
   // into a way of counting our customers.
   if (!ticket) notFound();
 
-  const { created, replied } = await searchParams;
+  const { created, replied, files } = await searchParams;
 
   return (
     <>
@@ -68,6 +68,15 @@ export default async function PortalTicketPage({
                 {created === '1' ? t(locale, 'ticketCreated') : t(locale, 'replySent')}
               </SuccessText>
             </div>
+          ) : null}
+
+          {/* The agent is told by a system message on the ticket; without this
+              the customer was not told at all, and was looking at a receipt for
+              a ticket missing the photo it is about. */}
+          {files === 'failed' ? (
+            <p className="mt-3 text-sm text-red-700 dark:text-red-300">
+              {t(locale, 'formAttachmentFailed')}
+            </p>
           ) : null}
 
           <ol className="mt-5 flex flex-col gap-3">

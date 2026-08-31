@@ -97,7 +97,7 @@ export function fieldLabel(def: TicketFieldDef, locale: 'ar' | 'en'): string {
 
 /** What a customer reading in `locale` should see one choice called. */
 export function optionLabel(option: TicketFieldOption, locale: 'ar' | 'en'): string {
-  return localised(option.labelAr, option.labelEn, locale, option.label);
+  return localised(option.labelAr, null, locale, option.label);
 }
 
 export type CustomFieldValues = Record<string, unknown>;
@@ -195,4 +195,50 @@ export function listLabels(defs: TicketFieldDef[]): string {
   const labels = defs.map((def) => def.label);
   if (labels.length <= 1) return labels.join('');
   return `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+}
+
+/**
+ * The choice list, as the one line of text an admin edits and back again.
+ *
+ * `value|Label|Arabic`, with a literal pipe written `\|`. The escape is not
+ * decoration: before the Arabic column existed the parser read
+ * `[value, ...rest]` and rejoined the rest, so a label reading
+ * "Cash on delivery | COD" survived a round trip. Splitting positionally into
+ * three broke that silently — the label was truncated and its tail became the
+ * Arabic — for an admin who had opened the field to change something else.
+ *
+ * Both directions live here so they cannot drift: the console serialises with
+ * `formatOptionLines` and the server parses with `parseOptionLines`, and a
+ * change to one is a change to the other.
+ */
+export function parseOptionLines(text: string): TicketFieldOption[] {
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [value, label, arabic] = line
+        // Only an unescaped pipe separates columns.
+        .split(/(?<!\\)\|/)
+        .map((part) => part.replace(/\\\|/g, '|').trim());
+
+      return {
+        value: value!,
+        label: label || value!,
+        ...(arabic ? { labelAr: arabic } : {}),
+      };
+    });
+}
+
+export function formatOptionLines(options: TicketFieldOption[]): string {
+  const escape = (part: string) => part.replace(/\|/g, '\\|');
+
+  return options
+    .map((option) => {
+      const columns = [escape(option.value)];
+      if (option.label !== option.value || option.labelAr) columns.push(escape(option.label));
+      if (option.labelAr) columns.push(escape(option.labelAr));
+      return columns.join('|');
+    })
+    .join('\n');
 }

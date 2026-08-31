@@ -719,6 +719,16 @@ const SKIP_REASONS: Record<string, string> = {
 
 function describeEvent(type: string, data: Record<string, unknown>): string {
   switch (type) {
+    // The whole point of the event. Without a case here it fell through to the
+    // default and read "unverified submitter" — no address, no client address —
+    // so the one record of who *claimed* to have filed the ticket was written
+    // and then never shown to anybody.
+    case 'unverified_submitter':
+      return `submitted without signing in, as ${String(data.email ?? 'an unknown address')}${
+        data.ip ? ` from ${String(data.ip)}` : ''
+      }`;
+    case 'opened_by_agent':
+      return 'opened this ticket on the customer’s behalf';
     case 'status_changed':
       return `set status to ${String(data.to ?? '')}`;
     case 'priority_changed':

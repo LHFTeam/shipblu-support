@@ -42,8 +42,9 @@ function render(
   custom: Record<string, unknown>,
   system: { subject?: string } = {},
   locale: 'ar' | 'en' = 'en',
+  seed = '',
 ) {
-  return renderSubject(template, PLACED, DEFS, custom, system, locale, 'Support request');
+  return renderSubject(template, PLACED, DEFS, custom, system, locale, 'Support request', seed);
 }
 
 describe('renderSubject', () => {
@@ -91,5 +92,32 @@ describe('renderSubject', () => {
   it('caps the subject so a paragraph pasted into a field cannot become one', () => {
     const long = 'x'.repeat(400);
     expect(render('{{tracking_number}}', { tracking_number: long })).toHaveLength(200);
+  });
+});
+
+describe('the subject a link supplied', () => {
+  it('names the ticket when the form asks no subject question', () => {
+    // The tracking page sends ?subject=SB123 so the ticket arrives named after
+    // the parcel. Once forms owned the subject this was dropped on every form
+    // without a subject question — which is every form with a template.
+    expect(render(null, {}, {}, 'en', 'SB12345678 — where is my parcel')).toBe(
+      'SB12345678 — where is my parcel',
+    );
+  });
+
+  it('never overrides what the customer actually typed', () => {
+    expect(render(null, {}, { subject: 'Typed' }, 'en', 'Seeded')).toBe('Typed');
+  });
+
+  it('never overrides the form’s own template', () => {
+    expect(
+      render(
+        'Damaged parcel — {{tracking_number}}',
+        { tracking_number: 'SB1' },
+        {},
+        'en',
+        'Seeded',
+      ),
+    ).toBe('Damaged parcel — SB1');
   });
 });

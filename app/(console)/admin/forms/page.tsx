@@ -1,8 +1,10 @@
-import { asc, eq } from 'drizzle-orm';
+import { asc } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { groups, ticketFields, ticketForms } from '@/db/schema';
 import { Card, EmptyState, PageHeader } from '@/components/ui';
 import { requirePermission } from '@/lib/auth/guard';
+import { parseFormElements } from '@/lib/forms/elements';
+import { listAllTicketFields } from '@/lib/tickets/queries';
 import { FormEditor, NewForm } from './forms';
 
 export const dynamic = 'force-dynamic';
@@ -17,12 +19,12 @@ export const dynamic = 'force-dynamic';
 export default async function FormsPage() {
   await requirePermission('admin.forms');
 
-  const [forms, groupList, fieldList] = await Promise.all([
+  const [forms, groupList, fieldList, defs] = await Promise.all([
     db.select().from(ticketForms).orderBy(asc(ticketForms.position), asc(ticketForms.slug)),
     db.select({ id: groups.id, name: groups.name }).from(groups).orderBy(asc(groups.name)),
-    // Active only: a deactivated field is one an admin has retired, and offering
-    // it here would let them place a question that `parseFormElements` then
-    // drops on the way back out.
+    // Retired fields included, marked. A form can already be placing one, and
+    // leaving it out of the picker renders that row blank with no way to tell
+    // which question it is — while every save re-posts it.
     db
       .select({
         key: ticketFields.key,
@@ -31,10 +33,11 @@ export default async function FormsPage() {
         options: ticketFields.options,
         visibleToCustomer: ticketFields.visibleToCustomer,
         editableByCustomer: ticketFields.editableByCustomer,
+        isActive: ticketFields.isActive,
       })
       .from(ticketFields)
-      .where(eq(ticketFields.isActive, true))
       .orderBy(asc(ticketFields.position), asc(ticketFields.label)),
+    listAllTicketFields(),
   ]);
 
   const groupChoices = groupList.map((group) => ({ value: group.id, label: group.name }));
@@ -44,6 +47,7 @@ export default async function FormsPage() {
     type: field.type,
     options: field.options.map((option) => ({ value: option.value, label: option.label })),
     internal: !(field.visibleToCustomer && field.editableByCustomer),
+    retired: !field.isActive,
   }));
 
   return (
@@ -63,7 +67,11 @@ export default async function FormsPage() {
               form={form}
               groups={groupChoices}
               fields={fieldChoices}
-              questionCount={form.elements.length}
+              // Parsed, not the raw document length. The count is the only
+              // signal on this screen that a form has drifted from what was
+              // built, and the stored length is the one number that cannot show
+              // the drift.
+              questionCount={parseFormElements(form.elements, defs).length}
             />
           </Card>
         ))}

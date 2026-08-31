@@ -70,6 +70,29 @@ const SYSTEM_REQUIRED: Record<SystemKey, boolean> = {
 export const CUSTOMER_ONLY_SYSTEM: readonly SystemKey[] = ['requester_name', 'requester_email'];
 export const AGENT_ONLY_SYSTEM: readonly SystemKey[] = ['priority'];
 
+/**
+ * The English name of each built-in question.
+ *
+ * Here rather than only in the console's renderer because the server needs it
+ * too: an error naming the questions a submission left blank was printing
+ * `description` where it meant "What happened", since the only lookup it had was
+ * the custom-field definitions.
+ */
+export const SYSTEM_LABELS_EN: Record<SystemKey, string> = {
+  subject: 'Subject',
+  description: 'What happened',
+  attachments: 'Attachments',
+  requester_name: 'Their name',
+  requester_email: 'Their email',
+  priority: 'Priority',
+};
+
+/** How an element is addressed in an error, so a field and a system key of the
+ * same name cannot mark each other's input. */
+export function elementToken(element: InputElement): string {
+  return `${element.kind}:${element.key}`;
+}
+
 export type ElementOverrides = {
   /** Blank falls back to the field's own customer wording, then to its label. */
   labelAr: string | null;

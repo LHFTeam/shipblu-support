@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Select } from '@/components/ui';
 import type { Operator } from '@/lib/rules/conditions';
 
@@ -75,10 +75,17 @@ export function ConditionBuilder({
 
   const json = raw ?? toJson(match, rows);
 
-  // Fires on mount too, which is deliberate: it normalises whatever was stored
-  // into what the builder can represent, so the owner's document and this
-  // editor cannot disagree about a condition nobody touched.
+  // Deliberately *not* on mount. Normalising what was already stored looked
+  // tidy and rewrote it: `toJson` re-serialises, so merely expanding a question
+  // to read its condition pushed the builder's rendering of it back into the
+  // document, and the next save persisted that. The owner already holds
+  // `initial`; it only needs telling when somebody changes something.
+  const mounted = useRef(false);
   useEffect(() => {
+    if (!mounted.current) {
+      mounted.current = true;
+      return;
+    }
     onChange?.(safeParse(json) ?? {});
     // `onChange` is a fresh closure on every parent render; depending on it
     // would re-run this on every keystroke elsewhere in the form.
@@ -245,8 +252,15 @@ function toJson(match: 'all' | 'any', rows: Row[]): string {
     }
     // Numbers stay numbers: the comparison operators coerce, but storing "4"
     // where 4 was meant makes the stored rule harder to read.
+    //
+    // Only where the text *is* the number, though. `Number('0012')` is 12, and
+    // an order reference of 0012 compared as 12 stops matching — so anything
+    // that does not survive the round trip is left as the string it was.
     const numeric = Number(row.value);
-    const value = row.value !== '' && Number.isFinite(numeric) ? numeric : row.value;
+    const value =
+      row.value !== '' && Number.isFinite(numeric) && String(numeric) === row.value
+        ? numeric
+        : row.value;
     return { field: row.field, op: row.op, value };
   });
 

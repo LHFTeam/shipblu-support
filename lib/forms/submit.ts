@@ -14,10 +14,12 @@ import {
 import { storeFormAttachments } from './attachments';
 import { checkFormFiles, type FileRefusal } from './files';
 import {
+  elementToken,
   elementsFor,
   isInput,
   isRequired,
   SYSTEM_KEYS,
+  SYSTEM_LABELS_EN,
   type FormElement,
   type SystemKey,
   type Viewer,
@@ -50,9 +52,15 @@ export type Requester =
 
 export type SubmitResult =
   | { ok: true; number: number; conversationId: string; attachmentsFailed: string[] }
-  /** Keys of the questions that were asked and not answered. */
+  /**
+   * The questions that were asked and not answered, as `kind:key`.
+   *
+   * Prefixed because a form may legitimately place both the built-in subject and
+   * a custom field keyed `subject`, and a bare key would mark whichever input
+   * the renderer matched first.
+   */
   | { ok: false; reason: 'missing'; keys: string[] }
-  /** Keys whose answer the field's own rules refused. */
+  /** The same, for answers a field's own rules refused. */
   | { ok: false; reason: 'invalid'; keys: string[] }
   /** An anonymous form that cannot tell who is writing. */
   | { ok: false; reason: 'requester' }
@@ -167,6 +175,8 @@ export async function submitForm(input: {
   values: FormData;
   requester: Requester;
   locale: Locale;
+  /** A subject carried by the link that opened the form. See `renderSubject`. */
+  subjectSeed?: string;
 }): Promise<SubmitResult> {
   const { form, fields } = input.loaded;
 
@@ -199,16 +209,16 @@ export async function submitForm(input: {
   // The second computation of visibility, and the one that counts: the browser's
   // answer arrived as a POST anybody can write by hand.
   const resolved = resolveVisibility(offered, submitted.custom, system);
-  const asked = new Set(
-    resolved.visible.filter(isInput).map((element) => `${element.kind}:${element.key}`),
-  );
+  const asked = new Set(resolved.visible.filter(isInput).map(elementToken));
 
   const byKey = new Map(fields.map((field) => [field.key, field]));
 
   // Reported only for questions that were actually asked. A field the conditions
   // never revealed cannot be wrong, and refusing over one would show an error
   // beside an input that is not on screen.
-  const invalid = submitted.invalid.filter((key) => asked.has(`field:${key}`));
+  const invalid = submitted.invalid
+    .map((key) => `field:${key}`)
+    .filter((token) => asked.has(token));
   if (invalid.length) return { ok: false, reason: 'invalid', keys: invalid };
 
   const missing: string[] = [];
@@ -225,7 +235,7 @@ export async function submitForm(input: {
           ? checked.files.length > 0
           : Boolean(resolved.system[element.key]);
 
-    if (!answered) missing.push(element.key);
+    if (!answered) missing.push(elementToken(element));
   }
   if (missing.length) return { ok: false, reason: 'missing', keys: missing };
 
@@ -244,6 +254,7 @@ export async function submitForm(input: {
     resolved.system,
     input.locale,
     formName(form, input.locale),
+    input.subjectSeed ?? '',
   );
 
   // The answers go into the message as well as into `custom_fields`, because the
@@ -262,6 +273,19 @@ export async function submitForm(input: {
     type: form.defaultType,
     tags: form.defaultTags,
   });
+
+  if (input.requester.kind === 'agent') {
+    // Recorded because `ticket.create` is justified as a reporting-integrity
+    // permission — "every ticket an agent opens counts in first-response time,
+    // in volume per channel". Nothing distinguished those tickets, so the
+    // integrity the permission protects was unmeasurable.
+    await db.insert(conversationEvents).values({
+      conversationId: created.conversationId,
+      type: 'opened_by_agent',
+      actorAgentId: input.requester.agentId,
+      data: { form: form.slug },
+    });
+  }
 
   if (requester.unverifiedEmail) {
     await db.insert(conversationEvents).values({
@@ -319,9 +343,17 @@ function priorityFrom(system: SystemValues): 'low' | 'medium' | 'high' | 'urgent
 }
 
 /** The labels of the questions a submission left unanswered, for an agent's error. */
-export function labelsFor(keys: string[], fields: TicketFieldDef[], locale: Locale): string[] {
+export function labelsFor(tokens: string[], fields: TicketFieldDef[], locale: Locale): string[] {
   const byKey = new Map(fields.map((field) => [field.key, field]));
-  return keys.map((key) => {
+
+  return tokens.map((token) => {
+    const [kind, ...rest] = token.split(':');
+    const key = rest.join(':');
+
+    // Without this the console asked an agent to "Fill in description" — the
+    // only lookup here was the custom fields, and a built-in question is not one.
+    if (kind === 'system') return SYSTEM_LABELS_EN[key as SystemKey] ?? key;
+
     const def = byKey.get(key);
     return def ? fieldLabel(def, locale) : key;
   });
