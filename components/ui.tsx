@@ -331,6 +331,20 @@ export function Toggle({
         defaultChecked={defaultChecked}
         className="mt-0.5 size-4 accent-brand-600"
       />
+      {/*
+        An unchecked checkbox submits nothing at all, which is invisible to a
+        reader written as `get(name) !== 'off'` — the shape every "on by
+        default" setting here uses. The effect was that nothing in the admin
+        console could be deactivated: unticking Active submitted no value, the
+        reader saw "not 'off'", and the row saved as active again.
+
+        The hidden field comes *after* the checkbox on purpose. FormData follows
+        DOM order, so a ticked box submits ['on', 'off'] and `get` returns 'on',
+        while an unticked one submits only 'off'. Both reader shapes — `=== 'on'`
+        and `!== 'off'` — then agree, which is what lets this be fixed in one
+        place rather than in every action that reads a toggle.
+      */}
+      <input type="hidden" name={name} value="off" />
       <span>
         <span className="font-medium">{label}</span>
         {hint ? <span className="block text-xs text-[var(--muted-foreground)]">{hint}</span> : null}

@@ -106,6 +106,15 @@ export const PERMISSIONS = [
   /** Skills, and who holds them — the input to skill-based assignment. */
   'admin.skills',
   'admin.fields',
+  /**
+   * Ticket forms, separate from `admin.fields` because the blast radius is.
+   *
+   * Defining a field adds a question to an internal sidebar. Publishing a form
+   * changes what the public help centre shows a customer and which queue the
+   * tickets it opens land in — the same reach an automation has, reached by
+   * somebody who only wanted to reword a question.
+   */
+  'admin.forms',
   'admin.billing',
 ] as const;
 
@@ -154,6 +163,7 @@ const ADMIN: Permission[] = [
   'admin.sla',
   'admin.skills',
   'admin.fields',
+  'admin.forms',
 ];
 
 const ACCOUNT_ADMIN: Permission[] = [...ADMIN, 'admin.billing'];

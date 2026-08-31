@@ -43,6 +43,7 @@ const SECTIONS: { title: string; links: { href: string; label: string }[] }[] = 
     links: [
       { href: '/admin/statuses', label: 'Statuses' },
       { href: '/admin/fields', label: 'Fields' },
+      { href: '/admin/forms', label: 'Forms' },
       { href: '/admin/canned', label: 'Canned responses' },
     ],
   },
