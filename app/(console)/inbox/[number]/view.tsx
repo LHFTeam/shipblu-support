@@ -251,6 +251,18 @@ function Header({
         {conversation.reopenCount > 0 ? (
           <Badge tone="warning">reopened ×{conversation.reopenCount}</Badge>
         ) : null}
+        {conversation.formName ? <Badge tone="brand">{conversation.formName}</Badge> : null}
+        {/*
+          Nobody proved who sent this. A form that anybody can submit resolves
+          the address it was given onto whatever contact already owns it — which
+          is what makes the unified inbox real, and is also why a stranger can
+          file a ticket under a real customer's name. The mail channel has SPF
+          and DKIM behind it; a web form has nothing, so the ticket says so and
+          the agent reads it differently.
+        */}
+        {conversation.unverifiedSubmitter ? (
+          <Badge tone="warning">not signed in — sender unverified</Badge>
+        ) : null}
         {conversation.channel === 'whatsapp' ? (
           <WindowIndicator lastCustomerMessageAt={conversation.lastCustomerMessageAt} />
         ) : null}

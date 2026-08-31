@@ -1,10 +1,12 @@
 import { and, asc, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { ticketForms } from '@/db/schema';
-import { localised } from '@/lib/tickets/custom-fields';
 import type { TicketFieldDef } from '@/lib/tickets/custom-fields';
 import { listTicketFields } from '@/lib/tickets/queries';
 import { parseFormElements, type FormElement } from './elements';
+import { formName } from './naming';
+
+export { formConfirmation, formDescription, formName } from './naming';
 
 /**
  * Reading forms out of the database.
@@ -42,31 +44,6 @@ export type FormRecord = {
 
 /** A form and the field definitions its elements were parsed against. */
 export type LoadedForm = { form: FormRecord; fields: TicketFieldDef[] };
-
-/** The form's own name, in the reader's language. */
-export function formName(
-  form: { nameAr: string; nameEn: string; slug: string },
-  locale: 'ar' | 'en',
-): string {
-  // A blank fallback on purpose: the slug is a URL segment, not wording, so a
-  // form named only in Arabic should read in Arabic to an English visitor
-  // rather than as `damaged-parcel`.
-  return localised(form.nameAr, form.nameEn, locale, '') || form.slug;
-}
-
-export function formDescription(
-  form: { descriptionAr: string; descriptionEn: string },
-  locale: 'ar' | 'en',
-): string {
-  return localised(form.descriptionAr, form.descriptionEn, locale, '');
-}
-
-export function formConfirmation(
-  form: { confirmationAr: string; confirmationEn: string },
-  locale: 'ar' | 'en',
-): string {
-  return localised(form.confirmationAr, form.confirmationEn, locale, '');
-}
 
 /** What a picker needs, without parsing every form's layout to draw a list. */
 export type FormSummary = {

@@ -85,10 +85,11 @@ export default async function FormPage({
     );
   }
 
-  const elements = elementsFor(form.elements, {
-    audience: 'customer',
-    anonymous: !customer,
-  });
+  const elements = elementsFor(
+    form.elements,
+    { audience: 'customer', anonymous: !customer },
+    fields,
+  );
 
   return (
     <>

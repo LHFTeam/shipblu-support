@@ -25,6 +25,13 @@ export type FieldChoice = {
   label: string;
   type: string;
   options: { value: string; label: string }[];
+  /**
+   * Whether a customer may read and write it. A field that is neither is still
+   * placeable — an agent-facing form is a real use — but it is dropped from the
+   * help centre's rendering, so the picker says so rather than letting somebody
+   * build a public form that quietly asks one question fewer.
+   */
+  internal: boolean;
 };
 
 const KINDS = [
@@ -293,7 +300,10 @@ function Target({
 
   const choices =
     item.kind === 'field'
-      ? fields.map((field) => ({ value: field.key, label: field.label }))
+      ? fields.map((field) => ({
+          value: field.key,
+          label: field.internal ? `${field.label} (agents only)` : field.label,
+        }))
       : SYSTEM_KEYS.map((key) => ({ value: key, label: SYSTEM_LABELS[key] }));
 
   return (

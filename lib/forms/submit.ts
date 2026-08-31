@@ -177,7 +177,7 @@ export async function submitForm(input: {
 
   // The same filter the page rendered with, so a question nobody was shown
   // cannot be answered by a request that claims it was.
-  const offered = elementsFor(form.elements, viewer);
+  const offered = elementsFor(form.elements, viewer, fields);
 
   const checked = checkFormFiles(input.values.getAll('attachments'));
   if (!checked.ok) return { ok: false, reason: 'files', refusal: checked.refusal };

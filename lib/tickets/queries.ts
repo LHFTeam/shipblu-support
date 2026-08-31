@@ -23,9 +23,11 @@ import {
   groups,
   messages,
   ticketFields,
+  ticketForms,
   ticketStatuses,
   whatsappTemplates,
 } from '@/db/schema';
+import { formName } from '@/lib/forms/naming';
 import type { SessionAgent } from '@/lib/auth/session';
 import { can } from '@/lib/auth/permissions';
 import { configuredAccountId } from '@/lib/meta/client';
@@ -458,6 +460,23 @@ export type ConversationDetail = {
    * which is what tells the composer to write in public rather than in private.
    */
   externalId: string | null;
+  /**
+   * The form this ticket was submitted through, when it was.
+   *
+   * The name rather than the id, because the only thing the header does with it
+   * is say it. Null covers both "no form" and "the form has since been deleted",
+   * which read the same on screen and should: the ticket is still a ticket.
+   */
+  formName: string | null;
+  /**
+   * True when the ticket was opened by somebody who was not signed in.
+   *
+   * Read off the `unverified_submitter` event rather than stored as a column:
+   * the event already carries the claimed address and the client address for
+   * anybody investigating, and a boolean beside it would be a second copy of
+   * one fact that could disagree with the first.
+   */
+  unverifiedSubmitter: boolean;
   /** Parcels this ticket is about, and the accounts it names. */
   shipments: LinkedShipment[];
   shippingAccounts: LinkedShippingAccount[];
@@ -505,12 +524,16 @@ export async function getConversation(
       requesterAvatarPath: contacts.avatarPath,
       assigneeName: agents.name,
       groupName: groups.name,
+      formNameAr: ticketForms.nameAr,
+      formNameEn: ticketForms.nameEn,
+      formSlug: ticketForms.slug,
     })
     .from(conversations)
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
     .innerJoin(contacts, eq(contacts.id, conversations.requesterContactId))
     .leftJoin(agents, eq(agents.id, conversations.assigneeAgentId))
     .leftJoin(groups, eq(groups.id, conversations.groupId))
+    .leftJoin(ticketForms, eq(ticketForms.id, conversations.formId))
     .where(and(...where))
     .limit(1);
 
@@ -610,6 +633,10 @@ export async function getConversation(
     subject: row.conversation.subject,
     channel: row.conversation.channel,
     externalId: row.conversation.externalId,
+    formName: row.formSlug
+      ? formName({ nameAr: row.formNameAr!, nameEn: row.formNameEn!, slug: row.formSlug }, 'en')
+      : null,
+    unverifiedSubmitter: events.some((event) => event.type === 'unverified_submitter'),
     metaThread,
     shipments,
     shippingAccounts: accounts,

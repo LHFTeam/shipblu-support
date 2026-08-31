@@ -1,7 +1,7 @@
 import { asc, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { ticketFields, ticketForms, ticketStatuses } from '@/db/schema';
-import { formName } from '@/lib/forms/queries';
+import { formName } from '@/lib/forms/naming';
 import type { FieldOption } from './condition-builder';
 
 /**

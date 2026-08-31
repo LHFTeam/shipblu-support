@@ -3,6 +3,7 @@
 import { useActionState, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Button, ErrorText, Input, Label, Textarea } from '@/components/ui';
+import { TicketFieldInput } from '@/components/ticket-field-input';
 import { ACCEPT_ATTRIBUTE, MAX_FORM_FILES } from '@/lib/forms/files';
 import {
   elementHelp,
@@ -18,8 +19,6 @@ import { t, tCount, type Locale, type StringKey } from '@/lib/kb/locale';
 import {
   fieldLabel,
   localised,
-  optionLabel,
-  selectedValues,
   type CustomFieldValues,
   type TicketFieldDef,
 } from '@/lib/tickets/custom-fields';
@@ -204,7 +203,7 @@ function Question({
           onFiles={onFiles}
         />
       ) : (
-        <FieldInput
+        <TicketFieldInput
           id={id}
           def={def!}
           locale={locale}
@@ -213,6 +212,7 @@ function Question({
           required={required}
           invalid={missing || invalid}
           onChange={onCustom}
+          surface="help"
         />
       )}
 
@@ -313,137 +313,6 @@ function SystemInput({
       aria-invalid={invalid}
       aria-label={label}
       value={value}
-      onChange={(event) => onChange(event.target.value)}
-    />
-  );
-}
-
-function FieldInput({
-  id,
-  def,
-  locale,
-  label,
-  value,
-  required,
-  invalid,
-  onChange,
-}: {
-  id: string;
-  def: TicketFieldDef;
-  locale: Locale;
-  label: string;
-  value: unknown;
-  required: boolean;
-  invalid: boolean;
-  onChange: (value: unknown) => void;
-}) {
-  const name = `custom.${def.key}`;
-  // `required` and `pattern` are set on the input as well as checked on the
-  // server. The attribute is the fast answer that never reaches the network;
-  // the server check is the one that is true.
-  const mark = required && def.type !== 'checkbox';
-  const text = typeof value === 'string' ? value : '';
-
-  if (def.type === 'paragraph') {
-    return (
-      <Textarea
-        id={id}
-        name={name}
-        rows={4}
-        required={mark}
-        aria-invalid={invalid}
-        value={text}
-        onChange={(event) => onChange(event.target.value)}
-      />
-    );
-  }
-
-  if (def.type === 'checkbox') {
-    return (
-      <label className="flex items-center gap-2 text-sm">
-        <input
-          id={id}
-          type="checkbox"
-          name={name}
-          className="size-4"
-          checked={value === true}
-          onChange={(event) => onChange(event.target.checked)}
-        />
-        {label}
-      </label>
-    );
-  }
-
-  if (def.type === 'dropdown') {
-    return (
-      <select
-        id={id}
-        name={name}
-        required={mark}
-        aria-invalid={invalid}
-        value={text}
-        onChange={(event) => onChange(event.target.value)}
-        className="w-full rounded-md border border-[var(--kb-border)] bg-transparent px-3 py-2 text-sm"
-      >
-        <option value="">—</option>
-        {def.options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {optionLabel(option, locale)}
-          </option>
-        ))}
-      </select>
-    );
-  }
-
-  if (def.type === 'multi_select') {
-    const chosen = selectedValues(value);
-    return (
-      <div role="group" aria-label={label} className="flex flex-col gap-1.5">
-        {def.options.map((option) => (
-          <label key={option.value} className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              name={name}
-              value={option.value}
-              className="size-4"
-              checked={chosen.includes(option.value)}
-              onChange={(event) =>
-                onChange(
-                  event.target.checked
-                    ? [...chosen, option.value]
-                    : chosen.filter((entry) => entry !== option.value),
-                )
-              }
-            />
-            {optionLabel(option, locale)}
-          </label>
-        ))}
-      </div>
-    );
-  }
-
-  return (
-    <Input
-      id={id}
-      name={name}
-      type={
-        def.type === 'number' || def.type === 'decimal'
-          ? 'number'
-          : def.type === 'date'
-            ? 'date'
-            : def.type === 'datetime'
-              ? 'datetime-local'
-              : 'text'
-      }
-      step={def.type === 'decimal' ? 'any' : def.type === 'number' ? '1' : undefined}
-      min={def.validation?.min}
-      max={def.validation?.max}
-      minLength={def.validation?.minLength}
-      maxLength={def.validation?.maxLength}
-      pattern={def.type === 'text' ? def.validation?.pattern : undefined}
-      required={mark}
-      aria-invalid={invalid}
-      value={text}
       onChange={(event) => onChange(event.target.value)}
     />
   );

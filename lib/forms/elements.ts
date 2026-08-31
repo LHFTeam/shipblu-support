@@ -220,9 +220,28 @@ export type Viewer = { audience: 'customer' | 'agent'; anonymous: boolean };
  * Called by the renderer and again by the submit path, from the same function,
  * so a question the page did not ask cannot be answered by a request that
  * claims it was.
+ *
+ * Placing a field on a form does **not** override
+ * `visible_to_customer` / `editable_by_customer`. Those flags are the field's
+ * own answer to "may a customer read this, and may they write it", and a form
+ * that places "Root cause" would otherwise publish an internal question to the
+ * help centre — the exact thing the pair exists to prevent. An agent sees every
+ * placed field, because the flags were never about them.
  */
-export function elementsFor(elements: FormElement[], viewer: Viewer): FormElement[] {
+export function elementsFor(
+  elements: FormElement[],
+  viewer: Viewer,
+  defs: TicketFieldDef[],
+): FormElement[] {
+  const byKey = new Map(defs.map((def) => [def.key, def]));
+
   return elements.filter((element) => {
+    if (element.kind === 'field') {
+      if (viewer.audience === 'agent') return true;
+      const def = byKey.get(element.key);
+      return Boolean(def?.visibleToCustomer && def.editableByCustomer);
+    }
+
     if (element.kind !== 'system') return true;
     if (AGENT_ONLY_SYSTEM.includes(element.key)) return viewer.audience === 'agent';
     if (CUSTOMER_ONLY_SYSTEM.includes(element.key)) return viewer.anonymous;

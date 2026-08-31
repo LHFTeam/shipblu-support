@@ -69,6 +69,18 @@ export const PERMISSIONS = [
   'ticket.delete',
   'ticket.merge',
   'ticket.edit_fields',
+  /**
+   * Opening a ticket on a customer's behalf, from a form.
+   *
+   * Separate from `ticket.reply` because answering what arrived and
+   * manufacturing what did not are different acts. Every ticket an agent opens
+   * counts in first-response time, in volume per channel and in whatever the
+   * team is measured on, so this is a reporting-integrity permission rather than
+   * a security one — which is also why it is in the agent baseline: a team that
+   * takes tickets over the phone needs it, and one that does not can take it
+   * away from everybody at once.
+   */
+  'ticket.create',
   'contact.view',
   'contact.edit',
   /**
@@ -128,6 +140,7 @@ const AGENT: Permission[] = [
   'ticket.side_conversation',
   'ticket.assign',
   'ticket.edit_fields',
+  'ticket.create',
   'contact.view',
   'contact.edit',
   'kb.view',

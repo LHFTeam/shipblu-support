@@ -29,6 +29,8 @@ export default async function FormsPage() {
         label: ticketFields.label,
         type: ticketFields.type,
         options: ticketFields.options,
+        visibleToCustomer: ticketFields.visibleToCustomer,
+        editableByCustomer: ticketFields.editableByCustomer,
       })
       .from(ticketFields)
       .where(eq(ticketFields.isActive, true))
@@ -41,6 +43,7 @@ export default async function FormsPage() {
     label: field.label,
     type: field.type,
     options: field.options.map((option) => ({ value: option.value, label: option.label })),
+    internal: !(field.visibleToCustomer && field.editableByCustomer),
   }));
 
   return (

@@ -98,6 +98,10 @@ function Fields({
             <b>built-in question</b> is one every ticket already has — the subject, the message,
             attachments — so it lands in its own column rather than in a field. Headings and notes
             collect nothing and exist to break up a long form.
+            <br />
+            <br />A field marked <b>agents only</b> is one whose own settings say a customer may not
+            read or write it. Placing it here does not override that — the help centre leaves it
+            out, and only an agent opening a ticket is asked it.
           </>
         }
       >
