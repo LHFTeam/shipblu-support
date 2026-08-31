@@ -5,7 +5,7 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-08-26, against `main` at `22871e1`.
+Last updated: 2026-08-31, against `main` at `fae6330`.
 
 ---
 
@@ -755,7 +755,17 @@ is code:
   re-run it if the parser ever learns to read a shape it currently skips. §7 has
   the figures.
 - **Unset config:** `EMAIL_API_KEY`, `EMAIL_FROM_ADDRESS`, `EMAIL_REPLY_DOMAIN`,
-  `EMAIL_WEBHOOK_SECRET`, `WIDGET_ALLOWED_ORIGINS`.
+  `EMAIL_WEBHOOK_SECRET`, `WIDGET_ALLOWED_ORIGINS`, `WIDGET_IDENTITY_SECRET`.
+
+  **The last two are what stands between the widget and the merchant
+  dashboard.** Measured 2026-08-31: `https://shipblu-support.onrender.com/widget`
+  answers `content-security-policy: frame-ancestors 'self';`, so
+  `app.shipblu.com` cannot frame it at all — the launcher would open an empty
+  box. `WIDGET_ALLOWED_ORIGINS` has to name that origin before the snippet in
+  `docs/embedding-the-widget.md` does anything. `WIDGET_IDENTITY_SECRET` is the
+  softer half: without it the dashboard can still say who its visitor is and the
+  agent still sees a name, an address and a phone — the claim just never gets to
+  link the person to their shipping account.
 
   **`KB_PUBLIC_HOST` was on this list and should not have been. It is set, to
   `support.shipblu.com`, and that domain still serves Freshdesk.** Measured
@@ -851,6 +861,12 @@ provider. Each is a round trip somebody has to actually watch:
   `frame-ancestors` allowlist and the visitor token are what you are testing.
   The help centre is not that test even on its own domain — it serves the
   snippet itself, so the frame is same-origin and `'self'` already covers it.
+  The identity handshake added on 2026-08-31 is part of the same test and has
+  the same gap: it was driven in Chromium from a page on `localhost:8080`
+  against a dev server on `localhost:10000` — a real cross-origin frame, a real
+  `WIDGET_ALLOWED_ORIGINS` entry, a real Postgres — which proves the mechanism
+  and proves nothing about `app.shipblu.com`, where the origin is one Render
+  serves the header for.
 - **The KB on its custom domain**, including that Freshdesk's old article URLs
   redirect. 174 `kb_redirects` rows exist and none has been followed in anger.
 - **A WhatsApp template send outside the 24-hour window** — the one path the

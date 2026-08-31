@@ -418,6 +418,14 @@ deleting it, and drop the sections that genuinely do not apply.
   The bucket is private; mint short-lived signed URLs.
 - Public endpoints (KB feedback and views, the widget) are rate limited in
   memory — do not add a row per rejected request.
+- **A host page telling the widget who its visitor is makes a claim, not a
+  statement of fact.** It arrives from a browser. An unsigned identity may only
+  decorate the contact the visitor's token already resolved to — it never adopts
+  another contact, and it never writes `contact_shipping_accounts`, which is an
+  assertion about whose account somebody may speak for. `WIDGET_IDENTITY_SECRET`
+  is what promotes a claim to a fact. `docs/embedding-the-widget.md` is the
+  contract the other side implements; changing what the signature covers breaks
+  a deployed integration silently, so add a second accepted form instead.
 - Side conversation recipients come from a directory and are re-read
   server-side; a free-text address is checked against the requester's own
   identities and our mailbox in the action, not only in the composer.

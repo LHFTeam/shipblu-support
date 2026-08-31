@@ -82,6 +82,20 @@ const schema = z.object({
   WIDGET_ALLOWED_ORIGINS: z.string().optional(),
 
   /**
+   * Shared secret the host page's *backend* signs a widget identity with, so a
+   * merchant dashboard can say who its visitor is and be believed.
+   *
+   * Optional, and its absence is a working state rather than a broken one: an
+   * unsigned identity is still accepted and still fills in the name and address
+   * an agent reads, it just never links the person to a shipping account. See
+   * `lib/widget/identity.ts` for what the signature covers and why that half.
+   *
+   * Per environment, never shared with staging: a secret that signs identities
+   * on two deployments lets a claim minted against one be replayed at the other.
+   */
+  WIDGET_IDENTITY_SECRET: z.string().optional(),
+
+  /**
    * Overrides for how a tracking number and an SBID are recognised in message
    * text. Both are regular-expression sources; `lib/shipments/detect.ts` holds
    * the defaults and falls back to them, loudly, if one does not compile.

@@ -777,6 +777,25 @@ function describeEvent(type: string, data: Record<string, unknown>): string {
       return data.permission === true
         ? 'asked Meta for the customer\u2019s profile and was refused — the app may not hold Business Asset User Profile Access'
         : 'asked Meta for the customer\u2019s profile and was refused';
+    /*
+     * Whether the agent may act on the name matters more than the name. An
+     * unsigned identity is whatever the browser sent — see
+     * `lib/widget/identity.ts` — and "the dashboard says so" is exactly the
+     * sentence somebody needs before they read an address change back to a
+     * caller.
+     */
+    case 'contact_identified': {
+      const named = String(data.name ?? '').trim();
+      const account = [data.accountName, data.accountId]
+        .filter(Boolean)
+        .map(String)
+        .join(' \u00b7 ');
+      const parts = [named, account ? `account ${account}` : null].filter(Boolean);
+      const who = parts.length > 0 ? parts.join(', ') : 'somebody it did not name';
+      return data.verified === true
+        ? `identified the visitor as ${who}`
+        : `identified the visitor as ${who} \u2014 the dashboard's word, not verified`;
+    }
     case 'comment_hidden':
       return 'hid the comment on the post';
     case 'comment_unhidden':

@@ -53,7 +53,14 @@ const COPY = {
   },
 } as const;
 
-export function WidgetChat({ locale }: { locale: Locale }) {
+export function WidgetChat({
+  locale,
+  hostOrigins,
+}: {
+  locale: Locale;
+  /** Origins permitted to embed this widget, from `WIDGET_ALLOWED_ORIGINS`. */
+  hostOrigins: string[];
+}) {
   const copy = COPY[locale];
 
   const [token, setToken] = useState<string | null>(null);
@@ -65,9 +72,38 @@ export function WidgetChat({ locale }: { locale: Locale }) {
   const [sending, setSending] = useState(false);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [emailSaved, setEmailSaved] = useState(false);
+  /**
+   * Bumped to open a *different* session on the same page — a second merchant
+   * signing into the host dashboard. Nothing else re-runs the session effect,
+   * which is deliberate: a reload of the transcript is what the stream is for.
+   */
+  const [sessionNonce, setSessionNonce] = useState(0);
 
   const bottom = useRef<HTMLDivElement>(null);
   const seenCount = useRef(0);
+
+  /**
+   * The token the visible transcript belongs to, updated at the two moments it
+   * changes rather than in an effect.
+   *
+   * In-flight requests read it back before they paint. A send that was still on
+   * the wire when the host page signed its user out would otherwise answer into
+   * the session that replaced it, putting the previous person's messages in
+   * front of the next one — the exact leak the reset exists to prevent.
+   */
+  const activeToken = useRef<string | null>(null);
+
+  /** The last identity the host page handed us, and its signature. */
+  const identity = useRef<{ identity: unknown; signature: string | null } | null>(null);
+  /** `token:payload` of the last identity actually sent, so opens are cheap. */
+  const identified = useRef<string | null>(null);
+  /**
+   * How many times the server has told us this browser belongs to somebody
+   * else. Bounded because the answer costs a session round trip, and a bug on
+   * either side that made it permanent would otherwise loop forever against the
+   * API rather than failing visibly.
+   */
+  const resets = useRef(0);
 
   // --- Session -------------------------------------------------------------
 
@@ -83,6 +119,7 @@ export function WidgetChat({ locale }: { locale: Locale }) {
       .then((data) => {
         if (!data) return;
         localStorage.setItem(STORAGE_KEY, data.token);
+        activeToken.current = data.token;
         setToken(data.token);
         setConversationId(data.conversationId);
         setMessages(data.messages);
@@ -94,7 +131,7 @@ export function WidgetChat({ locale }: { locale: Locale }) {
         // Leaves `online` null, which renders as the neutral header rather than
         // claiming either state.
       });
-  }, []);
+  }, [sessionNonce]);
 
   // --- Live agent replies --------------------------------------------------
 
@@ -112,7 +149,9 @@ export function WidgetChat({ locale }: { locale: Locale }) {
       })
         .then((response) => (response.ok ? response.json() : null))
         .then((data) => {
-          if (data) {
+          // Same reason as the guard in `send`: the interval is cleared when
+          // the token changes, but a request already issued still resolves.
+          if (data && activeToken.current === token) {
             setConversationId(data.conversationId);
             setMessages(data.messages);
           }
@@ -162,18 +201,104 @@ export function WidgetChat({ locale }: { locale: Locale }) {
     bottom.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, postToHost]);
 
+  // --- Who the host page says this is --------------------------------------
+
+  /**
+   * Throws the visitor token away and opens a fresh session.
+   *
+   * The transcript is dropped with it, which is the entire point: this runs when
+   * the host page's signed-in user has changed, and the previous person's
+   * conversation must not be on screen for the next one.
+   */
+  const startFreshSession = useCallback(() => {
+    localStorage.removeItem(STORAGE_KEY);
+    activeToken.current = null;
+    identified.current = null;
+    seenCount.current = 0;
+    setToken(null);
+    setConversationId(null);
+    setMessages([]);
+    setSessionNonce((nonce) => nonce + 1);
+  }, []);
+
+  const sendIdentity = useCallback(
+    async (activeToken: string) => {
+      const pending = identity.current;
+      if (!pending) return;
+
+      // The host re-sends on every open and on every navigation of its own SPA,
+      // so the common case is an identity the server already has.
+      const fingerprint = `${activeToken}:${JSON.stringify(pending)}`;
+      if (identified.current === fingerprint) return;
+      identified.current = fingerprint;
+
+      const response = await fetch('/api/widget/identify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: activeToken, ...pending }),
+      }).catch(() => null);
+
+      // Retried on the next open rather than left unsaid: the fingerprint is
+      // what makes the common case free, and keeping it after a failure would
+      // cost the agent the customer's name for the rest of the session.
+      if (!response?.ok) {
+        identified.current = null;
+        return;
+      }
+
+      const data = (await response.json().catch(() => null)) as { reset?: boolean } | null;
+      if (data?.reset && resets.current < 2) {
+        resets.current += 1;
+        startFreshSession();
+      }
+    },
+    [startFreshSession],
+  );
+
+  useEffect(() => {
+    if (!token) return;
+    // Tells the host the frame is ready to be told who the visitor is. Sent on
+    // every new token, so a session that reset re-collects the identity without
+    // the host having to notice.
+    postToHost({ type: 'ready' });
+    void sendIdentity(token);
+  }, [token, postToHost, sendIdentity]);
+
   useEffect(() => {
     const onHostMessage = (event: MessageEvent) => {
+      /*
+       * The origin check, not the `source` tag, is what makes the rest of this
+       * safe: `parent.frames` is reachable from any other frame on the host
+       * page, so anything embedded alongside us could otherwise identify the
+       * visitor as somebody else or wipe their session. Our own origin is
+       * allowed because the help centre serves the snippet itself and frames
+       * itself.
+       */
+      if (event.origin !== window.location.origin && !hostOrigins.includes(event.origin)) return;
       if (event.data?.source !== 'shipblu-host') return;
       if (event.data.type === 'opened') {
         seenCount.current = messages.length;
         postToHost({ type: 'unread', count: 0 });
       }
+      if (event.data.type === 'identify') {
+        identity.current = {
+          identity: event.data.identity,
+          signature: typeof event.data.signature === 'string' ? event.data.signature : null,
+        };
+        if (token) void sendIdentity(token);
+      }
+      // The host page signing its user out. Not merely an identity of null: the
+      // point is that the next person at this browser starts clean.
+      if (event.data.type === 'clear') {
+        identity.current = null;
+        resets.current = 0;
+        startFreshSession();
+      }
     };
 
     window.addEventListener('message', onHostMessage);
     return () => window.removeEventListener('message', onHostMessage);
-  }, [messages, postToHost]);
+  }, [hostOrigins, messages, postToHost, sendIdentity, startFreshSession, token]);
 
   // --- Article suggestions -------------------------------------------------
 
@@ -228,6 +353,12 @@ export function WidgetChat({ locale }: { locale: Locale }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token, body, pageUrl: document.referrer || null }),
       });
+
+      // The session was replaced while this was on the wire — a sign-out on the
+      // host page. Everything below belongs to somebody who is no longer here,
+      // the draft included: putting that text back would hand the next person
+      // the previous one's half-typed sentence.
+      if (activeToken.current !== token) return;
 
       if (response.ok) {
         const data = (await response.json()) as {
