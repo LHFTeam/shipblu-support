@@ -131,6 +131,29 @@ export function matches(rawCondition: unknown, facts: Facts): boolean {
   return evaluate(parsed, facts);
 }
 
+/**
+ * A stored custom-field answer, as the fact a condition compares against.
+ *
+ * Lives here rather than beside the ticket facts because two callers now need
+ * it: `lib/rules/facts.ts`, which builds the vocabulary a rule sees on a saved
+ * ticket, and `lib/forms/visibility.ts`, which builds the same vocabulary from
+ * the answers somebody is typing right now. Two copies would let a dropdown
+ * decide a rule one way while it was being filled in and the other way once it
+ * was saved, and nothing would report the disagreement.
+ *
+ * Numbers and booleans stay themselves — a number stored as "12" answers
+ * `custom.weight gt 5` with a string comparison and gets it wrong.
+ */
+export function normaliseCustom(value: unknown): FactValue {
+  if (value === null || value === undefined) return null;
+  if (Array.isArray(value)) return value.map((entry) => String(entry));
+  if (typeof value === 'object') return JSON.stringify(value);
+  if (typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string') {
+    return value;
+  }
+  return String(value);
+}
+
 function compare(fact: FactValue, op: Operator, value: unknown): boolean {
   switch (op) {
     case 'is_set':

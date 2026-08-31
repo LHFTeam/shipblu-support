@@ -16,6 +16,7 @@ import {
   automationTriggerEnum,
   cannedVisibilityEnum,
   channelEnum,
+  priorityEnum,
   slaHoursSourceEnum,
   statusCategoryEnum,
   ticketFieldTypeEnum,
@@ -102,6 +103,47 @@ export const ticketStatuses = pgTable(
   ],
 );
 
+/**
+ * One choice on a dropdown or multi-select.
+ *
+ * `label` is the admin- and agent-facing wording and is the only one that is
+ * required; `labelAr` and `labelEn` are what a customer is shown on a form, and
+ * a blank one falls back to `label`. Three strings rather than two because the
+ * console is read in English by the team regardless of which languages the
+ * customer-facing wording is written in — collapsing `label` into `labelEn`
+ * would mean an admin who only writes Arabic leaves every console screen naming
+ * the option by its raw stored value.
+ */
+export type TicketFieldOption = {
+  value: string;
+  label: string;
+  labelAr?: string;
+  labelEn?: string;
+};
+
+/**
+ * Extra constraints on what one field will accept, beyond its type.
+ *
+ * Attached to the field rather than to the form element that places it: a
+ * tracking number has the same shape wherever it is asked for, and a per-form
+ * override would be a second place to look when the wrong thing is rejected.
+ *
+ * `pattern` is a JavaScript regular expression source, anchored by the parser
+ * rather than by the admin — an unanchored pattern that happens to match a
+ * substring is the classic way a validation rule silently accepts everything.
+ * The message is per-locale because it is the one validation string a customer
+ * actually reads; blank falls back to a generic sentence in their language.
+ */
+export type TicketFieldValidation = {
+  pattern?: string;
+  patternMessageAr?: string;
+  patternMessageEn?: string;
+  min?: number;
+  max?: number;
+  minLength?: number;
+  maxLength?: number;
+};
+
 export const ticketFields = pgTable(
   'ticket_fields',
   {
@@ -109,10 +151,32 @@ export const ticketFields = pgTable(
     /** Stable key used inside `conversations.custom_fields`. */
     key: text('key').notNull(),
     label: text('label').notNull(),
+
+    /**
+     * The customer-facing wording, one per language.
+     *
+     * `label` above is deliberately left alone: it is what the console sidebar,
+     * the condition builder's vocabulary and every parser error message already
+     * use, and every existing field has one. These two are additive, blank means
+     * "use `label`", and the pair is the same shape `auto_responses` uses for
+     * its bodies — a team that only writes Arabic is not forced to write English
+     * too.
+     *
+     * Not the knowledge base's row-per-locale model, because a field is one
+     * thing with one key and one stored answer that happens to be *asked* in two
+     * languages. Two rows would mean two keys on a table whose whole point is
+     * that the key is unique.
+     */
+    labelAr: text('label_ar'),
+    labelEn: text('label_en'),
+
     type: ticketFieldTypeEnum('type').notNull(),
 
     /** For dropdown/multi_select. */
-    options: jsonb('options').$type<{ value: string; label: string }[]>().notNull().default([]),
+    options: jsonb('options').$type<TicketFieldOption[]>().notNull().default([]),
+
+    /** Null means "whatever the type already enforces". */
+    validation: jsonb('validation').$type<TicketFieldValidation | null>(),
 
     requiredOnCreate: boolean('required_on_create').notNull().default(false),
     requiredOnResolve: boolean('required_on_resolve').notNull().default(false),
@@ -125,6 +189,115 @@ export const ticketFields = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex('ticket_fields_key_idx').on(t.key)],
+);
+
+/**
+ * A named set of questions that opens a ticket.
+ *
+ * Every ticket this helpdesk could open before this table existed was opened by
+ * somebody writing a sentence. The one form that existed — the portal's
+ * new-ticket page — asked the same questions of everybody: a subject, a message,
+ * and every custom field marked visible *and* editable, in one fixed order. A
+ * damaged parcel and a refund request are not the same interview, and an admin
+ * had no way to say so.
+ *
+ * **The layout is one jsonb document, not a `ticket_form_fields` join table.**
+ * The join table is the obvious answer and it is the wrong one here for the
+ * reason `automation_rules.actions` is also jsonb: the layout is edited,
+ * validated and stored as a single document by one builder, so a join would
+ * spread one save across N inserts, N updates and M deletes and would still need
+ * a `position` column to put the rows back in order.
+ *
+ * What a join buys is a foreign key onto `ticket_fields`, and this codebase
+ * already settled that question: `lib/rules/conditions.ts` says a rule naming a
+ * deleted custom field "should quietly stop matching rather than break the
+ * sweep". An element naming a field that no longer exists is dropped by
+ * `parseFormElements` at read time, so deleting a field degrades a form instead
+ * of breaking the page. What is owed in exchange is a warning on the way out,
+ * which is why `deleteField` refuses while a form still names the key.
+ *
+ * The Arabic and English columns follow `auto_responses`: whichever is filled in
+ * covers the other, so a team writing only Arabic is not forced to write English
+ * too.
+ */
+export const ticketForms = pgTable(
+  'ticket_forms',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+
+    /**
+     * The URL segment on the help centre. Built through `lib/kb/slug.ts`, never
+     * an ASCII slugify — Arabic is the default locale and the front door, and
+     * an ASCII slugify erases it entirely.
+     */
+    slug: text('slug').notNull(),
+
+    nameAr: text('name_ar').notNull().default(''),
+    nameEn: text('name_en').notNull().default(''),
+    descriptionAr: text('description_ar').notNull().default(''),
+    descriptionEn: text('description_en').notNull().default(''),
+
+    /** `FormElement[]`, validated by `parseFormElements` at every read. */
+    elements: jsonb('elements').$type<unknown[]>().notNull().default([]),
+
+    /**
+     * Whether a visitor has to be signed in to submit.
+     *
+     * Off is the interesting case: an anonymous form asks for a name and an
+     * email and resolves onto a contact the same way an inbound email does. See
+     * `lib/forms/submit.ts` for what that risks and what is done about it.
+     */
+    requiresSignIn: boolean('requires_sign_in').notNull().default(true),
+
+    /**
+     * Where the form is offered. Two flags rather than one enum because a form
+     * can legitimately be both — most are — and an internal triage form that
+     * only agents may open is a real case that a single "audience" column would
+     * force into a third value nobody reads correctly.
+     */
+    showOnHelpCentre: boolean('show_on_help_centre').notNull().default(true),
+    showInConsole: boolean('show_in_console').notNull().default(true),
+
+    /**
+     * What the form presets on the ticket it opens.
+     *
+     * These exist so "Report a damaged parcel" lands on the Ops queue at high
+     * priority without an automation rule per form. They are defaults, not
+     * overrides: an on-create automation still runs afterwards and still wins,
+     * because the automation is the layer an admin uses to express a rule that
+     * spans forms.
+     *
+     * Null priority means the column default (`medium`) rather than a second way
+     * of writing it, so a form that does not care does not have an opinion.
+     */
+    defaultGroupId: uuid('default_group_id').references(() => groups.id, {
+      onDelete: 'set null',
+    }),
+    defaultPriority: priorityEnum('default_priority'),
+    defaultType: text('default_type'),
+    defaultTags: text('default_tags').array().notNull().default([]),
+
+    /**
+     * The ticket's subject, built from the answers — `Damaged parcel —
+     * {{tracking_number}}`. Empty falls back to the form's own name, because an
+     * inbox of forty identically-titled tickets is worse than a long subject.
+     */
+    subjectTemplate: text('subject_template'),
+
+    /** Shown after a successful submission; blank falls back to a generic thank-you. */
+    confirmationAr: text('confirmation_ar').notNull().default(''),
+    confirmationEn: text('confirmation_en').notNull().default(''),
+
+    position: integer('position').notNull().default(0),
+    isActive: boolean('is_active').notNull().default(true),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('ticket_forms_slug_idx').on(t.slug),
+    index('ticket_forms_position_idx').on(t.position),
+  ],
 );
 
 export type SlaTarget = {

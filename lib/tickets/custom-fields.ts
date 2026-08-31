@@ -16,6 +16,8 @@
  * round on its own, which is what `lib/format.ts` already relies on.
  */
 
+import type { TicketFieldOption, TicketFieldValidation } from '@/db/schema/config';
+
 const ZONE = 'Africa/Cairo';
 
 export type TicketFieldType =
@@ -38,14 +40,65 @@ export type TicketFieldType =
  */
 export type TicketFieldDef = {
   key: string;
+  /** The admin- and agent-facing name. Always set; every screen falls back to it. */
   label: string;
+  /** The customer-facing wording. Null falls back through `localised` below. */
+  labelAr: string | null;
+  labelEn: string | null;
   type: TicketFieldType;
-  options: { value: string; label: string }[];
+  options: TicketFieldOption[];
+  validation: TicketFieldValidation | null;
   requiredOnCreate: boolean;
   requiredOnResolve: boolean;
   visibleToCustomer: boolean;
   editableByCustomer: boolean;
 };
+
+/**
+ * One rule for resolving an Arabic/English pair, used for every piece of
+ * customer-facing wording an admin can write: a field's label, a choice's label,
+ * a form's name, an element's help text.
+ *
+ * The reader's own language, then the fallback, then **the other language**.
+ *
+ * The middle step is the one worth explaining. Where a fallback exists it is
+ * `ticket_fields.label` or something like it — a string an admin definitely
+ * wrote, in whatever language the console is kept in, which here is English. A
+ * field labelled "Payment" with only `label_ar` filled in should read "Payment"
+ * to an English customer, not the Arabic; falling straight through to the other
+ * language would show every English reader the Arabic the moment somebody
+ * translated a field, which is the opposite of what translating it was for.
+ *
+ * The other language is still reached, and that is the `auto_responses` rule
+ * kept intact: pass a blank fallback — a form's name has only a slug behind it —
+ * and a team that has written only Arabic has its Arabic shown to everybody
+ * rather than a URL segment.
+ */
+export function localised(
+  ar: string | null | undefined,
+  en: string | null | undefined,
+  locale: 'ar' | 'en',
+  fallback: string,
+): string {
+  const own = (locale === 'ar' ? ar : en)?.trim();
+  if (own) return own;
+
+  const neutral = fallback.trim();
+  if (neutral) return neutral;
+
+  const other = (locale === 'ar' ? en : ar)?.trim();
+  return other || fallback;
+}
+
+/** What a customer reading in `locale` should see this field called. */
+export function fieldLabel(def: TicketFieldDef, locale: 'ar' | 'en'): string {
+  return localised(def.labelAr, def.labelEn, locale, def.label);
+}
+
+/** What a customer reading in `locale` should see one choice called. */
+export function optionLabel(option: TicketFieldOption, locale: 'ar' | 'en'): string {
+  return localised(option.labelAr, option.labelEn, locale, option.label);
+}
 
 export type CustomFieldValues = Record<string, unknown>;
 

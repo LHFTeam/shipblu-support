@@ -15,7 +15,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import { agents, groups } from './agents';
-import { channels, ticketStatuses, slaPolicies } from './config';
+import { channels, ticketForms, ticketStatuses, slaPolicies } from './config';
 import { contacts } from './customers';
 import {
   channelEnum,
@@ -75,6 +75,22 @@ export const conversations = pgTable(
 
     tags: text('tags').array().notNull().default([]),
     customFields: jsonb('custom_fields').$type<Record<string, unknown>>().notNull().default({}),
+
+    /**
+     * The form this ticket was submitted through, when it was.
+     *
+     * Kept on the row rather than inferred from which custom fields happen to be
+     * filled in: two forms can ask the same questions, and an answer set is not
+     * an identity. It is what lets the console say where a ticket came from,
+     * what lets reporting group by it, and what `form.slug` in
+     * `lib/rules/facts.ts` reads so an automation can route on the form without
+     * re-deriving it.
+     *
+     * `set null` rather than `restrict`: deleting a retired form must not be
+     * blocked by the tickets it opened, and a ticket whose form is gone is still
+     * a ticket.
+     */
+    formId: uuid('form_id').references(() => ticketForms.id, { onDelete: 'set null' }),
 
     // --- SLA ------------------------------------------------------------
     slaPolicyId: uuid('sla_policy_id').references(() => slaPolicies.id, { onDelete: 'set null' }),
@@ -162,6 +178,7 @@ export const conversations = pgTable(
     index('conversations_inbox_idx').on(t.statusId, t.groupId, t.lastMessageAt),
     index('conversations_assignee_idx').on(t.assigneeAgentId, t.lastMessageAt),
     index('conversations_requester_idx').on(t.requesterContactId),
+    index('conversations_form_idx').on(t.formId, t.createdAt),
     index('conversations_channel_idx').on(t.channel, t.lastMessageAt),
     index('conversations_tags_idx').using('gin', t.tags),
     index('conversations_search_idx').using('gin', t.searchVector),

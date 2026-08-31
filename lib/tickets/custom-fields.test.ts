@@ -1,10 +1,13 @@
 import { DateTime } from 'luxon';
 import { describe, expect, it } from 'vitest';
 import {
+  fieldLabel,
   formatForInput,
   isBlank,
   listLabels,
+  localised,
   missingRequired,
+  optionLabel,
   type TicketFieldDef,
 } from './custom-fields';
 import { applyFieldValue, parseFieldValue } from './custom-fields-parse';
@@ -13,7 +16,10 @@ function field(overrides: Partial<TicketFieldDef> & { type: TicketFieldDef['type
   return {
     key: 'test_field',
     label: 'Test field',
+    labelAr: null,
+    labelEn: null,
     options: [],
+    validation: null,
     requiredOnCreate: false,
     requiredOnResolve: false,
     visibleToCustomer: false,
@@ -227,5 +233,73 @@ describe('listLabels', () => {
         field({ label: 'Three', type: 'text' }),
       ]),
     ).toBe('One, Two and Three');
+  });
+});
+
+describe('validation rules', () => {
+  it('anchors an admin’s pattern so a partial match is not a pass', () => {
+    // `[0-9]{6}` written to demand a six-digit reference also matches "call me
+    // on 0123456 thanks" unanchored, which is a validation rule that validates
+    // nothing and looks like it works.
+    const reference = field({ type: 'text', validation: { pattern: '[0-9]{6}' } });
+
+    expect(parseFieldValue(reference, '123456').ok).toBe(true);
+    expect(parseFieldValue(reference, 'call me on 0123456 thanks').ok).toBe(false);
+  });
+
+  it('skips a pattern that will not compile rather than refusing every answer', () => {
+    // Reaching here means the rule changed under a form somebody had open. The
+    // admin screen refuses a broken expression; losing their answer is worse
+    // than not checking it.
+    const broken = field({ type: 'text', validation: { pattern: '([' } });
+    expect(parseFieldValue(broken, 'anything').ok).toBe(true);
+  });
+
+  it('bounds a number from both ends', () => {
+    const weight = field({ type: 'decimal', validation: { min: 0.5, max: 30 } });
+
+    expect(parseFieldValue(weight, '0.4').ok).toBe(false);
+    expect(parseFieldValue(weight, '30.1').ok).toBe(false);
+    expect(parseFieldValue(weight, '30').ok).toBe(true);
+  });
+
+  it('leaves an unanswered optional field alone', () => {
+    // A length rule is about what was written, not about whether anything was —
+    // "required" is a separate question with its own answer.
+    const note = field({ type: 'text', validation: { minLength: 5 } });
+    expect(parseFieldValue(note, '').ok).toBe(true);
+  });
+
+  it('does not let a length rule raise the ceiling that bounds the column', () => {
+    const note = field({ type: 'text', validation: { maxLength: 5_000 } });
+    expect(parseFieldValue(note, 'x'.repeat(600)).ok).toBe(false);
+  });
+});
+
+describe('localised', () => {
+  it('prefers the reader’s language', () => {
+    expect(localised('عربي', 'English', 'ar', 'Fallback')).toBe('عربي');
+    expect(localised('عربي', 'English', 'en', 'Fallback')).toBe('English');
+  });
+
+  it('shows the neutral label rather than the other language', () => {
+    // A field labelled "Payment" that somebody has translated into Arabic must
+    // not start reading in Arabic to English customers.
+    expect(localised('طريقة الدفع', null, 'en', 'Payment')).toBe('Payment');
+    expect(
+      fieldLabel(field({ type: 'text', label: 'Payment', labelAr: 'طريقة الدفع' }), 'en'),
+    ).toBe('Payment');
+  });
+
+  it('reaches the other language when there is no neutral label to fall back to', () => {
+    // A form's name has only a URL slug behind it, so Arabic beats nothing.
+    expect(localised('شكوى', null, 'en', '')).toBe('شكوى');
+  });
+
+  it('reads a choice in the reader’s language', () => {
+    expect(optionLabel({ value: 'cod', label: 'COD', labelAr: 'عند الاستلام' }, 'ar')).toBe(
+      'عند الاستلام',
+    );
+    expect(optionLabel({ value: 'cod', label: 'COD' }, 'ar')).toBe('COD');
   });
 });

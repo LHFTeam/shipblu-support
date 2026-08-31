@@ -685,8 +685,11 @@ export async function listTicketFields(): Promise<TicketFieldDef[]> {
     .select({
       key: ticketFields.key,
       label: ticketFields.label,
+      labelAr: ticketFields.labelAr,
+      labelEn: ticketFields.labelEn,
       type: ticketFields.type,
       options: ticketFields.options,
+      validation: ticketFields.validation,
       requiredOnCreate: ticketFields.requiredOnCreate,
       requiredOnResolve: ticketFields.requiredOnResolve,
       visibleToCustomer: ticketFields.visibleToCustomer,

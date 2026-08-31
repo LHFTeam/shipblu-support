@@ -24,12 +24,86 @@ const MAX_SELECTIONS = 50;
 export type ParsedValue = { ok: true; value: unknown } | { ok: false; error: string };
 
 /**
+ * An admin's regular expression, compiled and anchored.
+ *
+ * Anchored here rather than by whoever typed it, because an unanchored pattern
+ * that happens to match a substring is the classic way a validation rule
+ * silently accepts everything: `[0-9]{6}` written to demand a six-digit
+ * reference also accepts "please call me on 0123456 thanks". A pattern that
+ * already anchors itself is unharmed by the wrapper.
+ *
+ * A pattern that will not compile yields null and the check is skipped, rather
+ * than refusing every answer: the admin screen validates the expression when it
+ * is saved, so reaching here with a broken one means the rule changed underneath
+ * a form somebody had open, and losing their answer is the worse outcome.
+ */
+function anchored(pattern: string): RegExp | null {
+  try {
+    return new RegExp(`^(?:${pattern})$`, 'u');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The admin's extra constraints, applied after the type's own parsing.
+ *
+ * After, not instead: `min`/`max` on a number are only meaningful once the text
+ * is a number, and a length rule on a paragraph is only reached once the hard
+ * `MAX_PARAGRAPH` ceiling has already refused the pathological case. The ceilings
+ * bound what one ticket's jsonb can hold and are not an admin's to raise.
+ */
+function checkValidation(def: TicketFieldDef, value: unknown): string | null {
+  const rules = def.validation;
+  if (!rules) return null;
+
+  if (typeof value === 'number') {
+    if (typeof rules.min === 'number' && value < rules.min) {
+      return `${def.label} must be ${rules.min} or more`;
+    }
+    if (typeof rules.max === 'number' && value > rules.max) {
+      return `${def.label} must be ${rules.max} or less`;
+    }
+    return null;
+  }
+
+  if (typeof value !== 'string' || value === '') return null;
+
+  if (typeof rules.minLength === 'number' && value.length < rules.minLength) {
+    return `${def.label} must be at least ${rules.minLength} characters`;
+  }
+  if (typeof rules.maxLength === 'number' && value.length > rules.maxLength) {
+    return `${def.label} must be at most ${rules.maxLength} characters`;
+  }
+
+  if (rules.pattern) {
+    const expression = anchored(rules.pattern);
+    if (expression && !expression.test(value)) {
+      // The generic sentence. The wording an admin actually wrote is per-locale
+      // and lives on the field, so the surface that has a reader — the help
+      // centre form — renders it beside the input rather than taking this one.
+      return `${def.label} is not in the expected format`;
+    }
+  }
+
+  return null;
+}
+
+/**
  * Every branch returns a JSON primitive, an array of strings, or a blank —
  * nothing that `normaliseCustom` in `lib/rules/facts.ts` would have to stringify
  * to compare, because a number stored as "12" answers `custom.weight gt 5` with
  * a string comparison and gets it wrong.
  */
 export function parseFieldValue(def: TicketFieldDef, raw: string | string[]): ParsedValue {
+  const parsed = parseByType(def, raw);
+  if (!parsed.ok) return parsed;
+
+  const invalid = checkValidation(def, parsed.value);
+  return invalid ? { ok: false, error: invalid } : parsed;
+}
+
+function parseByType(def: TicketFieldDef, raw: string | string[]): ParsedValue {
   if (def.type === 'multi_select') {
     const submitted = (Array.isArray(raw) ? raw : [raw])
       .map((entry) => entry.trim())

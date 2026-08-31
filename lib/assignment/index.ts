@@ -8,6 +8,7 @@ import {
   contacts,
   groupMembers,
   groups,
+  ticketForms,
   ticketStatuses,
 } from '@/db/schema';
 import { loadHoursCatalog } from '@/lib/hours/catalog';
@@ -94,10 +95,12 @@ export async function assignConversation(
       conversation: conversations,
       statusCategory: ticketStatuses.category,
       requesterEmail: contacts.primaryEmail,
+      formSlug: ticketForms.slug,
     })
     .from(conversations)
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
     .leftJoin(contacts, eq(contacts.id, conversations.requesterContactId))
+    .leftJoin(ticketForms, eq(ticketForms.id, conversations.formId))
     .where(eq(conversations.id, conversationId))
     .limit(1);
 
