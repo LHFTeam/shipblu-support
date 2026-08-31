@@ -1,6 +1,7 @@
 import { asc, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { ticketFields, ticketStatuses } from '@/db/schema';
+import { ticketFields, ticketForms, ticketStatuses } from '@/db/schema';
+import { formName } from '@/lib/forms/naming';
 import type { FieldOption } from './condition-builder';
 
 /**
@@ -12,7 +13,7 @@ import type { FieldOption } from './condition-builder';
  * absent, which silently never matches.
  */
 export async function ticketFieldOptions(): Promise<FieldOption[]> {
-  const [custom, statuses] = await Promise.all([
+  const [custom, statuses, forms] = await Promise.all([
     db
       .select()
       .from(ticketFields)
@@ -21,6 +22,10 @@ export async function ticketFieldOptions(): Promise<FieldOption[]> {
     db
       .select({ name: ticketStatuses.name, category: ticketStatuses.category })
       .from(ticketStatuses),
+    db
+      .select({ slug: ticketForms.slug, nameEn: ticketForms.nameEn, nameAr: ticketForms.nameAr })
+      .from(ticketForms)
+      .orderBy(asc(ticketForms.position)),
   ]);
 
   void statuses;
@@ -64,6 +69,19 @@ export async function ticketFieldOptions(): Promise<FieldOption[]> {
     { value: 'tags', label: 'Tags', kind: 'text' },
     { value: 'type', label: 'Type', kind: 'text' },
     { value: 'requester.email', label: 'Requester email', kind: 'text' },
+    // A choice rather than free text, and the slug rather than the id: a rule
+    // reading `form.slug is damaged-parcel` says what it routes on, and picking
+    // from the forms that exist is what stops a rule being written against a
+    // slug that was renamed and silently never matching again.
+    {
+      value: 'form.slug',
+      label: 'Submitted through form',
+      kind: 'choice',
+      choices: forms.map((form) => ({
+        value: form.slug,
+        label: formName(form, 'en'),
+      })),
+    },
     { value: 'group.id', label: 'Group', kind: 'text' },
     { value: 'assignee.id', label: 'Assignee', kind: 'text' },
     {

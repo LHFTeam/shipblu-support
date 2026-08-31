@@ -116,6 +116,47 @@ export function Disclosure({
 }
 
 /**
+ * A section of a form that starts folded, **without unmounting what is inside**.
+ *
+ * `Disclosure` above renders nothing until it is opened, which is right for a
+ * "New …" form that does not exist yet and catastrophic for a group of fields
+ * inside a form that already does: an input that is not in the DOM is not in the
+ * FormData either, so a save while the section was folded read every one of
+ * those fields as blank and wrote the record back with them cleared. That is how
+ * a field's validation rules were being deleted by an admin who only renamed it.
+ *
+ * So this hides with `hidden` rather than by returning early. The inputs stay
+ * mounted, keep their values, and submit exactly as if the section were open.
+ */
+export function Collapsible({
+  label,
+  children,
+  defaultOpen = false,
+}: {
+  label: string;
+  children: ReactNode;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <div className="rounded-md border border-[var(--border)] p-3">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        className="text-xs font-medium text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+      >
+        {open ? '▾' : '▸'} {label}
+      </button>
+      <div hidden={!open} className="mt-3 flex flex-col gap-3">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/**
  * A destructive action behind one confirmation.
  *
  * The confirm is a second click on the same button rather than a dialog: it is

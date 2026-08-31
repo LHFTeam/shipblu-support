@@ -7,6 +7,7 @@ import {
   conversationWatchers,
   conversations,
   contacts,
+  ticketForms,
   ticketStatuses,
 } from '@/db/schema';
 import { assignConversation } from '@/lib/assignment';
@@ -63,6 +64,7 @@ type TicketRow = {
   conversation: typeof conversations.$inferSelect;
   statusCategory: 'open' | 'pending' | 'resolved' | 'closed';
   requesterEmail: string | null;
+  formSlug: string | null;
 };
 
 async function loadTicket(conversationId: string): Promise<TicketRow | null> {
@@ -71,10 +73,12 @@ async function loadTicket(conversationId: string): Promise<TicketRow | null> {
       conversation: conversations,
       statusCategory: ticketStatuses.category,
       requesterEmail: contacts.primaryEmail,
+      formSlug: ticketForms.slug,
     })
     .from(conversations)
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
     .leftJoin(contacts, eq(contacts.id, conversations.requesterContactId))
+    .leftJoin(ticketForms, eq(ticketForms.id, conversations.formId))
     .where(eq(conversations.id, conversationId))
     .limit(1);
 
@@ -393,10 +397,12 @@ export async function liveTickets(limit: number): Promise<TicketRow[]> {
       conversation: conversations,
       statusCategory: ticketStatuses.category,
       requesterEmail: contacts.primaryEmail,
+      formSlug: ticketForms.slug,
     })
     .from(conversations)
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
     .leftJoin(contacts, eq(contacts.id, conversations.requesterContactId))
+    .leftJoin(ticketForms, eq(ticketForms.id, conversations.formId))
     .where(
       and(
         isNull(conversations.deletedAt),

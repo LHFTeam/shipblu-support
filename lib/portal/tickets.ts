@@ -154,17 +154,43 @@ export async function getTicket(
   };
 }
 
+export type NewTicket = {
+  subject: string;
+  body: string;
+  customFields?: Record<string, unknown>;
+  /**
+   * What the form that opened this ticket presets on it.
+   *
+   * Defaults, not overrides: `afterInboundMessage` runs the on-create
+   * automations immediately afterwards and those still win, because a rule is
+   * the layer an admin uses to express something that spans forms. Undefined
+   * means "no opinion" and leaves the channel's own default or the column's.
+   */
+  formId?: string | null;
+  groupId?: string | null;
+  priority?: 'low' | 'medium' | 'high' | 'urgent' | null;
+  type?: string | null;
+  tags?: string[];
+};
+
 /**
- * Opens a ticket from the portal.
+ * The ids a caller needs after the ticket exists.
+ *
+ * The message id is here because attachments are owned by a message and are
+ * uploaded after the transaction commits — see `lib/forms/attachments.ts`.
+ * Returning only the number would mean looking the message back up by
+ * conversation and timestamp, which is a race with any other write.
+ */
+export type CreatedTicket = { number: number; conversationId: string; messageId: string };
+
+/**
+ * Opens a ticket from the portal or from a form.
  *
  * Channel `portal` rather than `email`: it did not arrive by mail and has no
  * Message-ID, so filing it as email would put it in reporting's email column
  * and leave the threading code looking for a header that was never there.
  */
-export async function createTicket(
-  contactId: string,
-  input: { subject: string; body: string; customFields?: Record<string, unknown> },
-): Promise<number> {
+export async function createTicket(contactId: string, input: NewTicket): Promise<CreatedTicket> {
   const now = new Date();
   const portal = await portalChannel();
 
@@ -182,21 +208,30 @@ export async function createTicket(
         statusId,
         subject: input.subject,
         requesterContactId: contactId,
-        groupId: portal?.defaultGroupId ?? null,
+        // The form's group first, then the channel's. Worth noting the second
+        // is usually null: no `channels` row is seeded for `portal`, so before
+        // forms existed a portal ticket reached the inbox with no group at all.
+        groupId: input.groupId ?? portal?.defaultGroupId ?? null,
+        formId: input.formId ?? null,
+        // `undefined` rather than null where the caller has no opinion, so
+        // Drizzle omits the column and the schema default applies.
+        priority: input.priority ?? undefined,
+        type: input.type ?? null,
+        tags: input.tags ?? [],
         // Parsed and required-checked by the action before it gets here, against
         // the field definitions read from the database rather than from the form.
         customFields: input.customFields ?? {},
         lastMessageAt: now,
         lastCustomerMessageAt: now,
       })
-      .returning({ id: conversations.id });
+      .returning({ id: conversations.id, number: conversations.number });
 
-    const id = inserted[0]!.id;
+    const row = inserted[0]!;
 
     const insertedMessage = await tx
       .insert(messages)
       .values({
-        conversationId: id,
+        conversationId: row.id,
         direction: 'inbound',
         kind: 'reply',
         authorContactId: contactId,
@@ -207,7 +242,7 @@ export async function createTicket(
       })
       .returning({ id: messages.id });
 
-    return { id, messageId: insertedMessage[0]!.id };
+    return { id: row.id, number: row.number, messageId: insertedMessage[0]!.id };
   });
 
   await afterMessageStored({
@@ -219,13 +254,7 @@ export async function createTicket(
 
   await afterInboundMessage(created.id, true, now);
 
-  const rows = await db
-    .select({ number: conversations.number })
-    .from(conversations)
-    .where(eq(conversations.id, created.id))
-    .limit(1);
-
-  return rows[0]!.number;
+  return { number: created.number, conversationId: created.id, messageId: created.messageId };
 }
 
 export type ReplyResult = { ok: true } | { ok: false };

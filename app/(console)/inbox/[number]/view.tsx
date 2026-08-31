@@ -251,6 +251,18 @@ function Header({
         {conversation.reopenCount > 0 ? (
           <Badge tone="warning">reopened ×{conversation.reopenCount}</Badge>
         ) : null}
+        {conversation.formName ? <Badge tone="brand">{conversation.formName}</Badge> : null}
+        {/*
+          Nobody proved who sent this. A form that anybody can submit resolves
+          the address it was given onto whatever contact already owns it — which
+          is what makes the unified inbox real, and is also why a stranger can
+          file a ticket under a real customer's name. The mail channel has SPF
+          and DKIM behind it; a web form has nothing, so the ticket says so and
+          the agent reads it differently.
+        */}
+        {conversation.unverifiedSubmitter ? (
+          <Badge tone="warning">not signed in — sender unverified</Badge>
+        ) : null}
         {conversation.channel === 'whatsapp' ? (
           <WindowIndicator lastCustomerMessageAt={conversation.lastCustomerMessageAt} />
         ) : null}
@@ -707,6 +719,16 @@ const SKIP_REASONS: Record<string, string> = {
 
 function describeEvent(type: string, data: Record<string, unknown>): string {
   switch (type) {
+    // The whole point of the event. Without a case here it fell through to the
+    // default and read "unverified submitter" — no address, no client address —
+    // so the one record of who *claimed* to have filed the ticket was written
+    // and then never shown to anybody.
+    case 'unverified_submitter':
+      return `submitted without signing in, as ${String(data.email ?? 'an unknown address')}${
+        data.ip ? ` from ${String(data.ip)}` : ''
+      }`;
+    case 'opened_by_agent':
+      return 'opened this ticket on the customer’s behalf';
     case 'status_changed':
       return `set status to ${String(data.to ?? '')}`;
     case 'priority_changed':
