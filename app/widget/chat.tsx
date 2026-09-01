@@ -37,6 +37,7 @@ const COPY = {
     emailSaved: 'Thanks — we will email you.',
     suggested: 'These might help',
     starter: 'Ask us anything about your shipments.',
+    faqs: 'Popular questions',
   },
   ar: {
     heading: 'دعم شيب بلو',
@@ -50,16 +51,24 @@ const COPY = {
     emailSaved: 'شكرًا — سنراسلك عبر البريد.',
     suggested: 'قد تساعدك هذه المقالات',
     starter: 'اسألنا أي شيء عن شحناتك.',
+    faqs: 'الأسئلة الأكثر شيوعًا',
   },
 } as const;
 
 export function WidgetChat({
   locale,
   hostOrigins,
+  faqs,
 }: {
   locale: Locale;
   /** Origins permitted to embed this widget, from `WIDGET_ALLOWED_ORIGINS`. */
   hostOrigins: string[];
+  /**
+   * The most-read articles in this locale, rendered on the opening screen.
+   * Empty is a normal state — a knowledge base nobody has opened yet has no
+   * popular questions — and the section is left out rather than shown bare.
+   */
+  faqs: Suggestion[];
 }) {
   const copy = COPY[locale];
 
@@ -421,7 +430,43 @@ export function WidgetChat({
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
         {messages.length === 0 ? (
-          <p className="py-8 text-center text-sm opacity-50">{copy.starter}</p>
+          <div className="py-6">
+            <p className="text-center text-sm opacity-50">{copy.starter}</p>
+
+            {/*
+              The questions a visitor would otherwise wait for an agent to
+              answer, offered before they type. Two thirds of what arrives on
+              chat is "where is my parcel" in one wording or another, and that
+              article is one tap away here rather than four minutes away in the
+              queue.
+
+              Only on the opening screen: once there are messages the visitor is
+              in a conversation, and a list of links under it reads as being
+              fobbed off.
+            */}
+            {faqs.length > 0 ? (
+              <nav aria-label={copy.faqs} className="mt-6">
+                <p className="mb-2 text-xs font-medium opacity-50">{copy.faqs}</p>
+                <ul className="flex flex-col gap-1.5">
+                  {faqs.map((article) => (
+                    <li key={article.url}>
+                      <a
+                        href={article.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        // A row rather than a line of underlined text: this is
+                        // the one screen where the links are the interface, and
+                        // a 40px target is what a thumb can hit.
+                        className="block rounded-lg border border-[var(--border)] px-3 py-2 text-sm hover:bg-[var(--muted)]"
+                      >
+                        {article.title}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </nav>
+            ) : null}
+          </div>
         ) : null}
 
         <ol className="flex flex-col gap-2">
