@@ -86,6 +86,24 @@ export function explainMetaSendError(error: MetaApiError, context: MetaSendConte
     which `lib/meta/parse.ts` drops. It still does not mark the ticket, so the
     reply fails the same way — the sentence below is worth printing on both.
   */
+  /*
+    The app is not allowed to manage comments on this asset at all.
+
+    Checked before the target refusal below because it is the one production has
+    actually returned, and because the two need opposite responses: that one is
+    usually a customer deleting their own comment and needs no action, this one
+    fails every comment reply on the Page until somebody changes an approval.
+    Graph tells them apart by code — 200 rather than 100/33 — which is the only
+    signal there is, since the sentence it ships with says nothing either way.
+  */
+  if (context.sendKind !== 'dm' && isCommentPermissionRefusal(error)) {
+    return withReference(
+      `${base}\n\n${commentPermissionExplanation(context)}`,
+      error,
+      context.connection,
+    );
+  }
+
   if (context.sendKind !== 'dm' && isCommentTargetRefusal(error)) {
     return withReference(
       `${base}\n\n${commentTargetExplanation(context)}`,
@@ -141,6 +159,69 @@ function isCommentTargetRefusal(error: MetaApiError): boolean {
 }
 
 /**
+ * Graph refused the *capability*, not the comment.
+ *
+ * **Observed**, unlike the target refusal above. The first comment reply this
+ * system ever attempted — 2026-09-01 12:25 UTC, ticket #13755 — came back
+ * `HTTP 403, code 200, "(#200) Permissions error"` from
+ * `POST /<comment id>/comments`, and fell through every branch here to print
+ * that sentence and nothing else. "Permissions error" is not a sentence an agent
+ * can act on: it names no permission, no asset and no remedy, and it is
+ * indistinguishable at a glance from the customer having deleted their comment.
+ *
+ * The codes are the same three the profile lookups already treat this way —
+ * `3` "does not have the capability", `10` "does not have permission", `200`
+ * the explicit form — which is not a coincidence: they are how Graph refuses an
+ * app rather than a request, whatever the edge. Kept as its own set rather than
+ * shared with `PROFILE_PERMISSION_CODES` because that one also folds in the
+ * 100/33 unsupported-get shape, which on this path means the opposite thing.
+ */
+const COMMENT_PERMISSION_CODES = new Set([3, 10, 200]);
+
+function isCommentPermissionRefusal(error: MetaApiError): boolean {
+  return error.code !== null && COMMENT_PERMISSION_CODES.has(error.code);
+}
+
+/** The App Review permission that governs comment management on this channel. */
+function commentPermission(context: MetaSendContext): string {
+  if (context.platform === 'facebook') return '`pages_manage_engagement`';
+  return context.connection === 'instagram_login'
+    ? '`instagram_business_manage_comments`'
+    : '`instagram_manage_comments`';
+}
+
+/**
+ * Ordered the other way round from `commentTargetExplanation`, and for the same
+ * reason it is ordered as it is: by what this particular code makes likely. An
+ * approval gap is the first thing to check here rather than the last, because
+ * Graph reached for the permission code instead of the object one.
+ */
+function commentPermissionExplanation(context: MetaSendContext): string {
+  const permission = commentPermission(context);
+  const asset = context.platform === 'facebook' ? 'Page' : 'Instagram account';
+
+  const privately =
+    context.sendKind === 'private_reply'
+      ? `\n\nA private reply needs ${permission} too — the same approval covers both, so a ` +
+        `public reply will be refused the same way until it is granted.`
+      : `\n\nThe customer can still be answered privately if the comment is less than seven ` +
+        `days old: **Reply privately** moves the thread into the DM inbox, which is governed ` +
+        `by messaging permissions rather than this one.`;
+
+  return (
+    `Graph refused the app, not the comment. This is a permission on the credential, so it ` +
+    `fails **every** comment reply on this ${asset} rather than this one — if a reply has ` +
+    `ever succeeded here, look elsewhere.\n\n` +
+    `Comment management needs ${permission} at **Advanced Access**, granted for this ` +
+    `${asset} specifically. Standard Access is not enough on a Page the app does not own, and ` +
+    `a scope granted for a different asset reads as granted everywhere else — run ` +
+    `\`npm run job -- check_meta_permissions\`, which prints the token's scopes and the ` +
+    `\`granular_scopes\` list saying which assets each one was actually granted for.` +
+    privately
+  );
+}
+
+/**
  * The three things this refusal can mean, in the order they are worth checking.
  *
  * Ordered by likelihood rather than by severity, which is the opposite of how
@@ -149,12 +230,7 @@ function isCommentTargetRefusal(error: MetaApiError): boolean {
  * permission would have failed every comment reply rather than this one.
  */
 function commentTargetExplanation(context: MetaSendContext): string {
-  const permission =
-    context.platform === 'facebook'
-      ? '`pages_manage_engagement`'
-      : context.connection === 'instagram_login'
-        ? '`instagram_business_manage_comments`'
-        : '`instagram_manage_comments`';
+  const permission = commentPermission(context);
 
   const oneOff =
     context.sendKind === 'private_reply'

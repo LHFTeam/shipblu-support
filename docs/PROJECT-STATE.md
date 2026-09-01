@@ -2491,6 +2491,91 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     those puts a parcel that has only just been turned around at "on the way
     back".
 
+41. **The plus-addressed reply token does not survive the mail path into this
+    system, so the first reply anybody ever sent us bounced.**
+    _2026-09-01, side conversation #3 on ticket #13756._
+
+    An agent opened a side conversation, the hub received it, replied — and got a
+    bounce back in their own inbox. Nothing arrived on the ticket. `jobs` showed
+    `send_side_email` completed, `side_conversation_messages` showed the outbound
+    row `sent`, and `webhook_events` showed **no inbound email at all**, that day
+    or since 2026-08-18.
+
+    The reply address is the cause. `replyDomain()` resolves to `shipblu.com`,
+    whose MX is **Zoho**, and the route into this system is a Zoho forwarding
+    rule on the single address `help-support@shipblu.com` pointing at Postmark's
+    inbound endpoint `69a4cd2a…@inbound.postmarkapp.com`. The Reply-To we
+    advertised was `help-support+s3.<sig>@shipblu.com`, which is not that address
+    and is not a Zoho mailbox — so it was rejected at Zoho, before Postmark could
+    ever see it.
+
+    **Threading was never the problem; the address was.** `resolveThread` is
+    fine, the HMAC is fine, and the three-signal design is fine. What was wrong
+    is that the most reliable of the three signals is the only one that needs the
+    _mail path_ to cooperate, and nothing had ever checked whether this one does.
+
+    It hid for two weeks because **this was the first outbound email the system
+    had ever sent to a real recipient.** All three rows in `messages` for the
+    `email` channel are inbound, from the 2026-08-18 routing test. A Reply-To had
+    never been exercised, so a flaw present since August surfaced the first time
+    somebody used the feature.
+
+    So `EMAIL_REPLY_PLUS_ADDRESSING` now gates the token, default off, and the
+    fallback is `EMAIL_FROM_ADDRESS` itself — the one address provably
+    deliverable, because we just sent from it, and the same answer
+    `send-notification-email` has always given. Replies thread on `References` or
+    on the signed `[#S3.<sig>]` subject tag instead, both of which were exercised
+    end to end when the feature landed (§7).
+
+    **Inbound still accepts a token wherever one appears**, so this is reversible
+    from the dashboard alone: add a Zoho routing rule covering
+    `help-support+*@shipblu.com`, confirm a plus-addressed test mail reaches
+    `webhook_events`, then set the variable. Tokens already in the wild keep
+    working either way. Two general lessons:
+
+    - **A reply address is infrastructure, not code.** Whether `user+tag@` is
+      deliverable is a property of the receiving mail host, and Zoho, Google and
+      a raw Postmark inbound address all answer it differently. Check it against
+      the host before designing on top of it.
+    - **A feature verified end to end against a local Postgres has not been
+      verified against the mail system.** §7 records this exact path threading
+      three separate ways — and every one of those runs fed the parser an email
+      that had already been constructed, so none of them could have caught a
+      delivery that never happens.
+
+42. **Graph refuses a comment reply the app is not approved for with code 200,
+    which the send-error explanations did not cover — so the agent got
+    "(#200) Permissions error" and nothing else.**
+    _2026-09-01 12:25:01 UTC, ticket #13755._
+
+    `POST /1261963959273229_1084459191222048/comments` came back `HTTP 403`,
+    code 200, `"(#200) Permissions error"`. `explainMetaSendError` matched only
+    `100/33` on the comment path, so the refusal fell through to the generic
+    branch and the timeline showed Meta's five words verbatim. The agent then
+    tried **Reply privately**, which failed too — that one as `100/33`, so it
+    _did_ get the full explanation, which leads with "the comment is gone". Two
+    failures on one ticket pointing at opposite causes, neither of them right.
+
+    The cause is the approval: **`pages_manage_engagement` at Advanced Access**,
+    which this Page token does not carry. The discriminator was already written
+    down in `commentTargetExplanation` — "that one fails _every_ comment reply
+    rather than this one, so it is only the answer if no reply has ever
+    succeeded" — and the database settles it: across all time,
+    `meta->>'sendKind' = 'comment_reply'` has exactly one row and it is this
+    failure. **No comment reply has ever succeeded here.**
+
+    `lib/meta/errors.ts` now matches 3, 10 and 200 on the comment edges — the
+    same three codes the profile lookups already treat as "Graph refused the app,
+    not the request" — and says so, naming the permission, Advanced Access, and
+    `check_meta_permissions`. Kept separate from the `100/33` branch on purpose:
+    the two need opposite responses, and folding them together would have made
+    the observed refusal print the deleted-comment sentence.
+
+    The file's own instruction is what was followed here: it said the comment
+    branch was "not observed against the real Graph … if a real refusal arrives
+    wearing a different code, read it out of the log and widen this rather than
+    guessing now." One arrived. It was read out of the log.
+
 ## 7. Verification already done
 
 - **WhatsApp, end to end on production.** A synthetic webhook was enqueued; the
