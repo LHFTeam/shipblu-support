@@ -316,6 +316,21 @@ Arabic and English packaging guides are images and nothing else — and the pane
 says so rather than showing an empty box. Those images are still hot-linked from
 `s3.amazonaws.com/cdn.freshdesk.com` and will die with the Freshdesk account.
 
+And now **the widget knows who it is talking to, and opens with answers rather
+than a blank box.** Both were found by the same question: what does a merchant
+see when the dashboard stops loading Freshchat. The old snippet handed the
+widget a signed-in merchant's name, address, phone and account, and ours took
+none of it, so every chat would have opened anonymously — `shipbluChatSettings`
+and `shipbluChat.identify()` now carry it, `docs/embedding-the-widget.md` is the
+contract, and what arrives unsigned decorates the contact without ever claiming
+an account (see §"Security" and `lib/widget/identity.ts`). And the widget's only
+knowledge-base surface was a suggestion strip that appears after six typed
+characters, which meant it opened onto "Ask us anything" and nothing else. The
+opening screen now offers the five most-read articles in the visitor's locale
+through the same `popularArticles()` the help centre's front page uses — server
+rendered with the frame, so they are on screen when it paints, gone the moment
+there is a conversation, and empty is a normal state that hides the section.
+
 **The bot channel is live, and everything else is not.** This is the single most
 important thing to understand about the current state, and the easiest to read
 backwards.
@@ -787,7 +802,14 @@ is code:
 
   The knowledge panel and the article editor no longer depend on it: both build
   their links with `requestBaseUrl()` from the request's own `Host`, so they
-  follow whatever domain the console is being served on. Nothing else was
+  follow whatever domain the console is being served on. **The widget's two
+  article links joined them on 2026-08-31** — the popular questions on its
+  opening screen and the suggestions above its composer — for the same reason
+  and one more: the widget frames whichever of our hostnames served the snippet,
+  so the request's own `Host` is by construction the one that will answer. It
+  was measured before the change: `support.shipblu.com/en/a/fees-on-delivery-fod`
+  answers 404 while the suggestion pointing at it was being rendered, which made
+  every article the widget offered a dead link. Nothing else was
   moved — a published address should stay published, and switching the sitemap
   to a request host would be a genuine mistake.
   `META_APP_ID` joined the shared group with this change and is _not_ on that

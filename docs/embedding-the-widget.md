@@ -133,6 +133,16 @@ replayable at the other. While it is unset, signatures are ignored and every
 identity is unverified; once it is set, a signature that does not verify is a
 401 rather than a quiet downgrade.
 
+## What the visitor sees before they type
+
+The five most-read help centre articles for the widget's locale, on the opening
+screen, replaced by the conversation as soon as there is one. They come from the
+same source as the help centre's most-read list, so an article that earns its
+place there earns it here; nothing has to be curated per surface, and a locale
+with nothing read yet simply shows no list. Set `locale` correctly and the
+questions arrive in the visitor's language — that is the only thing the host
+page controls here.
+
 ## What the agent sees
 
 The requester's name, email and phone on the ticket, the shipping account in the

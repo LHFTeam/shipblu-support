@@ -3,7 +3,7 @@ import { DEFAULT_LOCALE, isLocale } from '@/lib/kb/locale';
 import { searchArticles } from '@/lib/kb/queries';
 import { ANONYMOUS } from '@/lib/kb/visibility';
 import { allow, clientIp } from '@/lib/kb/rate-limit';
-import { publicBaseUrl } from '@/lib/kb/site';
+import { requestBaseUrl } from '@/lib/kb/site';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,7 +37,15 @@ export async function GET(request: Request) {
   if (query.length < 3) return NextResponse.json({ articles: [] });
 
   const hits = await searchArticles(ANONYMOUS, locale, query, 3);
-  const base = publicBaseUrl();
+  /*
+   * The host this request arrived on, which is the one that served the frame —
+   * not `publicBaseUrl()`, which builds every link on `KB_PUBLIC_HOST` and
+   * therefore on a domain that does not serve this app yet. A suggestion the
+   * visitor cannot open is worse than no suggestion, and this is a link for
+   * somebody reading right now rather than a published address that has to stay
+   * put; the sitemap and the canonicals keep the configured host.
+   */
+  const base = requestBaseUrl(request.headers);
 
   return NextResponse.json({
     articles: hits.map((hit) => ({
