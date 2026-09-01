@@ -4,7 +4,8 @@ import { agents, contacts, conversations, messages } from '@/db/schema';
 import { env, replyDomain } from '@/lib/env';
 import { emailProvider } from '@/lib/email/providers';
 import { REPLY_ABOVE_MARKER } from '@/lib/email/quote-strip';
-import { buildReplyAddress, buildReplySubject, formatMessageId } from '@/lib/email/threading';
+import { replyToAddress } from '@/lib/email/reply-address';
+import { buildReplySubject, formatMessageId } from '@/lib/email/threading';
 import type { OutboundEmail } from '@/lib/email/types';
 import type { ClaimedJob } from '@/lib/queue';
 
@@ -56,7 +57,6 @@ export async function sendEmail(job: ClaimedJob): Promise<void> {
   }
 
   const domain = replyDomain();
-  const mailbox = e.EMAIL_FROM_ADDRESS.split('@')[0] ?? 'support';
 
   const references = buildReferences(row.message.inReplyTo, generatedMessageId(row, domain));
 
@@ -80,7 +80,7 @@ export async function sendEmail(job: ClaimedJob): Promise<void> {
       address: e.EMAIL_FROM_ADDRESS,
       name: row.agent ? `${row.agent.name} (${e.EMAIL_FROM_NAME})` : e.EMAIL_FROM_NAME,
     },
-    replyTo: buildReplyAddress(row.conversation.number, e.APP_SECRET, mailbox, domain),
+    replyTo: replyToAddress({ kind: 'ticket', conversationNumber: row.conversation.number }),
     subject: buildReplySubject(row.conversation.subject, row.conversation.number, e.APP_SECRET),
     textBody,
     htmlBody,

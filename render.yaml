@@ -132,6 +132,16 @@ projects:
               #   EMAIL_FROM_ADDRESS
               #   EMAIL_REPLY_DOMAIN       builds support+<token>@
               #
+              # EMAIL_REPLY_PLUS_ADDRESSING is deliberately *not set anywhere*,
+              # which reads as off. shipblu.com's MX is Zoho, and the route in is
+              # a Zoho forwarding rule on the one address help-support@shipblu.com
+              # — a plus-suffixed variant is rejected there and never reaches
+              # Postmark, so advertising one in Reply-To bounced the first reply
+              # anybody sent us (docs/PROJECT-STATE.md §6.41). Set it to "true"
+              # here only after a Zoho rule covers help-support+*@shipblu.com and
+              # a plus-addressed test mail has been seen landing in
+              # webhook_events. Inbound accepts the token either way.
+              #
               #   META_PAGE_ACCESS_TOKEN   sends on every Meta channel
               #   META_APP_SECRET          verifies X-Hub-Signature-256
               #   META_VERIFY_TOKEN        answers the subscription handshake

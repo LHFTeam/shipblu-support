@@ -317,3 +317,102 @@ describe('a reply to a comment Graph will not accept', () => {
     expect(explained).not.toContain('The comment is gone');
   });
 });
+
+describe('a comment reply the app is not approved to make', () => {
+  /**
+   * The real one, copied from production rather than imagined: ticket #13755,
+   * 2026-09-01 12:25:01 UTC, `POST /1261963959273229_1084459191222048/comments`
+   * answered `HTTP 403` with code 200 and the words below. It was the first
+   * comment reply this system had ever attempted, and it fell through every
+   * branch to the generic one — the agent's timeline read "(#200) Permissions
+   * error" and stopped there.
+   */
+  const permissionsError = () =>
+    new MetaApiError('(#200) Permissions error', 403, 200, null, false, null, 'AT9Pvg');
+
+  it('says the app was refused, not the comment', () => {
+    const explained = explainMetaSendError(permissionsError(), {
+      platform: 'facebook',
+      connection: 'facebook_page',
+      sendKind: 'comment_reply',
+    });
+
+    expect(explained).toContain('(#200) Permissions error');
+    expect(explained).toContain('pages_manage_engagement');
+    expect(explained).toContain('Advanced Access');
+    expect(explained).toContain('check_meta_permissions');
+
+    // The opposite diagnosis, and the one an agent would waste the afternoon on:
+    // this code says nothing about whether the customer deleted anything.
+    expect(explained).not.toContain('The comment is gone');
+  });
+
+  it('says it fails every reply, which is what makes it worth checking first', () => {
+    const explained = explainMetaSendError(permissionsError(), {
+      platform: 'facebook',
+      connection: 'facebook_page',
+      sendKind: 'comment_reply',
+    });
+
+    expect(explained).toContain('every');
+    expect(explained).toContain('if a reply has ever succeeded here, look elsewhere');
+  });
+
+  it('names the permission belonging to the connection the send went out over', () => {
+    const direct = explainMetaSendError(permissionsError(), {
+      platform: 'instagram',
+      connection: 'instagram_login',
+      sendKind: 'comment_reply',
+    });
+    expect(direct).toContain('instagram_business_manage_comments');
+
+    const page = explainMetaSendError(permissionsError(), {
+      platform: 'instagram',
+      connection: 'facebook_page',
+      sendKind: 'comment_reply',
+    });
+    expect(page).toContain('instagram_manage_comments');
+    expect(page).not.toContain('instagram_business_manage_comments');
+  });
+
+  it('covers the other two codes Graph refuses an app with', () => {
+    // 3 and 10 are the same refusal in different words — the profile lookups
+    // already treat all three as one thing, and this path sees the same Graph.
+    for (const code of [3, 10]) {
+      const explained = explainMetaSendError(
+        new MetaApiError('Permissions error', 403, code, null, false, null, 'AaBb'),
+        { platform: 'facebook', connection: 'facebook_page', sendKind: 'comment_reply' },
+      );
+      expect(explained).toContain('pages_manage_engagement');
+    }
+  });
+
+  it('offers the private reply as the way through, but not to a private reply', () => {
+    const publicReply = explainMetaSendError(permissionsError(), {
+      platform: 'facebook',
+      connection: 'facebook_page',
+      sendKind: 'comment_reply',
+    });
+    expect(publicReply).toContain('Reply privately');
+
+    // Suggesting it to somebody whose private reply just failed would be a loop.
+    const privateReply = explainMetaSendError(permissionsError(), {
+      platform: 'facebook',
+      connection: 'facebook_page',
+      sendKind: 'private_reply',
+    });
+    expect(privateReply).not.toContain('Reply privately');
+    expect(privateReply).toContain('the same approval covers both');
+  });
+
+  it('leaves a direct message alone: this branch is about the comment edges', () => {
+    const explained = explainMetaSendError(permissionsError(), {
+      platform: 'facebook',
+      connection: 'facebook_page',
+      sendKind: 'dm',
+      tag: 'RESPONSE',
+    });
+
+    expect(explained).not.toContain('pages_manage_engagement');
+  });
+});
