@@ -424,3 +424,70 @@ describe('a comment reply the app is not approved to make', () => {
     expect(explained).not.toContain('pages_manage_engagement');
   });
 });
+
+describe('thread control', () => {
+  /*
+    The refusal that produced this: two Facebook private replies on 2026-09-02,
+    both `10 / 2018300`, both explained as a missing messaging permission because
+    code 10 is one of the three the comment branch claims. Meta's own sentence
+    said what was wrong; the explanation underneath contradicted it.
+  */
+  const handover = () =>
+    new MetaApiError(
+      'Message failed to send because another app is controlling this thread now.',
+      400,
+      10,
+      2018300,
+      false,
+      null,
+      'AqKQR',
+    );
+
+  it('reads 10/2018300 as handover and not as a permission', () => {
+    const explained = explainMetaSendError(handover(), {
+      platform: 'facebook',
+      connection: 'facebook_page',
+      sendKind: 'private_reply',
+    });
+
+    expect(explained).toContain('thread control');
+    expect(explained).toContain('not a permission problem');
+    // The branch it has to win against, and the advice that would waste a day.
+    expect(explained).not.toContain('pages_messaging');
+    expect(explained).not.toContain('check_meta_permissions');
+  });
+
+  it('still explains a bare code 10 as the permission refusal it is', () => {
+    // The subcode is the only thing separating the two, so a 10 without one must
+    // keep reaching the branch it always did.
+    const explained = explainMetaSendError(
+      new MetaApiError('Permissions error', 403, 10, null, false, null, 'AaBb'),
+      { platform: 'facebook', connection: 'facebook_page', sendKind: 'comment_reply' },
+    );
+
+    expect(explained).toContain('pages_manage_engagement');
+    expect(explained).not.toContain('thread control');
+  });
+
+  it('offers the direct Instagram connection only when the Page is the route', () => {
+    const viaPage = explainMetaSendError(handover(), {
+      platform: 'instagram',
+      connection: 'facebook_page',
+      sendKind: 'private_reply',
+    });
+    expect(viaPage).toContain('INSTAGRAM_ACCESS_TOKEN');
+
+    /*
+      Already on the direct connection, where the Page's handover does not apply
+      — observed the same day: a private reply over `instagram_login` was
+      delivered in the minute a Facebook one was refused this way. Suggesting the
+      escape it is already using would be nonsense.
+    */
+    const direct = explainMetaSendError(handover(), {
+      platform: 'instagram',
+      connection: 'instagram_login',
+      sendKind: 'private_reply',
+    });
+    expect(direct).not.toContain('INSTAGRAM_ACCESS_TOKEN');
+  });
+});
