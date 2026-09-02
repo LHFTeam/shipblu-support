@@ -11,7 +11,12 @@ import {
   conversationsForTrackingNumber,
   getShipmentByTrackingNumber,
 } from '@/lib/shipments/queries';
-import { humaniseStatus } from '@/lib/shipments/status';
+import {
+  humaniseStatus,
+  returnProgress,
+  returnStepLabel,
+  RETURN_STEPS,
+} from '@/lib/shipments/status';
 import { scopeForAgent } from '@/lib/tickets/queries';
 import { ConversationTable } from '../../conversation-table';
 import { SyncBadge } from '../../page';
@@ -45,6 +50,21 @@ export default async function ShipmentPage({ params }: { params: Promise<{ track
    */
   const detail = await agentTrackingFor(trackingNumber);
 
+  /*
+   * Whether this parcel is on its way back, worked out the same way the customer
+   * page works it out — from `rto_requested` and the events, never from the
+   * status, which the platform leaves at `delivery_attempted` for the whole of a
+   * return (PROJECT-STATE §6.40). An agent reading the status alone would tell a
+   * caller their parcel is still coming.
+   */
+  const returning = detail
+    ? returnProgress({
+        rtoRequested: detail.rtoRequested,
+        status: detail.status,
+        events: detail.events,
+      })
+    : null;
+
   const editable = can(agent, 'contact.edit');
 
   return (
@@ -76,6 +96,14 @@ export default async function ShipmentPage({ params }: { params: Promise<{ track
                 something the detector picked up that was never a tracking number.
               </p>
             ) : null}
+            {returning ? (
+              <p className="rounded-md border border-[var(--border)] bg-[var(--muted)] px-2 py-1.5">
+                <span className="font-medium">{returnStepLabel('en', returning.step)}</span> — step{' '}
+                {returning.step + 1} of {RETURN_STEPS.length} of the journey back. This parcel is
+                going to the merchant, not to the customer, and will not be delivered.
+              </p>
+            ) : null}
+
             {shipment.sbid ? (
               <p>
                 Account:{' '}
@@ -128,14 +156,29 @@ export default async function ShipmentPage({ params }: { params: Promise<{ track
             <Card>
               <h3 className="mb-2 text-xs font-medium opacity-60">Delivery</h3>
               <dl className="flex flex-col gap-1.5 text-xs">
-                <Row label="Status" value={humaniseStatus(detail.status)} />
+                <Row
+                  label="Status"
+                  value={
+                    returning
+                      ? returnStepLabel('en', returning.step)
+                      : humaniseStatus(detail.status)
+                  }
+                />
+                {/* Kept beside it on a return, because it is what the platform
+                    still reports and an agent comparing screens will see it. */}
+                {returning ? (
+                  <Row label="Platform says" value={humaniseStatus(detail.status)} />
+                ) : null}
                 <Row
                   label="As of"
                   value={detail.statusAt ? formatDateTime(detail.statusAt) : null}
                 />
                 {/* Calendar dates, printed as the strings they are. Passing one
                     through a Date would move it a day west of Greenwich. */}
-                <Row label="Estimated" value={detail.estimatedDate} />
+                {/* Never on a return: nothing is being delivered, so an
+                    estimated delivery date is a date for an event that will not
+                    happen. */}
+                {returning ? null : <Row label="Estimated" value={detail.estimatedDate} />}
                 {/* Only when it has moved. Printing "booked 29th / estimated
                     29th" on every parcel is a row that says nothing; printing it
                     when they differ answers the call it generates. */}
@@ -202,17 +245,32 @@ export default async function ShipmentPage({ params }: { params: Promise<{ track
                   {detail.events
                     .slice()
                     .reverse()
-                    .map((event) => (
-                      <li
-                        key={`${event.status}-${event.at.toISOString()}`}
-                        className="flex justify-between gap-3"
-                      >
-                        <span>{humaniseStatus(event.status)}</span>
-                        <span className="shrink-0 tabular-nums opacity-60">
-                          {formatDateTime(event.at)}
-                        </span>
-                      </li>
-                    ))}
+                    .map((event) => {
+                      // Which leg this row belongs to. The same `in_transit`
+                      // event means "on its way to you" before the turnaround
+                      // and "on its way back" after it, and an agent reading a
+                      // flat list has no way to tell them apart.
+                      const onReturnLeg =
+                        returning?.startedAt != null &&
+                        event.at.getTime() >= returning.startedAt.getTime();
+
+                      return (
+                        <li
+                          key={`${event.status}-${event.at.toISOString()}`}
+                          className="flex justify-between gap-3"
+                        >
+                          <span>
+                            {humaniseStatus(event.status)}
+                            {onReturnLeg ? (
+                              <span className="ms-1.5 opacity-50">· return</span>
+                            ) : null}
+                          </span>
+                          <span className="shrink-0 tabular-nums opacity-60">
+                            {formatDateTime(event.at)}
+                          </span>
+                        </li>
+                      );
+                    })}
                 </ol>
               )}
             </Card>

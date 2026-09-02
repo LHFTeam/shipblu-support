@@ -1,5 +1,5 @@
 import type { conversations } from '@/db/schema';
-import type { Facts } from './conditions';
+import { normaliseCustom, type Facts } from './conditions';
 
 /**
  * The ticket vocabulary that conditions are written against.
@@ -18,6 +18,15 @@ export type FactSource = {
   conversation: typeof conversations.$inferSelect;
   statusCategory: 'open' | 'pending' | 'resolved' | 'closed';
   requesterEmail?: string | null;
+  /**
+   * The slug of the form the ticket was submitted through, when it was.
+   *
+   * The slug rather than the id: a rule is read and written by a person, and
+   * `form.slug is damaged-parcel` says what it routes on where a uuid says
+   * nothing. Undefined here and null in the facts mean the same thing to
+   * `is_empty` — the caller does not have to look the form up to build facts.
+   */
+  formSlug?: string | null;
 };
 
 export function conversationFacts(source: FactSource, now: Date = new Date()): Facts {
@@ -37,6 +46,7 @@ export function conversationFacts(source: FactSource, now: Date = new Date()): F
     'group.id': c.groupId,
     'assignee.id': c.assigneeAgentId,
     'requester.email': source.requesterEmail ?? null,
+    'form.slug': source.formSlug ?? null,
 
     created_at: c.createdAt,
     hours_since_created: hoursSince(c.createdAt, now),
@@ -76,14 +86,4 @@ function hoursSince(at: Date | null, now: Date): number | null {
 function isOverdue(dueAt: Date | null, satisfiedAt: Date | null, now: Date): boolean {
   if (!dueAt || satisfiedAt) return false;
   return dueAt.getTime() < now.getTime();
-}
-
-function normaliseCustom(value: unknown): Facts[string] {
-  if (value === null || value === undefined) return null;
-  if (Array.isArray(value)) return value.map((entry) => String(entry));
-  if (typeof value === 'object') return JSON.stringify(value);
-  if (typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string') {
-    return value;
-  }
-  return String(value);
 }

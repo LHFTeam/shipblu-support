@@ -46,9 +46,14 @@ export async function GET(request: Request) {
   if (query.length < 3) return NextResponse.json({ articles: [] });
 
   const hits = await searchArticles(ANONYMOUS, locale, query, RESULTS);
-  // The origin this request actually arrived on. `publicBaseUrl()` names
-  // KB_PUBLIC_HOST, which does not serve this app yet, so every suggestion built
-  // from it 404s for the person who clicked it.
+  /*
+   * The host this request arrived on, which is the one that served the frame —
+   * not `publicBaseUrl()`, which builds every link on `KB_PUBLIC_HOST` and
+   * therefore on a domain that does not serve this app yet. A suggestion the
+   * visitor cannot open is worse than no suggestion, and this is a link for
+   * somebody reading right now rather than a published address that has to stay
+   * put; the sitemap and the canonicals keep the configured host.
+   */
   const base = requestBaseUrl(request.headers);
 
   return NextResponse.json({

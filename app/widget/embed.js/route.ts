@@ -21,14 +21,38 @@ export async function GET() {
   const script = `(function () {
   'use strict';
 
-  if (window.__shipbluWidget) return;
+  // Either name: a page can hold a cached copy of the snippet from before the
+  // API object was named, and two launchers is the one failure a host page
+  // cannot fix from its side.
+  if (window.shipbluChat || window.__shipbluWidget) return;
 
-  // Claimed before anything else runs, so a page carrying the snippet twice
-  // still draws one launcher. \`setLocale\` is a function declaration, so it is
-  // already defined by the time a host page can reach it.
-  window.__shipbluWidget = { setLocale: setLocale };
+  /*
+   * The whole host-page API, claimed before anything else runs so a page
+   * carrying the snippet twice still draws one launcher. Every entry is a
+   * function *declaration*, so all of them are defined by the time a host page
+   * can reach the object.
+   *
+   * \`__shipbluWidget\` is the name this shipped under and stays an alias: a help
+   * centre page held in a back/forward cache still calls it.
+   */
+  window.shipbluChat = window.__shipbluWidget = {
+    identify: identify,
+    clear: clear,
+    setLocale: setLocale,
+    open: function () { toggle(true); },
+    close: function () { toggle(false); },
+    toggle: function () { toggle(); }
+  };
 
   var script = document.currentScript;
+
+  /*
+   * What the host page set before loading this file — the same shape Freshchat's
+   * \`fcWidgetMessengerConfig\` had, so a page moving off it changes the object's
+   * name and little else. Read once here; a page whose user changes afterwards
+   * calls \`identify()\` rather than mutating it, because nothing watches it.
+   */
+  var settings = window.shipbluChatSettings || {};
 
   /*
    * The origin the widget is served from.
@@ -56,10 +80,25 @@ export async function GET() {
     }
   }
 
-  var locale = (script && script.getAttribute('data-locale')) || 'en';
+  // The attribute wins over the settings object: the help centre keeps it
+  // current across a client-side language switch, which is the case that has to
+  // be right when both are present.
+  var locale = (script && script.getAttribute('data-locale')) || settings.locale || 'en';
 
   var open = false;
   var iframe = null;
+
+  /*
+   * Who the host page says its visitor is, held here until the frame exists and
+   * has a session to attach it to. The frame is only built on first open, so an
+   * identity handed over at page load waits — which is the right way round: an
+   * eager frame would cost every dashboard page view a request for a chat
+   * nobody opened.
+   */
+  var identity = identityFrom(settings);
+  var signature = typeof settings.signature === 'string' ? settings.signature : null;
+  var frameReady = false;
+  var clearPending = false;
 
   /*
    * The two layouts, and which one a viewport gets.
@@ -333,8 +372,85 @@ export async function GET() {
   // the right place.
   applyLocale();
 
+  /**
+   * Everything the widget will accept as an identity, so a settings object
+   * carrying only \`locale\` is not mistaken for one.
+   */
+  function identityFrom(source) {
+    if (!source || typeof source !== 'object') return null;
+
+    var keys = [
+      'name', 'firstName', 'lastName', 'email', 'phone',
+      'accountId', 'account_id', 'accountName', 'account_name', 'meta'
+    ];
+
+    for (var i = 0; i < keys.length; i++) {
+      if (source[keys[i]] !== undefined && source[keys[i]] !== null) return source;
+    }
+
+    return null;
+  }
+
+  /**
+   * Told to us by a host page that knows who is signed in.
+   *
+   * The signature is optional and is what separates a claim from a fact — see
+   * \`lib/widget/identity.ts\`. It may travel as a second argument or as a
+   * \`signature\` property, because a dashboard usually gets it from its own
+   * backend alongside the rest of the user object.
+   */
+  function identify(user, userSignature) {
+    identity = identityFrom(user);
+    signature =
+      typeof userSignature === 'string'
+        ? userSignature
+        : user && typeof user.signature === 'string'
+          ? user.signature
+          : null;
+
+    pushIdentity();
+  }
+
+  /**
+   * The host page's user has signed out.
+   *
+   * This has to survive the frame not existing yet. The visitor token lives in
+   * *our* origin's storage, so it outlives the host page's session entirely: a
+   * merchant who signs out without ever opening the chat still leaves one
+   * behind for whoever signs in next.
+   */
+  function clear() {
+    identity = null;
+    signature = null;
+
+    if (iframe && frameReady) {
+      iframe.contentWindow.postMessage({ source: 'shipblu-host', type: 'clear' }, BASE);
+    } else {
+      clearPending = true;
+    }
+
+    toggle(false);
+  }
+
+  function pushIdentity() {
+    if (!identity || !iframe || !frameReady) return;
+
+    iframe.contentWindow.postMessage(
+      { source: 'shipblu-host', type: 'identify', identity: identity, signature: signature },
+      BASE
+    );
+  }
+
   function ensureFrame() {
     if (iframe) return iframe;
+
+    /*
+     * A host page that calls \`shipbluChat.open()\` from its own head has nothing
+     * to append to yet. Returning null rather than throwing leaves the frame to
+     * be built by the click on the launcher, which cannot happen before there is
+     * a body to draw it in.
+     */
+    if (!document.body) return null;
 
     iframe = document.createElement('iframe');
     iframe.id = 'shipblu-chat-frame';
@@ -363,6 +479,10 @@ export async function GET() {
   function toggle(next) {
     open = next === undefined ? !open : next;
     var frame = ensureFrame();
+    if (!frame) {
+      open = false;
+      return;
+    }
     frame.style.display = open ? 'block' : 'none';
     paintLauncher();
 
@@ -373,10 +493,10 @@ export async function GET() {
 
     // Told on every open *and* every close, because an iframe cannot detect
     // being shown or hidden on its own — \`display:none\` fires no event inside
-    // it. The widget needs both halves: 'opened' is when it marks the
-    // transcript read, and without 'closed' a visitor who leaves the panel
-    // sitting on the conversation would never be badged for the reply that
-    // arrives after they look away.
+    // it. The widget needs both halves: 'opened' is when it marks the transcript
+    // read, and without 'closed' a visitor who leaves the panel sitting on the
+    // conversation would never be badged for the reply that arrives after they
+    // look away.
     if (open) badge.style.display = 'none';
     frame.contentWindow.postMessage(
       { source: 'shipblu-host', type: open ? 'opened' : 'closed' },
@@ -422,13 +542,32 @@ export async function GET() {
     if (!data || data.source !== 'shipblu-widget') return;
 
     /*
-     * The widget asking what state it is in.
+     * The frame has a session and can be told things. Sent again after the
+     * widget starts a fresh one, which is why the identity is pushed rather
+     * than assumed to have survived.
+     */
+    if (data.type === 'ready') {
+      frameReady = true;
+
+      if (clearPending) {
+        clearPending = false;
+        iframe.contentWindow.postMessage({ source: 'shipblu-host', type: 'clear' }, BASE);
+        return;
+      }
+
+      pushIdentity();
+    }
+
+    /*
+     * The frame asking whether it is visible.
      *
-     * It cannot know: the 'opened' this script posts when it *creates* the frame
+     * Distinct from 'ready', which the widget only sends once it has a session:
+     * it now opens on the questions and mints no token until somebody chooses to
+     * talk, so a panel showing FAQs would never ask. And it cannot work this out
+     * for itself — the 'opened' posted when this script *creates* the frame
      * lands on about:blank, a close before the frame loads is lost the same way,
-     * and \`setLocale\` re-points \`src\` and starts a new document. So the frame
-     * asks on mount and this answers with the truth, rather than the frame
-     * assuming it is visible and swallowing the unread badge while hidden.
+     * and \`setLocale\` re-points \`src\` and starts a new document. Left
+     * assuming it is visible, a hidden panel silently swallows the unread badge.
      */
     if (data.type === 'hello') {
       if (iframe && iframe.contentWindow) {

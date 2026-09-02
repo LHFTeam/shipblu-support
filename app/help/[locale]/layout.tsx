@@ -93,7 +93,7 @@ export default async function KbLayout({
             <AccountNav locale={locale} />
 
             <Link
-              href={`/${locale}/portal/new`}
+              href={`/${locale}/forms`}
               className="rounded-md bg-[var(--button-primary)] px-3.5 py-2 font-semibold text-white transition-colors hover:bg-[var(--button-primary-hover)]"
             >
               {t(locale, 'contactAction')}

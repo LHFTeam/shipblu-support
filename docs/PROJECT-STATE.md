@@ -5,7 +5,7 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-08-26, against `main` at `22871e1`.
+Last updated: 2026-08-31, against `main` at `fae6330`.
 
 ---
 
@@ -315,6 +315,21 @@ carries an entire message timeline. Two articles have no body text at all — th
 Arabic and English packaging guides are images and nothing else — and the panel
 says so rather than showing an empty box. Those images are still hot-linked from
 `s3.amazonaws.com/cdn.freshdesk.com` and will die with the Freshdesk account.
+
+And now **the widget knows who it is talking to, and opens with answers rather
+than a blank box.** Both were found by the same question: what does a merchant
+see when the dashboard stops loading Freshchat. The old snippet handed the
+widget a signed-in merchant's name, address, phone and account, and ours took
+none of it, so every chat would have opened anonymously — `shipbluChatSettings`
+and `shipbluChat.identify()` now carry it, `docs/embedding-the-widget.md` is the
+contract, and what arrives unsigned decorates the contact without ever claiming
+an account (see §"Security" and `lib/widget/identity.ts`). And the widget's only
+knowledge-base surface was a suggestion strip that appears after six typed
+characters, which meant it opened onto "Ask us anything" and nothing else. The
+opening screen now offers the five most-read articles in the visitor's locale
+through the same `popularArticles()` the help centre's front page uses — server
+rendered with the frame, so they are on screen when it paints, gone the moment
+there is a conversation, and empty is a normal state that hides the section.
 
 **The bot channel is live, and everything else is not.** This is the single most
 important thing to understand about the current state, and the easiest to read
@@ -760,7 +775,17 @@ is code:
   re-run it if the parser ever learns to read a shape it currently skips. §7 has
   the figures.
 - **Unset config:** `EMAIL_API_KEY`, `EMAIL_FROM_ADDRESS`, `EMAIL_REPLY_DOMAIN`,
-  `EMAIL_WEBHOOK_SECRET`, `WIDGET_ALLOWED_ORIGINS`.
+  `EMAIL_WEBHOOK_SECRET`, `WIDGET_ALLOWED_ORIGINS`, `WIDGET_IDENTITY_SECRET`.
+
+  **The last two are what stands between the widget and the merchant
+  dashboard.** Measured 2026-08-31: `https://shipblu-support.onrender.com/widget`
+  answers `content-security-policy: frame-ancestors 'self';`, so
+  `app.shipblu.com` cannot frame it at all — the launcher would open an empty
+  box. `WIDGET_ALLOWED_ORIGINS` has to name that origin before the snippet in
+  `docs/embedding-the-widget.md` does anything. `WIDGET_IDENTITY_SECRET` is the
+  softer half: without it the dashboard can still say who its visitor is and the
+  agent still sees a name, an address and a phone — the claim just never gets to
+  link the person to their shipping account.
 
   **`KB_PUBLIC_HOST` was on this list and should not have been. It is set, to
   `support.shipblu.com`, and that domain still serves Freshdesk.** Measured
@@ -782,7 +807,14 @@ is code:
 
   The knowledge panel and the article editor no longer depend on it: both build
   their links with `requestBaseUrl()` from the request's own `Host`, so they
-  follow whatever domain the console is being served on. Nothing else was
+  follow whatever domain the console is being served on. **The widget's two
+  article links joined them on 2026-08-31** — the popular questions on its
+  opening screen and the suggestions above its composer — for the same reason
+  and one more: the widget frames whichever of our hostnames served the snippet,
+  so the request's own `Host` is by construction the one that will answer. It
+  was measured before the change: `support.shipblu.com/en/a/fees-on-delivery-fod`
+  answers 404 while the suggestion pointing at it was being rendered, which made
+  every article the widget offered a dead link. Nothing else was
   moved — a published address should stay published, and switching the sitemap
   to a request host would be a genuine mistake.
   `META_APP_ID` joined the shared group with this change and is _not_ on that
@@ -856,6 +888,12 @@ provider. Each is a round trip somebody has to actually watch:
   `frame-ancestors` allowlist and the visitor token are what you are testing.
   The help centre is not that test even on its own domain — it serves the
   snippet itself, so the frame is same-origin and `'self'` already covers it.
+  The identity handshake added on 2026-08-31 is part of the same test and has
+  the same gap: it was driven in Chromium from a page on `localhost:8080`
+  against a dev server on `localhost:10000` — a real cross-origin frame, a real
+  `WIDGET_ALLOWED_ORIGINS` entry, a real Postgres — which proves the mechanism
+  and proves nothing about `app.shipblu.com`, where the origin is one Render
+  serves the header for.
 - **The KB on its custom domain**, including that Freshdesk's old article URLs
   redirect. 174 `kb_redirects` rows exist and none has been followed in anger.
 - **A WhatsApp template send outside the 24-hour window** — the one path the
@@ -2521,6 +2559,91 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
   into `attachVisitorDetails` before anyone checked the merge suggester.
   Skipping the identity row narrows the blast radius from a routing rule to a
   suggestion an agent can decline; it does not remove it.
+
+41. **The plus-addressed reply token does not survive the mail path into this
+    system, so the first reply anybody ever sent us bounced.**
+    _2026-09-01, side conversation #3 on ticket #13756._
+
+    An agent opened a side conversation, the hub received it, replied — and got a
+    bounce back in their own inbox. Nothing arrived on the ticket. `jobs` showed
+    `send_side_email` completed, `side_conversation_messages` showed the outbound
+    row `sent`, and `webhook_events` showed **no inbound email at all**, that day
+    or since 2026-08-18.
+
+    The reply address is the cause. `replyDomain()` resolves to `shipblu.com`,
+    whose MX is **Zoho**, and the route into this system is a Zoho forwarding
+    rule on the single address `help-support@shipblu.com` pointing at Postmark's
+    inbound endpoint `69a4cd2a…@inbound.postmarkapp.com`. The Reply-To we
+    advertised was `help-support+s3.<sig>@shipblu.com`, which is not that address
+    and is not a Zoho mailbox — so it was rejected at Zoho, before Postmark could
+    ever see it.
+
+    **Threading was never the problem; the address was.** `resolveThread` is
+    fine, the HMAC is fine, and the three-signal design is fine. What was wrong
+    is that the most reliable of the three signals is the only one that needs the
+    _mail path_ to cooperate, and nothing had ever checked whether this one does.
+
+    It hid for two weeks because **this was the first outbound email the system
+    had ever sent to a real recipient.** All three rows in `messages` for the
+    `email` channel are inbound, from the 2026-08-18 routing test. A Reply-To had
+    never been exercised, so a flaw present since August surfaced the first time
+    somebody used the feature.
+
+    So `EMAIL_REPLY_PLUS_ADDRESSING` now gates the token, default off, and the
+    fallback is `EMAIL_FROM_ADDRESS` itself — the one address provably
+    deliverable, because we just sent from it, and the same answer
+    `send-notification-email` has always given. Replies thread on `References` or
+    on the signed `[#S3.<sig>]` subject tag instead, both of which were exercised
+    end to end when the feature landed (§7).
+
+    **Inbound still accepts a token wherever one appears**, so this is reversible
+    from the dashboard alone: add a Zoho routing rule covering
+    `help-support+*@shipblu.com`, confirm a plus-addressed test mail reaches
+    `webhook_events`, then set the variable. Tokens already in the wild keep
+    working either way. Two general lessons:
+
+    - **A reply address is infrastructure, not code.** Whether `user+tag@` is
+      deliverable is a property of the receiving mail host, and Zoho, Google and
+      a raw Postmark inbound address all answer it differently. Check it against
+      the host before designing on top of it.
+    - **A feature verified end to end against a local Postgres has not been
+      verified against the mail system.** §7 records this exact path threading
+      three separate ways — and every one of those runs fed the parser an email
+      that had already been constructed, so none of them could have caught a
+      delivery that never happens.
+
+42. **Graph refuses a comment reply the app is not approved for with code 200,
+    which the send-error explanations did not cover — so the agent got
+    "(#200) Permissions error" and nothing else.**
+    _2026-09-01 12:25:01 UTC, ticket #13755._
+
+    `POST /1261963959273229_1084459191222048/comments` came back `HTTP 403`,
+    code 200, `"(#200) Permissions error"`. `explainMetaSendError` matched only
+    `100/33` on the comment path, so the refusal fell through to the generic
+    branch and the timeline showed Meta's five words verbatim. The agent then
+    tried **Reply privately**, which failed too — that one as `100/33`, so it
+    _did_ get the full explanation, which leads with "the comment is gone". Two
+    failures on one ticket pointing at opposite causes, neither of them right.
+
+    The cause is the approval: **`pages_manage_engagement` at Advanced Access**,
+    which this Page token does not carry. The discriminator was already written
+    down in `commentTargetExplanation` — "that one fails _every_ comment reply
+    rather than this one, so it is only the answer if no reply has ever
+    succeeded" — and the database settles it: across all time,
+    `meta->>'sendKind' = 'comment_reply'` has exactly one row and it is this
+    failure. **No comment reply has ever succeeded here.**
+
+    `lib/meta/errors.ts` now matches 3, 10 and 200 on the comment edges — the
+    same three codes the profile lookups already treat as "Graph refused the app,
+    not the request" — and says so, naming the permission, Advanced Access, and
+    `check_meta_permissions`. Kept separate from the `100/33` branch on purpose:
+    the two need opposite responses, and folding them together would have made
+    the observed refusal print the deleted-comment sentence.
+
+    The file's own instruction is what was followed here: it said the comment
+    branch was "not observed against the real Graph … if a real refusal arrives
+    wearing a different code, read it out of the log and widen this rather than
+    guessing now." One arrived. It was read out of the log.
 
 ## 7. Verification already done
 

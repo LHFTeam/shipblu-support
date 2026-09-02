@@ -26,6 +26,40 @@ const nextConfig: NextConfig = {
   // Keeping these external stops Next from trying to bundle native/node-only deps.
   serverExternalPackages: ['postgres', '@node-rs/argon2'],
 
+  experimental: {
+    serverActions: {
+      /**
+       * A ticket form can carry photographs of a damaged parcel.
+       *
+       * The default is 1 MB, and going over it fails with an error that never
+       * mentions size — the submission simply does not arrive. This is set just
+       * above `MAX_FORM_TOTAL_BYTES` in `lib/forms/files.ts` on purpose,
+       * so the limit a customer actually meets is the one that can explain
+       * itself rather than Next's own rejection.
+       *
+       * It is not larger than that because the body is buffered in memory before
+       * any application code runs, so this number is also how much RAM a single
+       * hostile request can ask an instance for.
+       */
+      bodySizeLimit: '26mb',
+    },
+
+    /**
+     * And the same number again, for the copy `proxy.ts` forces.
+     *
+     * `serverActions.bodySizeLimit` alone is not enough: middleware runs on
+     * every route here, so Next clones the request body first, and that clone is
+     * capped separately at 10 MB. Going over does not fail — `body-streams.ts`
+     * truncates the stream and writes a `console.warn` nobody reads — so three
+     * 4 MB photos arrived as a corrupt multipart body and the submission failed
+     * with nothing the customer could act on.
+     *
+     * Bytes, not a string: this one is compared numerically against the default
+     * of 10485760.
+     */
+    proxyClientMaxBodySize: 27 * 1024 * 1024,
+  },
+
   // Support tickets contain customer PII; never leak details through error pages.
   poweredByHeader: false,
 

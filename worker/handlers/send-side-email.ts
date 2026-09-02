@@ -4,7 +4,8 @@ import { agents, conversations, sideConversationMessages, sideConversations } fr
 import { env, replyDomain } from '@/lib/env';
 import { emailProvider } from '@/lib/email/providers';
 import { REPLY_ABOVE_MARKER } from '@/lib/email/quote-strip';
-import { buildSideReplyAddress, buildSideSubjectTag, formatMessageId } from '@/lib/email/threading';
+import { replyToAddress } from '@/lib/email/reply-address';
+import { buildSideSubjectTag, formatMessageId } from '@/lib/email/threading';
 import type { OutboundEmail } from '@/lib/email/types';
 import type { ClaimedJob } from '@/lib/queue';
 import {
@@ -69,7 +70,6 @@ export async function sendSideEmail(job: ClaimedJob): Promise<void> {
   }
 
   const domain = replyDomain();
-  const mailbox = e.EMAIL_FROM_ADDRESS.split('@')[0] ?? 'support';
   const sideTag = buildSideSubjectTag(row.side.number, e.APP_SECRET);
 
   const ownMessageId = row.message.channelMessageId ?? `${row.message.id}@${domain}`;
@@ -116,7 +116,7 @@ export async function sendSideEmail(job: ClaimedJob): Promise<void> {
     // The `s` token, not the `c` one. A hub replying to the ticket's reply
     // address would put their answer on the customer's timeline, where the
     // portal can read it.
-    replyTo: buildSideReplyAddress(row.side.number, e.APP_SECRET, mailbox, domain),
+    replyTo: replyToAddress({ kind: 'side', sideNumber: row.side.number }),
     subject,
     textBody,
     htmlBody,

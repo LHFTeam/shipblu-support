@@ -12,6 +12,7 @@ import {
 import { preview } from '@/lib/html/sanitize';
 import { afterInboundMessage, afterMessageStored } from '@/lib/tickets/lifecycle';
 import type { VisitorDetails } from './contact';
+import { recordIdentityOnConversation } from './identify';
 import { findLiveConversation, webchatChannel } from './session';
 
 /**
@@ -152,6 +153,16 @@ export async function appendVisitorMessage(
 
     return { conversationId, messageId: inserted[0]!.id, createdConversation };
   });
+
+  /*
+   * Before the automations, so a rule routing on the merchant's account sees the
+   * link rather than racing it. Only on creation: an identity that changes under
+   * a live conversation is recorded by the identify endpoint itself, and doing
+   * it per message would write the same event onto every reply.
+   */
+  if (result.createdConversation) {
+    await recordIdentityOnConversation(result.conversationId, contactId);
+  }
 
   await afterMessageStored({
     conversationId: result.conversationId,

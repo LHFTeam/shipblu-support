@@ -82,6 +82,20 @@ const schema = z.object({
   WIDGET_ALLOWED_ORIGINS: z.string().optional(),
 
   /**
+   * Shared secret the host page's *backend* signs a widget identity with, so a
+   * merchant dashboard can say who its visitor is and be believed.
+   *
+   * Optional, and its absence is a working state rather than a broken one: an
+   * unsigned identity is still accepted and still fills in the name and address
+   * an agent reads, it just never links the person to a shipping account. See
+   * `lib/widget/identity.ts` for what the signature covers and why that half.
+   *
+   * Per environment, never shared with staging: a secret that signs identities
+   * on two deployments lets a claim minted against one be replayed at the other.
+   */
+  WIDGET_IDENTITY_SECRET: z.string().optional(),
+
+  /**
    * Overrides for how a tracking number and an SBID are recognised in message
    * text. Both are regular-expression sources; `lib/shipments/detect.ts` holds
    * the defaults and falls back to them, loudly, if one does not compile.
@@ -142,6 +156,21 @@ const schema = z.object({
    * (support+<token>@shipblu.com). Defaults to the EMAIL_FROM_ADDRESS domain.
    */
   EMAIL_REPLY_DOMAIN: z.string().optional(),
+  /**
+   * `true` if mail addressed to `<mailbox>+<token>@<reply domain>` actually
+   * reaches the inbound webhook. Off unless a deployment has proved it does.
+   *
+   * The reply token is the most reliable of the three threading signals, but it
+   * is the only one that needs the *mail path* to cooperate, and this one does
+   * not: `shipblu.com` is hosted at Zoho, which forwards the single address
+   * `help-support@shipblu.com` on to Postmark's inbound endpoint. A plus-suffixed
+   * variant is not that address, so it is rejected before Postmark ever sees it
+   * and the sender gets a bounce — see `docs/PROJECT-STATE.md` §6.41.
+   *
+   * Inbound still *accepts* the token wherever one appears, so turning this on
+   * later needs no migration and tokens already in the wild keep threading.
+   */
+  EMAIL_REPLY_PLUS_ADDRESSING: z.string().optional(),
 
   /**
    * Meta: WhatsApp, Messenger and Instagram.

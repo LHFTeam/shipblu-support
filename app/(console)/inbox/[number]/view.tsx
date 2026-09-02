@@ -20,7 +20,7 @@ import {
   type SharedLocation,
 } from '@/lib/tickets/shared-location';
 import { describeRequesterRole } from '@/lib/shipments/roles';
-import { humaniseStatus } from '@/lib/shipments/status';
+import { humaniseStatus, returnStepLabel, stageDisplay } from '@/lib/shipments/status';
 import { formatRemaining, windowState } from '@/lib/whatsapp/window';
 import {
   linkShipment,
@@ -250,6 +250,18 @@ function Header({
         <span>opened {formatRelative(conversation.createdAt)} ago</span>
         {conversation.reopenCount > 0 ? (
           <Badge tone="warning">reopened ×{conversation.reopenCount}</Badge>
+        ) : null}
+        {conversation.formName ? <Badge tone="brand">{conversation.formName}</Badge> : null}
+        {/*
+          Nobody proved who sent this. A form that anybody can submit resolves
+          the address it was given onto whatever contact already owns it — which
+          is what makes the unified inbox real, and is also why a stranger can
+          file a ticket under a real customer's name. The mail channel has SPF
+          and DKIM behind it; a web form has nothing, so the ticket says so and
+          the agent reads it differently.
+        */}
+        {conversation.unverifiedSubmitter ? (
+          <Badge tone="warning">not signed in — sender unverified</Badge>
         ) : null}
         {conversation.channel === 'whatsapp' ? (
           <WindowIndicator lastCustomerMessageAt={conversation.lastCustomerMessageAt} />
@@ -707,6 +719,16 @@ const SKIP_REASONS: Record<string, string> = {
 
 function describeEvent(type: string, data: Record<string, unknown>): string {
   switch (type) {
+    // The whole point of the event. Without a case here it fell through to the
+    // default and read "unverified submitter" — no address, no client address —
+    // so the one record of who *claimed* to have filed the ticket was written
+    // and then never shown to anybody.
+    case 'unverified_submitter':
+      return `submitted without signing in, as ${String(data.email ?? 'an unknown address')}${
+        data.ip ? ` from ${String(data.ip)}` : ''
+      }`;
+    case 'opened_by_agent':
+      return 'opened this ticket on the customer’s behalf';
     case 'status_changed':
       return `set status to ${String(data.to ?? '')}`;
     case 'priority_changed':
@@ -777,6 +799,25 @@ function describeEvent(type: string, data: Record<string, unknown>): string {
       return data.permission === true
         ? 'asked Meta for the customer\u2019s profile and was refused — the app may not hold Business Asset User Profile Access'
         : 'asked Meta for the customer\u2019s profile and was refused';
+    /*
+     * Whether the agent may act on the name matters more than the name. An
+     * unsigned identity is whatever the browser sent — see
+     * `lib/widget/identity.ts` — and "the dashboard says so" is exactly the
+     * sentence somebody needs before they read an address change back to a
+     * caller.
+     */
+    case 'contact_identified': {
+      const named = String(data.name ?? '').trim();
+      const account = [data.accountName, data.accountId]
+        .filter(Boolean)
+        .map(String)
+        .join(' \u00b7 ');
+      const parts = [named, account ? `account ${account}` : null].filter(Boolean);
+      const who = parts.length > 0 ? parts.join(', ') : 'somebody it did not name';
+      return data.verified === true
+        ? `identified the visitor as ${who}`
+        : `identified the visitor as ${who} \u2014 the dashboard's word, not verified`;
+    }
     case 'comment_hidden':
       return 'hid the comment on the post';
     case 'comment_unhidden':
@@ -1125,14 +1166,23 @@ function ShipmentsField({ conversation }: { conversation: ConversationDetail }) 
               />
             </div>
 
+            {/*
+              A returning parcel says so instead of showing its status, because
+              the platform's status is `delivery_attempted` for the whole of a
+              return — an agent reading it would tell a customer their parcel is
+              still coming (PROJECT-STATE §6.40). The return's own step is the
+              honest answer, and it is the one the customer is ringing about.
+            */}
             <p className="mt-0.5 opacity-60">
-              {shipment.syncState === 'synced'
-                ? shipment.statusLabel
-                  ? humaniseStatus(shipment.statusLabel)
-                  : 'No status yet'
-                : shipment.syncState === 'not_found'
-                  ? 'Not a shipment on the platform'
-                  : 'Not synced yet'}
+              {shipment.returnStep !== null
+                ? returnStepLabel('en', shipment.returnStep)
+                : shipment.syncState === 'synced'
+                  ? shipment.statusLabel
+                    ? humaniseStatus(shipment.statusLabel)
+                    : 'No status yet'
+                  : shipment.syncState === 'not_found'
+                    ? 'Not a shipment on the platform'
+                    : 'Not synced yet'}
               {shipment.syncState === 'synced' && shipment.statusAt ? (
                 <>
                   {' · '}
@@ -1142,9 +1192,22 @@ function ShipmentsField({ conversation }: { conversation: ConversationDetail }) 
                 </>
               ) : null}
             </p>
+
+            {/*
+              The date the customer is actually asking about, and only while it
+              is still a prediction: never under a returning parcel, which is not
+              being delivered to anybody, and never under a delivered one.
+            */}
+            {shipment.returnStep === null &&
+            shipment.currentEstimatedDate &&
+            !stageDisplay(shipment.statusLabel).terminal ? (
+              <p className="opacity-60">Due {shipment.currentEstimatedDate}</p>
+            ) : null}
+
             <p className="opacity-60">{describeRequesterRole(shipment.requesterRole)}</p>
 
             <div className="mt-1 flex flex-wrap items-center gap-1">
+              {shipment.returnStep !== null ? <Badge tone="warning">returning</Badge> : null}
               {shipment.sbid ? (
                 <Link href={`/contacts/accounts/${encodeURIComponent(shipment.sbid)}`}>
                   <Badge>SBID {shipment.sbid}</Badge>

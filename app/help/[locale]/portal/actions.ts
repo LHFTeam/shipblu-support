@@ -75,9 +75,9 @@ export async function createPortalTicket(
     return { error: 'errorMissingFields', missing: missing.map((field) => field.key) };
   }
 
-  const number = await createTicket(customer.contactId, { subject, body, customFields });
+  const created = await createTicket(customer.contactId, { subject, body, customFields });
 
-  redirect(`/${locale}/portal/t/${number}?created=1`);
+  redirect(`/${locale}/portal/t/${created.number}?created=1`);
 }
 
 export async function replyToPortalTicket(

@@ -49,6 +49,7 @@ export async function InboxShell({
           filters={filters}
           activeNumber={activeNumber}
           canSeeBot={can(agent, 'ticket.view.bot')}
+          canCreate={can(agent, 'ticket.create')}
         />
       </aside>
 

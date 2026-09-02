@@ -32,12 +32,14 @@ export function InboxList({
   filters,
   activeNumber,
   canSeeBot = false,
+  canCreate = false,
 }: {
   rows: InboxRow[];
   nextCursor: string | null;
   filters: InboxFilters;
   activeNumber?: number;
   canSeeBot?: boolean;
+  canCreate?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -74,7 +76,22 @@ export function InboxList({
   return (
     <>
       <div className="flex shrink-0 flex-col gap-2 border-b border-[var(--border)] bg-[var(--surface)] p-2">
-        <SearchBox initial={filters.q} onSearch={(value) => setParam('q', value)} />
+        <div className="flex items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <SearchBox initial={filters.q} onSearch={(value) => setParam('q', value)} />
+          </div>
+          {/* Beside the search rather than floating over the list: this column
+              is scrolled constantly, and a button that moves with it is a button
+              that lands under a thumb mid-scroll. */}
+          {canCreate ? (
+            <Link
+              href="/inbox/new"
+              className="shrink-0 rounded-md bg-brand-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-brand-700"
+            >
+              New
+            </Link>
+          ) : null}
+        </div>
 
         <div className="flex gap-2">
           <Select

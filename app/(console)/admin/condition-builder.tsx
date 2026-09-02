@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Select } from '@/components/ui';
 import type { Operator } from '@/lib/rules/conditions';
 
@@ -15,6 +15,14 @@ import type { Operator } from '@/lib/rules/conditions';
  *
  * The value is serialised into a hidden input rather than posted as separate
  * fields, so the server validates exactly the document that will be stored.
+ *
+ * The form builder embeds one of these per question, where a hidden input of its
+ * own would be a second document the server has to reconcile with the first — so
+ * `name` and `onChange` are alternatives: give it a name and it posts itself,
+ * give it a callback and it hands its value to whoever owns the document it is
+ * part of. Reused rather than reimplemented because a second condition editor
+ * would be a second dialect, and an admin would have to learn which screen
+ * spoke which.
  */
 
 export type FieldOption = {
@@ -52,10 +60,13 @@ export function ConditionBuilder({
   name,
   fields,
   initial,
+  onChange,
 }: {
-  name: string;
+  /** Posts the document itself. Omit when an owner is collecting it instead. */
+  name?: string;
   fields: FieldOption[];
   initial: unknown;
+  onChange?: (value: unknown) => void;
 }) {
   const parsed = fromJson(initial, fields);
   const [match, setMatch] = useState<'all' | 'any'>(parsed.match);
@@ -64,9 +75,26 @@ export function ConditionBuilder({
 
   const json = raw ?? toJson(match, rows);
 
+  // Deliberately *not* on mount. Normalising what was already stored looked
+  // tidy and rewrote it: `toJson` re-serialises, so merely expanding a question
+  // to read its condition pushed the builder's rendering of it back into the
+  // document, and the next save persisted that. The owner already holds
+  // `initial`; it only needs telling when somebody changes something.
+  const mounted = useRef(false);
+  useEffect(() => {
+    if (!mounted.current) {
+      mounted.current = true;
+      return;
+    }
+    onChange?.(safeParse(json) ?? {});
+    // `onChange` is a fresh closure on every parent render; depending on it
+    // would re-run this on every keystroke elsewhere in the form.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [json]);
+
   return (
     <div className="flex flex-col gap-2">
-      <input type="hidden" name={name} value={json} />
+      {name ? <input type="hidden" name={name} value={json} /> : null}
 
       {raw === null ? (
         <>
@@ -224,8 +252,15 @@ function toJson(match: 'all' | 'any', rows: Row[]): string {
     }
     // Numbers stay numbers: the comparison operators coerce, but storing "4"
     // where 4 was meant makes the stored rule harder to read.
+    //
+    // Only where the text *is* the number, though. `Number('0012')` is 12, and
+    // an order reference of 0012 compared as 12 stops matching — so anything
+    // that does not survive the round trip is left as the string it was.
     const numeric = Number(row.value);
-    const value = row.value !== '' && Number.isFinite(numeric) ? numeric : row.value;
+    const value =
+      row.value !== '' && Number.isFinite(numeric) && String(numeric) === row.value
+        ? numeric
+        : row.value;
     return { field: row.field, op: row.op, value };
   });
 

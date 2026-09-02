@@ -16,6 +16,8 @@
  * round on its own, which is what `lib/format.ts` already relies on.
  */
 
+import type { TicketFieldOption, TicketFieldValidation } from '@/db/schema/config';
+
 const ZONE = 'Africa/Cairo';
 
 export type TicketFieldType =
@@ -38,14 +40,65 @@ export type TicketFieldType =
  */
 export type TicketFieldDef = {
   key: string;
+  /** The admin- and agent-facing name. Always set; every screen falls back to it. */
   label: string;
+  /** The customer-facing wording. Null falls back through `localised` below. */
+  labelAr: string | null;
+  labelEn: string | null;
   type: TicketFieldType;
-  options: { value: string; label: string }[];
+  options: TicketFieldOption[];
+  validation: TicketFieldValidation | null;
   requiredOnCreate: boolean;
   requiredOnResolve: boolean;
   visibleToCustomer: boolean;
   editableByCustomer: boolean;
 };
+
+/**
+ * One rule for resolving an Arabic/English pair, used for every piece of
+ * customer-facing wording an admin can write: a field's label, a choice's label,
+ * a form's name, an element's help text.
+ *
+ * The reader's own language, then the fallback, then **the other language**.
+ *
+ * The middle step is the one worth explaining. Where a fallback exists it is
+ * `ticket_fields.label` or something like it — a string an admin definitely
+ * wrote, in whatever language the console is kept in, which here is English. A
+ * field labelled "Payment" with only `label_ar` filled in should read "Payment"
+ * to an English customer, not the Arabic; falling straight through to the other
+ * language would show every English reader the Arabic the moment somebody
+ * translated a field, which is the opposite of what translating it was for.
+ *
+ * The other language is still reached, and that is the `auto_responses` rule
+ * kept intact: pass a blank fallback — a form's name has only a slug behind it —
+ * and a team that has written only Arabic has its Arabic shown to everybody
+ * rather than a URL segment.
+ */
+export function localised(
+  ar: string | null | undefined,
+  en: string | null | undefined,
+  locale: 'ar' | 'en',
+  fallback: string,
+): string {
+  const own = (locale === 'ar' ? ar : en)?.trim();
+  if (own) return own;
+
+  const neutral = fallback.trim();
+  if (neutral) return neutral;
+
+  const other = (locale === 'ar' ? en : ar)?.trim();
+  return other || fallback;
+}
+
+/** What a customer reading in `locale` should see this field called. */
+export function fieldLabel(def: TicketFieldDef, locale: 'ar' | 'en'): string {
+  return localised(def.labelAr, def.labelEn, locale, def.label);
+}
+
+/** What a customer reading in `locale` should see one choice called. */
+export function optionLabel(option: TicketFieldOption, locale: 'ar' | 'en'): string {
+  return localised(option.labelAr, null, locale, option.label);
+}
 
 export type CustomFieldValues = Record<string, unknown>;
 
@@ -142,4 +195,50 @@ export function listLabels(defs: TicketFieldDef[]): string {
   const labels = defs.map((def) => def.label);
   if (labels.length <= 1) return labels.join('');
   return `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+}
+
+/**
+ * The choice list, as the one line of text an admin edits and back again.
+ *
+ * `value|Label|Arabic`, with a literal pipe written `\|`. The escape is not
+ * decoration: before the Arabic column existed the parser read
+ * `[value, ...rest]` and rejoined the rest, so a label reading
+ * "Cash on delivery | COD" survived a round trip. Splitting positionally into
+ * three broke that silently — the label was truncated and its tail became the
+ * Arabic — for an admin who had opened the field to change something else.
+ *
+ * Both directions live here so they cannot drift: the console serialises with
+ * `formatOptionLines` and the server parses with `parseOptionLines`, and a
+ * change to one is a change to the other.
+ */
+export function parseOptionLines(text: string): TicketFieldOption[] {
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [value, label, arabic] = line
+        // Only an unescaped pipe separates columns.
+        .split(/(?<!\\)\|/)
+        .map((part) => part.replace(/\\\|/g, '|').trim());
+
+      return {
+        value: value!,
+        label: label || value!,
+        ...(arabic ? { labelAr: arabic } : {}),
+      };
+    });
+}
+
+export function formatOptionLines(options: TicketFieldOption[]): string {
+  const escape = (part: string) => part.replace(/\|/g, '\\|');
+
+  return options
+    .map((option) => {
+      const columns = [escape(option.value)];
+      if (option.label !== option.value || option.labelAr) columns.push(escape(option.label));
+      if (option.labelAr) columns.push(escape(option.labelAr));
+      return columns.join('|');
+    })
+    .join('\n');
 }

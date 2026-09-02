@@ -69,6 +69,18 @@ export const PERMISSIONS = [
   'ticket.delete',
   'ticket.merge',
   'ticket.edit_fields',
+  /**
+   * Opening a ticket on a customer's behalf, from a form.
+   *
+   * Separate from `ticket.reply` because answering what arrived and
+   * manufacturing what did not are different acts. Every ticket an agent opens
+   * counts in first-response time, in volume per channel and in whatever the
+   * team is measured on, so this is a reporting-integrity permission rather than
+   * a security one — which is also why it is in the agent baseline: a team that
+   * takes tickets over the phone needs it, and one that does not can take it
+   * away from everybody at once.
+   */
+  'ticket.create',
   'contact.view',
   'contact.edit',
   /**
@@ -106,6 +118,15 @@ export const PERMISSIONS = [
   /** Skills, and who holds them — the input to skill-based assignment. */
   'admin.skills',
   'admin.fields',
+  /**
+   * Ticket forms, separate from `admin.fields` because the blast radius is.
+   *
+   * Defining a field adds a question to an internal sidebar. Publishing a form
+   * changes what the public help centre shows a customer and which queue the
+   * tickets it opens land in — the same reach an automation has, reached by
+   * somebody who only wanted to reword a question.
+   */
+  'admin.forms',
   'admin.billing',
 ] as const;
 
@@ -119,6 +140,7 @@ const AGENT: Permission[] = [
   'ticket.side_conversation',
   'ticket.assign',
   'ticket.edit_fields',
+  'ticket.create',
   'contact.view',
   'contact.edit',
   'kb.view',
@@ -154,6 +176,7 @@ const ADMIN: Permission[] = [
   'admin.sla',
   'admin.skills',
   'admin.fields',
+  'admin.forms',
 ];
 
 const ACCOUNT_ADMIN: Permission[] = [...ADMIN, 'admin.billing'];

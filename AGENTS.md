@@ -302,6 +302,51 @@ screen, and `InfoTip` when it should be one gesture away. Never `title=` on a DO
 element — it never appears on a phone, which is where the console is read, and
 CI rejects it.
 
+**Ticket forms.** A form is a row in `ticket_forms` whose layout is one jsonb
+document, parsed on every read by `parseFormElements` against the fields that
+currently exist — an element naming a deleted or deactivated field is dropped,
+the same answer `lib/rules/conditions.ts` gives a rule pointing at one. Saving
+is the exception: `saveTicketForm` refuses rather than dropping, because a save
+that silently discards three questions is how a form stops asking about the
+warehouse without anybody noticing.
+
+Three rules hold, and each closes something a request could otherwise do:
+
+- **Visibility is computed twice, and the server's pass builds up from nothing.**
+  `resolveVisibility` starts with no question visible and reveals each one only
+  when the answers justifying it come from questions that are themselves
+  visible. Starting from everything and paring down would let an answer to a
+  question that was never asked sit in the facts for a pass and reveal a second
+  one. An answer to a hidden field is discarded, and a required field behind a
+  condition that never fired does not refuse the submission.
+- **Placing a field on a form does not override `visible_to_customer` /
+  `editable_by_customer`.** `elementsFor` is the one filter, called by the
+  renderer and again by the submit path, so a question the page did not ask
+  cannot be answered by a request claiming it was — and an internal field placed
+  on a public form is left out rather than published.
+- **An anonymous submission resolves the address it was given onto whatever
+  contact owns it**, exactly as inbound email does, and a web form has no SPF or
+  DKIM behind it. So the ticket carries an `unverified_submitter` event with the
+  claimed address and the client address, and the console badges it. Do not
+  "improve" this by writing a display name onto an existing contact.
+
+Files ride in the server action's multipart body; there is deliberately no
+upload endpoint, because on an open form that is an unauthenticated write to the
+storage bucket. They go through the same gate as every other answer — read only
+when the form asks for them, discarded when the question was behind a condition
+that did not fire — since a file accepted outside that gate is the bucket write
+the missing endpoint was avoiding. `next.config.ts` sets `serverActions.bodySizeLimit` just above
+`MAX_FORM_TOTAL_BYTES` so the limit a customer meets is the one that can explain
+itself. `lib/forms/files.ts` is client-safe and `lib/forms/attachments.ts` is
+not — the same split `custom-fields.ts` makes, here because the shared file put
+`node:fs` in the browser bundle.
+
+A form's slug can be Arabic, so anything putting one into a server `redirect()`
+goes through `formPath` / `encodeSlugParam`. Next hands the path straight to
+`res.setHeader('Location', …)`, which Node rejects above 0xFF — a `<Link href>`
+needs none of this, which is why the read side was handled long before the write
+side was.
+
 **Bilingual and RTL.** Arabic is the default locale and the front door; every
 public URL keeps an explicit locale segment. Use `direction()` from
 `lib/kb/locale.ts` and never assume LTR. Slugify through `lib/kb/slug.ts` —
@@ -418,6 +463,14 @@ deleting it, and drop the sections that genuinely do not apply.
   The bucket is private; mint short-lived signed URLs.
 - Public endpoints (KB feedback and views, the widget) are rate limited in
   memory — do not add a row per rejected request.
+- **A host page telling the widget who its visitor is makes a claim, not a
+  statement of fact.** It arrives from a browser. An unsigned identity may only
+  decorate the contact the visitor's token already resolved to — it never adopts
+  another contact, and it never writes `contact_shipping_accounts`, which is an
+  assertion about whose account somebody may speak for. `WIDGET_IDENTITY_SECRET`
+  is what promotes a claim to a fact. `docs/embedding-the-widget.md` is the
+  contract the other side implements; changing what the signature covers breaks
+  a deployed integration silently, so add a second accepted form instead.
 - Side conversation recipients come from a directory and are re-read
   server-side; a free-text address is checked against the requester's own
   identities and our mailbox in the action, not only in the composer.

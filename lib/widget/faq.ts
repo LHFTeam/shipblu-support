@@ -14,8 +14,15 @@ import { webchatChannel } from './session';
  * that embeds the widget.
  */
 
-/** Six: the most a 380px panel shows without the button below it scrolling off. */
-const FAQ_SIZE = 6;
+/**
+ * How many questions the opening screen offers.
+ *
+ * Five, because the panel is 380x600 and the list shares that screen with the
+ * search box above it and the button below: a longer list pushes the thing the
+ * visitor came to do off the bottom, and a list nobody scrolls to the end of is
+ * a list whose last entries are decoration.
+ */
+const FAQ_SIZE = 5;
 
 export type WidgetFaq = {
   title: string;

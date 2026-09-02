@@ -23,9 +23,11 @@ import {
   groups,
   messages,
   ticketFields,
+  ticketForms,
   ticketStatuses,
   whatsappTemplates,
 } from '@/db/schema';
+import { formName } from '@/lib/forms/naming';
 import type { SessionAgent } from '@/lib/auth/session';
 import { can } from '@/lib/auth/permissions';
 import { configuredAccountId } from '@/lib/meta/client';
@@ -458,6 +460,23 @@ export type ConversationDetail = {
    * which is what tells the composer to write in public rather than in private.
    */
   externalId: string | null;
+  /**
+   * The form this ticket was submitted through, when it was.
+   *
+   * The name rather than the id, because the only thing the header does with it
+   * is say it. Null covers both "no form" and "the form has since been deleted",
+   * which read the same on screen and should: the ticket is still a ticket.
+   */
+  formName: string | null;
+  /**
+   * True when the ticket was opened by somebody who was not signed in.
+   *
+   * Read off the `unverified_submitter` event rather than stored as a column:
+   * the event already carries the claimed address and the client address for
+   * anybody investigating, and a boolean beside it would be a second copy of
+   * one fact that could disagree with the first.
+   */
+  unverifiedSubmitter: boolean;
   /** Parcels this ticket is about, and the accounts it names. */
   shipments: LinkedShipment[];
   shippingAccounts: LinkedShippingAccount[];
@@ -505,17 +524,42 @@ export async function getConversation(
       requesterAvatarPath: contacts.avatarPath,
       assigneeName: agents.name,
       groupName: groups.name,
+      formNameAr: ticketForms.nameAr,
+      formNameEn: ticketForms.nameEn,
+      formSlug: ticketForms.slug,
     })
     .from(conversations)
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
     .innerJoin(contacts, eq(contacts.id, conversations.requesterContactId))
     .leftJoin(agents, eq(agents.id, conversations.assigneeAgentId))
     .leftJoin(groups, eq(groups.id, conversations.groupId))
+    .leftJoin(ticketForms, eq(ticketForms.id, conversations.formId))
     .where(and(...where))
     .limit(1);
 
   const row = rows[0];
   if (!row) return null;
+
+  /**
+   * Asked directly rather than read off the activity list below.
+   *
+   * That list is `limit(50)` newest-first and this event is always the oldest on
+   * the ticket — it is written the moment the ticket is created. Deriving the
+   * badge from it meant the "nobody proved who sent this" warning disappeared
+   * once fifty things had happened, which is exactly the escalated ticket where
+   * an agent most needs it.
+   */
+  const unverified = await db
+    .select({ id: conversationEvents.id })
+    .from(conversationEvents)
+    .where(
+      and(
+        eq(conversationEvents.conversationId, row.conversation.id),
+        eq(conversationEvents.type, 'unverified_submitter'),
+      ),
+    )
+    .limit(1);
+  const unverifiedSubmitter = unverified.length > 0;
 
   const [timeline, files, events, shipments, accounts, sides] = await Promise.all([
     db
@@ -610,6 +654,10 @@ export async function getConversation(
     subject: row.conversation.subject,
     channel: row.conversation.channel,
     externalId: row.conversation.externalId,
+    formName: row.formSlug
+      ? formName({ nameAr: row.formNameAr!, nameEn: row.formNameEn!, slug: row.formSlug }, 'en')
+      : null,
+    unverifiedSubmitter,
     metaThread,
     shipments,
     shippingAccounts: accounts,
@@ -681,20 +729,44 @@ export async function listStatuses() {
  * tickets gave it, and a rule still reading `custom.<key>` keeps working on them.
  */
 export async function listTicketFields(): Promise<TicketFieldDef[]> {
-  return db
+  return selectFields(true);
+}
+
+/**
+ * Every field, including the retired ones.
+ *
+ * For the two screens that must not pretend a deactivated field never existed:
+ * the form builder, which has to render a question already placed on a form, and
+ * `saveTicketForm`, which parses against this so that deactivating a field does
+ * not make every form placing it permanently unsavable. Everything a *customer*
+ * sees goes through `listTicketFields` and its active-only filter.
+ */
+export async function listAllTicketFields(): Promise<TicketFieldDef[]> {
+  return selectFields(false);
+}
+
+function selectFields(activeOnly: boolean): Promise<TicketFieldDef[]> {
+  const query = db
     .select({
       key: ticketFields.key,
       label: ticketFields.label,
+      labelAr: ticketFields.labelAr,
+      labelEn: ticketFields.labelEn,
       type: ticketFields.type,
       options: ticketFields.options,
+      validation: ticketFields.validation,
       requiredOnCreate: ticketFields.requiredOnCreate,
       requiredOnResolve: ticketFields.requiredOnResolve,
       visibleToCustomer: ticketFields.visibleToCustomer,
       editableByCustomer: ticketFields.editableByCustomer,
     })
     .from(ticketFields)
-    .where(eq(ticketFields.isActive, true))
-    .orderBy(asc(ticketFields.position), asc(ticketFields.label));
+    .$dynamic();
+
+  return (activeOnly ? query.where(eq(ticketFields.isActive, true)) : query).orderBy(
+    asc(ticketFields.position),
+    asc(ticketFields.label),
+  );
 }
 
 /**

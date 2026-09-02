@@ -5,6 +5,7 @@ import {
   conversations,
   contacts,
   slaPolicies,
+  ticketForms,
   ticketStatuses,
 } from '@/db/schema';
 import type { HoursConfig } from '@/lib/hours';
@@ -78,6 +79,7 @@ type ConversationRow = {
   statusCategory: 'open' | 'pending' | 'resolved' | 'closed';
   stopsSlaClock: boolean;
   requesterEmail: string | null;
+  formSlug: string | null;
 };
 
 async function loadConversation(conversationId: string): Promise<ConversationRow | null> {
@@ -87,10 +89,12 @@ async function loadConversation(conversationId: string): Promise<ConversationRow
       statusCategory: ticketStatuses.category,
       stopsSlaClock: ticketStatuses.stopsSlaClock,
       requesterEmail: contacts.primaryEmail,
+      formSlug: ticketForms.slug,
     })
     .from(conversations)
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
     .leftJoin(contacts, eq(contacts.id, conversations.requesterContactId))
+    .leftJoin(ticketForms, eq(ticketForms.id, conversations.formId))
     .where(eq(conversations.id, conversationId))
     .limit(1);
 

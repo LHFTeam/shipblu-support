@@ -1,6 +1,7 @@
 import { isWithinBusinessHours, nextOpeningAt } from '@/lib/hours';
 import { DEFAULT_LOCALE, isLocale } from '@/lib/kb/locale';
 import { widgetFaqs } from '@/lib/widget/faq';
+import { allowedHostOrigins } from '@/lib/widget/origins';
 import { widgetHours } from '@/lib/widget/session';
 import { WidgetChat } from './chat';
 
@@ -12,15 +13,21 @@ export const metadata = { robots: { index: false, follow: false } };
 /**
  * The iframe's document.
  *
- * It reads the FAQ list and the schedule here rather than leaving the client to
- * fetch them, for two reasons. The panel is created on the first launcher click,
- * so its load is something a visitor is watching — server-rendering means it
- * appears with answers already in it instead of a spinner. And it is what lets
- * the widget open without a session: the home screen needs no token, so a
- * visitor who reads an FAQ and leaves never becomes a `contacts` row.
+ * The questions and the schedule are read here rather than fetched once the
+ * widget has mounted, and that is the difference between a list that is *there*
+ * and one that appears a moment later under the visitor's thumb. The page is
+ * already `force-dynamic` and already renders per open, so both cost one query
+ * on a request that was happening anyway.
  *
- * `setLocale()` on the host re-points the iframe's `src`, so a language switch
- * re-runs both reads rather than translating what is already on screen.
+ * It is also what lets the widget open without a session: the home screen needs
+ * no token, so a visitor who reads an FAQ and leaves never becomes a `contacts`
+ * row. `setLocale()` on the host re-points the iframe's `src`, so a language
+ * switch re-runs both reads rather than translating what is already on screen.
+ *
+ * `widgetFaqs` resolves the viewer itself, and it is `ANONYMOUS` for the reason
+ * `/api/widget/search` states: the widget authenticates a browser on somebody
+ * else's website, which is not the portal session that says who a customer is,
+ * so a `logged_in` article must never reach a screen any page can embed.
  */
 export default async function WidgetPage({
   searchParams,
@@ -39,7 +46,8 @@ export default async function WidgetPage({
   return (
     <WidgetChat
       locale={locale}
-      faqs={faqs.map(({ title, slug }) => ({ title, slug }))}
+      hostOrigins={allowedHostOrigins()}
+      faqs={faqs}
       online={online}
       opensAt={opensAt?.toISOString() ?? null}
     />

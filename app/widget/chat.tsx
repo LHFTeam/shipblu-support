@@ -24,11 +24,14 @@ const STORAGE_KEY = 'shipblu.widget.token';
 
 export function WidgetChat({
   locale,
+  hostOrigins,
   faqs,
   online: initialOnline,
   opensAt: initialOpensAt,
 }: {
   locale: Locale;
+  /** Origins permitted to embed this widget, from `WIDGET_ALLOWED_ORIGINS`. */
+  hostOrigins: string[];
   faqs: ArticleLink[];
   online: boolean;
   opensAt: string | null;
@@ -70,6 +73,27 @@ export function WidgetChat({
      token — which the route answers by minting a *second* contact, filing the
      message against whichever won, and orphaning the other. */
   const minting = useRef<Promise<string | null> | null>(null);
+  /**
+   * The token the visible transcript belongs to, updated at the two moments it
+   * changes rather than in an effect.
+   *
+   * In-flight requests read it back before they paint. A send that was still on
+   * the wire when the host page signed its user out would otherwise answer into
+   * the session that replaced it, putting the previous person's messages in
+   * front of the next one — the exact leak the reset exists to prevent.
+   */
+  const activeToken = useRef<string | null>(null);
+  /** The last identity the host page handed us, and its signature. */
+  const identity = useRef<{ identity: unknown; signature: string | null } | null>(null);
+  /** `token:payload` of the last identity actually sent, so opens are cheap. */
+  const identified = useRef<string | null>(null);
+  /**
+   * How many times the server has told us this browser belongs to somebody
+   * else. Bounded because the answer costs a session round trip, and a bug on
+   * either side that made it permanent would otherwise loop forever against the
+   * API rather than failing visibly.
+   */
+  const resets = useRef(0);
   /* Whether the visitor has navigated since mount. The resume request settles
      after they may already have tapped something, and it must not drag them
      back out of it. */
@@ -100,6 +124,7 @@ export function WidgetChat({
       .then((data) => {
         if (!data) return;
         localStorage.setItem(STORAGE_KEY, data.token);
+        activeToken.current = data.token;
         setToken(data.token);
         setConversationId(data.conversationId);
         setMessages(data.messages);
@@ -157,6 +182,7 @@ export function WidgetChat({
       if (!data) return null;
 
       localStorage.setItem(STORAGE_KEY, data.token);
+      activeToken.current = data.token;
       setToken(data.token);
       setConversationId(data.conversationId);
       setMessages(data.messages);
@@ -190,7 +216,11 @@ export function WidgetChat({
       })
         .then((response) => (response.ok ? response.json() : null))
         .then((data) => {
-          if (data) {
+          // Same reason as the guard in `send`: the interval is cleared when
+          // the token changes, but a request already issued still resolves, and
+          // painting its answer would put the previous person's transcript in
+          // front of the next one.
+          if (data && activeToken.current === token) {
             setConversationId(data.conversationId);
             setMessages(data.messages);
             setOnline(Boolean(data.online));
@@ -236,6 +266,81 @@ export function WidgetChat({
     window.parent?.postMessage({ source: 'shipblu-widget', ...message }, '*');
   }, []);
 
+  // --- Who the host page says this is --------------------------------------
+
+  /**
+   * Throws the visitor token away and returns to the opening screen.
+   *
+   * The transcript is dropped with it, which is the entire point: this runs when
+   * the host page's signed-in user has changed, and the previous person's
+   * conversation must not be on screen for the next one.
+   *
+   * It does not open a replacement session, because nothing here needs one yet.
+   * The widget mints a token when somebody chooses to talk, so a browser whose
+   * merchant just signed out goes back to the questions and files no contact row
+   * until the next person actually writes something. The identity is kept, and
+   * `sendIdentity` attaches it to whatever token comes next.
+   */
+  const startFreshSession = useCallback(() => {
+    localStorage.removeItem(STORAGE_KEY);
+    activeToken.current = null;
+    identified.current = null;
+    seenCount.current = 0;
+    setToken(null);
+    setConversationId(null);
+    setMessages([]);
+    setDetailsSaved(false);
+    setThreadStarted(false);
+    setView('home');
+  }, []);
+
+  const sendIdentity = useCallback(
+    async (forToken: string) => {
+      const pending = identity.current;
+      if (!pending) return;
+
+      // The host re-sends on every open and on every navigation of its own SPA,
+      // so the common case is an identity the server already has.
+      const fingerprint = `${forToken}:${JSON.stringify(pending)}`;
+      if (identified.current === fingerprint) return;
+      identified.current = fingerprint;
+
+      const response = await fetch('/api/widget/identify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: forToken, ...pending }),
+      }).catch(() => null);
+
+      // Retried on the next open rather than left unsaid: the fingerprint is
+      // what makes the common case free, and keeping it after a failure would
+      // cost the agent the customer's name for the rest of the session.
+      if (!response?.ok) {
+        identified.current = null;
+        return;
+      }
+
+      const data = (await response.json().catch(() => null)) as { reset?: boolean } | null;
+      if (data?.reset && resets.current < 2) {
+        resets.current += 1;
+        startFreshSession();
+      }
+    },
+    [startFreshSession],
+  );
+
+  /*
+   * Announced when a token exists, which is now later than it used to be: the
+   * widget opens on the questions and mints nothing until somebody chooses to
+   * talk. So an identity the host pushes at load is held in the ref above and
+   * attached here, on the first token — rather than the host having to re-send
+   * it at the moment the visitor happens to press the button.
+   */
+  useEffect(() => {
+    if (!token) return;
+    postToHost({ type: 'ready' });
+    void sendIdentity(token);
+  }, [token, postToHost, sendIdentity]);
+
   /*
    * A reply is unread until the visitor is actually looking at it.
    *
@@ -253,9 +358,35 @@ export function WidgetChat({
 
   useEffect(() => {
     const onHostMessage = (event: MessageEvent) => {
+      /*
+       * The origin check, not the `source` tag, is what makes the rest of this
+       * safe: `parent.frames` is reachable from any other frame on the host
+       * page, so anything embedded alongside us could otherwise identify the
+       * visitor as somebody else or wipe their session. Our own origin is
+       * allowed because the help centre serves the snippet itself and frames
+       * itself.
+       */
+      if (event.origin !== window.location.origin && !hostOrigins.includes(event.origin)) return;
       if (event.data?.source !== 'shipblu-host') return;
+
       if (event.data.type === 'opened') setPanelOpen(true);
       if (event.data.type === 'closed') setPanelOpen(false);
+
+      if (event.data.type === 'identify') {
+        identity.current = {
+          identity: event.data.identity,
+          signature: typeof event.data.signature === 'string' ? event.data.signature : null,
+        };
+        if (token) void sendIdentity(token);
+      }
+
+      // The host page signing its user out. Not merely an identity of null: the
+      // point is that the next person at this browser starts clean.
+      if (event.data.type === 'clear') {
+        identity.current = null;
+        resets.current = 0;
+        startFreshSession();
+      }
     };
 
     window.addEventListener('message', onHostMessage);
@@ -273,7 +404,7 @@ export function WidgetChat({
     postToHost({ type: 'hello' });
 
     return () => window.removeEventListener('message', onHostMessage);
-  }, [postToHost]);
+  }, [hostOrigins, postToHost, sendIdentity, startFreshSession, token]);
 
   // --- Navigation ----------------------------------------------------------
 
@@ -347,6 +478,15 @@ export function WidgetChat({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token: active, body, pageUrl: document.referrer || null }),
       });
+
+      /*
+       * The session was replaced while this was on the wire — a sign-out on the
+       * host page. Everything below belongs to somebody who is no longer here,
+       * the draft included: putting that text back would hand the next person
+       * the previous one's half-typed sentence, so this reports success it did
+       * not have rather than restoring it.
+       */
+      if (activeToken.current !== active) return true;
 
       if (!response.ok) {
         setMessages((current) => current.filter((m) => m.id !== optimistic.id));
