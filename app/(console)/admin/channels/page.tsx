@@ -6,7 +6,9 @@ import { ChannelBadge } from '@/components/channel';
 import { Badge, Card, PageHeader } from '@/components/ui';
 import { requirePermission } from '@/lib/auth/guard';
 import { env } from '@/lib/env';
-import { ChannelForm } from './forms';
+import { listFolderOptions } from '@/lib/kb/admin';
+import { offerableFaqFolders, parseWidgetConfig } from '@/lib/widget/config';
+import { ChannelForm, WebchatSettings } from './forms';
 import { NewWhatsAppAccount, WhatsAppAccountEditor, type WhatsAppAccountRow } from './waba-forms';
 
 export const dynamic = 'force-dynamic';
@@ -14,13 +16,14 @@ export const dynamic = 'force-dynamic';
 export default async function ChannelsPage() {
   await requirePermission('admin.channels');
 
-  const [channelList, groupList, accountList, templateCounts] = await Promise.all([
+  const [channelList, groupList, accountList, templateCounts, folderList] = await Promise.all([
     db
       .select({
         id: channels.id,
         type: channels.type,
         name: channels.name,
         config: channels.config,
+        createdAt: channels.createdAt,
         defaultGroupId: channels.defaultGroupId,
         whatsappAccountId: channels.whatsappAccountId,
         isActive: channels.isActive,
@@ -40,7 +43,27 @@ export default async function ChannelsPage() {
       .from(whatsappTemplates)
       .where(eq(whatsappTemplates.status, 'APPROVED'))
       .groupBy(whatsappTemplates.whatsappAccountId),
+
+    listFolderOptions(),
   ]);
+
+  // The same rule `saveChannel` validates against, so the picker cannot offer a
+  // folder the action would refuse.
+  const faqFolders = offerableFaqFolders(folderList).map(
+    ({ id, name, categoryName, categoryLocale }) => ({
+      id,
+      name,
+      categoryName,
+      categoryLocale,
+    }),
+  );
+
+  // The same row `webchatChannel()` reads — oldest active first. Picking by a
+  // different rule would let an admin configure one row while the widget read
+  // another, and the setting would look saved and do nothing.
+  const webchat = channelList
+    .filter((channel) => channel.type === 'webchat' && channel.isActive)
+    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0];
 
   const accountChoices = accountList.map((account) => ({ id: account.id, name: account.name }));
   const templatesByAccount = new Map(templateCounts.map((row) => [row.accountId, row.total]));
@@ -145,6 +168,24 @@ export default async function ChannelsPage() {
             );
           })}
         </ul>
+
+        {/* Above the "add a channel" form because it is a setting on a row that
+            already exists, not another row to create — and because the widget is
+            the one channel whose configuration a customer sees directly. */}
+        {webchat ? (
+          <Card className="mb-4">
+            <WebchatSettings
+              channel={{
+                id: webchat.id,
+                name: webchat.name,
+                defaultGroupId: webchat.defaultGroupId,
+                faqFolders: parseWidgetConfig(webchat.config).faqFolders,
+              }}
+              groups={groupList}
+              folders={faqFolders}
+            />
+          </Card>
+        ) : null}
 
         <ChannelForm groups={groupList} whatsappAccounts={accountChoices} />
       </section>

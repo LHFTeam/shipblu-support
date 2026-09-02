@@ -371,8 +371,10 @@ inbound Messenger DMs and 4 Instagram ones from real people, the most recent
 today, all of them filed under bare numeric ids and none of them answered by
 anybody. That is not the channel being configured — no `channels` row exists for
 either — it is the app being connected to a page and an account that the public
-can already write to. There is still no email mailbox row, no human WhatsApp row,
-no `webchat` row and no `portal` row. `sla_policies` is still empty, so the SLA
+can already write to. There is still no human WhatsApp row and no `portal` row.
+A `webchat` row and an email mailbox row **do** now exist — measured 2026-08-31,
+"Web Chat" and "Support Mailbox", both active and both routed to a group — which
+is a correction to what this section said before. `sla_policies` is still empty, so the SLA
 cron sweeps nothing every 5 minutes. `automation_rules` holds exactly **one**
 rule as of 2026-08-28 — "Close resolved tickets after 3 days", seeded by
 `db/seed.ts` and inserted into production by hand (§6.30) — which is the first
@@ -726,11 +728,14 @@ is code:
   verifies inbound webhooks is single-valued. The env vars
   are the credentials; the rows are what the app routes on. A `portal` row is
   worth adding too: without one, tickets opened from the customer portal land
-  with no default group, so nothing routes them. The `webchat` row is in the
-  same position now that the help centre carries the chat launcher on every
-  page: a chat still opens a ticket without it, but with no channel and no
-  group, and it is also the row whose default group decides which schedule the
-  widget calls "we are here" — with none, the global default applies.
+  with no default group, so nothing routes them. The `webchat` row **now exists**
+  (measured 2026-08-31): it is the row whose default group decides which schedule
+  the widget calls "we are here", and since the widget's FAQ screen it is also
+  where that setting lives — `config.faqFolders` names one knowledge base folder
+  per locale, read through `parseWidgetConfig` in `lib/widget/config.ts`. It
+  carried `{"address": ""}` until then, written by `saveChannel`'s catch-all
+  branch, which is why anything reading that column treats its shape as
+  untrusted.
 - **Every bot transcript is one-sided, and the fix is one job away.** The app has
   never been subscribed to `message_echoes`, so the archive holds what customers
   said to the bot and nothing the bot said back — 10,007 inbound rows on
@@ -2554,6 +2559,48 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     them — every return is preceded by an outbound `in_transit`, and counting
     those puts a parcel that has only just been turned around at "on the way
     back".
+
+- **A `published`/`public` article can sit inside a folder nobody may read, and
+  production has fifteen of them.** _Found 2026-08-31, building the widget's FAQ
+  screen._ The Arabic staff handbook (`دليل الموظف`) is four `agents_only`
+  folders whose articles are each marked `status = 'published'` and
+  `visibility = 'public'` — so `articleVisibleTo(ANONYMOUS)` alone returns the
+  employee handbook, and only `folderVisibleTo(ANONYMOUS)` beside it keeps that
+  out of a panel embedded on a customer's website. `lib/kb/visibility.ts` already
+  says the folder gates the article; what was not written down is that the
+  combination exists in real data rather than in principle, which is what makes
+  a query missing the second predicate look correct in testing.
+
+  Two consequences beyond remembering to write both. Any new KB read model takes
+  a `KbViewer` and applies **both** predicates — `folderArticles` in
+  `lib/kb/queries.ts` is the shape to copy. And any admin control that _names_ a
+  folder for a customer-facing surface has to exclude the non-public ones from
+  the picker and refuse them in the action — one rule, in
+  `offerableFaqFolders`/`resolveFaqFolders` (`lib/widget/config.ts`), because a
+  picker offering more than the action accepts presents a choice that fails on
+  save. A staff folder chosen there would otherwise save cleanly and then show
+  the customer an empty panel, reading as a broken feature rather than a refused
+  setting, and nobody goes looking for the cause.
+
+  `folderArticles` also carries `eq(kbArticles.locale, locale)` even though the
+  folder implies it. A folder has no locale of its own — it inherits its
+  category's — and only one console action enforces that an article filed in it
+  matches; the Freshdesk importer does not. Without the predicate one mis-filed
+  row puts an English FAQ in the Arabic widget, where every tap 404s, because
+  `getArticle` _does_ filter on locale.
+
+- **An unverified value written to `contacts` is an identity-matching key, even
+  with no `contact_identities` row.** _Found 2026-08-31, in review of the widget
+  work._ `mergeCandidates` (`lib/contacts/merge.ts`) matches on `primary_email`
+  **and** `primary_phone`, so anything the out-of-hours widget form stores
+  surfaces as a merge suggestion: a visitor who types a real customer's mobile
+  makes that customer appear beside their own throwaway contact, reason
+  `'phone'`. Nothing merges on its own — the decision stays with an agent, and
+  the address beside it has always had the same exposure — but "it gets no
+  identity row, so it is inert" is not a sound argument, and it had been written
+  into `attachVisitorDetails` before anyone checked the merge suggester.
+  Skipping the identity row narrows the blast radius from a routing rule to a
+  suggestion an agent can decline; it does not remove it.
 
 41. **The plus-addressed reply token does not survive the mail path into this
     system, so the first reply anybody ever sent us bounced.**

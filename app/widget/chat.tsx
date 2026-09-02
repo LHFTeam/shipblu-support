@@ -2,95 +2,77 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { direction, type Locale } from '@/lib/kb/locale';
+import { initialView } from '@/lib/widget/view';
+import { WidgetArticle } from './article';
+import { copyFor } from './copy';
+import { WidgetHome } from './home';
+import { WidgetThread, type OfflineDetails } from './thread';
+import type { ArticleLink, Message, WidgetView } from './types';
 
 /**
- * The chat itself, running inside the widget iframe.
+ * The widget shell: which screen is showing, and everything that outlives one.
  *
  * State lives here rather than on the server because the widget must feel
  * instant on a page the visitor is only half paying attention to: their own
  * message appears the moment they send it, and reconciles when the server
- * answers.
+ * answers. The FAQ list and the business hours are the exception — they are
+ * rendered by `page.tsx` and arrive as props, so the panel paints with answers
+ * already in it rather than with a spinner.
  */
 
 const STORAGE_KEY = 'shipblu.widget.token';
-
-type Message = {
-  id: string;
-  from: 'visitor' | 'agent' | 'system';
-  authorName: string | null;
-  body: string;
-  createdAt: string;
-};
-
-type Suggestion = { title: string; url: string };
-
-const COPY = {
-  en: {
-    heading: 'ShipBlu Support',
-    online: 'We usually reply in a few minutes',
-    offline: 'We are away right now',
-    opensAt: 'We reply from',
-    placeholder: 'Type your message…',
-    send: 'Send',
-    emailPrompt: 'Leave your email and we will reply there.',
-    emailPlaceholder: 'you@example.com',
-    emailSaved: 'Thanks — we will email you.',
-    suggested: 'These might help',
-    starter: 'Ask us anything about your shipments.',
-    faqs: 'Popular questions',
-  },
-  ar: {
-    heading: 'دعم شيب بلو',
-    online: 'نرد عادةً خلال دقائق',
-    offline: 'لسنا متاحين الآن',
-    opensAt: 'نرد ابتداءً من',
-    placeholder: 'اكتب رسالتك…',
-    send: 'إرسال',
-    emailPrompt: 'اترك بريدك الإلكتروني وسنرد عليك هناك.',
-    emailPlaceholder: 'you@example.com',
-    emailSaved: 'شكرًا — سنراسلك عبر البريد.',
-    suggested: 'قد تساعدك هذه المقالات',
-    starter: 'اسألنا أي شيء عن شحناتك.',
-    faqs: 'الأسئلة الأكثر شيوعًا',
-  },
-} as const;
 
 export function WidgetChat({
   locale,
   hostOrigins,
   faqs,
+  online: initialOnline,
+  opensAt: initialOpensAt,
 }: {
   locale: Locale;
   /** Origins permitted to embed this widget, from `WIDGET_ALLOWED_ORIGINS`. */
   hostOrigins: string[];
-  /**
-   * The most-read articles in this locale, rendered on the opening screen.
-   * Empty is a normal state — a knowledge base nobody has opened yet has no
-   * popular questions — and the section is left out rather than shown bare.
-   */
-  faqs: Suggestion[];
+  faqs: ArticleLink[];
+  online: boolean;
+  opensAt: string | null;
 }) {
-  const copy = COPY[locale];
+  const copy = copyFor(locale);
+
+  const [view, setView] = useState<WidgetView>('home');
+  const [article, setArticle] = useState<ArticleLink | null>(null);
+  /* Where the article was opened from, so Back returns there rather than always
+     to the home screen — a suggestion tapped mid-conversation has to lead back
+     to the conversation. */
+  const [articleFrom, setArticleFrom] = useState<WidgetView>('home');
+  /* Once entered, the thread stays mounted (see the render). */
+  const [threadStarted, setThreadStarted] = useState(false);
 
   const [token, setToken] = useState<string | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [online, setOnline] = useState<boolean | null>(null);
-  const [opensAt, setOpensAt] = useState<string | null>(null);
-  const [draft, setDraft] = useState('');
-  const [sending, setSending] = useState(false);
-  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
-  const [emailSaved, setEmailSaved] = useState(false);
-  /**
-   * Bumped to open a *different* session on the same page — a second merchant
-   * signing into the host dashboard. Nothing else re-runs the session effect,
-   * which is deliberate: a reload of the transcript is what the stream is for.
+
+  /*
+   * Seeded by the server render, then refreshed by every session response.
+   *
+   * The panel is created once and can sit open across the moment the team opens
+   * or closes; a value fixed at render would keep telling a visitor at 18:05
+   * that we reply in a few minutes, and — because this also decides whether the
+   * out-of-hours form is asked for — would file their message with no way back.
+   * `/api/widget/session` already computes and returns both on every call,
+   * including the degraded 15s poll; before this nothing read them.
    */
-  const [sessionNonce, setSessionNonce] = useState(0);
+  const [online, setOnline] = useState(initialOnline);
+  const [opensAt, setOpensAt] = useState(initialOpensAt);
 
-  const bottom = useRef<HTMLDivElement>(null);
+  const [panelOpen, setPanelOpen] = useState(true);
+  const [detailsSaved, setDetailsSaved] = useState(false);
+
   const seenCount = useRef(0);
-
+  /* One session request at a time. Without this, `talkToAgent` firing one and a
+     fast Send firing another both see `token` still null and both POST an empty
+     token — which the route answers by minting a *second* contact, filing the
+     message against whichever won, and orphaning the other. */
+  const minting = useRef<Promise<string | null> | null>(null);
   /**
    * The token the visible transcript belongs to, updated at the two moments it
    * changes rather than in an effect.
@@ -101,7 +83,6 @@ export function WidgetChat({
    * front of the next one — the exact leak the reset exists to prevent.
    */
   const activeToken = useRef<string | null>(null);
-
   /** The last identity the host page handed us, and its signature. */
   const identity = useRef<{ identity: unknown; signature: string | null } | null>(null);
   /** `token:payload` of the last identity actually sent, so opens are cheap. */
@@ -113,11 +94,26 @@ export function WidgetChat({
    * API rather than failing visibly.
    */
   const resets = useRef(0);
+  /* Whether the visitor has navigated since mount. The resume request settles
+     after they may already have tapped something, and it must not drag them
+     back out of it. */
+  const navigated = useRef(false);
 
   // --- Session -------------------------------------------------------------
 
+  /*
+   * Resumed on load, but never minted there.
+   *
+   * `POST /api/widget/session` writes a `contacts` row for a token it does not
+   * recognise, so calling it on every load would file a customer record for
+   * everyone who opened the panel to read an FAQ and left. The same rule the
+   * tracking lookup follows: an unauthenticated read never writes a row, or the
+   * table becomes a place anyone can put things. A visitor becomes a contact at
+   * the moment they choose to talk to somebody, which is `ensureSession` below.
+   */
   useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY) ?? '';
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (!stored) return;
 
     void fetch('/api/widget/session', {
       method: 'POST',
@@ -132,15 +128,77 @@ export function WidgetChat({
         setToken(data.token);
         setConversationId(data.conversationId);
         setMessages(data.messages);
-        setOnline(data.online);
-        setOpensAt(data.opensAt);
-        seenCount.current = data.messages.length;
+        setDetailsSaved(Boolean(data.detailsSaved));
+        setOnline(Boolean(data.online));
+        setOpensAt((data.opensAt as string | null) ?? null);
+        seenCount.current = data.messages.filter((m: Message) => m.from === 'agent').length;
+        // A visitor coming back to a live conversation wants the reply they came
+        // back for, not the FAQ list.
+        // Only if they have not already chosen a screen while this was in
+        // flight — otherwise a slow resume yanks a visitor out of the article
+        // they opened, or unmounts the thread they are typing into.
+        if (!navigated.current) {
+          const opening = initialView({ messageCount: data.messages.length });
+          if (opening === 'thread') setThreadStarted(true);
+          setView(opening);
+        }
       })
       .catch(() => {
-        // Leaves `online` null, which renders as the neutral header rather than
-        // claiming either state.
+        // Leaves the home screen up, which is rendered from props and needs
+        // nothing from this call.
       });
-  }, [sessionNonce]);
+  }, []);
+
+  /**
+   * The token, minting one on first use. Resolves null only if the server did.
+   *
+   * Single-flight, and deliberately so. `talkToAgent` starts one without
+   * awaiting it so the screen changes immediately, and a visitor typing fast
+   * reaches `send` before `setToken` has landed — two callers, both seeing
+   * `token` as null. Without the shared promise each would POST an empty token,
+   * and `/api/widget/session` answers an unrecognised one by registering a new
+   * contact: two customer records, two tokens racing for the same localStorage
+   * key, and the message filed against whichever won.
+   *
+   * The stored token is read back inside the promise rather than trusted from
+   * the closure, so a resume that settled in the meantime is used instead of
+   * being overwritten.
+   */
+  const ensureSession = useCallback(async (): Promise<string | null> => {
+    if (token) return token;
+    if (minting.current) return minting.current;
+
+    const request = (async () => {
+      const stored = localStorage.getItem(STORAGE_KEY) ?? '';
+
+      const data = await fetch('/api/widget/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: stored }),
+      })
+        .then((response) => (response.ok ? response.json() : null))
+        .catch(() => null);
+
+      if (!data) return null;
+
+      localStorage.setItem(STORAGE_KEY, data.token);
+      activeToken.current = data.token;
+      setToken(data.token);
+      setConversationId(data.conversationId);
+      setMessages(data.messages);
+      setDetailsSaved(Boolean(data.detailsSaved));
+      setOnline(Boolean(data.online));
+      setOpensAt((data.opensAt as string | null) ?? null);
+      return data.token as string;
+    })();
+
+    minting.current = request;
+    try {
+      return await request;
+    } finally {
+      minting.current = null;
+    }
+  }, [token]);
 
   // --- Live agent replies --------------------------------------------------
 
@@ -159,10 +217,14 @@ export function WidgetChat({
         .then((response) => (response.ok ? response.json() : null))
         .then((data) => {
           // Same reason as the guard in `send`: the interval is cleared when
-          // the token changes, but a request already issued still resolves.
+          // the token changes, but a request already issued still resolves, and
+          // painting its answer would put the previous person's transcript in
+          // front of the next one.
           if (data && activeToken.current === token) {
             setConversationId(data.conversationId);
             setMessages(data.messages);
+            setOnline(Boolean(data.online));
+            setOpensAt((data.opensAt as string | null) ?? null);
           }
         })
         .catch(() => {});
@@ -204,20 +266,20 @@ export function WidgetChat({
     window.parent?.postMessage({ source: 'shipblu-widget', ...message }, '*');
   }, []);
 
-  useEffect(() => {
-    const unread = messages.filter((message) => message.from === 'agent').length;
-    postToHost({ type: 'unread', count: Math.max(0, unread - seenCount.current) });
-    bottom.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, postToHost]);
-
   // --- Who the host page says this is --------------------------------------
 
   /**
-   * Throws the visitor token away and opens a fresh session.
+   * Throws the visitor token away and returns to the opening screen.
    *
    * The transcript is dropped with it, which is the entire point: this runs when
    * the host page's signed-in user has changed, and the previous person's
    * conversation must not be on screen for the next one.
+   *
+   * It does not open a replacement session, because nothing here needs one yet.
+   * The widget mints a token when somebody chooses to talk, so a browser whose
+   * merchant just signed out goes back to the questions and files no contact row
+   * until the next person actually writes something. The identity is kept, and
+   * `sendIdentity` attaches it to whatever token comes next.
    */
   const startFreshSession = useCallback(() => {
     localStorage.removeItem(STORAGE_KEY);
@@ -227,24 +289,26 @@ export function WidgetChat({
     setToken(null);
     setConversationId(null);
     setMessages([]);
-    setSessionNonce((nonce) => nonce + 1);
+    setDetailsSaved(false);
+    setThreadStarted(false);
+    setView('home');
   }, []);
 
   const sendIdentity = useCallback(
-    async (activeToken: string) => {
+    async (forToken: string) => {
       const pending = identity.current;
       if (!pending) return;
 
       // The host re-sends on every open and on every navigation of its own SPA,
       // so the common case is an identity the server already has.
-      const fingerprint = `${activeToken}:${JSON.stringify(pending)}`;
+      const fingerprint = `${forToken}:${JSON.stringify(pending)}`;
       if (identified.current === fingerprint) return;
       identified.current = fingerprint;
 
       const response = await fetch('/api/widget/identify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: activeToken, ...pending }),
+        body: JSON.stringify({ token: forToken, ...pending }),
       }).catch(() => null);
 
       // Retried on the next open rather than left unsaid: the fingerprint is
@@ -264,14 +328,33 @@ export function WidgetChat({
     [startFreshSession],
   );
 
+  /*
+   * Announced when a token exists, which is now later than it used to be: the
+   * widget opens on the questions and mints nothing until somebody chooses to
+   * talk. So an identity the host pushes at load is held in the ref above and
+   * attached here, on the first token — rather than the host having to re-send
+   * it at the moment the visitor happens to press the button.
+   */
   useEffect(() => {
     if (!token) return;
-    // Tells the host the frame is ready to be told who the visitor is. Sent on
-    // every new token, so a session that reset re-collects the identity without
-    // the host having to notice.
     postToHost({ type: 'ready' });
     void sendIdentity(token);
   }, [token, postToHost, sendIdentity]);
+
+  /*
+   * A reply is unread until the visitor is actually looking at it.
+   *
+   * Which is two conditions, not one: the panel has to be open — an iframe is
+   * told that by the host, since `display:none` fires no event inside it — and
+   * the thread has to be the screen showing. Someone reading an FAQ with the
+   * panel open is not reading their conversation, and badging them is how they
+   * find out an agent answered.
+   */
+  useEffect(() => {
+    const replies = messages.filter((message) => message.from === 'agent').length;
+    if (panelOpen && view === 'thread') seenCount.current = replies;
+    postToHost({ type: 'unread', count: Math.max(0, replies - seenCount.current) });
+  }, [messages, view, panelOpen, postToHost]);
 
   useEffect(() => {
     const onHostMessage = (event: MessageEvent) => {
@@ -285,10 +368,10 @@ export function WidgetChat({
        */
       if (event.origin !== window.location.origin && !hostOrigins.includes(event.origin)) return;
       if (event.data?.source !== 'shipblu-host') return;
-      if (event.data.type === 'opened') {
-        seenCount.current = messages.length;
-        postToHost({ type: 'unread', count: 0 });
-      }
+
+      if (event.data.type === 'opened') setPanelOpen(true);
+      if (event.data.type === 'closed') setPanelOpen(false);
+
       if (event.data.type === 'identify') {
         identity.current = {
           identity: event.data.identity,
@@ -296,6 +379,7 @@ export function WidgetChat({
         };
         if (token) void sendIdentity(token);
       }
+
       // The host page signing its user out. Not merely an identity of null: the
       // point is that the next person at this browser starts clean.
       if (event.data.type === 'clear') {
@@ -306,43 +390,75 @@ export function WidgetChat({
     };
 
     window.addEventListener('message', onHostMessage);
+
+    /*
+     * Ask, rather than assume.
+     *
+     * `toggle` posts to `contentWindow` the instant it creates the iframe, so
+     * that first 'opened' lands on `about:blank` and is lost — as is a 'closed'
+     * from a visitor who shuts the panel before the frame finishes loading, and
+     * every locale switch re-points `src` and starts a fresh document. Any of
+     * those leaves a hidden panel believing it is visible, which silently
+     * swallows the unread badge. The host answers this with its real state.
+     */
+    postToHost({ type: 'hello' });
+
     return () => window.removeEventListener('message', onHostMessage);
-  }, [hostOrigins, messages, postToHost, sendIdentity, startFreshSession, token]);
+  }, [hostOrigins, postToHost, sendIdentity, startFreshSession, token]);
 
-  // --- Article suggestions -------------------------------------------------
+  // --- Navigation ----------------------------------------------------------
 
-  // Debounced so a suggestion query does not fire per keystroke. Short drafts
-  // are filtered when rendering rather than by clearing state here — clearing
-  // in the effect body is a synchronous setState that cascades a render.
-  useEffect(() => {
-    const query = draft.trim();
-    if (query.length < 6) return;
+  // Only ever called from the home screen or from the thread's suggestion strip,
+  // so the current view is the one to come back to.
+  const openArticle = useCallback(
+    (next: ArticleLink) => {
+      navigated.current = true;
+      setArticle(next);
+      setArticleFrom(view === 'article' ? 'home' : view);
+      setView('article');
+    },
+    [view],
+  );
 
-    const timer = setTimeout(() => {
-      void fetch(`/api/widget/search?q=${encodeURIComponent(query)}&locale=${locale}`)
-        .then((response) => (response.ok ? response.json() : null))
-        .then((data) => setSuggestions((data?.articles as Suggestion[]) ?? []))
-        .catch(() => setSuggestions([]));
-    }, 400);
+  /** Back goes where the visitor came from, which is not always the home screen. */
+  const back = useCallback(() => {
+    navigated.current = true;
+    setView((current) => (current === 'article' ? articleFrom : 'home'));
+  }, [articleFrom]);
 
-    return () => clearTimeout(timer);
-  }, [draft, locale]);
-
-  // Derived, so a half-typed word hides the previous suggestions immediately
-  // instead of leaving stale ones on screen until the next fetch settles.
-  const visibleSuggestions = draft.trim().length < 6 ? [] : suggestions;
+  const talkToAgent = useCallback(() => {
+    // Shown immediately; the token is minted underneath. Waiting for the round
+    // trip would make the one button on the screen feel broken.
+    navigated.current = true;
+    setThreadStarted(true);
+    setView('thread');
+    void ensureSession();
+  }, [ensureSession]);
 
   // --- Sending -------------------------------------------------------------
 
-  async function send(event: React.FormEvent) {
-    event.preventDefault();
+  /** Files how to reach the visitor. Needs a conversation, so never called first. */
+  const saveDetails = useCallback(
+    async (activeToken: string, details: OfflineDetails): Promise<boolean> => {
+      if (!details.email.trim() && !details.phone.trim()) return false;
 
-    const body = draft.trim();
-    if (!body || !token || sending) return;
+      const ok = await fetch('/api/widget/contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: activeToken, ...details }),
+      })
+        .then((response) => response.ok)
+        .catch(() => false);
 
-    setSending(true);
-    setDraft('');
-    setSuggestions([]);
+      if (ok) setDetailsSaved(true);
+      return ok;
+    },
+    [],
+  );
+
+  async function send(body: string, details: OfflineDetails | null): Promise<boolean> {
+    const active = await ensureSession();
+    if (!active) return false;
 
     // Shown immediately with a temporary id, then replaced by the server's
     // canonical list. Waiting for the round trip makes the widget feel broken
@@ -360,219 +476,126 @@ export function WidgetChat({
       const response = await fetch('/api/widget/message', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token, body, pageUrl: document.referrer || null }),
+        body: JSON.stringify({ token: active, body, pageUrl: document.referrer || null }),
       });
 
-      // The session was replaced while this was on the wire — a sign-out on the
-      // host page. Everything below belongs to somebody who is no longer here,
-      // the draft included: putting that text back would hand the next person
-      // the previous one's half-typed sentence.
-      if (activeToken.current !== token) return;
+      /*
+       * The session was replaced while this was on the wire — a sign-out on the
+       * host page. Everything below belongs to somebody who is no longer here,
+       * the draft included: putting that text back would hand the next person
+       * the previous one's half-typed sentence, so this reports success it did
+       * not have rather than restoring it.
+       */
+      if (activeToken.current !== active) return true;
 
-      if (response.ok) {
-        const data = (await response.json()) as {
-          conversationId: string;
-          messages: Message[];
-        };
-        setConversationId(data.conversationId);
-        setMessages(data.messages);
-        seenCount.current = data.messages.filter((m) => m.from === 'agent').length;
-      } else {
-        // Put the text back rather than losing it.
+      if (!response.ok) {
         setMessages((current) => current.filter((m) => m.id !== optimistic.id));
-        setDraft(body);
+        return false;
       }
+
+      const data = (await response.json()) as { conversationId: string; messages: Message[] };
+      setConversationId(data.conversationId);
+      setMessages(data.messages);
+      seenCount.current = data.messages.filter((m) => m.from === 'agent').length;
+
+      /*
+       * The details go second, because they need the conversation this message
+       * just opened — `/api/widget/contact` writes a timeline event, and an
+       * event has nowhere to hang without one.
+       *
+       * Its failure does not fail the send: the message is stored either way,
+       * and throwing away what the visitor wrote because we could not file a
+       * phone number would be the worse of the two losses. The form stays up
+       * instead, with its own button, so the number is recoverable rather than
+       * quietly gone.
+       */
+      if (details) await saveDetails(active, details);
+
+      return true;
     } catch {
       setMessages((current) => current.filter((m) => m.id !== optimistic.id));
-      setDraft(body);
-    } finally {
-      setSending(false);
+      return false;
     }
   }
 
-  async function saveEmail(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
+  // --- Chrome --------------------------------------------------------------
 
-    const response = await fetch('/api/widget/email', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token, email: form.get('email'), name: form.get('name') }),
-    }).catch(() => null);
-
-    if (response?.ok) setEmailSaved(true);
-  }
-
-  const showEmailPrompt = online === false && messages.length > 0 && !emailSaved;
+  const showBack = view !== 'home';
 
   return (
     <div dir={direction(locale)} lang={locale} className="flex h-full flex-col text-sm">
       <header className="flex shrink-0 items-center gap-2 border-b border-[var(--border)] px-4 py-3">
+        {showBack ? (
+          <button
+            type="button"
+            onClick={back}
+            aria-label={copy.back}
+            /* A logical arrow: `rtl` flips the glyph with the layout, so this
+               points back in both languages rather than forward in one. */
+            className="-ms-2 rounded px-2 py-1 opacity-60 hover:opacity-100 rtl:rotate-180"
+          >
+            ←
+          </button>
+        ) : null}
+
         <div className="min-w-0">
           <p className="font-semibold">{copy.heading}</p>
           <p className="truncate text-xs opacity-60">
-            {online === null ? '' : online ? copy.online : copy.offline}
-            {online === false && opensAt
-              ? ` · ${copy.opensAt} ${formatOpens(opensAt, locale)}`
-              : ''}
+            {online ? copy.online : copy.offline}
+            {!online && opensAt ? ` · ${copy.opensAt} ${formatOpens(opensAt, locale)}` : ''}
           </p>
         </div>
 
         <button
           type="button"
           onClick={() => postToHost({ type: 'close' })}
-          aria-label="Close"
+          aria-label={copy.close}
           className="ms-auto rounded px-2 py-1 opacity-50 hover:opacity-100"
         >
           ✕
         </button>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-        {messages.length === 0 ? (
-          <div className="py-6">
-            <p className="text-center text-sm opacity-50">{copy.starter}</p>
-
-            {/*
-              The questions a visitor would otherwise wait for an agent to
-              answer, offered before they type. Two thirds of what arrives on
-              chat is "where is my parcel" in one wording or another, and that
-              article is one tap away here rather than four minutes away in the
-              queue.
-
-              Only on the opening screen: once there are messages the visitor is
-              in a conversation, and a list of links under it reads as being
-              fobbed off.
-            */}
-            {faqs.length > 0 ? (
-              <nav aria-label={copy.faqs} className="mt-6">
-                <p className="mb-2 text-xs font-medium opacity-50">{copy.faqs}</p>
-                <ul className="flex flex-col gap-1.5">
-                  {faqs.map((article) => (
-                    <li key={article.url}>
-                      <a
-                        href={article.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        // A row rather than a line of underlined text: this is
-                        // the one screen where the links are the interface, and
-                        // a 40px target is what a thumb can hit.
-                        className="block rounded-lg border border-[var(--border)] px-3 py-2 text-sm hover:bg-[var(--muted)]"
-                      >
-                        {article.title}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              </nav>
-            ) : null}
-          </div>
-        ) : null}
-
-        <ol className="flex flex-col gap-2">
-          {messages.map((message) => (
-            <li
-              key={message.id}
-              className={`max-w-[85%] rounded-lg px-3 py-2 ${
-                message.from === 'visitor' ? 'ms-auto bg-brand-600 text-white' : 'bg-[var(--muted)]'
-              }`}
-            >
-              {message.from === 'agent' && message.authorName ? (
-                <p className="mb-0.5 text-xs opacity-60">{message.authorName}</p>
-              ) : null}
-              <p className="whitespace-pre-wrap break-words">{message.body}</p>
-            </li>
-          ))}
-        </ol>
-
-        {showEmailPrompt ? (
-          <form onSubmit={saveEmail} className="mt-4 rounded-lg border border-[var(--border)] p-3">
-            <p className="mb-2 text-xs opacity-70">{copy.emailPrompt}</p>
-            <div className="flex gap-2">
-              <input
-                name="email"
-                type="email"
-                required
-                placeholder={copy.emailPlaceholder}
-                /* 16px for the same reason as the composer below. */
-                className="min-w-0 flex-1 rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-base outline-none focus:border-brand-500"
-              />
-              <button
-                type="submit"
-                className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white"
-              >
-                {copy.send}
-              </button>
-            </div>
-          </form>
-        ) : null}
-
-        {emailSaved ? (
-          <p className="mt-4 rounded-lg bg-[var(--muted)] p-3 text-xs opacity-70">
-            {copy.emailSaved}
-          </p>
-        ) : null}
-
-        <div ref={bottom} />
-      </div>
-
-      {visibleSuggestions.length > 0 ? (
-        <div className="shrink-0 border-t border-[var(--border)] px-4 py-2">
-          <p className="mb-1 text-xs opacity-50">{copy.suggested}</p>
-          <ul className="flex flex-col gap-1">
-            {visibleSuggestions.map((article) => (
-              <li key={article.url}>
-                <a
-                  href={article.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-xs text-brand-600 underline underline-offset-2"
-                >
-                  {article.title}
-                </a>
-              </li>
-            ))}
-          </ul>
-        </div>
+      {view === 'home' ? (
+        <WidgetHome
+          locale={locale}
+          copy={copy}
+          faqs={faqs}
+          online={online}
+          onOpenArticle={openArticle}
+          onTalkToAgent={talkToAgent}
+        />
       ) : null}
 
-      <form
-        onSubmit={send}
-        className="flex shrink-0 items-end gap-2 border-t border-[var(--border)] p-3"
-      >
-        <textarea
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            // Enter sends, Shift+Enter breaks the line — what every chat does,
-            // and what a visitor will try without thinking.
-            if (event.key === 'Enter' && !event.shiftKey) {
-              event.preventDefault();
-              void send(event);
-            }
-          }}
-          rows={2}
-          maxLength={5000}
-          placeholder={copy.placeholder}
-          disabled={!token}
-          /*
-            16px, not the 14px the rest of the widget reads at. Safari zooms
-            the page in on any field smaller than that the moment it is
-            focused, and a zoomed page is a scrolled page — which on iOS is
-            what parts a caret from the field it belongs to. Sizing the field
-            up is the fix that does not also disable pinch-zoom for the
-            visitor.
-          */
-          className="min-w-0 flex-1 resize-none rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-base outline-none focus:border-brand-500"
-        />
-        <button
-          type="submit"
-          disabled={!token || sending || !draft.trim()}
-          className="rounded-md bg-brand-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-40"
-        >
-          {copy.send}
-        </button>
-      </form>
+      {view === 'article' && article ? (
+        <WidgetArticle locale={locale} copy={copy} article={article} onTalkToAgent={talkToAgent} />
+      ) : null}
+
+      {/*
+        Hidden rather than unmounted, once it has been opened.
+        Unmounting throws away the half-written message and the scroll position,
+        which turns the suggestion strip above the composer into a trap: tapping
+        an article to check something would delete the sentence that prompted it.
+        `contents` keeps the thread a flex item of this column while it is up.
+      */}
+      {threadStarted ? (
+        <div className={view === 'thread' ? 'contents' : 'hidden'}>
+          <WidgetThread
+            locale={locale}
+            copy={copy}
+            messages={messages}
+            online={online}
+            active={view === 'thread'}
+            detailsSaved={detailsSaved}
+            onSend={send}
+            onSaveDetails={async (details) => {
+              const active = await ensureSession();
+              return active ? saveDetails(active, details) : false;
+            }}
+            onOpenArticle={openArticle}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

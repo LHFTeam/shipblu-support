@@ -491,12 +491,17 @@ export async function GET() {
 
     applyPlacement();
 
-    if (open) {
-      badge.style.display = 'none';
-      // Told on every open so the widget can mark the transcript read and
-      // focus its input — an iframe cannot detect being shown on its own.
-      frame.contentWindow.postMessage({ source: 'shipblu-host', type: 'opened' }, BASE);
-    }
+    // Told on every open *and* every close, because an iframe cannot detect
+    // being shown or hidden on its own — \`display:none\` fires no event inside
+    // it. The widget needs both halves: 'opened' is when it marks the transcript
+    // read, and without 'closed' a visitor who leaves the panel sitting on the
+    // conversation would never be badged for the reply that arrives after they
+    // look away.
+    if (open) badge.style.display = 'none';
+    frame.contentWindow.postMessage(
+      { source: 'shipblu-host', type: open ? 'opened' : 'closed' },
+      BASE
+    );
   }
 
   launcher.addEventListener('click', function () {
@@ -551,6 +556,27 @@ export async function GET() {
       }
 
       pushIdentity();
+    }
+
+    /*
+     * The frame asking whether it is visible.
+     *
+     * Distinct from 'ready', which the widget only sends once it has a session:
+     * it now opens on the questions and mints no token until somebody chooses to
+     * talk, so a panel showing FAQs would never ask. And it cannot work this out
+     * for itself — the 'opened' posted when this script *creates* the frame
+     * lands on about:blank, a close before the frame loads is lost the same way,
+     * and \`setLocale\` re-points \`src\` and starts a new document. Left
+     * assuming it is visible, a hidden panel silently swallows the unread badge.
+     */
+    if (data.type === 'hello') {
+      if (iframe && iframe.contentWindow) {
+        iframe.contentWindow.postMessage(
+          { source: 'shipblu-host', type: open ? 'opened' : 'closed' },
+          BASE
+        );
+      }
+      return;
     }
 
     if (data.type === 'unread') {

@@ -454,6 +454,52 @@ export async function getArticle(
   return rows[0] ?? null;
 }
 
+/**
+ * One folder's articles, in the order an editor put them in.
+ *
+ * The widget's FAQ list. `position` rather than `view_count` because this is the
+ * one editorially-curated ordering the schema has: an admin points the widget at
+ * a folder and the running order is then whatever the KB editor dragged it into,
+ * which is the whole reason for choosing a folder over "most read".
+ *
+ * `folderVisibleTo` is not decoration here and is the reason this takes a viewer
+ * rather than a folder id alone. The folder is named by an admin in a form, and
+ * production has four `agents_only` folders whose articles are individually
+ * marked `published`/`public` — the staff handbook. Filtering on the article
+ * alone would publish it to every page that embeds the widget.
+ */
+export async function folderArticles(
+  viewer: KbViewer,
+  locale: Locale,
+  folderId: string,
+  limit = 6,
+): Promise<ArticleSummary[]> {
+  return db
+    .select({
+      id: kbArticles.id,
+      title: kbArticles.title,
+      slug: kbArticles.slug,
+      excerpt: kbArticles.excerpt,
+    })
+    .from(kbArticles)
+    .innerJoin(kbFolders, eq(kbFolders.id, kbArticles.folderId))
+    .where(
+      and(
+        eq(kbArticles.folderId, folderId),
+        // Carried even though the folder implies it. A folder has no locale of
+        // its own, it inherits its category's, and only one console action
+        // enforces that an article matches — the Freshdesk importer does not. A
+        // mis-filed row would otherwise put an English FAQ in the Arabic widget,
+        // where every tap 404s because `getArticle` *does* filter on locale.
+        eq(kbArticles.locale, locale),
+        articleVisibleTo(viewer),
+        folderVisibleTo(viewer),
+      ),
+    )
+    .orderBy(asc(kbArticles.position), asc(kbArticles.title))
+    .limit(limit);
+}
+
 /** Same folder, excluding the article itself. Cheap and usually relevant. */
 export async function relatedArticles(
   viewer: KbViewer,

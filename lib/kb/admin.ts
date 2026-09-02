@@ -104,6 +104,17 @@ export type FolderOption = {
   name: string;
   categoryName: string;
   categoryLocale: string;
+  /**
+   * Carried because one picker has to exclude some of these.
+   *
+   * The widget's FAQ folder is chosen from this list and then read with an
+   * anonymous viewer, so a folder that is not `public` yields an empty list on
+   * the customer's screen while looking configured on the admin's. Production
+   * has four `agents_only` folders — the staff handbook — whose articles are
+   * individually marked `published`/`public`, which is exactly the pairing that
+   * makes the mistake plausible.
+   */
+  visibility: string;
 };
 
 /** Every folder, grouped for a picker. Small enough to load in one go. */
@@ -114,6 +125,7 @@ export async function listFolderOptions(): Promise<FolderOption[]> {
       name: kbFolders.name,
       categoryName: kbCategories.name,
       categoryLocale: kbCategories.locale,
+      visibility: kbFolders.visibility,
     })
     .from(kbFolders)
     .innerJoin(kbCategories, eq(kbCategories.id, kbFolders.categoryId))

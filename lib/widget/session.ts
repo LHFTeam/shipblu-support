@@ -1,6 +1,7 @@
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull } from 'drizzle-orm';
+import { cache } from 'react';
 import { db } from '@/db/client';
-import { channels, contactIdentities, conversations, ticketStatuses } from '@/db/schema';
+import { channels, contactIdentities, contacts, conversations, ticketStatuses } from '@/db/schema';
 import { generateToken, hashToken } from '@/lib/auth/tokens';
 import type { HoursConfig } from '@/lib/hours';
 import { loadHoursCatalog } from '@/lib/hours/catalog';
@@ -49,6 +50,24 @@ export async function resolveVisitor(token: string): Promise<string | null> {
     .limit(1);
 
   return rows[0]?.contactId ?? null;
+}
+
+/**
+ * Whether we already know how to reach this visitor.
+ *
+ * Read on every session open so the out-of-hours form is not put back in front
+ * of somebody who filled it in last week. Either field counts, because either
+ * one is a way back — the same rule `parseVisitorDetails` enforces on the way
+ * in.
+ */
+export async function hasReplyDetails(contactId: string): Promise<boolean> {
+  const rows = await db
+    .select({ email: contacts.primaryEmail, phone: contacts.primaryPhone })
+    .from(contacts)
+    .where(eq(contacts.id, contactId))
+    .limit(1);
+
+  return Boolean(rows[0]?.email || rows[0]?.phone);
 }
 
 /** Creates the contact behind a fresh token. */
@@ -102,13 +121,32 @@ export async function widgetHours(): Promise<HoursConfig | null> {
   return groupHours(catalog, channel?.defaultGroupId ?? null);
 }
 
-/** The configured webchat channel, for default routing. */
-export async function webchatChannel() {
+/**
+ * The configured webchat channel, for default routing and the widget's settings.
+ *
+ * `cache()` because the widget page needs this row twice on the load a visitor
+ * is watching — once for the FAQ folder and once for the schedule — and two
+ * identical queries on that path buy nothing.
+ *
+ * Ordered, because nothing stops an admin adding a second `webchat` row: without
+ * it Postgres may return either, and the admin page would configure one row
+ * while the widget read the other. Oldest wins, which is the row that has been
+ * routing tickets.
+ */
+export const webchatChannel = cache(async () => {
   const rows = await db
-    .select({ id: channels.id, defaultGroupId: channels.defaultGroupId })
+    .select({
+      id: channels.id,
+      defaultGroupId: channels.defaultGroupId,
+      // Read here rather than in a second query because every caller that wants
+      // the settings already needs the row: the FAQ list resolves the folder for
+      // its locale out of this column, through `parseWidgetConfig`.
+      config: channels.config,
+    })
     .from(channels)
     .where(and(eq(channels.type, 'webchat'), eq(channels.isActive, true)))
+    .orderBy(asc(channels.createdAt), asc(channels.id))
     .limit(1);
 
   return rows[0] ?? null;
-}
+});

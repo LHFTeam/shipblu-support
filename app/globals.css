@@ -699,3 +699,107 @@ body {
     break-after: avoid;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Article body inside the chat widget.
+
+   Separate from `.kb-article` above rather than sharing it, because that block
+   is scoped to `.kb-shell` and reads off `--kb-*`, the help centre's own
+   palette. `app/widget/layout.tsx` deliberately does not carry `.kb-shell` — the
+   whole point of the iframe is that the widget's chrome is its own — so pulling
+   it in would import the help centre's typography scale into a 380px panel that
+   cannot hold it.
+
+   The same HTML, then, at interface size: an article read in the panel is a
+   glance at an answer, not a page someone settles into.
+   --------------------------------------------------------------------------- */
+.widget-article {
+  color: var(--foreground);
+  font-size: 0.875rem;
+  line-height: 1.65;
+  /* Imported articles carry bare tracking URLs and support@ addresses longer
+     than the panel is wide. */
+  overflow-wrap: break-word;
+}
+
+.widget-article > * + * {
+  margin-top: 0.9em;
+}
+.widget-article > :first-child {
+  margin-top: 0;
+}
+
+.widget-article :is(h1, h2, h3, h4, h5, h6) {
+  font-weight: 600;
+  line-height: 1.35;
+  /* A heading belongs to what follows it. */
+  margin-top: 1.6em;
+}
+/* One step down from the panel's own heading, whatever level the imported
+   markup happens to start at — Freshdesk bodies are inconsistent about it. */
+.widget-article :is(h1, h2) {
+  font-size: 1rem;
+}
+.widget-article :is(h3, h4, h5, h6) {
+  font-size: 0.9375rem;
+}
+
+.widget-article a {
+  color: var(--color-brand-600);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.widget-article :is(ul, ol) {
+  padding-inline-start: 1.4em;
+}
+.widget-article ul {
+  list-style: disc;
+}
+.widget-article ol {
+  list-style: decimal;
+}
+.widget-article li + li {
+  margin-top: 0.35em;
+}
+
+.widget-article blockquote {
+  border-inline-start: 3px solid var(--border);
+  padding-inline-start: 0.8em;
+  color: var(--muted-foreground);
+}
+
+/* Anything that cannot reflow scrolls in its own box rather than widening the
+   panel — the iframe is sized by the host and has nowhere to grow sideways. */
+.widget-article :is(img, video, iframe) {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+}
+.widget-article :is(pre, table) {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.widget-article :is(code, pre) {
+  font-size: 0.8125rem;
+}
+.widget-article pre {
+  background: var(--muted);
+  border-radius: 6px;
+  padding: 0.6em 0.75em;
+}
+
+.widget-article table {
+  border-collapse: collapse;
+}
+.widget-article :is(th, td) {
+  border: 1px solid var(--border);
+  padding: 0.35em 0.5em;
+  text-align: start;
+}
+
+.widget-article hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+}

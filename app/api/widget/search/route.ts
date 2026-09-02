@@ -23,7 +23,16 @@ export const dynamic = 'force-dynamic';
  * article to any page that embeds the widget. A signed-in customer searching
  * from the help centre gets their own articles through the search page, which
  * has their session.
+ *
+ * Two callers now, wanting different amounts: the composer's suggestion strip,
+ * which interrupts someone mid-sentence and shows a few titles, and the home
+ * screen's search box, which is the visitor's own question and replaces the FAQ
+ * list with its answer. Five is the larger of the two and the strip takes the
+ * first three, rather than a `limit` parameter — the cap is what stops this
+ * being a way to page through the knowledge base one request at a time.
  */
+const RESULTS = 5;
+
 export async function GET(request: Request) {
   if (!allow(`widget-search:${clientIp(request)}`, 60, 60_000)) {
     return NextResponse.json({ articles: [] }, { status: 429 });
@@ -36,7 +45,7 @@ export async function GET(request: Request) {
 
   if (query.length < 3) return NextResponse.json({ articles: [] });
 
-  const hits = await searchArticles(ANONYMOUS, locale, query, 3);
+  const hits = await searchArticles(ANONYMOUS, locale, query, RESULTS);
   /*
    * The host this request arrived on, which is the one that served the frame —
    * not `publicBaseUrl()`, which builds every link on `KB_PUBLIC_HOST` and
@@ -50,6 +59,9 @@ export async function GET(request: Request) {
   return NextResponse.json({
     articles: hits.map((hit) => ({
       title: hit.title,
+      // Carried so a hit opens in the panel like an FAQ does, rather than
+      // throwing the visitor out to a browser tab mid-question.
+      slug: hit.slug,
       url: `${base}/${locale}/a/${encodeURI(hit.slug)}`,
     })),
   });

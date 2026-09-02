@@ -9,6 +9,9 @@ import { normaliseEmail } from '@/lib/auth/normalise';
 import { sealInviteToken } from '@/lib/auth/invite-token';
 import { generateToken, hashToken } from '@/lib/auth/tokens';
 import { destroyAllSessionsForAgent } from '@/lib/auth/session';
+import { listFolderOptions } from '@/lib/kb/admin';
+import { LOCALES } from '@/lib/kb/locale';
+import { resolveFaqFolders } from '@/lib/widget/config';
 import { enqueue } from '@/lib/queue';
 import { appUrl, env } from '@/lib/env';
 
@@ -180,6 +183,20 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
     }
   }
 
+  // Which knowledge base folder the chat widget lists, per locale. The rule
+  // lives in `lib/widget/config.ts`, shared with the picker that offers them.
+  let faqFolders: Record<string, string> = {};
+
+  if (type === 'webchat') {
+    const chosen = Object.fromEntries(
+      LOCALES.map((locale) => [locale, String(formData.get(`faqFolder_${locale}`) ?? '')]),
+    );
+
+    const resolved = resolveFaqFolders(chosen, await listFolderOptions());
+    if ('error' in resolved) return { error: resolved.error };
+    faqFolders = resolved.folders;
+  }
+
   // Non-secret settings only. Access tokens and app secrets stay in the
   // environment, so a database dump never contains a usable credential.
   // Facebook and Instagram are addressed by ids that live in the environment
@@ -190,7 +207,12 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
       ? { phoneNumberId }
       : type === 'facebook' || type === 'instagram'
         ? {}
-        : { address };
+        : type === 'webchat'
+          ? // The widget has no address. The row used to store an empty one
+            // because this branch was the catch-all; production still carries
+            // `{"address": ""}` from that, and this replaces it.
+            { faqFolders }
+          : { address };
 
   const account = isWhatsApp ? whatsappAccountId : null;
 

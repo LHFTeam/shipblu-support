@@ -1,9 +1,8 @@
-import { headers } from 'next/headers';
+import { isWithinBusinessHours, nextOpeningAt } from '@/lib/hours';
 import { DEFAULT_LOCALE, isLocale } from '@/lib/kb/locale';
-import { popularArticles } from '@/lib/kb/queries';
-import { requestBaseUrl } from '@/lib/kb/site';
-import { ANONYMOUS } from '@/lib/kb/visibility';
+import { widgetFaqs } from '@/lib/widget/faq';
 import { allowedHostOrigins } from '@/lib/widget/origins';
+import { widgetHours } from '@/lib/widget/session';
 import { WidgetChat } from './chat';
 
 export const dynamic = 'force-dynamic';
@@ -12,15 +11,24 @@ export const dynamic = 'force-dynamic';
 export const metadata = { robots: { index: false, follow: false } };
 
 /**
- * How many questions the opening screen offers.
+ * The iframe's document.
  *
- * Five, because the panel is 380x600 and the list shares that screen with the
- * composer: a longer list pushes the thing the visitor came to do off the
- * bottom, and a list nobody scrolls to the end of is a list whose last entries
- * are decoration.
+ * The questions and the schedule are read here rather than fetched once the
+ * widget has mounted, and that is the difference between a list that is *there*
+ * and one that appears a moment later under the visitor's thumb. The page is
+ * already `force-dynamic` and already renders per open, so both cost one query
+ * on a request that was happening anyway.
+ *
+ * It is also what lets the widget open without a session: the home screen needs
+ * no token, so a visitor who reads an FAQ and leaves never becomes a `contacts`
+ * row. `setLocale()` on the host re-points the iframe's `src`, so a language
+ * switch re-runs both reads rather than translating what is already on screen.
+ *
+ * `widgetFaqs` resolves the viewer itself, and it is `ANONYMOUS` for the reason
+ * `/api/widget/search` states: the widget authenticates a browser on somebody
+ * else's website, which is not the portal session that says who a customer is,
+ * so a `logged_in` article must never reach a screen any page can embed.
  */
-const FAQ_COUNT = 5;
-
 export default async function WidgetPage({
   searchParams,
 }: {
@@ -29,42 +37,19 @@ export default async function WidgetPage({
   const { locale: requested } = await searchParams;
   const locale = isLocale(requested) ? requested : DEFAULT_LOCALE;
 
-  /*
-   * The questions are read here rather than fetched by the widget once it has
-   * mounted, and that is the difference between a list that is *there* and one
-   * that appears a moment later under the visitor's thumb. The page is already
-   * `force-dynamic` and already renders per open, so it costs one query on a
-   * request that was happening anyway — and it needs no public endpoint of its
-   * own to rate limit.
-   *
-   * `ANONYMOUS` for the same reason `/api/widget/search` uses it: the widget
-   * authenticates a browser on somebody else's website, which is not the portal
-   * session that says who a customer is. A `logged_in` article must not reach
-   * the opening screen of a widget any page can embed.
-   */
-  const [articles, headerList] = await Promise.all([
-    popularArticles(ANONYMOUS, locale, FAQ_COUNT),
-    headers(),
-  ]);
+  // Independent, and both on the panel's critical path.
+  const [faqs, hours] = await Promise.all([widgetFaqs(locale), widgetHours()]);
 
-  /*
-   * Links built from the host this frame was served on, not from
-   * `publicBaseUrl()`. The widget frames whichever of our hostnames served the
-   * snippet, so the request's own Host is the one that will answer — while
-   * `KB_PUBLIC_HOST` currently names `support.shipblu.com`, which has never
-   * pointed at this app and answers 404 (`docs/PROJECT-STATE.md` §4). A list of
-   * dead links is worse than no list.
-   */
-  const base = requestBaseUrl(headerList);
+  const online = hours ? isWithinBusinessHours(hours) : false;
+  const opensAt = !online && hours ? nextOpeningAt(hours) : null;
 
   return (
     <WidgetChat
       locale={locale}
       hostOrigins={allowedHostOrigins()}
-      faqs={articles.map((article) => ({
-        title: article.title,
-        url: `${base}/${locale}/a/${encodeURI(article.slug)}`,
-      }))}
+      faqs={faqs}
+      online={online}
+      opensAt={opensAt?.toISOString() ?? null}
     />
   );
 }
