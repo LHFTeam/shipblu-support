@@ -745,12 +745,36 @@ is code:
   decorative: auto-assignment only ever considers members of the ticket's group,
   so a group with an empty roster hands out nothing and says `no_group_members`
   on the timeline.
-- **Assignment is configured but off.** Every group is on `manual`, which is the
-  deliberate default and means the module changes nothing until somebody chooses
-  otherwise at `/admin/groups`. Whoever configures it should also decide the
-  per-agent caps and, if skills are used, set a **skill timeout** — without one,
-  a mistake in a skill's conditions is a ticket no human ever sees. `/admin`
-  reports both, including any skill no active agent holds.
+- ~~**Assignment is configured but off.**~~ **Switched on for `Support` on
+  2026-09-02**, round robin, all three agents on the roster. Still `manual` on
+  `Customer Care` and `Merchant Care`, whose rosters are empty and which no
+  channel points at — they route nothing until somebody decides what belongs in
+  them.
+
+  Two things were in the way and are worth knowing about, because both made the
+  feature look broken rather than unconfigured:
+
+  - **`facebook`, `instagram` and `whatsapp` had no `channels` rows**, so every
+    ticket on those channels arrived with `group_id` null and could never be
+    assigned — 71 of them had accumulated. Rows now exist, all defaulting to
+    `Support`, and the 71 were backfilled. The WhatsApp row carries
+    `phoneNumberId` `838961722630554`, the support line; it must **never** carry
+    the bot's `128318316834446`, which would route 13,693 bot transcripts into
+    the team's queue. `resolveWhatsAppChannel` matches the number exactly and
+    otherwise falls back to the first `whatsapp` row, so a blank number is safe
+    and a wrong one is only ever a fallback — the bot's number is the single
+    value that must not appear there.
+  - **Only one agent has ever been online.** Presence gates eligibility, so round
+    robin hands everything to whoever is connected. George has never signed in
+    (`last_seen_at` null) and Ahmed last beat on 26 Aug, which means the rota is
+    effectively one person until they open the console. This is the design
+    working, but it reads as "round robin is broken" if you do not know it.
+
+  No per-agent caps are set, and no skills are in use — so no skill timeout is
+  needed yet. If skills are ever switched on, set one: without it a mistake in a
+  skill's conditions is a ticket no human ever sees. `/admin` reports both,
+  including any skill no active agent holds.
+
 - **Locations.** `locations` is empty, and there are sixteen of them. Nothing
   routes on a location yet, so an empty table breaks nothing — but a register
   entered to fourteen is worse than an empty one, because the two missing hubs
