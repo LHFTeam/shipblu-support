@@ -141,6 +141,13 @@
       "when": 1788358569505,
       "tag": "0019_broken_dazzler",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1788367929878,
+      "tag": "0020_lazy_strong_guy",
+      "breakpoints": true
     }
   ]
 }

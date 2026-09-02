@@ -265,8 +265,14 @@ export const invites = pgTable(
   'invites',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    /** SHA-256 of the invite token; the raw token only ever exists in the email. */
+    /** SHA-256 of the invite token, used for the indexed acceptance lookup. */
     tokenHash: text('token_hash').notNull(),
+    /**
+     * AES-GCM ciphertext for showing the same link to an authenticated admin
+     * while the invite is pending. Nullable because hashes from older invites
+     * cannot be reversed; the database alone still contains no usable token.
+     */
+    tokenCiphertext: text('token_ciphertext'),
     email: text('email').notNull(),
     name: text('name'),
     role: agentRoleEnum('role').notNull().default('agent'),
