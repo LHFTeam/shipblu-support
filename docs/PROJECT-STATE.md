@@ -2699,6 +2699,66 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     node reference **for the version the client actually addresses** and treat a
     missing edge as a finding.
 
+    **Confirmed working the same day.** An Instagram private reply went out at
+    11:55:43 UTC with the corrected shape and came back `sent`, carrying a real
+    `IGMessageID`. That is the first private reply this product has ever
+    delivered, on either platform. Facebook's is refused for an unrelated reason
+    — §6.44.
+
+44. **A private reply is subject to the handover protocol, and the console
+    explained it as a missing permission.** _2026-09-02, two Facebook private
+    replies, `10 / 2018300`._
+
+    With the endpoint corrected (§6.43) and `pages_manage_engagement` granted —
+    a Facebook public comment reply succeeded at 11:48:20 — the Facebook private
+    reply still fails:
+
+    ```
+    (#10) Message failed to send because another app is controlling this thread now.
+    (Meta: code 10, subcode 2018300, HTTP 400, via graph.facebook.com)
+    ```
+
+    **This is correct behaviour and Meta's sentence is accurate.** Freshworks is
+    the Page's primary receiver, so it owns the thread; a private reply is a
+    message from the Page, and the handover protocol governs it exactly as it
+    governs a DM. Nothing in this repo fixes it — thread control has to be passed,
+    which is a decision made in the other tool. The same account's Instagram
+    private reply succeeded seven minutes later over `instagram_login`, which is
+    §6.29's asymmetry again: the direct connection is not installed on the Page
+    and has no primary receiver to be second to.
+
+    **What was wrong was the explanation.** `explainMetaSendError` printed the
+    permission branch underneath it — go and check `pages_messaging`, run
+    `check_meta_permissions` — because code `10` is one of the three
+    `COMMENT_PERMISSION_CODES`, and only the **subcode** separates a handover
+    refusal from a permission one. So the timeline carried a correct sentence
+    from Meta followed by a wrong diagnosis from us, which is worse than printing
+    nothing: the agent goes and checks approvals that were never the problem.
+    `isHandoverRefusal` now matches subcode 2018300 ahead of that branch.
+
+    A private reply is where this surfaces because it is the one send that
+    reaches the messages endpoint with no inbound DM behind it.
+    `metaThreadStateFromMessage` pre-empts a DM into a standby thread and returns
+    a refusal before the request is made; it has nothing to read for a comment
+    ticket, so Graph is the first thing that knows.
+
+45. **The console badged every private reply "posted publicly".** _2026-09-02,
+    reported off the first Instagram private reply that succeeded._
+
+    The timeline derived publicness from `meta.metaKind`, which is `'comment'`
+    for a private reply as much as a public one — it belongs to the comment
+    thread and is addressed to a comment id. The `isPublic` flag the reply action
+    writes for exactly this purpose was declared in the component's type and
+    never read.
+
+    The direction it failed in is the bad one: it told an agent that a sentence
+    meant for one person was sitting under the post for everyone. The rule now
+    lives in `lib/meta/visibility.ts` with tests, rather than inline in the
+    component where it could not have one — three states out of two fields,
+    written in two places and read in a third. A private reply gets its own
+    "sent privately" badge, because silence left it looking like an ordinary
+    comment reply.
+
 ## 7. Verification already done
 
 - **WhatsApp, end to end on production.** A synthetic webhook was enqueued; the
