@@ -54,7 +54,7 @@ const OPERATORS: {
   { value: 'is_empty', label: 'is empty', kinds: ['text', 'number', 'choice'], unary: true },
 ];
 
-type Row = { field: string; op: Operator; value: string };
+export type Row = { field: string; op: Operator; value: string | string[] };
 
 export function ConditionBuilder({
   name,
@@ -119,12 +119,14 @@ export function ConditionBuilder({
             const field = fields.find((f) => f.value === row.field) ?? fields[0]!;
             const operators = OPERATORS.filter((op) => op.kinds.includes(field.kind));
             const unary = OPERATORS.find((op) => op.value === row.op)?.unary;
+            const listOperator = isListOperator(row.op);
+            const selectedChoices = listOperator ? listValue(row.value) : [];
 
             return (
               <div key={index} className="flex flex-wrap items-center gap-2">
                 <Select
                   value={row.field}
-                  onChange={(event) => update(index, { ...row, field: event.target.value })}
+                  onChange={(event) => update(index, rowForField(row, event.target.value, fields))}
                   className="w-48"
                 >
                   {fields.map((option) => (
@@ -136,9 +138,10 @@ export function ConditionBuilder({
 
                 <Select
                   value={row.op}
-                  onChange={(event) =>
-                    update(index, { ...row, op: event.target.value as Operator })
-                  }
+                  onChange={(event) => {
+                    const op = event.target.value as Operator;
+                    update(index, { ...row, op, value: valueForOperator(row.value, op, field) });
+                  }}
                   className="w-40"
                 >
                   {operators.map((option) => (
@@ -148,9 +151,45 @@ export function ConditionBuilder({
                   ))}
                 </Select>
 
-                {unary ? null : field.choices ? (
+                {unary ? null : field.choices && listOperator ? (
+                  // A native multiple select makes desktop users hold Ctrl/Cmd
+                  // and behaves differently again on a phone. The console is
+                  // used on both, so make every member of the set an explicit
+                  // tap target instead.
+                  <div
+                    role="group"
+                    aria-label={`${field.label} options`}
+                    className="flex max-h-40 w-48 flex-col gap-1.5 overflow-y-auto rounded-md border border-[var(--border)] bg-[var(--surface)] p-2"
+                  >
+                    {field.choices.length === 0 ? (
+                      <span className="text-xs text-[var(--muted-foreground)]">
+                        No options available
+                      </span>
+                    ) : (
+                      field.choices.map((choice) => (
+                        <label key={choice.value} className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            value={choice.value}
+                            className="size-4"
+                            checked={selectedChoices.includes(choice.value)}
+                            onChange={(event) =>
+                              update(index, {
+                                ...row,
+                                value: event.target.checked
+                                  ? [...selectedChoices, choice.value]
+                                  : selectedChoices.filter((value) => value !== choice.value),
+                              })
+                            }
+                          />
+                          {choice.label}
+                        </label>
+                      ))
+                    )}
+                  </div>
+                ) : field.choices ? (
                   <Select
-                    value={row.value}
+                    value={scalarValue(row.value)}
                     onChange={(event) => update(index, { ...row, value: event.target.value })}
                     className="w-48"
                   >
@@ -163,11 +202,9 @@ export function ConditionBuilder({
                   </Select>
                 ) : (
                   <input
-                    value={row.value}
+                    value={textValue(row.value)}
                     onChange={(event) => update(index, { ...row, value: event.target.value })}
-                    placeholder={
-                      row.op === 'in' || row.op === 'not_in' ? 'comma, separated, values' : 'value'
-                    }
+                    placeholder={listOperator ? 'comma, separated, values' : 'value'}
                     className="w-48 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm"
                   />
                 )}
@@ -240,14 +277,11 @@ function toJson(match: 'all' | 'any', rows: Row[]): string {
     if (row.op === 'is_set' || row.op === 'is_empty') {
       return { field: row.field, op: row.op };
     }
-    if (row.op === 'in' || row.op === 'not_in') {
+    if (isListOperator(row.op)) {
       return {
         field: row.field,
         op: row.op,
-        value: row.value
-          .split(',')
-          .map((value) => value.trim())
-          .filter(Boolean),
+        value: listValue(row.value),
       };
     }
     // Numbers stay numbers: the comparison operators coerce, but storing "4"
@@ -256,11 +290,10 @@ function toJson(match: 'all' | 'any', rows: Row[]): string {
     // Only where the text *is* the number, though. `Number('0012')` is 12, and
     // an order reference of 0012 compared as 12 stops matching — so anything
     // that does not survive the round trip is left as the string it was.
-    const numeric = Number(row.value);
+    const scalar = scalarValue(row.value);
+    const numeric = Number(scalar);
     const value =
-      row.value !== '' && Number.isFinite(numeric) && String(numeric) === row.value
-        ? numeric
-        : row.value;
+      scalar !== '' && Number.isFinite(numeric) && String(numeric) === scalar ? numeric : scalar;
     return { field: row.field, op: row.op, value };
   });
 
@@ -285,15 +318,15 @@ function fromJson(
     const comparison = value as Record<string, unknown>;
     if (typeof comparison.field !== 'string' || typeof comparison.op !== 'string') return null;
 
-    return {
-      field: comparison.field,
-      op: comparison.op as Operator,
-      value: Array.isArray(comparison.value)
-        ? comparison.value.join(', ')
-        : comparison.value === undefined || comparison.value === null
-          ? ''
-          : String(comparison.value),
-    };
+    const op = comparison.op as Operator;
+    const stored = Array.isArray(comparison.value)
+      ? comparison.value.map(String)
+      : comparison.value === undefined || comparison.value === null
+        ? ''
+        : String(comparison.value);
+    const field = fields.find((f) => f.value === comparison.field);
+
+    return { field: comparison.field, op, value: valueForOperator(stored, op, field) };
   };
 
   for (const key of ['all', 'any'] as const) {
@@ -320,6 +353,75 @@ function safeParse(value: string): unknown {
   } catch {
     return null;
   }
+}
+
+function isListOperator(op: Operator): boolean {
+  return op === 'in' || op === 'not_in';
+}
+
+/**
+ * A row's value shape follows its operator: a set for `in`/`not_in`, a scalar
+ * for everything else. Converting at every point an operator can change is what
+ * keeps the control that renders a value and the serialiser that stores it in
+ * agreement. A row left holding an array under `contains` renders every member
+ * into the text box and then saves only the first, which is a silent edit to a
+ * rule the admin never made.
+ *
+ * The field matters as much as the operator, because the two scalar controls
+ * disagree about what a set collapses to. A dropdown can only display one of
+ * its own options, so joining a set gives it "high, urgent" — no option matches,
+ * it renders blank, and the condition saved underneath can never be true. The
+ * text box has no such constraint and keeps every term the admin typed.
+ */
+export function valueForOperator(
+  value: Row['value'],
+  op: Operator,
+  field?: FieldOption,
+): Row['value'] {
+  if (isListOperator(op)) return listValue(value);
+  if (field?.choices) return listValue(value)[0] ?? '';
+  return textValue(value);
+}
+
+/**
+ * Moving a row onto another field cannot carry the old field's value over.
+ *
+ * The members of a set belong to the field that was chosen when they were
+ * picked, and the new field renders a checkbox only for its own choices — so a
+ * leftover member is one this builder cannot show and the admin cannot untick,
+ * while `toJson` goes on writing it into the saved rule. The operator goes the
+ * same way when the new kind does not offer it, since a row displaying an
+ * operator its own dropdown does not list is one nothing can correct.
+ */
+export function rowForField(row: Row, fieldValue: string, fields: FieldOption[]): Row {
+  const field = fields.find((f) => f.value === fieldValue) ?? fields[0]!;
+  const operators = OPERATORS.filter((op) => op.kinds.includes(field.kind));
+  const op = operators.some((option) => option.value === row.op) ? row.op : operators[0]!.value;
+
+  return {
+    field: field.value,
+    op,
+    // Not the previous value narrowed: the first choice is what the dropdown
+    // shows for a fresh choice field, and storing anything else would save a
+    // condition the control is not displaying.
+    value: isListOperator(op) ? [] : (field.choices?.[0]?.value ?? ''),
+  };
+}
+
+function listValue(value: Row['value']): string[] {
+  if (Array.isArray(value)) return value;
+  return value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function scalarValue(value: Row['value']): string {
+  return Array.isArray(value) ? (value[0] ?? '') : value;
+}
+
+function textValue(value: Row['value']): string {
+  return Array.isArray(value) ? value.join(', ') : value;
 }
 
 function pretty(value: unknown): string {
