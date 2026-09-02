@@ -929,6 +929,22 @@ function checkAutomatedRepliesDoNotCountAsAgentReplies() {
     );
   }
 
+  // `is_first_response_overdue` answers for the SLA, and only `firstRespondedAt`
+  // does that. Reading the auto-reply stamp into it silences every rule sharing
+  // the condition, including the escalations that send the customer nothing —
+  // the loop belongs to the sender, and `alreadyReplied` guards it there.
+  const factsFile = 'lib/rules/facts.ts';
+  const facts = stripComments(read(factsFile));
+  for (const match of facts.matchAll(
+    /is_first_response_overdue[\s\S]{0,120}?firstAutoRepliedAt/g,
+  )) {
+    fail(
+      rule,
+      `${factsFile}:${lineOf(facts, match.index)}`,
+      'the overdue flag answers for the SLA, not for whether software replied',
+    );
+  }
+
   // The other half: `firstAutoRepliedAt` exists so the rule engine can tell an
   // acknowledgement already went out. A report or the breach sweep reading it
   // would put the automation's latency back into the number this whole seam

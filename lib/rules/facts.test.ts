@@ -31,21 +31,23 @@ describe('is_first_response_overdue', () => {
     expect(facts.is_first_response_overdue).toBe(false);
   });
 
-  // The fifteen-minute sweep re-reads this fact on every run, and an automation
-  // is the one actor that cannot clear it by replying. Leaving it true after an
-  // acknowledgement went out is what turns a chase rule into a rule that sends
-  // the customer the same message four times an hour until somebody opens the
-  // ticket.
-  it('is false once an automation has acknowledged, so the rule stops re-firing', () => {
+  // An acknowledgement is not a first response, so this stays true: the sweep
+  // records the breach and a rule that escalates an overdue ticket — priority,
+  // an assignee, a watcher — still fires. Reading the auto-reply stamp here to
+  // stop a *sender* re-running silenced those escalations too, for every ticket
+  // that had been auto-acknowledged. The re-send is guarded where the sending
+  // happens instead.
+  it('stays true after an automation has acknowledged', () => {
     const facts = conversationFacts(source({ firstAutoRepliedAt: overdue }), now);
-    expect(facts.is_first_response_overdue).toBe(false);
+    expect(facts.is_first_response_overdue).toBe(true);
   });
 
-  // The other half of the same decision: the ticket is still unanswered as far
-  // as the SLA is concerned. `firstRespondedAt` is what the breach sweep and
-  // every report read, and an acknowledgement must not have touched it.
-  it('leaves the SLA column an automation must not satisfy alone', () => {
-    const acknowledged = source({ firstAutoRepliedAt: overdue });
-    expect(acknowledged.conversation.firstRespondedAt).toBeNull();
+  it('exposes the acknowledgement separately, so a rule can ask for it by name', () => {
+    const answered = conversationFacts(source({ firstAutoRepliedAt: overdue }), now);
+    expect(answered.hours_since_auto_reply).toBe(3);
+
+    // Null rather than 0 when nothing has gone out: `is_empty` catches that and
+    // a comparison does not, so "no reply yet" cannot match every ticket.
+    expect(conversationFacts(source({}), now).hours_since_auto_reply).toBeNull();
   });
 });

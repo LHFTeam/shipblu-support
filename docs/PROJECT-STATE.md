@@ -119,14 +119,24 @@ not a first response** — like every automated reply, it does not stop the SLA
 clock or move `lastAgentMessageAt`; only an agent's reply does. Otherwise a rule
 acknowledging every ticket would measure itself and satisfy the team's target,
 and this one would report zero minutes on every ticket arriving overnight. What
-it does stamp is `conversations.first_auto_replied_at`, which exists for the
-rule engine alone: `is_first_response_overdue` reads it so a time-based rule
-that chases an unanswered ticket stops after the acknowledgement, while the
-breach sweep and every report keep reading `first_responded_at` and go on
-counting the ticket as awaiting its first human reply. Without that split the
-fifteen-minute sweep re-sends the same acknowledgement until somebody opens the
-ticket, because an automation cannot clear the condition it fired on. It
-sends **once per
+it does stamp is `conversations.first_auto_replied_at`, surfaced to rules as
+`hours_since_auto_reply` and read by no report or sweep.
+
+The re-send it exists around is worth understanding, because the first fix for
+it was wrong in a way that was invisible. A time-based rule is re-evaluated
+every fifteen minutes and nothing in the engine remembers it ran, so a rule
+whose condition only a person can clear — `is_first_response_overdue`, the
+obvious way to write a chase — sends the same message four times an hour until
+somebody opens the ticket. Making that fact read the auto-reply stamp stopped
+the loop and also silenced every _other_ rule sharing the condition: an
+escalation that sets a priority, assigns somebody or adds a watcher sends the
+customer nothing and never needed stopping, but stopped firing on every
+auto-acknowledged ticket, while the sweep went on recording the breach nobody
+was now told about. The guard belongs to the sender, and lives in
+`alreadyReplied` in `lib/automations/index.ts`: the same rule does not reply to
+the same ticket twice until the customer has written since. Keyed on the rule's
+own name, so an acknowledgement on create and a chase three days later do not
+silence each other. It sends **once per
 closed stretch**, not per message: `conversations.auto_responded_at` is claimed
 with a conditional update, so the six ingest jobs six WhatsApp messages at 23:00
 produce still yield one reply. The case for it is in the archive — **11,402 of

@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   automationRules,
@@ -314,6 +314,49 @@ async function applyAction(action: Action, ticket: TicketRow, ruleName: string):
  * in the database: an outbound message row plus a queued send, so an automated
  * reply is delivered, retried and shown on the timeline exactly like a human's.
  */
+/**
+ * Whether this rule has already written to this ticket since the customer last did.
+ *
+ * A time-based rule is re-evaluated every fifteen minutes and nothing in the
+ * engine remembers that it ran: `applyRules` keeps no per-ticket record and
+ * `lastRunAt` is rule-global. So a rule whose condition only a person can clear
+ * — "first response overdue", the obvious way to write a chase — sends the same
+ * message four times an hour until somebody opens the ticket. That is the loop
+ * this module opens by warning about, and the reply is the action that has to
+ * stop; the conditions are shared with rules that escalate rather than send,
+ * and those neither reach the customer nor need stopping.
+ *
+ * Since the customer last wrote, rather than once for good, because a chase is
+ * about silence: once they answer, the ticket has gone quiet again for a new
+ * reason and the same rule may legitimately chase it again. `lastCustomerMessageAt`
+ * null means they never wrote, so any reply already sent is the only one owed.
+ *
+ * The rule's own name, so two rules that both reply do not silence each other —
+ * an acknowledgement on create and a chase three days later are different
+ * messages about different things.
+ */
+async function alreadyReplied(
+  conversation: typeof conversations.$inferSelect,
+  ruleName: string,
+): Promise<boolean> {
+  const since = conversation.lastCustomerMessageAt;
+
+  const rows = await db
+    .select({ id: conversationEvents.id })
+    .from(conversationEvents)
+    .where(
+      and(
+        eq(conversationEvents.conversationId, conversation.id),
+        eq(conversationEvents.type, 'auto_replied'),
+        eq(conversationEvents.actorLabel, `automation:${ruleName}`),
+        ...(since ? [gt(conversationEvents.createdAt, since)] : []),
+      ),
+    )
+    .limit(1);
+
+  return rows.length > 0;
+}
+
 async function sendCannedReply(
   cannedResponseId: string,
   ticket: TicketRow,
@@ -342,6 +385,11 @@ async function sendCannedReply(
     !windowState(conversation.lastCustomerMessageAt).isOpen
   ) {
     console.warn(`[automations] "${ruleName}" skipped a reply: WhatsApp window closed`);
+    return;
+  }
+
+  if (await alreadyReplied(conversation, ruleName)) {
+    console.warn(`[automations] "${ruleName}" skipped a reply: it has already sent one`);
     return;
   }
 
