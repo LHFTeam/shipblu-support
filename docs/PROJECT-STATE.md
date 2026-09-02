@@ -2576,6 +2576,30 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     wearing a different code, read it out of the log and widen this rather than
     guessing now." One arrived. It was read out of the log.
 
+    **Getting the grant is circular, and `test_comment_permission` is the way
+    out.** The App Dashboard will not offer the "Request advanced access" button
+    for `pages_manage_engagement` until the app has made a _successful_ call
+    against it — and it can take 24 hours to activate after the first one. There
+    is no path to that from the console, because every comment reply an agent can
+    reach is the refusal above. So:
+
+    ```bash
+    npm run job -- test_comment_permission
+    ```
+
+    It comments on the Page's own newest published post and deletes the comment
+    in the same run, which exercises the permission in both directions. Options:
+    `postId=<id>` to choose the post, `keep=true` to leave the comment up,
+    `message=...` to change the words. It writes to the live Page, so it is a job
+    somebody types and nothing schedules.
+
+    Read the outcome, because the two mean opposite things. Succeeding says the
+    scope is on the token and only the Advanced Access grant is missing. Being
+    refused with the same code 200 says the scope is **not on the token at all**,
+    which no test call can fix — the Page token has to be re-minted with
+    `pages_manage_engagement` in its OAuth scope list, and
+    `check_meta_permissions` shows whether `granular_scopes` names this Page.
+
 ## 7. Verification already done
 
 - **WhatsApp, end to end on production.** A synthetic webhook was enqueued; the

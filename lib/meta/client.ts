@@ -402,6 +402,27 @@ export async function setCommentHidden(input: {
 }
 
 /**
+ * The Page's own most recent published post.
+ *
+ * Exists for `test_comment_permission`, which needs somewhere harmless to put a
+ * comment and must not guess at one. Deliberately here rather than in the
+ * handler: this file is the only thing that knows Graph, and a `fetch` in a
+ * worker handler would be the first crack in that.
+ *
+ * `published_posts` rather than `feed`: `feed` includes posts other people made
+ * on the Page, and commenting on a stranger's post is not the permission being
+ * exercised — it is a different one, refused differently.
+ */
+export async function latestPagePostId(): Promise<string | null> {
+  const result = await graph<{ data?: { id?: string }[] }>('facebook', 'me/published_posts', {
+    method: 'GET',
+    query: { limit: '1', fields: 'id' },
+  });
+
+  return result?.data?.[0]?.id ?? null;
+}
+
+/**
  * Deletes a comment.
  *
  * Irreversible, and it removes a customer's words from a public thread, so the
