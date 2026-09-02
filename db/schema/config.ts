@@ -15,8 +15,10 @@ import { agents, groups } from './agents';
 import {
   automationTriggerEnum,
   cannedVisibilityEnum,
+  categoryAudienceEnum,
   channelEnum,
   priorityEnum,
+  rootCauseOwnerEnum,
   slaHoursSourceEnum,
   statusCategoryEnum,
   ticketFieldTypeEnum,
@@ -117,6 +119,166 @@ export type TicketFieldOption = {
   label: string;
   labelAr?: string;
 };
+
+/**
+ * What a ticket is about, and why it happened — the two registries.
+ *
+ * Deliberately two questions, because conflating them is what makes most support
+ * taxonomies useless for improving anything:
+ *
+ * - A **category** is the customer's own account of their problem. "Where is my
+ *   order." It is detected from what they wrote, on arrival, and one ticket can
+ *   carry several.
+ *
+ * - A **root cause** is why that happened, recorded by the agent on resolve,
+ *   because *the customer does not know it*. "Where is my order" has at least six
+ *   causes behind it: the pickup never happened, the hub mis-sorted it, the
+ *   merchant gave a wrong address, the courier never called, the zone is
+ *   unserviced, or the parcel is on time and the expectation was wrong. Guessing
+ *   between those from the complaint text would manufacture confident, wrong data
+ *   in the exact place the team is trying to reason, so nothing tries.
+ *
+ * The consequence worth stating: a category report says what the queue is full
+ * of, and only the cause report says what to go and fix.
+ *
+ * Both live here beside `ticket_statuses` and `ticket_fields` rather than in
+ * their own file, because `conversations` points at them and everything else
+ * points at `conversations` — the schema's import graph is acyclic today and a
+ * registry in a leaf module is what would break it. The join table that carries
+ * the assignments is in `db/schema/categories.ts`.
+ */
+
+/**
+ * The category registry.
+ *
+ * A table rather than a constant because renaming "Cost and payment methods" to
+ * "Pricing" is a decision by whoever owns the report and should not be a deploy.
+ * What is *not* here is the matching rules: those live in `lib/categorise/`,
+ * compiled, with tests. A regular expression typed into an admin form is a
+ * production incident with no review — `(a+)+$` over every inbound message is a
+ * denial of service, and a stray `.*` files the whole archive under one label.
+ * `shipment_phrases` below draws the same line for the same reason.
+ *
+ * The join between the two halves is `key`, which is why it is the one column
+ * here nobody may edit: every compiled rule names one, every stored assignment
+ * freezes one, and every report groups by one.
+ */
+export const ticketCategories = pgTable(
+  'ticket_categories',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+
+    /** `area.slug`. Immutable once created — see the docstring. */
+    key: text('key').notNull(),
+
+    /**
+     * The first level of the hierarchy, always the part of `key` before the dot,
+     * held there by a CHECK in `db/sql`.
+     *
+     * Its own column so a report can group by area without `split_part` in every
+     * query. Fifty-one flat categories is a list nobody reads; eleven areas is a
+     * chart that fits on a screen, and the drill-down is the same table.
+     */
+    area: text('area').notNull(),
+
+    /**
+     * Both languages, because the customers write Arabic and the console is in
+     * English.
+     *
+     * `labelAr` is not decoration. It is what a report shown to an Egyptian
+     * operations lead is read in, and it is the string an agent matches against
+     * the words actually in front of them. A taxonomy maintained only in English
+     * makes everybody translate in their head at the moment they are choosing,
+     * which is where mis-categorisation comes from.
+     */
+    labelEn: text('label_en').notNull(),
+    labelAr: text('label_ar').notNull(),
+
+    description: text('description'),
+
+    /** Which population raises this. Narrows the picker; see the enum. */
+    audience: categoryAudienceEnum('audience').notNull().default('any'),
+
+    /**
+     * Nothing auto-assigns this; an agent files it by hand.
+     *
+     * The honest home for a category the business needs a bucket for and the
+     * archive has no evidence of. A category no rule can ever award is not dead
+     * weight if it is marked as such — it is dead weight if it sits in the same
+     * list pretending to be detectable, because then a zero count reads as "this
+     * never happens" rather than "nothing is looking for it".
+     */
+    isDetectable: boolean('is_detectable').notNull().default(true),
+
+    /** Seeded from `lib/categorise/taxonomy.ts`. Deactivated, never deleted. */
+    isSystem: boolean('is_system').notNull().default(false),
+    isActive: boolean('is_active').notNull().default(true),
+
+    /** Order in the picker, and the last tie-break when two scores are equal. */
+    position: integer('position').notNull().default(0),
+
+    /**
+     * Where a merged category's counts now go.
+     *
+     * Merging by rewriting the assignments would destroy the record of what was
+     * actually chosen at the time; merging by deleting would orphan every report
+     * older than the edit. A forwarding pointer keeps both — stored rows keep the
+     * key they were given, and reporting resolves through this. One hop only: a
+     * CHECK forbids pointing at yourself, and the resolver does not recurse.
+     */
+    supersededByKey: text('superseded_by_key'),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('ticket_categories_key_idx').on(t.key),
+    index('ticket_categories_area_idx').on(t.area, t.position),
+    index('ticket_categories_active_idx').on(t.isActive, t.position),
+  ],
+);
+
+/**
+ * The root cause registry.
+ *
+ * One row per way a ticket can have come to exist, each naming exactly one
+ * accountable party. The owner lives **here** rather than on the ticket so that
+ * accountability is a join: an agent answers one question — why did this happen —
+ * and who owns it follows. Asking them to set both invites the two to disagree,
+ * and then neither report can be trusted.
+ *
+ * Read this alongside `lib/shipments/status.ts`, which holds the courier's own
+ * status and reason vocabulary. They are not the same thing and must not be
+ * merged: the platform's `attempted` says what the courier *recorded*, and
+ * `courier.no_attempt` says we established it did not happen. The gap between
+ * those two is the most valuable thing this table can measure.
+ */
+export const ticketRootCauses = pgTable(
+  'ticket_root_causes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+
+    /** `owner.slug`, immutable, for the reasons `ticket_categories.key` is. */
+    key: text('key').notNull(),
+
+    labelEn: text('label_en').notNull(),
+    labelAr: text('label_ar').notNull(),
+    description: text('description'),
+
+    owner: rootCauseOwnerEnum('owner').notNull(),
+
+    isSystem: boolean('is_system').notNull().default(false),
+    isActive: boolean('is_active').notNull().default(true),
+    position: integer('position').notNull().default(0),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('ticket_root_causes_key_idx').on(t.key),
+    index('ticket_root_causes_owner_idx').on(t.owner, t.position),
+  ],
+);
 
 /**
  * Extra constraints on what one field will accept, beyond its type.

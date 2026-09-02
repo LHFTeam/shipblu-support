@@ -204,3 +204,87 @@ export const sideConversationStateEnum = pgEnum('side_conversation_state', ['ope
  * in a list.
  */
 export const internalRecipientKindEnum = pgEnum('internal_recipient_kind', ['team', 'vendor']);
+
+/**
+ * Which kind of customer a ticket came from.
+ *
+ * ShipBlu serves two populations whose support needs barely overlap. A
+ * **merchant** asks about payouts, price lists, pickups and integrations; a
+ * **recipient** asks where their parcel is and why nobody called. Reporting them
+ * together averages two different businesses into one meaningless line, which is
+ * why this is a dimension rather than something inferred at read time from
+ * whether a shipping account happens to be linked.
+ *
+ * `prospect` is separate from `merchant` because it is the one that pays for
+ * itself: somebody asking for a price list before they have signed up is a sales
+ * lead sitting in a support queue, and until it can be counted nobody knows how
+ * many are being answered as though they were complaints.
+ *
+ * `other` is for real inbound that is not support at all — job applications and
+ * couriers offering to distribute, both of which arrive often enough on Facebook
+ * to distort every other number if they are filed as customers.
+ */
+export const requesterKindEnum = pgEnum('requester_kind', [
+  'merchant',
+  'recipient',
+  'prospect',
+  'other',
+]);
+
+/**
+ * Who a category is meant for.
+ *
+ * Only used to narrow the picker an agent sees: offering `billing.payout` on a
+ * recipient's "where is my parcel" ticket is how a taxonomy of fifty entries
+ * becomes one where people choose the first plausible row and move on. `any` is
+ * the honest answer for the categories both populations really do raise — a
+ * damaged parcel is the same complaint whichever end of it you are on.
+ */
+export const categoryAudienceEnum = pgEnum('category_audience', ['merchant', 'recipient', 'any']);
+
+/**
+ * Where a category assignment stands with a human.
+ *
+ * `auto` was applied without asking because the evidence named the category
+ * outright; `suggested` is waiting for one click; `confirmed` and `rejected` are
+ * a person's answer.
+ *
+ * **A rejected row is kept, never deleted**, and that is the whole
+ * human-in-the-loop mechanism rather than an audit nicety. The natural key is
+ * (conversation, category), so a rejected row still occupies it: a later message
+ * that would re-assert the same category hits `onConflictDoNothing` and writes
+ * nothing. An agent's judgement therefore survives every subsequent message with
+ * no extra machinery, and the row keeps the `rule_key` and `confidence` that
+ * were wrong — the only copy of that evidence anyone will ever have, and what
+ * the next round of rule tuning is measured against.
+ */
+export const categoryReviewStateEnum = pgEnum('category_review_state', [
+  'auto',
+  'suggested',
+  'confirmed',
+  'rejected',
+]);
+
+/**
+ * Who owns fixing the thing that caused a ticket.
+ *
+ * Stored on the cause rather than on the ticket, so accountability is a join and
+ * cannot drift: an agent records *why* it happened and the owner follows from
+ * that, instead of two fields that can disagree about the same failure.
+ *
+ * `platform` is the value that earns its place. A ticket caused by our own app —
+ * a customer who tried to cancel in the portal and could not — is one the
+ * product could have prevented, and it is invisible in any taxonomy that only
+ * names the parties who touch the parcel. `none` covers the two endings that are
+ * not failures at all: a plain enquiry, and a parcel behaving exactly as
+ * designed while the customer expected something else.
+ */
+export const rootCauseOwnerEnum = pgEnum('root_cause_owner', [
+  'courier',
+  'hub',
+  'merchant',
+  'recipient',
+  'platform',
+  'external',
+  'none',
+]);

@@ -15,7 +15,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import { agents, groups } from './agents';
-import { channels, ticketForms, ticketStatuses, slaPolicies } from './config';
+import { channels, ticketForms, ticketRootCauses, ticketStatuses, slaPolicies } from './config';
 import { contacts } from './customers';
 import {
   channelEnum,
@@ -23,6 +23,7 @@ import {
   directionEnum,
   messageKindEnum,
   priorityEnum,
+  requesterKindEnum,
   sourceSystemEnum,
 } from './enums';
 
@@ -56,6 +57,35 @@ export const conversations = pgTable(
     priority: priorityEnum('priority').notNull().default('medium'),
     /** Freshdesk "ticket type" — Question, Incident, Problem, and so on. */
     type: text('type'),
+
+    /**
+     * Which population this ticket came from.
+     *
+     * Detected on arrival from the requester's own record — a contact holding a
+     * shipping account is a merchant — and falling back to the words they used.
+     * A column rather than a derived read because it is single-valued and
+     * because every report slices by it: merchants ask about payouts and
+     * integrations, recipients ask where their parcel is, and averaging the two
+     * describes neither.
+     */
+    requesterKind: requesterKindEnum('requester_kind'),
+
+    /**
+     * Why this ticket existed, recorded by the agent who resolved it.
+     *
+     * Null until then, and deliberately never written by the detector. The
+     * customer reports a symptom; the cause is what somebody established by
+     * looking, and inferring it from the complaint text would fill the one column
+     * the team plans from with confident guesses. Which is also why it is a
+     * column here rather than a row in `conversation_categories`: a ticket has
+     * many things it is about and exactly one reason it happened.
+     *
+     * `restrict`, like `status_id`: a cause with history behind it is retired,
+     * never deleted.
+     */
+    rootCauseId: uuid('root_cause_id').references(() => ticketRootCauses.id, {
+      onDelete: 'restrict',
+    }),
 
     requesterContactId: uuid('requester_contact_id')
       .notNull()
