@@ -1,9 +1,11 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 
 /**
- * Session, invite, password-reset and CSAT tokens all follow the same rule:
- * the raw token is handed out exactly once (cookie, email link) and only its
- * SHA-256 is stored. A database leak therefore yields no usable credential.
+ * Every opaque-token lookup uses a SHA-256 rather than the credential itself.
+ * Sessions, password resets and CSAT surveys store only that hash. Invites also
+ * keep an AES-GCM envelope through `invite-token.ts` so an authenticated admin
+ * can copy a pending link again; the raw value is never stored in plaintext and
+ * a database leak alone still yields no usable credential.
  *
  * SHA-256 rather than argon2 is deliberate here — these are 256-bit random
  * values, not user-chosen secrets, so there is nothing to brute-force and the

@@ -6,10 +6,11 @@ import { db } from '@/db/client';
 import { agents, channels, invites, jobs, whatsappAccounts } from '@/db/schema';
 import { requirePermission } from '@/lib/auth/guard';
 import { normaliseEmail } from '@/lib/auth/normalise';
+import { sealInviteToken } from '@/lib/auth/invite-token';
 import { generateToken, hashToken } from '@/lib/auth/tokens';
 import { destroyAllSessionsForAgent } from '@/lib/auth/session';
 import { enqueue } from '@/lib/queue';
-import { appUrl } from '@/lib/env';
+import { appUrl, env } from '@/lib/env';
 
 export type AdminState = { error: string | null; inviteUrl?: string };
 
@@ -18,10 +19,11 @@ const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 /**
  * Creates an invite and returns the link.
  *
- * The raw token is shown once, here, and only its hash is stored — so the link
- * is displayed to the admin rather than emailed for now. That also means invites
- * work before the email channel is configured, which is exactly when the first
- * agents need to be added.
+ * The raw token is displayed to the admin rather than emailed for now, so
+ * invites work before the email channel is configured — exactly when the first
+ * agents need to be added. Its hash handles acceptance and an encrypted copy
+ * lets the same link remain on the pending-invites screen without making a
+ * database dump sufficient to use it.
  */
 export async function createInvite(_state: AdminState, formData: FormData): Promise<AdminState> {
   const admin = await requirePermission('admin.agents');
@@ -42,24 +44,39 @@ export async function createInvite(_state: AdminState, formData: FormData): Prom
     .limit(1);
   if (existing.length > 0) return { error: 'That agent already exists' };
 
+  let inviteBaseUrl: string;
+  try {
+    // Resolve the configuration before superseding a working invite. Calling
+    // this after the writes would leave a new row behind while returning an
+    // error with no URL for the admin to send.
+    inviteBaseUrl = appUrl();
+  } catch {
+    return { error: 'APP_URL must be configured before creating an invite' };
+  }
+
   const token = generateToken();
+  const tokenCiphertext = sealInviteToken(token, env().APP_SECRET);
 
-  // Supersede any open invite for the same address, so a resend does not leave
-  // two working links with different roles.
-  await db.delete(invites).where(and(eq(invites.email, email), isNull(invites.acceptedAt)));
+  await db.transaction(async (tx) => {
+    // Supersede any open invite for the same address, so a resend does not leave
+    // two working links with different roles. Delete and insert are one unit:
+    // an insertion failure must leave the existing invitation usable.
+    await tx.delete(invites).where(and(eq(invites.email, email), isNull(invites.acceptedAt)));
 
-  await db.insert(invites).values({
-    tokenHash: hashToken(token),
-    email,
-    name,
-    role: role as 'agent' | 'supervisor' | 'admin' | 'account_admin',
-    invitedByAgentId: admin.id,
-    expiresAt: new Date(Date.now() + INVITE_TTL_MS),
+    await tx.insert(invites).values({
+      tokenHash: hashToken(token),
+      tokenCiphertext,
+      email,
+      name,
+      role: role as 'agent' | 'supervisor' | 'admin' | 'account_admin',
+      invitedByAgentId: admin.id,
+      expiresAt: new Date(Date.now() + INVITE_TTL_MS),
+    });
   });
 
   revalidatePath('/admin/agents');
 
-  return { error: null, inviteUrl: `${appUrl()}/invite/${token}` };
+  return { error: null, inviteUrl: `${inviteBaseUrl}/invite/${token}` };
 }
 
 export async function setAgentActive(_state: AdminState, formData: FormData): Promise<AdminState> {

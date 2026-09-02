@@ -1,9 +1,11 @@
-import { asc, desc, isNull } from 'drizzle-orm';
+import { and, asc, desc, gt, isNull } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agents, invites } from '@/db/schema';
 import { requirePermission } from '@/lib/auth/guard';
+import { unsealInviteToken } from '@/lib/auth/invite-token';
+import { appUrl, env } from '@/lib/env';
 import { formatDateTime } from '@/lib/format';
-import { AgentRow, InviteForm } from './forms';
+import { AgentRow, InviteForm, PendingInviteLink } from './forms';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,11 +34,50 @@ export default async function AgentsPage() {
         email: invites.email,
         role: invites.role,
         expiresAt: invites.expiresAt,
+        tokenCiphertext: invites.tokenCiphertext,
       })
       .from(invites)
-      .where(isNull(invites.acceptedAt))
+      .where(and(isNull(invites.acceptedAt), gt(invites.expiresAt, new Date())))
       .orderBy(desc(invites.createdAt)),
   ]);
+
+  const hasStoredLinks = openInvites.some((invite) => invite.tokenCiphertext);
+  let inviteBaseUrl: string | null = null;
+  if (hasStoredLinks) {
+    try {
+      inviteBaseUrl = appUrl();
+    } catch {
+      // An invite that has already been sent remains usable by its hash. A
+      // missing display-origin setting must not take down the whole Agents page.
+    }
+  }
+  const appSecret = hasStoredLinks ? env().APP_SECRET : null;
+  const pendingInvites = openInvites.map((invite) => {
+    if (!invite.tokenCiphertext) {
+      return {
+        ...invite,
+        inviteUrl: null,
+        unavailableMessage:
+          'This invite predates retained links. Create it again to keep a copy here.',
+      };
+    }
+    if (!inviteBaseUrl || !appSecret) {
+      return {
+        ...invite,
+        inviteUrl: null,
+        unavailableMessage: 'APP_URL is not configured, so this link cannot be shown.',
+      };
+    }
+
+    const token = unsealInviteToken(invite.tokenCiphertext, appSecret);
+    return {
+      ...invite,
+      inviteUrl: token ? `${inviteBaseUrl}/invite/${token}` : null,
+      unavailableMessage: token
+        ? null
+        : 'This retained link cannot be decrypted. Create the invite again to replace it.',
+    };
+  });
 
   return (
     <div className="flex flex-col gap-8">
@@ -54,17 +95,24 @@ export default async function AgentsPage() {
         <InviteForm />
       </section>
 
-      {openInvites.length > 0 ? (
+      {pendingInvites.length > 0 ? (
         <section>
           <h2 className="mb-3 text-sm font-medium opacity-70">Pending invites</h2>
           <ul className="divide-y divide-[var(--border)] rounded-lg border border-[var(--border)] text-sm">
-            {openInvites.map((invite) => (
-              <li key={invite.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
-                <span className="min-w-0 break-all">{invite.email}</span>
-                <span className="opacity-50">{invite.role}</span>
-                <span className="ms-auto text-xs opacity-50">
-                  expires {formatDateTime(invite.expiresAt)}
-                </span>
+            {pendingInvites.map((invite) => (
+              <li key={invite.id} className="flex flex-col gap-2 px-3 py-2.5">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span className="min-w-0 break-all">{invite.email}</span>
+                  <span className="opacity-50">{invite.role}</span>
+                  <span className="ms-auto text-xs opacity-50">
+                    expires {formatDateTime(invite.expiresAt)}
+                  </span>
+                </div>
+                <PendingInviteLink
+                  email={invite.email}
+                  inviteUrl={invite.inviteUrl}
+                  unavailableMessage={invite.unavailableMessage}
+                />
               </li>
             ))}
           </ul>

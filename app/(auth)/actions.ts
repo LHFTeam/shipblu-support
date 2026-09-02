@@ -151,7 +151,10 @@ export async function acceptInvite(
     // makes a double-submit lose here rather than creating two agents.
     const claimed = await tx
       .update(invites)
-      .set({ acceptedAt: new Date() })
+      // The recoverable copy has served its only purpose once the invite leaves
+      // the pending list. The hash remains as the audit-safe record of which
+      // one-time token was accepted.
+      .set({ acceptedAt: new Date(), tokenCiphertext: null })
       .where(and(eq(invites.id, invite.id), isNull(invites.acceptedAt)))
       .returning({ id: invites.id });
 
