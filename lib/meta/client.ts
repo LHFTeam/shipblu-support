@@ -374,15 +374,15 @@ export async function privateReplyToComment(input: {
   commentId: string;
   message: string;
 }): Promise<string | null> {
-  // Facebook answers with the new message's `id`, Instagram with `message_id`
-  // and a `recipient_id` — it is the messages endpoint there, not a comment one.
-  const result = await comment<{ id?: string; message_id?: string }>(
-    input.platform,
-    input.commentId,
-    { kind: 'private_reply', message: input.message },
-  );
+  // The messages endpoint on both platforms — see `commentRequest` — so both
+  // answer in the send API's shape, `message_id` and a `recipient_id`, rather
+  // than with a comment node's `id`.
+  const result = await comment<{ message_id?: string }>(input.platform, input.commentId, {
+    kind: 'private_reply',
+    message: input.message,
+  });
 
-  return result?.message_id ?? result?.id ?? null;
+  return result?.message_id ?? null;
 }
 
 /**
@@ -399,6 +399,27 @@ export async function setCommentHidden(input: {
   hidden: boolean;
 }): Promise<void> {
   await comment(input.platform, input.commentId, { kind: 'hide', hidden: input.hidden });
+}
+
+/**
+ * The Page's own most recent published post.
+ *
+ * Exists for `test_comment_permission`, which needs somewhere harmless to put a
+ * comment and must not guess at one. Deliberately here rather than in the
+ * handler: this file is the only thing that knows Graph, and a `fetch` in a
+ * worker handler would be the first crack in that.
+ *
+ * `published_posts` rather than `feed`: `feed` includes posts other people made
+ * on the Page, and commenting on a stranger's post is not the permission being
+ * exercised — it is a different one, refused differently.
+ */
+export async function latestPagePostId(): Promise<string | null> {
+  const result = await graph<{ data?: { id?: string }[] }>('facebook', 'me/published_posts', {
+    method: 'GET',
+    query: { limit: '1', fields: 'id' },
+  });
+
+  return result?.data?.[0]?.id ?? null;
 }
 
 /**

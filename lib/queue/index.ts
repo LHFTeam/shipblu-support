@@ -17,6 +17,7 @@ export type JobType =
   | 'sync_stale_shipments'
   | 'subscribe_meta_webhooks'
   | 'check_meta_permissions'
+  | 'test_comment_permission'
   | 'sla_sweep'
   | 'assign_sweep'
   | 'run_time_automations'

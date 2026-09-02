@@ -402,7 +402,15 @@ describe('a comment reply the app is not approved to make', () => {
       sendKind: 'private_reply',
     });
     expect(privateReply).not.toContain('Reply privately');
-    expect(privateReply).toContain('the same approval covers both');
+
+    /*
+      And it names the messaging approval rather than the comment one. A private
+      reply goes out through the messages endpoint, so `pages_manage_engagement`
+      would not have changed the answer — the sentence this replaces said the two
+      shared an approval, which would have sent an agent after the wrong grant.
+    */
+    expect(privateReply).toContain('pages_messaging');
+    expect(privateReply).not.toContain('pages_manage_engagement');
   });
 
   it('leaves a direct message alone: this branch is about the comment edges', () => {

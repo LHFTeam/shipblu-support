@@ -11,13 +11,17 @@ import type { MetaPlatform } from './types';
  * comment is gone" rather than as "we asked the wrong endpoint".
  *
  * Facebook treats a comment as another node with a `comments` edge, and updates
- * it with `is_hidden`. Instagram gives a comment a `replies` edge instead,
- * spells the same update `hide`, and does not have a private-reply edge at all —
- * a private reply there is a *message* addressed to a comment id. Every one of
- * those was previously issued in the Facebook shape on both platforms, because
- * the functions took a comment id and no platform, which made the difference
- * impossible to express. No Instagram comment reply this system sent could ever
- * have been delivered.
+ * it with `is_hidden`. Instagram gives a comment a `replies` edge instead and
+ * spells the same update `hide`. Every one of those was previously issued in the
+ * Facebook shape on both platforms, because the functions took a comment id and
+ * no platform, which made the difference impossible to express. No Instagram
+ * comment reply this system sent could ever have been delivered.
+ *
+ * A private reply is the exception that proves the point. Neither platform has a
+ * private-reply edge on the comment — it is a message addressed to a comment id
+ * on both — but Facebook did have one, `{comment-id}/private_replies`, until it
+ * was removed after Graph API v3.2. Writing the platforms' shapes down from a
+ * doc page is what caught it; the responses never could.
  *
  * Written as data rather than as branches inside the client so the shapes can be
  * asserted against Meta's reference in a unit test, which is the only check
@@ -42,11 +46,11 @@ export type CommentRequestInput = {
   platform: MetaPlatform;
   commentId: string;
   /**
-   * The account replies go out from. Only Instagram's private reply needs it —
-   * it is addressed to the account rather than to the comment — but it is
-   * required for every input so a caller cannot reach that one case having
-   * resolved nothing, which is how the account id came to be missing from the
-   * only call that needed it.
+   * The account replies go out from. Only a private reply needs it — that one is
+   * addressed to the account rather than to the comment — but it is required for
+   * every input so a caller cannot reach that one case having resolved nothing,
+   * which is how the account id came to be missing from the only call that
+   * needed it.
    */
   accountId: string;
   operation: CommentOperation;
@@ -65,19 +69,23 @@ export function commentRequest(input: CommentRequestInput): GraphRequest {
       };
 
     case 'private_reply':
-      if (platform === 'facebook') {
-        return {
-          method: 'POST',
-          path: `${commentId}/private_replies`,
-          body: { message: operation.message },
-        };
-      }
-
       /*
-        Instagram has no private-reply edge. The same thing is done by sending a
-        message from the account with a *comment id* where a recipient id would
-        normally go, which is what makes the send legal without the customer
-        having written in first.
+        The one comment operation that is spelled the same on both platforms,
+        and the only one that is not addressed to the comment at all: a message
+        from the account with a *comment id* where a recipient id would normally
+        go, which is what makes the send legal without the customer having
+        written in first.
+
+        Facebook had its own branch here, posting to `{comment-id}/private_replies`.
+        **That edge was removed after Graph API v3.2** and this app addresses
+        v23.0, so every Facebook private reply asked a node for an edge it does
+        not have — refused with `100 "Unsupported post request"`, which is the
+        sentence at the top of this file, and rendered on the ticket as "the
+        comment is gone, or you have already replied to it". It was not
+        distinguishable from the real thing at any point. Meta documents this
+        shape for both platforms now (Messenger Platform → Private Replies), so
+        the branch is gone rather than corrected: there is no Facebook spelling
+        left to drift from Instagram's.
 
         Deliberately not folded into `sendDirectMessage`: that function's
         recipient is a person and its tag decides whether the 24-hour window
