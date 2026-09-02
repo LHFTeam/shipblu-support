@@ -24,6 +24,7 @@ import { subscribeMetaWebhooks } from './subscribe-meta-webhooks';
 import { syncShipmentJob } from './sync-shipment';
 import { syncStaleShipments } from './sync-stale-shipments';
 import { syncWhatsAppTemplates } from './sync-whatsapp-templates';
+import { testCommentPermission } from './test-comment-permission';
 
 export type JobHandler = (job: ClaimedJob) => Promise<void>;
 
@@ -41,6 +42,7 @@ export const handlers: Partial<Record<JobType, JobHandler>> = {
   backfill_meta_profiles: (job) => backfillMetaProfiles(job),
   backfill_shipment_links: (job) => backfillShipmentLinks(job),
   check_meta_permissions: () => checkMetaPermissions(),
+  test_comment_permission: (job) => testCommentPermission(job),
   cleanup,
   download_media: downloadMediaJob,
   fetch_meta_profile: fetchMetaProfile,
