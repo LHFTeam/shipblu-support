@@ -78,6 +78,17 @@ export default async function ReportsPage({
             Agent productivity
           </Link>
         ) : null}
+        {/*
+          Behind `report.view` like this page rather than a key of its own: it
+          answers what the team is being asked about, which is the same question
+          this page answers, cut a different way.
+        */}
+        <Link
+          href={`/reports/categories?days=${days}`}
+          className="rounded-md border border-[var(--border)] px-2.5 py-1 text-sm hover:bg-[var(--muted)]"
+        >
+          What tickets are about
+        </Link>
         <p className="ml-auto text-xs opacity-50">Rolled up nightly — today is not included yet.</p>
       </div>
 

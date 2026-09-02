@@ -11,7 +11,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import { agents, groups } from './agents';
 import { conversations } from './conversations';
-import { channelEnum } from './enums';
+import { channelEnum, rootCauseOwnerEnum } from './enums';
 
 export const csatSurveys = pgTable(
   'csat_surveys',
@@ -272,5 +272,113 @@ export const agentMetricsDaily = pgTable(
     // unique index really is unique and the rollup can upsert onto it.
     uniqueIndex('agent_metrics_daily_dimensions_idx').on(t.day, t.agentId),
     index('agent_metrics_daily_day_idx').on(t.day),
+  ],
+);
+
+/**
+ * What tickets were about, per day.
+ *
+ * Its own table rather than a dimension on `metrics_daily`, and the reason is
+ * not size — it is that `reconciles()` would have to be deleted. That assertion
+ * checks a day's totals row equals the sum of its channel slices, and its own
+ * comment calls it "the only thing standing between a double-counting bug and a
+ * report that merely looks busy". Categories are **multi-valued**: a ticket
+ * routinely carries two or three, so category slices can never sum to the total.
+ * Adding one to a table whose contract is single-valued slices either breaks
+ * that assertion or forces it to be relaxed, and relaxing it is worse than not
+ * having the dimension.
+ *
+ * Keyed on the **text key**, not the category's id, so a retired or merged
+ * category still reports. A report drawn last quarter must stay readable after
+ * somebody tidies the taxonomy.
+ *
+ * `channel` is NOT NULL with no "all" slice — the opposite choice from
+ * `metrics_daily`, deliberately. There is no totals row to reconcile against, so
+ * nulls buy nothing, and NOT NULL makes the unique index actually unique, which
+ * sidesteps the NULL-distinctness trap that forces the delete-and-insert rebuild
+ * next door. The page sums whichever channels it is showing.
+ *
+ * **Everything here is recomputable**, which is what makes a delete-and-insert
+ * rebuild safe: `conversations.created_at` and `resolved_at` are immutable, and
+ * `conversation_categories.first_seen_at` is append-only. The column that must
+ * never be added is "suggestions still open at day end" — that is current state,
+ * and a rebuild would write today's answer onto an old date. It would only
+ * surface on the third night, when the recompute window reaches back, which is
+ * the hardest possible failure to notice. Ask that question live instead, the
+ * way the review queue does.
+ */
+export const categoryMetricsDaily = pgTable(
+  'category_metrics_daily',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    day: date('day').notNull(),
+
+    /** The key as assigned, so a retired category still reports. */
+    categoryKey: text('category_key').notNull(),
+    area: text('area').notNull(),
+    channel: channelEnum('channel').notNull(),
+
+    /** Conversations created this day that carry this category as primary. */
+    ticketsPrimary: integer('tickets_primary').notNull().default(0),
+    /**
+     * …and carrying it at all.
+     *
+     * Deliberately does not sum to the day's ticket count, because a ticket with
+     * three categories appears under three of them. Anything rendering this has
+     * to say so, or the first person to add the column up files a bug.
+     */
+    ticketsAny: integer('tickets_any').notNull().default(0),
+
+    /** How the assignment was made, counted from immutable `first_seen_at`. */
+    assignedAuto: integer('assigned_auto').notNull().default(0),
+    assignedSuggested: integer('assigned_suggested').notNull().default(0),
+    assignedManual: integer('assigned_manual').notNull().default(0),
+
+    computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('category_metrics_daily_dimensions_idx').on(t.day, t.categoryKey, t.channel),
+    index('category_metrics_daily_day_idx').on(t.day),
+    index('category_metrics_daily_area_idx').on(t.area, t.day),
+  ],
+);
+
+/**
+ * Why tickets happened, per day, and who owns fixing it.
+ *
+ * The report the whole feature exists for. A category report says what the queue
+ * was full of; only this says what to go and change — and because the owner is
+ * carried here rather than joined at read time, "how much did the courier
+ * network cost us last month" is one grouped read.
+ *
+ * `owner` is denormalised out of `ticket_root_causes` on purpose, and it is the
+ * one denormalisation here: resolving it through the registry at read time would
+ * re-attribute history the moment somebody corrects a cause's owner, and a
+ * report that silently rewrites last quarter is worse than one that is a little
+ * out of date.
+ *
+ * Counted from `conversations.resolved_at` rather than `created_at`: the cause
+ * is recorded at resolution, so a ticket that arrives in one month and is
+ * understood in the next belongs to the month somebody worked it out.
+ */
+export const rootCauseMetricsDaily = pgTable(
+  'root_cause_metrics_daily',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    day: date('day').notNull(),
+
+    causeKey: text('cause_key').notNull(),
+    /** Frozen with the row — see the docstring. */
+    owner: rootCauseOwnerEnum('owner').notNull(),
+    channel: channelEnum('channel').notNull(),
+
+    ticketsResolved: integer('tickets_resolved').notNull().default(0),
+
+    computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('root_cause_metrics_daily_dimensions_idx').on(t.day, t.causeKey, t.channel),
+    index('root_cause_metrics_daily_day_idx').on(t.day),
+    index('root_cause_metrics_daily_owner_idx').on(t.owner, t.day),
   ],
 );
