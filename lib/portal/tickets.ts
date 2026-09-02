@@ -250,6 +250,7 @@ export async function createTicket(contactId: string, input: NewTicket): Promise
     messageId: created.messageId,
     bodyText: input.body,
     kind: 'reply',
+    direction: 'inbound',
   });
 
   await afterInboundMessage(created.id, true, now);
@@ -344,6 +345,7 @@ export async function appendReply(
     messageId: result.messageId,
     bodyText: body,
     kind: 'reply',
+    direction: 'inbound',
   });
 
   await afterInboundMessage(result.id, false, now);

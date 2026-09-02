@@ -315,6 +315,7 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
     messageId,
     bodyText: isEmail && html ? htmlToText(html) : body,
     kind: 'reply',
+    direction: 'outbound',
   });
 
   if (cannedResponseId) await countCannedUse(cannedResponseId);
@@ -389,6 +390,7 @@ export async function addNote(_state: ActionState, formData: FormData): Promise<
     messageId: note[0]!.id,
     bodyText: body,
     kind: 'note',
+    direction: 'outbound',
   });
 
   refresh(row.conversation.number);
@@ -671,6 +673,7 @@ export async function sendTemplateReply(
     messageId,
     bodyText: rendered,
     kind: 'reply',
+    direction: 'outbound',
   });
 
   refresh(row.conversation.number);

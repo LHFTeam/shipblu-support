@@ -159,6 +159,7 @@ export async function ingestMetaMessage(
     messageId: result.messageId,
     bodyText: message.text,
     kind: 'reply',
+    direction: 'inbound',
   });
 
   await afterInboundMessage(result.conversationId, result.createdConversation, message.sentAt);
@@ -280,6 +281,7 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
     messageId: result.messageId,
     bodyText: comment.text,
     kind: 'reply',
+    direction: 'inbound',
   });
 
   await afterInboundMessage(result.conversationId, result.createdConversation, comment.createdAt);

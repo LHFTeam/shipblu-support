@@ -199,6 +199,7 @@ export async function ingestWhatsAppMessage(
     messageId: result.messageId,
     bodyText: message.text,
     kind: 'reply',
+    direction: 'inbound',
   });
 
   // Deliberately not run for a read-only channel. Everything downstream assumes
@@ -386,6 +387,7 @@ export async function ingestWhatsAppEcho(echo: NormalisedEcho): Promise<WhatsApp
     messageId: result.messageId,
     bodyText: echo.text,
     kind: 'reply',
+    direction: 'outbound',
   });
 
   return { ...result, duplicate: false, ignored: false };
