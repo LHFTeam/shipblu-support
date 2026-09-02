@@ -568,13 +568,7 @@ export function WidgetChat({
       ) : null}
 
       {view === 'article' && article ? (
-        <WidgetArticle
-          locale={locale}
-          copy={copy}
-          article={article}
-          onBack={back}
-          onTalkToAgent={talkToAgent}
-        />
+        <WidgetArticle locale={locale} copy={copy} article={article} onTalkToAgent={talkToAgent} />
       ) : null}
 
       {/*

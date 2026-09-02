@@ -19,13 +19,11 @@ export function WidgetArticle({
   locale,
   copy,
   article,
-  onBack,
   onTalkToAgent,
 }: {
   locale: Locale;
   copy: WidgetCopy;
   article: ArticleLink;
-  onBack: () => void;
   onTalkToAgent: () => void;
 }) {
   /*
@@ -151,13 +149,6 @@ export function WidgetArticle({
           className="w-full rounded-md bg-brand-600 px-3 py-2.5 text-sm font-medium text-white"
         >
           {copy.talkToAgent}
-        </button>
-        <button
-          type="button"
-          onClick={onBack}
-          className="mt-1 w-full rounded-md px-3 py-1.5 text-xs opacity-60 hover:opacity-100"
-        >
-          {copy.back}
         </button>
       </div>
     </div>
