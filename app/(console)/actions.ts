@@ -24,6 +24,7 @@ import {
 } from '@/db/schema';
 import { assignConversation } from '@/lib/assignment';
 import { refreshPrimary } from '@/lib/categorise/apply';
+import { CAUSE_REQUIRED_AREAS } from '@/lib/categorise/taxonomy';
 import { requestAssignmentSweep, setAccepting } from '@/lib/assignment/presence';
 import { requireAgent } from '@/lib/auth/guard';
 import { env } from '@/lib/env';
@@ -197,9 +198,12 @@ async function refuseIfIncomplete(
  * automation cannot know why a parcel was late, so enforcing this against the
  * three-day auto-close would wedge tickets in a state no person was asked to
  * clear.
+ *
+ * The list of areas lives in `lib/categorise/taxonomy.ts` because the coverage
+ * figure on the report has to measure the same population this gate demands —
+ * two definitions of "owes a cause" is how a report comes to say 40% of tickets
+ * are missing something that was never asked of most of them.
  */
-const CAUSE_REQUIRED_AREAS = new Set(['delivery', 'condition', 'pickup', 'return', 'payment']);
-
 async function refuseIfNoRootCause(conversationId: string): Promise<ActionState | null> {
   const rows = await db
     .select({
@@ -221,9 +225,9 @@ async function refuseIfNoRootCause(conversationId: string): Promise<ActionState 
   const row = rows[0];
   if (!row) return null;
   if (row.rootCauseId) return null;
-  if (!row.area || !CAUSE_REQUIRED_AREAS.has(row.area)) return null;
+  if (!row.area || !CAUSE_REQUIRED_AREAS.includes(row.area)) return null;
 
-  return { error: 'Record what caused this before resolving it' };
+  return { error: 'Record what caused this before closing it' };
 }
 
 // --- Replies and notes ------------------------------------------------------
@@ -252,10 +256,15 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
   // the composer, so the agent would see a reply they cannot un-send and a
   // status that did not move, with nothing on screen saying why.
   if (resolveAfter) {
+    // Checked in order, and the second query only runs if the first passed.
+    // Computing both and then reporting the *newer* one first put a message
+    // about the root cause in front of a required-fields message that predates
+    // this feature — so an agent filled in a cause, pressed the button again,
+    // and only then learned about the two empty fields.
     const incomplete = await refuseIfIncomplete(conversation.customFields);
+    if (incomplete) return incomplete;
     const uncaused = await refuseIfNoRootCause(conversationId);
     if (uncaused) return uncaused;
-    if (incomplete) return incomplete;
   }
 
   if (conversation.channel === 'whatsapp') {
@@ -772,11 +781,17 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
         return { error: 'Only a supervisor can close a ticket — resolve it instead' };
       }
 
-      if (status.category === 'resolved') {
+      // Both terminal categories, not just `resolved`. `Closed` is a seeded
+      // status an agent can pick from the same dropdown, and gating only the
+      // one next to it made the whole rule advisory: picking the other option
+      // ended the ticket with no cause recorded and nothing to say so. See
+      // `conversations.root_cause_set_at` for how a closed ticket's cause is
+      // then dated, since `resolved_at` stays null on this path.
+      if (status.category === 'resolved' || status.category === 'closed') {
         const incomplete = await refuseIfIncomplete(row.conversation.customFields);
+        if (incomplete) return incomplete;
         const uncaused = await refuseIfNoRootCause(conversationId);
         if (uncaused) return uncaused;
-        if (incomplete) return incomplete;
       }
 
       await db.transaction(async (tx) => {
@@ -1851,7 +1866,13 @@ export async function setRootCause(_state: ActionState, formData: FormData): Pro
 
   await db
     .update(conversations)
-    .set({ rootCauseId: rootCauseId || null, updatedAt: new Date() })
+    .set({
+      rootCauseId: rootCauseId || null,
+      // Cleared with the cause, so a ticket whose cause was removed cannot be
+      // counted on the day the removed one was established.
+      rootCauseSetAt: rootCauseId ? new Date() : null,
+      updatedAt: new Date(),
+    })
     .where(eq(conversations.id, conversationId));
 
   await db.insert(conversationEvents).values({

@@ -108,9 +108,12 @@ export default async function CategoriesPage() {
               <>
                 Who{' '}
                 <InfoTip label="Who">
-                  Which population raises this, used only to narrow the picker an agent sees.
-                  Offering a merchant&rsquo;s payout question on a recipient&rsquo;s missing parcel
-                  is how a list of fifty becomes one where people choose the first plausible row.
+                  Which population raises this. It <b>orders</b> the picker an agent sees — a
+                  recipient&rsquo;s delivery questions above a merchant&rsquo;s payout ones on a
+                  recipient&rsquo;s ticket — and never hides a row, because the ticket&rsquo;s
+                  requester is established from role flags that can be absent or stale. A list of
+                  fifty is one where people choose the first plausible row; a list an agent cannot
+                  reach past is worse.
                 </InfoTip>
               </>,
               'Used',

@@ -131,9 +131,17 @@ both sides of its comparison, and the corpus carries `إلغاء الشحنه`,
 
 **Confidence is an evidence grade, not a probability.** 0.90 for a whole message
 that reads as a known phrase, 0.70 for a multi-word anchored match, 0.55 for a
-single keyword inside a longer sentence; independent hits combine noisy-OR and
-cap at 0.95. Nothing here claims a percentage chance of being right, and the
-console says so where the number is shown.
+single keyword inside a longer sentence; independent hits combine noisy-OR.
+Nothing here claims a percentage chance of being right, and the console says so
+where the number is shown.
+
+**Which ceiling that combination hits is decided by the strongest rule that
+contributed, not by how many did.** Accumulation may sharpen confidence inside a
+kind of evidence; it must not promote evidence into a kind it never was. A pile
+of single keywords caps at 0.85, below the auto line — three of them noisy-OR to
+0.909 and would otherwise be applied without asking on the strength of three
+words. Two anchored patterns agreeing reach 0.91 and may be applied, which is
+the "several strong patterns agreed" case the threshold exists for.
 
 Two thresholds, both overridable through `process.env` without a deploy:
 `CATEGORISE_AUTO_MIN` (0.90) applies outright, `CATEGORISE_RECORD_MIN` (0.35)
@@ -141,7 +149,8 @@ suggests into the review queue, and below it nothing is written at all.
 `CATEGORISE_DISABLED_RULES` kills a single over-firing rule by key.
 
 **The error philosophy is asymmetric on purpose.** A missed category shows as
-`meta.unclassified`, tops the review queue, and a re-run repairs it. A wrong
+`meta.unclassified`, gets its own section on the review page, and a re-run
+repairs it. A wrong
 category silently moves a number a manager staffs a team from. Under-detection is
 cheap; over-detection is not.
 

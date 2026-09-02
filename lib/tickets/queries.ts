@@ -488,6 +488,16 @@ export type ConversationDetail = {
    */
   categories: AssignedCategory[];
   rootCauseId: string | null;
+  /**
+   * Which population asked, when the records established it.
+   *
+   * Only used to *order* the category picker — a merchant's payout question
+   * offered first on a merchant's ticket. Never to filter: the value is
+   * established from role flags that can be stale or absent, and a picker that
+   * hides `billing.payout` from a ticket this got wrong is a control an agent
+   * cannot work around.
+   */
+  requesterKind: 'merchant' | 'recipient' | 'prospect' | 'other' | null;
   /** Parcels this ticket is about, and the accounts it names. */
   shipments: LinkedShipment[];
   shippingAccounts: LinkedShippingAccount[];
@@ -673,6 +683,7 @@ export async function getConversation(
     metaThread,
     categories,
     rootCauseId: row.conversation.rootCauseId,
+    requesterKind: row.conversation.requesterKind,
     shipments,
     shippingAccounts: accounts,
     sideConversations: sides,

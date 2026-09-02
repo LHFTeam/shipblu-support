@@ -3,7 +3,7 @@ import { Badge, Cell, PageHeader, Row, Table } from '@/components/ui';
 import { InfoTip } from '@/components/tooltip';
 import { requirePermission } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
-import { reviewQueue, ruleScores } from '@/lib/categorise/queries';
+import { reviewQueue, ruleScores, unclassifiedQueue } from '@/lib/categorise/queries';
 import { direction } from '@/lib/kb/locale';
 import { detectLocale } from '@/lib/kb/language';
 import { CONVERSATION_CHANNELS, hiddenChannels } from '@/lib/tickets/channel-policy';
@@ -14,10 +14,17 @@ export const dynamic = 'force-dynamic';
 /**
  * The categories the detector is unsure about, and how each rule is doing.
  *
- * Two halves that answer different questions. The queue is the work: every
- * suggestion waiting on one click. The table underneath is why the work is worth
- * doing — a rule with a high rejection count is one to narrow, and a rule with
- * nothing but unreviewed rows is one nobody has checked yet.
+ * Three parts that answer different questions. The queue is the work: every
+ * suggestion waiting on one click. The unclassified list under it is the other
+ * direction — messages no rule matched at all, which is where the next rule
+ * comes from. The table at the bottom is why the work is worth doing: a rule
+ * with a high rejection count is one to narrow, and a rule with nothing but
+ * unreviewed rows is one nobody has checked yet.
+ *
+ * The unclassified list is separate rather than mixed into the queue because it
+ * carries confidence 0 by definition, so best-evidence-first ordering buried it
+ * below every real suggestion — the under-detection signal was invisible in the
+ * one place built to surface it.
  *
  * Ordered best-evidence-first rather than newest-first. The suggestions most
  * likely to be right are the cheapest to confirm, and clearing those fastest is
@@ -37,7 +44,11 @@ export default async function CategoryReviewPage() {
   const hidden = new Set<string>(hiddenChannels(agent));
   const visibleChannels = CONVERSATION_CHANNELS.filter((channel) => !hidden.has(channel));
 
-  const [queue, scores] = await Promise.all([reviewQueue({ visibleChannels }), ruleScores()]);
+  const [queue, unclassified, scores] = await Promise.all([
+    reviewQueue({ visibleChannels }),
+    unclassifiedQueue({ visibleChannels }),
+    ruleScores(),
+  ]);
 
   const canDecide = can(agent, 'ticket.categorise');
 
@@ -123,6 +134,57 @@ export default async function CategoryReviewPage() {
           })}
         </Table>
       )}
+
+      <section className="mt-8">
+        <h2 className="mb-1 text-sm font-medium">Nothing matched these</h2>
+        <p className="mb-3 max-w-2xl text-sm opacity-70">
+          Free text the rules could not read, newest first. There is nothing to confirm here — the
+          point is to read what customers actually wrote and write the rule that was missing. A
+          category climbing this list is the lexicon telling you where its gap is, and it is the
+          cheap half of the asymmetry the detector is tuned around: a miss shows up here, a wrong
+          answer shows up nowhere.
+        </p>
+
+        {unclassified.length === 0 ? (
+          <p className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm opacity-70">
+            Every message so far matched something.
+          </p>
+        ) : (
+          <Table head={['Ticket', 'When', 'What the customer wrote']}>
+            {unclassified.map((row) => {
+              const excerptLocale = row.excerpt ? detectLocale(row.excerpt) : 'en';
+              return (
+                <Row key={row.conversationId}>
+                  <Cell>
+                    <Link href={`/inbox/${row.number}`} className="font-medium hover:underline">
+                      #{row.number}
+                    </Link>
+                    <p className="opacity-60">
+                      <Badge>{row.channel}</Badge>
+                    </p>
+                  </Cell>
+                  <Cell className="text-xs opacity-60">
+                    {row.firstSeenAt.toISOString().slice(0, 10)}
+                  </Cell>
+                  <Cell className="max-w-md">
+                    {row.excerpt ? (
+                      <p
+                        dir={direction(excerptLocale)}
+                        lang={excerptLocale}
+                        className="text-xs opacity-70"
+                      >
+                        {row.excerpt}
+                      </p>
+                    ) : (
+                      <p className="text-xs opacity-40">the message is gone</p>
+                    )}
+                  </Cell>
+                </Row>
+              );
+            })}
+          </Table>
+        )}
+      </section>
 
       <section className="mt-8">
         <h2 className="mb-1 text-sm font-medium">How the rules are doing</h2>

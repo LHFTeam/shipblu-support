@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { bandFor, detectCategories } from './detect';
+import {
+  AUTO_APPLY_MIN,
+  INFERENCE_CEILING,
+  KEYWORD_CEILING,
+  bandFor,
+  combine,
+  detectCategories,
+} from './detect';
 import { MAX_TEXT_LENGTH, anchored, normaliseForMatch } from './normalise';
+import { PHRASES } from './rules';
 import { UNCLASSIFIED_KEY } from './taxonomy';
 
 /**
@@ -262,6 +270,25 @@ describe('choosing which category leads', () => {
   });
 });
 
+describe('every phrase rule can actually fire', () => {
+  // A standing guard rather than a case per phrase, because the failure it
+  // catches is silent in both directions. `ok` and `hi` are two characters
+  // each, and the content floor — three alphanumerics — ran ahead of the phrase
+  // lookup, so both rules sat in the table scoring zero forever. In the
+  // per-rule tuning table that reads as "nobody has checked this rule", not as
+  // "this rule cannot fire", which is the worst possible way to be told.
+  it.each(PHRASES.map((rule) => [rule.key, rule.phrase, rule.category] as const))(
+    '%s matches its own phrase',
+    (key, phrase, category) => {
+      const hits = detectCategories({ bodyText: phrase });
+      expect(
+        hits.map((hit) => hit.key),
+        `${key} produced nothing`,
+      ).toContain(category);
+    },
+  );
+});
+
 describe('bands', () => {
   it('applies a whole-message phrase without asking', () => {
     const hit = detectCategories({ bodyText: 'فين الاوردر' })[0]!;
@@ -273,6 +300,25 @@ describe('bands', () => {
     const hit = detectCategories({ bodyText: 'الشحنة تالفة' })[0]!;
     expect(hit.confidence).toBeLessThan(0.9);
     expect(bandFor(hit)).toBe('suggested');
+  });
+
+  // The ceiling this file's first version shipped with was 0.95 — above the
+  // 0.9 auto line rather than below it — so it prevented nothing it claimed to.
+  // These two are the assertion it was missing.
+  it('holds a pile of single keywords out of the auto band', () => {
+    expect(combine([0.55, 0.55])).toBeCloseTo(0.7975, 4);
+    expect(combine([0.55, 0.55, 0.55])).toBe(KEYWORD_CEILING);
+    expect(combine([0.55, 0.55, 0.55, 0.55])).toBe(KEYWORD_CEILING);
+    expect(KEYWORD_CEILING).toBeLessThan(AUTO_APPLY_MIN);
+  });
+
+  it('lets two anchored patterns agreeing be applied without asking', () => {
+    // The other half of the same rule: accumulation may sharpen confidence
+    // inside a kind of evidence, and two multi-word matches are a different
+    // kind from three single words however the arithmetic lands.
+    expect(combine([0.7, 0.7])).toBeGreaterThanOrEqual(AUTO_APPLY_MIN);
+    expect(combine([0.7, 0.55])).toBeLessThan(AUTO_APPLY_MIN);
+    expect(combine([0.7, 0.7, 0.7, 0.7])).toBe(INFERENCE_CEILING);
   });
 
   it('always writes the unclassified fallback, despite its zero confidence', () => {

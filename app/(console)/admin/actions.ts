@@ -13,6 +13,7 @@ import {
   whatsappAccounts,
 } from '@/db/schema';
 import { requirePermission } from '@/lib/auth/guard';
+import { forgetCategoryIds } from '@/lib/categorise/apply';
 import { normaliseEmail } from '@/lib/auth/normalise';
 import { sealInviteToken } from '@/lib/auth/invite-token';
 import { generateToken, hashToken } from '@/lib/auth/tokens';
@@ -406,6 +407,7 @@ export async function saveCategory(_state: AdminState, formData: FormData): Prom
     .set({ labelEn, labelAr, updatedAt: new Date() })
     .where(eq(ticketCategories.id, id));
 
+  forgetCategoryIds();
   revalidatePath('/admin/categories');
   return { error: null };
 }
@@ -425,6 +427,12 @@ export async function setCategoryActive(
     .set({ isActive: active, updatedAt: new Date() })
     .where(eq(ticketCategories.id, id));
 
+  // Retiring a category is how somebody stops an over-firing rule filling a
+  // report, so the detector has to stop assigning it — not just the picker stop
+  // offering it. This clears the registry cache in the web service; the worker,
+  // which is where the detector actually runs, picks the change up on its own
+  // cache's TTL. See `categoryIds()`.
+  forgetCategoryIds();
   revalidatePath('/admin/categories');
   return { error: null };
 }

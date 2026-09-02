@@ -24,8 +24,8 @@ import { anchored, normaliseForMatch } from './normalise';
  *
  * ## The asymmetry these are written for
  *
- * A missed category shows up as `meta.unclassified`, sits at the top of the
- * review queue, and a re-run repairs it. A wrong one silently moves a number a
+ * A missed category shows up as `meta.unclassified`, which has its own section
+ * on the review page, and a re-run repairs it. A wrong one silently moves a number a
  * manager staffs a team from, and nobody goes looking for a label that should
  * not be there. So every pattern here is written to under-match: no rule on a
  * bare noun that could belong to any area, no rule short enough to appear inside
@@ -38,6 +38,17 @@ import { anchored, normaliseForMatch } from './normalise';
  */
 
 export type Grade = 0.9 | 0.7 | 0.55;
+
+/**
+ * The anchored grade, named rather than written as `0.7` at the one place that
+ * reasons about it.
+ *
+ * `combine()` branches here: evidence below this grade is a single content word,
+ * and a pile of single words is held short of the auto-apply band no matter how
+ * many of them agree. Anything at or above it is two or more words in a fixed
+ * order, which is allowed to accumulate past that line.
+ */
+export const ANCHORED_GRADE = 0.7;
 
 export type PatternRule = {
   /** Written to `rule_key`; reports group on it to find a rule that over-fires. */

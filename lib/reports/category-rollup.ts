@@ -12,11 +12,16 @@ import type { ReportingContext } from './rollup';
  *
  * - A **category** is counted from `conversations.created_at`. It describes
  *   demand: what arrived that day.
- * - A **cause** is counted from `conversations.resolved_at`. It describes what
- *   was understood that day. A ticket that arrives in one month and is worked
- *   out in the next belongs to the month somebody worked it out, because that is
- *   when the cause became knowable — counting it on arrival would put a finding
- *   on a day when nobody had it.
+ * - A **cause** is counted from `coalesce(resolved_at, root_cause_set_at)`. It
+ *   describes what was understood that day. A ticket that arrives in one month
+ *   and is worked out in the next belongs to the month somebody worked it out,
+ *   because that is when the cause became knowable — counting it on arrival
+ *   would put a finding on a day when nobody had it. The coalesce is what
+ *   covers a ticket an agent **closed** rather than resolved: `resolved_at` is
+ *   written only for the `resolved` status category, so a cause recorded on a
+ *   closed ticket was stored and counted by nothing at all. See
+ *   `conversations.root_cause_set_at` for why widening `resolved_at` instead
+ *   was the wrong repair.
  *
  * The day boundary comes from the reporting timezone, not from UTC, exactly as
  * `computeDay` does it: Cairo observes DST, so a fixed offset would put an hour
@@ -51,6 +56,20 @@ function dayBounds(day: string, zone: string): { start: Date; end: Date } {
  * suggestion out is the system being corrected, not a ticket being about that
  * thing, and counting it would make the driver report measure the lexicon's
  * mistakes alongside the customers' problems.
+ *
+ * **The three bands partition the remaining rows, and `source` decides first.**
+ * The first version of this counted `manual` off `source` and the other two off
+ * `review_state`, which left a hole exactly where the interesting case is: an
+ * agent confirming a suggestion sets `review_state = 'confirmed'` and leaves
+ * `source = 'detected'`, so the row matched no filter and vanished from all
+ * three columns. Worse, the rebuild is delete-and-insert over a three-day
+ * window, so *yesterday's* correct count was destroyed the moment somebody
+ * pressed Confirm today — the retroactive rewrite `db/schema/metrics.ts` warns
+ * about, arriving through a column its docstring did not think of.
+ *
+ * A confirmed detection now counts as **suggested**, which is how it was filed;
+ * a human later agreeing does not change that, and it means the number stops
+ * depending on how much of the review queue has been worked through.
  */
 export async function computeCategoryDay(
   day: string,
@@ -71,11 +90,14 @@ export async function computeCategoryDay(
     select cc.category_key,
            split_part(cc.category_key, '.', 1) as area,
            c.channel::text as channel,
-           count(*) filter (where cc.is_primary)::int                            as tickets_primary,
-           count(*)::int                                                         as tickets_any,
-           count(*) filter (where cc.review_state = 'auto')::int                 as assigned_auto,
-           count(*) filter (where cc.review_state = 'suggested')::int            as assigned_suggested,
-           count(*) filter (where cc.source = 'manual')::int                     as assigned_manual
+           count(*) filter (where cc.is_primary)::int as tickets_primary,
+           count(*)::int                              as tickets_any,
+           count(*) filter (where cc.source <> 'manual' and cc.review_state = 'auto')::int
+             as assigned_auto,
+           count(*) filter (where cc.source <> 'manual' and cc.review_state <> 'auto')::int
+             as assigned_suggested,
+           count(*) filter (where cc.source = 'manual')::int
+             as assigned_manual
     from conversation_categories cc
     join conversations c on c.id = cc.conversation_id
     where c.created_at >= ${start.toISOString()}
@@ -85,18 +107,33 @@ export async function computeCategoryDay(
     group by cc.category_key, c.channel
   `);
 
-  return rows.map((row) => ({
-    day,
-    categoryKey: row.category_key,
-    area: row.area,
-    channel: row.channel as CategoryRow['channel'],
-    ticketsPrimary: row.tickets_primary,
-    ticketsAny: row.tickets_any,
-    assignedAuto: row.assigned_auto,
-    assignedSuggested: row.assigned_suggested,
-    assignedManual: row.assigned_manual,
-    computedAt: new Date(),
-  }));
+  return rows.map((row) => {
+    // Asserted rather than assumed, for the same reason `reconciles()` exists
+    // next door: three `filter` clauses that are meant to partition a set are
+    // one edited predicate away from overlapping or leaking, and the result is
+    // invisible in the output — a column that is quietly too small reads as a
+    // quiet week.
+    const banded = row.assigned_auto + row.assigned_suggested + row.assigned_manual;
+    if (banded !== row.tickets_any) {
+      console.error(
+        `[rollup_metrics] ${day} ${row.category_key}/${row.channel}: ` +
+          `${banded} banded assignments but ${row.tickets_any} rows`,
+      );
+    }
+
+    return {
+      day,
+      categoryKey: row.category_key,
+      area: row.area,
+      channel: row.channel as CategoryRow['channel'],
+      ticketsPrimary: row.tickets_primary,
+      ticketsAny: row.tickets_any,
+      assignedAuto: row.assigned_auto,
+      assignedSuggested: row.assigned_suggested,
+      assignedManual: row.assigned_manual,
+      computedAt: new Date(),
+    };
+  });
 }
 
 /**
@@ -125,8 +162,8 @@ export async function computeRootCauseDay(
            count(*)::int as tickets_resolved
     from conversations c
     join ticket_root_causes rc on rc.id = c.root_cause_id
-    where c.resolved_at >= ${start.toISOString()}
-      and c.resolved_at < ${end.toISOString()}
+    where coalesce(c.resolved_at, c.root_cause_set_at) >= ${start.toISOString()}
+      and coalesce(c.resolved_at, c.root_cause_set_at) < ${end.toISOString()}
       and c.deleted_at is null
     group by rc.key, rc.owner, c.channel
   `);

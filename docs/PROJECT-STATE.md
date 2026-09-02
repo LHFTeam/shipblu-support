@@ -373,8 +373,10 @@ fills one field and the report gets two dimensions that cannot disagree.
 `lib/shipments/status.ts` so a report can ask what the parcel was really doing.
 The detector is rules only — inspectable, free, deterministic, and turn-off-able
 by name in `CATEGORISE_DISABLED_RULES` while somebody fixes one. Two thresholds:
-above 0.90 it applies, down to 0.35 it suggests into `/admin/categories/review`,
-below that nothing is written. Confidence is an evidence grade and not a
+above 0.90 it applies — a whole message that reads as a known phrase, or two
+anchored patterns agreeing — down to 0.35 it suggests into
+`/admin/categories/review`, below that nothing is written. A pile of single
+keywords caps below the auto line however many of them agree. Confidence is an evidence grade and not a
 probability, and the console says so where the number appears.
 `/reports/categories` reads the new `category_metrics_daily` and
 `root_cause_metrics_daily`, both folded into the existing `rollup_metrics`

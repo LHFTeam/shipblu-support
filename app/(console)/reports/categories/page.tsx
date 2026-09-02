@@ -124,7 +124,10 @@ export default async function CategoryReportPage({
                   How it was filed{' '}
                   <InfoTip label="How it was filed">
                     <b>Auto</b> means the rules were confident enough to apply it without asking.
-                    <b> Suggested</b> is still waiting on somebody in the review queue.{' '}
+                    <b> Suggested</b> means a rule proposed it and a person was asked — including
+                    the ones already confirmed, because how a category was <em>filed</em> does not
+                    change when somebody agrees with it, and counting confirmations here would make
+                    last week&rsquo;s figures move every time the queue is worked through.{' '}
                     <b>By hand</b> is an agent filing something the rules missed — and a category
                     arriving by hand far more often than by rule is the clearest sign the lexicon
                     has a gap.
@@ -155,8 +158,11 @@ export default async function CategoryReportPage({
 
           <h2 className="mb-1 text-sm font-medium">Why those tickets existed</h2>
           <p className="mb-3 max-w-2xl text-sm opacity-70">
-            Recorded by the agent who resolved each ticket, counted on the day they resolved it —
-            the cause becomes knowable when somebody works it out, not when the ticket arrived.
+            Recorded by the agent who finished each ticket, counted on the day they finished it —
+            the cause becomes knowable when somebody works it out, not when the ticket arrived. The
+            count below is of tickets about a delivery, a parcel&apos;s condition, a pickup, a
+            return or a payment: those are the ones an agent must record a cause for, and the only
+            ones it would mean anything to count.
           </p>
 
           {/*
@@ -172,12 +178,12 @@ export default async function CategoryReportPage({
                   : 'border-[var(--border)] bg-[var(--surface)]'
               }`}
             >
-              <b>{coverage.withCause}</b> of <b>{coverage.total}</b> tickets resolved in this window
-              have a cause recorded
+              <b>{coverage.withCause}</b> of <b>{coverage.total}</b> tickets that owed a cause in
+              this window have one recorded
               {missing > 0 ? (
                 <>
                   {' '}
-                  — the other {missing} were resolved without one, so everything below describes{' '}
+                  — the other {missing} ended without one, so everything below describes{' '}
                   {Math.round((100 * coverage.withCause) / coverage.total)}% of the work.
                 </>
               ) : (

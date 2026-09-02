@@ -223,6 +223,20 @@ export const internalRecipientKindEnum = pgEnum('internal_recipient_kind', ['tea
  * `other` is for real inbound that is not support at all — job applications and
  * couriers offering to distribute, both of which arrive often enough on Facebook
  * to distort every other number if they are filed as customers.
+ *
+ * **Only `merchant` and `recipient` are written**, by `requesterKindFrom()` in
+ * `lib/categorise/requester.ts`, and only from records — the contact's role
+ * flags and whether they hold a shipping account. Null means "not established",
+ * which is a different claim from any of these four and the only honest one
+ * when the records do not say: `refreshContactRoles()` is documented as
+ * additive, so a recipient whose parcel has not synced carries no flag at all
+ * and calling them a `prospect` would be inventing the very number the column
+ * exists to make countable.
+ *
+ * `prospect` and `other` are therefore unreachable by detection on purpose.
+ * Deciding a stranger is a sales lead needs somebody to read what they wrote,
+ * and a detector guessing it from vocabulary is the same mistake as a detector
+ * guessing a root cause.
  */
 export const requesterKindEnum = pgEnum('requester_kind', [
   'merchant',

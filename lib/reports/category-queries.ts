@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { db } from '@/db/client';
+import { CAUSE_REQUIRED_AREAS } from '@/lib/categorise/taxonomy';
 
 /**
  * Reading the category and cause rollups.
@@ -138,24 +139,49 @@ export async function ownerTotals(days: number): Promise<OwnerTotal[]> {
 }
 
 /**
- * How many resolved tickets never had a cause recorded.
+ * How many of the tickets that **owed** a cause have one recorded.
  *
  * The honesty check on every number above. A cause report drawn from a third of
  * the tickets is not wrong, but it is not what it looks like either — so the
  * page says the coverage out loud rather than presenting a total that quietly
  * omits whatever nobody filled in.
  *
+ * The denominator is the population the resolve gate actually demands a cause
+ * from — a ticket whose leading category is in `CAUSE_REQUIRED_AREAS` — and not
+ * every ended ticket. Counting price-list questions and integration
+ * walkthroughs in the denominator would report a permanent two-thirds gap made
+ * almost entirely of tickets that never owed a cause and never will, and a
+ * figure that cannot reach 100% is one people stop reading. It shares that list
+ * with the gate so the two cannot disagree about who is being measured.
+ *
+ * Dated by `coalesce(resolved_at, root_cause_set_at)`, matching
+ * `computeRootCauseDay`, so the coverage line and the cause table below it
+ * describe the same tickets.
+ *
  * Read live rather than rolled up, because it is a question about the current
  * state of those tickets: somebody can still go back and fill one in, and a
  * rolled-up copy would freeze the gap as it was on the night.
  */
 export async function causeCoverage(days: number): Promise<{ withCause: number; total: number }> {
+  // `in (…)` built with `sql.join`, and **not** `= any(${CAUSE_REQUIRED_AREAS})`.
+  // That reads like working SQL and is the 42809 in PROJECT-STATE §6.44: drizzle
+  // interpolates a JS array as one bind parameter per element, so `any($2, $3)`
+  // reaches Postgres as a row constructor. `any()` is only correct over an array
+  // *column*. This is a page query, so nothing in CI would have caught it.
+  const areas = sql.join(
+    CAUSE_REQUIRED_AREAS.map((area) => sql`${area}`),
+    sql`, `,
+  );
+
   const rows = await db.execute<{ with_cause: number; total: number }>(sql`
-    select count(*) filter (where root_cause_id is not null)::int as with_cause,
+    select count(*) filter (where c.root_cause_id is not null)::int as with_cause,
            count(*)::int as total
-    from conversations
-    where resolved_at >= current_date - ${days}::int
-      and deleted_at is null
+    from conversations c
+    join conversation_categories cc
+      on cc.conversation_id = c.id and cc.is_primary
+    where coalesce(c.resolved_at, c.root_cause_set_at) >= current_date - ${days}::int
+      and c.deleted_at is null
+      and split_part(cc.category_key, '.', 1) in (${areas})
   `);
   const row = rows[0];
   return { withCause: row?.with_cause ?? 0, total: row?.total ?? 0 };

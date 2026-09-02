@@ -756,3 +756,40 @@ export function rootCauseKeys(): readonly string[] {
 
 /** The fallback every uncategorised ticket gets, so an absence is countable. */
 export const UNCLASSIFIED_KEY = 'meta.unclassified';
+
+/**
+ * The areas where a ticket owes a root cause before anybody may call it done.
+ *
+ * Only where something actually failed. A price-list question or an integration
+ * walkthrough has no cause, and demanding one would teach agents to pick
+ * whatever clears the dialogue — which is how a dimension fills up with noise
+ * and stops being worth reporting on.
+ *
+ * One definition, read by three places that would otherwise drift: the resolve
+ * gate in `app/(console)/actions.ts`, and the coverage figure on
+ * `/reports/categories`, which has to measure the population the gate demands.
+ * A coverage line whose denominator is every resolved ticket reports a
+ * permanent two-thirds gap made mostly of enquiries that never owed a cause,
+ * and a number that can never reach 100% is one people stop reading.
+ */
+export const CAUSE_REQUIRED_AREAS: readonly string[] = [
+  'delivery',
+  'condition',
+  'pickup',
+  'return',
+  'payment',
+];
+
+/** Whether a category key sits in one of those areas. */
+export function causeRequiredFor(categoryKey: string): boolean {
+  return CAUSE_REQUIRED_AREAS.includes(areaOf(categoryKey));
+}
+
+/**
+ * The one category the detector treats as exclusive, named because three
+ * modules branch on it.
+ *
+ * A promotional message mentioning `توصيل` must not also be filed as a delivery
+ * question, so a spam hit suppresses every other hit rather than joining them.
+ */
+export const SPAM_KEY = 'other.spam';

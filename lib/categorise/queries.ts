@@ -8,6 +8,7 @@ import {
   ticketRootCauses,
 } from '@/db/schema';
 import type { ConversationChannel } from '@/lib/tickets/channel-policy';
+import { UNCLASSIFIED_KEY } from './taxonomy';
 
 /**
  * Reading categories back out.
@@ -146,6 +147,14 @@ export type ReviewRow = {
  * likely to be right: those are the cheapest to confirm, and clearing them
  * fastest is what keeps the queue from becoming the thing nobody opens.
  *
+ * **`meta.unclassified` is excluded, and gets `unclassifiedQueue()` instead.**
+ * It carries confidence 0 by definition, so under this ordering it sorted below
+ * every real suggestion and fell off the end of the page the moment fifty were
+ * waiting — which is precisely when the under-detection it represents matters
+ * most. It is also a different question: a suggestion asks "is this right?",
+ * and an unclassified message asks "what should this have matched?". One list
+ * with one pair of buttons cannot ask both.
+ *
  * **`channels` is a required argument, not a default.** It is how the caller
  * passes what the signed-in agent may see: this queue joins conversations, and a
  * default here would be a side door around `ticket.view.bot` for anybody holding
@@ -178,6 +187,7 @@ export async function reviewQueue(options: {
     .where(
       and(
         eq(conversationCategories.reviewState, 'suggested'),
+        ne(conversationCategories.categoryKey, UNCLASSIFIED_KEY),
         // `inArray`, never a hand-written `= any(...)`. Drizzle interpolates a
         // JS array as separate bind parameters, so `any($2, $3)` reaches
         // Postgres as a row constructor and it answers `op ANY/ALL (array)
@@ -190,6 +200,62 @@ export async function reviewQueue(options: {
     )
     .orderBy(desc(conversationCategories.confidence), desc(conversationCategories.firstSeenAt))
     .limit(options.limit ?? 50);
+
+  return rows.map((row) => ({
+    ...row,
+    excerpt: row.excerpt ? row.excerpt.slice(0, 240) : null,
+  }));
+}
+
+export type UnclassifiedRow = {
+  conversationId: string;
+  number: number;
+  channel: string;
+  firstSeenAt: Date;
+  /** What the detector could not read. Without it there is nothing to act on. */
+  excerpt: string | null;
+};
+
+/**
+ * Messages no rule matched, newest first.
+ *
+ * Its own query and its own section rather than a row in the main queue, for
+ * two reasons. It sorts on time because there is no evidence to sort on — the
+ * fallback is confidence 0 — and the useful ones are the recent ones, since
+ * this list is read to find what the lexicon is missing *now*. And the action
+ * it invites is different: nobody confirms that a message was unreadable; they
+ * read it and go and write a rule.
+ *
+ * Takes `visibleChannels` for the same reason `reviewQueue` does — it joins
+ * `conversations`, so a default would be a side door around `ticket.view.bot`.
+ */
+export async function unclassifiedQueue(options: {
+  visibleChannels: readonly ConversationChannel[];
+  limit?: number;
+}): Promise<UnclassifiedRow[]> {
+  if (options.visibleChannels.length === 0) return [];
+
+  const rows = await db
+    .select({
+      conversationId: conversationCategories.conversationId,
+      number: conversations.number,
+      channel: conversations.channel,
+      firstSeenAt: conversationCategories.firstSeenAt,
+      excerpt: messages.bodyText,
+    })
+    .from(conversationCategories)
+    .innerJoin(conversations, eq(conversations.id, conversationCategories.conversationId))
+    .leftJoin(messages, eq(messages.id, conversationCategories.detectedInMessageId))
+    .where(
+      and(
+        eq(conversationCategories.categoryKey, UNCLASSIFIED_KEY),
+        eq(conversationCategories.reviewState, 'suggested'),
+        inArray(conversations.channel, options.visibleChannels),
+        isNull(conversations.deletedAt),
+      ),
+    )
+    .orderBy(desc(conversationCategories.firstSeenAt))
+    .limit(options.limit ?? 25);
 
   return rows.map((row) => ({
     ...row,

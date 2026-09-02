@@ -860,6 +860,39 @@ function describeEvent(type: string, data: Record<string, unknown>): string {
       return data.reason === 'group_hours'
         ? "re-counted the due dates on the new group's business hours"
         : 're-counted the due dates';
+
+    // The six categorisation events, and they need cases here for exactly the
+    // reason `unverified_submitter` above does: the default prints the type
+    // with its underscores swapped for spaces and drops the payload, so the
+    // timeline read "category added" with no category in it. The actions all
+    // store what was decided; this is where it becomes readable.
+    case 'categorised': {
+      const applied = Array.isArray(data.applied) ? (data.applied as string[]) : [];
+      const suggested = Array.isArray(data.suggested) ? (data.suggested as string[]) : [];
+      const parts = [
+        applied.length > 0 ? `filed it under ${applied.join(', ')}` : null,
+        suggested.length > 0 ? `suggested ${suggested.join(', ')}` : null,
+      ].filter(Boolean);
+      // Both empty should be unreachable — the event is only written when
+      // something was created — but a timeline entry is the wrong place to
+      // throw, and saying so is better than an empty sentence.
+      return parts.length > 0 ? parts.join(' and ') : 'read the message and found nothing to file';
+    }
+    case 'category_added':
+      return `filed this under ${String(data.categoryKey ?? 'a category')}`;
+    case 'category_confirmed':
+      return `confirmed ${String(data.categoryKey ?? 'a suggested category')}`;
+    case 'category_rejected':
+      return `rejected ${String(data.categoryKey ?? 'a suggested category')}`;
+    case 'category_removed':
+      return `removed ${String(data.categoryKey ?? 'a category')}`;
+    case 'root_cause_set':
+      // Null is the clear, not a missing payload: `setRootCause` writes the key
+      // it resolved, and writes null when an agent picks "Not established yet".
+      return data.rootCauseKey
+        ? `recorded the cause as ${String(data.rootCauseKey)}`
+        : 'cleared the recorded cause';
+
     default:
       return type.replace(/_/g, ' ');
   }
@@ -1312,7 +1345,11 @@ function CategoriesField({
           ) : null}
 
           {canCategorise && options.length > 0 ? (
-            <CategoryPicker conversationId={conversation.id} options={options} />
+            <CategoryPicker
+              conversationId={conversation.id}
+              options={options}
+              requesterKind={conversation.requesterKind}
+            />
           ) : null}
 
           {rootCauses.length > 0 ? (
@@ -1378,15 +1415,57 @@ function ReviewButton({
 function CategoryPicker({
   conversationId,
   options,
+  requesterKind,
 }: {
   conversationId: string;
   options: CategoryOption[];
+  requesterKind: ConversationDetail['requesterKind'];
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const areas = [...new Set(options.map((option) => option.area))];
+  /*
+   * The requester's own half of the taxonomy first, everything else after it —
+   * **ordered, never filtered**, and the distinction is the whole design.
+   *
+   * Fifty-five entries in one flat list is a list where people pick the first
+   * plausible row, so putting a recipient's eleven delivery categories above a
+   * merchant's payout questions is worth doing. Hiding the rest is not:
+   * `requester_kind` comes off role flags that are maintained additively and
+   * can be absent or stale, so a wrong one would leave an agent unable to reach
+   * `billing.payout` on a merchant's ticket with no way to see why. A control
+   * an agent cannot work around has to be right every time; this one cannot be.
+   *
+   * `any` categories — a damaged parcel is the same complaint at either end —
+   * sort with the matching half rather than into the remainder.
+   */
+  const matches = (option: CategoryOption) =>
+    requesterKind !== null && (option.audience === requesterKind || option.audience === 'any');
+
+  const groups: { label: string; options: CategoryOption[] }[] = [];
+  const byArea = (source: CategoryOption[], suffix: string) => {
+    for (const area of [...new Set(source.map((option) => option.area))]) {
+      groups.push({
+        label: `${area}${suffix}`,
+        options: source.filter((option) => option.area === area),
+      });
+    }
+  };
+
+  const relevant = options.filter(matches);
+  if (relevant.length === 0) {
+    // Nothing established about who is asking, so there is no "other" half to
+    // put anything under — labelling every group that way would say the
+    // opposite of what is known.
+    byArea(options, '');
+  } else {
+    byArea(relevant, '');
+    byArea(
+      options.filter((option) => !matches(option)),
+      ' — other',
+    );
+  }
 
   async function add(categoryId: string) {
     if (!categoryId) return;
@@ -1414,15 +1493,13 @@ function CategoryPicker({
         }}
       >
         <option value="">Add a category…</option>
-        {areas.map((area) => (
-          <optgroup key={area} label={area}>
-            {options
-              .filter((option) => option.area === area)
-              .map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.labelEn}
-                </option>
-              ))}
+        {groups.map((group) => (
+          <optgroup key={group.label} label={group.label}>
+            {group.options.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.labelEn}
+              </option>
+            ))}
           </optgroup>
         ))}
       </select>
@@ -1453,9 +1530,27 @@ function RootCausePicker({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  /*
+   * Held locally as well as in the prop, because a `<select>` whose value comes
+   * only from the server snaps back to the old option the instant it is
+   * changed and stays there until the action and the refresh both land. On a
+   * `force-dynamic` page that is long enough to read as "it did not take", and
+   * an agent's second attempt writes the same value twice.
+   *
+   * Reset to the prop whenever the server disagrees — which is how a rejected
+   * write, or another agent's choice arriving on a refresh, wins.
+   */
+  const [chosen, setChosen] = useState<string>(value ?? '');
+  const [seen, setSeen] = useState<string | null>(value);
+  if (seen !== value) {
+    setSeen(value);
+    setChosen(value ?? '');
+  }
+
   const owners = [...new Set(rootCauses.map((cause) => cause.owner))];
 
   async function save(rootCauseId: string) {
+    setChosen(rootCauseId);
     setBusy(true);
     setError(null);
     const formData = new FormData();
@@ -1463,8 +1558,12 @@ function RootCausePicker({
     formData.set('rootCauseId', rootCauseId);
     const result = await setRootCause({ error: null }, formData);
     setBusy(false);
-    if (result.error) setError(result.error);
-    else router.refresh();
+    if (result.error) {
+      setError(result.error);
+      setChosen(value ?? '');
+      return;
+    }
+    router.refresh();
   }
 
   return (
@@ -1474,14 +1573,14 @@ function RootCausePicker({
         <InfoTip label="the root cause">
           What actually went wrong, as opposed to what the customer asked about. Recorded by you
           rather than detected, because the customer does not know it — and it is the one field the
-          reports on what to go and fix are built from. Required before resolving a ticket about a
-          delivery, a parcel&apos;s condition, a pickup, a return or a payment.
+          reports on what to go and fix are built from. Required before resolving or closing a
+          ticket about a delivery, a parcel&apos;s condition, a pickup, a return or a payment.
         </InfoTip>
       </p>
       <select
         className="app-input w-full text-xs"
         disabled={disabled || busy}
-        value={value ?? ''}
+        value={chosen}
         aria-label="Root cause"
         onChange={(event) => void save(event.target.value)}
       >

@@ -390,8 +390,12 @@ Confidence is an evidence grade, not a probability, and anything rendering it
 says so. `CATEGORISE_AUTO_MIN`, `CATEGORISE_RECORD_MIN` and
 `CATEGORISE_DISABLED_RULES` tune the bands and kill one over-firing rule by key
 without a deploy — read through `process.env` for the reason `detect.ts` gives.
-Under-detection is cheap (it shows as `meta.unclassified` and tops the review
-queue); over-detection silently moves a number a manager staffs a team from.
+Under-detection is cheap (it shows as `meta.unclassified`, which has its own
+section on the review page — it carries confidence 0, so it can never surface in
+a queue ordered best-evidence-first); over-detection silently moves a number a
+manager staffs a team from. `combine()` picks its ceiling from the strongest
+rule that contributed rather than from how many did, so a pile of single
+keywords is held below the auto band however many of them agree.
 See `plans/ticket-categorisation.md`.
 
 **Bilingual and RTL.** Arabic is the default locale and the front door; every

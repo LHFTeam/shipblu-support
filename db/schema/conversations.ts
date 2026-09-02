@@ -87,6 +87,26 @@ export const conversations = pgTable(
       onDelete: 'restrict',
     }),
 
+    /**
+     * When the cause above was established, which is the day the cause report
+     * counts it on.
+     *
+     * `resolved_at` was the obvious timestamp and it is the wrong one on its
+     * own, because it is written **only** for a status in the `resolved`
+     * category. An agent who picks `Closed` instead ends the ticket with
+     * `resolved_at` still null, so a cause recorded there was stored and then
+     * counted by nothing. Widening `resolved_at` to cover closing was the other
+     * option and would have been worse: it feeds resolution-SLA attainment
+     * (`lib/sla/index.ts`) and the agents report's resolved counts
+     * (`lib/reports/agent-rollup.ts`), and closing a ticket is not resolving it.
+     *
+     * So the cause carries its own instant, and `computeRootCauseDay` counts
+     * from `coalesce(resolved_at, root_cause_set_at)`. That also happens to be
+     * a more literal reading of what the report claims to measure — the day
+     * somebody worked it out — than the day the ticket was closed.
+     */
+    rootCauseSetAt: timestamp('root_cause_set_at', { withTimezone: true }),
+
     requesterContactId: uuid('requester_contact_id')
       .notNull()
       .references(() => contacts.id, { onDelete: 'restrict' }),
