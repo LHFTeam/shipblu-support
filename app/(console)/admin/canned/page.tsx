@@ -27,7 +27,7 @@ export default async function CannedPage() {
     <>
       <PageHeader
         title="Canned responses"
-        description="Reusable replies. Automations can send one of these as an auto-acknowledgement, which stops the first-response clock."
+        description="Reusable replies. Agents can insert one while writing; automations can send one without satisfying the first-response SLA."
         actions={<NewCanned />}
       />
 

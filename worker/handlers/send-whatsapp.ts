@@ -89,6 +89,8 @@ export async function sendWhatsApp(job: ClaimedJob): Promise<void> {
             phoneNumberId: credentials.phoneNumberId,
           });
 
+    const sentAt = new Date();
+
     await db
       .update(messages)
       .set({
@@ -105,16 +107,21 @@ export async function sendWhatsApp(job: ClaimedJob): Promise<void> {
           // did this leave on?" is the next question once there are two.
           phoneNumberId: credentials.phoneNumberId,
           whatsappAccountId: credentials.accountId,
-          sentAt: new Date().toISOString(),
+          sentAt: sentAt.toISOString(),
         },
       })
       .where(eq(messages.id, messageId));
 
-    // Deliberately does not touch lastCustomerMessageAt: an agent's reply does
-    // not extend the 24-hour window, only the customer's message does.
+    // Automated acknowledgements and surveys share this carrier with replies an
+    // agent wrote. They have no author and must leave the ticket unanswered;
+    // otherwise WhatsApp alone would quietly satisfy the queue's human-reply
+    // test after the shared outbound path deliberately left it alone.
     await db
       .update(conversations)
-      .set({ lastMessageAt: new Date(), lastAgentMessageAt: new Date() })
+      .set({
+        lastMessageAt: sentAt,
+        ...(row.message.authorAgentId ? { lastAgentMessageAt: sentAt } : {}),
+      })
       .where(eq(conversations.id, row.conversation.id));
 
     console.log(`[send_whatsapp] ${messageId} sent as ${result.wamid}`);

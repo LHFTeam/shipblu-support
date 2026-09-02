@@ -115,10 +115,18 @@ every SLA due date is counted against, so nothing has been added that could
 disagree with the clock. See `plans/out-of-hours-auto-response.md`.
 
 Two things in it are worth knowing before reading the code. It is **deliberately
-not a first response** — it does not stop the SLA clock and does not move
-`lastAgentMessageAt`, because it is sent precisely when nobody is working and the
-SLA is counted in working time; recording it would report a first response of
-zero minutes on every ticket that arrives overnight. And it sends **once per
+not a first response** — like every automated reply, it does not stop the SLA
+clock or move `lastAgentMessageAt`; only an agent's reply does. Otherwise a rule
+acknowledging every ticket would measure itself and satisfy the team's target,
+and this one would report zero minutes on every ticket arriving overnight. What
+it does stamp is `conversations.first_auto_replied_at`, which exists for the
+rule engine alone: `is_first_response_overdue` reads it so a time-based rule
+that chases an unanswered ticket stops after the acknowledgement, while the
+breach sweep and every report keep reading `first_responded_at` and go on
+counting the ticket as awaiting its first human reply. Without that split the
+fifteen-minute sweep re-sends the same acknowledgement until somebody opens the
+ticket, because an automation cannot clear the condition it fired on. It
+sends **once per
 closed stretch**, not per message: `conversations.auto_responded_at` is claimed
 with a conditional update, so the six ingest jobs six WhatsApp messages at 23:00
 produce still yield one reply. The case for it is in the archive — **11,402 of

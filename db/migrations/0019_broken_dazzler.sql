@@ -1,0 +1,1 @@
+ALTER TABLE "conversations" ADD COLUMN "first_auto_replied_at" timestamp with time zone;
