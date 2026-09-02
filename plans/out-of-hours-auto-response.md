@@ -87,16 +87,14 @@ sends produce one message; verified below.
 
 ## What it deliberately does not do
 
-**It does not count as a first response.** The automation engine's canned reply
-stops the SLA clock, on the reasoning that an automated answer is still an answer
-and a team that dislikes it should not be auto-replying. This is the case where
-that reasoning inverts: the acknowledgement goes out precisely because nobody is
-working, and the SLA is counted in working time. Marking first response at 02:00
-would report a first response of zero minutes on every ticket that arrives
-overnight, and the team's headline figure would measure the autoresponder instead
-of the team. It does not move `lastAgentMessageAt` either — the live backlog, the
-unanswered sweep and `hours_since_last_agent_message` all read that as "somebody
-has been in here".
+**It does not count as a first response.** No automated reply does: an SLA whose
+first-response target can be satisfied by a rule measures the rule rather than
+the team. This acknowledgement makes the problem especially visible because it
+goes out precisely when nobody is working and the SLA is counted in working
+time; marking first response at 02:00 would report zero minutes on every ticket
+that arrives overnight. It does not move `lastAgentMessageAt` either — the live
+backlog, the unanswered sweep and `hours_since_last_agent_message` all read that
+as "an agent has answered".
 
 **It does not answer machines.** An out-of-office answering our acknowledgement,
 which answers it back, is the loop RFC 3834 exists to prevent. The classification

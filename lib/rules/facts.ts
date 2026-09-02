@@ -63,7 +63,17 @@ export function conversationFacts(source: FactSource, now: Date = new Date()): F
     // The overdue flags are what a time-based rule keys off to chase a ticket
     // that is about to embarrass someone, without having to restate the SLA's
     // own arithmetic in the rule.
-    is_first_response_overdue: isOverdue(c.firstResponseDueAt, c.firstRespondedAt, now),
+    // An automated acknowledgement satisfies this fact but not the SLA. The
+    // breach sweep and every report read `firstRespondedAt` alone, so the
+    // ticket still counts as awaiting its first reply and still breaches; what
+    // stops here is the rule that chases it. Without that, a rule whose only
+    // exit is a human reply re-sends to the customer on every sweep — the
+    // fifteen-minute loop `lib/automations` opens by warning about.
+    is_first_response_overdue: isOverdue(
+      c.firstResponseDueAt,
+      c.firstRespondedAt ?? c.firstAutoRepliedAt,
+      now,
+    ),
     is_resolution_overdue: isOverdue(c.resolutionDueAt, c.resolvedAt, now),
     is_assigned: c.assigneeAgentId !== null,
   };

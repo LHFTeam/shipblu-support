@@ -16,7 +16,7 @@ import { readOnlyChannels } from '@/lib/tickets/channel-policy';
 import { deliverAutomatedReply } from '@/lib/tickets/outbound';
 import { matches } from '@/lib/rules/conditions';
 import { conversationFacts } from '@/lib/rules/facts';
-import { onAgentReply, onGroupChanged, onStatusChanged } from '@/lib/sla';
+import { onGroupChanged, onStatusChanged } from '@/lib/sla';
 import { windowState } from '@/lib/whatsapp/window';
 import { parseActions, type Action } from './actions';
 
@@ -354,18 +354,12 @@ async function sendCannedReply(
     actorLabel: `automation:${ruleName}`,
     eventType: 'auto_replied',
     meta: { automation: ruleName },
-    // A rule that answers the customer is the team answering: it is sent from
-    // the queue the team owns, during hours somebody could have written it by
-    // hand. The out-of-hours acknowledgement in `lib/auto-response` is the case
-    // where that is not true, and it passes false.
-    countsAsAgentReply: true,
   });
 
-  // An automated acknowledgement is a first response as far as the customer is
-  // concerned, and pretending otherwise would let a team hit every target by
-  // auto-replying — so this deliberately stops the clock, and a team that does
-  // not want that should not be auto-replying.
-  await onAgentReply(conversation.id);
+  // The rule sent this without an agent writing it. It must remain visibly
+  // unanswered and its first-response clock must keep running, or a rule that
+  // acknowledges every new ticket turns the human-response metric into the
+  // automation's response time and can satisfy every target by itself.
 
   // Counted here as well as on the agent's own path. A rule sending a response
   // a thousand times a week is the clearest signal the column can carry, and

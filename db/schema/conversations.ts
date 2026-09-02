@@ -98,6 +98,17 @@ export const conversations = pgTable(
     nextResponseDueAt: timestamp('next_response_due_at', { withTimezone: true }),
     resolutionDueAt: timestamp('resolution_due_at', { withTimezone: true }),
     firstRespondedAt: timestamp('first_responded_at', { withTimezone: true }),
+    /**
+     * When software first answered, which is never a first response.
+     *
+     * Deliberately a second column rather than a flag on `firstRespondedAt`:
+     * the reports, the rollup and the breach sweep all read that one and must
+     * keep counting an auto-acknowledged ticket as awaiting its first reply.
+     * What this column exists for is the rule engine, which needs to know the
+     * acknowledgement already went out — an automation whose condition only a
+     * human can clear re-sends it every time the sweep comes round.
+     */
+    firstAutoRepliedAt: timestamp('first_auto_replied_at', { withTimezone: true }),
     firstResponseBreached: boolean('first_response_breached').notNull().default(false),
     resolutionBreached: boolean('resolution_breached').notNull().default(false),
 

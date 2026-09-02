@@ -86,8 +86,13 @@ Design decisions worth knowing before changing things:
   become the one that applies to everything.
 - **SLA clocks are measured in working time**, not wall-clock, and a status flagged
   `stops_sla_clock` pauses them — recorded as a conversation event, so the timeline
-  explains why a due date moved. Breaches are found by a five-minute sweep that re-reads
-  current due dates rather than by a timer per ticket, because due dates move.
+  explains why a due date moved. Only a reply an agent actually sends satisfies a
+  response target: canned responses sent by a rule and out-of-hours acknowledgements
+  leave the ticket awaiting its first human reply, and are recorded separately in
+  `first_auto_replied_at` so a chase rule can tell it already fired without any of
+  it reaching the metric. Breaches are found by a five-minute
+  sweep that re-reads current due dates rather than by a timer per ticket, because due
+  dates move.
 - **Business hours are global with a per-group override.** One schedule is the company
   default; a group can be put on its own, which brings its timezone, operating days _and_
   holiday list with it, because all three live on the same `business_hours` row. SLA due
