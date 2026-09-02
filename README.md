@@ -89,8 +89,10 @@ Design decisions worth knowing before changing things:
   explains why a due date moved. Only a reply an agent actually sends satisfies a
   response target: canned responses sent by a rule and out-of-hours acknowledgements
   leave the ticket awaiting its first human reply, and are recorded separately in
-  `first_auto_replied_at` so a chase rule can tell it already fired without any of
-  it reaching the metric. Breaches are found by a five-minute
+  `first_auto_replied_at` so a rule can ask whether anything has gone out without
+  any of it reaching the metric. A rule that replies will not reply again to the
+  same ticket until the customer has written since — the sweep re-runs every
+  fifteen minutes and would otherwise repeat itself. Breaches are found by a five-minute
   sweep that re-reads current due dates rather than by a timer per ticket, because due
   dates move.
 - **Business hours are global with a per-group override.** One schedule is the company
