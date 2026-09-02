@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   automationRules,
@@ -16,7 +16,7 @@ import { readOnlyChannels } from '@/lib/tickets/channel-policy';
 import { deliverAutomatedReply } from '@/lib/tickets/outbound';
 import { matches } from '@/lib/rules/conditions';
 import { conversationFacts } from '@/lib/rules/facts';
-import { onAgentReply, onGroupChanged, onStatusChanged } from '@/lib/sla';
+import { onGroupChanged, onStatusChanged } from '@/lib/sla';
 import { windowState } from '@/lib/whatsapp/window';
 import { parseActions, type Action } from './actions';
 
@@ -314,6 +314,49 @@ async function applyAction(action: Action, ticket: TicketRow, ruleName: string):
  * in the database: an outbound message row plus a queued send, so an automated
  * reply is delivered, retried and shown on the timeline exactly like a human's.
  */
+/**
+ * Whether this rule has already written to this ticket since the customer last did.
+ *
+ * A time-based rule is re-evaluated every fifteen minutes and nothing in the
+ * engine remembers that it ran: `applyRules` keeps no per-ticket record and
+ * `lastRunAt` is rule-global. So a rule whose condition only a person can clear
+ * — "first response overdue", the obvious way to write a chase — sends the same
+ * message four times an hour until somebody opens the ticket. That is the loop
+ * this module opens by warning about, and the reply is the action that has to
+ * stop; the conditions are shared with rules that escalate rather than send,
+ * and those neither reach the customer nor need stopping.
+ *
+ * Since the customer last wrote, rather than once for good, because a chase is
+ * about silence: once they answer, the ticket has gone quiet again for a new
+ * reason and the same rule may legitimately chase it again. `lastCustomerMessageAt`
+ * null means they never wrote, so any reply already sent is the only one owed.
+ *
+ * The rule's own name, so two rules that both reply do not silence each other —
+ * an acknowledgement on create and a chase three days later are different
+ * messages about different things.
+ */
+async function alreadyReplied(
+  conversation: typeof conversations.$inferSelect,
+  ruleName: string,
+): Promise<boolean> {
+  const since = conversation.lastCustomerMessageAt;
+
+  const rows = await db
+    .select({ id: conversationEvents.id })
+    .from(conversationEvents)
+    .where(
+      and(
+        eq(conversationEvents.conversationId, conversation.id),
+        eq(conversationEvents.type, 'auto_replied'),
+        eq(conversationEvents.actorLabel, `automation:${ruleName}`),
+        ...(since ? [gt(conversationEvents.createdAt, since)] : []),
+      ),
+    )
+    .limit(1);
+
+  return rows.length > 0;
+}
+
 async function sendCannedReply(
   cannedResponseId: string,
   ticket: TicketRow,
@@ -345,6 +388,11 @@ async function sendCannedReply(
     return;
   }
 
+  if (await alreadyReplied(conversation, ruleName)) {
+    console.warn(`[automations] "${ruleName}" skipped a reply: it has already sent one`);
+    return;
+  }
+
   await deliverAutomatedReply({
     conversationId: conversation.id,
     channel: conversation.channel,
@@ -354,18 +402,12 @@ async function sendCannedReply(
     actorLabel: `automation:${ruleName}`,
     eventType: 'auto_replied',
     meta: { automation: ruleName },
-    // A rule that answers the customer is the team answering: it is sent from
-    // the queue the team owns, during hours somebody could have written it by
-    // hand. The out-of-hours acknowledgement in `lib/auto-response` is the case
-    // where that is not true, and it passes false.
-    countsAsAgentReply: true,
   });
 
-  // An automated acknowledgement is a first response as far as the customer is
-  // concerned, and pretending otherwise would let a team hit every target by
-  // auto-replying — so this deliberately stops the clock, and a team that does
-  // not want that should not be auto-replying.
-  await onAgentReply(conversation.id);
+  // The rule sent this without an agent writing it. It must remain visibly
+  // unanswered and its first-response clock must keep running, or a rule that
+  // acknowledges every new ticket turns the human-response metric into the
+  // automation's response time and can satisfy every target by itself.
 
   // Counted here as well as on the agent's own path. A rule sending a response
   // a thousand times a week is the clearest signal the column can carry, and

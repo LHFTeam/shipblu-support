@@ -13,6 +13,7 @@ import { formatBytes, formatDateTime, formatRelative } from '@/lib/format';
 import type { CannedResponseOption, ConversationDetail } from '@/lib/tickets/queries';
 import { formatForInput, selectedValues, type TicketFieldDef } from '@/lib/tickets/custom-fields';
 import { describeWindow, metaWindowState } from '@/lib/meta/window';
+import { isPrivateReplyMessage, isPublicMetaMessage } from '@/lib/meta/visibility';
 import {
   formatCoordinates,
   mapUrl,
@@ -408,7 +409,8 @@ function Timeline({
           isPublic?: boolean;
           echo?: boolean;
         };
-        const isPublicComment = meta.metaKind === 'comment';
+        const isPublicComment = isPublicMetaMessage(meta);
+        const isPrivateReply = isPrivateReplyMessage(meta, message.direction);
 
         return (
           <li
@@ -441,6 +443,7 @@ function Timeline({
                   {isInbound ? 'public comment' : 'posted publicly'}
                 </Badge>
               ) : null}
+              {isPrivateReply ? <Badge tone="neutral">sent privately</Badge> : null}
               {!isInbound && !isNote && meta.metaKind === 'direct_message' ? (
                 <Badge tone="neutral">direct message</Badge>
               ) : null}

@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversationEvents, conversations, messages } from '@/db/schema';
 import { enqueue } from '@/lib/queue';
@@ -12,10 +12,13 @@ import { enqueue } from '@/lib/queue';
  * the inbox sorts on. Two copies of that drift, and the drift shows up as one
  * channel quietly not delivering.
  *
- * What is deliberately *not* in here is what the message means. Whether it stops
- * an SLA clock, whether it counts as the team having replied, whether anything
- * gets a usage count — those differ between callers on purpose, and folding them
- * in behind a flag each is how a helper stops being readable at the call site.
+ * What is deliberately *not* in here is what the message means beyond one firm
+ * boundary: software writing to a customer is not an agent replying. Automated
+ * messages therefore move the thread but not `lastAgentMessageAt`, and their
+ * callers must not stop an SLA response clock. They do stamp
+ * `firstAutoRepliedAt`, which is how the rule engine knows the acknowledgement
+ * already went out without any of it counting as a first response. Whether
+ * anything gets a usage count still belongs to the caller.
  */
 
 export type AutomatedReply = {
@@ -31,15 +34,6 @@ export type AutomatedReply = {
   eventType: string;
   eventData?: Record<string, unknown>;
   meta?: Record<string, unknown>;
-  /**
-   * Whether this counts as the team answering.
-   *
-   * True moves `lastAgentMessageAt`, which is what the live backlog, the
-   * unanswered sweep and `hours_since_last_agent_message` all read as "somebody
-   * has been in here". An acknowledgement sent because nobody is in here must
-   * not claim that.
-   */
-  countsAsAgentReply: boolean;
 };
 
 /** The new message's id, for the caller's log and follow-up writes. */
@@ -74,7 +68,10 @@ export async function deliverAutomatedReply(reply: AutomatedReply): Promise<stri
     .update(conversations)
     .set({
       lastMessageAt: now,
-      ...(reply.countsAsAgentReply ? { lastAgentMessageAt: now } : {}),
+      // Coalesced rather than overwritten: this records that the customer has
+      // been acknowledged at all, so the second automated reply on a ticket
+      // must not move it and make a rule keyed off it fire again.
+      firstAutoRepliedAt: sql`coalesce(${conversations.firstAutoRepliedAt}, ${now})`,
     })
     .where(eq(conversations.id, reply.conversationId));
 

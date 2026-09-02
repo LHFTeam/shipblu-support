@@ -136,13 +136,6 @@ async function send(conversationId: string, at: Date): Promise<void> {
     eventType: 'auto_replied',
     eventData: { reason: holiday ? 'holiday' : 'out_of_hours', ruleId: rule.id },
     meta: { autoResponse: holiday ? 'holiday' : 'out_of_hours' },
-    // Deliberately not: nobody is working, and the SLA is counted in working
-    // time. Recording this as the team's reply would mark a first response at
-    // 02:00 on every ticket that arrives overnight, and the first-response
-    // figure would then measure the autoresponder instead of the team. The
-    // automation engine's canned reply does the opposite, and is right to — that
-    // one is an answer, sent while the office is open.
-    countsAsAgentReply: false,
   });
 
   console.log(

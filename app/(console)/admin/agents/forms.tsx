@@ -11,7 +11,6 @@ const INITIAL: AdminState = { error: null };
 
 export function InviteForm() {
   const [state, action] = useActionState(createInvite, INITIAL);
-  const [copied, setCopied] = useState(false);
 
   return (
     <form
@@ -44,27 +43,66 @@ export function InviteForm() {
       {state.inviteUrl ? (
         <div className="rounded-md bg-[var(--muted)] p-3 text-sm">
           <p className="mb-1.5 text-xs font-medium opacity-70">
-            Send this link to the new agent. It is shown once and expires in 7 days.
+            Send this link to the new agent. It expires in 7 days and remains under Pending invites
+            until it is accepted.
           </p>
-          <div className="flex items-center gap-2">
-            <code className="min-w-0 flex-1 truncate text-xs">{state.inviteUrl}</code>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => {
-                void navigator.clipboard.writeText(state.inviteUrl!);
-                setCopied(true);
-              }}
-            >
-              {copied ? 'Copied' : 'Copy'}
-            </Button>
-          </div>
+          <CopyInviteLink
+            key={state.inviteUrl}
+            inviteUrl={state.inviteUrl}
+            label="Copy invite link"
+          />
         </div>
       ) : null}
 
       <SubmitButton className="self-start" idle="Create invite" busy="Creating…" />
     </form>
   );
+}
+
+function CopyInviteLink({ inviteUrl, label }: { inviteUrl: string; label: string }) {
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+      setCopyState('copied');
+    } catch {
+      setCopyState('failed');
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => void copy()}
+      aria-label={label}
+      className="flex w-full min-w-0 items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2.5 py-2 text-start transition-colors hover:bg-[var(--muted)] focus:ring-2 focus:ring-brand-500/30 focus:outline-none"
+    >
+      <code className="min-w-0 flex-1 truncate text-xs">{inviteUrl}</code>
+      <span
+        aria-live="polite"
+        className={`shrink-0 text-xs font-medium ${copyState === 'failed' ? 'text-red-600 dark:text-red-300' : 'text-brand-700 dark:text-brand-300'}`}
+      >
+        {copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Could not copy' : 'Copy'}
+      </span>
+    </button>
+  );
+}
+
+export function PendingInviteLink({
+  inviteUrl,
+  email,
+  unavailableMessage,
+}: {
+  inviteUrl: string | null;
+  email: string;
+  unavailableMessage: string | null;
+}) {
+  if (!inviteUrl) {
+    return <p className="text-xs opacity-50">{unavailableMessage ?? 'Link unavailable.'}</p>;
+  }
+
+  return <CopyInviteLink inviteUrl={inviteUrl} label={`Copy invite link for ${email}`} />;
 }
 
 /**

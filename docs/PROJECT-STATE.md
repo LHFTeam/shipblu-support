@@ -115,10 +115,28 @@ every SLA due date is counted against, so nothing has been added that could
 disagree with the clock. See `plans/out-of-hours-auto-response.md`.
 
 Two things in it are worth knowing before reading the code. It is **deliberately
-not a first response** — it does not stop the SLA clock and does not move
-`lastAgentMessageAt`, because it is sent precisely when nobody is working and the
-SLA is counted in working time; recording it would report a first response of
-zero minutes on every ticket that arrives overnight. And it sends **once per
+not a first response** — like every automated reply, it does not stop the SLA
+clock or move `lastAgentMessageAt`; only an agent's reply does. Otherwise a rule
+acknowledging every ticket would measure itself and satisfy the team's target,
+and this one would report zero minutes on every ticket arriving overnight. What
+it does stamp is `conversations.first_auto_replied_at`, surfaced to rules as
+`hours_since_auto_reply` and read by no report or sweep.
+
+The re-send it exists around is worth understanding, because the first fix for
+it was wrong in a way that was invisible. A time-based rule is re-evaluated
+every fifteen minutes and nothing in the engine remembers it ran, so a rule
+whose condition only a person can clear — `is_first_response_overdue`, the
+obvious way to write a chase — sends the same message four times an hour until
+somebody opens the ticket. Making that fact read the auto-reply stamp stopped
+the loop and also silenced every _other_ rule sharing the condition: an
+escalation that sets a priority, assigns somebody or adds a watcher sends the
+customer nothing and never needed stopping, but stopped firing on every
+auto-acknowledged ticket, while the sweep went on recording the breach nobody
+was now told about. The guard belongs to the sender, and lives in
+`alreadyReplied` in `lib/automations/index.ts`: the same rule does not reply to
+the same ticket twice until the customer has written since. Keyed on the rule's
+own name, so an acknowledgement on create and a chase three days later do not
+silence each other. It sends **once per
 closed stretch**, not per message: `conversations.auto_responded_at` is claimed
 with a conditional update, so the six ingest jobs six WhatsApp messages at 23:00
 produce still yield one reply. The case for it is in the archive — **11,402 of
@@ -742,12 +760,36 @@ is code:
   decorative: auto-assignment only ever considers members of the ticket's group,
   so a group with an empty roster hands out nothing and says `no_group_members`
   on the timeline.
-- **Assignment is configured but off.** Every group is on `manual`, which is the
-  deliberate default and means the module changes nothing until somebody chooses
-  otherwise at `/admin/groups`. Whoever configures it should also decide the
-  per-agent caps and, if skills are used, set a **skill timeout** — without one,
-  a mistake in a skill's conditions is a ticket no human ever sees. `/admin`
-  reports both, including any skill no active agent holds.
+- ~~**Assignment is configured but off.**~~ **Switched on for `Support` on
+  2026-09-02**, round robin, all three agents on the roster. Still `manual` on
+  `Customer Care` and `Merchant Care`, whose rosters are empty and which no
+  channel points at — they route nothing until somebody decides what belongs in
+  them.
+
+  Two things were in the way and are worth knowing about, because both made the
+  feature look broken rather than unconfigured:
+
+  - **`facebook`, `instagram` and `whatsapp` had no `channels` rows**, so every
+    ticket on those channels arrived with `group_id` null and could never be
+    assigned — 71 of them had accumulated. Rows now exist, all defaulting to
+    `Support`, and the 71 were backfilled. The WhatsApp row carries
+    `phoneNumberId` `838961722630554`, the support line; it must **never** carry
+    the bot's `128318316834446`, which would route 13,693 bot transcripts into
+    the team's queue. `resolveWhatsAppChannel` matches the number exactly and
+    otherwise falls back to the first `whatsapp` row, so a blank number is safe
+    and a wrong one is only ever a fallback — the bot's number is the single
+    value that must not appear there.
+  - **Only one agent has ever been online.** Presence gates eligibility, so round
+    robin hands everything to whoever is connected. George has never signed in
+    (`last_seen_at` null) and Ahmed last beat on 26 Aug, which means the rota is
+    effectively one person until they open the console. This is the design
+    working, but it reads as "round robin is broken" if you do not know it.
+
+  No per-agent caps are set, and no skills are in use — so no skill timeout is
+  needed yet. If skills are ever switched on, set one: without it a mistake in a
+  skill's conditions is a ticket no human ever sees. `/admin` reports both,
+  including any skill no active agent holds.
+
 - **Locations.** `locations` is empty, and there are sixteen of them. Nothing
   routes on a location yet, so an empty table breaks nothing — but a register
   entered to fourteen is worse than an empty one, because the two missing hubs
@@ -2745,6 +2787,66 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     not as "this was deleted". When writing a shape down from a doc, check the
     node reference **for the version the client actually addresses** and treat a
     missing edge as a finding.
+
+    **Confirmed working the same day.** An Instagram private reply went out at
+    11:55:43 UTC with the corrected shape and came back `sent`, carrying a real
+    `IGMessageID`. That is the first private reply this product has ever
+    delivered, on either platform. Facebook's is refused for an unrelated reason
+    — §6.44.
+
+44. **A private reply is subject to the handover protocol, and the console
+    explained it as a missing permission.** _2026-09-02, two Facebook private
+    replies, `10 / 2018300`._
+
+    With the endpoint corrected (§6.43) and `pages_manage_engagement` granted —
+    a Facebook public comment reply succeeded at 11:48:20 — the Facebook private
+    reply still fails:
+
+    ```
+    (#10) Message failed to send because another app is controlling this thread now.
+    (Meta: code 10, subcode 2018300, HTTP 400, via graph.facebook.com)
+    ```
+
+    **This is correct behaviour and Meta's sentence is accurate.** Freshworks is
+    the Page's primary receiver, so it owns the thread; a private reply is a
+    message from the Page, and the handover protocol governs it exactly as it
+    governs a DM. Nothing in this repo fixes it — thread control has to be passed,
+    which is a decision made in the other tool. The same account's Instagram
+    private reply succeeded seven minutes later over `instagram_login`, which is
+    §6.29's asymmetry again: the direct connection is not installed on the Page
+    and has no primary receiver to be second to.
+
+    **What was wrong was the explanation.** `explainMetaSendError` printed the
+    permission branch underneath it — go and check `pages_messaging`, run
+    `check_meta_permissions` — because code `10` is one of the three
+    `COMMENT_PERMISSION_CODES`, and only the **subcode** separates a handover
+    refusal from a permission one. So the timeline carried a correct sentence
+    from Meta followed by a wrong diagnosis from us, which is worse than printing
+    nothing: the agent goes and checks approvals that were never the problem.
+    `isHandoverRefusal` now matches subcode 2018300 ahead of that branch.
+
+    A private reply is where this surfaces because it is the one send that
+    reaches the messages endpoint with no inbound DM behind it.
+    `metaThreadStateFromMessage` pre-empts a DM into a standby thread and returns
+    a refusal before the request is made; it has nothing to read for a comment
+    ticket, so Graph is the first thing that knows.
+
+45. **The console badged every private reply "posted publicly".** _2026-09-02,
+    reported off the first Instagram private reply that succeeded._
+
+    The timeline derived publicness from `meta.metaKind`, which is `'comment'`
+    for a private reply as much as a public one — it belongs to the comment
+    thread and is addressed to a comment id. The `isPublic` flag the reply action
+    writes for exactly this purpose was declared in the component's type and
+    never read.
+
+    The direction it failed in is the bad one: it told an agent that a sentence
+    meant for one person was sitting under the post for everyone. The rule now
+    lives in `lib/meta/visibility.ts` with tests, rather than inline in the
+    component where it could not have one — three states out of two fields,
+    written in two places and read in a third. A private reply gets its own
+    "sent privately" badge, because silence left it looking like an ordinary
+    comment reply.
 
 ## 7. Verification already done
 

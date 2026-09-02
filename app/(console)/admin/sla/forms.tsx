@@ -54,9 +54,9 @@ function TargetGrid({ targets }: { targets?: SlaTargets }) {
             <th className="pb-1 text-start text-xs font-medium text-[var(--muted-foreground)]">
               First response{' '}
               <InfoTip label="First response">
-                From the ticket arriving to the first reply. An automation&rsquo;s
-                auto-acknowledgement counts as that reply and stops this clock — deliberately, so
-                that a team auto-replying to everything is measuring the robot rather than itself.
+                From the ticket arriving to the first reply sent by an agent. Automated replies —
+                including a canned response sent by a rule and the out-of-hours acknowledgement — do
+                not stop this clock.
               </InfoTip>
             </th>
             <th className="pb-1 text-start text-xs font-medium text-[var(--muted-foreground)]">

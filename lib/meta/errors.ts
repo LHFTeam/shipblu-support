@@ -96,6 +96,28 @@ export function explainMetaSendError(error: MetaApiError, context: MetaSendConte
     Graph tells them apart by code — 200 rather than 100/33 — which is the only
     signal there is, since the sentence it ships with says nothing either way.
   */
+  /*
+    Another app owns the thread — the handover protocol, not an approval.
+
+    **Checked before the comment-permission branch, which would otherwise claim
+    it.** Graph reports this as code `10`, which is one of the three codes that
+    branch treats as "the app is refused on this asset"; only the subcode
+    separates them. Observed 2026-09-02 on two Facebook private replies, both
+    `10 / 2018300`, and the explanation appended underneath told the agent to go
+    and check `pages_messaging` — while Meta's own sentence directly above it
+    said another app was controlling the thread. A wrong diagnosis under a
+    correct message is worse than no diagnosis: the message was already right.
+
+    Reached mainly by a private reply, because that is the send that goes to the
+    messages endpoint without a thread this app has ever seen inbound —
+    `metaThreadStateFromMessage` cannot pre-empt it, having no inbound DM to read
+    the standby flag off. Not restricted to that send kind, though: any message
+    refused this way means the same thing.
+  */
+  if (isHandoverRefusal(error)) {
+    return withReference(`${base}\n\n${handoverExplanation(context)}`, error, context.connection);
+  }
+
   if (context.sendKind !== 'dm' && isCommentPermissionRefusal(error)) {
     return withReference(
       `${base}\n\n${commentPermissionExplanation(context)}`,
@@ -180,6 +202,55 @@ const COMMENT_PERMISSION_CODES = new Set([3, 10, 200]);
 
 function isCommentPermissionRefusal(error: MetaApiError): boolean {
   return error.code !== null && COMMENT_PERMISSION_CODES.has(error.code);
+}
+
+/**
+ * "Message failed to send because another app is controlling this thread now."
+ *
+ * `10 / 2018300` on the Messenger send API. Keyed on the subcode and not on the
+ * code, which it shares with the comment-permission refusals — and deliberately
+ * on this one subcode rather than a range, because the codebase's rule for this
+ * file is to widen from a refusal actually read out of a log rather than to
+ * guess at the neighbours.
+ */
+const HANDOVER_SUBCODE = 2018300;
+
+function isHandoverRefusal(error: MetaApiError): boolean {
+  return error.subcode === HANDOVER_SUBCODE;
+}
+
+/**
+ * What to do about thread control, which is nothing this deployment can fix on
+ * its own.
+ *
+ * Deliberately not sharing text with `metaThreadStateFromMessage`: that one
+ * explains a send this app refused *before* making it, from a standby flag on an
+ * inbound message, and can therefore say the ticket is readable but unanswerable.
+ * This one explains a send Graph refused, on a thread we may have no inbound
+ * record of at all. Same remedy, different thing observed.
+ */
+function handoverExplanation(context: MetaSendContext): string {
+  const product = context.platform === 'facebook' ? 'Messenger' : 'Instagram';
+
+  const instagramWayOut =
+    context.platform === 'instagram' && context.connection === 'facebook_page'
+      ? `\n\nThis went out over the Facebook Page, which is what makes it subject to the ` +
+        `Page's handover protocol. An Instagram account connected directly through Instagram ` +
+        `Login is not installed on the Page and has no primary receiver to be second to — ` +
+        `setting \`INSTAGRAM_ACCESS_TOKEN\` routes replies around this entirely (§6.29).`
+      : '';
+
+  return (
+    `Another app holds thread control of this ${product} conversation, so Meta will not ` +
+    `accept a message from this app — only from the one that owns the thread. Nothing here ` +
+    `changes that: not a retry, not a token, not an approval. **This is not a permission ` +
+    `problem**, whatever the code suggests, and a public reply on the same post can be ` +
+    `working while this is refused.\n\n` +
+    `Either answer in whichever tool is the primary receiver, or hand thread control to this ` +
+    `app — the Meta app's Messenger settings decide which app is primary, and the other tool ` +
+    `can pass control per thread.` +
+    instagramWayOut
+  );
 }
 
 /** The App Review permission that governs comment management on this channel. */

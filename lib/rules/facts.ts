@@ -53,6 +53,10 @@ export function conversationFacts(source: FactSource, now: Date = new Date()): F
     hours_since_last_message: hoursSince(c.lastMessageAt, now),
     hours_since_last_customer_message: hoursSince(c.lastCustomerMessageAt, now),
     hours_since_last_agent_message: hoursSince(c.lastAgentMessageAt, now),
+    // Null until software has answered, which `is_empty` catches and a
+    // comparison does not — so a rule can say "overdue and nothing has gone out
+    // yet" without the overdue flag having to lie about what the SLA knows.
+    hours_since_auto_reply: hoursSince(c.firstAutoRepliedAt, now),
     hours_since_resolved: hoursSince(c.resolvedAt, now),
     // How long the current assignee has held it. Null when nobody does, which
     // `is_empty` catches and a comparison does not — so "assigned more than four
@@ -63,6 +67,15 @@ export function conversationFacts(source: FactSource, now: Date = new Date()): F
     // The overdue flags are what a time-based rule keys off to chase a ticket
     // that is about to embarrass someone, without having to restate the SLA's
     // own arithmetic in the rule.
+    //
+    // `firstRespondedAt` only, and an automated acknowledgement is not that.
+    // Reading the auto-reply stamp here as well was an attempt to stop a rule
+    // re-sending on every sweep, and it silenced far more than the sender: a
+    // rule that escalates an overdue ticket — priority, an assignee, a watcher
+    // — sends the customer nothing and never needed stopping, but stopped
+    // firing for every ticket that had been auto-acknowledged, while the sweep
+    // went on recording the breach nobody was now told about. The re-send is
+    // the sender's problem and is guarded where the sending happens.
     is_first_response_overdue: isOverdue(c.firstResponseDueAt, c.firstRespondedAt, now),
     is_resolution_overdue: isOverdue(c.resolutionDueAt, c.resolvedAt, now),
     is_assigned: c.assigneeAgentId !== null,

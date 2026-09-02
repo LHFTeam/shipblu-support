@@ -125,8 +125,29 @@ export async function assignConversation(
   const groupId = options.groupId ?? conversation.groupId;
   if (!groupId) return { assignedTo: null, reason: 'no_group' };
 
-  const group = (await db.select().from(groups).where(eq(groups.id, groupId)).limit(1))[0];
-  if (!group) return { assignedTo: null, reason: 'no_group' };
+  const groupRow = (await db.select().from(groups).where(eq(groups.id, groupId)).limit(1))[0];
+  if (!groupRow) return { assignedTo: null, reason: 'no_group' };
+
+  /*
+   * The group's settings, with the round-robin cursor deliberately removed.
+   *
+   * Everything else on this row is configuration an admin edits — the strategy,
+   * the caps, whether skills are matched, whether hours gate it — and reading it
+   * a moment before the lock is harmless: those change rarely, and a pick made
+   * against a setting from two seconds ago is not wrong in any way a person can
+   * see.
+   *
+   * `lastAssignedAgentId` is different in kind, because *this code path writes it
+   * on every assignment*. Read before the lock, it is a value a concurrent
+   * assignment may already have advanced while this call sat waiting — and using
+   * it would hand two tickets to the same agent, which is the exact failure the
+   * lock exists to prevent. It is read again from the locked row below.
+   *
+   * Destructured away rather than merely not-used, so reaching for it out here
+   * is a compile error rather than a silent misroute nobody notices until the
+   * rota looks lopsided.
+   */
+  const { lastAssignedAgentId: _preLockCursor, ...group } = groupRow;
 
   /*
    * A caller that named a group is routing the ticket there, and that half
@@ -191,7 +212,11 @@ export async function assignConversation(
      * few milliseconds and only ever between tickets that were going to the
      * same place anyway.
      */
-    await tx.execute(sql`select 1 from ${groups} where id = ${groupId} for update`);
+    const lockedGroups = await tx
+      .select({ lastAssignedAgentId: groups.lastAssignedAgentId })
+      .from(groups)
+      .where(eq(groups.id, groupId))
+      .for('update');
 
     // Re-read the assignee inside the lock. Between the check above and here,
     // an agent may have picked the ticket up by hand.
@@ -219,7 +244,10 @@ export async function assignConversation(
       return { assignedTo: null, reason: skipReasonFor(rejected) };
     }
 
-    const cursor = group.lastAssignedAgentId;
+    // From the locked row, never from the copy loaded before the transaction —
+    // see the note where that copy is destructured. `?? null` rather than an
+    // assertion: the group can be deleted between the two reads.
+    const cursor = lockedGroups[0]?.lastAssignedAgentId ?? null;
     const agentId =
       strategy === 'load_balanced'
         ? pickLoadBalanced(eligible, cursor)

@@ -10,9 +10,8 @@ import { enqueue } from '@/lib/queue';
  *
  * One survey per resolution, sent on the channel the conversation happened on,
  * answered without signing in. The link carries a random token and only its
- * SHA-256 is stored, exactly as sessions and invites do: a leaked database
- * yields no way to answer surveys as somebody else, and no way to enumerate
- * them.
+ * SHA-256 is stored, exactly as sessions do: a leaked database yields no way to
+ * answer surveys as somebody else, and no way to enumerate them.
  */
 
 /**
