@@ -122,8 +122,15 @@ async function syncAccount(account: WhatsAppAccount): Promise<void> {
   if (templates.length === 0) {
     // Deliberately not treated as "delete everything": an API hiccup returning
     // an empty page must not wipe the templates agents are relying on.
+    //
+    // The WABA id is in the line because this is the one outcome that is not
+    // self-explanatory. Graph answers 200 with an empty list for a WABA that
+    // genuinely holds no templates *and* for an id that is not a WABA at all —
+    // so a mistyped id syncs "successfully" every hour for ever, and the id is
+    // the only thing in the message worth checking.
     console.warn(
-      `[sync_whatsapp_templates] ${account.name} returned no templates, leaving existing rows`,
+      `[sync_whatsapp_templates] ${account.name} (${account.wabaId}) returned no templates, ` +
+        `leaving existing rows`,
     );
     await recordSync(account.id, null);
     return;

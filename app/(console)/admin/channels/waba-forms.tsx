@@ -26,7 +26,10 @@ export type WhatsAppAccountRow = {
   lastSyncedAt: Date | null;
   lastSyncError: string | null;
   numbers: string[];
+  /** Approved, which is what an agent can pick from. */
   templateCount: number;
+  /** Every row the sync has stored, whatever its status. Zero is the interesting case. */
+  templateTotal: number;
 };
 
 function Fields({
@@ -153,6 +156,17 @@ export function WhatsAppAccountEditor({ account }: { account: WhatsAppAccountRow
           {account.isActive && !account.lastSyncedAt && !account.lastSyncError ? (
             <Badge tone="warning">never synced</Badge>
           ) : null}
+          {/* A sync that succeeds and reads back nothing, every hour, for ever.
+              Meta answers 200 with an empty list both for a WABA that holds no
+              templates and for an id that is not the WABA anybody meant — so on
+              every other signal this row carries it is indistinguishable from a
+              healthy one, which is why it needs a signal of its own. */}
+          {account.isActive &&
+          account.lastSyncedAt &&
+          !account.lastSyncError &&
+          account.templateTotal === 0 ? (
+            <Badge tone="warning">no templates</Badge>
+          ) : null}
         </h3>
 
         <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">
@@ -163,6 +177,13 @@ export function WhatsAppAccountEditor({ account }: { account: WhatsAppAccountRow
 
         {account.lastSyncError ? (
           <p className="mt-1 text-xs text-red-600 dark:text-red-400">{account.lastSyncError}</p>
+        ) : account.lastSyncedAt && account.templateTotal === 0 ? (
+          <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+            Meta answered and returned no templates at all. Check that {account.wabaId} is the
+            WhatsApp Business Account ID from WhatsApp Manager — an id that is not a WABA, or one
+            belonging to a business this token cannot manage, answers exactly the same way an empty
+            account does.
+          </p>
         ) : account.lastSyncedAt ? (
           <p className="mt-1 text-xs text-[var(--muted-foreground)]">
             Templates last synced{' '}

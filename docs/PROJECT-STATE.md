@@ -1322,6 +1322,22 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
 
 ### 5.5 Loose ends
 
+- **`Merchant Care WABA` is connected to an id that holds no templates, and
+  nothing said so.** The row was added by hand on 2026-08-23 17:33, 33 minutes
+  after the hourly sync adopted the real one, and carries
+  `waba_id = 26784926584531240` — 17 digits, where the working account
+  (`128772296801141`) and every other WABA id here are 15. It has never appeared
+  as `entry[0].id` on any of the 131,690 WhatsApp webhooks received, owns no
+  channel, and has returned zero templates on every sync since.
+
+  The sync is not failing: `graph()` throws on any non-2xx and `last_sync_error`
+  is null, so Meta is answering **200 with an empty list**. That is the same
+  answer an empty WABA gives and the same answer an id that is not a WABA gives,
+  which is why this sat unnoticed. One call settles which:
+  `GET /{id}?fields=id,name` with the same token names the object. Until
+  somebody runs it, the console now at least says the account read back nothing
+  — see the `no templates` badge added with this note.
+
 - **`contacts.locale` is never written, so every contact reads `'en'`.** All
   6,244 of them sit at the column default, and `lib/contacts/merge.ts` already
   documents why that is not the same as knowing: `'en'` means either "reads

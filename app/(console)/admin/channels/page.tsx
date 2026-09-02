@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { asc, eq, sql } from 'drizzle-orm';
+import { asc, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels, groups, whatsappAccounts, whatsappTemplates } from '@/db/schema';
 import { ChannelBadge } from '@/components/channel';
@@ -35,13 +35,17 @@ export default async function ChannelsPage() {
 
     db.select().from(whatsappAccounts).orderBy(asc(whatsappAccounts.name)),
 
+    // Approved and total, because they answer different questions. Approved is
+    // what an agent can actually pick; total is what the sync last read back
+    // from Meta, and zero of it is the difference between "connected" and
+    // "connected to something that is not this WABA".
     db
       .select({
         accountId: whatsappTemplates.whatsappAccountId,
+        approved: sql<number>`count(*) filter (where ${whatsappTemplates.status} = 'APPROVED')::int`,
         total: sql<number>`count(*)::int`,
       })
       .from(whatsappTemplates)
-      .where(eq(whatsappTemplates.status, 'APPROVED'))
       .groupBy(whatsappTemplates.whatsappAccountId),
 
     listFolderOptions(),
@@ -66,14 +70,15 @@ export default async function ChannelsPage() {
     .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0];
 
   const accountChoices = accountList.map((account) => ({ id: account.id, name: account.name }));
-  const templatesByAccount = new Map(templateCounts.map((row) => [row.accountId, row.total]));
+  const templatesByAccount = new Map(templateCounts.map((row) => [row.accountId, row]));
 
   const accounts: WhatsAppAccountRow[] = accountList.map((account) => ({
     ...account,
     numbers: channelList
       .filter((channel) => channel.whatsappAccountId === account.id)
       .map((channel) => channel.name),
-    templateCount: templatesByAccount.get(account.id) ?? 0,
+    templateCount: templatesByAccount.get(account.id)?.approved ?? 0,
+    templateTotal: templatesByAccount.get(account.id)?.total ?? 0,
   }));
 
   // The WABA the environment already names, offered as a starting value when no
