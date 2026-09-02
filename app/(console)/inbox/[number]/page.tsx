@@ -6,6 +6,7 @@ import { suggestForAgent } from '@/lib/kb/agent-search';
 import { detectLocale } from '@/lib/kb/language';
 import { seedTerms } from '@/lib/kb/seed';
 import { requestBaseUrl } from '@/lib/kb/site';
+import { categoryOptions, rootCauseOptions } from '@/lib/categorise/queries';
 import { listSideConversationRecipients } from '@/lib/side-conversations/queries';
 import {
   getConversation,
@@ -48,6 +49,12 @@ export default async function ConversationPage({
   const canModerateComments = can(agent, 'ticket.moderate_comment');
   const canEditContact = can(agent, 'contact.edit');
   const canClose = can(agent, 'ticket.close');
+  const canCategorise = can(agent, 'ticket.categorise');
+
+  // Read whatever the permission, because the sidebar shows what a ticket is
+  // filed under to anybody who can open it — `ticket.categorise` gates changing
+  // it, not seeing it.
+  const [categories, causes] = await Promise.all([categoryOptions(), rootCauseOptions()]);
 
   /*
     What the ticket suggests it is about, for the composer's knowledge panel.
@@ -121,6 +128,9 @@ export default async function ConversationPage({
         canModerateComments={canModerateComments}
         canEditContact={canEditContact}
         canClose={canClose}
+        canCategorise={canCategorise}
+        categoryOptions={categories}
+        rootCauses={causes}
         currentAgentId={agent.id}
       />
       <FocusBeat conversationId={conversation.id} />
