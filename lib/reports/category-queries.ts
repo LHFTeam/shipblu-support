@@ -164,7 +164,7 @@ export async function ownerTotals(days: number): Promise<OwnerTotal[]> {
  */
 export async function causeCoverage(days: number): Promise<{ withCause: number; total: number }> {
   // `in (…)` built with `sql.join`, and **not** `= any(${CAUSE_REQUIRED_AREAS})`.
-  // That reads like working SQL and is the 42809 in PROJECT-STATE §6.44: drizzle
+  // That reads like working SQL and is the 42809 in PROJECT-STATE §6.46: drizzle
   // interpolates a JS array as one bind parameter per element, so `any($2, $3)`
   // reaches Postgres as a row constructor. `any()` is only correct over an array
   // *column*. This is a page query, so nothing in CI would have caught it.

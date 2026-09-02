@@ -465,7 +465,7 @@ The second reaches Postgres as `any($2, $3)` — a row constructor — and is
 answered `op ANY/ALL (array) requires array on right side` (42809). The two read
 identically, which is why this is not a CI check: telling them apart needs the
 type of the interpolated expression, not its spelling. Use `inArray()` for a
-list of values (§6.44).
+list of values (§6.46).
 
 Playwright (`npm run test:e2e`) exists but is not part of the pre-push loop.
 

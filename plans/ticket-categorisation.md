@@ -258,7 +258,7 @@ for an enquiry, and every read query returns rows. The console screens and
 prefetch.
 
 That is also what caught the one real bug in the work, now `docs/PROJECT-STATE.md`
-§6.44: `sql\`${column} = any(${values})\`` reads like working SQL, type-checks,
+§6.46: `sql\`${column} = any(${values})\`` reads like working SQL, type-checks,
 passes ESLint and Prettier, and dies on first execution because drizzle
 interpolates a JS array as separate bind parameters. It was in a page query,
 which is precisely the position no automated check in this repo covers.
