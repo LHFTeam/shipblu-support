@@ -191,6 +191,22 @@ function commentPermission(context: MetaSendContext): string {
 }
 
 /**
+ * The App Review permission that governs *messaging* on this channel.
+ *
+ * Needed here because a private reply is not a comment call: it is a message
+ * addressed to a comment id, sent from the account through the same endpoint a
+ * DM goes out of, and so it is refused by the messaging approval rather than the
+ * comment one. Naming the comment permission on that failure would send an agent
+ * after a grant that could not have changed the answer.
+ */
+function messagingPermission(context: MetaSendContext): string {
+  if (context.platform === 'facebook') return '`pages_messaging`';
+  return context.connection === 'instagram_login'
+    ? '`instagram_business_manage_messages`'
+    : '`instagram_manage_messages`';
+}
+
+/**
  * Ordered the other way round from `commentTargetExplanation`, and for the same
  * reason it is ordered as it is: by what this particular code makes likely. An
  * approval gap is the first thing to check here rather than the last, because
@@ -200,13 +216,27 @@ function commentPermissionExplanation(context: MetaSendContext): string {
   const permission = commentPermission(context);
   const asset = context.platform === 'facebook' ? 'Page' : 'Instagram account';
 
-  const privately =
-    context.sendKind === 'private_reply'
-      ? `\n\nA private reply needs ${permission} too — the same approval covers both, so a ` +
-        `public reply will be refused the same way until it is granted.`
-      : `\n\nThe customer can still be answered privately if the comment is less than seven ` +
-        `days old: **Reply privately** moves the thread into the DM inbox, which is governed ` +
-        `by messaging permissions rather than this one.`;
+  /*
+    A private reply is refused by the messaging approval, not the comment one,
+    and is worth separating rather than appending a sentence to: the two fail
+    independently, so "public replies work here" is not evidence about this and
+    granting the comment permission would not have changed it. The sentence this
+    replaces claimed the opposite — that one approval covered both — which was
+    true of neither the endpoint it was written for nor the one that replaced it.
+  */
+  if (context.sendKind === 'private_reply') {
+    return (
+      `Graph refused the app, not the comment. A private reply is a *message* addressed to a ` +
+      `comment id and goes out through the same endpoint a DM does, so it is governed by ` +
+      `${messagingPermission(context)} — not by comment management. Public replies on this ` +
+      `${asset} can be working while this is refused, and granting the comment permission ` +
+      `would not change it.\n\n` +
+      `The token's owner must also hold the **MESSAGING** task on the ${asset}. That is a role ` +
+      `on the asset rather than a scope on the token, so it does not appear in ` +
+      `\`granular_scopes\` at all — \`npm run job -- check_meta_permissions\` can only rule the ` +
+      `scope half in or out.`
+    );
+  }
 
   return (
     `Graph refused the app, not the comment. This is a permission on the credential, so it ` +
@@ -216,8 +246,10 @@ function commentPermissionExplanation(context: MetaSendContext): string {
     `${asset} specifically. Standard Access is not enough on a Page the app does not own, and ` +
     `a scope granted for a different asset reads as granted everywhere else — run ` +
     `\`npm run job -- check_meta_permissions\`, which prints the token's scopes and the ` +
-    `\`granular_scopes\` list saying which assets each one was actually granted for.` +
-    privately
+    `\`granular_scopes\` list saying which assets each one was actually granted for.\n\n` +
+    `The customer can still be answered privately if the comment is less than seven days old: ` +
+    `**Reply privately** moves the thread into the DM inbox, which is governed by messaging ` +
+    `permissions rather than this one.`
   );
 }
 

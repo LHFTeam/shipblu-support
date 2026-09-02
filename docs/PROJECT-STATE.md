@@ -2578,6 +2578,11 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     _did_ get the full explanation, which leads with "the comment is gone". Two
     failures on one ticket pointing at opposite causes, neither of them right.
 
+    **That second failure had its own cause and this entry did not find it:** the
+    private reply was posting to an endpoint Meta removed after Graph API v3.2.
+    See §6.43. Nothing below is wrong about the comment reply, but do not read
+    this entry as having accounted for the private one.
+
     The cause is the approval: **`pages_manage_engagement` at Advanced Access**,
     which this Page token does not carry. The discriminator was already written
     down in `commentTargetExplanation` — "that one fails _every_ comment reply
@@ -2621,6 +2626,78 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     which no test call can fix — the Page token has to be re-minted with
     `pages_manage_engagement` in its OAuth scope list, and
     `check_meta_permissions` shows whether `granular_scopes` names this Page.
+
+43. **The Facebook private reply was posting to `{comment-id}/private_replies`,
+    an edge Meta removed after Graph API v3.2 — on a client that addresses
+    v23.0.** _2026-09-02, found by checking the shape against Meta's reference._
+
+    Every Facebook private reply this app has ever attempted asked a comment node
+    for an edge it does not have. Three attempts, all failed, none by any other
+    cause:
+
+    | When (UTC)          | `sendKind`      | Result                           |
+    | ------------------- | --------------- | -------------------------------- |
+    | 2026-09-01 12:25:36 | `private_reply` | `100` "Unsupported post request" |
+    | 2026-09-02 08:29:53 | `private_reply` | same                             |
+    | 2026-09-02 10:39:17 | `private_reply` | same                             |
+
+    **The log could not have told us.** Graph answers a nonexistent edge with
+    code `100` and this sentence:
+
+    ```
+    Unsupported post request. Object with ID '…' does not exist, cannot be
+    loaded due to missing permissions, or does not support this operation.
+    ```
+
+    Which is, word for word, what it says about a comment the customer deleted.
+    That is the exact failure mode `lib/meta/comments.ts` was written to defend
+    against, stated in its own header comment, and it caught Instagram's three
+    wrong shapes while carrying this one. §6.42 read one of these very rows as
+    the deleted-comment case one day earlier.
+
+    **Production still cannot isolate it, and this is worth being careful
+    about.** `comment_reply` uses `POST /{comment-id}/comments`, which _is_ a
+    valid edge, and it failed identically — same code, same sentence, same object
+    id — six times over the same two days. So the two share a visible cause,
+    §6.42's missing `pages_manage_engagement` at Advanced Access, and the logs
+    cannot separate that from this. Both are real and they are independent:
+    granting the approval would have left the private reply failing with an
+    unchanged error message. Do not close this by reading a green comment reply.
+
+    The fix is a deletion rather than a correction. Meta documents one shape for
+    both platforms now — Messenger Platform → Private Replies — and it is the one
+    `commentRequest` already built for Instagram:
+
+    ```
+    POST https://graph.facebook.com/v23.0/{PAGE_ID}/messages
+    { "recipient": { "comment_id": "…" }, "message": { "text": "…" } }
+    ```
+
+    So the `platform === 'facebook'` branch is gone and there is no Facebook
+    spelling left to drift. Host and token stay `endpoint()`'s business, which is
+    the only thing that still differs between the two.
+
+    **It also moves which approval governs the send**, and §6.42's explanation
+    said the opposite. A private reply is a message addressed to a comment id,
+    sent through the endpoint a DM goes out of, so it needs **`pages_messaging`**
+    plus the **MESSAGING** task on the Page — not `pages_manage_engagement`. The
+    old text ("a private reply needs it too — the same approval covers both") was
+    true of neither endpoint, and would have sent an agent after a grant that
+    could not have changed the answer. `commentPermissionExplanation` now branches
+    on `sendKind` and names the messaging permission. Note the MESSAGING task is a
+    role on the asset rather than a scope on the token, so `granular_scopes` — and
+    therefore `check_meta_permissions` — cannot rule that half in or out.
+
+    **The durable lesson is about the test, not the endpoint.**
+    `comments.test.ts` opens by saying every assertion in it is against Meta's
+    reference, which is the right instinct and is why the Instagram shapes are
+    correct. It did not survive contact with a _removed_ feature: the removal
+    notice lives on its own legacy page, while the v23.0 Comment node reference
+    simply does not list the edge among `comments`, `likes`, `reactions`,
+    `private_reply_conversation`. An absence reads as "the page did not bother",
+    not as "this was deleted". When writing a shape down from a doc, check the
+    node reference **for the version the client actually addresses** and treat a
+    missing edge as a finding.
 
 ## 7. Verification already done
 

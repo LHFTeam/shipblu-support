@@ -287,6 +287,17 @@ already cost a customer channel:
   The two connections differ in the host, the token, the ids _and_ the field
   vocabulary — §6.35.
 
+Graph request shapes are written down in `lib/meta/comments.ts` rather than built
+inline, and asserted there against Meta's reference, because **a wrong shape is
+invisible in the response**: Graph refuses a nonexistent edge with `100
+"Unsupported post request … does not exist, cannot be loaded due to missing
+permissions, or does not support this operation"`, which is word for word what it
+says about a comment the customer deleted. When adding or changing one, read the
+node reference **for the version `GRAPH_VERSION` actually names** — an edge
+missing from it is a finding, not an omission by the doc, and removal notices sit
+on a separate legacy page that a search for the working endpoint will not surface
+(§6.43).
+
 A WhatsApp business account's access token is read
 directly from `process.env`, for a different reason: its variable's _name_ is a
 database value, so it cannot be in the schema — and must therefore start `WHATSAPP_TOKEN_`, or

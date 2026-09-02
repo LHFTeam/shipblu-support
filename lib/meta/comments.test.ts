@@ -33,22 +33,38 @@ describe('public replies', () => {
 });
 
 describe('private replies', () => {
-  it('sends an Instagram private reply as a message addressed to the comment', () => {
-    // Not `{comment}/private_replies`: Instagram has no such edge, and the send
-    // is a message from the account with a comment id where a recipient id goes.
+  it('sends a private reply as a message addressed to the comment, on both platforms', () => {
+    // Not `{comment}/private_replies` on either. Instagram never had that edge,
+    // and Facebook's was removed after Graph API v3.2 — this app addresses v23.0,
+    // so the send is a message from the account with a comment id where a
+    // recipient id would go. Meta documents this one shape for both now.
     expect(commentRequest({ ...IG, operation: { kind: 'private_reply', message: 'hi' } })).toEqual({
       method: 'POST',
       path: 'ig-account/messages',
       body: { recipient: { comment_id: 'ig-comment-1' }, message: { text: 'hi' } },
     });
-  });
 
-  it('uses the private_replies edge on Facebook', () => {
     expect(commentRequest({ ...FB, operation: { kind: 'private_reply', message: 'hi' } })).toEqual({
       method: 'POST',
-      path: 'fb-comment-1/private_replies',
-      body: { message: 'hi' },
+      path: 'fb-page/messages',
+      body: { recipient: { comment_id: 'fb-comment-1' }, message: { text: 'hi' } },
     });
+  });
+
+  it('addresses the account and not the comment, so the account id is what it needs', () => {
+    /*
+      The regression guard for the shape above, kept separate because it is what
+      the old Facebook branch got wrong rather than a restatement of it: that
+      branch built a path out of the comment id and never read `accountId`, so a
+      deployment could send private replies with no account resolved at all. If
+      this assertion ever passes with the comment id in the path, the branch is
+      back.
+    */
+    const request = commentRequest({ ...FB, operation: { kind: 'private_reply', message: 'hi' } });
+
+    expect(request.path).toBe('fb-page/messages');
+    expect(request.path).not.toContain('fb-comment-1');
+    expect(request.path).not.toContain('private_replies');
   });
 });
 

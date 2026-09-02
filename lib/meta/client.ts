@@ -374,15 +374,15 @@ export async function privateReplyToComment(input: {
   commentId: string;
   message: string;
 }): Promise<string | null> {
-  // Facebook answers with the new message's `id`, Instagram with `message_id`
-  // and a `recipient_id` — it is the messages endpoint there, not a comment one.
-  const result = await comment<{ id?: string; message_id?: string }>(
-    input.platform,
-    input.commentId,
-    { kind: 'private_reply', message: input.message },
-  );
+  // The messages endpoint on both platforms — see `commentRequest` — so both
+  // answer in the send API's shape, `message_id` and a `recipient_id`, rather
+  // than with a comment node's `id`.
+  const result = await comment<{ message_id?: string }>(input.platform, input.commentId, {
+    kind: 'private_reply',
+    message: input.message,
+  });
 
-  return result?.message_id ?? result?.id ?? null;
+  return result?.message_id ?? null;
 }
 
 /**
