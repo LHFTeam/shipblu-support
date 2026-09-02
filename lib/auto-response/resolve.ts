@@ -153,22 +153,35 @@ export function substitute(
     customer_name: context.customerName,
   };
 
-  return (
-    body
-      .replace(/\{\{\s*([a-z_]+)\s*\}\}/gi, (match, name: string) => {
+  /*
+    A placeholder that resolved to nothing — an unnamed holiday, a schedule with
+    no opening inside the lookahead — leaves the space it sat in behind. Closing
+    that is the difference between "reply on ." and a sentence, and it is
+    cheaper than making every admin write a template that reads correctly both
+    with and without each value.
+
+    The gap is closed where it is made, in the same pass, rather than by tidying
+    the finished message afterwards. Collapsing `/[ \t]{2,}/` over the whole body
+    was the shorter way to write it and it reflowed the admin's own text: an
+    indented list or a column aligned with spaces came out flattened, on every
+    send, with nothing in the editor to show that it had happened.
+  */
+  return body
+    .replace(
+      /([ \t]*)\{\{\s*([a-z_]+)\s*\}\}([ \t]*)([,.!؟?])?/gi,
+      (match, before: string, name: string, after: string, punctuation?: string) => {
         const value = values[name.toLowerCase()];
-        return value === undefined ? match : (value ?? '');
-      })
-      // A placeholder that resolved to nothing — an unnamed holiday, a schedule
-      // with no opening inside the lookahead — leaves the space it sat in
-      // behind. Collapsing that is the difference between "reply on ." and a
-      // sentence, and it is cheaper than making every admin write a template
-      // that reads correctly both with and without each value.
-      .replace(/[ \t]{2,}/g, ' ')
-      .replace(/[ \t]+([,.!؟?])/g, '$1')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim()
-  );
+        if (value === undefined) return match;
+        if (value) return `${before}${value}${after}${punctuation ?? ''}`;
+
+        // Nothing to interpolate. A gap between two words closes to a single
+        // space; one sitting against punctuation, a line end, or another empty
+        // placeholder closes completely.
+        if (punctuation) return punctuation;
+        return before && after ? ' ' : '';
+      },
+    )
+    .trim();
 }
 
 /** The placeholders an admin can use, for the hint under the editor. */

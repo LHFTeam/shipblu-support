@@ -2922,6 +2922,36 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     production. Same family as the `operator does not exist: text = channel`
     entry above.
 
+47. **A null `whatsapp_account_id` is invisible to every read and unreachable by
+    the sync that would repair it.** Rows that predate multi-WABA carry null, and
+    three separate filters then agree to ignore them:
+    `listApprovedTemplates(accountId)` matches on `= accountId`, so an agent's
+    template picker is simply empty; the upsert's conflict target is
+    `(whatsapp_account_id, name, language)` and a null never matches, so the next
+    sync inserts a second copy beside each orphan rather than updating it; and
+    `staleTemplateFilter` skips nulls too, so the orphan stays `APPROVED` for
+    ever. Nothing logs, and the console shows the account as synced.
+
+    The adoption in `ensureEnvironmentAccount` is the only thing that clears
+    them, and it used to run only on the call that _inserted_ the row — so
+    connecting `WHATSAPP_WABA_ID` by hand on the channels screen, which that
+    screen invites, took the insert path away and left every template orphaned.
+    It now runs on every call. That is safe because a null link can only mean
+    "configured before there were accounts": `saveChannel` refuses a WhatsApp
+    channel with no account once one exists, and a template is only ever written
+    by the sync, which always names one.
+
+48. **A form field that is not rendered submits nothing, and `text()` reads
+    nothing as `''`.** Ticking "send nothing" on an auto-response unmounts the
+    four body textareas, so saving wrote four empty strings over the Arabic,
+    English and holiday messages behind them — muting a rule for a week
+    destroyed its content, and un-ticking the box gave back four blank boxes
+    with no undo. The guard that would have caught it
+    (`!silent && !bodyAr && !bodyEn`) is skipped in exactly the case that does
+    the damage. A server action must write only the fields the form actually had
+    on screen; a conditionally rendered field means a conditional in the
+    `values` object too.
+
 ## 7. Verification already done
 
 - **WhatsApp, end to end on production.** A synthetic webhook was enqueued; the

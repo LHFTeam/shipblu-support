@@ -1,6 +1,6 @@
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { autoResponses, contacts, conversations, messages, ticketStatuses } from '@/db/schema';
+import { autoResponses, contacts, conversations, messages } from '@/db/schema';
 import { loadHoursCatalog } from '@/lib/hours/catalog';
 import { groupHours } from '@/lib/hours/resolve';
 import { holidayOn, isWithinBusinessHours, nextOpeningAt } from '@/lib/hours';
@@ -47,6 +47,12 @@ type Ticket = {
  * channel. Best-effort, like the other lifecycle hooks: this runs inside ingest
  * jobs, and throwing here would fail the job and have the retry re-run every
  * engine that already succeeded — including sending this reply again.
+ *
+ * `at` is the moment the reply goes out, and defaults to it. Deliberately not
+ * the timestamp on the customer's message: that one is the sender's own `Date:`
+ * header on email, and everything below — whether the office is shut, what
+ * `{{next_opening}}` resolves to, when the claim says we last answered — is a
+ * statement about now that a wrong clock would make wrong in both directions.
  */
 export async function maybeSendAutoResponse(
   conversationId: string,
@@ -224,7 +230,11 @@ async function loadTicket(conversationId: string): Promise<Ticket | null> {
       contactName: contacts.name,
     })
     .from(conversations)
-    .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
+    // No join to `ticket_statuses`: every ingest path reopens a resolved ticket
+    // before this runs (see `reopen` in lib/tickets/ingest-meta.ts and its two
+    // siblings), so there is no resolved ticket here to guard against — and a
+    // join that filters nothing and selects nothing is a cost on every inbound
+    // message.
     .leftJoin(contacts, eq(contacts.id, conversations.requesterContactId))
     .where(eq(conversations.id, conversationId))
     .limit(1);

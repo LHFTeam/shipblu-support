@@ -8,7 +8,7 @@ import { requirePermission } from '@/lib/auth/guard';
 import { env } from '@/lib/env';
 import { listFolderOptions } from '@/lib/kb/admin';
 import { offerableFaqFolders, parseWidgetConfig } from '@/lib/widget/config';
-import { ChannelForm, WebchatSettings } from './forms';
+import { ChannelEditor, ChannelForm, WebchatSettings } from './forms';
 import { NewWhatsAppAccount, WhatsAppAccountEditor, type WhatsAppAccountRow } from './waba-forms';
 
 export const dynamic = 'force-dynamic';
@@ -149,7 +149,9 @@ export default async function ChannelsPage() {
                 {/* A number with no account sends with the default one's
                     credential. Fine while there is exactly one account, and a
                     real hazard once there are two — so it is only called out
-                    when there is something to be wrong about. */}
+                    when there is something to be wrong about. Edit, beside it,
+                    is what clears it: the badge used to name a problem the
+                    console had no way to fix. */}
                 {isWhatsApp && !account && accounts.length > 1 ? (
                   <Badge tone="warning">no business account</Badge>
                 ) : null}
@@ -164,6 +166,11 @@ export default async function ChannelsPage() {
                         ? 'the widget'
                         : (channel.config.address as string) || 'no address'}
                 </span>
+                <ChannelEditor
+                  channel={channel}
+                  groups={groupList}
+                  whatsappAccounts={accountChoices}
+                />
               </li>
             );
           })}

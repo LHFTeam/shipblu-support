@@ -9,7 +9,7 @@ import {
 } from '@/lib/meta/client';
 import { commentReplyTarget } from '@/lib/meta/comments';
 import { metaConnection } from '@/lib/meta/connection';
-import { explainMetaSendError } from '@/lib/meta/errors';
+import { explainMetaSendError, MetaSendRefusal } from '@/lib/meta/errors';
 import type { MetaPlatform } from '@/lib/meta/types';
 import { messagingTag, metaWindowState } from '@/lib/meta/window';
 import type { ClaimedJob } from '@/lib/queue';
@@ -172,13 +172,7 @@ async function deliver(
   // is: thread control can be handed to another tool between an agent writing
   // and this job running.
   if (!target.thread.canSend) {
-    throw new MetaApiError(
-      target.thread.explanation ?? 'This thread cannot be answered.',
-      0,
-      null,
-      null,
-      false,
-    );
+    throw new MetaSendRefusal(target.thread.explanation ?? 'This thread cannot be answered.');
   }
 
   const window = metaWindowState(row.conversation.lastCustomerMessageAt);
@@ -187,12 +181,8 @@ async function deliver(
   if (!tag) {
     // Checked here as well as in the console, because the seven days can lapse
     // between an agent writing and the job running.
-    throw new MetaApiError(
+    throw new MetaSendRefusal(
       'The 7-day messaging window has closed; only the customer can reopen this conversation.',
-      400,
-      null,
-      null,
-      false,
     );
   }
 

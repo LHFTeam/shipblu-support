@@ -219,6 +219,33 @@ describe('substitute', () => {
     expect(text).toBe('Closed for, back Sunday at 09:00.');
   });
 
+  // The gap-closing is scoped to the placeholder, so an admin who lays a message
+  // out with spaces gets the message they wrote. Collapsing runs of spaces over
+  // the whole body reflowed this into a single line of prose.
+  it('leaves the admin’s own spacing alone', () => {
+    const text = substitute(
+      ['Track your parcel:', '  •  shipblu.com/track', '  •  or reply here'].join('\n'),
+      HOURS,
+      context,
+      thursdayEvening,
+    );
+
+    expect(text).toBe(
+      ['Track your parcel:', '  •  shipblu.com/track', '  •  or reply here'].join('\n'),
+    );
+  });
+
+  it('closes a gap between two words without touching the rest of the line', () => {
+    const text = substitute(
+      'Hello  {{customer_name}}  — ticket  #{{ticket_number}}',
+      HOURS,
+      { ...context, customerName: null },
+      thursdayEvening,
+    );
+
+    expect(text).toBe('Hello — ticket  #4210');
+  });
+
   it('leaves an unknown placeholder alone so a typo is visible', () => {
     const text = substitute('See {{nxt_opening}}.', HOURS, context, thursdayEvening);
     expect(text).toBe('See {{nxt_opening}}.');

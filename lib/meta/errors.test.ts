@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MetaApiError } from './client';
-import { explainMetaModerationError, explainMetaSendError } from './errors';
+import { explainMetaModerationError, explainMetaSendError, MetaSendRefusal } from './errors';
 
 const UNKNOWN = 'An unknown error has occurred.';
 
@@ -91,7 +91,7 @@ describe('explainMetaSendError', () => {
     was never made.
   */
   it('does not print an empty Meta reference under our own refusal', () => {
-    const ours = new MetaApiError('Another app holds thread control.', 0, null, null, false);
+    const ours = new MetaSendRefusal('Another app holds thread control.');
 
     const explained = explainMetaSendError(ours, {
       platform: 'facebook',
@@ -104,16 +104,56 @@ describe('explainMetaSendError', () => {
     expect(explained).not.toContain('Meta:');
   });
 
-  it('still prints the reference for a network failure that carries a status', () => {
+  /*
+    The 7-day refusal is raised with an HTTP 400 so the job treats it the way it
+    treats any final rejection. That made it indistinguishable from a Graph
+    answer by shape, and it printed `(Meta: code —, subcode —, HTTP 400)` under
+    a sentence Meta never sent — which points whoever reads it at Meta's logs
+    for a request that was never made.
+  */
+  it('does not print a reference under our own refusal that carries a status', () => {
+    const ours = new MetaSendRefusal('The 7-day messaging window has closed.', 400);
+
+    const explained = explainMetaSendError(ours, {
+      platform: 'facebook',
+      connection: 'facebook_page',
+      sendKind: 'dm',
+      tag: 'HUMAN_AGENT',
+    });
+
+    expect(explained).toBe('The 7-day messaging window has closed.');
+    expect(explained).not.toContain('Meta:');
+  });
+
+  /*
+    The shape lib/meta/client.ts actually raises when `fetch` throws: status 0,
+    no code. It has to survive the classifier untouched — a null code otherwise
+    reads as one of Meta's unspecified refusals, and the reply would be told the
+    24-hour window is in order when nothing was ever asked.
+  */
+  it('leaves a network failure as the sentence that names the cause', () => {
     const unreachable = new MetaApiError(
       'Graph API unreachable: socket hang up',
-      503,
-      2,
+      0,
+      null,
       null,
       true,
     );
 
     const explained = explainMetaSendError(unreachable, {
+      platform: 'facebook',
+      connection: 'facebook_page',
+      sendKind: 'dm',
+      tag: 'RESPONSE',
+    });
+
+    expect(explained).toBe('Graph API unreachable: socket hang up');
+    expect(explained).not.toContain('Meta:');
+    expect(explained).not.toContain('24-hour window');
+  });
+
+  it('still prints the reference when Graph answered with a 5xx', () => {
+    const explained = explainMetaSendError(new MetaApiError('Internal error', 503, 2, null, true), {
       platform: 'facebook',
       connection: 'facebook_page',
       sendKind: 'dm',

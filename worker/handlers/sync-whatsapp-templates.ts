@@ -73,9 +73,16 @@ export async function syncWhatsAppTemplates(): Promise<void> {
     return;
   }
 
-  if (!env().META_PAGE_ACCESS_TOKEN && accounts.some((account) => !account.tokenEnvVar)) {
+  // `every`, not `some`: the quiet skip is for the install where nothing is
+  // configured yet, and that is the case where *no* account has a token to sync
+  // with. One account naming its own WHATSAPP_TOKEN_… is a working account, and
+  // skipping the run on its behalf stopped it syncing because a different WABA
+  // was waiting on a shared token — with no lastSyncError recorded anywhere,
+  // so the admin screen showed both as merely "never synced". Below, the loop
+  // fails that one account by itself and `tokenForAccount` names the variable.
+  if (!env().META_PAGE_ACCESS_TOKEN && accounts.every((account) => !account.tokenEnvVar)) {
     console.log(
-      '[sync_whatsapp_templates] META_PAGE_ACCESS_TOKEN is not set and an account ' +
+      '[sync_whatsapp_templates] META_PAGE_ACCESS_TOKEN is not set and every account ' +
         'relies on it — skipping',
     );
     return;
