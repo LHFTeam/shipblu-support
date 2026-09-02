@@ -109,6 +109,30 @@ const schema = z.object({
    * reachable from the inbox search parser, and validating this whole schema on
    * that path would fail a search on a variable a search has no use for.
    */
+  /**
+   * Controls for the ticket categoriser, all three read straight from
+   * `process.env` by `lib/categorise/` for the same reason the shipment
+   * patterns are: that module is reachable from the ingest path and from a page
+   * render, and validating this whole schema there would let one unrelated
+   * missing variable stop tickets being categorised.
+   *
+   * `CATEGORISE_DISABLED_RULES` is a comma-separated list of rule keys, and it
+   * is the one that matters in an incident: a rule found to be filing half the
+   * queue under one label is switched off in the time it takes to restart a
+   * service, rather than the time it takes to ship a deploy. There is
+   * deliberately no matching way to *add* a rule — turning one off is safe and
+   * reversible, and adding one would be a regular expression in an env var with
+   * no test and no review.
+   *
+   * The two thresholds are numbers in 0..1 and exist so the auto-apply and
+   * review bands can be recalibrated against measured precision without a
+   * deploy. A value that will not parse is logged and ignored in favour of the
+   * constant, because a mistyped threshold must not stop categorisation.
+   */
+  CATEGORISE_DISABLED_RULES: z.string().optional(),
+  CATEGORISE_AUTO_MIN: z.string().optional(),
+  CATEGORISE_RECORD_MIN: z.string().optional(),
+
   SHIPMENT_TRACKING_PATTERN: z.string().optional(),
   SHIPMENT_SBID_PATTERN: z.string().optional(),
   /**

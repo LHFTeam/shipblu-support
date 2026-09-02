@@ -55,6 +55,20 @@ export type CategoryDef = {
   labelEn: string;
   labelAr: string;
   audience: NonNullable<CategoryRow['audience']>;
+  /**
+   * How much this needs a person, used only to pick the primary category.
+   *
+   * A ticket that says both "I confirmed my address" and "nobody called me" is
+   * about the second, and this is the rung of the ladder that says so instead of
+   * a hand-ordered precedence list. An earlier draft of this work used one of
+   * those and it collapsed a category from 2,718 conversations to 18, because
+   * whichever entry sat higher swallowed everything it co-occurred with.
+   *
+   * `high` is anything where somebody is out of money, out of a parcel, or has
+   * been told something untrue. Default is `normal`; `low` is for rows that are
+   * real but are never the point of the ticket.
+   */
+  severity?: 'high' | 'normal' | 'low';
   /** Why this is its own category rather than folded into a neighbour. */
   note?: string;
   /** No rule can award it; an agent files it by hand. */
@@ -98,6 +112,7 @@ export const TAXONOMY: readonly AreaDef[] = [
         key: 'delivery.late',
         labelEn: 'Delivery is late',
         labelAr: 'تأخر التوصيل',
+        severity: 'high',
         audience: 'any',
         note: 'Past the promised date. The customer is asserting a breach, not asking a question.',
       },
@@ -112,6 +127,7 @@ export const TAXONOMY: readonly AreaDef[] = [
         key: 'delivery.not_received_marked_delivered',
         labelEn: 'Marked delivered but never received',
         labelAr: 'مسجّلة كمستلمة ولم تُستلم',
+        severity: 'high',
         audience: 'any',
         note: 'A false delivered scan. Its own category despite low volume because it is the most serious thing a courier network can get wrong and it must never be averaged into `late`.',
       },
@@ -119,6 +135,7 @@ export const TAXONOMY: readonly AreaDef[] = [
         key: 'delivery.failed_attempt',
         labelEn: 'Delivery attempt disputed',
         labelAr: 'محاولة توصيل محل خلاف',
+        severity: 'high',
         audience: 'any',
         note: 'The platform recorded an attempt and the customer says it did not happen. Draws on the same words as the `attempted` phrase in lib/shipments/status.ts.',
       },
@@ -126,6 +143,7 @@ export const TAXONOMY: readonly AreaDef[] = [
         key: 'delivery.no_contact',
         labelEn: 'Courier never made contact',
         labelAr: 'المندوب لم يتواصل',
+        severity: 'high',
         audience: 'recipient',
       },
       {
@@ -153,6 +171,14 @@ export const TAXONOMY: readonly AreaDef[] = [
         labelAr: 'رفض استلام الشحنة',
         audience: 'recipient',
       },
+      {
+        key: 'delivery.unrecognised',
+        labelEn: "Doesn't recognise the parcel",
+        labelAr: 'لا يعرف هذه الشحنة',
+        audience: 'recipient',
+        severity: 'high',
+        note: 'شحنه ايه — "what shipment?". Added because it is one of the most frequent free-text messages in the archive, and it is high severity rather than a curiosity: somebody who does not recognise a parcel addressed to them is either a mis-delivery, a merchant sending without consent, or a card being tested.',
+      },
     ],
   },
   {
@@ -160,12 +186,25 @@ export const TAXONOMY: readonly AreaDef[] = [
     labelEn: 'Parcel condition',
     labelAr: 'حالة الشحنة',
     categories: [
-      { key: 'condition.damaged', labelEn: 'Damaged', labelAr: 'شحنة تالفة', audience: 'any' },
-      { key: 'condition.wrong_item', labelEn: 'Wrong item', labelAr: 'منتج خاطئ', audience: 'any' },
+      {
+        key: 'condition.damaged',
+        labelEn: 'Damaged',
+        labelAr: 'شحنة تالفة',
+        severity: 'high',
+        audience: 'any',
+      },
+      {
+        key: 'condition.wrong_item',
+        labelEn: 'Wrong item',
+        labelAr: 'منتج خاطئ',
+        severity: 'high',
+        audience: 'any',
+      },
       {
         key: 'condition.missing_items',
         labelEn: 'Items missing',
         labelAr: 'عناصر ناقصة',
+        severity: 'high',
         audience: 'any',
       },
       {
@@ -186,6 +225,7 @@ export const TAXONOMY: readonly AreaDef[] = [
         key: 'pickup.not_collected',
         labelEn: 'Nobody collected the shipments',
         labelAr: 'لم يتم استلام الشحنات',
+        severity: 'high',
         audience: 'merchant',
       },
       {
@@ -237,6 +277,7 @@ export const TAXONOMY: readonly AreaDef[] = [
         key: 'return.not_received_by_merchant',
         labelEn: 'Return never came back',
         labelAr: 'المرتجع لم يصل التاجر',
+        severity: 'high',
         audience: 'merchant',
       },
     ],
@@ -250,12 +291,14 @@ export const TAXONOMY: readonly AreaDef[] = [
         key: 'payment.cod_dispute',
         labelEn: 'COD amount disputed',
         labelAr: 'خلاف على المبلغ المحصّل',
+        severity: 'high',
         audience: 'any',
       },
       {
         key: 'payment.cod_not_collected',
         labelEn: 'COD not collected',
         labelAr: 'لم يتم تحصيل المبلغ',
+        severity: 'high',
         audience: 'merchant',
       },
       {
@@ -266,9 +309,17 @@ export const TAXONOMY: readonly AreaDef[] = [
         note: "ShipBlu's FOD product, where the delivery fee is collected from the recipient. Its own category because a recipient refusing the fee is a commercial decision the merchant needs to see, not a delivery failure.",
       },
       {
+        key: 'payment.method',
+        labelEn: 'How can I pay',
+        labelAr: 'طرق الدفع',
+        audience: 'recipient',
+        note: 'Cash, card, wallet — asked before the courier arrives. Distinct from `fod`, which is a dispute about a fee rather than a question about how to settle one.',
+      },
+      {
         key: 'payment.refund',
         labelEn: 'Refund request',
         labelAr: 'طلب استرداد',
+        severity: 'high',
         audience: 'recipient',
       },
     ],
@@ -307,6 +358,7 @@ export const TAXONOMY: readonly AreaDef[] = [
         key: 'billing.discrepancy',
         labelEn: 'Charged incorrectly',
         labelAr: 'خطأ في الرسوم',
+        severity: 'high',
         audience: 'merchant',
       },
     ],
@@ -353,6 +405,7 @@ export const TAXONOMY: readonly AreaDef[] = [
         key: 'integration.sync_issue',
         labelEn: 'Orders not syncing',
         labelAr: 'الأوردرات لا تُنقل',
+        severity: 'high',
         audience: 'merchant',
         note: 'Separate from `setup`: a connection that worked and stopped is an incident, and one that was never configured is onboarding.',
       },
@@ -400,6 +453,7 @@ export const TAXONOMY: readonly AreaDef[] = [
         key: 'commercial.claim',
         labelEn: 'Claims and compensation',
         labelAr: 'تعويضات ومطالبات',
+        severity: 'high',
         audience: 'merchant',
         note: 'The formal claims procedure, which is a process with its own paperwork rather than a description of what went wrong — the cause dimension carries that.',
       },
@@ -414,6 +468,7 @@ export const TAXONOMY: readonly AreaDef[] = [
         key: 'service.request_human',
         labelEn: 'Asking for a person',
         labelAr: 'طلب التحدث مع موظف',
+        severity: 'low',
         audience: 'any',
         note: 'Very common on Facebook, and the most under-rated row here: high volume means people cannot find a way to reach us, which is a product finding rather than a support one.',
       },
@@ -428,9 +483,24 @@ export const TAXONOMY: readonly AreaDef[] = [
         key: 'service.complaint',
         labelEn: 'Complaint about our service',
         labelAr: 'شكوى على الخدمة',
+        severity: 'high',
         audience: 'any',
       },
-      { key: 'service.praise', labelEn: 'Thanks or praise', labelAr: 'شكر وثناء', audience: 'any' },
+      {
+        key: 'service.praise',
+        labelEn: 'Thanks or praise',
+        labelAr: 'شكر وثناء',
+        severity: 'low',
+        audience: 'any',
+      },
+      {
+        key: 'service.acknowledgement',
+        labelEn: 'Acknowledgement',
+        labelAr: 'رد بالموافقة',
+        severity: 'low',
+        audience: 'any',
+        note: '`تمام`, `اوك`, `تم الاستلام` — the customer agreeing or confirming, with no request in it. The highest-volume single free-text message in the archive, and worth a row rather than a shrug: the share of inbound that is conversational filler rather than demand is what makes a volume forecast honest.',
+      },
     ],
   },
   {
@@ -455,12 +525,14 @@ export const TAXONOMY: readonly AreaDef[] = [
         key: 'other.vendor_sales',
         labelEn: 'Somebody selling to us',
         labelAr: 'عرض بيع أو خدمة',
+        severity: 'low',
         audience: 'any',
       },
       {
         key: 'other.spam',
         labelEn: 'Spam',
         labelAr: 'رسائل غير مرغوبة',
+        severity: 'low',
         audience: 'any',
         note: "Includes other merchants' own autoresponders, which arrive on our channels and read like customer messages.",
       },
@@ -475,6 +547,7 @@ export const TAXONOMY: readonly AreaDef[] = [
         key: 'meta.unclassified',
         labelEn: 'Not classified',
         labelAr: 'غير مصنّف',
+        severity: 'low',
         audience: 'any',
         note: 'Free text no rule matched. The only category here meant to shrink, and the one the review queue is built on. It is a real row rather than an absence so that it can be counted — an absence cannot be a target.',
       },
