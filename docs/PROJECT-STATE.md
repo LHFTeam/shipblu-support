@@ -5,7 +5,7 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-08-31, against `main` at `fae6330`.
+Last updated: 2026-09-02, against `main` at `aec5d4f`.
 
 ---
 
@@ -348,6 +348,63 @@ opening screen now offers the five most-read articles in the visitor's locale
 through the same `popularArticles()` the help centre's front page uses — server
 rendered with the frame, so they are on screen when it paints, gone the moment
 there is a conversation, and empty is a normal state that hides the section.
+
+And now **ticket categorisation**, which answers the first question anybody asks
+of a helpdesk and which this one could not answer at all: what are customers
+contacting us about, and why does it keep happening. Both dimensions existed and
+were empty — `conversations.tags` was `{}` on all 13,748 rows and
+`conversations.type` was null on every one of them, the same dead scaffolding
+`agents.presence` and `custom_fields` were before something finally wrote to
+them. A ticket now carries a **topic**, detected from the customer's own words as
+the message lands, and a **cause**, which an agent records when they close.
+
+The two are separate on purpose and it is the load-bearing decision.
+"Where is my order" is one sentence with at least six causes behind it — the
+pickup never happened, the hub mis-sorted it, the merchant gave a wrong address,
+the courier never called, the zone is unserviced, or the parcel is not late and
+the expectation is wrong. Inferring a cause from complaint text would
+manufacture confident, wrong data in the exact place the team is trying to reason
+from, so the detector names the **symptom** and the agent names the **cause**,
+having actually looked. Accountability is then derived rather than typed:
+`ticket_root_causes.owner` maps each cause to exactly one party, so an agent
+fills one field and the report gets two dimensions that cannot disagree.
+
+12 areas, 55 categories, 27 causes, bilingual, aligned to the parcel states in
+`lib/shipments/status.ts` so a report can ask what the parcel was really doing.
+The detector is rules only — inspectable, free, deterministic, and turn-off-able
+by name in `CATEGORISE_DISABLED_RULES` while somebody fixes one. Two thresholds:
+above 0.90 it applies — a whole message that reads as a known phrase, or two
+anchored patterns agreeing — down to 0.35 it suggests into
+`/admin/categories/review`, below that nothing is written. A pile of single
+keywords caps below the auto line however many of them agree. Confidence is an evidence grade and not a
+probability, and the console says so where the number appears.
+`/reports/categories` reads the new `category_metrics_daily` and
+`root_cause_metrics_daily`, both folded into the existing `rollup_metrics`
+transaction. See `plans/ticket-categorisation.md`.
+
+**It was tuned against the real corpus rather than against imagination**, and
+that is the part worth copying. 769 free-text messages, 59.6% → **85.3%
+classified**, and four gaps that no amount of design would have produced:
+Franco-Arab (Arabic in Latin script, a whole register of customer writing),
+ordinary English sentences, pasted addresses and dropped pins, and `شحنه ايه` —
+frequent enough to earn a category of its own. `تمام` alone, 61 occurrences, is
+the single most common free-text message in the archive. The precision pass then
+made three rules _less_ eager, the important one being that "I did not receive
+it" no longer accuses a courier of a false delivery scan; only the conjunction
+with a tracking claim does.
+
+**An earlier draft of this mined the bot archive and was wrong**, which is worth
+knowing because the archive is the biggest thing in this database and the next
+person will be drawn to it for the same reason. The bot's menu is a self-service
+flow, not a ticket stream: a customer pressing "confirm my details" has no
+support need, and a third of that archive is exactly that. Categorising it
+measures the bot's funnel and reports the result as support demand. Categorisation
+therefore excludes `whatsapp_bot` through the `readOnlyChannels()` helper that
+already meant this. The archive keeps one real use — **3,159 bot conversations
+contain free text the bot never answered**, which is the best available proxy for
+agent-bound complaints and a leading indicator of inbound volume. That is also
+why there is **no backfill job**: with the bot channel excluded there are 55
+conversations in the entire archive to categorise.
 
 **The bot channel is live, and everything else is not.** This is the single most
 important thing to understand about the current state, and the easiest to read
@@ -2847,6 +2904,23 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     written in two places and read in a third. A private reply gets its own
     "sent privately" badge, because silence left it looking like an ordinary
     comment reply.
+
+46. **A JS array interpolated into a raw `sql` fragment is not an array to
+    Postgres.** `sql`${column} = any(${values})`` reads exactly like working
+    SQL and is not: drizzle-orm interpolates each element as its own bind
+    parameter, so Postgres receives `any($2, $3)` — a row constructor — and
+    answers `op ANY/ALL (array) requires array on right side` (42809). The
+    version that shipped this way type-checked, passed ESLint and Prettier, and
+    died on its first real execution. Use `inArray()`, which builds an `IN` list,
+    and reach for a raw fragment only where the builder genuinely cannot express
+    something.
+
+    Found in `lib/categorise/queries.ts` by standing a Postgres up locally and
+    running the query, which is the only thing that finds this class: Vitest runs
+    without a database, and the `database` CI job only executes job handlers — a
+    query in a page or an action, which this was, is still first executed in
+    production. Same family as the `operator does not exist: text = channel`
+    entry above.
 
 ## 7. Verification already done
 

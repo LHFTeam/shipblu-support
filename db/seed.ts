@@ -1,5 +1,6 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { SEEDED_RULES } from '@/lib/automations/defaults';
+import { syncTaxonomy } from '@/lib/categorise/seed';
 import { closeDb, db } from './client';
 import { automationRules, businessHours, channels, groups, ticketStatuses } from './schema';
 import type { WeeklySchedule } from './schema/config';
@@ -135,6 +136,26 @@ async function main() {
   console.log(
     `  automation rules: ${rulesCreated} created, ${SEEDED_RULES.length - rulesCreated} already present`,
   );
+
+  // The category and root-cause registries. A reconcile rather than an
+  // overwrite: labels an admin has edited are left alone, and a category dropped
+  // from the code is reported rather than deleted, because the FK is `restrict`
+  // and there may be tickets behind it.
+  const taxonomy = await syncTaxonomy();
+  console.log(
+    `  ticket categories: ${taxonomy.categoriesCreated} created, ${taxonomy.categoriesPresent} already present`,
+  );
+  console.log(
+    `  root causes: ${taxonomy.causesCreated} created, ${taxonomy.causesPresent} already present`,
+  );
+  if (taxonomy.orphanedCategoryKeys.length || taxonomy.orphanedCauseKeys.length) {
+    console.log(
+      `  in the database but no longer in the code (left alone, decide by hand): ${[
+        ...taxonomy.orphanedCategoryKeys,
+        ...taxonomy.orphanedCauseKeys,
+      ].join(', ')}`,
+    );
+  }
 
   const counts = await db.execute<{ statuses: number }>(
     sql`select count(*)::int as statuses from ticket_statuses`,

@@ -29,11 +29,24 @@ export function normaliseDigits(text: string): string {
 /** Bidi controls and zero-width characters, which paste along invisibly. */
 const INVISIBLE = /[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g;
 
+/**
+ * The same strip, exported, because a second module needs it.
+ *
+ * `lib/categorise/normalise.ts` compares message text against patterns and hits
+ * the identical problem from the other direction: a U+200F pasted out of an RTL
+ * message makes `الغاء` and `الغاء\u200F` different strings, so a rule that
+ * should match does not. One definition rather than two regexes that will
+ * eventually disagree about which controls count.
+ */
+export function stripInvisible(text: string): string {
+  return text.replace(INVISIBLE, '');
+}
+
 /** Punctuation people put inside an identifier when writing it down. */
 const SEPARATORS = /[\s\-_./\\:#]+/g;
 
 export function normaliseTrackingNumber(value: string): string {
-  return normaliseDigits(value).replace(INVISIBLE, '').replace(SEPARATORS, '').trim().toUpperCase();
+  return stripInvisible(normaliseDigits(value)).replace(SEPARATORS, '').trim().toUpperCase();
 }
 
 /**

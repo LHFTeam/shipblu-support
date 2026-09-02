@@ -27,6 +27,19 @@
  * folding one side alone turns a match into a miss.
  */
 const TASHKEEL = /[ً-ْٰٖ-ٟۖ-ۭـ]/g;
+/**
+ * Arabic diacritics and tatweel, stripped, exported for the one other module
+ * that has to make the same decision.
+ *
+ * `lib/categorise/normalise.ts` matches message text against patterns and has to
+ * strip these for the same reason this file does — a diacritic is not a letter,
+ * so anything splitting on non-letters tears الشِّحنة into fragments. Shared
+ * rather than copied so the two cannot end up disagreeing about which marks
+ * count as a diacritic.
+ */
+export function stripTashkeel(text: string): string {
+  return text.replace(TASHKEEL, '');
+}
 
 /** Anything that is not a letter or a digit separates one token from the next. */
 const SEPARATOR = /[^\p{L}\p{N}]+/u;

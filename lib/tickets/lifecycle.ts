@@ -1,6 +1,7 @@
 import { assignConversation } from '@/lib/assignment';
 import { maybeSendAutoResponse } from '@/lib/auto-response';
 import { runAutomations } from '@/lib/automations';
+import { categoriseFromMessage } from '@/lib/categorise/apply';
 import { linkShipmentsFromMessage } from '@/lib/shipments/links';
 import { scheduleSurvey } from '@/lib/csat';
 import { applySlaOnCreate, onCustomerReply } from '@/lib/sla';
@@ -125,15 +126,39 @@ export async function afterTicketResolved(conversationId: string): Promise<void>
  * Failures are logged and swallowed. A detection bug must never fail an ingest
  * job — the job would retry, re-running everything downstream of it.
  */
-export async function afterMessageStored(message: {
+export type StoredMessage = {
   conversationId: string;
   messageId: string;
   bodyText: string;
   kind: string;
-}): Promise<void> {
+  /**
+   * Required and nullable rather than optional, and that is load-bearing.
+   *
+   * `direction?: string` compiles at every existing call site and silently
+   * disables categorisation on whichever ingest path was forgotten — which is
+   * precisely the failure this seam's own docstring warns about two paragraphs
+   * up. `direction: string` does not compile until somebody has answered the
+   * question for each path, which is the whole point of widening the type
+   * instead of re-reading the row inside the consumer: re-reading also
+   * compiles, and also never asks.
+   */
+  direction: string;
+};
+
+export async function afterMessageStored(message: StoredMessage): Promise<void> {
   try {
     await linkShipmentsFromMessage(message);
   } catch (error) {
     console.error(`[lifecycle] shipment linking failed for message ${message.messageId}`, error);
+  }
+
+  // Its own try/catch rather than sharing one: a bug in shipment detection must
+  // not stop categorisation, or the reverse. Sequential rather than in parallel
+  // because both finish by touching the same `conversations` row, and two
+  // concurrent updates of one row from one pool is a deadlock.
+  try {
+    await categoriseFromMessage(message, 'notify');
+  } catch (error) {
+    console.error(`[lifecycle] categorisation failed for message ${message.messageId}`, error);
   }
 }

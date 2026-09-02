@@ -83,6 +83,9 @@ ungrouped:
         #   SHIPMENT_SBID_PATTERN       what an SBID looks like
         #   SHIPMENT_IGNORE             references never to link
         #   SHIPBLU_API_URL             the delivery platform's base URL
+        #   CATEGORISE_DISABLED_RULES   rule keys to stop applying
+        #   CATEGORISE_AUTO_MIN         confidence at which a category auto-applies
+        #   CATEGORISE_RECORD_MIN       confidence below which nothing is written
         #
         # Shared rather than per-environment because both halves of one system
         # have to agree on the answer: the web service applies the pattern when

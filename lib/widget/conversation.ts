@@ -169,6 +169,7 @@ export async function appendVisitorMessage(
     messageId: result.messageId,
     bodyText: body,
     kind: 'reply',
+    direction: 'inbound',
   });
 
   await afterInboundMessage(result.conversationId, result.createdConversation, now);

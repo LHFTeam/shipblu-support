@@ -358,6 +358,46 @@ goes through `formPath` / `encodeSlugParam`. Next hands the path straight to
 needs none of this, which is why the read side was handled long before the write
 side was.
 
+**Ticket categorisation.** `lib/categorise/` is pure and rules-only; the live
+path is `categoriseFromMessage`, called from `afterMessageStored`. Four rules
+hold, and each of them closes something that has already been reasoned through:
+
+- **Only inbound `reply` messages are categorised.** Not our own replies, which
+  would file every ticket where an agent pasted a canned answer, and not notes,
+  which would launder an agent's opinion into the `detected` column the tuning
+  pass trusts. Bot channels are excluded through `readOnlyChannels()` — the
+  bot's menu is a self-service funnel, not support demand, and categorising it
+  would report the one as the other.
+- **The root cause is never detected, only recorded.** The customer does not
+  know why it happened: "where is my order" has at least six causes behind it.
+  A detector guessing one manufactures confident, wrong data in the exact place
+  the team reasons from. The detector names the symptom; the agent names the
+  cause on resolve, and accountability is derived from
+  `ticket_root_causes.owner` rather than typed, so the two cannot disagree.
+- **Every Arabic pattern goes through `anchored()`.** `\b` is defined over ASCII
+  `\w`, so it does not exist for Arabic — `/لا/` matches inside `الغاء` and
+  inside `ولا`, which is how a "no" rule files a reschedule as a refusal. Text
+  is folded before matching, the opposite of `lib/kb/seed.ts`, which compares
+  against an unfolded tsvector; this matcher owns both sides.
+- **A category is retired, never deleted**, and `conversation_categories`
+  freezes `category_key` at assignment. The rollups key on the same text, so a
+  report drawn last quarter stays readable after somebody tidies the taxonomy.
+  The registry tables live in `db/schema/config.ts` beside `ticket_statuses`
+  rather than with the join table, because `conversations` references them and
+  everything references `conversations`.
+
+Confidence is an evidence grade, not a probability, and anything rendering it
+says so. `CATEGORISE_AUTO_MIN`, `CATEGORISE_RECORD_MIN` and
+`CATEGORISE_DISABLED_RULES` tune the bands and kill one over-firing rule by key
+without a deploy — read through `process.env` for the reason `detect.ts` gives.
+Under-detection is cheap (it shows as `meta.unclassified`, which has its own
+section on the review page — it carries confidence 0, so it can never surface in
+a queue ordered best-evidence-first); over-detection silently moves a number a
+manager staffs a team from. `combine()` picks its ceiling from the strongest
+rule that contributed rather than from how many did, so a pile of single
+keywords is held below the auto band however many of them agree.
+See `plans/ticket-categorisation.md`.
+
 **Bilingual and RTL.** Arabic is the default locale and the front door; every
 public URL keeps an explicit locale segment. Use `direction()` from
 `lib/kb/locale.ts` and never assume LTR. Slugify through `lib/kb/slug.ts` —
@@ -412,6 +452,20 @@ It does not cover queries in pages and actions. So a raw `sql` fragment, a
 against the real database before it is pushed — `execute_sql` on the production
 project answers it in one call, and reading the row count back is also how you
 learn the predicate selects what you meant.
+
+One shape in particular: **`any(...)` in a raw fragment is only correct when
+what is inside the parentheses is an array _column_.**
+
+```ts
+sql`${domain} = any(${companies.domains})`; // right — a column, interpolated as an identifier
+sql`${col} = any(${values})`; // wrong — a JS array, one bind parameter per element
+```
+
+The second reaches Postgres as `any($2, $3)` — a row constructor — and is
+answered `op ANY/ALL (array) requires array on right side` (42809). The two read
+identically, which is why this is not a CI check: telling them apart needs the
+type of the interpolated expression, not its spelling. Use `inArray()` for a
+list of values (§6.46).
 
 Playwright (`npm run test:e2e`) exists but is not part of the pre-push loop.
 

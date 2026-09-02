@@ -6,20 +6,25 @@ import { db } from '@/db/client';
 import {
   cannedResponses,
   contactIdentities,
+  contacts,
+  conversationCategories,
   conversationEvents,
   conversationShipments,
   conversations,
-  contacts,
   internalRecipients,
   locations,
   messages,
   shipments,
   sideConversationMessages,
   sideConversations,
+  ticketCategories,
+  ticketRootCauses,
   ticketStatuses,
   whatsappTemplates,
 } from '@/db/schema';
 import { assignConversation } from '@/lib/assignment';
+import { refreshPrimary } from '@/lib/categorise/apply';
+import { CAUSE_REQUIRED_AREAS } from '@/lib/categorise/taxonomy';
 import { requestAssignmentSweep, setAccepting } from '@/lib/assignment/presence';
 import { requireAgent } from '@/lib/auth/guard';
 import { env } from '@/lib/env';
@@ -146,6 +151,10 @@ function refuseIfReadOnly(channel: string): ActionState | null {
 function refresh(number: number) {
   revalidatePath(`/inbox/${number}`);
   revalidatePath('/inbox');
+  // The category review queue is a view onto these tickets' categories, so any
+  // ticket write can stale it. Here rather than in each action, for the reason
+  // channel-policy.ts gives about rules spread across call sites.
+  revalidatePath('/admin/categories/review');
 }
 
 /**
@@ -169,6 +178,56 @@ async function refuseIfIncomplete(
   return {
     error: `Fill in ${listLabels(missing)} before resolving this ticket`,
   };
+}
+
+/**
+ * Refuses to resolve a ticket that went wrong without saying why.
+ *
+ * The root cause is the dimension the business acts on — a category report says
+ * what the queue is full of, and only this says what to go and fix — and it
+ * cannot be detected, because the customer does not know it. Which means the
+ * only moment it can be captured is the one where somebody has just finished
+ * looking into the ticket.
+ *
+ * Only for the areas where something actually failed. A price-list question or
+ * an integration walkthrough has no cause, and demanding one would teach agents
+ * to pick whatever clears the dialogue — which is how a dimension fills up with
+ * noise and stops being worth reporting on.
+ *
+ * On the agent's own path only, exactly as `refuseIfIncomplete` is: an
+ * automation cannot know why a parcel was late, so enforcing this against the
+ * three-day auto-close would wedge tickets in a state no person was asked to
+ * clear.
+ *
+ * The list of areas lives in `lib/categorise/taxonomy.ts` because the coverage
+ * figure on the report has to measure the same population this gate demands —
+ * two definitions of "owes a cause" is how a report comes to say 40% of tickets
+ * are missing something that was never asked of most of them.
+ */
+async function refuseIfNoRootCause(conversationId: string): Promise<ActionState | null> {
+  const rows = await db
+    .select({
+      rootCauseId: conversations.rootCauseId,
+      area: ticketCategories.area,
+    })
+    .from(conversations)
+    .leftJoin(
+      conversationCategories,
+      and(
+        eq(conversationCategories.conversationId, conversations.id),
+        eq(conversationCategories.isPrimary, true),
+      ),
+    )
+    .leftJoin(ticketCategories, eq(ticketCategories.id, conversationCategories.categoryId))
+    .where(eq(conversations.id, conversationId))
+    .limit(1);
+
+  const row = rows[0];
+  if (!row) return null;
+  if (row.rootCauseId) return null;
+  if (!row.area || !CAUSE_REQUIRED_AREAS.includes(row.area)) return null;
+
+  return { error: 'Record what caused this before closing it' };
 }
 
 // --- Replies and notes ------------------------------------------------------
@@ -197,8 +256,15 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
   // the composer, so the agent would see a reply they cannot un-send and a
   // status that did not move, with nothing on screen saying why.
   if (resolveAfter) {
+    // Checked in order, and the second query only runs if the first passed.
+    // Computing both and then reporting the *newer* one first put a message
+    // about the root cause in front of a required-fields message that predates
+    // this feature — so an agent filled in a cause, pressed the button again,
+    // and only then learned about the two empty fields.
     const incomplete = await refuseIfIncomplete(conversation.customFields);
     if (incomplete) return incomplete;
+    const uncaused = await refuseIfNoRootCause(conversationId);
+    if (uncaused) return uncaused;
   }
 
   if (conversation.channel === 'whatsapp') {
@@ -315,6 +381,7 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
     messageId,
     bodyText: isEmail && html ? htmlToText(html) : body,
     kind: 'reply',
+    direction: 'outbound',
   });
 
   if (cannedResponseId) await countCannedUse(cannedResponseId);
@@ -389,6 +456,7 @@ export async function addNote(_state: ActionState, formData: FormData): Promise<
     messageId: note[0]!.id,
     bodyText: body,
     kind: 'note',
+    direction: 'outbound',
   });
 
   refresh(row.conversation.number);
@@ -671,6 +739,7 @@ export async function sendTemplateReply(
     messageId,
     bodyText: rendered,
     kind: 'reply',
+    direction: 'outbound',
   });
 
   refresh(row.conversation.number);
@@ -712,9 +781,17 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
         return { error: 'Only a supervisor can close a ticket — resolve it instead' };
       }
 
-      if (status.category === 'resolved') {
+      // Both terminal categories, not just `resolved`. `Closed` is a seeded
+      // status an agent can pick from the same dropdown, and gating only the
+      // one next to it made the whole rule advisory: picking the other option
+      // ended the ticket with no cause recorded and nothing to say so. See
+      // `conversations.root_cause_set_at` for how a closed ticket's cause is
+      // then dated, since `resolved_at` stays null on this path.
+      if (status.category === 'resolved' || status.category === 'closed') {
         const incomplete = await refuseIfIncomplete(row.conversation.customFields);
         if (incomplete) return incomplete;
+        const uncaused = await refuseIfNoRootCause(conversationId);
+        if (uncaused) return uncaused;
       }
 
       await db.transaction(async (tx) => {
@@ -1547,4 +1624,264 @@ export async function setAcceptingTickets(
 
   revalidatePath('/inbox');
   return { error: null, accepting };
+}
+
+// --- Categories and root cause ----------------------------------------------
+
+/**
+ * An agent's answer to what the detector proposed.
+ *
+ * Four verbs on a category, and the shape of each is the human-in-the-loop
+ * design rather than CRUD on a join table:
+ *
+ * - **confirm** says the rule was right, and keeps the `confidence` and
+ *   `rule_key` it asserted. Those are what the tuning pass measures; clearing
+ *   them on confirmation would destroy the only record of whether the rule was
+ *   any good.
+ * - **reject** says it was wrong, and **keeps the row**. A rejected assignment
+ *   still occupies `(conversation, category)`, which is what stops the next
+ *   message re-suggesting it — the agent's judgement survives without a single
+ *   `where` clause anywhere having to remember it.
+ * - **add** is a person filing what the rules missed, which is the other half of
+ *   the same signal: a category arriving by hand far more often than by rule is
+ *   a gap in the lexicon.
+ * - **remove** takes back an agent's own addition, and is the one path that
+ *   deletes — there is nothing to learn from somebody undoing their own click.
+ */
+type CategoryTarget =
+  | { ok: false; error: string }
+  | {
+      ok: true;
+      agent: SessionAgent;
+      conversationId: string;
+      categoryId: string;
+      category: { id: string; key: string };
+      number: number;
+    };
+
+async function resolveCategoryTarget(formData: FormData): Promise<CategoryTarget> {
+  const agent = await requireAgent();
+  if (!can(agent, 'ticket.categorise')) {
+    return { ok: false, error: 'You do not have permission to categorise tickets' };
+  }
+
+  const conversationId = String(formData.get('conversationId') ?? '');
+  const categoryId = String(formData.get('categoryId') ?? '');
+  if (!conversationId || !categoryId) return { ok: false, error: 'Choose a category' };
+
+  // Re-read both sides rather than trusting the ids in the form: the
+  // conversation so channel visibility is checked at this entry point too, and
+  // the category so a request naming a row that has since gone fails instead of
+  // writing a dangling assignment.
+  const row = await loadConversation(agent, conversationId);
+  if (!row) return { ok: false, error: 'Ticket not found' };
+
+  const category = await db
+    .select({ id: ticketCategories.id, key: ticketCategories.key })
+    .from(ticketCategories)
+    .where(eq(ticketCategories.id, categoryId))
+    .limit(1);
+
+  if (!category[0]) return { ok: false, error: 'That category no longer exists' };
+
+  return {
+    ok: true,
+    agent,
+    conversationId,
+    categoryId,
+    category: category[0],
+    number: row.conversation.number,
+  };
+}
+
+export async function addCategory(_state: ActionState, formData: FormData): Promise<ActionState> {
+  const target = await resolveCategoryTarget(formData);
+  if (!target.ok) return { error: target.error };
+  const { agent, conversationId, categoryId, category, number } = target;
+
+  // `onConflictDoUpdate` rather than `DoNothing`, and this is the one path
+  // allowed to overturn a rejection: a person adding a category the detector
+  // suggested, or that somebody previously threw out, is making an explicit
+  // decision and it should win.
+  const claim = {
+    source: 'manual' as const,
+    reviewState: 'confirmed' as const,
+    confidence: 1,
+    assignedByAgentId: agent.id,
+    reviewedByAgentId: agent.id,
+    reviewedAt: new Date(),
+  };
+
+  await db
+    .insert(conversationCategories)
+    .values({ conversationId, categoryId, categoryKey: category.key, ...claim })
+    .onConflictDoUpdate({
+      target: [conversationCategories.conversationId, conversationCategories.categoryId],
+      set: claim,
+    });
+
+  await refreshPrimary(conversationId);
+  await db.insert(conversationEvents).values({
+    conversationId,
+    type: 'category_added',
+    actorAgentId: agent.id,
+    data: { categoryKey: category.key },
+  });
+
+  refresh(number);
+  return ok();
+}
+
+export async function confirmCategory(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const target = await resolveCategoryTarget(formData);
+  if (!target.ok) return { error: target.error };
+  const { agent, conversationId, categoryId, category, number } = target;
+
+  await db
+    .update(conversationCategories)
+    .set({ reviewState: 'confirmed', reviewedByAgentId: agent.id, reviewedAt: new Date() })
+    .where(
+      and(
+        eq(conversationCategories.conversationId, conversationId),
+        eq(conversationCategories.categoryId, categoryId),
+      ),
+    );
+
+  await refreshPrimary(conversationId);
+  await db.insert(conversationEvents).values({
+    conversationId,
+    type: 'category_confirmed',
+    actorAgentId: agent.id,
+    data: { categoryKey: category.key },
+  });
+
+  refresh(number);
+  return ok();
+}
+
+export async function rejectCategory(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const target = await resolveCategoryTarget(formData);
+  if (!target.ok) return { error: target.error };
+  const { agent, conversationId, categoryId, category, number } = target;
+
+  // A state change, never a delete. `source` is left alone so a report can tell
+  // "a rule was thrown out" from "an agent removed their own", and `is_primary`
+  // is cleared in the same statement because a CHECK forbids a rejected row
+  // from being one.
+  await db
+    .update(conversationCategories)
+    .set({
+      reviewState: 'rejected',
+      isPrimary: false,
+      reviewedByAgentId: agent.id,
+      reviewedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(conversationCategories.conversationId, conversationId),
+        eq(conversationCategories.categoryId, categoryId),
+      ),
+    );
+
+  await refreshPrimary(conversationId);
+  await db.insert(conversationEvents).values({
+    conversationId,
+    type: 'category_rejected',
+    actorAgentId: agent.id,
+    data: { categoryKey: category.key },
+  });
+
+  refresh(number);
+  return ok();
+}
+
+export async function removeCategory(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const target = await resolveCategoryTarget(formData);
+  if (!target.ok) return { error: target.error };
+  const { agent, conversationId, categoryId, category, number } = target;
+
+  // Scoped to `manual`: deleting a detected row would throw away the evidence
+  // that a rule fired, which is what the tuning pass reads. A detected row is
+  // rejected instead.
+  await db
+    .delete(conversationCategories)
+    .where(
+      and(
+        eq(conversationCategories.conversationId, conversationId),
+        eq(conversationCategories.categoryId, categoryId),
+        eq(conversationCategories.source, 'manual'),
+      ),
+    );
+
+  await refreshPrimary(conversationId);
+  await db.insert(conversationEvents).values({
+    conversationId,
+    type: 'category_removed',
+    actorAgentId: agent.id,
+    data: { categoryKey: category.key },
+  });
+
+  refresh(number);
+  return ok();
+}
+
+/**
+ * Why this ticket happened, recorded by the agent who looked into it.
+ *
+ * Accepts an empty value so a cause set by mistake can be cleared — the resolve
+ * gate will ask again, which is the right outcome for a ticket somebody is
+ * still working out.
+ */
+export async function setRootCause(_state: ActionState, formData: FormData): Promise<ActionState> {
+  const agent = await requireAgent();
+  if (!can(agent, 'ticket.categorise')) {
+    return { error: 'You do not have permission to categorise tickets' };
+  }
+
+  const conversationId = String(formData.get('conversationId') ?? '');
+  const rootCauseId = String(formData.get('rootCauseId') ?? '');
+
+  const row = await loadConversation(agent, conversationId);
+  if (!row) return { error: 'Ticket not found' };
+
+  let key: string | null = null;
+  if (rootCauseId) {
+    const cause = await db
+      .select({ key: ticketRootCauses.key })
+      .from(ticketRootCauses)
+      .where(eq(ticketRootCauses.id, rootCauseId))
+      .limit(1);
+    if (!cause[0]) return { error: 'That root cause no longer exists' };
+    key = cause[0].key;
+  }
+
+  await db
+    .update(conversations)
+    .set({
+      rootCauseId: rootCauseId || null,
+      // Cleared with the cause, so a ticket whose cause was removed cannot be
+      // counted on the day the removed one was established.
+      rootCauseSetAt: rootCauseId ? new Date() : null,
+      updatedAt: new Date(),
+    })
+    .where(eq(conversations.id, conversationId));
+
+  await db.insert(conversationEvents).values({
+    conversationId,
+    type: 'root_cause_set',
+    actorAgentId: agent.id,
+    data: { rootCauseKey: key },
+  });
+
+  refresh(row.conversation.number);
+  return ok();
 }

@@ -244,6 +244,7 @@ export async function ingestInboundEmail(email: ParsedInboundEmail): Promise<Ing
     messageId: result.messageId,
     bodyText,
     kind: 'reply',
+    direction: 'inbound',
   });
 
   await afterInboundMessage(result.conversationId, result.createdConversation, email.receivedAt);

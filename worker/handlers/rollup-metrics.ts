@@ -1,9 +1,15 @@
 import { DateTime } from 'luxon';
 import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { agentMetricsDaily, metricsDaily } from '@/db/schema';
+import {
+  agentMetricsDaily,
+  categoryMetricsDaily,
+  metricsDaily,
+  rootCauseMetricsDaily,
+} from '@/db/schema';
 import type { ClaimedJob } from '@/lib/queue';
 import { computeAgentDay, withActivity } from '@/lib/reports/agent-rollup';
+import { computeCategoryDay, computeRootCauseDay } from '@/lib/reports/category-rollup';
 import {
   asRows,
   computeDay,
@@ -162,6 +168,8 @@ export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
     const slices = await computeDay(day, context);
     const rows = asRows(day, slices);
     const agentRows = withActivity(await computeAgentDay(day, context));
+    const categoryRows = await computeCategoryDay(day, context);
+    const causeRows = await computeRootCauseDay(day, context);
 
     // Delete-then-insert rather than an upsert on the unique index: Postgres
     // treats NULLs as distinct in a unique index, so the "all" slices — which
@@ -184,17 +192,39 @@ export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
           .insert(agentMetricsDaily)
           .values(agentRows.map((row) => ({ ...row, day, computedAt: new Date() })));
       }
+
+      // The two category tables join the same transaction rather than a job of
+      // their own, for the reason at the top of this file: two nightly jobs
+      // would be two answers to "which day is this". Rebuilt by delete and
+      // insert like the others, and safe to destroy for the same reason —
+      // `conversations.created_at` and `resolved_at` are immutable and
+      // `conversation_categories.first_seen_at` is append-only, so every column
+      // can be recomputed from scratch. The column that would break that is
+      // "suggestions still open", which is why it is not there.
+      await tx.delete(categoryMetricsDaily).where(eq(categoryMetricsDaily.day, day));
+      if (categoryRows.length) await tx.insert(categoryMetricsDaily).values(categoryRows);
+
+      await tx.delete(rootCauseMetricsDaily).where(eq(rootCauseMetricsDaily.day, day));
+      if (causeRows.length) await tx.insert(rootCauseMetricsDaily).values(causeRows);
     });
 
     // Asserted on every write, not just on backfills: a day whose totals do not
     // equal the sum of its own channel slices is the exact shape of the bug
     // this job once shipped, and it is invisible in the output.
+    // Not extended to the two category tables, and the absence is deliberate
+    // rather than an oversight: they have no totals row to reconcile against,
+    // because a ticket carrying three categories appears under three of them.
+    // That is also exactly why they are not a dimension on `metrics_daily` —
+    // see `db/schema/metrics.ts`.
     if (!reconciles(slices)) {
       inconsistent += 1;
       console.error(`[rollup_metrics] ${day}: totals do not match the sum of the channel slices`);
     }
 
-    console.log(`[rollup_metrics] ${day}: ${rows.length} rows, ${agentRows.length} agent-day(s)`);
+    console.log(
+      `[rollup_metrics] ${day}: ${rows.length} rows, ${agentRows.length} agent-day(s), ` +
+        `${categoryRows.length} category row(s), ${causeRows.length} cause row(s)`,
+    );
   }
 
   console.log(

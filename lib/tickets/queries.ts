@@ -49,6 +49,7 @@ import {
   type LinkedShippingAccount,
   type ReadScope,
 } from '@/lib/shipments/queries';
+import { type AssignedCategory, categoriesForConversation } from '@/lib/categorise/queries';
 import {
   sideConversationsForConversation,
   type SideConversationView,
@@ -477,6 +478,26 @@ export type ConversationDetail = {
    * one fact that could disagree with the first.
    */
   unverifiedSubmitter: boolean;
+  /**
+   * What this ticket is about, and why it happened.
+   *
+   * Loaded here rather than by the sidebar because the resolve control needs the
+   * cause in the same render as the composer: an agent told they must record a
+   * cause, by a page that has not loaded which one is set, would be told to fill
+   * in something already filled in.
+   */
+  categories: AssignedCategory[];
+  rootCauseId: string | null;
+  /**
+   * Which population asked, when the records established it.
+   *
+   * Only used to *order* the category picker — a merchant's payout question
+   * offered first on a merchant's ticket. Never to filter: the value is
+   * established from role flags that can be stale or absent, and a picker that
+   * hides `billing.payout` from a ticket this got wrong is a control an agent
+   * cannot work around.
+   */
+  requesterKind: 'merchant' | 'recipient' | 'prospect' | 'other' | null;
   /** Parcels this ticket is about, and the accounts it names. */
   shipments: LinkedShipment[];
   shippingAccounts: LinkedShippingAccount[];
@@ -561,7 +582,7 @@ export async function getConversation(
     .limit(1);
   const unverifiedSubmitter = unverified.length > 0;
 
-  const [timeline, files, events, shipments, accounts, sides] = await Promise.all([
+  const [timeline, files, events, shipments, accounts, sides, categories] = await Promise.all([
     db
       .select({
         message: messages,
@@ -604,6 +625,7 @@ export async function getConversation(
     shipmentsForConversation(row.conversation.id, row.conversation.requesterContactId),
     shippingAccountsForConversation(row.conversation.id),
     sideConversationsForConversation(row.conversation.id),
+    categoriesForConversation(row.conversation.id),
   ]);
 
   const filesByMessage = new Map<string, ConversationDetail['messages'][number]['attachments']>();
@@ -659,6 +681,9 @@ export async function getConversation(
       : null,
     unverifiedSubmitter,
     metaThread,
+    categories,
+    rootCauseId: row.conversation.rootCauseId,
+    requesterKind: row.conversation.requesterKind,
     shipments,
     shippingAccounts: accounts,
     sideConversations: sides,

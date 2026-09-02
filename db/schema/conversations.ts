@@ -15,7 +15,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import { agents, groups } from './agents';
-import { channels, ticketForms, ticketStatuses, slaPolicies } from './config';
+import { channels, ticketForms, ticketRootCauses, ticketStatuses, slaPolicies } from './config';
 import { contacts } from './customers';
 import {
   channelEnum,
@@ -23,6 +23,7 @@ import {
   directionEnum,
   messageKindEnum,
   priorityEnum,
+  requesterKindEnum,
   sourceSystemEnum,
 } from './enums';
 
@@ -56,6 +57,55 @@ export const conversations = pgTable(
     priority: priorityEnum('priority').notNull().default('medium'),
     /** Freshdesk "ticket type" — Question, Incident, Problem, and so on. */
     type: text('type'),
+
+    /**
+     * Which population this ticket came from.
+     *
+     * Detected on arrival from the requester's own record — a contact holding a
+     * shipping account is a merchant — and falling back to the words they used.
+     * A column rather than a derived read because it is single-valued and
+     * because every report slices by it: merchants ask about payouts and
+     * integrations, recipients ask where their parcel is, and averaging the two
+     * describes neither.
+     */
+    requesterKind: requesterKindEnum('requester_kind'),
+
+    /**
+     * Why this ticket existed, recorded by the agent who resolved it.
+     *
+     * Null until then, and deliberately never written by the detector. The
+     * customer reports a symptom; the cause is what somebody established by
+     * looking, and inferring it from the complaint text would fill the one column
+     * the team plans from with confident guesses. Which is also why it is a
+     * column here rather than a row in `conversation_categories`: a ticket has
+     * many things it is about and exactly one reason it happened.
+     *
+     * `restrict`, like `status_id`: a cause with history behind it is retired,
+     * never deleted.
+     */
+    rootCauseId: uuid('root_cause_id').references(() => ticketRootCauses.id, {
+      onDelete: 'restrict',
+    }),
+
+    /**
+     * When the cause above was established, which is the day the cause report
+     * counts it on.
+     *
+     * `resolved_at` was the obvious timestamp and it is the wrong one on its
+     * own, because it is written **only** for a status in the `resolved`
+     * category. An agent who picks `Closed` instead ends the ticket with
+     * `resolved_at` still null, so a cause recorded there was stored and then
+     * counted by nothing. Widening `resolved_at` to cover closing was the other
+     * option and would have been worse: it feeds resolution-SLA attainment
+     * (`lib/sla/index.ts`) and the agents report's resolved counts
+     * (`lib/reports/agent-rollup.ts`), and closing a ticket is not resolving it.
+     *
+     * So the cause carries its own instant, and `computeRootCauseDay` counts
+     * from `coalesce(resolved_at, root_cause_set_at)`. That also happens to be
+     * a more literal reading of what the report claims to measure — the day
+     * somebody worked it out — than the day the ticket was closed.
+     */
+    rootCauseSetAt: timestamp('root_cause_set_at', { withTimezone: true }),
 
     requesterContactId: uuid('requester_contact_id')
       .notNull()
