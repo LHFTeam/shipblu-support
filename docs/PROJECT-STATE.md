@@ -2801,6 +2801,23 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     "sent privately" badge, because silence left it looking like an ordinary
     comment reply.
 
+46. **A JS array interpolated into a raw `sql` fragment is not an array to
+    Postgres.** `sql`${column} = any(${values})`` reads exactly like working
+    SQL and is not: drizzle-orm interpolates each element as its own bind
+    parameter, so Postgres receives `any($2, $3)` — a row constructor — and
+    answers `op ANY/ALL (array) requires array on right side` (42809). The
+    version that shipped this way type-checked, passed ESLint and Prettier, and
+    died on its first real execution. Use `inArray()`, which builds an `IN` list,
+    and reach for a raw fragment only where the builder genuinely cannot express
+    something.
+
+    Found in `lib/categorise/queries.ts` by standing a Postgres up locally and
+    running the query, which is the only thing that finds this class: Vitest runs
+    without a database, and the `database` CI job only executes job handlers — a
+    query in a page or an action, which this was, is still first executed in
+    production. Same family as the `operator does not exist: text = channel`
+    entry above.
+
 ## 7. Verification already done
 
 - **WhatsApp, end to end on production.** A synthetic webhook was enqueued; the

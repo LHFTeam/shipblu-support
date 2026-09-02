@@ -68,6 +68,22 @@ export const PERMISSIONS = [
   'ticket.close',
   'ticket.delete',
   'ticket.merge',
+  /**
+   * Adding, confirming or rejecting a category on a ticket.
+   *
+   * Separate from `ticket.edit_fields`, which it superficially resembles,
+   * because the two change different things. A custom field changes what one
+   * ticket says about itself. A category is the label every report is built
+   * from *and* the training signal the rules are tuned against — so an agent
+   * clearing a suggestion they did not understand moves a number on a
+   * supervisor's report and teaches the detector to stop finding that case.
+   *
+   * Held by agents anyway, and it has to be: they are the only people who read
+   * enough tickets for the corrections to happen at all, and a review queue
+   * only an admin can work is a review queue nobody finishes. Its own key so it
+   * can be taken off one person without taking their field editing with it.
+   */
+  'ticket.categorise',
   'ticket.edit_fields',
   /**
    * Opening a ticket on a customer's behalf, from a form.
@@ -119,6 +135,18 @@ export const PERMISSIONS = [
   'admin.skills',
   'admin.fields',
   /**
+   * The category and root-cause taxonomy, and the review queue.
+   *
+   * Above `ticket.categorise` and not folded into `admin.fields`, which owns
+   * statuses and custom fields, because the blast radius is different in time
+   * rather than in size. A field definition changes what can be recorded next.
+   * Retiring or renaming a category rewrites what the archive already means —
+   * retroactively, since the nightly rollup rebuilds from the current taxonomy,
+   * so a rename quietly re-labels every report anybody has ever drawn.
+   */
+  'admin.categories',
+
+  /**
    * Ticket forms, separate from `admin.fields` because the blast radius is.
    *
    * Defining a field adds a question to an internal sidebar. Publishing a form
@@ -140,6 +168,7 @@ const AGENT: Permission[] = [
   'ticket.side_conversation',
   'ticket.assign',
   'ticket.edit_fields',
+  'ticket.categorise',
   'ticket.create',
   'contact.view',
   'contact.edit',
@@ -176,6 +205,7 @@ const ADMIN: Permission[] = [
   'admin.sla',
   'admin.skills',
   'admin.fields',
+  'admin.categories',
   'admin.forms',
 ];
 
