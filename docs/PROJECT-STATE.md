@@ -3015,6 +3015,19 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     `scripts/ci/repo-rules.mjs`: a write path that sanitises an article body and
     does not normalise it fails the build.
 
+51. **`kb_articles.updated_at` is not an edit date — every page view moves
+    it.** _2026-09-03._ `recordArticleView` increments `view_count` on the
+    article row, and `touch_updated_at` fires on any update of a table with that
+    column, so a read writes the timestamp. The article page renders it as
+    "Updated <date>" under the title, which means a busy article tells every
+    customer it was revised today and a quiet one looks stale.
+
+    Two consequences. The line on the page is worth either sourcing from
+    somewhere else — `kb_article_versions` knows when the body actually changed
+    — or dropping. And nothing should reason about content freshness from this
+    column: 99 of the 112 articles read 2026-08-19, the import date, and the
+    handful that read later are the ones somebody happened to open.
+
 ## 7. Verification already done
 
 - **WhatsApp, end to end on production.** A synthetic webhook was enqueued; the

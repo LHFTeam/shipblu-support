@@ -30,10 +30,11 @@ import type { ClaimedJob } from '@/lib/queue';
  * One visible side effect, called out because somebody will ask about it: every
  * table with an `updated_at` carries the `touch_updated_at` trigger from
  * `db/sql/001_extensions_and_triggers.sql`, so an article this changes shows
- * today's date under its title. That is not avoidable from here without
- * disabling a trigger on a live table, and it is not untrue either — the stored
- * body did change. The sitemap carries no `lastmod`, so nothing is republished
- * to a search engine on the strength of it.
+ * today's date under its title. It is not avoidable from here without disabling
+ * a trigger on a live table, and it is not much of a change either: that column
+ * is already moved by every page view, because `recordArticleView` increments
+ * `view_count` on the same row (§6.51). The sitemap carries no `lastmod`, so
+ * nothing is republished to a search engine on the strength of it.
  */
 
 type Payload = {
