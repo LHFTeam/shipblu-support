@@ -42,9 +42,24 @@ export function InviteForm() {
 
       {state.inviteUrl ? (
         <div className="rounded-md bg-[var(--muted)] p-3 text-sm">
+          {/* Which of the two happened is the part an admin has to read. The
+              link is shown either way, so without this sentence a successful
+              send and a send that never left look identical — and the second
+              one needs them to go and paste the link somewhere. */}
           <p className="mb-1.5 text-xs font-medium opacity-70">
-            Send this link to the new agent. It expires in 7 days and remains under Pending invites
-            until it is accepted.
+            {state.inviteSentTo ? (
+              <>
+                Invitation emailed to{' '}
+                <span className="break-all opacity-100">{state.inviteSentTo}</span>. The same link
+                is below if you need to send it another way.
+              </>
+            ) : (
+              <>
+                No invitation email went out, so send this link to the new agent yourself. (The
+                server log says why — usually no sending address is configured yet.)
+              </>
+            )}{' '}
+            It expires in 7 days and remains under Pending invites until it is accepted.
           </p>
           <CopyInviteLink
             key={state.inviteUrl}

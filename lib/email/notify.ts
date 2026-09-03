@@ -7,7 +7,9 @@ import { enqueue } from '@/lib/queue';
  * `send_email`, which reads the message row and threads the reply. A portal
  * verification link has no conversation and must never create one — a customer
  * confirming their address is not asking a question — so it takes its own job
- * type with the body carried in the payload.
+ * type with the body carried in the payload. An agent invitation is the same
+ * shape for the same reason: threading it onto a ticket would file the arrival
+ * of a new colleague as support demand.
  *
  * Queued rather than sent inline so that a slow provider cannot stall the form
  * submission the customer is waiting on, and so a transient failure is retried

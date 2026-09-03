@@ -15,27 +15,46 @@ import {
 import { requirePermission } from '@/lib/auth/guard';
 import { forgetCategoryIds } from '@/lib/categorise/apply';
 import { normaliseEmail } from '@/lib/auth/normalise';
+import { inviteEmail } from '@/lib/auth/invite-email';
 import { sealInviteToken } from '@/lib/auth/invite-token';
 import { generateToken, hashToken } from '@/lib/auth/tokens';
 import { destroyAllSessionsForAgent } from '@/lib/auth/session';
 import { listFolderOptions } from '@/lib/kb/admin';
 import { LOCALES } from '@/lib/kb/locale';
 import { resolveFaqFolders } from '@/lib/widget/config';
+import { enqueueNotificationEmail } from '@/lib/email/notify';
 import { enqueue } from '@/lib/queue';
 import { appUrl, env } from '@/lib/env';
 
-export type AdminState = { error: string | null; inviteUrl?: string };
+export type AdminState = {
+  error: string | null;
+  inviteUrl?: string;
+  /**
+   * Present only when the invitation email was actually queued. Distinct from
+   * `inviteUrl`, which is always returned: the admin has to be told which of
+   * the two things happened, because "we emailed them" and "nothing was sent,
+   * send this yourself" call for opposite next actions and an invite that
+   * silently went nowhere is indistinguishable from one that arrived.
+   */
+  inviteSentTo?: string;
+};
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
- * Creates an invite and returns the link.
+ * Creates an invite, emails the invitee a link to activate it, and returns that
+ * link to the admin as well.
  *
- * The raw token is displayed to the admin rather than emailed for now, so
- * invites work before the email channel is configured — exactly when the first
- * agents need to be added. Its hash handles acceptance and an encrypted copy
- * lets the same link remain on the pending-invites screen without making a
- * database dump sufficient to use it.
+ * Both, not either. The email is how an invite is delivered, but it is only
+ * attempted when `EMAIL_FROM_ADDRESS` is configured — and the one moment that
+ * is guaranteed *not* to be true is a fresh deploy adding its first agents,
+ * which is exactly when invites have to work. So the link keeps coming back for
+ * the admin to send by hand, and the return value says which of the two
+ * happened rather than leaving them to guess.
+ *
+ * The token's hash handles acceptance and an encrypted copy lets the same link
+ * remain on the pending-invites screen without making a database dump
+ * sufficient to use it.
  */
 export async function createInvite(_state: AdminState, formData: FormData): Promise<AdminState> {
   const admin = await requirePermission('admin.agents');
@@ -68,6 +87,11 @@ export async function createInvite(_state: AdminState, formData: FormData): Prom
 
   const token = generateToken();
   const tokenCiphertext = sealInviteToken(token, env().APP_SECRET);
+  // One value for the row and for the email. Recomputing the deadline for the
+  // message would put a date in the invitee's inbox that is minutes off the one
+  // the database will enforce, and the copy would stop matching the
+  // pending-invites screen the moment the TTL changed.
+  const expiresAt = new Date(Date.now() + INVITE_TTL_MS);
 
   await db.transaction(async (tx) => {
     // Supersede any open invite for the same address, so a resend does not leave
@@ -82,13 +106,52 @@ export async function createInvite(_state: AdminState, formData: FormData): Prom
       name,
       role: role as 'agent' | 'supervisor' | 'admin' | 'account_admin',
       invitedByAgentId: admin.id,
-      expiresAt: new Date(Date.now() + INVITE_TTL_MS),
+      expiresAt,
     });
   });
 
+  const inviteUrl = `${inviteBaseUrl}/invite/${token}`;
+
+  // After the commit, never inside it. `enqueue` writes on its own connection,
+  // so a job queued from inside the transaction would survive a rollback and
+  // email a link to an invite that does not exist.
+  //
+  // Queued rather than sent inline because the admin is waiting on this form
+  // and the provider is not theirs to wait for: they already have the link in
+  // the response, so a slow Postmark must not hold up the page, and a transient
+  // failure gets the same backoff as every other send. No `dedupeKey` — a
+  // resend supersedes the old row and mints a new token, so each send is a
+  // different message, and a key spent on the address would silently drop the
+  // second invitation entirely.
+  //
+  // Nothing here may throw. The invite is committed by this point, so an
+  // exception would do what the `appUrl()` check above exists to prevent: leave
+  // a new row behind and hand the admin an error page with no link on it. A
+  // queue insert that fails degrades to the same state as an unconfigured
+  // mailbox — the admin is told no email went out and sends the link
+  // themselves, which is a working invitation either way.
+  let inviteSentTo: string | null = null;
+  if (env().EMAIL_FROM_ADDRESS) {
+    try {
+      await enqueueNotificationEmail({
+        to: email,
+        ...inviteEmail({ url: inviteUrl, name, invitedByName: admin.name, expiresAt }),
+      });
+      inviteSentTo = email;
+    } catch (error) {
+      // The cause belongs in the logs; the admin only needs to know it is on
+      // them to deliver the link, which the response already tells them.
+      console.error(`[createInvite] could not queue the invitation email for ${email}`, error);
+    }
+  }
+
   revalidatePath('/admin/agents');
 
-  return { error: null, inviteUrl: `${inviteBaseUrl}/invite/${token}` };
+  return {
+    error: null,
+    inviteUrl,
+    ...(inviteSentTo ? { inviteSentTo } : {}),
+  };
 }
 
 export async function setAgentActive(_state: AdminState, formData: FormData): Promise<AdminState> {

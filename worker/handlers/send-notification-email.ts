@@ -8,11 +8,13 @@ import type { ClaimedJob } from '@/lib/queue';
 
 /**
  * Sends one transactional email that does not belong to a ticket — today, the
- * customer portal's verification and password-reset links.
+ * customer portal's verification and password-reset links, and the agent
+ * invitation.
  *
  * The body arrives in the payload rather than being rendered here, because the
- * copy is bilingual and the caller is the only place that knows which language
- * the customer was reading when they asked for it.
+ * caller is the only place that knows what language to write in: which locale
+ * the customer was reading for a portal link, and English for an invitation to
+ * a console that has none.
  */
 
 const payloadSchema = z.object({

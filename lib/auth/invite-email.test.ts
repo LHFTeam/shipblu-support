@@ -1,0 +1,92 @@
+import { DateTime } from 'luxon';
+import { describe, expect, it } from 'vitest';
+import { inviteEmail } from './invite-email';
+
+const URL = 'https://support.shipblu.com/invite/JqL0-9_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789';
+
+/** Cairo wall-clock in, so the timezone database does the conversion. */
+function cairo(iso: string): Date {
+  return DateTime.fromISO(iso, { zone: 'Africa/Cairo' }).toJSDate();
+}
+
+const EXPIRES = cairo('2026-09-10T14:30');
+
+function build(overrides: Partial<Parameters<typeof inviteEmail>[0]> = {}) {
+  return inviteEmail({
+    url: URL,
+    name: 'Mona Farouk',
+    invitedByName: 'Ali Hassan',
+    expiresAt: EXPIRES,
+    ...overrides,
+  });
+}
+
+describe('inviteEmail', () => {
+  it('puts the activation link in both bodies and never in the subject', () => {
+    const email = build();
+
+    expect(email.htmlBody).toContain(`href="${URL}"`);
+    expect(email.textBody).toContain(URL);
+
+    // The subject is what a mail client prints on a lock screen and what a
+    // notification relay keeps a copy of. The link is a credential.
+    expect(email.subject).not.toContain(URL);
+    expect(email.subject).not.toContain('/invite/');
+  });
+
+  it('offers the bare URL as well as the button, for clients that flatten anchors', () => {
+    const email = build();
+
+    // Twice in the HTML: once as the anchor, once as copyable text. A client
+    // that strips the anchor still leaves the recipient able to act.
+    expect(email.htmlBody.split(URL)).toHaveLength(3);
+  });
+
+  it('greets an invitee with no name without leaving a dangling comma', () => {
+    const email = build({ name: null });
+
+    expect(email.textBody).toContain('Hi,');
+    expect(email.textBody).not.toContain('Hi ,');
+    expect(email.htmlBody).not.toContain('Hi ,');
+  });
+
+  it('falls back to the passive voice when the inviter is unknown', () => {
+    const email = build({ invitedByName: null });
+
+    expect(email.textBody).toContain('You have been invited');
+    expect(email.textBody).not.toContain('null');
+    expect(email.htmlBody).not.toContain('null');
+  });
+
+  it('names the inviter, which is the only thing a recipient can check', () => {
+    expect(build().textBody).toContain('Ali Hassan has invited you');
+  });
+
+  it('escapes a name rather than letting it reach the markup', () => {
+    const email = build({ name: "O'Brien <ops>", invitedByName: 'A & B' });
+
+    expect(email.htmlBody).toContain('O&#39;Brien &lt;ops&gt;');
+    expect(email.htmlBody).toContain('A &amp; B');
+    expect(email.htmlBody).not.toContain('<ops>');
+
+    // The text body is not markup and must keep the name as typed.
+    expect(email.textBody).toContain("O'Brien <ops>");
+  });
+
+  it('states the expiry in Cairo time, from the deadline the row will enforce', () => {
+    const email = build();
+
+    // 14:30 Cairo, not the 11:30 the same instant reads as in UTC.
+    expect(email.textBody).toContain('10 Sept 2026, 14:30');
+    expect(email.textBody).toContain('(Cairo time)');
+    expect(email.htmlBody).toContain('10 Sept 2026, 14:30');
+  });
+
+  it('tells the recipient that ignoring it costs them nothing', () => {
+    const email = build();
+
+    for (const body of [email.textBody, email.htmlBody]) {
+      expect(body).toContain('not created until you set a password');
+    }
+  });
+});
