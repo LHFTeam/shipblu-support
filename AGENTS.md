@@ -398,6 +398,22 @@ rule that contributed rather than from how many did, so a pile of single
 keywords is held below the auto band however many of them agree.
 See `plans/ticket-categorisation.md`.
 
+**Knowledge base article formatting.** `lib/kb/format.ts` is the standard, and
+it is code rather than prose because it is enforced: `normaliseArticleHtml`
+runs on every write, wrapped round the sanitiser as
+`normaliseArticleHtml(sanitiseArticleHtml(html))` — sanitise first, always, and
+CI checks the pair. An article body is plain semantic tags: no `class`, no
+`style`, no per-element `dir` (the help-centre shell sets it once), no `div` or
+`span`, and **no `h1`** — the article page owns the page's only `h1` and
+`.kb-article` dresses `h2`–`h6`, so a body `h1` renders as paragraph text
+(§6.49). `br` is a line break inside a paragraph, never spacing between blocks.
+Read the module's header before adding a rule: it carries the evidence for each
+one, all of it from the imported corpus, and the two invariants that make a
+regex pass over markup safe — it only ever runs on sanitize-html's own output,
+and it never touches a text node. Applying it to what is already stored is
+`normalise_kb_formatting`, which is idempotent and cuts a `kb_article_versions`
+row per article so the pass is undoable from the console.
+
 **Bilingual and RTL.** Arabic is the default locale and the front door; every
 public URL keeps an explicit locale segment. Use `direction()` from
 `lib/kb/locale.ts` and never assume LTR. Slugify through `lib/kb/slug.ts` —
