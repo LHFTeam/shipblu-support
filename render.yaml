@@ -365,6 +365,15 @@ projects:
           # is about to hand to somebody carries its breach flags when they open
           # it. `&&` rather than `;` — if the SLA sweep dies the run should go
           # red rather than reporting success because the second half worked.
+          #
+          # The presence sweep goes between them for the same reason, one step
+          # earlier in the chain: it is what takes an agent who has walked away
+          # out of the rota, so running it after the assignment sweep would hand
+          # this round's tickets to somebody it is about to mark away. It is the
+          # backstop rather than the mechanism — the console reports its own
+          # idleness within seconds — so five-minute granularity only shows when
+          # a browser could not report at all: a slept laptop, a frozen tab, an
+          # instance replaced by a deploy.
           - type: cron
             name: shipblu-sla-sweep
             runtime: node
@@ -373,7 +382,7 @@ projects:
             branch: main
             schedule: '*/5 * * * *' # SLA breaches need minute-ish resolution
             buildCommand: npm ci --include=dev
-            startCommand: npm run job -- sla_sweep && npm run job -- assign_sweep
+            startCommand: npm run job -- sla_sweep && npm run job -- presence_sweep && npm run job -- assign_sweep
             envVars:
               - fromGroup: shipblu-shared
               - fromGroup: shipblu-support-production

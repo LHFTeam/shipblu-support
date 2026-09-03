@@ -125,6 +125,22 @@ export const PERMISSIONS = [
    * too.
    */
   'report.agents',
+  /**
+   * Setting another agent's availability, and seeing who is at their desk now.
+   *
+   * Its own key rather than part of `report.agents`, which it sits beside,
+   * because the two differ in tense and in consequence. That one is a record of
+   * what happened, read after the fact; this one changes where the next ticket
+   * goes — a supervisor parking somebody who has walked off, or putting them
+   * back in the rota when the queue is backing up.
+   *
+   * Granted from supervisor up, since covering the queue is what a supervisor is
+   * for. It does not override the agent: their own switch still works, and an
+   * agent who disagrees with being parked can un-park themselves. Making it
+   * stick would need a lock the product does not have, and the honest failure —
+   * two people disagreeing in the open — is better than a silent one.
+   */
+  'agent.availability',
   'admin.agents',
   'admin.groups',
   'admin.locations',
@@ -187,6 +203,7 @@ const SUPERVISOR: Permission[] = [
   'kb.publish',
   'report.view',
   'report.agents',
+  'agent.availability',
 ];
 
 const ADMIN: Permission[] = [

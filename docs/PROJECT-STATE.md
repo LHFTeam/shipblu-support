@@ -493,15 +493,17 @@ declared all seven services as one flat list.
 | `shipblu-whatsapp-template-sync` | cron `0 * * * *`              | `crn-da1jgtg1ne8s73ciquk0` | `main`                       |
 | `shipblu-nightly`                | cron `0 0 * * *`              | `crn-da1jgtg1ne8s73ciqumg` | `main`                       |
 
-¹ `shipblu-sla-sweep` runs **two** jobs, `sla_sweep && assign_sweep`, chained the
-way `shipblu-nightly` chains cleanup and the rollup — same cadence, neither long,
-and a second container booting every five minutes to run a query that usually
-returns nothing is not worth it. The order matters and the `&&` does too: the SLA
-sweep goes first so a ticket the assignment sweep is about to hand to somebody
-carries its breach flags when they open it, and a failure in the first half takes
-the run red rather than reporting success because the second half worked. So the
-service name understates what it does — grep `render.yaml` for `startCommand`
-rather than trusting a cron's name.
+¹ `shipblu-sla-sweep` runs **three** jobs,
+`sla_sweep && presence_sweep && assign_sweep`, chained the way `shipblu-nightly`
+chains cleanup and the rollup — same cadence, none of them long, and a second
+container booting every five minutes to run a query that usually returns nothing
+is not worth it. The order matters and the `&&` does too: the SLA sweep goes
+first so a ticket the assignment sweep is about to hand to somebody carries its
+breach flags when they open it, the presence sweep next so an agent who has
+walked away is out of the rota _before_ that hand-out rather than a round later,
+and a failure in any half takes the run red rather than reporting success
+because the rest worked. So the service name understates what it does — grep
+`render.yaml` for `startCommand` rather than trusting a cron's name.
 
 **No service on Render deploys itself.** `autoDeploy` is `no` and
 `autoDeployTrigger` is `off` on every one of the seven, so merging to `main`

@@ -167,6 +167,18 @@ export type AgentLoad = {
    */
   presence: 'online' | 'away' | 'offline';
   lastSeenAt: Date | null;
+  /** The raw switch, which `presence` above folds into "away". */
+  accepting: boolean;
+  /**
+   * Who turned it off, which is what says whether it will come back on its own.
+   * Null whenever they are accepting.
+   */
+  offReason: 'self' | 'idle' | 'supervisor' | null;
+  /**
+   * Last key or click in the console. Null for an agent who has not touched it
+   * since this was first recorded, which is not the same as idle for ever.
+   */
+  lastInputAt: Date | null;
   /** Their effective cap, already resolved through the group default. Null is uncapped. */
   maxOpen: number | null;
   open: number;
@@ -208,6 +220,8 @@ export async function agentLoad(): Promise<AgentLoad[]> {
       name: sql<string>`coalesce(nullif(${agents.name}, ''), ${agents.email})`,
       presence: agents.presence,
       isAcceptingTickets: agents.isAcceptingTickets,
+      offReason: agents.acceptingOffReason,
+      lastInputAt: agents.lastInputAt,
       lastSeenAt: agents.lastSeenAt,
       // The smallest cap any of their groups would apply, since a ticket from
       // the strictest group is the first one they stop receiving.
@@ -230,6 +244,7 @@ export async function agentLoad(): Promise<AgentLoad[]> {
 
   return rows.map(({ isAcceptingTickets, ...row }) => ({
     ...row,
+    accepting: isAcceptingTickets,
     presence: row.presence === 'online' && !isAcceptingTickets ? ('away' as const) : row.presence,
     oldestWaitingSince: asDate(row.oldestWaitingSince),
   }));

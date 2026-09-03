@@ -21,6 +21,7 @@ export type JobType =
   | 'test_comment_permission'
   | 'sla_sweep'
   | 'assign_sweep'
+  | 'presence_sweep'
   | 'run_time_automations'
   | 'send_csat'
   | 'rollup_metrics'

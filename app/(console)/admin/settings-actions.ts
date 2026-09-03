@@ -43,6 +43,8 @@ import { parseOptionLines, type TicketFieldDef } from '@/lib/tickets/custom-fiel
 import { listAllTicketFields } from '@/lib/tickets/queries';
 import { PHRASE_GROUPS } from '@/lib/shipments/status';
 import { parseTokenEnvVar } from '@/lib/whatsapp/accounts';
+import { validatePolicy } from '@/lib/presence/idle';
+import { savePresencePolicy } from '@/lib/presence/policy';
 
 /**
  * Everything the admin screens write.
@@ -185,6 +187,54 @@ export async function deleteGroup(
   await db.delete(groups).where(eq(groups.id, id));
   refresh('/admin/groups');
   return ok();
+}
+
+// --- Presence policy ---------------------------------------------------------
+
+/**
+ * When the console decides somebody has stopped working.
+ *
+ * Under `admin.agents` rather than a permission of its own: it is a rule about
+ * the team, and it sits on the page that lists them.
+ *
+ * Blank means the timer is off, and that is the only way to turn one off — so
+ * an unreadable value has to be an error rather than a silent null, which is
+ * what `optionalMinutes` above would give. A typo quietly disabling the
+ * sign-out is exactly the failure this form must not have: nothing would look
+ * wrong afterwards, because "nobody was ever signed out" and "the timeout is
+ * working" look identical from the outside.
+ */
+export async function savePresenceSettings(
+  _state: SettingsState,
+  formData: FormData,
+): Promise<SettingsState> {
+  const admin = await requirePermission('admin.agents');
+
+  const away = minutesOrOff(formData, 'autoAwayAfterMins');
+  const signout = minutesOrOff(formData, 'autoSignoutAfterMins');
+
+  if (away === 'invalid' || signout === 'invalid') {
+    return { error: 'Enter a whole number of minutes, or leave the box empty to turn it off.' };
+  }
+
+  const policy = { autoAwayAfterMins: away, autoSignoutAfterMins: signout };
+  const problem = validatePolicy(policy);
+  if (problem) return { error: problem };
+
+  await savePresencePolicy(policy, admin.id);
+
+  refresh('/admin/agents');
+  return ok();
+}
+
+/** Blank is "off", a number is a window, and anything else is the admin's mistake. */
+function minutesOrOff(formData: FormData, key: string): number | null | 'invalid' {
+  const raw = text(formData, key);
+  if (!raw) return null;
+
+  const value = Number(raw);
+  if (!Number.isInteger(value)) return 'invalid';
+  return value;
 }
 
 // --- Locations --------------------------------------------------------------

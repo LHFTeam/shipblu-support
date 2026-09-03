@@ -4,6 +4,9 @@ import { agentPresenceIntervals, agents } from '@/db/schema';
 import { enqueue } from '@/lib/queue';
 import { HEARTBEAT_TTL_MS } from './eligibility';
 
+/** Who turned the switch off — `null` is only ever "they are accepting". */
+export type AvailabilityReason = 'self' | 'idle' | 'supervisor';
+
 /**
  * Whether an agent is at their desk.
  *
@@ -81,7 +84,7 @@ export async function goOffline(agentId: string): Promise<void> {
 }
 
 /**
- * The agent's own away switch, and the record of it.
+ * The away switch, and the record of it.
  *
  * Here rather than in the server action because the switch marks the boundary
  * between available and merely present, and that boundary is a span of time —
@@ -89,29 +92,75 @@ export async function goOffline(agentId: string): Promise<void> {
  * replacement makes "available time" a sum over rows instead of a replay of two
  * interleaved event streams.
  *
- * Only recorded for an agent who is actually connected. Flipping the switch
- * from a page load after the stream has gone would otherwise open an interval
- * that says they were at their desk because they changed a setting.
+ * Three callers now, which is why `reason` is not optional at the call site's
+ * discretion: the agent's own switch, a supervisor's, and the idle sweep. Only
+ * the last of the three may be undone automatically, and the column is how
+ * anything downstream can tell — see `availabilityReasonEnum`. A caller that
+ * could leave it unset would eventually park somebody with no way to know
+ * whether returning to their desk should bring them back.
+ *
+ * A call that changes nothing writes nothing. `acceptingChangedAt` is the grace
+ * period the sweep measures against, so re-asserting the current state — which
+ * a double-click or two supervisors reaching for the same row will do — must
+ * not silently extend it.
+ *
+ * The interval boundary is only recorded for an agent who is actually
+ * connected. Flipping the switch from a page load after the stream has gone
+ * would otherwise open an interval that says they were at their desk because
+ * they changed a setting.
  */
-export async function setAccepting(agentId: string, accepting: boolean): Promise<void> {
-  const updated = await db
-    .update(agents)
-    .set({ isAcceptingTickets: accepting, updatedAt: new Date() })
-    .where(eq(agents.id, agentId))
-    .returning({ presence: agents.presence, lastSeenAt: agents.lastSeenAt });
+export async function setAccepting(
+  agentId: string,
+  accepting: boolean,
+  reason: AvailabilityReason,
+): Promise<boolean> {
+  const nextReason = accepting ? null : reason;
 
-  const agent = updated[0];
-  if (!agent) return;
+  // Read then write, rather than one conditional UPDATE. The condition is "the
+  // flag or the reason differs", and the reason is an enum: expressing that in
+  // a single statement means a raw fragment comparing an enum column to a bound
+  // string, which is the shape that type-checks, passes every test — Vitest
+  // runs without a database — and then fails in production with `operator does
+  // not exist` (docs/PROJECT-STATE.md §6.46). Two round trips on an action
+  // somebody clicks a few times a day is the cheaper side of that trade.
+  const before = await db
+    .select({
+      accepting: agents.isAcceptingTickets,
+      reason: agents.acceptingOffReason,
+      presence: agents.presence,
+      lastSeenAt: agents.lastSeenAt,
+    })
+    .from(agents)
+    .where(eq(agents.id, agentId))
+    .limit(1);
+
+  const agent = before[0];
+  if (!agent) return false;
+  if (agent.accepting === accepting && agent.reason === nextReason) return false;
 
   const now = new Date();
+
+  await db
+    .update(agents)
+    .set({
+      isAcceptingTickets: accepting,
+      acceptingOffReason: nextReason,
+      acceptingChangedAt: now,
+      updatedAt: now,
+    })
+    .where(eq(agents.id, agentId));
+
   const live =
     agent.presence === 'online' &&
     agent.lastSeenAt !== null &&
     now.getTime() - agent.lastSeenAt.getTime() < HEARTBEAT_TTL_MS;
-  if (!live) return;
 
-  await close(agentId, now);
-  await open(agentId, accepting, now);
+  if (live) {
+    await close(agentId, now);
+    await open(agentId, accepting, now);
+  }
+
+  return true;
 }
 
 // --- The history ------------------------------------------------------------

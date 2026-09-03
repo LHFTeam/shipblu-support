@@ -2,6 +2,8 @@ import { cookies } from 'next/headers';
 import { and, eq, gt, lt } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agents, sessions } from '@/db/schema';
+import { minutesToMs, shouldSignOut } from '@/lib/presence/idle';
+import { loadPresencePolicy } from '@/lib/presence/policy';
 import { SESSION_COOKIE } from './cookie';
 import { generateToken, hashToken } from './tokens';
 
@@ -76,6 +78,7 @@ export async function getSessionAgent(): Promise<SessionAgent | null> {
       isAcceptingTickets: agents.isAcceptingTickets,
       isActive: agents.isActive,
       lastUsedAt: sessions.lastUsedAt,
+      lastActivityAt: sessions.lastActivityAt,
     })
     .from(sessions)
     .innerJoin(agents, eq(agents.id, sessions.agentId))
@@ -84,6 +87,17 @@ export async function getSessionAgent(): Promise<SessionAgent | null> {
 
   const row = rows[0];
   if (!row || !row.isActive) return null;
+
+  // Inactivity sign-out, enforced here because here is the one place every page
+  // and every action already passes through. The browser counts down and signs
+  // itself out politely, but a browser is a claim: a tab restored from history,
+  // a second window nobody closed, or a script replaying the cookie would
+  // otherwise keep a session that the policy says is over. This is the control;
+  // the countdown is the courtesy.
+  if (shouldSignOut(row, await loadPresencePolicy(), new Date())) {
+    await db.delete(sessions).where(eq(sessions.tokenHash, tokenHash));
+    return null;
+  }
 
   if (Date.now() - row.lastUsedAt.getTime() > REFRESH_AFTER_MS) {
     await db
@@ -116,6 +130,85 @@ export async function destroySession(): Promise<void> {
 /** Sign the agent out everywhere — used on password change and offboarding. */
 export async function destroyAllSessionsForAgent(agentId: string): Promise<void> {
   await db.delete(sessions).where(eq(sessions.agentId, agentId));
+}
+
+/**
+ * The current session's fingerprint, for callers that outlive the request.
+ *
+ * The presence stream is the one that needs it: it opens once, holds a
+ * connection for hours, and cannot read a cookie again from inside its own
+ * keepalive. Handing it the hash lets it re-check that the session still exists
+ * without keeping anything a leak could replay — the hash is what the table
+ * stores, and it cannot be turned back into a cookie.
+ */
+export async function currentSessionHash(): Promise<string | null> {
+  const store = await cookies();
+  const token = store.get(SESSION_COOKIE)?.value;
+  return token ? hashToken(token) : null;
+}
+
+/** Whether a session is still present and unexpired. */
+export async function sessionIsLive(tokenHash: string): Promise<boolean> {
+  const rows = await db
+    .select({ tokenHash: sessions.tokenHash })
+    .from(sessions)
+    .where(and(eq(sessions.tokenHash, tokenHash), gt(sessions.expiresAt, new Date())))
+    .limit(1);
+
+  return rows.length > 0;
+}
+
+/**
+ * Mark that a human did something in this session.
+ *
+ * The only writer of `last_activity_at`, and deliberately not called from
+ * anywhere on the ordinary request path — see the column's comment. It moves
+ * only when the console reports real input.
+ */
+export async function touchSessionActivity(): Promise<void> {
+  const tokenHash = await currentSessionHash();
+  if (!tokenHash) return;
+
+  await db
+    .update(sessions)
+    .set({ lastActivityAt: new Date() })
+    .where(eq(sessions.tokenHash, tokenHash));
+}
+
+/**
+ * Sign out every session that has gone quiet for longer than the policy allows.
+ *
+ * The backstop to the check in `getSessionAgent`, which can only fire when a
+ * request arrives: a console left open makes no requests, so without this the
+ * abandoned tab keeps its session — and its presence stream, and its place in
+ * the rota — until somebody touches it.
+ *
+ * Returns the agents affected, because a signed-out session should not leave
+ * its owner showing as online on the dashboard.
+ */
+export async function deleteInactiveSessions(
+  afterMins: number,
+  now = new Date(),
+): Promise<string[]> {
+  const cutoff = new Date(now.getTime() - minutesToMs(afterMins));
+
+  const deleted = await db
+    .delete(sessions)
+    .where(lt(sessions.lastActivityAt, cutoff))
+    .returning({ agentId: sessions.agentId });
+
+  return [...new Set(deleted.map((row) => row.agentId))];
+}
+
+/** Whether this agent has any session left — used after the sweep above. */
+export async function hasLiveSession(agentId: string): Promise<boolean> {
+  const rows = await db
+    .select({ tokenHash: sessions.tokenHash })
+    .from(sessions)
+    .where(and(eq(sessions.agentId, agentId), gt(sessions.expiresAt, new Date())))
+    .limit(1);
+
+  return rows.length > 0;
 }
 
 /** Called by the cleanup cron job. */
