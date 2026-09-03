@@ -15,6 +15,7 @@ import { runTimeAutomations } from './run-time-automations';
 import { sendCsat } from './send-csat';
 import { sendEmail } from './send-email';
 import { sendMeta } from './send-meta';
+import { sendAgentInvite } from './send-agent-invite';
 import { sendNotificationEmail } from './send-notification-email';
 import { sendSideEmail } from './send-side-email';
 import { sendWhatsApp } from './send-whatsapp';
@@ -54,6 +55,7 @@ export const handlers: Partial<Record<JobType, JobHandler>> = {
   send_csat: sendCsat,
   send_email: sendEmail,
   send_meta: sendMeta,
+  send_agent_invite: sendAgentInvite,
   send_notification_email: sendNotificationEmail,
   send_side_email: sendSideEmail,
   send_whatsapp: sendWhatsApp,

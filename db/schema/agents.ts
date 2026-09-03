@@ -274,7 +274,14 @@ export const invites = pgTable(
      */
     tokenCiphertext: text('token_ciphertext'),
     email: text('email').notNull(),
-    name: text('name'),
+    /**
+     * Required, so the activation page can present a filled-in identity and ask
+     * for nothing but a password. Nullable would push that decision to the one
+     * place it cannot be made well: an invitee who has to type their own name
+     * into a form the company sent them, or an agent record silently named
+     * after an email address.
+     */
+    name: text('name').notNull(),
     role: agentRoleEnum('role').notNull().default('agent'),
     groupIds: jsonb('group_ids').$type<string[]>().notNull().default([]),
 

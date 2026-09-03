@@ -9,6 +9,12 @@ import { enqueue } from '@/lib/queue';
  * confirming their address is not asking a question — so it takes its own job
  * type with the body carried in the payload.
  *
+ * The agent invitation is the same shape and does *not* come through here: a
+ * rendered activation link in `jobs.payload` is a live credential at rest, so
+ * `send_agent_invite` carries the invite's id and builds the body in the
+ * worker. Anything added to this path inherits that trade-off — a one-time link
+ * in the payload outlives the job by seven days, and forever if it dies.
+ *
  * Queued rather than sent inline so that a slow provider cannot stall the form
  * submission the customer is waiting on, and so a transient failure is retried
  * by the same backoff as everything else.

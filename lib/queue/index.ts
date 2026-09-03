@@ -7,6 +7,7 @@ export type JobType =
   | 'send_email'
   | 'send_side_email'
   | 'send_notification_email'
+  | 'send_agent_invite'
   | 'send_whatsapp'
   | 'send_meta'
   | 'moderate_meta_comment'
