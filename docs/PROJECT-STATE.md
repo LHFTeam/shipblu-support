@@ -2922,6 +2922,51 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     production. Same family as the `operator does not exist: text = channel`
     entry above.
 
+47. **A rendered one-time link in `jobs.payload` is a live credential at rest.**
+    _2026-09-03, caught in review before it shipped._
+
+    The agent invitation was enqueued the way every other ticket-less email is,
+    with the composed body in the payload — so the activation URL sat in
+    plaintext in `jobs`. `cleanup` keeps a completed job for **7 days**, which is
+    the invite's entire TTL, and never deletes a `dead` one at all, so the link
+    outlives the invite it belongs to. `invites` goes to real trouble to prevent
+    exactly this: a SHA-256 for the lookup and an AES-GCM envelope for
+    redisplay, so that a database dump alone yields no usable token. Enqueueing
+    the rendered link handed it straight back one table over.
+
+    The fix that does **not** work is carrying the raw token in the payload
+    instead and rendering the body in the handler — the token _is_ the
+    credential, so that moves it without protecting it. `send_agent_invite`
+    carries the invite's **id** and rebuilds the link from the envelope, which is
+    the path the pending-invites screen already took.
+
+    So: anything with a one-time link in it either carries an id and rebuilds, or
+    accepts that the credential is readable for a week. `send_notification_email`
+    still takes bodies, and the portal's verification and reset links still go
+    through it — `password_resets` stores only a hash, so there is nothing to
+    rebuild from and closing it needs a column, not a handler.
+
+48. **`className` cannot override `FIELD_BASE`'s background, and fails
+    silently.** _2026-09-03, same review._
+
+    A read-only field was styled by passing `bg-[var(--muted)]` to `Input`
+    alongside `FIELD_BASE`'s own `bg-[var(--surface)]`. Both are single-class
+    utilities of equal specificity, so the winner is whichever Tailwind emits
+    **later in the stylesheet** — not whichever the class attribute lists last.
+    It emits `--surface` second (offsets 23493 vs 23672 in the built CSS), so the
+    override never applied and the field rendered exactly like an editable box,
+    on the one page whose whole point is that there is nothing to type in it.
+
+    The surviving classes made it look half-intentional: `cursor-default` and the
+    text colour do not conflict with anything, so the field was subtly different
+    and not obviously wrong.
+
+    `Input` now picks the background itself from the `readOnly` prop, so the two
+    are mutually exclusive and there is no conflict to lose. Keyed off the prop
+    rather than the `read-only:` variant deliberately: CSS `:read-only` also
+    matches every _disabled_ field. The general rule — do not pass a utility
+    through `className` that the component already sets; change the component.
+
 ## 7. Verification already done
 
 - **WhatsApp, end to end on production.** A synthetic webhook was enqueued; the
