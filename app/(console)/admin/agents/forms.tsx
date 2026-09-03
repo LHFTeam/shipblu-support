@@ -20,9 +20,15 @@ export function InviteForm() {
       {/* Stacked on a phone: three fields sharing one row leaves an email box
           about eleven characters wide. */}
       <div className="flex flex-col gap-3 sm:flex-row">
+        {/* `autoComplete="off"` on both: an email-plus-name pair is an address
+            form as far as Chrome and Safari are concerned, so they offer the
+            signed-in admin's own details — into a form that is entirely about
+            somebody else. Getting that wrong here does not just misaddress the
+            invite, it puts the wrong person's name in the greeting and on the
+            new agent record. */}
         <div className="sm:flex-1">
           <Label htmlFor="email">Email</Label>
-          <Input id="email" name="email" type="email" required />
+          <Input id="email" name="email" type="email" required autoComplete="off" />
         </div>
         <div className="sm:flex-1">
           <Label htmlFor="name">Name</Label>
@@ -30,7 +36,7 @@ export function InviteForm() {
               the invitation email and reads back on the activation page. The
               admin knows who they are inviting; the invitee should not have to
               tell us who they are. */}
-          <Input id="name" name="name" required />
+          <Input id="name" name="name" required autoComplete="off" maxLength={120} />
         </div>
         <div className="sm:w-40">
           <Label htmlFor="role">Role</Label>
@@ -49,13 +55,24 @@ export function InviteForm() {
           {/* Which of the two happened is the part an admin has to read. The
               link is shown either way, so without this sentence a successful
               send and a send that never left look identical — and the second
-              one needs them to go and paste the link somewhere. */}
-          <p className="mb-1.5 text-xs font-medium opacity-70">
-            {state.inviteSentTo ? (
+              one needs them to go and paste the link somewhere.
+
+              "On its way", not "emailed": all this action did was queue a job.
+              The worker still has to run and the provider still has to accept
+              the recipient, so claiming it was delivered would recreate the
+              silent failure the message exists to rule out.
+
+              Coloured with a token rather than dimmed with `opacity-70`,
+              because opacity composites the whole element — a child cannot
+              exceed its parent's, so the `opacity-100` that used to be on the
+              address was a no-op and the one word worth reading back for a
+              typo was as faint as the rest of the sentence. */}
+          <p className="mb-1.5 text-xs font-medium text-[var(--muted-foreground)]">
+            {state.inviteQueuedFor ? (
               <>
-                Invitation emailed to{' '}
-                <span className="break-all opacity-100">{state.inviteSentTo}</span>. The same link
-                is below if you need to send it another way.
+                The invitation is on its way to{' '}
+                <span className="break-all text-[var(--foreground)]">{state.inviteQueuedFor}</span>.
+                The same link is below if you need to send it another way.
               </>
             ) : (
               <>

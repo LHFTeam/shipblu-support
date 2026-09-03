@@ -1,3 +1,4 @@
+import { emailShell, type EmailBody } from '@/lib/email/html';
 import type { Locale } from '@/lib/kb/locale';
 import { publicBaseUrl } from '@/lib/kb/site';
 
@@ -15,20 +16,19 @@ import { publicBaseUrl } from '@/lib/kb/site';
  * session cookie was set on.
  */
 
-export type PortalEmail = { subject: string; textBody: string; htmlBody: string };
+/**
+ * Structurally the invitation's shape too, so both come from one type in
+ * `lib/email/html.ts` — the alias is kept because "a portal email" is what the
+ * rest of this module talks about.
+ */
+export type PortalEmail = EmailBody;
 
 function accountUrl(locale: Locale, path: string, token: string): string {
   return `${publicBaseUrl()}/${locale}/account/${path}/${encodeURIComponent(token)}`;
 }
 
-/** Minimal HTML: a paragraph, a link, a note. Every client renders it the same. */
 function wrap(lines: string[], locale: Locale): string {
-  const dir = locale === 'ar' ? 'rtl' : 'ltr';
-  return [
-    `<div dir="${dir}" lang="${locale}" style="font-family:system-ui,-apple-system,'Segoe UI',sans-serif;font-size:15px;line-height:1.6;color:#111">`,
-    ...lines,
-    '</div>',
-  ].join('\n');
+  return emailShell(lines, { dir: locale === 'ar' ? 'rtl' : 'ltr', lang: locale });
 }
 
 export function verificationEmail(locale: Locale, token: string): PortalEmail {

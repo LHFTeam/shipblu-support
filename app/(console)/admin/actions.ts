@@ -14,15 +14,13 @@ import {
 } from '@/db/schema';
 import { requirePermission } from '@/lib/auth/guard';
 import { forgetCategoryIds } from '@/lib/categorise/apply';
-import { normaliseEmail } from '@/lib/auth/normalise';
-import { inviteEmail } from '@/lib/auth/invite-email';
+import { looksLikeEmail, normaliseEmail } from '@/lib/auth/normalise';
 import { sealInviteToken } from '@/lib/auth/invite-token';
 import { generateToken, hashToken } from '@/lib/auth/tokens';
 import { destroyAllSessionsForAgent } from '@/lib/auth/session';
 import { listFolderOptions } from '@/lib/kb/admin';
 import { LOCALES } from '@/lib/kb/locale';
 import { resolveFaqFolders } from '@/lib/widget/config';
-import { enqueueNotificationEmail } from '@/lib/email/notify';
 import { enqueue } from '@/lib/queue';
 import { appUrl, env } from '@/lib/env';
 
@@ -30,16 +28,27 @@ export type AdminState = {
   error: string | null;
   inviteUrl?: string;
   /**
-   * Present only when the invitation email was actually queued. Distinct from
-   * `inviteUrl`, which is always returned: the admin has to be told which of
-   * the two things happened, because "we emailed them" and "nothing was sent,
-   * send this yourself" call for opposite next actions and an invite that
-   * silently went nowhere is indistinguishable from one that arrived.
+   * The address an invitation was *queued* for, present only when it was.
+   *
+   * Named for the queue rather than the send because that is all this action
+   * can honestly report: the worker still has to run, and Postmark still has
+   * to accept the recipient. Distinct from `inviteUrl`, which comes back
+   * either way — the admin has to be told which of the two happened, because
+   * "it is on its way" and "nothing was sent, send this yourself" call for
+   * opposite next actions.
    */
-  inviteSentTo?: string;
+  inviteQueuedFor?: string;
 };
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * A cap on the invited name, checked server-side because the action is
+ * reachable without the form. Unbounded, it would reach `invites.name`, then
+ * `agents.name`, and from there every inbox row and assignment dropdown that
+ * renders an agent — one paste of a large clipboard buffer away.
+ */
+const MAX_INVITE_NAME = 120;
 
 /**
  * Creates an invite, emails the invitee a link to activate it, and returns that
@@ -63,12 +72,19 @@ export async function createInvite(_state: AdminState, formData: FormData): Prom
   const name = String(formData.get('name') ?? '').trim();
   const role = String(formData.get('role') ?? 'agent');
 
-  if (!email.includes('@')) return { error: 'Enter a valid email address' };
+  // `looksLikeEmail`, not `includes('@')`: the send path validates with
+  // `z.email()`, which rejects `foo@` and `@b.com`. Accepting them here would
+  // commit the invite, tell the admin it was emailed, and leave the job to die
+  // in the worker where they will never see it.
+  if (!looksLikeEmail(email)) return { error: 'Enter a valid email address' };
   // `required` on the input is a courtesy to whoever is typing, not a
   // constraint — the action is reachable without it. Checked here because
   // `invites.name` is NOT NULL and a blank one would otherwise reach the
   // insert as '', which satisfies the column and satisfies nobody else.
   if (!name) return { error: 'Enter the name of the person you are inviting' };
+  if (name.length > MAX_INVITE_NAME) {
+    return { error: `A name cannot be longer than ${MAX_INVITE_NAME} characters` };
+  }
   if (!['agent', 'supervisor', 'admin', 'account_admin'].includes(role)) {
     return { error: 'Unknown role' };
   }
@@ -98,36 +114,46 @@ export async function createInvite(_state: AdminState, formData: FormData): Prom
   // pending-invites screen the moment the TTL changed.
   const expiresAt = new Date(Date.now() + INVITE_TTL_MS);
 
-  await db.transaction(async (tx) => {
+  const inviteId = await db.transaction(async (tx) => {
     // Supersede any open invite for the same address, so a resend does not leave
     // two working links with different roles. Delete and insert are one unit:
     // an insertion failure must leave the existing invitation usable.
     await tx.delete(invites).where(and(eq(invites.email, email), isNull(invites.acceptedAt)));
 
-    await tx.insert(invites).values({
-      tokenHash: hashToken(token),
-      tokenCiphertext,
-      email,
-      name,
-      role: role as 'agent' | 'supervisor' | 'admin' | 'account_admin',
-      invitedByAgentId: admin.id,
-      expiresAt,
-    });
+    const inserted = await tx
+      .insert(invites)
+      .values({
+        tokenHash: hashToken(token),
+        tokenCiphertext,
+        email,
+        name,
+        role: role as 'agent' | 'supervisor' | 'admin' | 'account_admin',
+        invitedByAgentId: admin.id,
+        expiresAt,
+      })
+      .returning({ id: invites.id });
+
+    return inserted[0]!.id;
   });
 
   const inviteUrl = `${inviteBaseUrl}/invite/${token}`;
 
   // After the commit, never inside it. `enqueue` writes on its own connection,
   // so a job queued from inside the transaction would survive a rollback and
-  // email a link to an invite that does not exist.
+  // point the worker at an invite that does not exist.
   //
-  // Queued rather than sent inline because the admin is waiting on this form
-  // and the provider is not theirs to wait for: they already have the link in
-  // the response, so a slow Postmark must not hold up the page, and a transient
-  // failure gets the same backoff as every other send. No `dedupeKey` — a
-  // resend supersedes the old row and mints a new token, so each send is a
-  // different message, and a key spent on the address would silently drop the
-  // second invitation entirely.
+  // The payload is the row's id and nothing else. The rendered link must not go
+  // in it: `jobs` keeps a completed row for seven days and a dead one forever,
+  // so a body containing the activation URL would leave a working credential in
+  // plaintext for longer than the invite itself is valid — undoing the whole
+  // reason `invites` stores a hash and an AES-GCM envelope instead of a token.
+  // `send_agent_invite` rebuilds the link from that envelope.
+  //
+  // Priority 60, behind ticket replies at 50. `enqueueNotificationEmail` uses 40
+  // on the grounds that somebody is sitting on a form waiting for the link,
+  // which is exactly what is *not* true here — the admin already has it in this
+  // response. A batch of invitations must not overtake customers waiting on an
+  // answer.
   //
   // Nothing here may throw. The invite is committed by this point, so an
   // exception would do what the `appUrl()` check above exists to prevent: leave
@@ -135,14 +161,11 @@ export async function createInvite(_state: AdminState, formData: FormData): Prom
   // queue insert that fails degrades to the same state as an unconfigured
   // mailbox — the admin is told no email went out and sends the link
   // themselves, which is a working invitation either way.
-  let inviteSentTo: string | null = null;
+  let queuedFor: string | null = null;
   if (env().EMAIL_FROM_ADDRESS) {
     try {
-      await enqueueNotificationEmail({
-        to: email,
-        ...inviteEmail({ url: inviteUrl, name, invitedByName: admin.name, expiresAt }),
-      });
-      inviteSentTo = email;
+      await enqueue('send_agent_invite', { inviteId }, { priority: 60 });
+      queuedFor = email;
     } catch (error) {
       // The cause belongs in the logs; the admin only needs to know it is on
       // them to deliver the link, which the response already tells them.
@@ -155,7 +178,7 @@ export async function createInvite(_state: AdminState, formData: FormData): Prom
   return {
     error: null,
     inviteUrl,
-    ...(inviteSentTo ? { inviteSentTo } : {}),
+    ...(queuedFor ? { inviteQueuedFor: queuedFor } : {}),
   };
 }
 

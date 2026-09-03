@@ -1,8 +1,11 @@
 import { DateTime } from 'luxon';
 import { describe, expect, it } from 'vitest';
+import { formatDateTime } from '@/lib/format';
 import { inviteEmail } from './invite-email';
 
-const URL = 'https://support.shipblu.com/invite/JqL0-9_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789';
+// Not `URL` — that shadows the global constructor for the whole module, so the
+// next case that wants to parse the link gets a TypeError instead.
+const INVITE_URL = 'https://support.shipblu.com/invite/JqL0-9_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789';
 
 /** Cairo wall-clock in, so the timezone database does the conversion. */
 function cairo(iso: string): Date {
@@ -13,7 +16,7 @@ const EXPIRES = cairo('2026-09-10T14:30');
 
 function build(overrides: Partial<Parameters<typeof inviteEmail>[0]> = {}) {
   return inviteEmail({
-    url: URL,
+    url: INVITE_URL,
     name: 'Mona Farouk',
     invitedByName: 'Ali Hassan',
     expiresAt: EXPIRES,
@@ -25,12 +28,12 @@ describe('inviteEmail', () => {
   it('puts the activation link in both bodies and never in the subject', () => {
     const email = build();
 
-    expect(email.htmlBody).toContain(`href="${URL}"`);
-    expect(email.textBody).toContain(URL);
+    expect(email.htmlBody).toContain(`href="${INVITE_URL}"`);
+    expect(email.textBody).toContain(INVITE_URL);
 
     // The subject is what a mail client prints on a lock screen and what a
     // notification relay keeps a copy of. The link is a credential.
-    expect(email.subject).not.toContain(URL);
+    expect(email.subject).not.toContain(INVITE_URL);
     expect(email.subject).not.toContain('/invite/');
   });
 
@@ -39,7 +42,7 @@ describe('inviteEmail', () => {
 
     // Twice in the HTML: once as the anchor, once as copyable text. A client
     // that strips the anchor still leaves the recipient able to act.
-    expect(email.htmlBody.split(URL)).toHaveLength(3);
+    expect(email.htmlBody.split(INVITE_URL)).toHaveLength(3);
   });
 
   it('greets the invitee by the name the invite was raised with', () => {
@@ -77,10 +80,15 @@ describe('inviteEmail', () => {
   it('states the expiry in Cairo time, from the deadline the row will enforce', () => {
     const email = build();
 
-    // 14:30 Cairo, not the 11:30 the same instant reads as in UTC.
-    expect(email.textBody).toContain('10 Sept 2026, 14:30');
+    // Against `formatDateTime` rather than a literal date string. The thing
+    // worth pinning is the timezone — 14:30 Cairo, not the 11:30 the same
+    // instant reads as in UTC — and `Intl`'s spelling of the month and its
+    // choice of space character have both moved across CLDR releases, so a
+    // hardcoded '10 Sept 2026, 14:30' turns red on an ICU bump for no reason.
+    expect(email.textBody).toContain(formatDateTime(EXPIRES));
+    expect(email.textBody).toContain('14:30');
     expect(email.textBody).toContain('(Cairo time)');
-    expect(email.htmlBody).toContain('10 Sept 2026, 14:30');
+    expect(email.htmlBody).toContain(formatDateTime(EXPIRES));
   });
 
   it('tells the recipient that ignoring it costs them nothing', () => {

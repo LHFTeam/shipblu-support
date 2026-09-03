@@ -145,6 +145,7 @@ export async function acceptInvite(
   if (!invite) return { error: 'This invite has expired or has already been used' };
 
   const passwordHash = await hashPassword(password);
+  const agentName = name || invite.name;
 
   const agentId = await db.transaction(async (tx) => {
     // Marking the invite accepted first, conditional on it still being open,
@@ -167,7 +168,7 @@ export async function acceptInvite(
         // or the one the invite was raised with. `invites.name` is NOT NULL, so
         // the old `|| invite.email` could no longer fire — and an agent record
         // named after an email address was never an answer anybody wanted.
-        name: name || invite.name,
+        name: agentName,
         email: invite.email,
         passwordHash,
         role: invite.role,
@@ -175,7 +176,12 @@ export async function acceptInvite(
       .onConflictDoUpdate({
         // An agent invited again after being deactivated keeps their history.
         target: agents.email,
-        set: { passwordHash, isActive: true, role: invite.role },
+        // `name` included deliberately. The activation page invites them to
+        // correct it — "the one moment somebody can correct a misspelling of
+        // their own name is before the account carries it into every ticket
+        // they ever answer" — and leaving it out of the update is precisely the
+        // case where that promise would be broken instead of kept.
+        set: { name: agentName, passwordHash, isActive: true, role: invite.role },
       })
       .returning({ id: agents.id });
 

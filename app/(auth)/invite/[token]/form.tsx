@@ -41,14 +41,7 @@ export function InviteForm({ token, email, name }: { token: string; email: strin
           addresses was invited, and posting a value the server is required to
           ignore only invites a later change to start trusting it.
         */}
-        <Input
-          id="email"
-          type="email"
-          defaultValue={email}
-          readOnly
-          autoComplete="username"
-          className="cursor-default bg-[var(--muted)] text-[var(--muted-foreground)]"
-        />
+        <Input id="email" type="email" defaultValue={email} readOnly autoComplete="username" />
       </div>
 
       <div>

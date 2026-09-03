@@ -1,3 +1,4 @@
+import { emailShell, escapeHtml } from '@/lib/email/html';
 import type { NotificationEmail } from '@/lib/email/notify';
 import { formatDateTime } from '@/lib/format';
 
@@ -24,8 +25,10 @@ export type InviteEmailBody = Omit<NotificationEmail, 'to'>;
  * inbox and an agent account with this invite's role. So it stays out of the
  * subject, which is what a mail client prints on a lock screen and what a
  * mailing-list archive or a notification relay keeps a copy of, and out of
- * every log line (`send_notification_email` logs the recipient and the
- * Message-ID, never the body).
+ * every log line (`sendTransactionalEmail` logs the recipient and the
+ * Message-ID, never the body). It is also why this is called from
+ * `send_agent_invite` rather than at enqueue time: the rendered link must not
+ * be what sits in `jobs.payload`.
  *
  * `invitedByName` is not decoration. An unexpected "set a password" link is
  * indistinguishable from a phishing attempt, and naming the colleague who sent
@@ -73,7 +76,7 @@ export function inviteEmail({
       '',
       'ShipBlu Support',
     ].join('\n'),
-    htmlBody: wrap([
+    htmlBody: emailShell([
       `<p>${escapeHtml(greeting)}</p>`,
       `<p>${escapeHtml(inviter)} to join the ShipBlu Support team console — the tool the team answers customer tickets in.</p>`,
       // A styled anchor rather than a <button>: a button in an email is a form
@@ -93,34 +96,4 @@ export function inviteEmail({
       '<p>ShipBlu Support</p>',
     ]),
   };
-}
-
-/** Minimal HTML: paragraphs, one link, a note. Every client renders it the same. */
-function wrap(lines: string[]): string {
-  return [
-    `<div lang="en" style="font-family:system-ui,-apple-system,'Segoe UI',sans-serif;font-size:15px;line-height:1.6;color:#111">`,
-    ...lines,
-    '</div>',
-  ].join('\n');
-}
-
-/**
- * Interpolated values are escaped rather than sanitised, and deliberately not
- * through `lib/html/sanitize.ts`: that module's job is to keep attacker HTML
- * *renderable but safe*, which is the right answer for an email body somebody
- * sent us. Here the values are a name, an inviter and a URL — none of which
- * has any business carrying markup at all — so the whole answer is to escape
- * them and let a stray `<` show up as a `<`.
- *
- * An admin types the name, so this is not a hostile input so much as one nobody
- * validates: `O'Brien <ops>` should not silently break the layout of the
- * message, and an apostrophe in a name is common enough to matter.
- */
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
 }
