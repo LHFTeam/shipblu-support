@@ -50,6 +50,7 @@ export async function InboxShell({
           activeNumber={activeNumber}
           canSeeBot={can(agent, 'ticket.view.bot')}
           canCreate={can(agent, 'ticket.create')}
+          canViewKb={can(agent, 'kb.view')}
         />
       </aside>
 
