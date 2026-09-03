@@ -42,12 +42,13 @@ describe('inviteEmail', () => {
     expect(email.htmlBody.split(URL)).toHaveLength(3);
   });
 
-  it('greets an invitee with no name without leaving a dangling comma', () => {
-    const email = build({ name: null });
+  it('greets the invitee by the name the invite was raised with', () => {
+    const email = build();
 
-    expect(email.textBody).toContain('Hi,');
-    expect(email.textBody).not.toContain('Hi ,');
-    expect(email.htmlBody).not.toContain('Hi ,');
+    // No unnamed case to cover: `invites.name` is NOT NULL and `createInvite`
+    // rejects a blank one, so the greeting has exactly one shape.
+    expect(email.textBody).toContain('Hi Mona Farouk,');
+    expect(email.htmlBody).toContain('Hi Mona Farouk,');
   });
 
   it('falls back to the passive voice when the inviter is unknown', () => {

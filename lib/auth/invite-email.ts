@@ -39,15 +39,17 @@ export function inviteEmail({
   expiresAt,
 }: {
   url: string;
-  /** The name the admin typed, when they typed one. */
-  name: string | null;
-  /** The admin who created the invite. */
+  /** The name the admin typed. `invites.name` is NOT NULL, so there is one. */
+  name: string;
+  /**
+   * The admin who created the invite. Optional where `name` is not, because
+   * `invites.invited_by_agent_id` is `on delete set null` — an invitation
+   * rebuilt from a row whose author has since left has nobody to name.
+   */
   invitedByName: string | null;
   expiresAt: Date;
 }): InviteEmailBody {
-  // "Hi," rather than "Hi ," — name is optional on the invite form, so the
-  // greeting has to survive its absence.
-  const greeting = name ? `Hi ${name},` : 'Hi,';
+  const greeting = `Hi ${name},`;
 
   const inviter = invitedByName ? `${invitedByName} has invited you` : 'You have been invited';
 

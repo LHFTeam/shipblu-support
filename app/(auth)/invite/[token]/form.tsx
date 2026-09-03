@@ -15,24 +15,13 @@ const INITIAL: AuthFormState = { error: null };
  * "here is who we think you are, confirm it by setting a password" is what this
  * page is doing, and a sentence of body text does not read as a form somebody
  * has already half-completed for you.
+ *
+ * There is no unnamed-invite branch to handle: `invites.name` is NOT NULL, so
+ * the admin has already answered the only identity question this page could
+ * otherwise have had to ask.
  */
-export function InviteForm({
-  token,
-  email,
-  name,
-}: {
-  token: string;
-  email: string;
-  name: string | null;
-}) {
+export function InviteForm({ token, email, name }: { token: string; email: string; name: string }) {
   const [state, action] = useActionState(acceptInvite, INITIAL);
-
-  // The admin may have invited an address without a name — it is optional on
-  // their form — and the agent record needs one. So the field is prefilled and
-  // left alone when we have it, and asked for when we do not; a read-only empty
-  // name would end up naming the account after the email address, which is what
-  // `acceptInvite` falls back to.
-  const hasName = Boolean(name);
 
   return (
     <form
@@ -41,11 +30,7 @@ export function InviteForm({
     >
       <input type="hidden" name="token" value={token} />
 
-      <p className="text-sm opacity-70">
-        {hasName
-          ? 'Set a password to activate your account.'
-          : 'Confirm your name and set a password to activate your account.'}
-      </p>
+      <p className="text-sm opacity-70">Set a password to activate your account.</p>
 
       <div>
         <Label htmlFor="email">Email</Label>
@@ -68,14 +53,13 @@ export function InviteForm({
 
       <div>
         <Label htmlFor="name">Your name</Label>
-        <Input
-          id="name"
-          name="name"
-          defaultValue={name ?? ''}
-          required
-          autoComplete="name"
-          autoFocus={!hasName}
-        />
+        {/*
+          Prefilled and still editable. The admin typed this, so it is a
+          reasonable guess rather than a fact about the person reading it, and
+          the one moment somebody can correct a misspelling of their own name is
+          before the account carries it into every ticket they ever answer.
+        */}
+        <Input id="name" name="name" defaultValue={name} required autoComplete="name" />
       </div>
 
       <div>
@@ -87,10 +71,10 @@ export function InviteForm({
           autoComplete="new-password"
           minLength={12}
           required
-          // The one field with anything left to do in it, whenever the invite
-          // carried a name. Focusing the prefilled name instead puts the cursor
-          // in the box the page just told them they can leave alone.
-          autoFocus={hasName}
+          // The only field with anything left to do in it. Focusing the
+          // prefilled name instead puts the cursor in a box the page has just
+          // told them they can leave alone.
+          autoFocus
         />
         <p className="mt-1 text-xs opacity-50">At least 12 characters.</p>
       </div>

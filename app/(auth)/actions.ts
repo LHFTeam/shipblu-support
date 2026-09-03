@@ -163,7 +163,11 @@ export async function acceptInvite(
     const inserted = await tx
       .insert(agents)
       .values({
-        name: name || invite.name || invite.email,
+        // Two names, no third fallback: what they typed on the activation page,
+        // or the one the invite was raised with. `invites.name` is NOT NULL, so
+        // the old `|| invite.email` could no longer fire — and an agent record
+        // named after an email address was never an answer anybody wanted.
+        name: name || invite.name,
         email: invite.email,
         passwordHash,
         role: invite.role,

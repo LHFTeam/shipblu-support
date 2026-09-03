@@ -25,8 +25,12 @@ export function InviteForm() {
           <Input id="email" name="email" type="email" required />
         </div>
         <div className="sm:flex-1">
-          <Label htmlFor="name">Name (optional)</Label>
-          <Input id="name" name="name" />
+          <Label htmlFor="name">Name</Label>
+          {/* Required, because this is the name the invitee is greeted by in
+              the invitation email and reads back on the activation page. The
+              admin knows who they are inviting; the invitee should not have to
+              tell us who they are. */}
+          <Input id="name" name="name" required />
         </div>
         <div className="sm:w-40">
           <Label htmlFor="role">Role</Label>

@@ -60,10 +60,15 @@ export async function createInvite(_state: AdminState, formData: FormData): Prom
   const admin = await requirePermission('admin.agents');
 
   const email = normaliseEmail(String(formData.get('email') ?? ''));
-  const name = String(formData.get('name') ?? '').trim() || null;
+  const name = String(formData.get('name') ?? '').trim();
   const role = String(formData.get('role') ?? 'agent');
 
   if (!email.includes('@')) return { error: 'Enter a valid email address' };
+  // `required` on the input is a courtesy to whoever is typing, not a
+  // constraint — the action is reachable without it. Checked here because
+  // `invites.name` is NOT NULL and a blank one would otherwise reach the
+  // insert as '', which satisfies the column and satisfies nobody else.
+  if (!name) return { error: 'Enter the name of the person you are inviting' };
   if (!['agent', 'supervisor', 'admin', 'account_admin'].includes(role)) {
     return { error: 'Unknown role' };
   }
