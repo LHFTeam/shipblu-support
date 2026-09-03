@@ -994,7 +994,13 @@ provider. Each is a round trip somebody has to actually watch:
   and proves nothing about `app.shipblu.com`, where the origin is one Render
   serves the header for.
 - **The KB on its custom domain**, including that Freshdesk's old article URLs
-  redirect. 174 `kb_redirects` rows exist and none has been followed in anger.
+  redirect. 174 `kb_redirects` rows exist and none has been followed in anger —
+  which was read as "nothing links to them" and was not: 29 links **inside the
+  articles** pointed at those legacy paths until 2026-09-03, and `support.
+shipblu.com` still serves Freshdesk, so each one took a reader out of this
+  help centre and into the old portal. They are now `/{locale}/a/{slug}`
+  (§6.50). The redirects still matter for inbound traffic; nothing we publish
+  depends on them any more.
 - **A WhatsApp template send outside the 24-hour window** — the one path the
   end-to-end test in §7 could not cover.
 - **A side conversation to a genuine forwarding list.** Everything below is
@@ -2966,6 +2972,61 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     rather than the `read-only:` variant deliberately: CSS `:read-only` also
     matches every _disabled_ field. The general rule — do not pass a utility
     through `className` that the component already sets; change the component.
+
+49. **A body `<h1>` in a knowledge-base article renders as plain paragraph
+    text.** _2026-09-03._ Tailwind's preflight resets every heading to
+    `font-size: inherit; font-weight: inherit`, and `.kb-article` in
+    `app/globals.css` deliberately styles `h2`–`h6` only — the article page
+    already renders the title as the page's `h1`. So the 128 body `h1`s the
+    Freshdesk import brought with it, across 44 of 112 articles, picked up
+    nothing at all: no size, no weight, no colour, not even the `margin-top:
+2em` that separates a section from the one above it, because that rule names
+    `h2`–`h6` too. Verified in the served stylesheet rather than inferred:
+    `h1,h2,h3,h4,h5,h6{font-size:inherit;font-weight:inherit}` and
+    `.kb-article h2,.kb-article h3,…` are both in
+    `/_next/static/chunks/04dkjnvi0lxh0.css`.
+
+    Every section heading in the step-by-step guides was one of these, so
+    "Order", "Customer Details" and "Packages" read as ordinary bullet text in
+    the middle of a list. `lib/kb/format.ts` maps them to `h2` and lifts them
+    out of the list item Freshdesk left them in.
+
+    The general shape is worth keeping in mind beyond headings: **the stylesheet
+    is the specification for what stored HTML may contain.** `.kb-article` says
+    what it styles, and anything outside that list is unstyled by construction
+    rather than by accident.
+
+50. **The classes a paste brings with it are live utilities in this app.**
+    _2026-09-03._ Three of the imported articles carry a chunk of ChatGPT's DOM,
+    `class="markdown prose dark:prose-invert"` and all — and because this app is
+    built with Tailwind, `flex`, `flex-col`, `items-end`, `gap-2`, `w-full`,
+    `text-base`, `text-lg` and `mx-auto` are real rules in the served CSS
+    (checked, one by one, in the built chunk). So a pasted wrapper turned part
+    of an article into a flex column with its content pushed to the inline end,
+    and a `text-lg` on a heading resized it. Froala's `fr-*`, Zoho's `zw-*` and
+    a WordPress theme's `fusion-text` were inert; these were not.
+
+    Two more from the same corpus, both invisible in an English spot check:
+    inline `color:rgb(0, 0, 0)` from a light-mode editor, on a help centre that
+    answers `prefers-color-scheme: dark`; and `dir="ltr"` with
+    `text-align:left`, which 25 of the Arabic articles carry, un-mirroring a
+    paragraph in the middle of a right-to-left page. `lib/kb/format.ts` strips
+    all of it, and the rule that catches the next one is in
+    `scripts/ci/repo-rules.mjs`: a write path that sanitises an article body and
+    does not normalise it fails the build.
+
+51. **`kb_articles.updated_at` is not an edit date — every page view moves
+    it.** _2026-09-03._ `recordArticleView` increments `view_count` on the
+    article row, and `touch_updated_at` fires on any update of a table with that
+    column, so a read writes the timestamp. The article page renders it as
+    "Updated <date>" under the title, which means a busy article tells every
+    customer it was revised today and a quiet one looks stale.
+
+    Two consequences. The line on the page is worth either sourcing from
+    somewhere else — `kb_article_versions` knows when the body actually changed
+    — or dropping. And nothing should reason about content freshness from this
+    column: 99 of the 112 articles read 2026-08-19, the import date, and the
+    handful that read later are the ones somebody happened to open.
 
 ## 7. Verification already done
 

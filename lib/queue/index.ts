@@ -29,6 +29,7 @@ export type JobType =
   | 'backfill_shipment_links'
   | 'backfill_message_locations'
   | 'backfill_meta_profiles'
+  | 'normalise_kb_formatting'
   | 'cleanup';
 
 export type EnqueueOptions = {

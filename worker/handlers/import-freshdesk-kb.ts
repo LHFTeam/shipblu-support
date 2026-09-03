@@ -18,6 +18,7 @@ import {
   type FreshdeskFolder,
 } from '@/lib/freshdesk/client';
 import { htmlToText, preview, sanitiseArticleHtml } from '@/lib/html/sanitize';
+import { normaliseArticleHtml } from '@/lib/kb/format';
 import { detectCategoryLocale, detectLocale, looksUntranslated } from '@/lib/kb/language';
 import { LOCALES, LOCALE_NAMES, type Locale } from '@/lib/kb/locale';
 import { slugify, uniqueSlug } from '@/lib/kb/slug';
@@ -499,7 +500,13 @@ async function upsertArticle(
   // and hand-written markup, so it goes through the same sanitiser as anything
   // an agent writes. Sanitising at import rather than at render keeps the
   // stored row safe for every consumer.
-  const bodyHtml = sanitiseArticleHtml(article.description ?? '');
+  //
+  // And then through the same normaliser, for the reason the first import made
+  // plain: what arrived carried four editors' classes, inline colours a dark
+  // theme cannot survive, and 128 body `h1`s the help centre's stylesheet does
+  // not dress. Re-importing without this would undo the cleanup article by
+  // article — `lib/kb/format.ts` has the standard and the evidence for it.
+  const bodyHtml = normaliseArticleHtml(sanitiseArticleHtml(article.description ?? ''));
   const bodyText = htmlToText(bodyHtml);
 
   const values = {

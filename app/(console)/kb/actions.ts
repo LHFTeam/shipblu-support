@@ -8,6 +8,7 @@ import { kbArticleVersions, kbArticles, kbCategories, kbFolders } from '@/db/sch
 import { requirePermission } from '@/lib/auth/guard';
 import { htmlToText, preview, sanitiseArticleHtml } from '@/lib/html/sanitize';
 import { takenSlugs } from '@/lib/kb/admin';
+import { normaliseArticleHtml } from '@/lib/kb/format';
 import { isLocale } from '@/lib/kb/locale';
 import { slugify, uniqueSlug } from '@/lib/kb/slug';
 
@@ -52,7 +53,13 @@ export async function saveArticle(_state: KbState, formData: FormData): Promise<
     return { error: 'Unknown visibility' };
   }
 
-  const bodyHtml = sanitiseArticleHtml(rawBody);
+  // Sanitise, then normalise, in that order: the sanitiser is the security
+  // boundary and the normaliser is a formatting pass that relies on being handed
+  // sanitize-html's canonical output. It runs here rather than on the editor's
+  // side because an author pasting from another help desk cannot see what came
+  // with the paste, and the preview beside the textarea renders their draft
+  // through `.kb-article` — the same stylesheet the standard is written for.
+  const bodyHtml = normaliseArticleHtml(sanitiseArticleHtml(rawBody));
   const bodyText = htmlToText(bodyHtml);
   const excerpt = preview(bodyText, 200);
 
@@ -312,9 +319,12 @@ export async function restoreVersion(_state: KbState, formData: FormData): Promi
       editedByAgentId: agent.id,
     });
 
-    // Re-sanitised on the way back in: an old version was sanitised by whatever
-    // rules were in force when it was written, and those may since have tightened.
-    const bodyHtml = sanitiseArticleHtml(version.bodyHtml);
+    // Re-sanitised and re-normalised on the way back in: an old version was
+    // sanitised by whatever rules were in force when it was written, and those
+    // may since have tightened — and a version cut before the formatting
+    // standard existed still carries the classes and inline styles it took to
+    // restore one and undo the cleanup.
+    const bodyHtml = normaliseArticleHtml(sanitiseArticleHtml(version.bodyHtml));
 
     await tx
       .update(kbArticles)

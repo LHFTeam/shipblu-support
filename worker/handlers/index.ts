@@ -9,6 +9,7 @@ import { downloadMediaJob } from './download-media';
 import { fetchMetaProfile } from './fetch-meta-profile';
 import { importFreshdeskKb } from './import-freshdesk-kb';
 import { moderateMetaComment } from './moderate-meta-comment';
+import { normaliseKbFormatting } from './normalise-kb-formatting';
 import { processWebhook } from './process-webhook';
 import { rollupMetrics } from './rollup-metrics';
 import { runTimeAutomations } from './run-time-automations';
@@ -49,6 +50,7 @@ export const handlers: Partial<Record<JobType, JobHandler>> = {
   fetch_meta_profile: fetchMetaProfile,
   import_freshdesk_kb: () => importFreshdeskKb(),
   moderate_meta_comment: moderateMetaComment,
+  normalise_kb_formatting: (job) => normaliseKbFormatting(job),
   process_webhook: processWebhook,
   rollup_metrics: (job) => rollupMetrics(job),
   run_time_automations: () => runTimeAutomations(),
