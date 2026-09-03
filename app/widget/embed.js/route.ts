@@ -39,6 +39,7 @@ export async function GET() {
     identify: identify,
     clear: clear,
     setLocale: setLocale,
+    compose: compose,
     open: function () { toggle(true); },
     close: function () { toggle(false); },
     toggle: function () { toggle(); }
@@ -99,6 +100,20 @@ export async function GET() {
   var signature = typeof settings.signature === 'string' ? settings.signature : null;
   var frameReady = false;
   var clearPending = false;
+
+  /*
+   * Text a host page wants sitting in the composer, held until there is a
+   * document to hand it to.
+   *
+   * \`frameLoaded\` is a weaker fact than \`frameReady\` and has to be: the widget
+   * opens on its questions and mints no token until somebody chooses to talk,
+   * so \`ready\` — which needs a token — never arrives for a panel that has only
+   * ever been looked at. \`hello\`, which the frame posts as soon as it mounts,
+   * is what says a document exists. Re-pointing \`src\` starts a new one, so it
+   * goes back to false there.
+   */
+  var composePending = null;
+  var frameLoaded = false;
 
   /*
    * The two layouts, and which one a viewport gets.
@@ -343,7 +358,12 @@ export async function GET() {
       // frame, which would throw away a half-typed message every time this
       // runs.
       var src = frameSrc();
-      if (iframe.src !== src) iframe.src = src;
+      if (iframe.src !== src) {
+        iframe.src = src;
+        // A new document, which has been told nothing. Anything waiting to be
+        // handed over is handed to that one instead, on its \`hello\`.
+        frameLoaded = false;
+      }
     }
 
     applyPlacement();
@@ -392,6 +412,40 @@ export async function GET() {
   }
 
   /**
+   * Open the chat with something already written in the composer.
+   *
+   * For a host page with a subject of its own — the tracking page's "ask
+   * support about this shipment", where the parcel number belongs in the
+   * message and the visitor should not have to copy it across. It is a draft
+   * and nothing more: the widget puts the text in the box, focuses it and
+   * waits, so the visitor writes their own question under it and decides when
+   * it goes. Nothing is sent on their behalf.
+   *
+   * Held rather than posted when the frame is not up yet. \`toggle(true)\` builds
+   * it, and a frame that is still loading has no listener — so the text waits
+   * for the \`hello\` that says a document exists, exactly as \`clear()\` waits
+   * for \`ready\`.
+   */
+  function compose(text) {
+    composePending = typeof text === 'string' ? text : '';
+    toggle(true);
+    flushCompose();
+  }
+
+  function flushCompose() {
+    if (composePending === null || !iframe || !frameLoaded) return;
+
+    iframe.contentWindow.postMessage(
+      { source: 'shipblu-host', type: 'compose', text: composePending },
+      BASE
+    );
+    // Once only. The frame says \`hello\` again whenever it remounts, and
+    // re-delivering the draft then would overwrite whatever the visitor has
+    // typed since.
+    composePending = null;
+  }
+
+  /**
    * Told to us by a host page that knows who is signed in.
    *
    * The signature is optional and is what separates a claim from a fact — see
@@ -422,6 +476,10 @@ export async function GET() {
   function clear() {
     identity = null;
     signature = null;
+    // The draft goes with them. A pending compose belongs to whoever was
+    // reading the page that asked for it, and handing it to the next person at
+    // this browser is the leak \`clear()\` exists to prevent.
+    composePending = null;
 
     if (iframe && frameReady) {
       iframe.contentWindow.postMessage({ source: 'shipblu-host', type: 'clear' }, BASE);
@@ -454,6 +512,7 @@ export async function GET() {
 
     iframe = document.createElement('iframe');
     iframe.id = 'shipblu-chat-frame';
+    frameLoaded = false;
     iframe.src = frameSrc();
     iframe.setAttribute('allow', 'clipboard-write');
     // Everything except its size and position, which \`applyPlacement\` owns —
@@ -548,6 +607,7 @@ export async function GET() {
      */
     if (data.type === 'ready') {
       frameReady = true;
+      frameLoaded = true;
 
       if (clearPending) {
         clearPending = false;
@@ -556,6 +616,7 @@ export async function GET() {
       }
 
       pushIdentity();
+      flushCompose();
     }
 
     /*
@@ -570,12 +631,19 @@ export async function GET() {
      * assuming it is visible, a hidden panel silently swallows the unread badge.
      */
     if (data.type === 'hello') {
+      frameLoaded = true;
+
       if (iframe && iframe.contentWindow) {
         iframe.contentWindow.postMessage(
           { source: 'shipblu-host', type: open ? 'opened' : 'closed' },
           BASE
         );
       }
+
+      // After the visibility answer, so the panel knows it is on screen before
+      // it is given something to say — the draft arriving first would land in a
+      // thread the widget still believes nobody is looking at.
+      flushCompose();
       return;
     }
 

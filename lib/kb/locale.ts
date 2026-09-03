@@ -97,7 +97,9 @@ const STRINGS = {
     trackLastUpdate: 'Last update',
     trackNoTimestamp: 'No time recorded for this update',
     trackAnswers: 'Answers for this status',
+    trackStatus: 'Status',
     trackAskSupport: 'Ask support about this shipment',
+    trackAskSupportHint: 'Opens the chat with this shipment already in the box.',
     trackPrivacyNote:
       'Anyone with this tracking number can see its status, so this page never shows a name, an address or a phone number.',
     trackHistory: 'History',
@@ -277,7 +279,9 @@ const STRINGS = {
     trackLastUpdate: 'آخر تحديث',
     trackNoTimestamp: 'لم يُسجَّل وقت لهذا التحديث',
     trackAnswers: 'إجابات لهذه الحالة',
+    trackStatus: 'الحالة',
     trackAskSupport: 'اسأل الدعم عن هذه الشحنة',
+    trackAskSupportHint: 'تفتح المحادثة وبها بيانات هذه الشحنة بالفعل.',
     trackPrivacyNote:
       'أي شخص يملك رقم التتبّع يستطيع رؤية حالة الشحنة، لذلك لا تعرض هذه الصفحة اسمًا أو عنوانًا أو رقم هاتف.',
     trackHistory: 'السجل',

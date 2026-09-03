@@ -78,7 +78,21 @@ window.shipbluChat.setLocale('ar'); // language switch without a reload
 window.shipbluChat.open(); // e.g. from a "Contact support" menu item
 window.shipbluChat.close();
 window.shipbluChat.toggle();
+window.shipbluChat.compose('Tracking number: 1755021358719\n\n'); // open with a draft
 ```
+
+**`compose(text)` opens the panel with `text` already in the composer, and
+stops there.** It is for a page that knows what the conversation is about — the
+help centre's tracking page uses it so a recipient asking about a parcel does
+not have to copy the number across. The widget puts the text in the box,
+focuses it and waits: the visitor writes their own question under it and
+decides when it goes. Nothing is sent on their behalf, and nothing overwrites a
+message they have already started typing — a second call onto a non-empty
+composer only moves the caret.
+
+The text is capped at 1,000 characters and is a draft like any other, so keep
+it to the facts the agent needs first. Called before the frame exists, it waits
+for it; called on a panel that is already open, it lands immediately.
 
 **Call `clear()` when the user signs out.** The visitor's token lives in the
 widget's own storage, so it outlives the dashboard's session entirely: on a

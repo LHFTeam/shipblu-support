@@ -66,6 +66,16 @@ export function WidgetChat({
 
   const [panelOpen, setPanelOpen] = useState(true);
   const [detailsSaved, setDetailsSaved] = useState(false);
+  /*
+   * Text a host page asked us to start the visitor off with, and a sequence
+   * number rather than a bare string.
+   *
+   * The thread applies a prefill it has not seen before, so the counter is what
+   * lets the same host page hand over the same draft twice — a visitor pressing
+   * "ask support about this shipment" again after clearing the box — without
+   * either press being mistaken for a repaint of the other.
+   */
+  const [prefill, setPrefill] = useState<{ text: string; seq: number } | null>(null);
 
   const seenCount = useRef(0);
   /* One session request at a time. Without this, `talkToAgent` firing one and a
@@ -98,6 +108,8 @@ export function WidgetChat({
      after they may already have tapped something, and it must not drag them
      back out of it. */
   const navigated = useRef(false);
+  /* Which prefill this is, so a repeat of the same text is still a new one. */
+  const composeSeq = useRef(0);
 
   // --- Session -------------------------------------------------------------
 
@@ -199,6 +211,38 @@ export function WidgetChat({
       minting.current = null;
     }
   }, [token]);
+
+  /**
+   * The visitor has chosen to talk. Lives here rather than under Navigation
+   * because minting is the part that matters: this is the moment a browser
+   * becomes a `contacts` row, and the screen change is the cheap half.
+   */
+  const talkToAgent = useCallback(() => {
+    // Shown immediately; the token is minted underneath. Waiting for the round
+    // trip would make the one button on the screen feel broken.
+    navigated.current = true;
+    setThreadStarted(true);
+    setView('thread');
+    void ensureSession();
+  }, [ensureSession]);
+
+  /**
+   * The same thing, with the host page's own subject already in the box.
+   *
+   * Choosing to talk is what this is — the tracking page's support button, not
+   * a page load — so it mints exactly as the button on the home screen does. It
+   * only ever *drafts*: the widget stops at the composer and the visitor sends,
+   * because a host page that could put words in somebody's mouth would be a
+   * page that can open a ticket in their name.
+   */
+  const compose = useCallback(
+    (text: string) => {
+      composeSeq.current += 1;
+      setPrefill({ text, seq: composeSeq.current });
+      talkToAgent();
+    },
+    [talkToAgent],
+  );
 
   // --- Live agent replies --------------------------------------------------
 
@@ -380,6 +424,17 @@ export function WidgetChat({
         if (token) void sendIdentity(token);
       }
 
+      /*
+       * A host page opening the chat on a subject of its own.
+       *
+       * Capped well under the composer's own 5,000: this is a draft somebody is
+       * meant to write under, and a host page — or anyone who can post to this
+       * frame from an allowed origin — should not be able to fill the box.
+       */
+      if (event.data.type === 'compose') {
+        compose(typeof event.data.text === 'string' ? event.data.text.slice(0, 1000) : '');
+      }
+
       // The host page signing its user out. Not merely an identity of null: the
       // point is that the next person at this browser starts clean.
       if (event.data.type === 'clear') {
@@ -404,7 +459,7 @@ export function WidgetChat({
     postToHost({ type: 'hello' });
 
     return () => window.removeEventListener('message', onHostMessage);
-  }, [hostOrigins, postToHost, sendIdentity, startFreshSession, token]);
+  }, [compose, hostOrigins, postToHost, sendIdentity, startFreshSession, token]);
 
   // --- Navigation ----------------------------------------------------------
 
@@ -425,15 +480,6 @@ export function WidgetChat({
     navigated.current = true;
     setView((current) => (current === 'article' ? articleFrom : 'home'));
   }, [articleFrom]);
-
-  const talkToAgent = useCallback(() => {
-    // Shown immediately; the token is minted underneath. Waiting for the round
-    // trip would make the one button on the screen feel broken.
-    navigated.current = true;
-    setThreadStarted(true);
-    setView('thread');
-    void ensureSession();
-  }, [ensureSession]);
 
   // --- Sending -------------------------------------------------------------
 
@@ -587,6 +633,7 @@ export function WidgetChat({
             online={online}
             active={view === 'thread'}
             detailsSaved={detailsSaved}
+            prefill={prefill}
             onSend={send}
             onSaveDetails={async (details) => {
               const active = await ensureSession();
