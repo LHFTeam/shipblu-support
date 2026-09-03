@@ -233,9 +233,10 @@ export function AgentRow({
             cap
           </label>
           <InfoTip label="Ticket cap">
-            The most open tickets auto-assignment will give this agent at once. Leave it blank and
-            the group&rsquo;s default cap applies; with neither set they are uncapped. It never
-            stops you assigning a ticket by hand.
+            The most tickets on an open status auto-assignment will give this agent at once. A
+            ticket waiting on the customer on a pending status does not count towards it. Leave it
+            blank and the group&rsquo;s default cap applies; with neither set they are uncapped. It
+            never stops you assigning a ticket by hand.
           </InfoTip>
           {/* 16px on a phone for the same reason as every other field in the
               console: iOS zooms into anything smaller and does not zoom back. */}

@@ -44,6 +44,12 @@ export function pickRoundRobin(
  * The cursor sits *last* in the ring, so the agent who took the previous ticket
  * is picked again only when nobody else is as free — which is the correct answer
  * when they are, and never the accidental one when they are not.
+ *
+ * "Loaded" here is everything the candidate holds, pending tickets included,
+ * which is not the figure their cap was tested against a step earlier. That is
+ * deliberate and `Candidate.heldTickets` says why: a pending ticket must not
+ * stop somebody being given work, and must still count when the question is
+ * which of two people who both have room is carrying less.
  */
 export function pickLoadBalanced(
   candidates: Candidate[],
@@ -52,6 +58,6 @@ export function pickLoadBalanced(
   const ring = ringOrder(candidates, cursorAgentId);
   if (ring.length === 0) return null;
 
-  const fewest = Math.min(...ring.map((candidate) => candidate.openTickets));
-  return ring.find((candidate) => candidate.openTickets === fewest)?.agentId ?? null;
+  const fewest = Math.min(...ring.map((candidate) => candidate.heldTickets));
+  return ring.find((candidate) => candidate.heldTickets === fewest)?.agentId ?? null;
 }

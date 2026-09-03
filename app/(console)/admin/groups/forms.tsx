@@ -107,7 +107,7 @@ function AssignmentFields({ group, agents }: { group?: Group; agents: Choice[] }
 
           <Field
             label="Default ticket cap per agent"
-            hint="Blank means uncapped. An agent's own cap overrides this."
+            hint="The most tickets on an open status auto-assignment gives one member at once. A ticket waiting on the customer does not count towards it. Blank means uncapped, and an agent's own cap overrides this."
           >
             <Input
               name="defaultMaxOpenTickets"

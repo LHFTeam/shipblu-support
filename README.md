@@ -324,7 +324,7 @@ before — so nothing changes until an admin opts a team in.
 
 - **Manual** — the ticket waits in the group queue.
 - **Round robin** — each member in turn.
-- **Load balanced** — whoever is holding the fewest open tickets, capped per agent.
+- **Load balanced** — whoever is holding the fewest tickets, capped per agent.
 - **Skills** are a _filter_, not a fourth strategy: switch matching on and the group still
   distributes the survivors by round robin or by load. Freshdesk models this as three
   mutually exclusive modes, which makes turning skills on discard the answer you already
@@ -335,6 +335,15 @@ Who is eligible is decided in one pure function, `filterCandidates` in
 their cap, holding every skill the ticket matched. Everything else in `lib/assignment` is
 either the SQL that loads those rows or the strategy that picks between them.
 
+- **A cap counts open tickets; distribution counts everything held.** The two numbers
+  answer different questions and `lib/tickets/backlog.ts` holds both. A cap says how much
+  work one person may be _given at once_, and a ticket on a pending status is waiting on
+  the customer — counting those would let somebody sit at their cap for a week holding
+  nothing they could act on. Choosing between two people who both have room is the other
+  question, and there a pending ticket is still theirs to pick back up. The consequence is
+  that a total load can exceed a cap, so the dashboard shows the open count against the cap
+  and the pending ones beside it: a fraction reading "9 / 8" next to a cap that is plainly
+  still handing out work looks like a broken cap.
 - **What a ticket needs is derived from it, never stored on it.** A skill carries
   `conditions` in the same language as SLA policies and automation rules, so correcting a
   skill immediately corrects every ticket already sitting in the queue rather than only the

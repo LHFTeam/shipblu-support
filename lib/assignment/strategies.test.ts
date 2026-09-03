@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { pickLoadBalanced, pickRoundRobin } from './strategies';
 import type { Candidate } from './eligibility';
 
-const candidate = (agentId: string, openTickets = 0): Candidate => ({
+const candidate = (agentId: string, heldTickets = 0): Candidate => ({
   agentId,
   name: agentId,
-  openTickets,
+  heldTickets,
 });
 
 describe('pickRoundRobin', () => {
@@ -41,8 +41,8 @@ describe('pickRoundRobin', () => {
   it('orders by id, so renaming an agent does not reshuffle the rota', () => {
     const first = pickRoundRobin([candidate('a'), candidate('b')], null);
     const renamed = [
-      { agentId: 'a', name: 'zzz', openTickets: 0 },
-      { agentId: 'b', name: 'aaa', openTickets: 0 },
+      { agentId: 'a', name: 'zzz', heldTickets: 0 },
+      { agentId: 'b', name: 'aaa', heldTickets: 0 },
     ];
     expect(pickRoundRobin(renamed, null)).toBe(first);
   });

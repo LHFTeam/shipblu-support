@@ -14,14 +14,32 @@ export type CandidateRow = {
   isAcceptingTickets: boolean;
   /** The agent's own cap. Null falls through to the group's. */
   maxOpenTickets: number | null;
+  /**
+   * Tickets they hold on an `open` status. The only ones the cap counts.
+   *
+   * See `capacityBacklog()` in `lib/tickets/backlog.ts` for why a pending ticket
+   * is not one of them.
+   */
   openTickets: number;
+  /** Everything they hold, pending included. What load balancing reads. */
+  heldTickets: number;
   skillIds: string[];
 };
 
 export type Candidate = {
   agentId: string;
   name: string;
-  openTickets: number;
+  /**
+   * Their total load, pending included — deliberately not the figure the cap
+   * was tested against.
+   *
+   * The two questions differ. "May this person be given more?" is about work
+   * they can act on now, so it ignores a ticket that is waiting on the customer.
+   * "Which of these people should get it?" is about who is carrying least, and a
+   * pending ticket is still theirs to pick back up — an agent holding thirty of
+   * them and nothing open is not the emptiest pair of hands in the room.
+   */
+  heldTickets: number;
 };
 
 /**
@@ -52,6 +70,9 @@ export type Eligibility = {
  * — and an agent's own is a statement about the person, a new starter or someone
  * back from leave. Either can be absent, and absent means uncapped rather than
  * zero: a cap nobody set must never stop the queue.
+ *
+ * The number is compared against the agent's `open` tickets alone, not against
+ * everything they hold — see `capacityBacklog()` in `lib/tickets/backlog.ts`.
  */
 export function effectiveCap(
   agentMax: number | null | undefined,
@@ -125,7 +146,7 @@ export function filterCandidates(
       continue;
     }
 
-    eligible.push({ agentId: row.agentId, name: row.name, openTickets: row.openTickets });
+    eligible.push({ agentId: row.agentId, name: row.name, heldTickets: row.heldTickets });
   }
 
   return { eligible, rejected };

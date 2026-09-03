@@ -11,6 +11,7 @@ const member = (overrides: Partial<CandidateRow> = {}): CandidateRow => ({
   isAcceptingTickets: true,
   maxOpenTickets: null,
   openTickets: 0,
+  heldTickets: 0,
   skillIds: [],
   ...overrides,
 });
@@ -77,6 +78,25 @@ describe('filterCandidates', () => {
   it('excludes an agent at their own cap and admits one below it', () => {
     expect(run([member({ maxOpenTickets: 2, openTickets: 2 })]).eligible).toHaveLength(0);
     expect(run([member({ maxOpenTickets: 2, openTickets: 1 })]).eligible).toHaveLength(1);
+  });
+
+  /*
+   * The cap counts open tickets, and pending ones are not open.
+   *
+   * An agent holding nine tickets that are all waiting on the customer has
+   * nothing in front of them to do, and a cap that stopped them receiving work
+   * would hold the queue shut for a reason no page in the console showed.
+   */
+  it('does not count pending tickets towards the cap', () => {
+    const rows = [member({ maxOpenTickets: 2, openTickets: 1, heldTickets: 9 })];
+    expect(run(rows).eligible).toHaveLength(1);
+  });
+
+  /* And the balance figure is the one that carries them, so a candidate who got
+   * through is offered to the strategy with everything they hold. */
+  it('reports total load, not the capped count, to the strategy', () => {
+    const rows = [member({ maxOpenTickets: 5, openTickets: 1, heldTickets: 9 })];
+    expect(run(rows).eligible[0]?.heldTickets).toBe(9);
   });
 
   it('falls back to the group cap when the agent has none', () => {

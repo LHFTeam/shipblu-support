@@ -169,7 +169,20 @@ export type AgentLoad = {
   lastSeenAt: Date | null;
   /** Their effective cap, already resolved through the group default. Null is uncapped. */
   maxOpen: number | null;
+  /**
+   * Tickets on an `open` status — the figure `maxOpen` is enforced against, so
+   * the page can render the two as a fraction that means something.
+   */
   open: number;
+  /**
+   * The rest of what they hold, on a `pending` status.
+   *
+   * Reported separately rather than folded into `open`, because it is work that
+   * does not count towards their cap: a page showing one number against the cap
+   * would either overstate the load or hide these tickets entirely, and both
+   * readings have somebody acting on them.
+   */
+  pending: number;
   awaitingReply: number;
   breached: number;
   oldestWaitingSince: Date | null;
@@ -181,11 +194,15 @@ export type AgentLoad = {
  * A left join onto the live backlog, so an agent holding nothing still appears:
  * "this queue is empty" and "this agent is missing from the list" look the same
  * otherwise, and only one of them means the work is done.
+ *
+ * Ordered by total load, open and pending together, since the question the
+ * ordering answers is who is carrying most — not who is closest to their cap.
  */
 export async function agentLoad(): Promise<AgentLoad[]> {
   const live = db
     .select({
       assigneeAgentId: conversations.assigneeAgentId,
+      category: ticketStatuses.category,
       lastCustomerMessageAt: conversations.lastCustomerMessageAt,
       lastAgentMessageAt: conversations.lastAgentMessageAt,
       breached:
@@ -217,7 +234,12 @@ export async function agentLoad(): Promise<AgentLoad[]> {
         join ${groups} g on g.id = gm.group_id
         where gm.agent_id = ${agents}.id
       ))`,
-      open: sql<number>`count(${live.assigneeAgentId})::int`,
+      // Split by category rather than counted together: only the first of the
+      // two is what `maxOpen` above is measured against. The left join's null
+      // row fails both filters, so an agent holding nothing still reads 0 rather
+      // than the 1 a bare `count(*)` would give.
+      open: sql<number>`count(*) filter (where ${live.category} = 'open')::int`,
+      pending: sql<number>`count(*) filter (where ${live.category} = 'pending')::int`,
       awaitingReply: sql<number>`count(*) filter (where ${awaiting})::int`,
       breached: sql<number>`count(*) filter (where ${live.breached})::int`,
       oldestWaitingSince: sql<unknown>`min(${live.lastCustomerMessageAt}) filter (where ${awaiting})`,

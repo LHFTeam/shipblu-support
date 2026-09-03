@@ -16,7 +16,7 @@ import { isWithinBusinessHours } from '@/lib/hours';
 import { groupHours } from '@/lib/hours/resolve';
 import { conversationFacts } from '@/lib/rules/facts';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
-import { openBacklog } from '@/lib/tickets/backlog';
+import { capacityBacklog, openBacklog } from '@/lib/tickets/backlog';
 import { filterCandidates, type CandidateRow } from './eligibility';
 import { pickLoadBalanced, pickRoundRobin } from './strategies';
 import { activeSkills, matchingSkills } from './skills';
@@ -293,10 +293,15 @@ export async function assignConversation(
  * rather than to draw a list — membership has been decoration since the schema
  * was written.
  *
- * The open count is a correlated subquery rather than a join so that an agent
+ * The counts are correlated subqueries rather than a join so that an agent
  * holding nothing still comes back with a zero: dropping out of the result set
  * and being full look identical to the caller otherwise, and only one of them
  * means "do not give this person work".
+ *
+ * Two of them, because the cap and the strategy are asking different questions
+ * and `capacityBacklog()` and `openBacklog()` are the two answers — one counts
+ * only what the agent can act on, the other everything they hold. The extra scan
+ * is over one group's roster and the same handful of indexed rows.
  */
 async function loadRoster(tx: Pick<typeof db, 'select'>, groupId: string): Promise<CandidateRow[]> {
   const rows = await tx
@@ -308,6 +313,13 @@ async function loadRoster(tx: Pick<typeof db, 'select'>, groupId: string): Promi
       isAcceptingTickets: agents.isAcceptingTickets,
       maxOpenTickets: agents.maxOpenTickets,
       openTickets: sql<number>`(
+        select count(*)::int
+        from ${conversations}
+        inner join ${ticketStatuses} on ${ticketStatuses.id} = ${conversations.statusId}
+        where ${conversations.assigneeAgentId} = ${agents}.id
+          and ${capacityBacklog()}
+      )`,
+      heldTickets: sql<number>`(
         select count(*)::int
         from ${conversations}
         inner join ${ticketStatuses} on ${ticketStatuses.id} = ${conversations.statusId}

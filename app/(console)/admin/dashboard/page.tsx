@@ -425,15 +425,17 @@ export default async function DashboardPage({
               <>
                 Open{' '}
                 <InfoTip label="Open">
-                  Tickets assigned to them that are still open or pending — the same count the
-                  assignment engine measures a cap against, which is why a second number appears
-                  beside it for an agent who has one.
+                  Tickets assigned to them on an open status — the count the assignment engine
+                  measures a cap against, which is why a second number appears beside it for an
+                  agent who has one. Anything they hold on a pending status is listed after it and
+                  does not count towards the cap: it is waiting on the customer, not on them.
                 </InfoTip>
               </>,
               <>
                 Waiting on us{' '}
                 <InfoTip label="Waiting on us">
-                  Of those, the ones where the customer spoke last and has had no reply since.
+                  Of everything they hold, open or pending, the ones where the customer spoke last
+                  and has had no reply since.
                 </InfoTip>
               </>,
               <>
@@ -466,7 +468,11 @@ export default async function DashboardPage({
                   {agent.open.toLocaleString('en-GB')}
                   {/* Shown as a fraction so a full agent is legible at a glance:
                       "8 / 8" is the reason the queue is not draining, and it
-                      reads as an explanation where a bare 8 reads as a total. */}
+                      reads as an explanation where a bare 8 reads as a total.
+                      Both halves are the open count, never the total load — a
+                      cap is not enforced against pending tickets, and a fraction
+                      that read "9 / 8" beside a cap still handing out work would
+                      look like a broken cap. */}
                   {agent.maxOpen !== null ? (
                     <span
                       className={
@@ -476,6 +482,15 @@ export default async function DashboardPage({
                       }
                     >
                       / {agent.maxOpen}
+                    </span>
+                  ) : null}
+                  {/* The load the fraction leaves out. Worth a place on the row
+                      rather than only in the tooltip: an agent at 2 / 8 holding
+                      nineteen pending tickets is not the free pair of hands the
+                      fraction alone suggests. */}
+                  {agent.pending > 0 ? (
+                    <span className="ms-1.5 text-xs text-[var(--muted-foreground)]">
+                      +{agent.pending.toLocaleString('en-GB')} pending
                     </span>
                   ) : null}
                 </Cell>

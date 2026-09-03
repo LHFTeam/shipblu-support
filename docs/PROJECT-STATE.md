@@ -842,10 +842,19 @@ is code:
     effectively one person until they open the console. This is the design
     working, but it reads as "round robin is broken" if you do not know it.
 
-  No per-agent caps are set, and no skills are in use — so no skill timeout is
-  needed yet. If skills are ever switched on, set one: without it a mistake in a
-  skill's conditions is a ticket no human ever sees. `/admin` reports both,
-  including any skill no active agent holds.
+  No per-agent caps are set and no group carries a default one, so nothing is
+  capped anywhere today (verified 2026-09-03: `max_open_tickets` null on all 5
+  agents, `default_max_open_tickets` null on all 3 groups). When one is set it
+  counts only tickets on an **`open`** status — a ticket waiting on the customer
+  neither consumes a slot nor holds the queue shut — while load balancing weighs
+  everything an agent holds. `capacityBacklog()` and `openBacklog()` in
+  `lib/tickets/backlog.ts` are the two, and the dashboard shows the first against
+  the cap with the pending count beside it.
+
+  No skills are in use either, so no skill timeout is needed yet. If skills are
+  ever switched on, set one: without it a mistake in a skill's conditions is a
+  ticket no human ever sees. `/admin` reports both, including any skill no active
+  agent holds.
 
 - **Locations.** `locations` is empty, and there are sixteen of them. Nothing
   routes on a location yet, so an empty table breaks nothing — but a register

@@ -29,8 +29,10 @@ import { openBacklog } from '@/lib/tickets/backlog';
 export async function snapshotBacklog(): Promise<void> {
   const at = new Date();
 
-  // Same `openBacklog()` the dashboard and the capacity check use, so a
-  // snapshot and the live "holding seven tickets" cannot disagree.
+  // Same `openBacklog()` the dashboard and the inbox use, so a snapshot and the
+  // live "holding seven tickets" cannot disagree. Not the narrower
+  // `capacityBacklog()`: a cap ignores pending tickets, and a backlog history
+  // that did the same would under-report what the team was carrying.
   const live = db
     .select({
       assigneeAgentId: conversations.assigneeAgentId,
