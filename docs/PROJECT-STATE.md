@@ -486,6 +486,16 @@ the run red rather than reporting success because the second half worked. So the
 service name understates what it does — grep `render.yaml` for `startCommand`
 rather than trusting a cron's name.
 
+**No service on Render deploys itself.** `autoDeploy` is `no` and
+`autoDeployTrigger` is `off` on every one of the seven, so merging to `main`
+changes nothing that is running — a deploy is triggered by hand, from the
+dashboard or the API, and until it is, `main` and production are different
+software. This is easy to miss precisely because it looks like nothing went
+wrong: the merge succeeds, CI is green, and the old code keeps serving. Check
+what a service is actually running before concluding a change is live, and
+before enqueueing a job whose handler only exists in the new code — the running
+worker would take it, find no handler, and kill it.
+
 **Staging is currently suspended, and it is pinned to the feature branch
 `claude/shipblu-support-app-03p2we` rather than to a staging branch.** Both are
 deliberate-looking but neither is written down anywhere else, so: if you resume
@@ -3029,6 +3039,36 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     handful that read later are the ones somebody happened to open.
 
 ## 7. Verification already done
+
+- **The knowledge base's formatting standard, applied to production.**
+  _2026-09-03._ `normalise_kb_formatting` ran against the live database after
+  #133 deployed: 108 of 112 articles changed, 266,219 characters became 170,596,
+  and 29 cross-links stopped pointing at the Freshdesk portal. Per locale, which
+  is the breakdown that matters here — 54 of 54 English and 54 of 58 Arabic (the
+  four that did not change were one already-clean article and three of the
+  employee-handbook stubs).
+
+  Verified rather than assumed, in this order. The dry run's per-locale
+  character totals were compared against a reference computed locally from the
+  same 112 bodies and matched exactly on both sides — 134,072→89,386 and
+  132,147→81,210 — before anything was written. After the write, a fingerprint
+  over every row (`md5` of each body, keyed by `md5(locale || slug)`, aggregated
+  in a stable order) was computed on the database and independently from the
+  local reference: `0a5c001b77725ed91f117e56b551fd69` both times, so all 112
+  stored bodies are byte-identical to what was reviewed. Then all 108 public
+  article pages were fetched from the running app on full navigations — not RSC
+  prefetches, per trap 2 — and every one returned 200 with markup byte-identical
+  to the reference.
+
+  The way back is `kb_article_versions`, which held nothing before this and now
+  holds one row per changed article: each is that article's pre-cleanup body,
+  restorable from the console.
+
+  One finding fell out of the verification. **`packaging-guidelines` and its
+  Arabic translation contain no text at all** — five screenshots each, no words,
+  and no `alt` on any of them. Their `body_text` is empty, so they are findable
+  by title and by nothing else, and a screen reader gets nothing. Five other
+  articles link to that page for the detail it is supposed to carry.
 
 - **WhatsApp, end to end on production.** A synthetic webhook was enqueued; the
   job completed in 170 ms on the first attempt. The same `wamid` redelivered
