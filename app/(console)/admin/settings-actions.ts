@@ -792,18 +792,28 @@ export async function saveCannedResponse(
 
   const id = text(formData, 'id');
   const title = text(formData, 'title');
-  const bodyText = text(formData, 'bodyText');
+  const bodyTextAr = text(formData, 'bodyTextAr');
+  const bodyTextEn = text(formData, 'bodyTextEn');
   const folder = text(formData, 'folder') || null;
 
   if (!title) return { error: 'Give the response a title' };
-  if (!bodyText) return { error: 'Write the response' };
 
-  // Stored as both: email sends HTML, WhatsApp and the social channels send
-  // text, and deriving one from the other at send time would mean every channel
-  // guessing at line breaks.
-  const bodyHtml = textToHtml(bodyText);
+  // One language is a complete response; neither is a row nothing can send. The
+  // form asks for both and requires neither, so this is where the real rule is.
+  if (!bodyTextAr && !bodyTextEn) return { error: 'Write the response in at least one language' };
 
-  const values = { title, folder, bodyText, bodyHtml };
+  // Stored as both forms: email sends HTML, WhatsApp and the social channels
+  // send text, and deriving one from the other at send time would mean every
+  // channel guessing at line breaks. An unwritten language stays empty in both
+  // — `textToHtml('')` would otherwise leave markup that reads as a body.
+  const values = {
+    title,
+    folder,
+    bodyTextAr,
+    bodyHtmlAr: bodyTextAr ? textToHtml(bodyTextAr) : '',
+    bodyTextEn,
+    bodyHtmlEn: bodyTextEn ? textToHtml(bodyTextEn) : '',
+  };
 
   if (id) {
     await db.update(cannedResponses).set(values).where(eq(cannedResponses.id, id));
@@ -997,21 +1007,83 @@ export async function saveBusinessHours(
   return ok();
 }
 
-export async function addHoliday(
+/**
+ * Add a holiday, or correct one that is already on the calendar.
+ *
+ * Editing exists because the name is now the part most likely to be wrong — it
+ * reaches a customer through `{{holiday}}`, and it is typed twice, in two
+ * scripts. Before this the only way to change it was to delete the row and add
+ * it again, which is not a repair anybody guesses at.
+ *
+ * A duplicate date is **refused rather than ignored.** The insert used to be
+ * `onConflictDoNothing()` followed by `ok()`, so retyping a date the calendar
+ * already had reported success and changed nothing — the one shape of failure
+ * this codebase calls worse than an error, and it landed on exactly the person
+ * trying to fix a name. The insert keeps the conflict clause so a race cannot
+ * raise instead, and an insert that touched no row is now the error message.
+ */
+export async function saveHoliday(
   _state: SettingsState,
   formData: FormData,
 ): Promise<SettingsState> {
   await requirePermission('admin.sla');
 
-  const businessHoursId = text(formData, 'businessHoursId');
+  const id = text(formData, 'id');
   const date = text(formData, 'date');
-  const name = text(formData, 'name');
+  const nameAr = text(formData, 'nameAr');
+  const nameEn = text(formData, 'nameEn');
 
-  if (!businessHoursId) return { error: 'Pick a schedule' };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { error: 'Pick a date' };
-  if (!name) return { error: 'Name the holiday' };
 
-  await db.insert(holidays).values({ businessHoursId, date, name }).onConflictDoNothing();
+  // One name is enough — `holidayName` falls back to whichever was written —
+  // but a holiday with neither leaves `{{holiday}}` empty in an out-of-hours
+  // message that only exists to say which day it is.
+  if (!nameAr && !nameEn) return { error: 'Name the holiday in at least one language' };
+
+  const taken = 'That schedule already has a holiday on that date';
+
+  if (id) {
+    // The schedule comes from the stored row, never from the form: the hidden
+    // field is a claim by whoever posted it, and honouring it would let one
+    // move a holiday onto a calendar the page never showed.
+    const existing = await db
+      .select({ businessHoursId: holidays.businessHoursId })
+      .from(holidays)
+      .where(eq(holidays.id, id))
+      .limit(1);
+
+    const row = existing[0];
+    if (!row) return { error: 'That holiday has already been removed' };
+
+    // Moving a holiday onto a date its own calendar already uses. Checked
+    // rather than left to the unique index, which would surface as a 500.
+    const clash = await db
+      .select({ id: holidays.id })
+      .from(holidays)
+      .where(
+        and(
+          eq(holidays.businessHoursId, row.businessHoursId),
+          eq(holidays.date, date),
+          ne(holidays.id, id),
+        ),
+      )
+      .limit(1);
+
+    if (clash.length > 0) return { error: taken };
+
+    await db.update(holidays).set({ date, nameAr, nameEn }).where(eq(holidays.id, id));
+  } else {
+    const businessHoursId = text(formData, 'businessHoursId');
+    if (!businessHoursId) return { error: 'Pick a schedule' };
+
+    const inserted = await db
+      .insert(holidays)
+      .values({ businessHoursId, date, nameAr, nameEn })
+      .onConflictDoNothing()
+      .returning({ id: holidays.id });
+
+    if (inserted.length === 0) return { error: taken };
+  }
 
   refresh('/admin/hours');
   return ok();

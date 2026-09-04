@@ -829,7 +829,11 @@ export async function listCannedResponses(agent: SessionAgent) {
       id: cannedResponses.id,
       title: cannedResponses.title,
       folder: cannedResponses.folder,
-      bodyText: cannedResponses.bodyText,
+      // Both languages, because the choice between them is the agent's and it
+      // is made after the list has rendered. Fetching the picked one on demand
+      // would put a round trip inside a dropdown's onChange.
+      bodyTextAr: cannedResponses.bodyTextAr,
+      bodyTextEn: cannedResponses.bodyTextEn,
     })
     .from(cannedResponses)
     .where(

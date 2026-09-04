@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Badge, Button, Field, Input, Toggle } from '@/components/ui';
 import type { WeeklySchedule } from '@/db/schema/config';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
-import { addHoliday, deleteHoliday, saveBusinessHours } from '../settings-actions';
+import { deleteHoliday, saveBusinessHours, saveHoliday } from '../settings-actions';
 
 type Schedule = {
   id: string;
@@ -14,7 +14,7 @@ type Schedule = {
   isDefault: boolean;
 };
 
-type Holiday = { id: string; date: string; name: string };
+type Holiday = { id: string; date: string; nameAr: string; nameEn: string };
 
 const DAYS: { key: keyof WeeklySchedule; label: string }[] = [
   { key: 'sun', label: 'Sunday' },
@@ -151,8 +151,65 @@ export function HoursEditor({
   );
 }
 
+/**
+ * The three fields a holiday has, shared by the add form and the edit form.
+ *
+ * A name per language, because this one is not an internal label: the
+ * out-of-hours auto-response drops it into the message a customer reads, in the
+ * language that message is written in. One name meant every Arabic
+ * acknowledgement naming the day in Latin script.
+ *
+ * Neither name is required on its own — the action asks for one of the two — so
+ * a calendar can be filled in in Arabic and completed in English later.
+ */
+function HolidayFields({ holiday }: { holiday?: Holiday }) {
+  return (
+    <div className="grid gap-2 sm:grid-cols-3">
+      <Input name="date" type="date" defaultValue={holiday?.date} required aria-label="Date" />
+      <Input
+        name="nameAr"
+        dir="rtl"
+        defaultValue={holiday?.nameAr}
+        placeholder="عيد الفطر"
+        aria-label="Arabic name"
+      />
+      <Input
+        name="nameEn"
+        defaultValue={holiday?.nameEn}
+        placeholder="Eid al-Fitr"
+        aria-label="English name"
+      />
+    </div>
+  );
+}
+
 export function HolidayList({ scheduleId, holidays }: { scheduleId: string; holidays: Holiday[] }) {
   const [adding, setAdding] = useState(false);
+
+  /*
+    Which holiday is open for editing, by id rather than by index: the list is
+    re-sorted by date on every save, so an index would edit a different row than
+    the one that was clicked as soon as somebody corrected a date.
+
+    Editing exists because the name is the part that is most likely to be wrong
+    and the hardest to check — it is typed twice, in two scripts, and it reaches
+    a customer through `{{holiday}}`. Delete-and-re-add was the only repair
+    before, and nobody guesses at that.
+  */
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const editing = holidays.find((holiday) => holiday.id === editingId) ?? null;
+
+  // One form at a time. Two open at once is two dates on screen and no way to
+  // tell which one the submit button belongs to.
+  const openAdd = () => {
+    setEditingId(null);
+    setAdding((open) => !open);
+  };
+
+  const openEdit = (id: string) => {
+    setAdding(false);
+    setEditingId((open) => (open === id ? null : id));
+  };
 
   return (
     <div className="mt-4 border-t border-[var(--border)] pt-3">
@@ -162,7 +219,7 @@ export function HolidayList({ scheduleId, holidays }: { scheduleId: string; holi
         </h3>
         <button
           type="button"
-          onClick={() => setAdding(!adding)}
+          onClick={openAdd}
           className="text-xs font-medium text-brand-600 hover:underline"
         >
           {adding ? 'Cancel' : '+ Add'}
@@ -172,15 +229,12 @@ export function HolidayList({ scheduleId, holidays }: { scheduleId: string; holi
       {adding ? (
         <div className="mt-2">
           <EditorForm
-            action={addHoliday}
+            action={saveHoliday}
             submitLabel="Add holiday"
             onSaved={() => setAdding(false)}
           >
             <input type="hidden" name="businessHoursId" value={scheduleId} />
-            <div className="grid gap-2 sm:grid-cols-2">
-              <Input name="date" type="date" required />
-              <Input name="name" placeholder="Eid al-Fitr" required />
-            </div>
+            <HolidayFields />
           </EditorForm>
         </div>
       ) : null}
@@ -192,8 +246,21 @@ export function HolidayList({ scheduleId, holidays }: { scheduleId: string; holi
               key={holiday.id}
               className="flex items-center gap-2 rounded-md bg-[var(--muted)] px-2 py-1 text-xs"
             >
-              <span className="font-medium">{holiday.date}</span>
-              <span className="text-[var(--muted-foreground)]">{holiday.name}</span>
+              <button
+                type="button"
+                onClick={() => openEdit(holiday.id)}
+                className="flex items-center gap-2 hover:underline"
+              >
+                <span className="font-medium">{holiday.date}</span>
+                {/*
+                  Both names, because this list is where an admin checks that the
+                  Arabic one is actually there — showing one and falling back
+                  would render a half-filled calendar as a complete one.
+                */}
+                <span className="text-[var(--muted-foreground)]">
+                  {[holiday.nameAr, holiday.nameEn].filter(Boolean).join(' · ') || 'Unnamed'}
+                </span>
+              </button>
               <DangerAction
                 action={deleteHoliday}
                 id={holiday.id}
@@ -203,6 +270,25 @@ export function HolidayList({ scheduleId, holidays }: { scheduleId: string; holi
             </li>
           ))}
         </ul>
+      ) : null}
+
+      {editing ? (
+        <div className="mt-2">
+          <EditorForm
+            // Keyed on the holiday, because the fields inside are uncontrolled:
+            // clicking a second chip while the first is open re-renders with new
+            // `defaultValue`s, which React does not apply to a mounted input —
+            // the form would keep showing the previous holiday's date and names
+            // and save them onto this one.
+            key={editing.id}
+            action={saveHoliday}
+            submitLabel="Save holiday"
+            onSaved={() => setEditingId(null)}
+          >
+            <input type="hidden" name="id" value={editing.id} />
+            <HolidayFields holiday={editing} />
+          </EditorForm>
+        </div>
       ) : null}
     </div>
   );

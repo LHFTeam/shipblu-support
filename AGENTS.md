@@ -503,6 +503,37 @@ public URL keeps an explicit locale segment. Use `direction()` from
 ASCII slugify erases Arabic entirely — and decode dynamic route params with
 `decodeSlugParam()`, because Next hands them over still percent-encoded.
 
+**Anything a customer reads is a `*_ar` / `*_en` pair, and either side covers
+the other.** Auto-response bodies, ticket field labels, form names, canned
+responses and holiday names all take that shape: both columns `not null default
+''`, the write path requiring one of the two rather than both, and the read path
+falling back to whichever was filled in. A team that writes only Arabic gets a
+complete configuration, and nothing renders a hole where a translation was
+never typed. The trap it closes is the half-localised message: a body chosen for
+an Arabic reader that interpolates a name only stored in English is translated
+everywhere except the one word the sentence is about.
+
+Two different questions decide the language, and they are not the same module.
+**Anything that writes to a customer unattended goes through
+`lib/tickets/locale.ts`** — the out-of-hours acknowledgement and an automation's
+canned reply both call `requesterLocale()`, which picks the most recent inbound
+`reply` carrying text and hands it to `preferredLocale()`. Each of those
+narrowings is a way the answer went wrong: the last inbound row of _any_ kind
+includes the English `system` notice we write when a form attachment fails, and
+a media message carries no text at all. A sender that reads the language off a
+message it already happens to be holding is how the two came to disagree, so do
+not reintroduce that shortcut — one indexed query is the price of the invariant.
+
+The console's pickers are deliberately outside this. They open on
+`detectLocale()` from `lib/kb/language.ts`, the value the inbox page already
+computed to search the knowledge base, so the knowledge panel and the canned
+picker beside it cannot disagree. The two detectors differ at the margins —
+`detectLocale` calls text Arabic from a fifth of its letters, `preferredLocale`
+from a majority — and that is the right way round: one is a default an agent
+overrules with a click, the other has already been sent. Do not trust
+`contacts.locale` alone in either; nothing writes it, so all 6,000 contacts
+read as 'en'.
+
 **Time.** Cairo observes DST again. Build test instants from wall-clock with
 luxon and let the timezone database convert; never hand-convert fixtures. SLA
 clocks are working-time, resolved through `lib/hours/resolve.ts` by every

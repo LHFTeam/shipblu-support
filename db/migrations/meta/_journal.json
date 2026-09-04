@@ -176,6 +176,13 @@
       "when": 1788554120582,
       "tag": "0024_wise_goliath",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1788554836979,
+      "tag": "0025_bilingual_canned_responses_and_holiday_names",
+      "breakpoints": true
     }
   ]
 }

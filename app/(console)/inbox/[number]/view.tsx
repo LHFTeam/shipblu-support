@@ -41,6 +41,7 @@ import { readOnlyReason } from '@/lib/tickets/channel-policy';
 import type { PickerEntry } from '@/lib/side-conversations/queries';
 import { CommentModeration } from './comment-moderation';
 import { ProfileRefresh } from './profile-refresh';
+import type { CannedLocale } from '@/lib/tickets/canned';
 import { Composer, type KnowledgeContext } from './composer';
 import { SideConversationCard, SideConversationsField } from './side-conversations';
 
@@ -110,6 +111,7 @@ export function ConversationView({
   recipients,
   fields,
   canned,
+  customerLocale,
   knowledge,
   canSideConversation,
   canModerateComments,
@@ -131,6 +133,8 @@ export function ConversationView({
   recipients: PickerEntry[];
   /** Reusable replies, already scoped to this agent's own and their groups'. */
   canned: CannedResponseOption[];
+  /** The language the customer writes in, which the canned picker starts on. */
+  customerLocale: CannedLocale;
   /** Null when the agent lacks `kb.view`, or on a channel with no composer. */
   knowledge: KnowledgeContext | null;
   canSideConversation: boolean;
@@ -171,6 +175,7 @@ export function ConversationView({
             templates={templates}
             recipients={recipients}
             canned={canned}
+            customerLocale={customerLocale}
             knowledge={knowledge}
             canSideConversation={canSideConversation}
           />

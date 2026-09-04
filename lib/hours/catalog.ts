@@ -26,7 +26,8 @@ export async function loadHoursCatalog(): Promise<HoursCatalog> {
       .select({
         businessHoursId: holidays.businessHoursId,
         date: holidays.date,
-        name: holidays.name,
+        nameAr: holidays.nameAr,
+        nameEn: holidays.nameEn,
       })
       .from(holidays),
     db
@@ -52,7 +53,7 @@ export async function loadHoursCatalog(): Promise<HoursCatalog> {
 
   for (const row of holidayRows) {
     const config = catalog.schedules.get(row.businessHoursId);
-    config?.holidays?.push({ date: row.date, name: row.name });
+    config?.holidays?.push({ date: row.date, nameAr: row.nameAr, nameEn: row.nameEn });
   }
 
   for (const row of groupRows) {

@@ -234,7 +234,7 @@ describe('group business hours', () => {
     built.schedules.set('weekend', {
       schedule: CAIRO,
       timezone: 'Africa/Cairo',
-      holidays: [{ date: '2026-08-23', name: 'Team day' }],
+      holidays: [{ date: '2026-08-23', nameEn: 'Team day' }],
     });
 
     const onGroupHours = policy({ hoursSource: 'group' });

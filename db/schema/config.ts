@@ -65,6 +65,16 @@ export const businessHours = pgTable(
  * Days a calendar is shut. Attached to a schedule rather than global, which is
  * what lets a group keep its own holiday list: a group pointing at its own
  * schedule gets that schedule's holidays and none of the default one's.
+ *
+ * The name is stored per language because it is not an internal label: the
+ * out-of-hours auto-response interpolates it into the message a customer reads,
+ * through `{{holiday}}`, and that message is already chosen by their language.
+ * One name meant an Arabic body carrying "Eid al-Fitr" in Latin script — the
+ * message was translated and the one proper noun in it was not.
+ *
+ * Either side may be blank, like every other bilingual pair here, so a team
+ * that only writes Arabic is not made to transliterate; `holidayName()` falls
+ * back to whichever is filled in. The admin action requires at least one.
  */
 export const holidays = pgTable(
   'holidays',
@@ -74,7 +84,26 @@ export const holidays = pgTable(
       .notNull()
       .references(() => businessHours.id, { onDelete: 'cascade' }),
     date: date('date').notNull(),
-    name: text('name').notNull(),
+    nameAr: text('name_ar').notNull().default(''),
+    nameEn: text('name_en').notNull().default(''),
+
+    /**
+     * Superseded by the pair above, and still here on purpose.
+     *
+     * Only the two web services run `db:migrate` (`preDeployCommand` in
+     * `render.yaml`); the worker and the four crons deploy separately and by
+     * hand. Dropping this column in the same release that stops writing it
+     * would mean the still-running old worker selecting a column that no longer
+     * exists — and `loadHoursCatalog` is on the SLA sweep, assignment, the
+     * nightly rollup and the widget's open/closed check, so the whole of that
+     * would fail until somebody redeployed it. Expand now, contract once every
+     * service is on new code; `docs/PROJECT-STATE.md` §5.5 carries the removal.
+     *
+     * Defaulted rather than made nullable so an old reader gets the same empty
+     * string an unwritten translation gives it, rather than a null it has never
+     * had to handle.
+     */
+    name: text('name').notNull().default(''),
   },
   (t) => [uniqueIndex('holidays_bh_date_idx').on(t.businessHoursId, t.date)],
 );
@@ -541,14 +570,51 @@ export const automationRules = pgTable(
   (t) => [index('automation_rules_trigger_idx').on(t.trigger, t.isActive, t.position)],
 );
 
+/**
+ * A reply written once and sent many times, in both languages.
+ *
+ * ShipBlu's customers write in Arabic and in English on the same channel, often
+ * in the same hour, so a single body meant the boilerplate was only reusable for
+ * half the queue — the other half was retyped from memory every time, which is
+ * where wording drifts.
+ *
+ * **One title, two bodies.** The title is the agent's label for the pair and the
+ * console it is read in is English throughout; making it bilingual would ask
+ * every response to be named twice so that a dropdown could show one of them.
+ * The two bodies are the same response, not two responses.
+ *
+ * Either body may be blank — a team writes the Arabic first and the English when
+ * they get to it — and the picker offers a response only in the languages it
+ * actually has. `saveCannedResponse` requires at least one, because a response
+ * with neither is a row nothing can ever send.
+ */
 export const cannedResponses = pgTable(
   'canned_responses',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     title: text('title').notNull(),
     folder: text('folder'),
-    bodyHtml: text('body_html').notNull(),
-    bodyText: text('body_text').notNull(),
+
+    /*
+      Both forms of each body, for the reason the single pair was stored twice
+      before this: email sends HTML and WhatsApp and the social channels send
+      text, and deriving one from the other at send time would leave every
+      channel guessing at line breaks.
+    */
+    bodyHtmlAr: text('body_html_ar').notNull().default(''),
+    bodyTextAr: text('body_text_ar').notNull().default(''),
+    bodyHtmlEn: text('body_html_en').notNull().default(''),
+    bodyTextEn: text('body_text_en').notNull().default(''),
+
+    /**
+     * Superseded by the four columns above, and kept for one release for the
+     * reason `holidays.name` is — the worker deploys separately from the
+     * service that runs the migration, and the old `sendCannedReply` selects
+     * these. Dropped once every service is on new code; see
+     * `docs/PROJECT-STATE.md` §5.5.
+     */
+    bodyHtml: text('body_html').notNull().default(''),
+    bodyText: text('body_text').notNull().default(''),
 
     visibility: cannedVisibilityEnum('visibility').notNull().default('global'),
     /** Set when visibility = 'personal'. */
