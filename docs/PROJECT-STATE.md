@@ -3055,6 +3055,40 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     column: 99 of the 112 articles read 2026-08-19, the import date, and the
     handful that read later are the ones somebody happened to open.
 
+52. **`current_date` in a page query is the database's date, and the database is
+    UTC.** _2026-09-04._ `/reports/categories` filtered its rollups with
+    `day >= current_date - N`, which is a different day from the one
+    `rollup_metrics` bucketed them into for the first two hours of every Cairo
+    morning — the rollup uses the reporting zone, deliberately, so that an
+    evening shift does not land on tomorrow. Nothing catches this: the SQL is
+    valid, the numbers look plausible, and the window is only ever wrong by a day
+    at one edge. Every report now derives its window once, in the page, through
+    `rangeIn()` in `lib/reports/rollup.ts`, and no read query mentions
+    `current_date`. A live query comparing a `timestamptz` against that window
+    has to name the zone too — cast the date to `timestamp` and apply
+    `at time zone <reporting zone>`, not a bare `::date` comparison in UTC.
+
+53. **A console page with no scroll container is silently truncated, not
+    scrollable.** _2026-09-04._ The console shell is `h-dvh overflow-hidden` with
+    a `min-h-0 flex-1` content column, so a page that does not open its own
+    `app-scroll h-full overflow-y-auto` wrapper renders everything below the fold
+    where nobody can reach it — and with no padding either. `/reports/categories`
+    shipped that way and read as an unfinished page: half of it existed and could
+    not be seen. `/reports/agents` and `/inbox/new` have the wrapper; the admin
+    pages get it from `app/(console)/admin/layout.tsx`. A new page under
+    `(console)` outside `admin/` has to bring its own.
+
+54. **A range control over a rollup with no backfill looks broken.**
+    _2026-09-04._ 7, 30 and 90 days on `/reports/categories` answered
+    identically, which was reported as the buttons not working. They worked:
+    `rollup_metrics` recomputes three days a night, categorisation only started
+    on 2026-09-01, and there is no category backfill — the whole archive is three
+    days deep (verified: `category_metrics_daily` holds 8 rows over 3 days;
+    `root_cause_metrics_daily` is empty). A control whose effect is invisible has
+    to say so itself, so the page now prints the window it selected and, when the
+    figures begin after the window opens, says where they begin and why. Worth
+    remembering for the next report built on a young rollup.
+
 ## 7. Verification already done
 
 - **The knowledge base's formatting standard, applied to production.**
