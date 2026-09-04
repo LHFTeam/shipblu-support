@@ -5,7 +5,8 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-09-02, against `main` at `aec5d4f`.
+Last updated: 2026-09-04, against `main` at `c1132c7` — which is also what
+production runs, as of the deploy in §7.
 
 ---
 
@@ -505,8 +506,23 @@ and a failure in any half takes the run red rather than reporting success
 because the rest worked. So the service name understates what it does — grep
 `render.yaml` for `startCommand` rather than trusting a cron's name.
 
-**No service on Render deploys itself.** `autoDeploy` is `no` and
-`autoDeployTrigger` is `off` on every one of the seven, so merging to `main`
+**The running service has only two of them.** Live it is
+`sla_sweep && assign_sweep`. `presence_sweep` was added to `render.yaml` by #136
+and the blueprint has not been re-synced since, so the cron still runs the
+command it was created with. **Deploying does not fix this** — a deploy rebuilds
+the code, and `startCommand` is service configuration rather than code, so every
+service can be live on the newest commit while a job nobody notices is missing
+from the chain. It is inert only because `presence_policy` is empty and both
+windows are therefore off; the moment somebody sets a timer at `/admin/agents`,
+the half of the idle policy that catches a slept laptop, a frozen tab or a
+console left open on a replaced instance silently never runs. `getSessionAgent()`
+still refuses an inactive session, but only for agents who are still making
+requests — which is precisely the population that is not idle. Fix it in the
+dashboard, or by syncing the blueprint; not by triggering another deploy.
+
+**No production service on Render deploys itself.** `autoDeploy` is `no` and
+`autoDeployTrigger` is `off` on all six production services — staging is the
+exception and is described below — so merging to `main`
 changes nothing that is running — a deploy is triggered by hand, from the
 dashboard or the API, and until it is, `main` and production are different
 software. This is easy to miss precisely because it looks like nothing went
@@ -515,11 +531,16 @@ what a service is actually running before concluding a change is live, and
 before enqueueing a job whose handler only exists in the new code — the running
 worker would take it, find no handler, and kill it.
 
-**Staging is currently suspended, and it is pinned to the feature branch
-`claude/shipblu-support-app-03p2we` rather than to a staging branch.** Both are
-deliberate-looking but neither is written down anywhere else, so: if you resume
-staging, check what branch you are actually about to deploy. Do not assume it
-tracks `main`.
+**Staging is still suspended, but it is no longer pinned to a feature branch.**
+As of 2026-09-04 the running service tracks `main` with `autoDeploy: yes` and
+`autoDeployTrigger: commit`, while `render.yaml` still names
+`claude/shipblu-support-app-03p2we` — so the blueprint and the service disagree
+about what staging is, in the same way and for the same reason the SLA cron's
+command does. Nothing records who changed it. The practical consequence is that
+resuming staging does not merely restore what was there: it arms a service that
+will deploy the next commit to `main` against the staging Supabase project, whose
+own `preDeployCommand` migrates it. So check the branch, and expect a migration,
+before you resume.
 
 ### Supabase — org `ihngokrzwjmgpogkecug`
 
@@ -3205,6 +3226,40 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     Arabic ticket in English is answering the whole thread in English.
 
 ## 7. Verification already done
+
+- **Production rebuilt and redeployed onto `c1132c7`.** _2026-09-04._ All six
+  production services were 22 commits behind — the web service and the worker
+  were serving `bf507aa` — because nothing on Render deploys itself. Deployed in
+  dependency order with the build cache cleared: the web service first, because
+  its `preDeployCommand` is what applies the migrations and the worker's new code
+  reads columns that did not exist yet; then the worker; then the four crons.
+  Neither of the two new job types is enqueued by the web app (`presence_sweep`
+  is invoked by the cron and `seed_console_handbook` by hand, both through
+  `npm run job`), so the window where a new web release can hand the old worker a
+  job it has no handler for did not apply here — it is still the thing to check
+  before deploying in this order.
+
+  Migrations 0023, 0024 and 0025 applied, and `db/sql` replayed: all nine objects
+  confirmed present by querying the production catalogue afterwards rather than
+  by reading the deploy log — `kb_articles.min_role` and `kb_folders.min_role`,
+  the `presence_policy` table with its `presence_policy_singleton` check, three
+  new `agents` columns, `sessions.last_activity_at` with `sessions_activity_idx`,
+  four bilingual `canned_responses` columns and two on `holidays`. All additive:
+  no rewrite, and the NOT NULL columns all carry defaults.
+
+  `/api/health` returns `commit: c1132c7` with a 3 ms database latency, so the
+  colocation §2 protects is intact. The worker logged
+  `[worker] listening for job_enqueued` and did not crash-loop on the new schema,
+  and `shipblu-sla-sweep` ran green at 23:25:39 UTC — after its own deploy, so
+  the cron path is exercised on the new code rather than assumed.
+
+  Two pieces of drift were found by reading the live configuration rather than
+  the blueprint, and **neither is fixed by deploying**; both are written up in
+  §2. The 51 dead jobs the health endpoint reports all pre-date this deploy
+  (38 `download_media`, 7 `send_agent_invite`, 6 `send_meta`; newest 2026-09-03),
+  so none of them is a regression from it — but the seven `send_agent_invite`
+  deaths are the invite feature #132 shipped that same day, and those invitations
+  never reached anybody.
 
 - **The knowledge-base role floor, against a real Postgres.** _2026-09-04._ The
   predicate and the console handbook were exercised on a local Postgres 16 with
