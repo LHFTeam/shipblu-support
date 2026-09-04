@@ -3111,6 +3111,27 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     The trap generalises past the schema: the `node:fs` version of this mistake
     fails the build, and every other version of it just makes the app slower.
 
+55. **`key={state.nonce}` on a form clears the fields, not the state that
+    renders them.** _2026-09-04, reviewing the handbook._ Every composer and
+    admin form in this app clears itself by remounting on the nonce the action
+    returns, which works because the inputs are uncontrolled — the DOM nodes are
+    new. A `useState` in the component that _declares_ the form is above that
+    boundary and survives, so anything driven by it silently carries over into
+    the next submission.
+
+    Twice, in the same review. `/kb/structure` kept "Agents only" selected after
+    adding an internal folder, so the next folder was created internal with an
+    empty name box. Worse, `ReplyForm` kept `usedId` — the canned response the
+    last reply used — in a hidden `cannedResponseId` field, so every subsequent
+    reply from the same open ticket incremented `usage_count` for a response it
+    did not contain, compounding with how many replies the agent sent.
+
+    The rule: state that a keyed form's submission depends on belongs _inside_
+    the keyed subtree, in a component of its own. State that is deliberately
+    sticky (`privately`, the side-conversation recipient) belongs outside it —
+    and both of those are visible controls, so what carries over is on screen
+    rather than in a hidden field.
+
 ## 7. Verification already done
 
 - **The knowledge-base role floor, against a real Postgres.** _2026-09-04._ The
