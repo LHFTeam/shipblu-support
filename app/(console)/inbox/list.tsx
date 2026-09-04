@@ -7,6 +7,7 @@ import { ChannelBadge, channelInfo } from '@/components/channel';
 import { BookIcon, SearchIcon } from '@/components/icons';
 import { Badge, Select } from '@/components/ui';
 import { formatRelative } from '@/lib/format';
+import { DEFAULT_LOCALE } from '@/lib/kb/locale';
 import type { InboxFilters, InboxRow } from '@/lib/tickets/queries';
 import { FILTERABLE_CHANNELS, isRestrictedChannel } from '@/lib/tickets/channel-policy';
 import {
@@ -33,7 +34,6 @@ export function InboxList({
   activeNumber,
   canSeeBot = false,
   canCreate = false,
-  canViewKb = false,
 }: {
   rows: InboxRow[];
   nextCursor: string | null;
@@ -41,7 +41,6 @@ export function InboxList({
   activeNumber?: number;
   canSeeBot?: boolean;
   canCreate?: boolean;
-  canViewKb?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -81,12 +80,37 @@ export function InboxList({
         {/*
           The knowledge base, named, on the screen an agent spends the day on.
 
-          The rail already links to it, but as an unlabelled icon whose name
+          The rail already carries one, but as an unlabelled icon whose name
           appears on hover — which is no name at all on a phone, and on the
           desktop is a thing you have to already suspect is there before you
           point at it. Inside a ticket the composer's panel answers the same
           need; this is the half of the console where that panel does not exist,
           and looking something up meant guessing at an icon.
+
+          The public help centre rather than `/kb`, which is where this pointed
+          first. What an agent wants from the list is the answer as the customer
+          will read it, at the URL they are about to paste into a reply. `/kb`
+          is the editor's index — statuses, floors, folder admin — and answers
+          neither question; it stays on the rail for the people who edit
+          articles, and it is still the only way to an internal article, which
+          the help centre serves to nobody however they are signed in.
+
+          A relative path, so it opens on whichever hostname the agent is
+          already on: the proxy rewrites a locale-prefixed path under /help
+          everywhere, while `KB_PUBLIC_HOST` names an address that serves this
+          app only once the domain has cut over — the same reason the editor's
+          "View on the help centre" link is built from the request rather than
+          from `publicBaseUrl()`. Arabic because that is the help centre's front
+          door, with its language switcher one click away.
+
+          A new tab, because the inbox is not a page you leave: this column
+          restores the scroll position and the pages it had loaded, and the
+          frame around it holds the stream the list updates over.
+
+          No `kb.view` gate on it any more. That permission guards the console's
+          own articles and can be taken away from one agent; keeping it here
+          would only be the console hiding a public page from the person
+          answering the ticket about it.
 
           Its own line rather than a third control in either row below, because
           both of those are measured against this column's width: the search
@@ -95,15 +119,15 @@ export function InboxList({
           than wrap. One line of a column that scrolls anyway is the cheaper
           side of that trade.
         */}
-        {canViewKb ? (
-          <Link
-            href="/kb"
-            className="flex items-center gap-1.5 self-start rounded-md px-1.5 py-1 text-xs font-medium text-brand-600 hover:bg-[var(--muted)]"
-          >
-            <BookIcon size={15} />
-            Knowledge base
-          </Link>
-        ) : null}
+        <a
+          href={`/${DEFAULT_LOCALE}`}
+          target="_blank"
+          rel="noreferrer"
+          className="flex items-center gap-1.5 self-start rounded-md px-1.5 py-1 text-xs font-medium text-brand-600 hover:bg-[var(--muted)]"
+        >
+          <BookIcon size={15} />
+          Help centre
+        </a>
 
         <div className="flex items-center gap-2">
           <div className="min-w-0 flex-1">
