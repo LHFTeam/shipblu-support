@@ -130,7 +130,7 @@ export function ActionBuilder({
       <button
         type="button"
         onClick={() => setItems([...items, { type: 'set_priority', value: 'high' }])}
-        className="self-start text-xs font-medium text-brand-600 hover:underline dark:text-brand-300"
+        className="self-start text-xs font-medium text-brand-600 hover:underline"
       >
         + Add action
       </button>

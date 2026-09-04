@@ -74,9 +74,7 @@ export default async function PortalTicketPage({
               the customer was not told at all, and was looking at a receipt for
               a ticket missing the photo it is about. */}
           {files === 'failed' ? (
-            <p className="mt-3 text-sm text-red-700 dark:text-red-300">
-              {t(locale, 'formAttachmentFailed')}
-            </p>
+            <p className="mt-3 text-sm text-red-700">{t(locale, 'formAttachmentFailed')}</p>
           ) : null}
 
           <ol className="mt-5 flex flex-col gap-3">

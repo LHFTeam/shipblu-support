@@ -94,7 +94,7 @@ export function AdminNav() {
                     aria-current={isActive(link.href) ? 'page' : undefined}
                     className={`block rounded-md px-2 py-1.5 text-sm ${
                       isActive(link.href)
-                        ? 'bg-brand-500/12 font-medium text-brand-700 dark:text-brand-200'
+                        ? 'bg-brand-500/12 font-medium text-brand-700'
                         : 'text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)]'
                     }`}
                   >

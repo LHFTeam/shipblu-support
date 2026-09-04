@@ -3035,7 +3035,9 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
 
     Two more from the same corpus, both invisible in an English spot check:
     inline `color:rgb(0, 0, 0)` from a light-mode editor, on a help centre that
-    answers `prefers-color-scheme: dark`; and `dir="ltr"` with
+    answered `prefers-color-scheme: dark` at the time — the app is light-only
+    now, and the colour is stripped for the plainer reason that the article's
+    text colour is the stylesheet's; and `dir="ltr"` with
     `text-align:left`, which 25 of the Arabic articles carry, un-mirroring a
     paragraph in the middle of a right-to-left page. `lib/kb/format.ts` strips
     all of it, and the rule that catches the next one is in

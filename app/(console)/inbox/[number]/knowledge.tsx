@@ -201,7 +201,7 @@ function LocaleToggle({ value, onChange }: { value: Locale; onChange: (next: Loc
           aria-pressed={value === option}
           className={`px-2 py-1.5 text-xs sm:py-1 ${
             value === option
-              ? 'bg-brand-500/15 font-medium text-brand-700 dark:text-brand-300'
+              ? 'bg-brand-500/15 font-medium text-brand-700'
               : 'text-[var(--muted-foreground)]'
           }`}
         >

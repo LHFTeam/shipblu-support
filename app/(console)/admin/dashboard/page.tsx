@@ -128,7 +128,7 @@ export default async function DashboardPage({
             <p className="mt-3">
               <Link
                 href="/inbox?status=unresolved"
-                className="text-xs text-brand-600 hover:underline dark:text-brand-300"
+                className="text-xs text-brand-600 hover:underline"
               >
                 Open the inbox →
               </Link>
@@ -398,10 +398,7 @@ export default async function DashboardPage({
 
             <p className="mt-2 text-xs text-[var(--muted-foreground)]">
               Cuts by agent, group and channel live in{' '}
-              <Link
-                href={`/reports?days=${days}`}
-                className="text-brand-600 hover:underline dark:text-brand-300"
-              >
+              <Link href={`/reports?days=${days}`} className="text-brand-600 hover:underline">
                 Reports
               </Link>
               .

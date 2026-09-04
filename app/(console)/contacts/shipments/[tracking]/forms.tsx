@@ -100,7 +100,7 @@ export function PartyField({
             </button>
           ) : null}
 
-          {error ? <p className="text-xs text-red-600 dark:text-red-400">{error}</p> : null}
+          {error ? <p className="text-xs text-red-600">{error}</p> : null}
         </div>
       ) : null}
     </div>
@@ -162,7 +162,7 @@ export function RefreshShipmentButton({
           {lastSyncedAt ? `checked ${lastSyncedAt}` : 'never checked'}
         </span>
       </div>
-      {error ? <p className="text-xs text-red-600 dark:text-red-400">{error}</p> : null}
+      {error ? <p className="text-xs text-red-600">{error}</p> : null}
     </div>
   );
 }

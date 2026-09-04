@@ -224,7 +224,7 @@ export function ConditionBuilder({
             <button
               type="button"
               onClick={() => setRows([...rows, { field: fields[0]!.value, op: 'eq', value: '' }])}
-              className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-300"
+              className="text-xs font-medium text-brand-600 hover:underline"
             >
               + Add condition
             </button>

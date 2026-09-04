@@ -162,7 +162,7 @@ export function WhatsAppAccountEditor({ account }: { account: WhatsAppAccountRow
         </p>
 
         {account.lastSyncError ? (
-          <p className="mt-1 text-xs text-red-600 dark:text-red-400">{account.lastSyncError}</p>
+          <p className="mt-1 text-xs text-red-600">{account.lastSyncError}</p>
         ) : account.lastSyncedAt ? (
           <p className="mt-1 text-xs text-[var(--muted-foreground)]">
             Templates last synced{' '}

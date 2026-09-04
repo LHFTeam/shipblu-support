@@ -15,9 +15,10 @@
  * `mx-auto` are all real utilities in the served stylesheet. A pasted wrapper
  * carrying them turns part of an article into a flex column with its content
  * pushed to the inline end. Inline `color:` and `font-size` are the same shape
- * of problem one layer down: the help centre answers
- * `prefers-color-scheme: dark`, and a hard-coded `rgb(0, 0, 0)` from a light
- * editor becomes black text on a near-black surface.
+ * of problem one layer down: the help centre's type scale and text colour are
+ * the stylesheet's, and a `rgb(0, 0, 0)` at `13px` carried over from whatever
+ * editor the author pasted from overrides both — one paragraph in an article
+ * rendering a size and a black the rest of the page never uses.
  *
  * So the standard is what the stylesheet already assumes, and this module is
  * where it is written down as code rather than as prose somebody has to

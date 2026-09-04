@@ -35,6 +35,15 @@
 }
 
 :root {
+  /* The app is light-only, and this is the half of that decision a stylesheet
+     cannot express by simply not defining dark values. `color-scheme` is what
+     the browser paints its *own* surfaces from — a select's dropdown, a date
+     picker, the form-control chrome, the default scrollbar. Left unset it
+     follows the operating system, so a reader with the OS in dark mode gets
+     charcoal dropdowns and near-black inputs on a page that is white
+     everywhere else. Naming `light` here is what keeps the two in step. */
+  color-scheme: light;
+
   --background: oklch(0.985 0.003 250);
   --surface: oklch(1 0 0);
   --surface-2: oklch(0.975 0.004 250);
@@ -53,9 +62,8 @@
   /* Chart series, in a fixed order that never gets cycled or reassigned: series
      one is always the brand blue, series two always the coral. A colour that
      moves between series when a filter changes is a chart that has to be read
-     twice. Both pairs are checked for colour-vision separation against the
-     surface they sit on, which is why the dark theme re-steps them rather than
-     reusing the light values. */
+     twice. Both are checked for colour-vision separation against the surface
+     they sit on. */
   --series-1: var(--color-brand-500);
   --series-2: var(--color-accent-600);
   --chart-grid: var(--border);
@@ -64,28 +72,6 @@
      so the help centre can substitute its own without forking the component. */
   --button-primary: var(--color-brand-600);
   --button-primary-hover: var(--color-brand-700);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: oklch(0.17 0.012 255);
-    --surface: oklch(0.21 0.014 255);
-    --surface-2: oklch(0.24 0.015 255);
-    --foreground: oklch(0.96 0.005 250);
-    --muted: oklch(0.25 0.014 255);
-    --muted-foreground: oklch(0.72 0.012 250);
-    --border: oklch(0.31 0.014 255);
-    --border-strong: oklch(0.4 0.016 255);
-    --ring: oklch(0.66 0.12 253);
-
-    --rail: oklch(0.15 0.014 258);
-    --rail-foreground: oklch(0.9 0.02 250);
-
-    /* The same two hues, stepped for the dark surface. Coral holds; the blue
-       has to lighten or it disappears into the panel behind it. */
-    --series-1: var(--color-brand-400);
-    --series-2: var(--color-accent-600);
-  }
 }
 
 body {
@@ -159,10 +145,10 @@ body {
    swap is one file, and a page that was written against `--kb-muted` keeps
    working while meaning the design system's secondary text.
 
-   Dark stays on `prefers-color-scheme` rather than the system's
-   `[data-theme="dark"]`: this site has no theme switch, and inventing one to
-   match a selector would be the tail wagging the dog. The values inside it are
-   the system's dark block.
+   The design system's dark block is deliberately not transcribed. Its dark
+   theme is for "operational night shifts and hub screens", the live portal is
+   light-only, and this app renders one palette regardless of what the reader's
+   operating system asks for — see `color-scheme: light` on `:root`.
    ────────────────────────────────────────────────────────────────────────── */
 .kb-shell {
   /* ── Primitive · Blu (brand) ─────────────────────────────────────────── */
@@ -264,10 +250,10 @@ body {
      violet of its own rather than sharing blue with `in transit`, which is
      precisely the distinction a recipient checking their phone cares about.
 
-     Expressed through the feedback roles above wherever the two agree, so the
-     dark block below only has to restate feedback and these follow. Violet and
-     the neutral pair are the exceptions — the system ships no dark value for
-     either, so both are stated in full in both themes. */
+     Expressed through the feedback roles above wherever the two agree, so a
+     change to what "warning" looks like reaches the attempted-delivery badge
+     rather than being made twice. Violet is the exception: the system gives
+     `out for delivery` a hue no feedback role carries. */
   --color-status-in-transit-bg: var(--color-feedback-info-bg);
   --color-status-in-transit-fg: var(--color-feedback-info-fg);
   --color-status-out-for-delivery-bg: var(--violet-50);
@@ -314,9 +300,9 @@ body {
      their layout, not to their colours, and it is not this one. */
   --kb-band: var(--color-action-primary-default);
   /* Not the system's `--color-text-inverse`, which means "text on whatever the
-     inverse surface currently is" and therefore goes *dark* in the dark theme.
-     The band and the footer are dark in both themes, so their text is light in
-     both, and borrowing a token that flips would put charcoal on navy. */
+     inverse surface currently is". The band and the footer are dark surfaces on
+     a light page, so their text is white; borrowing a token that follows the
+     inverse surface would put charcoal on navy the moment it moved. */
   --kb-band-text: var(--neutral-0);
   /* The brand at card strength: the icon tile in front of a category name, the
      tint behind a stepper's completed run. A flat tint rather than the band at
@@ -358,74 +344,6 @@ body {
      same blue and nothing else is. */
   --button-primary: var(--color-action-primary-default);
   --button-primary-hover: var(--color-action-primary-hover);
-}
-
-/* The live portal is light-only, and the design system's dark theme is for
-   "operational night shifts and hub screens" rather than for this. A reader who
-   has asked their operating system for a dark interface has still asked for it
-   here, so the system's dark values are used, under the media query this site
-   already answers.
-
-   Only the semantic layer is restated. The primitives above are a fixed scale —
-   the same #1C5BFE in both themes — and the roles are what move across it. */
-@media (prefers-color-scheme: dark) {
-  .kb-shell {
-    --color-background-canvas: var(--neutral-950);
-    --color-background-surface: #1a1c20;
-    --color-background-surface-sunken: #101114;
-    --color-background-hover: #25282e;
-    --color-background-inverse: #101114;
-    --color-background-brand-subtle: #132048;
-
-    --color-text-primary: #f3f5f8;
-    --color-text-secondary: #a9b2be;
-    --color-text-tertiary: #8a939f;
-    --color-text-brand: var(--blu-300);
-    --color-text-link: var(--blu-300);
-    --color-text-link-hover: var(--blu-200);
-
-    --color-border-subtle: #2b2f36;
-    --color-border-default: #3a414a;
-
-    --color-action-primary-hover: var(--blu-400);
-
-    --color-feedback-success-bg: #0e2a20;
-    --color-feedback-success-border: #1b4635;
-    --color-feedback-success-fg: #5cc79a;
-    --color-feedback-warning-bg: #2e2109;
-    --color-feedback-warning-border: #4b3813;
-    --color-feedback-warning-fg: #e9a73e;
-    --color-feedback-danger-bg: #2e1512;
-    --color-feedback-danger-border: #4c221d;
-    --color-feedback-danger-fg: #f08379;
-    --color-feedback-info-bg: #101f4a;
-    --color-feedback-info-border: #1b3170;
-    --color-feedback-info-fg: #8fadff;
-    --color-feedback-neutral-bg: #25282e;
-    --color-feedback-neutral-border: #3a414a;
-    --color-feedback-neutral-fg: #a9b2be;
-
-    --elevation-card: 0 1px 3px rgba(0, 0, 0, 0.5);
-
-    /* The two the system leaves undefined for dark. Violet at the same
-       lightness its own dark feedback pairs sit at, so the status row does not
-       have one badge glowing brighter than the rest. */
-    --color-status-out-for-delivery-bg: #1e1747;
-    --color-status-out-for-delivery-fg: #b9a8ff;
-    --color-status-returned-bg: var(--color-feedback-warning-bg);
-    --color-status-returned-fg: var(--color-feedback-warning-fg);
-
-    /* The band darkens with the page: blu-500 behind white text is comfortable
-       on a white page and glaring against a near-black one. Pure white softens
-       to the system's own dark-theme primary for the same reason. */
-    --kb-band: var(--blu-700);
-    --kb-band-text: #f3f5f8;
-    --kb-footer: var(--color-background-inverse);
-    --kb-footer-text: #f3f5f8;
-
-    --button-primary: var(--blu-600);
-    --button-primary-hover: var(--blu-500);
-  }
 }
 
 .kb-shell {

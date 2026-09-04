@@ -230,7 +230,7 @@ function Question({
       )}
 
       {help ? <p className="mt-1 text-xs text-[var(--kb-muted)]">{help}</p> : null}
-      {message ? <p className="mt-1 text-xs text-red-700 dark:text-red-300">{message}</p> : null}
+      {message ? <p className="mt-1 text-xs text-red-700">{message}</p> : null}
     </div>
   );
 }

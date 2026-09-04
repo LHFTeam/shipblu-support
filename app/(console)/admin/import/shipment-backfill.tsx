@@ -90,7 +90,7 @@ export function ShipmentBackfillForm({
           </dl>
 
           {manual > counts.links_detected && counts.links > 0 ? (
-            <p className="mt-3 text-xs text-amber-700 dark:text-amber-400">
+            <p className="mt-3 text-xs text-amber-700">
               Agents are linking more shipments by hand than the detector finds, which usually means
               the tracking-number pattern does not match the real format. Set
               SHIPMENT_TRACKING_PATTERN on the web and worker services and run this again.

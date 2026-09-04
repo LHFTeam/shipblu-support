@@ -98,7 +98,7 @@ export function InboxList({
         {canViewKb ? (
           <Link
             href="/kb"
-            className="flex items-center gap-1.5 self-start rounded-md px-1.5 py-1 text-xs font-medium text-brand-600 hover:bg-[var(--muted)] dark:text-brand-300"
+            className="flex items-center gap-1.5 self-start rounded-md px-1.5 py-1 text-xs font-medium text-brand-600 hover:bg-[var(--muted)]"
           >
             <BookIcon size={15} />
             Knowledge base
