@@ -3055,7 +3055,49 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     column: 99 of the 112 articles read 2026-08-19, the import date, and the
     handful that read later are the ones somebody happened to open.
 
+52. **The article page in the console required `kb.edit`, so no agent could
+    open an article.** _2026-09-04, writing the team handbook._ `/kb` needed
+    `kb.view`, which the agent baseline carries, and `/kb/[id]` needed
+    `kb.edit`, which starts at supervisor. An agent could therefore see every
+    title in the list, click one, and land back on the inbox with
+    `?error=forbidden`.
+
+    Survivable while the knowledge base was entirely customer-facing — an agent
+    could read any of it on the help centre like anybody else. Not survivable
+    the moment internal articles exist: an article addressed to agents that no
+    agent can open is not published, it is filed. The page now serves a
+    read-only render at `kb.view` and the editor at `kb.edit`; every write still
+    goes through `requirePermission` inside the actions, so nothing was widened
+    but reading.
+
+    The general shape is worth keeping: a permission that gates a _route_ rather
+    than the writes on it will eventually gate a reader it was never meant to.
+
 ## 7. Verification already done
+
+- **The knowledge-base role floor, against a real Postgres.** _2026-09-04._ The
+  predicate and the console handbook were exercised on a local Postgres 16 with
+  the migrations and `db/sql` applied, because `readableByRole` and
+  `effectiveFloor` are raw `sql` fragments used from pages and actions rather
+  than only from a job handler, and vitest executes no SQL.
+
+  Six article shapes — public; public carrying a floor; internal with no floor;
+  internal only through its folder (production's shape); internal with a floor
+  on the article; and article and folder disagreeing — read by each of the four
+  roles, through all four internal read models (`listArticlesForAdmin`,
+  `getArticleForEdit`, `searchForAgent`, `suggestForAgent`). 95 assertions, all
+  as intended: the floor is ignored on anything a customer can open, the folder
+  supplies it when the article does not, and the stricter of the two wins.
+
+  Then the handbook itself. Seeded into an empty database it wrote 5 folders and
+  15 articles; a second run and an `overwrite=true` run each reported everything
+  current and cut no `kb_article_versions` row. Editing an article's body by
+  hand made the next run report one drifted article and change nothing;
+  `overwrite=true` restored it and cut exactly one version row. On the seeded
+  data an agent sees 8 articles, a supervisor 11, an admin 14 and an account
+  admin 15 — and every customer-facing surface (`listCategories`,
+  `searchArticles`, `getArticle` by slug, and the sitemap) returns zero of them
+  for both an anonymous reader and a signed-in one.
 
 - **The knowledge base's formatting standard, applied to production.**
   _2026-09-03._ `normalise_kb_formatting` ran against the live database after

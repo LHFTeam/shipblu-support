@@ -11,7 +11,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import { agents } from './agents';
-import { kbArticleStatusEnum, kbVisibilityEnum, sourceSystemEnum } from './enums';
+import { agentRoleEnum, kbArticleStatusEnum, kbVisibilityEnum, sourceSystemEnum } from './enums';
 import { tsvector } from './conversations';
 
 /**
@@ -64,6 +64,12 @@ export const kbFolders = pgTable(
     /** Used when visibility = 'selected_companies'. */
     visibleToCompanyIds: uuid('visible_to_company_ids').array().notNull().default([]),
 
+    /**
+     * The lowest role on the team that may read what is inside, or null for no
+     * floor. Read only where the folder is internal — see `lib/kb/internal.ts`.
+     */
+    minRole: agentRoleEnum('min_role'),
+
     sourceSystem: sourceSystemEnum('source_system').notNull().default('native'),
     externalId: text('external_id'),
 
@@ -96,6 +102,20 @@ export const kbArticles = pgTable(
     status: kbArticleStatusEnum('status').notNull().default('draft'),
     visibility: kbVisibilityEnum('visibility').notNull().default('public'),
     visibleToCompanyIds: uuid('visible_to_company_ids').array().notNull().default([]),
+
+    /**
+     * The lowest role on the team that may read this article, or null for no
+     * floor.
+     *
+     * Nullable rather than defaulted to `agent` so the column arrives meaning
+     * exactly what every existing row already meant — no floor — instead of
+     * asserting a floor onto 112 imported articles that nobody chose. It is a
+     * second axis, not a fifth `kb_visibility` level: visibility answers "may a
+     * customer read this", this answers "which of us may", and folding the two
+     * together would put a role branch inside the rule that keeps internal
+     * runbooks out of Google.
+     */
+    minRole: agentRoleEnum('min_role'),
 
     authorAgentId: uuid('author_agent_id').references(() => agents.id, { onDelete: 'set null' }),
     approvedByAgentId: uuid('approved_by_agent_id').references(() => agents.id, {

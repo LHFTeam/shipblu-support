@@ -189,3 +189,48 @@ jobs:
             npm run job -- $job
             echo "::endgroup::"
           done
+
+      # Not in the loop above, because unlike those this one writes — so it can
+      # carry a real assertion rather than only proving its SQL plans. Run once
+      # it seeds the handbook into an empty knowledge base; run again it must
+      # find everything current and change nothing. That is the same shape as
+      # the db/sql replay above, and it is the property that lets the job be
+      # re-run to ship a content fix without reverting anybody's edits.
+      - name: The console handbook seeds idempotently
+        run: |
+          set -euo pipefail
+          npm run job -- seed_console_handbook
+          before=$(psql "$DATABASE_URL" -tAc "select count(*) from kb_articles")
+          npm run job -- seed_console_handbook overwrite=true | tee /tmp/second-run.log
+          after=$(psql "$DATABASE_URL" -tAc "select count(*) from kb_articles")
+          versions=$(psql "$DATABASE_URL" -tAc "select count(*) from kb_article_versions")
+
+          test "$before" = "$after" || {
+            echo "::error::second run changed the article count: $before -> $after"; exit 1; }
+          test "$versions" = "0" || {
+            echo "::error::second run rewrote $versions article(s) that were already current"; exit 1; }
+          grep -q "0 rewritten" /tmp/second-run.log || {
+            echo "::error::second run reported a rewrite"; exit 1; }
+
+          # And the audience, which is the whole point of the folders: every one
+          # of them internal, and every role on the ladder addressed. A folder
+          # that lost its floor is how a supervisor article reaches every agent.
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "
+            do \$\$
+            declare wrong int;
+            begin
+              select count(*) into wrong from kb_folders
+                where external_id like 'handbook:folder:%'
+                  and (visibility <> 'agents_only' or min_role is null);
+              if wrong > 0 then
+                raise exception '% handbook folder(s) are not internal or carry no role floor', wrong;
+              end if;
+
+              select count(distinct min_role) into wrong from kb_folders
+                where external_id like 'handbook:folder:%';
+              if wrong <> 4 then
+                raise exception 'handbook folders cover % of the 4 roles', wrong;
+              end if;
+            end
+            \$\$;
+          "

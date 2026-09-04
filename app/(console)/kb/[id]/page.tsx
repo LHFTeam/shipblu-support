@@ -1,24 +1,47 @@
 import Link from 'next/link';
 import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
+import { Badge } from '@/components/ui';
 import { requirePermission } from '@/lib/auth/guard';
+import { can } from '@/lib/auth/permissions';
 import { getArticleForEdit, listFolderOptions, listVersions } from '@/lib/kb/admin';
+import { FLOOR_LABELS } from '@/lib/kb/internal';
+import { direction } from '@/lib/kb/locale';
 import { requestBaseUrl } from '@/lib/kb/site';
 import { ArticleEditor } from '../editor';
 import { ArticleSidebar } from './sidebar';
 
 export const dynamic = 'force-dynamic';
 
-export default async function EditArticlePage({ params }: { params: Promise<{ id: string }> }) {
-  await requirePermission('kb.edit');
+/**
+ * One article: read by anybody with `kb.view`, edited by anybody with
+ * `kb.edit`.
+ *
+ * It used to require `kb.edit` outright, which is supervisor and up — so an
+ * agent could see every article's title in the list, click one, and be bounced
+ * to the inbox with `?error=forbidden`. That was survivable while the knowledge
+ * base was entirely customer-facing content an agent read on the help centre
+ * like everybody else. It stops being survivable the moment the internal
+ * handbook is the thing being written: an article addressed to agents that no
+ * agent can open is not published, it is filed.
+ *
+ * So the permission split moved to where it belongs. Reading is `kb.view`,
+ * which the agent baseline carries; every write still goes through
+ * `requirePermission('kb.edit')` or `'kb.publish'` inside the actions
+ * themselves, so what an agent gets here is the article and nothing else — no
+ * editor, no status controls, no version history. The role floor is applied
+ * before any of that, by `getArticleForEdit`, which answers null for an article
+ * above the reader.
+ */
+export default async function ArticlePage({ params }: { params: Promise<{ id: string }> }) {
+  const agent = await requirePermission('kb.view');
+  const mayEdit = can(agent, 'kb.edit');
 
   const { id } = await params;
-  const article = await getArticleForEdit(id);
+  const article = await getArticleForEdit(id, agent.role);
   if (!article) notFound();
 
-  const [folders, versions] = await Promise.all([listFolderOptions(), listVersions(id)]);
-
-  // Built from the host this editor is being served on rather than from
+  // Built from the host this page is being served on rather than from
   // `publicBaseUrl()`. This link exists to be clicked by the person who just
   // wrote the article, and the published hostname is only the right answer once
   // it serves this app — until the domain cuts over it is a 404 wearing the
@@ -27,6 +50,58 @@ export default async function EditArticlePage({ params }: { params: Promise<{ id
     article.status === 'published' && article.visibility === 'public'
       ? `${requestBaseUrl(await headers())}/${article.locale}/a/${encodeURI(article.slug)}`
       : null;
+
+  if (!mayEdit) {
+    return (
+      <div className="mx-auto flex h-full max-w-3xl flex-col gap-4 overflow-y-auto p-6">
+        <nav className="text-sm opacity-60">
+          <Link href="/kb" className="hover:opacity-100">
+            ← Knowledge base
+          </Link>
+        </nav>
+
+        <header className="flex flex-wrap items-center gap-2">
+          <Badge tone={article.status === 'published' ? 'open' : 'neutral'}>{article.status}</Badge>
+          {article.effectiveMinRole ? (
+            <Badge tone="warning">{FLOOR_LABELS[article.effectiveMinRole]}</Badge>
+          ) : null}
+          <Badge>{article.locale}</Badge>
+        </header>
+
+        {/*
+          `dir` and `lang` on the wrapper, once, exactly as the help centre's
+          shell does it — the formatting standard forbids either on an element
+          inside the body, so this is the only place an Arabic article is told
+          which way to run.
+        */}
+        <article
+          dir={direction(article.locale === 'ar' ? 'ar' : 'en')}
+          lang={article.locale}
+          className="kb-article"
+        >
+          <h1 className="mb-4 text-2xl font-semibold">{article.title}</h1>
+          {/*
+            Stored HTML, sanitised on the way in by `sanitiseArticleHtml` and
+            rendered here without a second pass — the same contract the public
+            article page holds to, and for the same reason: re-sanitising on
+            read would mask a gap on write.
+          */}
+          <div dangerouslySetInnerHTML={{ __html: article.bodyHtml }} />
+        </article>
+
+        {publicUrl ? (
+          <p className="text-sm opacity-60">
+            Also on the help centre:{' '}
+            <a href={publicUrl} className="underline underline-offset-4">
+              {publicUrl}
+            </a>
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+
+  const [folders, versions] = await Promise.all([listFolderOptions(), listVersions(id)]);
 
   return (
     <div className="mx-auto flex h-full max-w-6xl gap-6 overflow-y-auto p-6">
@@ -46,6 +121,7 @@ export default async function EditArticlePage({ params }: { params: Promise<{ id
             locale: article.locale,
             folderId: article.folderId,
             visibility: article.visibility,
+            minRole: article.minRole,
             tags: article.tags,
             seo: article.seo,
           }}

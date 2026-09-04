@@ -6,8 +6,9 @@ import { and, eq, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { kbArticleVersions, kbArticles, kbCategories, kbFolders } from '@/db/schema';
 import { requirePermission } from '@/lib/auth/guard';
+import { ROLES_BY_SENIORITY, type AgentRole } from '@/lib/auth/permissions';
 import { htmlToText, preview, sanitiseArticleHtml } from '@/lib/html/sanitize';
-import { takenSlugs } from '@/lib/kb/admin';
+import { getArticleForEdit, takenSlugs } from '@/lib/kb/admin';
 import { normaliseArticleHtml } from '@/lib/kb/format';
 import { isLocale } from '@/lib/kb/locale';
 import { slugify, uniqueSlug } from '@/lib/kb/slug';
@@ -19,6 +20,34 @@ function ok(): KbState {
 }
 
 const VISIBILITIES = ['public', 'logged_in', 'agents_only', 'selected_companies'] as const;
+
+/**
+ * The role floor a form field may carry: one of the roles, or nothing at all.
+ *
+ * Parsed rather than cast, and empty means null rather than `'agent'`, so
+ * clearing the control clears the column instead of writing a floor nobody
+ * chose.
+ */
+function parseMinRole(value: FormDataEntryValue | null): AgentRole | null | 'invalid' {
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+  return ROLES_BY_SENIORITY.includes(raw as AgentRole) ? (raw as AgentRole) : 'invalid';
+}
+
+/**
+ * Refuses to act on an article the signed-in agent may not read.
+ *
+ * Every action below is reached with an id out of a `FormData` field, and
+ * `kb.edit` is supervisor and up — which is exactly the population an
+ * admins-only runbook is kept from. Without this, a supervisor could publish,
+ * restore, retitle or delete an article they cannot open, and `saveArticle`
+ * could be used to read one back by lowering its floor. `getArticleForEdit`
+ * applies the same predicate the pages do, so there is one rule rather than
+ * two.
+ */
+async function readable(id: string, role: AgentRole): Promise<boolean> {
+  return (await getArticleForEdit(id, role)) !== null;
+}
 
 /**
  * Creates or updates an article.
@@ -38,6 +67,7 @@ export async function saveArticle(_state: KbState, formData: FormData): Promise<
   const locale = String(formData.get('locale') ?? 'en');
   const rawBody = String(formData.get('bodyHtml') ?? '');
   const visibility = String(formData.get('visibility') ?? 'public');
+  const minRole = parseMinRole(formData.get('minRole'));
   const requestedSlug = String(formData.get('slug') ?? '').trim();
   const seoTitle = String(formData.get('seoTitle') ?? '').trim();
   const seoDescription = String(formData.get('seoDescription') ?? '').trim();
@@ -52,6 +82,8 @@ export async function saveArticle(_state: KbState, formData: FormData): Promise<
   if (!VISIBILITIES.includes(visibility as (typeof VISIBILITIES)[number])) {
     return { error: 'Unknown visibility' };
   }
+  if (minRole === 'invalid') return { error: 'Unknown minimum role' };
+  if (id && !(await readable(id, agent.role))) return { error: 'Article not found' };
 
   // Sanitise, then normalise, in that order: the sanitiser is the security
   // boundary and the normaliser is a formatting pass that relies on being handed
@@ -93,6 +125,7 @@ export async function saveArticle(_state: KbState, formData: FormData): Promise<
     bodyText,
     excerpt,
     visibility: visibility as (typeof VISIBILITIES)[number],
+    minRole,
     tags,
     seo: {
       ...(seoTitle ? { title: seoTitle } : {}),
@@ -162,6 +195,7 @@ export async function setArticleStatus(_state: KbState, formData: FormData): Pro
   // becomes visible to every customer, which is a different level of trust from
   // being able to draft it.
   const agent = await requirePermission(status === 'published' ? 'kb.publish' : 'kb.edit');
+  if (!(await readable(id, agent.role))) return { error: 'Article not found' };
 
   await db
     .update(kbArticles)
@@ -179,9 +213,11 @@ export async function setArticleStatus(_state: KbState, formData: FormData): Pro
 }
 
 export async function deleteArticle(_state: KbState, formData: FormData): Promise<KbState> {
-  await requirePermission('kb.publish');
+  const agent = await requirePermission('kb.publish');
 
   const id = String(formData.get('id') ?? '');
+  if (!(await readable(id, agent.role))) return { error: 'Article not found' };
+
   await db.delete(kbArticles).where(eq(kbArticles.id, id));
 
   revalidatePath('/kb');
@@ -220,12 +256,14 @@ export async function createFolder(_state: KbState, formData: FormData): Promise
   const name = String(formData.get('name') ?? '').trim();
   const categoryId = String(formData.get('categoryId') ?? '');
   const visibility = String(formData.get('visibility') ?? 'public');
+  const minRole = parseMinRole(formData.get('minRole'));
 
   if (!name) return { error: 'Give the folder a name' };
   if (!categoryId) return { error: 'Choose a category' };
   if (!VISIBILITIES.includes(visibility as (typeof VISIBILITIES)[number])) {
     return { error: 'Unknown visibility' };
   }
+  if (minRole === 'invalid') return { error: 'Unknown minimum role' };
 
   const existing = await db
     .select({ slug: kbFolders.slug })
@@ -242,6 +280,7 @@ export async function createFolder(_state: KbState, formData: FormData): Promise
     slug,
     categoryId,
     visibility: visibility as (typeof VISIBILITIES)[number],
+    minRole,
   });
 
   revalidatePath('/kb/structure');
@@ -256,13 +295,18 @@ export async function createFolder(_state: KbState, formData: FormData): Promise
  * anyone having to decide which article is the original.
  */
 export async function linkTranslation(_state: KbState, formData: FormData): Promise<KbState> {
-  await requirePermission('kb.edit');
+  const agent = await requirePermission('kb.edit');
 
   const id = String(formData.get('id') ?? '');
   const otherId = String(formData.get('otherId') ?? '');
 
   if (!otherId) return { error: 'Choose an article to link to' };
   if (otherId === id) return { error: 'An article cannot be its own translation' };
+  // Both sides: linking is a write to one article and an assertion about the
+  // other, and either being out of reach makes this somebody else's business.
+  if (!(await readable(id, agent.role)) || !(await readable(otherId, agent.role))) {
+    return { error: 'Article not found' };
+  }
 
   const rows = await db
     .select({ id: kbArticles.id, locale: kbArticles.locale, group: kbArticles.translationGroupId })
@@ -287,6 +331,7 @@ export async function restoreVersion(_state: KbState, formData: FormData): Promi
 
   const id = String(formData.get('id') ?? '');
   const versionId = String(formData.get('versionId') ?? '');
+  if (!(await readable(id, agent.role))) return { error: 'Article not found' };
 
   const versions = await db
     .select({ title: kbArticleVersions.title, bodyHtml: kbArticleVersions.bodyHtml })

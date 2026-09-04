@@ -414,6 +414,48 @@ and it never touches a text node. Applying it to what is already stored is
 `normalise_kb_formatting`, which is idempotent and cuts a `kb_article_versions`
 row per article so the pass is undoable from the console.
 
+**Who on the team may read an internal article.** `kb_visibility` answers
+whether a _customer_ may (`lib/kb/visibility.ts`); `min_role` on `kb_articles`
+and `kb_folders` answers which of _us_ may, and the two are separate axes on
+purpose. `agents_only` already means "no customer, ever", whoever is signed in —
+a `supervisors_only` beside it would put a role branch inside the predicate that
+keeps internal runbooks out of Google, and would make every exhaustive switch
+over `kb_visibility` answer a question it was not asked.
+
+`lib/kb/internal.ts` owns the rule, and three things about it are load-bearing:
+
+- **The floor is read only where the content is internal.** A floor on something
+  a customer can open is not a boundary, it is a console hiding from an agent
+  what a stranger can read. The folder counts too — production's internal
+  articles are marked `public` on the row and are internal only through their
+  folder — so an article's floor is the stricter of its own and its folder's,
+  and null on anything public.
+- **`readableByRole(role)` takes the role as a required argument**, the same
+  device `articleVisibleTo` uses for its viewer: there is no zero-argument
+  version to call by accident, so a new internal read model cannot forget the
+  rule without failing to compile. Every one applies it — `admin.ts` for the
+  console list and the editor, `agent-search.ts` for the composer panel — and so
+  do the five console actions that reach an article by an id out of a
+  `FormData` field, because `kb.edit` is supervisor and up, which is exactly the
+  population an admins-only article is kept from.
+- **The seniority ladder is generated, never retyped.** `agent_role` happens to
+  be declared most-senior-first, so `least()` and `<=` would work by accident
+  today and silently re-grade every article the day a role is inserted into the
+  middle of the enum. The CASE arms come from `ROLES_BY_SENIORITY` in
+  `lib/auth/permissions.ts`, and compare as text so no `agent_role` operator is
+  needed — the `operator does not exist: text = channel` shape under
+  [Tests](#tests).
+
+The team's own handbook is the content this exists for: `lib/kb/handbook.ts`
+holds it, `seed_console_handbook` puts it in the database idempotently, and the
+`database` CI job runs that job twice and asserts the second run changes
+nothing. Its floors are on the folders rather than on the articles, so an
+article added to one later inherits the right audience instead of needing
+somebody to remember. Ship a content fix by re-running with `overwrite=true`,
+which cuts a `kb_article_versions` row for what it replaces; without it the job
+reports what drifted and leaves it alone, because these articles are meant to be
+edited in the console.
+
 **Bilingual and RTL.** Arabic is the default locale and the front door; every
 public URL keeps an explicit locale segment. Use `direction()` from
 `lib/kb/locale.ts` and never assume LTR. Slugify through `lib/kb/slug.ts` —

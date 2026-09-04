@@ -3,6 +3,7 @@ import { requirePermission } from '@/lib/auth/guard';
 import { Badge } from '@/components/ui';
 import { formatRelative } from '@/lib/format';
 import { listArticlesForAdmin, parseArticleFilters } from '@/lib/kb/admin';
+import { FLOOR_LABELS } from '@/lib/kb/internal';
 import { KbFilters } from './filters';
 
 export const dynamic = 'force-dynamic';
@@ -12,10 +13,10 @@ export default async function KbListPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  await requirePermission('kb.view');
+  const agent = await requirePermission('kb.view');
 
   const filters = parseArticleFilters(await searchParams);
-  const articles = await listArticlesForAdmin(filters);
+  const articles = await listArticlesForAdmin(agent.role, filters);
 
   return (
     <div className="mx-auto flex h-full max-w-5xl flex-col overflow-y-auto p-6">
@@ -58,7 +59,16 @@ export default async function KbListPage({
               <Badge tone={article.status === 'published' ? 'open' : 'neutral'}>
                 {article.status}
               </Badge>
-              {article.visibility !== 'public' ? (
+              {/*
+                The floor rather than the level when there is one: "agents only"
+                and "supervisors and up" are different audiences, and the row
+                that says the first about an article only supervisors can open
+                is the row that gets an internal article filed where the whole
+                team can read it.
+              */}
+              {article.minRole ? (
+                <Badge tone="warning">{FLOOR_LABELS[article.minRole]}</Badge>
+              ) : article.visibility !== 'public' ? (
                 <Badge tone="warning">{article.visibility.replace('_', ' ')}</Badge>
               ) : null}
               <Badge>{article.locale}</Badge>

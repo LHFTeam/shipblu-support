@@ -4,7 +4,9 @@ import { useActionState, useEffect, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { Button, ErrorText, Input, Label, Select, Textarea } from '@/components/ui';
+import { ROLES_BY_SENIORITY, type AgentRole } from '@/lib/auth/permissions';
 import type { FolderOption } from '@/lib/kb/admin';
+import { FLOOR_LABELS } from '@/lib/kb/internal';
 import { saveArticle, type KbState } from './actions';
 
 const INITIAL: KbState = { error: null };
@@ -17,6 +19,7 @@ export type EditorArticle = {
   locale: string;
   folderId: string;
   visibility: string;
+  minRole: AgentRole | null;
   tags: string[];
   seo: { title?: string; description?: string };
 };
@@ -51,12 +54,22 @@ export function ArticleEditor({
   const [locale, setLocale] = useState(article?.locale ?? 'en');
   const [body, setBody] = useState(article?.bodyHtml ?? '');
   const [showPreview, setShowPreview] = useState(true);
+  const [visibility, setVisibility] = useState(article?.visibility ?? 'public');
+  const [folderId, setFolderId] = useState(article?.folderId ?? '');
 
   // A folder belongs to a category, and a category has a locale. Offering
   // folders from the other language would let an author file an article
   // somewhere the public routes can never reach it — the server rejects that,
   // but the picker should not offer it in the first place.
   const available = folders.filter((folder) => folder.categoryLocale === locale);
+
+  // The chosen folder decides two things the author needs to see: whether the
+  // article is internal even when it says `public` — which is how all fifteen
+  // of production's internal articles are shaped — and what floor it already
+  // carries. A floor set here below the folder's does nothing; saying so beats
+  // letting somebody choose "agents and up" and wonder why no agent sees it.
+  const folder = available.find((option) => option.id === folderId);
+  const internal = visibility === 'agents_only' || folder?.visibility === 'agents_only';
 
   return (
     <form action={action} className="flex flex-col gap-4">
@@ -83,7 +96,13 @@ export function ArticleEditor({
 
         <div className="min-w-56 flex-1">
           <Label htmlFor="folderId">Folder</Label>
-          <Select id="folderId" name="folderId" defaultValue={article?.folderId ?? ''} required>
+          <Select
+            id="folderId"
+            name="folderId"
+            value={folderId}
+            onChange={(event) => setFolderId(event.target.value)}
+            required
+          >
             <option value="" disabled>
               {available.length ? 'Choose a folder…' : 'No folders in this language yet'}
             </option>
@@ -97,13 +116,49 @@ export function ArticleEditor({
 
         <div className="w-44">
           <Label htmlFor="visibility">Visibility</Label>
-          <Select id="visibility" name="visibility" defaultValue={article?.visibility ?? 'public'}>
+          <Select
+            id="visibility"
+            name="visibility"
+            value={visibility}
+            onChange={(event) => setVisibility(event.target.value)}
+          >
             <option value="public">Public</option>
             <option value="agents_only">Agents only</option>
             <option value="logged_in">Signed-in customers</option>
           </Select>
         </div>
+
+        {/*
+          Only for internal articles, and it disappears rather than greying out.
+          A floor is meaningless on anything a customer can open — the read rule
+          drops it — so a control offering one there would be a promise the
+          product does not keep.
+        */}
+        {internal ? (
+          <div className="w-52">
+            <Label htmlFor="minRole">Who on the team</Label>
+            <Select id="minRole" name="minRole" defaultValue={article?.minRole ?? ''}>
+              <option value="">Everyone on the team</option>
+              {ROLES_BY_SENIORITY.map((role) => (
+                <option key={role} value={role}>
+                  {FLOOR_LABELS[role]}
+                </option>
+              ))}
+            </Select>
+          </div>
+        ) : null}
       </div>
+
+      {internal ? (
+        <p className="-mt-2 text-xs opacity-50">
+          This article is internal
+          {visibility === 'agents_only' ? '' : `, because ${folder?.name} is`}. No customer can
+          reach it on the help centre, signed in or not, and it cannot be linked into a reply.
+          {folder?.minRole
+            ? ` ${folder.name} is already limited to ${FLOOR_LABELS[folder.minRole].toLowerCase()}; a lower setting here does not widen that.`
+            : ''}
+        </p>
+      ) : null}
 
       {/*
         'logged_in' is served for real now: the public queries take the reader's

@@ -1,8 +1,10 @@
 'use client';
 
-import { useActionState } from 'react';
+import { useActionState, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Button, ErrorText, Input, Label, Select } from '@/components/ui';
+import { ROLES_BY_SENIORITY } from '@/lib/auth/permissions';
+import { FLOOR_LABELS } from '@/lib/kb/internal';
 import { createCategory, createFolder, type KbState } from '../actions';
 
 const INITIAL: KbState = { error: null };
@@ -46,6 +48,7 @@ export function FolderForm({
   categories: { id: string; name: string; locale: string }[];
 }) {
   const [state, action] = useActionState(createFolder, INITIAL);
+  const [visibility, setVisibility] = useState('public');
 
   return (
     <form
@@ -74,12 +77,37 @@ export function FolderForm({
 
       <div className="w-44">
         <Label htmlFor="folderVisibility">Visibility</Label>
-        <Select id="folderVisibility" name="visibility" defaultValue="public">
+        <Select
+          id="folderVisibility"
+          name="visibility"
+          value={visibility}
+          onChange={(event) => setVisibility(event.target.value)}
+        >
           <option value="public">Public</option>
           <option value="agents_only">Agents only</option>
           <option value="logged_in">Signed-in customers</option>
         </Select>
       </div>
+
+      {/*
+        A floor on the folder is the one worth setting: it holds for every
+        article filed here afterwards, including one an author left on the
+        default. Offered only for an internal folder, because the read rule only
+        reads it there.
+      */}
+      {visibility === 'agents_only' ? (
+        <div className="w-52">
+          <Label htmlFor="folderMinRole">Who on the team</Label>
+          <Select id="folderMinRole" name="minRole" defaultValue="">
+            <option value="">Everyone on the team</option>
+            {ROLES_BY_SENIORITY.map((role) => (
+              <option key={role} value={role}>
+                {FLOOR_LABELS[role]}
+              </option>
+            ))}
+          </Select>
+        </div>
+      ) : null}
 
       <SubmitButton idle="Add folder" busy="Adding…" />
       <ErrorText>{state.error}</ErrorText>

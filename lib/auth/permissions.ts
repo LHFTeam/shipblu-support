@@ -234,3 +234,44 @@ export function can(
 export function permissionsForRole(role: AgentRole): Permission[] {
   return [...ROLE_PERMISSIONS[role]];
 }
+
+/**
+ * Seniority, as a number, for the one question that is genuinely ordered.
+ *
+ * Capabilities deliberately are not: `PERMISSIONS` is a flat union and
+ * `agents.permissions` layers explicit true/false on top, so a supervisor can
+ * hold something an admin has had taken away and "higher role" says nothing
+ * about who can do what. Audience is the exception. "Supervisors and up" is a
+ * statement about the ladder rather than about a capability, and a knowledge
+ * base article that is only for the people above a line has no permission key
+ * to hang on — inventing one per article is how a taxonomy becomes a hundred
+ * booleans.
+ *
+ * So this is exported for that use and named for it. Do not reach for it to
+ * decide whether somebody may perform an action: `can()` is the answer there,
+ * and it is the answer precisely because it can be overridden per agent.
+ */
+const ROLE_SENIORITY: Record<AgentRole, number> = {
+  agent: 1,
+  supervisor: 2,
+  admin: 3,
+  account_admin: 4,
+};
+
+/** True when `role` is `floor` or senior to it. */
+export function roleAtLeast(role: AgentRole, floor: AgentRole): boolean {
+  return ROLE_SENIORITY[role] >= ROLE_SENIORITY[floor];
+}
+
+/** The more senior of two floors — the one that admits fewer people. */
+export function strictestRole(a: AgentRole, b: AgentRole): AgentRole {
+  return roleAtLeast(a, b) ? a : b;
+}
+
+/** How senior a role is, for the SQL side of the same rule. */
+export function roleSeniority(role: AgentRole): number {
+  return ROLE_SENIORITY[role];
+}
+
+/** Every role, most junior first — the order a "minimum role" picker reads in. */
+export const ROLES_BY_SENIORITY: AgentRole[] = ['agent', 'supervisor', 'admin', 'account_admin'];
