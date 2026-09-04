@@ -6,10 +6,10 @@ import { and, eq, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { kbArticleVersions, kbArticles, kbCategories, kbFolders } from '@/db/schema';
 import { requirePermission } from '@/lib/auth/guard';
-import { ROLES_BY_SENIORITY, type AgentRole } from '@/lib/auth/permissions';
+import type { AgentRole } from '@/lib/auth/permissions';
 import { htmlToText, preview, sanitiseArticleHtml } from '@/lib/html/sanitize';
-import { getArticleForEdit, takenSlugs } from '@/lib/kb/admin';
-import { folderFloor, meetsFloor } from '@/lib/kb/floors';
+import { getArticleForEdit, takenSlugs, type EditableArticle } from '@/lib/kb/admin';
+import { FLOOR_LABELS, SELECTABLE_FLOORS, folderFloor, meetsFloor } from '@/lib/kb/floors';
 import { normaliseArticleHtml } from '@/lib/kb/format';
 import { isLocale } from '@/lib/kb/locale';
 import { slugify, uniqueSlug } from '@/lib/kb/slug';
@@ -27,12 +27,15 @@ const VISIBILITIES = ['public', 'logged_in', 'agents_only', 'selected_companies'
  *
  * Parsed rather than cast, and empty means null rather than `'agent'`, so
  * clearing the control clears the column instead of writing a floor nobody
- * chose.
+ * chose. Checked against `SELECTABLE_FLOORS` rather than every role for the
+ * same reason the picker offers that list: `agent` is a floor every read model
+ * reports as none, so accepting it would store a value that reads back as if
+ * the control had done nothing.
  */
 function parseMinRole(value: FormDataEntryValue | null): AgentRole | null | 'invalid' {
   const raw = String(value ?? '').trim();
   if (!raw) return null;
-  return ROLES_BY_SENIORITY.includes(raw as AgentRole) ? (raw as AgentRole) : 'invalid';
+  return SELECTABLE_FLOORS.includes(raw as AgentRole) ? (raw as AgentRole) : 'invalid';
 }
 
 /**
@@ -45,9 +48,31 @@ function parseMinRole(value: FormDataEntryValue | null): AgentRole | null | 'inv
  * could be used to read one back by lowering its floor. `getArticleForEdit`
  * applies the same predicate the pages do, so there is one rule rather than
  * two.
+ *
+ * It returns the row rather than a boolean so the check and the read are one
+ * query: the callers needing the current title and body were fetching the same
+ * row again immediately afterwards, and `linkTranslation` paid for it twice in
+ * a row because `||` short-circuits.
  */
-async function readable(id: string, role: AgentRole): Promise<boolean> {
-  return (await getArticleForEdit(id, role)) !== null;
+async function readable(id: string, role: AgentRole): Promise<EditableArticle | null> {
+  if (!id) return null;
+  return getArticleForEdit(id, role);
+}
+
+/**
+ * Refuses a floor the author could not themselves clear.
+ *
+ * The folder half of this is checked above, against `folderFloor`. This is the
+ * article's own: a supervisor picks "Admins and up", saves, and is redirected
+ * to an article that now answers 404 for them — locked out of their own work in
+ * one action, and out of reach of every read model that could show it back to
+ * them. You may put content above yourself only by asking somebody who is.
+ */
+function refuseUnreachableFloor(role: AgentRole, floor: AgentRole | null): KbState | null {
+  if (meetsFloor(role, floor)) return null;
+  return {
+    error: `You cannot limit this to ${FLOOR_LABELS[floor!].toLowerCase()} — you would not be able to open it afterwards`,
+  };
 }
 
 /**
@@ -84,7 +109,8 @@ export async function saveArticle(_state: KbState, formData: FormData): Promise<
     return { error: 'Unknown visibility' };
   }
   if (minRole === 'invalid') return { error: 'Unknown minimum role' };
-  if (id && !(await readable(id, agent.role))) return { error: 'Article not found' };
+  const before = id ? await readable(id, agent.role) : null;
+  if (id && !before) return { error: 'Article not found' };
 
   // Sanitise, then normalise, in that order: the sanitiser is the security
   // boundary and the normaliser is a formatting pass that relies on being handed
@@ -144,6 +170,9 @@ export async function saveArticle(_state: KbState, formData: FormData): Promise<
   const internal = visibility === 'agents_only' || folder[0].visibility === 'agents_only';
   const floor = internal ? (formData.has('minRole') ? { minRole } : {}) : { minRole: null };
 
+  const unreachable = refuseUnreachableFloor(agent.role, internal ? minRole : null);
+  if (unreachable) return unreachable;
+
   const baseSlug = slugify(requestedSlug || title, `article-${Date.now()}`);
   const slug = uniqueSlug(baseSlug, await takenSlugs(locale, id || undefined));
 
@@ -175,19 +204,13 @@ export async function saveArticle(_state: KbState, formData: FormData): Promise<
     redirect(`/kb/${inserted[0]!.id}`);
   }
 
-  const existing = await db
-    .select({ bodyHtml: kbArticles.bodyHtml, title: kbArticles.title })
-    .from(kbArticles)
-    .where(eq(kbArticles.id, id))
-    .limit(1);
-
-  if (!existing[0]) return { error: 'Article not found' };
+  const current = before!;
 
   await db.transaction(async (tx) => {
     // A version is only cut when the content actually changed. Snapshotting
     // every save would bury the edits that matter under a pile of identical
     // rows from someone tabbing through the form.
-    const changed = existing[0]!.bodyHtml !== bodyHtml || existing[0]!.title !== title;
+    const changed = current.bodyHtml !== bodyHtml || current.title !== title;
 
     if (changed) {
       const next = await tx
@@ -200,8 +223,8 @@ export async function saveArticle(_state: KbState, formData: FormData): Promise<
         version: next[0]?.version ?? 1,
         // The version stores the state being replaced, so restoring one means
         // taking the body out of the row rather than reconstructing a diff.
-        title: existing[0]!.title,
-        bodyHtml: existing[0]!.bodyHtml,
+        title: current.title,
+        bodyHtml: current.bodyHtml,
         editedByAgentId: agent.id,
       });
     }
@@ -339,21 +362,17 @@ export async function linkTranslation(_state: KbState, formData: FormData): Prom
   if (otherId === id) return { error: 'An article cannot be its own translation' };
   // Both sides: linking is a write to one article and an assertion about the
   // other, and either being out of reach makes this somebody else's business.
-  if (!(await readable(id, agent.role)) || !(await readable(otherId, agent.role))) {
-    return { error: 'Article not found' };
-  }
+  const [mine, other] = await Promise.all([
+    readable(id, agent.role),
+    readable(otherId, agent.role),
+  ]);
+  if (!mine || !other) return { error: 'Article not found' };
 
-  const rows = await db
-    .select({ id: kbArticles.id, locale: kbArticles.locale, group: kbArticles.translationGroupId })
-    .from(kbArticles)
-    .where(sql`${kbArticles.id} in (${id}, ${otherId})`);
-
-  if (rows.length !== 2) return { error: 'Article not found' };
-  if (rows[0]!.locale === rows[1]!.locale) {
+  if (mine.locale === other.locale) {
     return { error: 'Both articles are in the same language' };
   }
 
-  const target = rows.find((row) => row.id === otherId)!.group;
+  const target = other.translationGroupId;
   await db.update(kbArticles).set({ translationGroupId: target }).where(eq(kbArticles.id, id));
 
   revalidatePath(`/kb/${id}`);
@@ -366,7 +385,9 @@ export async function restoreVersion(_state: KbState, formData: FormData): Promi
 
   const id = String(formData.get('id') ?? '');
   const versionId = String(formData.get('versionId') ?? '');
-  if (!(await readable(id, agent.role))) return { error: 'Article not found' };
+
+  const current = await readable(id, agent.role);
+  if (!current) return { error: 'Article not found' };
 
   const versions = await db
     .select({ title: kbArticleVersions.title, bodyHtml: kbArticleVersions.bodyHtml })
@@ -377,14 +398,6 @@ export async function restoreVersion(_state: KbState, formData: FormData): Promi
   const version = versions[0];
   if (!version) return { error: 'That version no longer exists' };
 
-  const current = await db
-    .select({ title: kbArticles.title, bodyHtml: kbArticles.bodyHtml })
-    .from(kbArticles)
-    .where(eq(kbArticles.id, id))
-    .limit(1);
-
-  if (!current[0]) return { error: 'Article not found' };
-
   await db.transaction(async (tx) => {
     const next = await tx
       .select({ version: sql<number>`coalesce(max(${kbArticleVersions.version}), 0) + 1` })
@@ -394,8 +407,8 @@ export async function restoreVersion(_state: KbState, formData: FormData): Promi
     await tx.insert(kbArticleVersions).values({
       articleId: id,
       version: next[0]?.version ?? 1,
-      title: current[0]!.title,
-      bodyHtml: current[0]!.bodyHtml,
+      title: current.title,
+      bodyHtml: current.bodyHtml,
       editedByAgentId: agent.id,
     });
 

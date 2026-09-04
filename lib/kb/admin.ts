@@ -3,7 +3,8 @@ import { db } from '@/db/client';
 import { agents, kbArticleVersions, kbArticles, kbCategories, kbFolders } from '@/db/schema';
 import type { AgentRole } from '@/lib/auth/permissions';
 import { folderFloor, meetsFloor } from './floors';
-import { effectiveFloor, readableByRole } from './internal';
+import type { ArticleVisibility } from './floors';
+import { effectiveFloor, effectiveVisibility, readableByRole } from './internal';
 
 /**
  * Read models for KB authoring.
@@ -51,7 +52,14 @@ export type AdminArticleRow = {
   slug: string;
   locale: string;
   status: string;
-  visibility: string;
+  /**
+   * The stricter of the article's own level and its folder's, never the column.
+   *
+   * Production's internal articles carry `visibility = 'public'` and are
+   * internal only through their folder, so a badge drawn from the column reads
+   * "public" on the fifteen rows where saying so is most misleading.
+   */
+  visibility: ArticleVisibility;
   /** The floor in force, or null. Null on everything a customer may read. */
   minRole: AgentRole | null;
   folderName: string;
@@ -82,7 +90,7 @@ export async function listArticlesForAdmin(
       slug: kbArticles.slug,
       locale: kbArticles.locale,
       status: kbArticles.status,
-      visibility: kbArticles.visibility,
+      visibility: effectiveVisibility,
       minRole: effectiveFloor,
       folderName: kbFolders.name,
       categoryName: kbCategories.name,
@@ -103,6 +111,14 @@ export type EditableArticle = typeof kbArticles.$inferSelect & {
   categoryId: string;
   /** The floor in force, folder included — what the editor shows and re-saves. */
   effectiveMinRole: AgentRole | null;
+  /**
+   * The level in force, folder included.
+   *
+   * `visibility` on the row beside it is what the editor's control edits; this
+   * is what decides whether the article is reachable on the help centre, so
+   * anything offering a public URL reads this one.
+   */
+  effectiveVisibility: ArticleVisibility;
 };
 
 /**
@@ -123,6 +139,7 @@ export async function getArticleForEdit(
       article: kbArticles,
       categoryId: kbFolders.categoryId,
       effectiveMinRole: effectiveFloor,
+      effectiveVisibility,
     })
     .from(kbArticles)
     .innerJoin(kbFolders, eq(kbFolders.id, kbArticles.folderId))
@@ -131,7 +148,12 @@ export async function getArticleForEdit(
 
   const row = rows[0];
   return row
-    ? { ...row.article, categoryId: row.categoryId, effectiveMinRole: row.effectiveMinRole }
+    ? {
+        ...row.article,
+        categoryId: row.categoryId,
+        effectiveMinRole: row.effectiveMinRole,
+        effectiveVisibility: row.effectiveVisibility,
+      }
     : null;
 }
 

@@ -46,8 +46,13 @@ export default async function ArticlePage({ params }: { params: Promise<{ id: st
   // wrote the article, and the published hostname is only the right answer once
   // it serves this app — until the domain cuts over it is a 404 wearing the
   // canonical address.
+  //
+  // `effectiveVisibility`, never the column: a `published`/`public` article
+  // inside an `agents_only` folder is not on the help centre, so its URL is a
+  // guaranteed 404 — the hole `folderVisibleTo` exists to close, offered here
+  // as a link somebody will click.
   const publicUrl =
-    article.status === 'published' && article.visibility === 'public'
+    article.status === 'published' && article.effectiveVisibility === 'public'
       ? `${requestBaseUrl(await headers())}/${article.locale}/a/${encodeURI(article.slug)}`
       : null;
 
@@ -69,25 +74,46 @@ export default async function ArticlePage({ params }: { params: Promise<{ id: st
         </header>
 
         {/*
-          `dir` and `lang` on the wrapper, once, exactly as the help centre's
-          shell does it — the formatting standard forbids either on an element
-          inside the body, so this is the only place an Arabic article is told
-          which way to run.
+          A reader gets the published article and nothing else.
+
+          Widening this page to `kb.view` widened everything on it, not only the
+          part that was being thought about: without this branch every agent
+          could read the body of any draft. `agent-search.ts` states the rule
+          for the composer — "no reviewer has agreed to its contents" — and it
+          holds more strongly here, where the whole body is on screen rather
+          than a search snippet. A notice rather than a 404, because the row is
+          already in the list and a dead click is what this page was changed to
+          stop.
         */}
-        <article
-          dir={direction(article.locale === 'ar' ? 'ar' : 'en')}
-          lang={article.locale}
-          className="kb-article"
-        >
-          <h1 className="mb-4 text-2xl font-semibold">{article.title}</h1>
-          {/*
-            Stored HTML, sanitised on the way in by `sanitiseArticleHtml` and
-            rendered here without a second pass — the same contract the public
-            article page holds to, and for the same reason: re-sanitising on
-            read would mask a gap on write.
-          */}
-          <div dangerouslySetInnerHTML={{ __html: article.bodyHtml }} />
-        </article>
+        {article.status === 'published' ? (
+          // `dir` and `lang` on the wrapper, once, exactly as the help centre's
+          // shell does it — the formatting standard forbids either on an element
+          // inside the body, so this is the only place an Arabic article is told
+          // which way to run.
+          <article
+            dir={direction(article.locale === 'ar' ? 'ar' : 'en')}
+            lang={article.locale}
+            className="kb-article"
+          >
+            <h1 className="mb-4 text-2xl font-semibold">{article.title}</h1>
+            {/*
+              Stored HTML, sanitised on the way in by `sanitiseArticleHtml` and
+              rendered here without a second pass — the same contract the public
+              article page holds to, and for the same reason: re-sanitising on
+              read would mask a gap on write.
+            */}
+            <div dangerouslySetInnerHTML={{ __html: article.bodyHtml }} />
+          </article>
+        ) : (
+          <>
+            <h1 className="text-2xl font-semibold">{article.title}</h1>
+            <p className="rounded-lg border border-[var(--border)] p-4 text-sm opacity-70">
+              This article is {article.status === 'draft' ? 'still a draft' : 'archived'}. Nobody
+              has approved what it says yet, so it is readable only by whoever can edit it. Ask a
+              supervisor if you need it.
+            </p>
+          </>
+        )}
 
         {publicUrl ? (
           <p className="text-sm opacity-60">

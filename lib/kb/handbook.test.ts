@@ -28,6 +28,19 @@ describe('the handbook’s shape', () => {
     expect(new Set(slugs).size).toBe(slugs.length);
   });
 
+  it('has a unique key and slug for every folder', () => {
+    // A duplicated folder key is not a loud failure: `(source_system,
+    // external_id)` is unique, so the second `upsertFolder` finds the first
+    // folder's row, overwrites its floor with the second's and hands both sets
+    // of articles the same id — three admin articles filed under a supervisor
+    // floor, with the tally still reporting five folders.
+    const keys = HANDBOOK.map((folder) => folder.key);
+    const slugs = HANDBOOK.map((folder) => folder.slug);
+
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(new Set(slugs).size).toBe(slugs.length);
+  });
+
   it('uses slugs that survive slugify unchanged', () => {
     // The seeding job re-finds a row by its slug. One that slugify would
     // rewrite is a key that stops matching the moment anything re-derives it.
