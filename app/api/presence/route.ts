@@ -62,16 +62,24 @@ export async function GET(request: Request) {
       // stream is still alive. A killed instance heals through staleness even
       // when it never gets a chance to run the sign-off below.
       heartbeat = setInterval(() => {
+        // The keepalive byte goes out first and synchronously. It is what stops
+        // the proxy timing this stream out, and it must never wait on a
+        // database: under pool pressure an awaited query here holds the byte
+        // back for tens of seconds, the proxy closes every open stream, and
+        // every console in the building reconnects at once — a slow database
+        // turned into a stampede against the same database.
+        sendKeepalive();
+
         void (async () => {
-          // Order matters: prove the session is still there before asserting the
-          // agent is. A beat first would put them back online for 25 seconds
-          // after they were signed out, every time round the loop.
+          // Then the session, before the beat rather than after it. A beat
+          // first would put a signed-out agent back to `online` for 25 seconds,
+          // every time round the loop. A database that cannot answer fails open
+          // — a blip must not sign the whole team out.
           if (tokenHash && !(await sessionIsLive(tokenHash).catch(() => true))) {
             cleanup();
             return;
           }
 
-          sendKeepalive();
           await beat(agent.id).catch(() => {
             /* the staleness check covers a missed beat */
           });

@@ -157,7 +157,10 @@ function describePolicy(policy: {
     parts.push(`marked away after ${policy.autoAwayAfterMins} minutes without input`);
   }
   if (policy.autoSignoutAfterMins !== null) {
-    parts.push(`signed out after ${policy.autoSignoutAfterMins}`);
+    // Carries its own unit rather than borrowing the clause above, which is
+    // only there when the away timer is also on: "signed out after 30" is what
+    // a supervisor read when it was not.
+    parts.push(`signed out after ${policy.autoSignoutAfterMins} minutes`);
   }
 
   if (parts.length === 0) {

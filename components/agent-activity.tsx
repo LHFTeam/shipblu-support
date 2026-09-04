@@ -40,7 +40,8 @@ const BEAT_MS = 60_000;
 /** How often the timers are evaluated when nothing is imminent. */
 const TICK_MS = 5_000;
 
-const INPUT_EVENTS = ['pointerdown', 'keydown', 'scroll', 'wheel'] as const;
+/** Scroll is missing on purpose — it is registered on the document below. */
+const INPUT_EVENTS = ['pointerdown', 'keydown', 'wheel'] as const;
 
 export function AgentActivity({
   accepting,
@@ -75,8 +76,14 @@ export function AgentActivity({
   const lastBeat = useRef(0);
   const reportedIdle = useRef(false);
   const signingOut = useRef(false);
+  /**
+   * Mirrors `warning` below, because `noteInput` has to know whether it is
+   * dismissing a countdown without taking the state as a dependency — a beat
+   * memoised on changing state would be rebuilt on every tick.
+   */
+  const warningUp = useRef(false);
 
-  const [warningSince, setWarningSince] = useState<number | null>(null);
+  const [warning, setWarning] = useState(false);
   const [remainingMs, setRemainingMs] = useState(0);
 
   const awayMs = awayAfterMins === null ? null : awayAfterMins * 60_000;
@@ -110,12 +117,14 @@ export function AgentActivity({
           body: JSON.stringify(idle ? { idle: true } : {}),
         });
 
-        // Signed out from somewhere else — the sweep, an admin, another tab. A
-        // hidden tab that was throttled past its own countdown lands here too,
-        // which is what stops it sitting on a dead session until somebody
-        // clicks something.
+        // The session is gone — but this tab does not know why, and there are
+        // several: the sweep, an admin deactivating them, a password change in
+        // another tab. Only the countdown below can honestly claim inactivity,
+        // so this says the neutral thing. A hidden tab throttled past its own
+        // countdown lands here too, which is what stops it sitting on a dead
+        // session until somebody clicks something.
         if (response.status === 401) {
-          window.location.replace('/login?signedOut=inactivity');
+          window.location.replace('/login?signedOut=session');
           return;
         }
 
@@ -141,7 +150,9 @@ export function AgentActivity({
     lastInput.current = now;
 
     // Whatever the countdown was about, they are here.
-    setWarningSince(null);
+    const dismissing = warningUp.current;
+    warningUp.current = false;
+    setWarning(false);
 
     // Straight back to the server when they return from an automatic away, so
     // the rota starts including them again in seconds rather than at the next
@@ -149,7 +160,11 @@ export function AgentActivity({
     const returning = reportedIdle.current;
     reportedIdle.current = false;
 
-    if (returning || now - lastBeat.current >= BEAT_MS) {
+    // `dismissing` bypasses the throttle deliberately. Pressing "Stay signed
+    // in" has to move the server's clock *now* — on a short window the throttle
+    // is longer than the window itself, so a throttled dismissal would leave
+    // the agent watching a countdown they cannot stop.
+    if (returning || dismissing || now - lastBeat.current >= BEAT_MS) {
       lastBeat.current = now;
       void beat(false);
     }
@@ -159,14 +174,25 @@ export function AgentActivity({
     if (!active) return;
 
     lastInput.current = Date.now();
-    lastBeat.current = Date.now();
+    // Zero, not now: a page load is not itself input — a tab restored by the
+    // browser at startup would otherwise refresh the clock with nobody there —
+    // but the *first* thing the agent does has to reach the server immediately.
+    // Seeded to the mount time, an agent who reloads with a session already 29
+    // minutes idle works for a minute in silence and is signed out mid-sentence.
+    lastBeat.current = 0;
     reportedIdle.current = false;
+    warningUp.current = false;
 
     // `passive` throughout: none of these prevent default, and a non-passive
     // scroll listener on a long ticket timeline is visible jank.
     for (const event of INPUT_EVENTS) {
       window.addEventListener(event, noteInput, { passive: true });
     }
+    // Scroll is the exception, and it has to be captured on the document: the
+    // event does not bubble, and this console has no document scroller at all —
+    // the shell is `h-dvh overflow-hidden` and every list is its own
+    // `overflow-y-auto` box, so a window listener would never fire once.
+    document.addEventListener('scroll', noteInput, { capture: true, passive: true });
     // Turning back to the tab is a person doing something, the same as a click.
     const onVisibility = () => {
       if (document.visibilityState === 'visible') noteInput();
@@ -182,8 +208,14 @@ export function AgentActivity({
         return;
       }
 
-      if (signoutMs !== null && idleFor >= signoutMs - warningLeadMs) {
-        setWarningSince((current) => current ?? Date.now());
+      if (signoutMs !== null && idleFor >= signoutMs - warningLeadMs && !warningUp.current) {
+        // Both in one commit. Leaving `remainingMs` at its initial 0 until the
+        // effect below runs paints "you will be signed out in 0 seconds" and
+        // then counts *up* to 60, which is exactly the "reads as broken" the
+        // countdown exists to avoid.
+        warningUp.current = true;
+        setWarning(true);
+        setRemainingMs(Math.max(0, signoutMs - idleFor));
       }
 
       if (awayMs !== null && idleFor >= awayMs && !reportedIdle.current) {
@@ -195,6 +227,7 @@ export function AgentActivity({
     return () => {
       clearInterval(tick);
       for (const event of INPUT_EVENTS) window.removeEventListener(event, noteInput);
+      document.removeEventListener('scroll', noteInput, { capture: true });
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('focus', noteInput);
     };
@@ -204,7 +237,7 @@ export function AgentActivity({
   // moves in five-second jumps reads as broken, and running at this rate all day
   // to serve the last minute of it would wake the tab 720 times an hour.
   useEffect(() => {
-    if (warningSince === null || signoutMs === null) return;
+    if (!warning || signoutMs === null) return;
 
     const update = () => {
       setRemainingMs(Math.max(0, signoutMs - (Date.now() - lastInput.current)));
@@ -213,9 +246,9 @@ export function AgentActivity({
     update();
     const timer = setInterval(update, 1_000);
     return () => clearInterval(timer);
-  }, [warningSince, signoutMs]);
+  }, [warning, signoutMs]);
 
-  if (warningSince === null) return null;
+  if (!warning) return null;
 
   const seconds = Math.ceil(remainingMs / 1000);
 

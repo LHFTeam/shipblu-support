@@ -378,6 +378,18 @@ export const presencePolicy = pgTable('presence_policy', {
    */
   autoSignoutAfterMins: integer('auto_signout_after_mins'),
 
+  /**
+   * When the windows last changed, and the anchor for the grace period that
+   * stops a newly-enabled timer acting retroactively — `StoredPresencePolicy`
+   * in `lib/presence/idle.ts` explains why that is load-bearing rather than
+   * cosmetic.
+   *
+   * Maintained by the `touch_updated_at` trigger that `db/sql/001` applies to
+   * every table carrying the column, so a future writer that forgets to set it
+   * still gets it right. That is worth knowing in the other direction too: an
+   * UPDATE cannot backdate this, which is a nuisance to test against and
+   * exactly the property the grace needs.
+   */
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   updatedByAgentId: uuid('updated_by_agent_id').references(() => agents.id, {
     onDelete: 'set null',

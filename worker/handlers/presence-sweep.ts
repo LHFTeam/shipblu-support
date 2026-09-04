@@ -2,8 +2,8 @@ import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agents } from '@/db/schema';
 import { goOffline, setAccepting } from '@/lib/assignment/presence';
-import { deleteInactiveSessions, hasLiveSession } from '@/lib/auth/session';
-import { shouldAutoAway } from '@/lib/presence/idle';
+import { agentsWithLiveSessions, deleteSessionsIdleSince } from '@/lib/auth/session';
+import { shouldAutoAway, signOutCutoff } from '@/lib/presence/idle';
 import { loadPresencePolicy } from '@/lib/presence/policy';
 
 /**
@@ -68,16 +68,27 @@ export async function presenceSweep(): Promise<void> {
   }
 
   // --- Sign out sessions nobody has touched ---------------------------------
+  // `signOutCutoff` answers null both when the timer is off and while a
+  // just-enabled window is still inside its grace period — without that second
+  // case, the first sweep after an admin switches the sign-out on would find
+  // every session in the table already older than the window and destroy the
+  // lot.
+  const cutoff = signOutCutoff(policy, now);
   let signedOut: string[] = [];
 
-  if (policy.autoSignoutAfterMins !== null) {
-    signedOut = await deleteInactiveSessions(policy.autoSignoutAfterMins, now);
+  if (cutoff) {
+    signedOut = await deleteSessionsIdleSince(cutoff);
+
+    // Asked once for the whole batch. A deploy or an overnight sweep signs out
+    // the entire fleet at once, and a query per agent would be forty round
+    // trips on the same five-minute cron as the SLA and assignment sweeps.
+    const stillHere = await agentsWithLiveSessions(signedOut);
 
     for (const agentId of signedOut) {
       // An agent with another live session — a phone, a second machine — is
       // still here, and marking them offline would take them out of the rota
       // for a browser they had already stopped using.
-      if (await hasLiveSession(agentId)) continue;
+      if (stillHere.has(agentId)) continue;
 
       // The stream on the other end notices the missing session within 25
       // seconds and signs off by itself. This covers the case where nothing is

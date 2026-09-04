@@ -7,9 +7,11 @@ import {
   shouldAutoAway,
   shouldRestoreOnInput,
   shouldSignOut,
+  signOutCutoff,
   validatePolicy,
   warningLeadMs,
   type PresencePolicy,
+  type StoredPresencePolicy,
 } from './idle';
 
 /** Wall-clock Cairo, so a fixture reads as the shift it describes. */
@@ -19,6 +21,11 @@ function at(time: string, day = '2026-09-03'): Date {
 
 const POLICY: PresencePolicy = { autoAwayAfterMins: 10, autoSignoutAfterMins: 30 };
 const OFF: PresencePolicy = { autoAwayAfterMins: null, autoSignoutAfterMins: null };
+
+/** A policy that has been in force long enough for its grace to have elapsed. */
+function settled(policy: PresencePolicy = POLICY): StoredPresencePolicy {
+  return { ...policy, changedAt: at('00:00') };
+}
 
 function online(over: Partial<Parameters<typeof shouldAutoAway>[0]> = {}) {
   return {
@@ -116,12 +123,42 @@ describe('shouldRestoreOnInput', () => {
 
 describe('shouldSignOut', () => {
   it('measures the session, not the agent', () => {
-    expect(shouldSignOut({ lastActivityAt: at('09:00') }, POLICY, at('09:30'))).toBe(true);
-    expect(shouldSignOut({ lastActivityAt: at('09:00') }, POLICY, at('09:29'))).toBe(false);
+    expect(shouldSignOut({ lastActivityAt: at('09:00') }, settled(), at('09:30'))).toBe(true);
+    expect(shouldSignOut({ lastActivityAt: at('09:00') }, settled(), at('09:29'))).toBe(false);
   });
 
   it('never fires while the window is off', () => {
-    expect(shouldSignOut({ lastActivityAt: at('09:00') }, OFF, at('23:00'))).toBe(false);
+    expect(shouldSignOut({ lastActivityAt: at('09:00') }, settled(OFF), at('23:00'))).toBe(false);
+  });
+
+  it('signs nobody out inside the grace after the window is turned on', () => {
+    // The case that would otherwise sign out the whole team at once: nothing
+    // beats while the timers are off, so the moment an admin enables the
+    // sign-out every session in the table is already older than it.
+    const justEnabled: StoredPresencePolicy = { ...POLICY, changedAt: at('09:00') };
+
+    expect(shouldSignOut({ lastActivityAt: at('06:00') }, justEnabled, at('09:01'))).toBe(false);
+    expect(shouldSignOut({ lastActivityAt: at('06:00') }, justEnabled, at('09:29'))).toBe(false);
+    // …and once a full window has passed since the change, it applies normally.
+    expect(shouldSignOut({ lastActivityAt: at('06:00') }, justEnabled, at('09:30'))).toBe(true);
+  });
+
+  it('has no grace to give on a fresh install', () => {
+    // No row means nobody has changed anything, and the column default already
+    // started every session's clock at the migration.
+    const noRow: StoredPresencePolicy = { ...POLICY, changedAt: null };
+    expect(shouldSignOut({ lastActivityAt: at('06:00') }, noRow, at('09:00'))).toBe(true);
+  });
+});
+
+describe('signOutCutoff', () => {
+  it('is the window back from now once the policy has settled', () => {
+    expect(signOutCutoff(settled(), at('10:00'))).toEqual(at('09:30'));
+  });
+
+  it('is null while the timer is off, and while the grace still runs', () => {
+    expect(signOutCutoff(settled(OFF), at('10:00'))).toBeNull();
+    expect(signOutCutoff({ ...POLICY, changedAt: at('09:50') }, at('10:00'))).toBeNull();
   });
 });
 

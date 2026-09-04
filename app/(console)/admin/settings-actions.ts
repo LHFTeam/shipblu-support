@@ -203,6 +203,10 @@ export async function deleteGroup(
  * sign-out is exactly the failure this form must not have: nothing would look
  * wrong afterwards, because "nobody was ever signed out" and "the timeout is
  * working" look identical from the outside.
+ *
+ * Everything else about the numbers — whole, in range, and the sign-out no
+ * shorter than the away — is `validatePolicy`'s, so the form and the tests
+ * agree on the wording of each refusal.
  */
 export async function savePresenceSettings(
   _state: SettingsState,
@@ -213,8 +217,8 @@ export async function savePresenceSettings(
   const away = minutesOrOff(formData, 'autoAwayAfterMins');
   const signout = minutesOrOff(formData, 'autoSignoutAfterMins');
 
-  if (away === 'invalid' || signout === 'invalid') {
-    return { error: 'Enter a whole number of minutes, or leave the box empty to turn it off.' };
+  if (away === 'not_a_number' || signout === 'not_a_number') {
+    return { error: 'Enter a number of minutes, or leave the box empty to turn it off.' };
   }
 
   const policy = { autoAwayAfterMins: away, autoSignoutAfterMins: signout };
@@ -227,14 +231,21 @@ export async function savePresenceSettings(
   return ok();
 }
 
-/** Blank is "off", a number is a window, and anything else is the admin's mistake. */
-function minutesOrOff(formData: FormData, key: string): number | null | 'invalid' {
+/**
+ * Blank is "off", anything numeric is a window, and text is the admin's typo.
+ *
+ * Deliberately does *not* check that the number is whole or in range —
+ * `validatePolicy` owns both, and it has the wording for each. Checking here
+ * too made that function's "has to be a whole number of minutes" message
+ * unreachable from the only form that writes these, which is how a tested
+ * message ends up being one nobody can ever see.
+ */
+function minutesOrOff(formData: FormData, key: string): number | null | 'not_a_number' {
   const raw = text(formData, key);
   if (!raw) return null;
 
   const value = Number(raw);
-  if (!Number.isInteger(value)) return 'invalid';
-  return value;
+  return Number.isFinite(value) ? value : 'not_a_number';
 }
 
 // --- Locations --------------------------------------------------------------

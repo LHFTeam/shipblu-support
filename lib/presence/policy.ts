@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { presencePolicy } from '@/db/schema';
-import { DEFAULT_POLICY, type PresencePolicy } from './idle';
+import { DEFAULT_POLICY, type PresencePolicy, type StoredPresencePolicy } from './idle';
 
 /**
  * Reading the idle policy, cheaply enough to do it on every request.
@@ -25,9 +25,12 @@ import { DEFAULT_POLICY, type PresencePolicy } from './idle';
 
 const CACHE_TTL_MS = 30_000;
 
-let cached: { at: number; value: PresencePolicy } | null = null;
+let cached: { at: number; value: StoredPresencePolicy } | null = null;
 
-export async function loadPresencePolicy(): Promise<PresencePolicy> {
+/** No row yet is a fresh install: the defaults, and nothing to grant a grace against. */
+const UNSET: StoredPresencePolicy = { ...DEFAULT_POLICY, changedAt: null };
+
+export async function loadPresencePolicy(): Promise<StoredPresencePolicy> {
   if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.value;
 
   try {
@@ -35,12 +38,15 @@ export async function loadPresencePolicy(): Promise<PresencePolicy> {
       .select({
         autoAwayAfterMins: presencePolicy.autoAwayAfterMins,
         autoSignoutAfterMins: presencePolicy.autoSignoutAfterMins,
+        // Read as `changedAt`, because that is what it is used for: the grace
+        // period a just-enabled window grants the whole fleet.
+        changedAt: presencePolicy.updatedAt,
       })
       .from(presencePolicy)
       .where(eq(presencePolicy.id, 1))
       .limit(1);
 
-    cached = { at: Date.now(), value: rows[0] ?? DEFAULT_POLICY };
+    cached = { at: Date.now(), value: rows[0] ?? UNSET };
   } catch (error) {
     // Never the reason a page fails to render. A database that cannot answer
     // this is about to fail the page's real queries anyway, and falling back to
@@ -49,7 +55,7 @@ export async function loadPresencePolicy(): Promise<PresencePolicy> {
     // Not cached, so the next request tries again rather than serving defaults
     // for the next thirty seconds.
     console.error('[presence] could not read the idle policy, using defaults', error);
-    return DEFAULT_POLICY;
+    return UNSET;
   }
 
   return cached.value;

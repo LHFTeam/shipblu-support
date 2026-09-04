@@ -21,6 +21,30 @@ export type PresencePolicy = {
 };
 
 /**
+ * The policy as stored, plus when it last changed.
+ *
+ * `changedAt` exists for one reason, and it is the same reason
+ * `agents.accepting_changed_at` exists: a window that has just been *turned on*
+ * finds every session in the table already older than it. Nothing beats while
+ * both timers are off — the console does not even attach its listeners — so the
+ * first sweep after an admin enables the sign-out would destroy every session at
+ * once, with no countdown, because the consoles rendered before the change do
+ * not know a countdown is now a thing. Measuring from the later of the session's
+ * own activity and this gives the whole fleet one full window to prove somebody
+ * is there.
+ *
+ * Null means "no row yet", which is a fresh install: the column defaults on
+ * `sessions.last_activity_at` already start every session's clock at the
+ * migration, so there is nothing to grant a grace against.
+ *
+ * The away timer deliberately has no equivalent. Being parked is undone by a
+ * keypress and costs nobody their unsent work, so enabling it mid-shift and
+ * parking whoever is genuinely idle is the correct outcome rather than a
+ * surprise.
+ */
+export type StoredPresencePolicy = PresencePolicy & { changedAt: Date | null };
+
+/**
  * The two windows an admin can set, in minutes.
  *
  * Both ends are bounds rather than opinions. A window under a minute cannot be
@@ -143,6 +167,24 @@ export function shouldRestoreOnInput(agent: {
 }
 
 /**
+ * The instant a session must have been active since to survive, or null when
+ * nothing may be signed out at all.
+ *
+ * Null covers both "the timer is off" and "the timer was only just turned on",
+ * and the sweep leans on the second: because the answer is one instant for the
+ * whole fleet, a policy still inside its grace period means the sweep has
+ * nothing to do rather than something to filter row by row.
+ */
+export function signOutCutoff(policy: StoredPresencePolicy, now: Date): Date | null {
+  if (policy.autoSignoutAfterMins === null) return null;
+
+  const cutoff = now.getTime() - minutesToMs(policy.autoSignoutAfterMins);
+  if (policy.changedAt !== null && policy.changedAt.getTime() > cutoff) return null;
+
+  return new Date(cutoff);
+}
+
+/**
  * Whether a session has been inactive long enough to be destroyed.
  *
  * Measured against the session's own activity rather than the agent's, so the
@@ -150,13 +192,15 @@ export function shouldRestoreOnInput(agent: {
  */
 export function shouldSignOut(
   session: { lastActivityAt: Date },
-  policy: PresencePolicy,
+  policy: StoredPresencePolicy,
   now: Date,
 ): boolean {
-  if (policy.autoSignoutAfterMins === null) return false;
+  const cutoff = signOutCutoff(policy, now);
 
-  const idle = Math.max(0, now.getTime() - session.lastActivityAt.getTime());
-  return idle >= minutesToMs(policy.autoSignoutAfterMins);
+  // Inclusive, and it has to match the sweep's `lte` exactly: "idle for the
+  // window" is over the line, and the request path and the sweep disagreeing by
+  // a millisecond about that is a difference nothing would ever explain.
+  return cutoff !== null && session.lastActivityAt.getTime() <= cutoff.getTime();
 }
 
 /**

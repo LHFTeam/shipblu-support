@@ -23,9 +23,15 @@ export default async function LoginPage({
           guess people make is that the system logged them out at random. Saying
           which rule did it — once, only when it did — is the difference between
           a setting and a fault. */}
-      {signedOut === 'inactivity' ? (
+      {signedOut ? (
         <p className="rounded-md border border-[var(--border)] bg-[var(--muted)] px-3 py-2 text-sm text-[var(--muted-foreground)]">
-          You were signed out after a period of inactivity. Sign in to carry on.
+          {signedOut === 'inactivity'
+            ? 'You were signed out after a period of inactivity. Sign in to carry on.'
+            : /* Everything that is not the browser's own countdown: the sweep,
+                 a deactivation, a password change elsewhere. Naming inactivity
+                 here would tell somebody whose access was just revoked
+                 something untrue. */
+              'Your session has ended. Sign in to carry on.'}
         </p>
       ) : null}
       <LoginForm next={next ?? '/inbox'} />

@@ -1,13 +1,25 @@
 import { cookies } from 'next/headers';
-import { and, eq, gt, lt } from 'drizzle-orm';
+import { and, eq, gt, inArray, lt, lte } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agents, sessions } from '@/db/schema';
-import { minutesToMs, shouldSignOut } from '@/lib/presence/idle';
+import { shouldSignOut } from '@/lib/presence/idle';
 import { loadPresencePolicy } from '@/lib/presence/policy';
 import { SESSION_COOKIE } from './cookie';
 import { generateToken, hashToken } from './tokens';
 
 export { SESSION_COOKIE };
+
+/**
+ * What "live" means for a session row, in one place.
+ *
+ * Three callers ask it — the session lookup, the presence stream's re-check and
+ * the post-sweep offline decision — and the next change to the definition (an
+ * inactivity clause, say) has to reach all three, or the one that missed it
+ * becomes the hole.
+ */
+function liveSession() {
+  return gt(sessions.expiresAt, new Date());
+}
 
 /** Sliding window: a session survives 30 days, refreshed on use. */
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -67,23 +79,30 @@ export async function getSessionAgent(): Promise<SessionAgent | null> {
 
   const tokenHash = hashToken(token);
 
-  const rows = await db
-    .select({
-      id: agents.id,
-      email: agents.email,
-      name: agents.name,
-      role: agents.role,
-      permissions: agents.permissions,
-      avatarUrl: agents.avatarUrl,
-      isAcceptingTickets: agents.isAcceptingTickets,
-      isActive: agents.isActive,
-      lastUsedAt: sessions.lastUsedAt,
-      lastActivityAt: sessions.lastActivityAt,
-    })
-    .from(sessions)
-    .innerJoin(agents, eq(agents.id, sessions.agentId))
-    .where(and(eq(sessions.tokenHash, tokenHash), gt(sessions.expiresAt, new Date())))
-    .limit(1);
+  // Together, not in sequence. The policy read has no dependency on the session
+  // row and is needed either way, and this function runs on every page, every
+  // action and every API route — a serial round trip here is one added to every
+  // request in the console.
+  const [rows, policy] = await Promise.all([
+    db
+      .select({
+        id: agents.id,
+        email: agents.email,
+        name: agents.name,
+        role: agents.role,
+        permissions: agents.permissions,
+        avatarUrl: agents.avatarUrl,
+        isAcceptingTickets: agents.isAcceptingTickets,
+        isActive: agents.isActive,
+        lastUsedAt: sessions.lastUsedAt,
+        lastActivityAt: sessions.lastActivityAt,
+      })
+      .from(sessions)
+      .innerJoin(agents, eq(agents.id, sessions.agentId))
+      .where(and(eq(sessions.tokenHash, tokenHash), liveSession()))
+      .limit(1),
+    loadPresencePolicy(),
+  ]);
 
   const row = rows[0];
   if (!row || !row.isActive) return null;
@@ -94,7 +113,7 @@ export async function getSessionAgent(): Promise<SessionAgent | null> {
   // a second window nobody closed, or a script replaying the cookie would
   // otherwise keep a session that the policy says is over. This is the control;
   // the countdown is the courtesy.
-  if (shouldSignOut(row, await loadPresencePolicy(), new Date())) {
+  if (shouldSignOut(row, policy, new Date())) {
     await db.delete(sessions).where(eq(sessions.tokenHash, tokenHash));
     return null;
   }
@@ -152,7 +171,7 @@ export async function sessionIsLive(tokenHash: string): Promise<boolean> {
   const rows = await db
     .select({ tokenHash: sessions.tokenHash })
     .from(sessions)
-    .where(and(eq(sessions.tokenHash, tokenHash), gt(sessions.expiresAt, new Date())))
+    .where(and(eq(sessions.tokenHash, tokenHash), liveSession()))
     .limit(1);
 
   return rows.length > 0;
@@ -183,32 +202,41 @@ export async function touchSessionActivity(): Promise<void> {
  * abandoned tab keeps its session — and its presence stream, and its place in
  * the rota — until somebody touches it.
  *
+ * Takes the cutoff rather than a window, because deciding *whether* the sweep
+ * may run at all is `signOutCutoff`'s job — it is the one place that knows a
+ * just-enabled window owes the fleet a grace period first.
+ *
  * Returns the agents affected, because a signed-out session should not leave
  * its owner showing as online on the dashboard.
  */
-export async function deleteInactiveSessions(
-  afterMins: number,
-  now = new Date(),
-): Promise<string[]> {
-  const cutoff = new Date(now.getTime() - minutesToMs(afterMins));
-
+export async function deleteSessionsIdleSince(cutoff: Date): Promise<string[]> {
   const deleted = await db
     .delete(sessions)
-    .where(lt(sessions.lastActivityAt, cutoff))
+    // `lte`, matching `shouldSignOut`'s inclusive boundary — see the comment
+    // there.
+    .where(lte(sessions.lastActivityAt, cutoff))
     .returning({ agentId: sessions.agentId });
 
   return [...new Set(deleted.map((row) => row.agentId))];
 }
 
-/** Whether this agent has any session left — used after the sweep above. */
-export async function hasLiveSession(agentId: string): Promise<boolean> {
-  const rows = await db
-    .select({ tokenHash: sessions.tokenHash })
-    .from(sessions)
-    .where(and(eq(sessions.agentId, agentId), gt(sessions.expiresAt, new Date())))
-    .limit(1);
+/**
+ * Which of these agents still have a session — asked once, not once each.
+ *
+ * `inArray`, not `any(...)` in a raw fragment: a JS array interpolated into
+ * `any()` reaches Postgres as a row constructor and is refused outright
+ * (docs/PROJECT-STATE.md §6.46). The two read identically, which is why it is
+ * worth saying out loud at the one call site that wants a list.
+ */
+export async function agentsWithLiveSessions(agentIds: string[]): Promise<Set<string>> {
+  if (agentIds.length === 0) return new Set();
 
-  return rows.length > 0;
+  const rows = await db
+    .selectDistinct({ agentId: sessions.agentId })
+    .from(sessions)
+    .where(and(inArray(sessions.agentId, agentIds), liveSession()));
+
+  return new Set(rows.map((row) => row.agentId));
 }
 
 /** Called by the cleanup cron job. */

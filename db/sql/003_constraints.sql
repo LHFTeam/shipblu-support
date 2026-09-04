@@ -87,3 +87,43 @@ BEGIN
       );
   END IF;
 END $$;
+
+-- --------------------------------------------------------------------------
+-- An availability reason belongs with the switch being off, and only then
+--
+-- `shouldRestoreOnInput` reads the pair: not accepting *and* reason `idle` is
+-- the one state a keypress may undo. The schema comment asserts the reason is
+-- null while accepting, and nothing enforced it — so a hand-written
+-- `UPDATE agents SET is_accepting_tickets = true` left `supervisor` behind, and
+-- the Team availability page rendered "online · set by a supervisor". That is
+-- the case this file exists for: the half of an invariant that also holds for
+-- an UPDATE nobody wrote a code path for.
+--
+-- The backfill has to come first, and it is not a formality: every agent who
+-- was switched off before the reason column existed has a null in it, so
+-- adding the constraint to a live database without this fails on them. `self`
+-- is the honest value — their own switch was the only way it could have been
+-- set. Both statements are idempotent, so the replay is a no-op.
+-- --------------------------------------------------------------------------
+UPDATE agents
+   SET accepting_off_reason = 'self'
+ WHERE NOT is_accepting_tickets
+   AND accepting_off_reason IS NULL;
+
+UPDATE agents
+   SET accepting_off_reason = NULL
+ WHERE is_accepting_tickets
+   AND accepting_off_reason IS NOT NULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'agents_accepting_reason_paired'
+  ) THEN
+    ALTER TABLE agents
+      ADD CONSTRAINT agents_accepting_reason_paired CHECK (
+        (is_accepting_tickets AND accepting_off_reason IS NULL)
+        OR (NOT is_accepting_tickets AND accepting_off_reason IS NOT NULL)
+      );
+  END IF;
+END $$;

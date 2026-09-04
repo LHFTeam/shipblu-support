@@ -546,6 +546,14 @@ once it is wrong:
   that fires first makes the away state unreachable. `lib/presence/idle.ts` is
   the single copy of every one of these decisions and the only part with tests,
   because the sweep, the endpoint and the browser all have to answer identically.
+- **Switching a timer on must not act retroactively.** Nothing beats while the
+  windows are off, so the moment an admin enables the sign-out every session in
+  the table is already older than it — the first sweep would destroy the lot,
+  with no countdown, because the consoles rendered before the change do not know
+  a countdown exists. `signOutCutoff` therefore measures from the later of the
+  session's activity and `presence_policy.updated_at`. The away timer needs no
+  such grace, and that asymmetry is the point: being parked is undone by a
+  keypress, being signed out throws away an unsent reply.
 
 **A snapshot cannot be recomputed.** Anything of the form "how much was open at
 time T" has to be sampled at the time — `conversations` carries only current
