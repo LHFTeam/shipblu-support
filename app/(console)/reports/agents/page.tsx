@@ -14,7 +14,6 @@ import {
   minutesEarlyOff,
   minutesLate,
   occupancy,
-  rangeIn,
   reopenRate,
   resolvedPerHour,
   type AgentDayRow,
@@ -26,7 +25,7 @@ import {
   formatDuration,
   metPercentage,
 } from '@/lib/reports/queries';
-import { reportingContext } from '@/lib/reports/rollup';
+import { rangeIn, reportingContext } from '@/lib/reports/rollup';
 
 export const dynamic = 'force-dynamic';
 

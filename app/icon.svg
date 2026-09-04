@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="ShipBlu">
+  <!--
+    The favicon: the logomark from components/brand.tsx on the white rounded
+    tile ShipBluLogo always draws it in.
+
+    The tile is not decoration. Half the mark is navy (#022D65), which sinks
+    into a dark browser tab strip and disappears; the white ground is what makes
+    the shape read in both themes, and the 28% radius is ShipBluLogo's own.
+
+    The five paths below are copied verbatim from ShipBluMark and are placed by
+    a transform rather than by recomputed coordinates, so the two files can be
+    diffed by their `d` attributes alone — which is what components/brand.test.ts
+    checks, because a mark that drifts from its own favicon is invisible until
+    somebody looks at a tab.
+
+    translate/scale places the 115.2x64.4 mark at 76% of the tile's width,
+    centred: 0.76 * 64 = 48.64 wide, so scale = 48.64 / 115.2, x = (64 - 48.64) / 2
+    and y = (64 - 48.64 * 64.4 / 115.2) / 2.
+  -->
+  <rect width="64" height="64" rx="17.92" fill="#fff" />
+  <g transform="translate(7.68 18.4) scale(0.42222)">
+    <path fill="#145BFE" d="M0 0 44 0 74.7 15.35 52.7 26.35Z" />
+    <path fill="#145BFE" d="M105.2 2.22 96.7 26.35 74.7 15.35Z" />
+    <path fill="#022D65" d="M105.2 2.22 115.2 11.13 102.1 11.13Z" />
+    <path
+      fill="#145BFE"
+      d="M52.7 26.35 74.7 37.35 96.7 26.35 91.1 42.05 74.7 54.75 58.3 42.05Z"
+    />
+    <path fill="#022D65" d="M58.3 42.05 74.7 54.75 43.7 63.92 24.1 64.34Z" />
+  </g>
+</svg>
