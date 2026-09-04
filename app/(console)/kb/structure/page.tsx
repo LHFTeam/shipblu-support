@@ -1,8 +1,8 @@
 import Link from 'next/link';
 import { Badge } from '@/components/ui';
 import { requirePermission } from '@/lib/auth/guard';
-import { listCategoriesForAdmin, listFolderOptions } from '@/lib/kb/admin';
-import { FLOOR_LABELS } from '@/lib/kb/internal';
+import { listCategoriesForAdmin, listFolderOptions, type FolderOption } from '@/lib/kb/admin';
+import { FLOOR_LABELS, folderFloor } from '@/lib/kb/floors';
 import { CategoryForm, FolderForm } from './forms';
 
 export const dynamic = 'force-dynamic';
@@ -65,11 +65,7 @@ export default async function StructurePage() {
               </span>
               <span className="font-medium">{folder.name}</span>
               {folder.visibility !== 'public' ? (
-                <Badge tone="warning">
-                  {folder.minRole
-                    ? FLOOR_LABELS[folder.minRole]
-                    : folder.visibility.replace('_', ' ')}
-                </Badge>
+                <Badge tone="warning">{audience(folder)}</Badge>
               ) : null}
               <span className="ms-auto text-xs opacity-50">{folder.categoryLocale}</span>
             </li>
@@ -80,4 +76,18 @@ export default async function StructurePage() {
       </section>
     </div>
   );
+}
+
+/**
+ * Who this folder is for, in one badge.
+ *
+ * The floor rather than the level where there is one — "agents only" and
+ * "supervisors and up" are different audiences — but only where the floor is
+ * the thing in force. `folderFloor` is null on anything a customer can open, so
+ * a `logged_in` folder still carrying a stray `min_role` reads as "signed-in
+ * customers" instead of claiming an audience nothing enforces.
+ */
+function audience(folder: FolderOption): string {
+  const floor = folderFloor(folder);
+  return floor ? FLOOR_LABELS[floor] : folder.visibility.replace('_', ' ');
 }

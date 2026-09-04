@@ -4,8 +4,8 @@ import { notFound } from 'next/navigation';
 import { Badge } from '@/components/ui';
 import { requirePermission } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
-import { getArticleForEdit, listFolderOptions, listVersions } from '@/lib/kb/admin';
-import { FLOOR_LABELS } from '@/lib/kb/internal';
+import { getArticleForEdit, listFolderOptionsForRole, listVersions } from '@/lib/kb/admin';
+import { FLOOR_LABELS } from '@/lib/kb/floors';
 import { direction } from '@/lib/kb/locale';
 import { requestBaseUrl } from '@/lib/kb/site';
 import { ArticleEditor } from '../editor';
@@ -101,7 +101,12 @@ export default async function ArticlePage({ params }: { params: Promise<{ id: st
     );
   }
 
-  const [folders, versions] = await Promise.all([listFolderOptions(), listVersions(id)]);
+  // Role-filtered, like `/kb/new`: the picker decides where this article can be
+  // moved to, and a folder above the reader is not somewhere they can move it.
+  const [folders, versions] = await Promise.all([
+    listFolderOptionsForRole(agent.role),
+    listVersions(id),
+  ]);
 
   return (
     <div className="mx-auto flex h-full max-w-6xl gap-6 overflow-y-auto p-6">

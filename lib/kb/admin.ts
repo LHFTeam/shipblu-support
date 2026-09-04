@@ -2,6 +2,7 @@ import { and, asc, desc, eq, ilike, or, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agents, kbArticleVersions, kbArticles, kbCategories, kbFolders } from '@/db/schema';
 import type { AgentRole } from '@/lib/auth/permissions';
+import { folderFloor, meetsFloor } from './floors';
 import { effectiveFloor, readableByRole } from './internal';
 
 /**
@@ -175,6 +176,27 @@ export async function listFolderOptions(): Promise<FolderOption[]> {
     .orderBy(asc(kbCategories.position), asc(kbCategories.name), asc(kbFolders.position));
 }
 
+/**
+ * The same list, cut down to the folders a reader may actually use.
+ *
+ * `listFolderOptions` stays unfiltered, because its other two callers are
+ * asking a different question: the widget's FAQ folder is chosen by an admin
+ * and validated by `resolveFaqFolders` against every folder there is, and a
+ * picker that quietly dropped one would look like the folder had been deleted.
+ * The editor's picker is not that. A supervisor offered the account-admins
+ * handbook folder files an article they cannot open: the `redirect()` after the
+ * save 404s on them, and the article is then missing from their list and out of
+ * reach of every action, because all of those apply `readableByRole`.
+ *
+ * The floor is read off the folder alone — `folderFloor` is null on anything a
+ * customer can open, the same cut `effectiveFloor` makes — so this is the SQL
+ * rule over rows in hand rather than a second rule.
+ */
+export async function listFolderOptionsForRole(role: AgentRole): Promise<FolderOption[]> {
+  const folders = await listFolderOptions();
+  return folders.filter((folder) => meetsFloor(role, folderFloor(folder)));
+}
+
 export async function listCategoriesForAdmin() {
   return db
     .select({
@@ -212,16 +234,6 @@ export async function listVersions(articleId: string): Promise<ArticleVersion[]>
     .where(eq(kbArticleVersions.articleId, articleId))
     .orderBy(desc(kbArticleVersions.version))
     .limit(30);
-}
-
-export async function getVersionBody(versionId: string): Promise<string | null> {
-  const rows = await db
-    .select({ bodyHtml: kbArticleVersions.bodyHtml })
-    .from(kbArticleVersions)
-    .where(eq(kbArticleVersions.id, versionId))
-    .limit(1);
-
-  return rows[0]?.bodyHtml ?? null;
 }
 
 /** Slugs already used in a locale, so the editor can offer a free one. */

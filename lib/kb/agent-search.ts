@@ -2,7 +2,8 @@ import { and, asc, desc, eq, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { kbArticles, kbCategories, kbFolders } from '@/db/schema';
 import type { AgentRole } from '@/lib/auth/permissions';
-import { effectiveVisibility, readableByRole, type ArticleVisibility } from './internal';
+import type { ArticleVisibility } from './floors';
+import { effectiveVisibility, readableByRole } from './internal';
 import type { Locale } from './locale';
 import { hybridMatch, hybridRank } from './rank';
 

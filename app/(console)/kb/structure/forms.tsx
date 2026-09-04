@@ -4,7 +4,7 @@ import { useActionState, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Button, ErrorText, Input, Label, Select } from '@/components/ui';
 import { ROLES_BY_SENIORITY } from '@/lib/auth/permissions';
-import { FLOOR_LABELS } from '@/lib/kb/internal';
+import { FLOOR_LABELS } from '@/lib/kb/floors';
 import { createCategory, createFolder, type KbState } from '../actions';
 
 const INITIAL: KbState = { error: null };
@@ -48,7 +48,6 @@ export function FolderForm({
   categories: { id: string; name: string; locale: string }[];
 }) {
   const [state, action] = useActionState(createFolder, INITIAL);
-  const [visibility, setVisibility] = useState('public');
 
   return (
     <form
@@ -75,6 +74,28 @@ export function FolderForm({
         </Select>
       </div>
 
+      <AudienceFields />
+
+      <SubmitButton idle="Add folder" busy="Adding…" />
+      <ErrorText>{state.error}</ErrorText>
+    </form>
+  );
+}
+
+/**
+ * Visibility, and the floor that only means anything beside it.
+ *
+ * Its own component so that the `key` on the form above resets it. React state
+ * belongs to the component that declares it, and this one declared in
+ * `FolderForm` outlived the remount that clears every other field — so the
+ * folder created after an internal one was silently internal too, with the name
+ * box empty and the picker still reading "Agents only".
+ */
+function AudienceFields() {
+  const [visibility, setVisibility] = useState('public');
+
+  return (
+    <>
       <div className="w-44">
         <Label htmlFor="folderVisibility">Visibility</Label>
         <Select
@@ -93,7 +114,8 @@ export function FolderForm({
         A floor on the folder is the one worth setting: it holds for every
         article filed here afterwards, including one an author left on the
         default. Offered only for an internal folder, because the read rule only
-        reads it there.
+        reads it there — and the action drops it for the same reason, so a floor
+        chosen here and then switched away from is not stored.
       */}
       {visibility === 'agents_only' ? (
         <div className="w-52">
@@ -108,10 +130,7 @@ export function FolderForm({
           </Select>
         </div>
       ) : null}
-
-      <SubmitButton idle="Add folder" busy="Adding…" />
-      <ErrorText>{state.error}</ErrorText>
-    </form>
+    </>
   );
 }
 

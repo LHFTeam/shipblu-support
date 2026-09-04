@@ -209,7 +209,9 @@ jobs:
             echo "::error::second run changed the article count: $before -> $after"; exit 1; }
           test "$versions" = "0" || {
             echo "::error::second run rewrote $versions article(s) that were already current"; exit 1; }
-          grep -q "0 rewritten" /tmp/second-run.log || {
+          # Anchored to the whole field: a bare `grep -q "0 rewritten"` also
+          # matches "10 rewritten", which is the run this is meant to catch.
+          grep -qE "articles [0-9]+ created, 0 rewritten," /tmp/second-run.log || {
             echo "::error::second run reported a rewrite"; exit 1; }
 
           # And the audience, which is the whole point of the folders: every one

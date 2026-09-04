@@ -1,14 +1,8 @@
 import { sql, type SQL } from 'drizzle-orm';
 import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import { kbArticles, kbFolders } from '@/db/schema';
-import { kbVisibilityEnum } from '@/db/schema/enums';
-import {
-  ROLES_BY_SENIORITY,
-  roleAtLeast,
-  roleSeniority,
-  strictestRole,
-  type AgentRole,
-} from '@/lib/auth/permissions';
+import { ROLES_BY_SENIORITY, roleSeniority, type AgentRole } from '@/lib/auth/permissions';
+import type { ArticleVisibility } from './floors';
 
 /**
  * Which of *us* may read an internal article.
@@ -34,10 +28,12 @@ import {
  * because their folder is — the unnumbered §6 trap in `docs/PROJECT-STATE.md`,
  * "A `published`/`public` article can sit inside a folder nobody may read". A
  * floor read off the article alone would be null on every one of them.
+ *
+ * This file is the database half. The labels a control shows, and the twin of
+ * the rule for rows already in hand, are in `./floors.ts` — imported by client
+ * components, which is why they may not sit beside a value import of the
+ * schema.
  */
-
-/** Taken from the schema rather than retyped, so the two cannot drift. */
-export type ArticleVisibility = (typeof kbVisibilityEnum.enumValues)[number];
 
 /**
  * The stricter of an article's own visibility and its folder's.
@@ -95,8 +91,8 @@ function seniorityOf(column: AnyPgColumn): SQL<number> {
  * The floor actually in force: the stricter of the article's and the folder's.
  *
  * Reported as a number rather than a role because that is what the predicate
- * compares; `floorFor` below is the same rule in TypeScript, for the callers
- * that have rows in hand rather than a query to add a clause to.
+ * compares; `floorFor` in `./floors.ts` is the same rule in TypeScript, for the
+ * callers that have rows in hand rather than a query to add a clause to.
  */
 const floorSeniority = sql<number>`greatest(${seniorityOf(kbArticles.minRole)}, ${seniorityOf(kbFolders.minRole)})`;
 
@@ -132,40 +128,3 @@ export const effectiveFloor = sql<AgentRole | null>`
 export function readableByRole(role: AgentRole): SQL {
   return sql`(not ${isInternal} or ${floorSeniority} <= ${roleSeniority(role)})`;
 }
-
-/**
- * The same rule over two rows already in hand.
- *
- * Returns the floor in force, or null where there is none — because the content
- * is not internal, or because neither the article nor its folder names one.
- */
-export function floorFor(row: {
-  visibility: ArticleVisibility;
-  minRole: AgentRole | null;
-  folderVisibility: ArticleVisibility;
-  folderMinRole: AgentRole | null;
-}): AgentRole | null {
-  if (row.visibility !== 'agents_only' && row.folderVisibility !== 'agents_only') return null;
-  if (!row.minRole) return row.folderMinRole;
-  if (!row.folderMinRole) return row.minRole;
-  return strictestRole(row.minRole, row.folderMinRole);
-}
-
-/** Whether a reader clears a floor. A null floor is cleared by everybody. */
-export function meetsFloor(role: AgentRole, floor: AgentRole | null): boolean {
-  return floor === null || roleAtLeast(role, floor);
-}
-
-/**
- * How a floor is described to the person who set it, and to the person it keeps
- * out of the editor.
- *
- * English, like the rest of the console — the articles themselves are Arabic,
- * the chrome around them is not.
- */
-export const FLOOR_LABELS: Record<AgentRole, string> = {
-  agent: 'Agents and up',
-  supervisor: 'Supervisors and up',
-  admin: 'Admins and up',
-  account_admin: 'Account admins only',
-};

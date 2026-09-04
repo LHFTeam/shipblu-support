@@ -9,6 +9,7 @@ import { requirePermission } from '@/lib/auth/guard';
 import { ROLES_BY_SENIORITY, type AgentRole } from '@/lib/auth/permissions';
 import { htmlToText, preview, sanitiseArticleHtml } from '@/lib/html/sanitize';
 import { getArticleForEdit, takenSlugs } from '@/lib/kb/admin';
+import { folderFloor, meetsFloor } from '@/lib/kb/floors';
 import { normaliseArticleHtml } from '@/lib/kb/format';
 import { isLocale } from '@/lib/kb/locale';
 import { slugify, uniqueSlug } from '@/lib/kb/slug';
@@ -100,18 +101,48 @@ export async function saveArticle(_state: KbState, formData: FormData): Promise<
   // routes filter on the category's locale — so this is rejected rather than
   // silently filed somewhere nobody will find it.
   const folder = await db
-    .select({ id: kbFolders.id, categoryLocale: kbCategories.locale })
+    .select({
+      id: kbFolders.id,
+      categoryLocale: kbCategories.locale,
+      visibility: kbFolders.visibility,
+      minRole: kbFolders.minRole,
+    })
     .from(kbFolders)
     .innerJoin(kbCategories, eq(kbCategories.id, kbFolders.categoryId))
     .where(eq(kbFolders.id, folderId))
     .limit(1);
 
   if (!folder[0]) return { error: 'That folder no longer exists' };
+  // The picker no longer offers a folder above the caller, but the id arrives in
+  // a `FormData` field — the same reason `readable()` exists above. Filing an
+  // article into a folder you cannot read is a write whose result you cannot
+  // see: the redirect 404s, and the article is then out of reach of every read
+  // model. Answered as "no longer exists", so trying ids tells nobody anything.
+  if (!meetsFloor(agent.role, folderFloor(folder[0]))) {
+    return { error: 'That folder no longer exists' };
+  }
   if (folder[0].categoryLocale !== locale) {
     return {
       error: `That folder belongs to a ${folder[0].categoryLocale} category, so a ${locale} article cannot live in it`,
     };
   }
+
+  // Whether the article is internal is decided here rather than taken from the
+  // form, because it is the answer that decides whether the floor column is
+  // written at all — and the folder is half of it, which is the half a browser
+  // can be wrong about.
+  //
+  // Three cases, and the third is the one that bites. The editor renders the
+  // control only for an internal article, so a submission that carries no
+  // `minRole` field is not somebody clearing the floor; it is a form that never
+  // offered one. Writing null there would drop the floor off an article that is
+  // internal through its folder — the shape all fifteen of production's
+  // internal articles have — the first time anybody saved it from a stale tab
+  // or with the folder list a step behind. On something a customer can open the
+  // column is cleared, because the read rule ignores a floor there and a value
+  // nothing reads is a value that misleads the next person to look.
+  const internal = visibility === 'agents_only' || folder[0].visibility === 'agents_only';
+  const floor = internal ? (formData.has('minRole') ? { minRole } : {}) : { minRole: null };
 
   const baseSlug = slugify(requestedSlug || title, `article-${Date.now()}`);
   const slug = uniqueSlug(baseSlug, await takenSlugs(locale, id || undefined));
@@ -125,7 +156,7 @@ export async function saveArticle(_state: KbState, formData: FormData): Promise<
     bodyText,
     excerpt,
     visibility: visibility as (typeof VISIBILITIES)[number],
-    minRole,
+    ...floor,
     tags,
     seo: {
       ...(seoTitle ? { title: seoTitle } : {}),
@@ -280,7 +311,11 @@ export async function createFolder(_state: KbState, formData: FormData): Promise
     slug,
     categoryId,
     visibility: visibility as (typeof VISIBILITIES)[number],
-    minRole,
+    // Only where the folder is internal, for the reason `lib/kb/internal.ts`
+    // gives: the read rule ignores a floor on a folder a customer can open, and
+    // `/kb/structure` would badge that folder with an audience nothing
+    // enforces — "Admins and up" on a folder every signed-in customer can read.
+    minRole: visibility === 'agents_only' ? minRole : null,
   });
 
   revalidatePath('/kb/structure');

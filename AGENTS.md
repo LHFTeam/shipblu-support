@@ -350,7 +350,12 @@ the missing endpoint was avoiding. `next.config.ts` sets `serverActions.bodySize
 `MAX_FORM_TOTAL_BYTES` so the limit a customer meets is the one that can explain
 itself. `lib/forms/files.ts` is client-safe and `lib/forms/attachments.ts` is
 not — the same split `custom-fields.ts` makes, here because the shared file put
-`node:fs` in the browser bundle.
+`node:fs` in the browser bundle. That split is now checked: CI walks the import
+graph out of every `'use client'` file and fails a value import that reaches
+`db/schema` or `db/client`, stopping at `'use server'` modules, which are a
+boundary rather than a dependency. Only the `node:fs` case fails a build on its
+own; one constant imported from a module that touches the schema ships the whole
+schema and nothing complains (§6.54).
 
 A form's slug can be Arabic, so anything putting one into a server `redirect()`
 goes through `formPath` / `encodeSlugParam`. Next hands the path straight to
@@ -445,6 +450,21 @@ over `kb_visibility` answer a question it was not asked.
   `lib/auth/permissions.ts`, and compare as text so no `agent_role` operator is
   needed — the `operator does not exist: text = channel` shape under
   [Tests](#tests).
+- **The pure half lives in `lib/kb/floors.ts`** — the labels a control shows,
+  and `floorFor`/`folderFloor`, the twins of `effectiveFloor` for rows already in
+  hand. Split by which side of the wire runs it, like `lib/forms/files.ts`, and
+  the twins answer null wherever the SQL does, the most junior role included:
+  "every agent" and "no floor set" are the same audience, and a twin that
+  disagreed would badge a row the list beside it reports as unrestricted.
+
+A floor is written only where the content is internal, and both writers decide
+that server-side: `saveArticle` reads the target folder rather than trusting the
+form, because the editor renders the control only for an internal article — so a
+submission with no `minRole` field is a form that never offered one, not somebody
+clearing a floor, and clearing it there would drop the floor off every article
+that is internal through its folder. Neither may accept a folder above the
+caller, for the same reason the five id-in-`FormData` actions may not accept an
+article above them.
 
 The team's own handbook is the content this exists for: `lib/kb/handbook.ts`
 holds it, `seed_console_handbook` puts it in the database idempotently, and the

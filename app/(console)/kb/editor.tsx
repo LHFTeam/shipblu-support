@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Button, ErrorText, Input, Label, Select, Textarea } from '@/components/ui';
 import { ROLES_BY_SENIORITY, type AgentRole } from '@/lib/auth/permissions';
 import type { FolderOption } from '@/lib/kb/admin';
-import { FLOOR_LABELS } from '@/lib/kb/internal';
+import { FLOOR_LABELS } from '@/lib/kb/floors';
 import { saveArticle, type KbState } from './actions';
 
 const INITIAL: KbState = { error: null };

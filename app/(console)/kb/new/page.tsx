@@ -1,14 +1,16 @@
 import Link from 'next/link';
 import { requirePermission } from '@/lib/auth/guard';
-import { listFolderOptions } from '@/lib/kb/admin';
+import { listFolderOptionsForRole } from '@/lib/kb/admin';
 import { ArticleEditor } from '../editor';
 
 export const dynamic = 'force-dynamic';
 
 export default async function NewArticlePage() {
-  await requirePermission('kb.edit');
+  const agent = await requirePermission('kb.edit');
 
-  const folders = await listFolderOptions();
+  // The reader's own folders, not every folder: `kb.edit` starts at supervisor,
+  // and the handbook's admin folders are above some of the people who hold it.
+  const folders = await listFolderOptionsForRole(agent.role);
 
   return (
     <div className="mx-auto h-full max-w-5xl overflow-y-auto p-6">

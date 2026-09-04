@@ -3073,6 +3073,44 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     The general shape is worth keeping: a permission that gates a _route_ rather
     than the writes on it will eventually gate a reader it was never meant to.
 
+53. **`kb_categories` has no visibility column, so a category holding only
+    internal folders was still a public page.** _2026-09-04, reviewing the
+    handbook._ Visibility and the role floor are columns on `kb_articles` and
+    `kb_folders`; a category has neither. `getCategory` filtered the folders it
+    returned and then returned the category anyway, so
+    `GET /ar/c/handbook-console` answered 200 to a signed-out visitor with the
+    category's Arabic name as the `<title>` and its description as the meta
+    description. The fifteen articles were never reachable — every query that
+    could reach one threads a viewer — but the page around them was, and it was
+    indexable.
+
+    `getCategory` now answers null when nothing inside it is readable, which is
+    the cut `listCategories` already took for the front page ("an empty category
+    on a help centre reads as a broken page"). The general shape: a table with no
+    visibility axis inherits one only if every read of it derives the answer from
+    the children that do have one.
+
+54. **A client component importing one constant from a module that touches the
+    schema ships the whole schema.** _2026-09-04, reviewing the handbook._
+    `FLOOR_LABELS` — four strings — lived beside the SQL predicates in
+    `lib/kb/internal.ts`, which value-imports `@/db/schema`. Three `'use client'`
+    files imported it, and the first-load JS of `/kb/[id]`, `/kb/new` and
+    `/kb/structure` therefore carried every Drizzle table definition in the
+    repository: 579 KB per route, of which 87 KB was the schema. Nothing failed.
+    `tsc`, `eslint`, `vitest` and `next build` were all green, and the evidence
+    is only in `.next/diagnostics/route-bundle-stats.json`.
+
+    The labels moved to `lib/kb/floors.ts`, which imports the visibility enum as
+    a `type` and so is erased entirely; the three routes now load 484–492 KB with
+    no schema string in any chunk. `scripts/ci/repo-rules.mjs` walks the graph
+    out of every `'use client'` file and fails on a value import that reaches
+    `db/schema` or `db/client`. It stops at `'use server'` modules — a client
+    form importing its own actions file is a network boundary, not a dependency —
+    which is why the first version of the check reported 88 violations.
+
+    The trap generalises past the schema: the `node:fs` version of this mistake
+    fails the build, and every other version of it just makes the app slower.
+
 ## 7. Verification already done
 
 - **The knowledge-base role floor, against a real Postgres.** _2026-09-04._ The
