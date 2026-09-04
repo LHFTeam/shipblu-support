@@ -156,6 +156,23 @@ knowledge-base answers for that status out. `noindex` and `Disallow`, and rate
 limited per address, because every useful URL on it carries somebody's parcel
 number.
 
+**"Ask support about this shipment" opens the chat, not a sign-in wall.** The
+button led to `/{locale}/forms`, which redirects to `/portal/new` when no ticket
+form exists — and that calls `requireCustomer`. Production has **zero**
+`ticket_forms` rows (measured 2026-09-03), so every press by the people this
+page is written for — recipients, who have no ShipBlu account — ended at a login
+screen. It now calls a new `shipbluChat.compose(text)` on the embed snippet,
+which opens the widget with the parcel already in the composer and waits for the
+visitor to write their question: the chat mints a visitor token at the moment
+somebody chooses to talk, so it needs no account. The draft is built by
+`lib/shipments/support.ts` from the number and the status **as the badge already
+worded it** — never from `shipments.data`, so it cannot say more than the page
+said — and `lib/shipments/detect.ts` reads the number back out when the message
+is stored, linking the conversation to the shipment without an agent retyping
+it. The `/forms` link survives as the `href`: it is where the button goes with
+no JavaScript or a blocked snippet, and it is the right destination once an
+admin builds a form.
+
 **`.kb-shell` no longer carries the Freshdesk portal's hex.** It carries the
 design system's `tokens/colors.css`, so the swap reaches every page under
 `app/help/` rather than only the two the redesign covered — charcoal text on cool

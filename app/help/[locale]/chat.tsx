@@ -3,10 +3,38 @@
 import { useEffect } from 'react';
 import type { Locale } from '@/lib/kb/locale';
 
+/**
+ * The half of the snippet's host API the help centre calls.
+ *
+ * Every entry optional, and that is not defensiveness for its own sake: the
+ * snippet is cached for five minutes and a page held in a back/forward cache
+ * can be running a copy from before a method existed. A caller checks for the
+ * one it wants and falls back rather than throwing inside a click handler.
+ */
+type ShipbluChat = {
+  setLocale?: (locale: string) => void;
+  open?: () => void;
+  compose?: (text: string) => void;
+};
+
 declare global {
   interface Window {
-    __shipbluWidget?: { setLocale?: (locale: string) => void };
+    shipbluChat?: ShipbluChat;
+    /** The name this shipped under, which the snippet still aliases. */
+    __shipbluWidget?: ShipbluChat;
   }
+}
+
+/**
+ * The snippet's API, or null while it is still loading.
+ *
+ * `ChatWidget` appends the tag with `async`, so a visitor who reaches a button
+ * within the first moment of the page finds nothing here. Every caller is a
+ * progressive enhancement over a link that already worked.
+ */
+export function chatWidget(): ShipbluChat | null {
+  if (typeof window === 'undefined') return null;
+  return window.shipbluChat ?? window.__shipbluWidget ?? null;
 }
 
 const SCRIPT_ID = 'shipblu-chat-embed';
@@ -38,7 +66,7 @@ export function ChatWidget({ locale }: { locale: Locale }) {
 
     if (existing) {
       existing.dataset.locale = locale;
-      window.__shipbluWidget?.setLocale?.(locale);
+      chatWidget()?.setLocale?.(locale);
       return;
     }
 

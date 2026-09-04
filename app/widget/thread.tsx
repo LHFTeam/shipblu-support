@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Locale } from '@/lib/kb/locale';
 import { parseVisitorDetails } from '@/lib/widget/contact';
 import type { WidgetCopy } from './copy';
@@ -21,6 +21,7 @@ export function WidgetThread({
   online,
   active,
   detailsSaved,
+  prefill,
   onSend,
   onSaveDetails,
   onOpenArticle,
@@ -32,6 +33,8 @@ export function WidgetThread({
   /** Whether this view is the one showing. It stays mounted while hidden. */
   active: boolean;
   detailsSaved: boolean;
+  /** A draft the host page asked us to start the visitor off with, or null. */
+  prefill: { text: string; seq: number } | null;
   onSend: (body: string, details: OfflineDetails | null) => Promise<boolean>;
   onSaveDetails: (details: OfflineDetails) => Promise<boolean>;
   onOpenArticle: (article: ArticleLink) => void;
@@ -44,6 +47,69 @@ export function WidgetThread({
   const [savingDetails, setSavingDetails] = useState(false);
 
   const bottom = useRef<HTMLDivElement>(null);
+  const composer = useRef<HTMLTextAreaElement>(null);
+  /** The last prefill actually put in the box, so a repaint does not redo it. */
+  const applied = useRef(0);
+  /** A caret waiting for the value it is meant to sit at the end of. */
+  const caretPending = useRef(false);
+
+  /*
+   * A draft handed over by the host page.
+   *
+   * Never over something the visitor has already started writing. The tracking
+   * page's button can be pressed twice, and a second press that wiped a
+   * half-written sentence would cost far more than the two lines it was trying
+   * to save — so a non-empty box keeps what is in it and only the caret moves.
+   *
+   * Applying it is one thing and putting the caret after it is another, because
+   * the field still holds the old value when this runs: `setDraft` has not been
+   * rendered yet. The effect below waits for the value and then places the
+   * caret, which is also what makes the case above right — the caret lands at
+   * the end of whatever the visitor kept.
+   */
+  useEffect(() => {
+    if (!prefill || prefill.seq === applied.current) return;
+
+    applied.current = prefill.seq;
+    caretPending.current = true;
+    setDraft((current) => (current.trim() ? current : prefill.text));
+  }, [prefill]);
+
+  useEffect(() => {
+    if (!caretPending.current) return;
+    caretPending.current = false;
+
+    const field = composer.current;
+    if (!field) return;
+
+    field.focus();
+    field.setSelectionRange(field.value.length, field.value.length);
+  }, [draft]);
+
+  /*
+   * The composer grows with what is in it, up to a point.
+   *
+   * Two fixed rows is right for an empty box and wrong the moment something is
+   * already in one: a prefilled draft shows its first two lines and hides the
+   * line the caret is on, so the visitor cannot see where they are about to
+   * type — which reads as the button having half worked.
+   *
+   * Measured rather than counted off the newlines. The panel is 380px wide and
+   * `Tracking number: 1755021358719` wraps in it, so the lines that decide the
+   * height are the ones the browser drew, not the ones somebody typed.
+   *
+   * Nothing is measured while the thread is hidden: `scrollHeight` is 0 inside
+   * a `display:none` subtree, so a visitor opening an article would come back
+   * to a box collapsed to nothing. `active` in the dependencies is what
+   * re-measures it on the way back.
+   */
+  useLayoutEffect(() => {
+    const field = composer.current;
+    if (!field || !active) return;
+
+    field.style.height = 'auto';
+    field.style.height = `${Math.min(field.scrollHeight, MAX_COMPOSER_PX)}px`;
+  }, [draft, active]);
 
   /*
    * Out of hours, ask before the message rather than after it.
@@ -266,6 +332,7 @@ export function WidgetThread({
         className="flex shrink-0 items-end gap-2 border-t border-[var(--border)] p-3"
       >
         <textarea
+          ref={composer}
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
@@ -276,6 +343,8 @@ export function WidgetThread({
               void submit(event);
             }
           }}
+          /* The floor, and what the box is before the effect above has
+             measured it. */
           rows={2}
           maxLength={5000}
           placeholder={copy.placeholder}
@@ -302,6 +371,10 @@ export function WidgetThread({
 }
 
 export type OfflineDetails = { name: string; email: string; phone: string };
+
+/* Roughly six lines. Past that the composer would be eating the transcript,
+   which is the half of the panel that carries the agent's answer. */
+const MAX_COMPOSER_PX = 160;
 
 /* Shared by the three fields; 16px for the same reason as the composer. */
 const FIELD =
