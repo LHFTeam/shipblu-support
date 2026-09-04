@@ -2,6 +2,7 @@ import { DateTime } from 'luxon';
 import { and, asc, desc, eq, gte, isNull, lte, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agentMetricsDaily, agents, metricsDaily } from '@/db/schema';
+import { rangeIn } from '@/lib/reports/rollup';
 
 /**
  * Read models for the agent productivity report.
@@ -71,23 +72,6 @@ export type AgentDayRow = Sums & {
   openAtDayEnd: number | null;
   pendingAtDayEnd: number | null;
 };
-
-/**
- * The window a range covers, as the `YYYY-MM-DD` the rollup writes.
- *
- * In the reporting zone rather than UTC, because the rollup buckets days in the
- * team's zone: asking for "the last 7 days" in UTC selects a window whose edges
- * are two or three hours out, which silently includes or drops an evening shift
- * at each end.
- */
-export function rangeIn(zone: string, days: number): { from: string; to: string } {
-  const today = DateTime.now().setZone(zone).startOf('day');
-
-  return {
-    from: today.minus({ days: days - 1 }).toISODate()!,
-    to: today.toISODate()!,
-  };
-}
 
 /** One row per agent for the whole range, busiest first. */
 export async function agentSummaries(zone: string, days: number): Promise<AgentSummary[]> {

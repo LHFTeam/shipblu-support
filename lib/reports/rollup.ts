@@ -66,6 +66,31 @@ export function todayIn(zone: string): string {
 }
 
 /**
+ * The window a report's range covers, as the `YYYY-MM-DD` the rollup writes.
+ *
+ * Lives here, beside `todayIn`, because it is the read side of the same rule:
+ * the rollup buckets days in the team's zone, so a report that asks for "the
+ * last 7 days" against the database's `current_date` selects a window whose
+ * edges are two or three hours out — silently including or dropping an evening
+ * shift at each end. Every report that filters on `day` goes through this, so a
+ * figure and the range printed above it cannot disagree about where the window
+ * starts.
+ *
+ * `to` is today, which never has a rolled-up row: the job clamps to yesterday
+ * because today is not complete. Pages say so rather than quietly asking for
+ * `days - 1`, since a range that omitted today would read as an off-by-one to
+ * anybody comparing it against a calendar.
+ */
+export function rangeIn(zone: string, days: number): { from: string; to: string } {
+  const today = DateTime.now().setZone(zone).startOf('day');
+
+  return {
+    from: today.minus({ days: days - 1 }).toISODate()!,
+    to: today.toISODate()!,
+  };
+}
+
+/**
  * The first day any figure could exist for, as the team's date.
  *
  * A survey or a resolution always belongs to a ticket that predates it, so the

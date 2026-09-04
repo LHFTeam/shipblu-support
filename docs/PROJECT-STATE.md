@@ -3055,7 +3055,41 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     column: 99 of the 112 articles read 2026-08-19, the import date, and the
     handful that read later are the ones somebody happened to open.
 
-52. **The article page in the console required `kb.edit`, so no agent could
+52. **`current_date` in a page query is the database's date, and the database is
+    UTC.** _2026-09-04._ `/reports/categories` filtered its rollups with
+    `day >= current_date - N`, which is a different day from the one
+    `rollup_metrics` bucketed them into for the first two hours of every Cairo
+    morning — the rollup uses the reporting zone, deliberately, so that an
+    evening shift does not land on tomorrow. Nothing catches this: the SQL is
+    valid, the numbers look plausible, and the window is only ever wrong by a day
+    at one edge. Every report now derives its window once, in the page, through
+    `rangeIn()` in `lib/reports/rollup.ts`, and no read query mentions
+    `current_date`. A live query comparing a `timestamptz` against that window
+    has to name the zone too — cast the date to `timestamp` and apply
+    `at time zone <reporting zone>`, not a bare `::date` comparison in UTC.
+
+53. **A console page with no scroll container is silently truncated, not
+    scrollable.** _2026-09-04._ The console shell is `h-dvh overflow-hidden` with
+    a `min-h-0 flex-1` content column, so a page that does not open its own
+    `app-scroll h-full overflow-y-auto` wrapper renders everything below the fold
+    where nobody can reach it — and with no padding either. `/reports/categories`
+    shipped that way and read as an unfinished page: half of it existed and could
+    not be seen. `/reports/agents` and `/inbox/new` have the wrapper; the admin
+    pages get it from `app/(console)/admin/layout.tsx`. A new page under
+    `(console)` outside `admin/` has to bring its own.
+
+54. **A range control over a rollup with no backfill looks broken.**
+    _2026-09-04._ 7, 30 and 90 days on `/reports/categories` answered
+    identically, which was reported as the buttons not working. They worked:
+    `rollup_metrics` recomputes three days a night, categorisation only started
+    on 2026-09-01, and there is no category backfill — the whole archive is three
+    days deep (verified: `category_metrics_daily` holds 8 rows over 3 days;
+    `root_cause_metrics_daily` is empty). A control whose effect is invisible has
+    to say so itself, so the page now prints the window it selected and, when the
+    figures begin after the window opens, says where they begin and why. Worth
+    remembering for the next report built on a young rollup.
+
+55. **The article page in the console required `kb.edit`, so no agent could
     open an article.** _2026-09-04, writing the team handbook._ `/kb` needed
     `kb.view`, which the agent baseline carries, and `/kb/[id]` needed
     `kb.edit`, which starts at supervisor. An agent could therefore see every
@@ -3073,7 +3107,7 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     The general shape is worth keeping: a permission that gates a _route_ rather
     than the writes on it will eventually gate a reader it was never meant to.
 
-53. **`kb_categories` has no visibility column, so a category holding only
+56. **`kb_categories` has no visibility column, so a category holding only
     internal folders was still a public page.** _2026-09-04, reviewing the
     handbook._ Visibility and the role floor are columns on `kb_articles` and
     `kb_folders`; a category has neither. `getCategory` filtered the folders it
@@ -3090,7 +3124,7 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     visibility axis inherits one only if every read of it derives the answer from
     the children that do have one.
 
-54. **A client component importing one constant from a module that touches the
+57. **A client component importing one constant from a module that touches the
     schema ships the whole schema.** _2026-09-04, reviewing the handbook._
     `FLOOR_LABELS` — four strings — lived beside the SQL predicates in
     `lib/kb/internal.ts`, which value-imports `@/db/schema`. Three `'use client'`
@@ -3111,7 +3145,7 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     The trap generalises past the schema: the `node:fs` version of this mistake
     fails the build, and every other version of it just makes the app slower.
 
-55. **`key={state.nonce}` on a form clears the fields, not the state that
+58. **`key={state.nonce}` on a form clears the fields, not the state that
     renders them.** _2026-09-04, reviewing the handbook._ Every composer and
     admin form in this app clears itself by remounting on the nonce the action
     returns, which works because the inputs are uncontrolled — the DOM nodes are

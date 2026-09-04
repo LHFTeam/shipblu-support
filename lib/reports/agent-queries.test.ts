@@ -10,10 +10,10 @@ import {
   minutesEarlyOff,
   minutesLate,
   occupancy,
-  rangeIn,
   reopenRate,
   resolvedPerHour,
 } from './agent-queries';
+import { rangeIn } from './rollup';
 
 const CAIRO = 'Africa/Cairo';
 

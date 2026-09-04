@@ -137,6 +137,14 @@ proxy.ts         Next 16 middleware: host routing + the signed-out redirect
 Put logic in `lib/`, not in route files. A page or action authorises, calls into
 `lib/`, and revalidates.
 
+**A page under `(console)` outside `admin/` brings its own scroll container.**
+The shell is `h-dvh overflow-hidden` so the inbox can own the full height and
+manage its own panes, which means a page that does not open an
+`app-scroll h-full overflow-y-auto p-6` wrapper is not merely unpadded — every
+row below the fold is rendered where nobody can scroll to it, and the page reads
+as half-finished rather than as broken (§6.53). `admin/layout.tsx` supplies one
+for everything beneath it; nothing else does.
+
 ## Do not edit
 
 Generated or managed elsewhere. Change the source, or the tool that writes them.
@@ -355,7 +363,7 @@ graph out of every `'use client'` file and fails a value import that reaches
 `db/schema` or `db/client`, stopping at `'use server'` modules, which are a
 boundary rather than a dependency. Only the `node:fs` case fails a build on its
 own; one constant imported from a module that touches the schema ships the whole
-schema and nothing complains (§6.54).
+schema and nothing complains (§6.57).
 
 A form's slug can be Arabic, so anything putting one into a server `redirect()`
 goes through `formPath` / `encodeSlugParam`. Next hands the path straight to
@@ -504,6 +512,25 @@ state, so counting it during a rebuild writes today's answer onto an old date.
 rollup reads it rather than owning it: `rollup_metrics` rebuilds by delete and
 insert, and would otherwise destroy the only copy. Hourly rather than at
 midnight because Render's cron schedules are UTC and Cairo's offset moves.
+
+**A report's window comes from `rangeIn()`, never from `current_date`.** The
+rollups bucket a day in the reporting zone so an evening shift does not land on
+tomorrow; `current_date` is the _database's_ date, and the database is UTC. A
+query that mixes the two is wrong by a day at one edge for the first two hours
+of every Cairo morning, and looks entirely correct while it is. So the page
+resolves the window once, through `rangeIn(zone, days)` in `lib/reports/rollup.ts`,
+and hands the two `YYYY-MM-DD` strings to every query it runs — which also means
+the dates printed in the header are provably the dates the figures were selected
+on. A live query comparing a `timestamptz` against that window names the zone
+too (`::timestamp at time zone <zone>`), rather than casting a date in UTC.
+
+**Say what the window holds, not just what it asked for.** A range control over
+a young rollup is indistinguishable from a broken one: `rollup_metrics`
+recomputes three days a night and several rollups have no backfill, so every
+window wider than the history returns the same rows and the buttons look dead.
+`/reports/categories` was reported as exactly that bug. A report with a range
+control therefore prints the window it selected and, when the figures start
+after the window opens, says where they start and why (§6.54).
 
 ## Tests
 

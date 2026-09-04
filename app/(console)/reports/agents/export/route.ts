@@ -8,13 +8,12 @@ import {
   handlingSeconds,
   minutesLate,
   occupancy,
-  rangeIn,
   reopenRate,
   resolvedPerHour,
 } from '@/lib/reports/agent-queries';
 import { csvFile, csvHeaders } from '@/lib/reports/csv';
 import { averageRating, averageSeconds, metPercentage } from '@/lib/reports/queries';
-import { reportingContext } from '@/lib/reports/rollup';
+import { rangeIn, reportingContext } from '@/lib/reports/rollup';
 
 export const dynamic = 'force-dynamic';
 
