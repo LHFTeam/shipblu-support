@@ -169,6 +169,13 @@
       "when": 1788525254736,
       "tag": "0023_kb_min_role",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1788554120582,
+      "tag": "0024_wise_goliath",
+      "breakpoints": true
     }
   ]
 }
