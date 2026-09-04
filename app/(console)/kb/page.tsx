@@ -77,6 +77,11 @@ export default async function KbListPage({
                 that says the first about an article only supervisors can open
                 is the row that gets an internal article filed where the whole
                 team can read it.
+
+                Both read the *effective* values. An article marked `public` in
+                an `agents_only` folder — production's shape for all fifteen of
+                its internal ones — would otherwise draw no badge at all and sit
+                in the list looking exactly like a customer-facing article.
               */}
               {article.minRole ? (
                 <Badge tone="warning">{FLOOR_LABELS[article.minRole]}</Badge>

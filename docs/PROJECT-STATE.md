@@ -3139,8 +3139,17 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     goes through `requirePermission` inside the actions, so nothing was widened
     but reading.
 
-    The general shape is worth keeping: a permission that gates a _route_ rather
-    than the writes on it will eventually gate a reader it was never meant to.
+    And "nothing was widened but reading" turned out to be the sentence to
+    distrust: the read-only branch applied **no status gate**, so every agent
+    could now read the body of any draft. `agent-search.ts` states the opposite
+    rule for the composer — "no reviewer has agreed to its contents" — and it
+    holds more strongly where the whole body is on screen rather than a search
+    snippet. Readers get published articles and a notice for anything else.
+
+    Two general shapes, both worth keeping. A permission that gates a _route_
+    rather than the writes on it will eventually gate a reader it was never
+    meant to. And widening who may reach a page widens everything that page
+    renders, not only the part you were thinking about when you widened it.
 
 56. **`kb_categories` has no visibility column, so a category holding only
     internal folders was still a public page.** _2026-09-04, reviewing the
@@ -3204,6 +3213,25 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     _should_ survive a send, because an agent who has decided to answer an
     Arabic ticket in English is answering the whole thread in English.
 
+59. **An `UPDATE` that changes nothing still moves `updated_at`.**
+    _2026-09-04, review of the handbook seed._ `touch_updated_at` is created
+    `BEFORE UPDATE` on every table with the column by a loop in
+    `db/sql/001_extensions_and_triggers.sql`, and it fires on the statement, not
+    on a diff. So an upsert re-asserting values a row already holds —
+    `set({folderId, visibility, position})` — writes the timestamp on every row
+    it visits while truthfully reporting "0 rewritten, 15 already current".
+
+    Two reasons that is worse than untidy. `/kb` orders by `updated_at desc`, so
+    a no-op re-run floats the whole seeded set to the top of the list; and §6.51
+    already records that this column is not an edit date, which is exactly the
+    confusion a job moving it for nothing deepens. An idempotent writer has to
+    compare before it writes, field by field.
+
+    The measurement matters as much as the fix. The job's own tally could not
+    have caught this — it was reporting the truth — and neither could
+    `updated_at > created_at`, because the statement resetting the fixtures
+    fires the same trigger. Diff every timestamp across the run.
+
 ## 7. Verification already done
 
 - **The knowledge-base role floor, against a real Postgres.** _2026-09-04._ The
@@ -3227,8 +3255,17 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
   `overwrite=true` restored it and cut exactly one version row. On the seeded
   data an agent sees 8 articles, a supervisor 11, an admin 14 and an account
   admin 15 — and every customer-facing surface (`listCategories`,
-  `searchArticles`, `getArticle` by slug, and the sitemap) returns zero of them
-  for both an anonymous reader and a signed-in one.
+  `searchArticles`, `getArticle` by slug, `getCategory`, and the sitemap)
+  returns zero of them for both an anonymous reader and a signed-in one.
+
+  Re-run after review, on the merged state, with two additions. Every article's
+  `updated_at` was diffed across a run rather than trusted to the job's tally
+  (§6.59): a no-op run writes **no row at all**, and after one article was
+  deliberately misfiled to `visibility = 'public'` the next run repaired it and
+  moved that one row's timestamp and no other's. And each read model is now also
+  asserted to report the _effective_ level, not the column — the distinction
+  that decides whether the list badges an internal article and whether the
+  article page offers a help-centre link that would 404.
 
 - **The knowledge base's formatting standard, applied to production.**
   _2026-09-03._ `normalise_kb_formatting` ran against the live database after

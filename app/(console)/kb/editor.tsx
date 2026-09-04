@@ -4,9 +4,9 @@ import { useActionState, useEffect, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { Button, ErrorText, Input, Label, Select, Textarea } from '@/components/ui';
-import { ROLES_BY_SENIORITY, type AgentRole } from '@/lib/auth/permissions';
+import type { AgentRole } from '@/lib/auth/permissions';
 import type { FolderOption } from '@/lib/kb/admin';
-import { FLOOR_LABELS } from '@/lib/kb/floors';
+import { FLOOR_LABELS, SELECTABLE_FLOORS } from '@/lib/kb/floors';
 import { saveArticle, type KbState } from './actions';
 
 const INITIAL: KbState = { error: null };
@@ -56,6 +56,12 @@ export function ArticleEditor({
   const [showPreview, setShowPreview] = useState(true);
   const [visibility, setVisibility] = useState(article?.visibility ?? 'public');
   const [folderId, setFolderId] = useState(article?.folderId ?? '');
+  // Controlled, like the two beside it, because the field it renders is mounted
+  // conditionally. Left uncontrolled, flipping Visibility to Public and back
+  // reset the author's choice to the saved value with nothing on screen saying
+  // so — and the action reads a missing field as "the form never offered one",
+  // so the reset was invisible until the next person opened the article.
+  const [minRole, setMinRole] = useState<string>(article?.minRole ?? '');
 
   // A folder belongs to a category, and a category has a locale. Offering
   // folders from the other language would let an author file an article
@@ -137,9 +143,19 @@ export function ArticleEditor({
         {internal ? (
           <div className="w-52">
             <Label htmlFor="minRole">Who on the team</Label>
-            <Select id="minRole" name="minRole" defaultValue={article?.minRole ?? ''}>
+            <Select
+              id="minRole"
+              name="minRole"
+              value={minRole}
+              onChange={(event) => setMinRole(event.target.value)}
+            >
+              {/*
+                `SELECTABLE_FLOORS`, not every role: "Agents and up" stores a
+                value every read model reports as no floor, so it would sit
+                beside "Everyone on the team" doing the same thing.
+              */}
               <option value="">Everyone on the team</option>
-              {ROLES_BY_SENIORITY.map((role) => (
+              {SELECTABLE_FLOORS.map((role) => (
                 <option key={role} value={role}>
                   {FLOOR_LABELS[role]}
                 </option>

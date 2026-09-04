@@ -4,6 +4,7 @@ import { kbArticleVersions, kbArticles, kbCategories, kbFolders } from '@/db/sch
 import { htmlToText, preview, sanitiseArticleHtml } from '@/lib/html/sanitize';
 import { normaliseArticleHtml } from '@/lib/kb/format';
 import { HANDBOOK, HANDBOOK_CATEGORY, HANDBOOK_LOCALE } from '@/lib/kb/handbook';
+import type { AgentRole } from '@/lib/auth/permissions';
 import type { ClaimedJob } from '@/lib/queue';
 
 /**
@@ -39,6 +40,16 @@ import type { ClaimedJob } from '@/lib/queue';
  *    business making. The folder's floor still applies underneath: the
  *    stricter of the two wins (`lib/kb/internal.ts`).
  *
+ * **A run with nothing to do issues no UPDATE at all**, which is a stronger
+ * claim than it sounds and has to be maintained deliberately. Every table with
+ * an `updated_at` carries `touch_updated_at BEFORE UPDATE` from
+ * `db/sql/001_extensions_and_triggers.sql`, so an unconditional
+ * `set({folderId, visibility, position})` on a row that already holds those
+ * values still moves the timestamp — 20 rows a run, reported as "already
+ * current". `/kb` orders by `updated_at desc`, so the whole handbook would jump
+ * to the top of the list every time somebody re-ran the seed, which is the
+ * misleading-`updated_at` trap §6.51 already records once.
+ *
  * Idempotent, and enqueued **without a `dedupeKey`** for the reason spelled out
  * in `AGENTS.md`: a key is spent for good rather than until the job finishes,
  * so keying this would make the second run silently do nothing — the opposite
@@ -60,6 +71,15 @@ type Tally = {
   /** Differ from what this repository says, and were left as they are. */
   articlesDrifted: number;
   articlesUnchanged: number;
+  /**
+   * Articles reached, per folder, counted as the run reaches them.
+   *
+   * Deliberately not read back off `HANDBOOK` when reporting: printing the
+   * constant that produced the work makes the table an echo, and it would show
+   * a healthy three beside the supervisor folder on a run where those three
+   * were never touched.
+   */
+  perFolder: Map<string, { minRole: AgentRole; reached: number }>;
 };
 
 /**
@@ -87,20 +107,25 @@ export async function seedConsoleHandbook(job: ClaimedJob): Promise<void> {
     articlesRewritten: 0,
     articlesDrifted: 0,
     articlesUnchanged: 0,
+    perFolder: new Map(),
   };
 
+  // Null only in a dry run against a database that has never been seeded. The
+  // walk continues on it rather than returning: a dry run is read on the way to
+  // the first real seed, and "the category does not exist yet" is not an answer
+  // to "what is this about to write".
   const categoryId = await upsertCategory(dryRun);
-  if (categoryId === null) {
-    report(tally, dryRun, 'would create the category; nothing below it can be resolved yet');
-    return;
-  }
 
   for (const [index, folder] of HANDBOOK.entries()) {
     const folderId = await upsertFolder(categoryId, folder, index, dryRun, tally);
-    if (folderId === null) continue;
+    tally.perFolder.set(folder.slug, { minRole: folder.minRole, reached: 0 });
 
     for (const [position, article] of folder.articles.entries()) {
-      await upsertArticle(folderId, article, position, { dryRun, overwrite }, tally);
+      // A dry run reaches the articles even when the folder does not exist yet
+      // — `folderId` is null then, and nothing below writes. Skipping them
+      // instead reported "5 folders, 0 articles" on the run where the operator
+      // most wants the number: the one before the first real seed.
+      await upsertArticle(folder.slug, folderId, article, position, { dryRun, overwrite }, tally);
     }
   }
 
@@ -109,7 +134,11 @@ export async function seedConsoleHandbook(job: ClaimedJob): Promise<void> {
 
 async function upsertCategory(dryRun: boolean): Promise<string | null> {
   const existing = await db
-    .select({ id: kbCategories.id })
+    .select({
+      id: kbCategories.id,
+      name: kbCategories.name,
+      description: kbCategories.description,
+    })
     .from(kbCategories)
     .where(
       and(
@@ -120,13 +149,18 @@ async function upsertCategory(dryRun: boolean): Promise<string | null> {
     .limit(1);
 
   if (existing[0]) {
-    if (!dryRun) {
+    const current = existing[0];
+    const stale =
+      current.name !== HANDBOOK_CATEGORY.name ||
+      current.description !== HANDBOOK_CATEGORY.description;
+
+    if (stale && !dryRun) {
       await db
         .update(kbCategories)
         .set({ name: HANDBOOK_CATEGORY.name, description: HANDBOOK_CATEGORY.description })
-        .where(eq(kbCategories.id, existing[0].id));
+        .where(eq(kbCategories.id, current.id));
     }
-    return existing[0].id;
+    return current.id;
   }
 
   if (dryRun) return null;
@@ -149,14 +183,15 @@ async function upsertCategory(dryRun: boolean): Promise<string | null> {
 }
 
 async function upsertFolder(
-  categoryId: string,
+  /** Null only in a dry run, where the category does not exist yet. */
+  categoryId: string | null,
   folder: (typeof HANDBOOK)[number],
   position: number,
   dryRun: boolean,
   tally: Tally,
 ): Promise<string | null> {
   const shape = {
-    categoryId,
+    categoryId: categoryId ?? '',
     name: folder.name,
     description: folder.description,
     // Both, every run. This is the line the feature is built on.
@@ -166,7 +201,15 @@ async function upsertFolder(
   };
 
   const existing = await db
-    .select({ id: kbFolders.id })
+    .select({
+      id: kbFolders.id,
+      categoryId: kbFolders.categoryId,
+      name: kbFolders.name,
+      description: kbFolders.description,
+      visibility: kbFolders.visibility,
+      minRole: kbFolders.minRole,
+      position: kbFolders.position,
+    })
     .from(kbFolders)
     .where(
       and(
@@ -177,15 +220,25 @@ async function upsertFolder(
     .limit(1);
 
   if (existing[0]) {
-    tally.foldersUpdated += 1;
-    if (!dryRun) {
-      await db.update(kbFolders).set(shape).where(eq(kbFolders.id, existing[0].id));
+    const current = existing[0];
+    // Compared field by field so a folder that already says what this
+    // repository says is not written to at all. See the header: an UPDATE that
+    // changes nothing still fires `touch_updated_at`.
+    const stale = (Object.keys(shape) as (keyof typeof shape)[]).some(
+      (key) => current[key] !== shape[key],
+    );
+
+    if (stale) {
+      tally.foldersUpdated += 1;
+      if (!dryRun && categoryId !== null) {
+        await db.update(kbFolders).set(shape).where(eq(kbFolders.id, current.id));
+      }
     }
-    return existing[0].id;
+    return current.id;
   }
 
   tally.foldersCreated += 1;
-  if (dryRun) return null;
+  if (dryRun || categoryId === null) return null;
 
   const inserted = await db
     .insert(kbFolders)
@@ -196,7 +249,9 @@ async function upsertFolder(
 }
 
 async function upsertArticle(
-  folderId: string,
+  folderSlug: string,
+  /** Null only in a dry run, where the folder does not exist yet. */
+  folderId: string | null,
   article: (typeof HANDBOOK)[number]['articles'][number],
   position: number,
   options: { dryRun: boolean; overwrite: boolean },
@@ -215,6 +270,9 @@ async function upsertArticle(
       id: kbArticles.id,
       title: kbArticles.title,
       bodyHtml: kbArticles.bodyHtml,
+      folderId: kbArticles.folderId,
+      visibility: kbArticles.visibility,
+      position: kbArticles.position,
     })
     .from(kbArticles)
     .where(
@@ -226,10 +284,12 @@ async function upsertArticle(
     .limit(1);
 
   const row = existing[0];
+  const reached = tally.perFolder.get(folderSlug);
+  if (reached) reached.reached += 1;
 
   if (!row) {
     tally.articlesCreated += 1;
-    if (options.dryRun) return;
+    if (options.dryRun || folderId === null) return;
 
     await db.insert(kbArticles).values({
       folderId,
@@ -267,7 +327,15 @@ async function upsertArticle(
   else if (changed) tally.articlesDrifted += 1;
   else tally.articlesUnchanged += 1;
 
-  if (options.dryRun) return;
+  // Everything this job owns structurally, compared before it is written. The
+  // three of them together are the audience guarantee — an article that drifted
+  // out of its folder has left the floor behind — but re-asserting values that
+  // already hold costs an `updated_at` per row per run.
+  const misfiled =
+    folderId !== null &&
+    (row.folderId !== folderId || row.visibility !== 'agents_only' || row.position !== position);
+
+  if (options.dryRun || (!rewriting && !misfiled)) return;
 
   await db.transaction(async (tx) => {
     if (rewriting) {
@@ -291,11 +359,7 @@ async function upsertArticle(
     await tx
       .update(kbArticles)
       .set({
-        // Always: an article that drifted out of its folder has left the floor
-        // behind, and one whose visibility was widened is on the help centre.
-        folderId,
-        visibility: 'agents_only',
-        position,
+        ...(misfiled ? { folderId: folderId!, visibility: 'agents_only' as const, position } : {}),
         ...(rewriting
           ? { title: article.title, bodyHtml, bodyText, excerpt: preview(bodyText, 200) }
           : {}),
@@ -304,10 +368,8 @@ async function upsertArticle(
   });
 }
 
-function report(tally: Tally, dryRun: boolean, note?: string): void {
+function report(tally: Tally, dryRun: boolean): void {
   const tag = '[seed_console_handbook]';
-
-  if (note) console.log(`${tag} ${note}`);
 
   console.log(
     `${tag} folders ${tally.foldersCreated} created, ${tally.foldersUpdated} updated ` +
@@ -331,14 +393,26 @@ function report(tally: Tally, dryRun: boolean, note?: string): void {
   }
 
   // Per audience rather than as one number, for the reason §7 of the working
-  // brief gives about per-locale reporting: "16 articles seeded" reads as a
+  // brief gives about per-locale reporting: "15 articles seeded" reads as a
   // clean run even if the supervisor folder ended up empty, and an audience
   // with nothing addressed to it is exactly the failure worth seeing.
-  console.log(`${tag} ${'audience'.padEnd(16)}${'folder'.padStart(26)}${'articles'.padStart(10)}`);
-  for (const folder of HANDBOOK) {
+  //
+  // Counted as the run reached each article, never read back off `HANDBOOK` —
+  // a table printed from the constant that produced the work is an echo, and
+  // would show a reassuring three beside a folder the run never got to.
+  console.log(`${tag} ${'audience'.padEnd(16)}${'folder'.padStart(26)}${'reached'.padStart(10)}`);
+  for (const [slug, folder] of tally.perFolder) {
     console.log(
-      `${tag} ${folder.minRole.padEnd(16)}${folder.slug.padStart(26)}` +
-        `${String(folder.articles.length).padStart(10)}`,
+      `${tag} ${folder.minRole.padEnd(16)}${slug.padStart(26)}` +
+        `${String(folder.reached).padStart(10)}`,
+    );
+  }
+
+  const empty = [...tally.perFolder].filter(([, folder]) => folder.reached === 0);
+  if (empty.length > 0) {
+    console.log(
+      `${tag} ${empty.length} folder(s) had no article reached: ` +
+        empty.map(([slug]) => slug).join(', '),
     );
   }
 }

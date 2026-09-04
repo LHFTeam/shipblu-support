@@ -1,4 +1,10 @@
-import { roleAtLeast, roleSeniority, strictestRole, type AgentRole } from '@/lib/auth/permissions';
+import {
+  ROLES_BY_SENIORITY,
+  roleAtLeast,
+  roleSeniority,
+  strictestRole,
+  type AgentRole,
+} from '@/lib/auth/permissions';
 import type { kbVisibilityEnum } from '@/db/schema/enums';
 
 /**
@@ -70,6 +76,25 @@ function floorOf(a: AgentRole | null, b: AgentRole | null): AgentRole | null {
 export function meetsFloor(role: AgentRole, floor: AgentRole | null): boolean {
   return floor === null || roleAtLeast(role, floor);
 }
+
+/**
+ * The floors a picker may offer: every role above the most junior one.
+ *
+ * The same `> 1` cut `floorOf` takes, for the same reason, one layer up.
+ * Choosing "Agents and up" stores `agent`, which every read model — the SQL and
+ * `floorFor` alike — then reports as no floor, so the option sits beside
+ * "Everyone on the team" doing exactly what it does and reads as a control that
+ * refused to save.
+ *
+ * A stored `agent` stays legal and still means that: `lib/kb/handbook.ts`
+ * spells it out on the two folders whose audience is the whole team, because a
+ * folder there declares its audience rather than omitting it. Normalising on
+ * read rather than constraining the column is what lets both spellings exist
+ * without either being wrong — but only one of them needs offering.
+ */
+export const SELECTABLE_FLOORS: AgentRole[] = ROLES_BY_SENIORITY.filter(
+  (role) => roleSeniority(role) > 1,
+);
 
 /**
  * How a floor is described to the person who set it, and to the person it keeps
