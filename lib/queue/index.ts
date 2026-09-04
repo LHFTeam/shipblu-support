@@ -30,6 +30,7 @@ export type JobType =
   | 'backfill_message_locations'
   | 'backfill_meta_profiles'
   | 'normalise_kb_formatting'
+  | 'seed_console_handbook'
   | 'cleanup';
 
 export type EnqueueOptions = {

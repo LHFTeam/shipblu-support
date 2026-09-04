@@ -358,7 +358,12 @@ the missing endpoint was avoiding. `next.config.ts` sets `serverActions.bodySize
 `MAX_FORM_TOTAL_BYTES` so the limit a customer meets is the one that can explain
 itself. `lib/forms/files.ts` is client-safe and `lib/forms/attachments.ts` is
 not — the same split `custom-fields.ts` makes, here because the shared file put
-`node:fs` in the browser bundle.
+`node:fs` in the browser bundle. That split is now checked: CI walks the import
+graph out of every `'use client'` file and fails a value import that reaches
+`db/schema` or `db/client`, stopping at `'use server'` modules, which are a
+boundary rather than a dependency. Only the `node:fs` case fails a build on its
+own; one constant imported from a module that touches the schema ships the whole
+schema and nothing complains (§6.57).
 
 A form's slug can be Arabic, so anything putting one into a server `redirect()`
 goes through `formPath` / `encodeSlugParam`. Next hands the path straight to
@@ -421,6 +426,63 @@ regex pass over markup safe — it only ever runs on sanitize-html's own output,
 and it never touches a text node. Applying it to what is already stored is
 `normalise_kb_formatting`, which is idempotent and cuts a `kb_article_versions`
 row per article so the pass is undoable from the console.
+
+**Who on the team may read an internal article.** `kb_visibility` answers
+whether a _customer_ may (`lib/kb/visibility.ts`); `min_role` on `kb_articles`
+and `kb_folders` answers which of _us_ may, and the two are separate axes on
+purpose. `agents_only` already means "no customer, ever", whoever is signed in —
+a `supervisors_only` beside it would put a role branch inside the predicate that
+keeps internal runbooks out of Google, and would make every exhaustive switch
+over `kb_visibility` answer a question it was not asked.
+
+`lib/kb/internal.ts` owns the rule, and three things about it are load-bearing:
+
+- **The floor is read only where the content is internal.** A floor on something
+  a customer can open is not a boundary, it is a console hiding from an agent
+  what a stranger can read. The folder counts too — production's internal
+  articles are marked `public` on the row and are internal only through their
+  folder — so an article's floor is the stricter of its own and its folder's,
+  and null on anything public.
+- **`readableByRole(role)` takes the role as a required argument**, the same
+  device `articleVisibleTo` uses for its viewer: there is no zero-argument
+  version to call by accident, so a new internal read model cannot forget the
+  rule without failing to compile. Every one applies it — `admin.ts` for the
+  console list and the editor, `agent-search.ts` for the composer panel — and so
+  do the five console actions that reach an article by an id out of a
+  `FormData` field, because `kb.edit` is supervisor and up, which is exactly the
+  population an admins-only article is kept from.
+- **The seniority ladder is generated, never retyped.** `agent_role` happens to
+  be declared most-senior-first, so `least()` and `<=` would work by accident
+  today and silently re-grade every article the day a role is inserted into the
+  middle of the enum. The CASE arms come from `ROLES_BY_SENIORITY` in
+  `lib/auth/permissions.ts`, and compare as text so no `agent_role` operator is
+  needed — the `operator does not exist: text = channel` shape under
+  [Tests](#tests).
+- **The pure half lives in `lib/kb/floors.ts`** — the labels a control shows,
+  and `floorFor`/`folderFloor`, the twins of `effectiveFloor` for rows already in
+  hand. Split by which side of the wire runs it, like `lib/forms/files.ts`, and
+  the twins answer null wherever the SQL does, the most junior role included:
+  "every agent" and "no floor set" are the same audience, and a twin that
+  disagreed would badge a row the list beside it reports as unrestricted.
+
+A floor is written only where the content is internal, and both writers decide
+that server-side: `saveArticle` reads the target folder rather than trusting the
+form, because the editor renders the control only for an internal article — so a
+submission with no `minRole` field is a form that never offered one, not somebody
+clearing a floor, and clearing it there would drop the floor off every article
+that is internal through its folder. Neither may accept a folder above the
+caller, for the same reason the five id-in-`FormData` actions may not accept an
+article above them.
+
+The team's own handbook is the content this exists for: `lib/kb/handbook.ts`
+holds it, `seed_console_handbook` puts it in the database idempotently, and the
+`database` CI job runs that job twice and asserts the second run changes
+nothing. Its floors are on the folders rather than on the articles, so an
+article added to one later inherits the right audience instead of needing
+somebody to remember. Ship a content fix by re-running with `overwrite=true`,
+which cuts a `kb_article_versions` row for what it replaces; without it the job
+reports what drifted and leaves it alone, because these articles are meant to be
+edited in the console.
 
 **Bilingual and RTL.** Arabic is the default locale and the front door; every
 public URL keeps an explicit locale segment. Use `direction()` from

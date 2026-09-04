@@ -3089,7 +3089,108 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     figures begin after the window opens, says where they begin and why. Worth
     remembering for the next report built on a young rollup.
 
+55. **The article page in the console required `kb.edit`, so no agent could
+    open an article.** _2026-09-04, writing the team handbook._ `/kb` needed
+    `kb.view`, which the agent baseline carries, and `/kb/[id]` needed
+    `kb.edit`, which starts at supervisor. An agent could therefore see every
+    title in the list, click one, and land back on the inbox with
+    `?error=forbidden`.
+
+    Survivable while the knowledge base was entirely customer-facing — an agent
+    could read any of it on the help centre like anybody else. Not survivable
+    the moment internal articles exist: an article addressed to agents that no
+    agent can open is not published, it is filed. The page now serves a
+    read-only render at `kb.view` and the editor at `kb.edit`; every write still
+    goes through `requirePermission` inside the actions, so nothing was widened
+    but reading.
+
+    The general shape is worth keeping: a permission that gates a _route_ rather
+    than the writes on it will eventually gate a reader it was never meant to.
+
+56. **`kb_categories` has no visibility column, so a category holding only
+    internal folders was still a public page.** _2026-09-04, reviewing the
+    handbook._ Visibility and the role floor are columns on `kb_articles` and
+    `kb_folders`; a category has neither. `getCategory` filtered the folders it
+    returned and then returned the category anyway, so
+    `GET /ar/c/handbook-console` answered 200 to a signed-out visitor with the
+    category's Arabic name as the `<title>` and its description as the meta
+    description. The fifteen articles were never reachable — every query that
+    could reach one threads a viewer — but the page around them was, and it was
+    indexable.
+
+    `getCategory` now answers null when nothing inside it is readable, which is
+    the cut `listCategories` already took for the front page ("an empty category
+    on a help centre reads as a broken page"). The general shape: a table with no
+    visibility axis inherits one only if every read of it derives the answer from
+    the children that do have one.
+
+57. **A client component importing one constant from a module that touches the
+    schema ships the whole schema.** _2026-09-04, reviewing the handbook._
+    `FLOOR_LABELS` — four strings — lived beside the SQL predicates in
+    `lib/kb/internal.ts`, which value-imports `@/db/schema`. Three `'use client'`
+    files imported it, and the first-load JS of `/kb/[id]`, `/kb/new` and
+    `/kb/structure` therefore carried every Drizzle table definition in the
+    repository: 579 KB per route, of which 87 KB was the schema. Nothing failed.
+    `tsc`, `eslint`, `vitest` and `next build` were all green, and the evidence
+    is only in `.next/diagnostics/route-bundle-stats.json`.
+
+    The labels moved to `lib/kb/floors.ts`, which imports the visibility enum as
+    a `type` and so is erased entirely; the three routes now load 484–492 KB with
+    no schema string in any chunk. `scripts/ci/repo-rules.mjs` walks the graph
+    out of every `'use client'` file and fails on a value import that reaches
+    `db/schema` or `db/client`. It stops at `'use server'` modules — a client
+    form importing its own actions file is a network boundary, not a dependency —
+    which is why the first version of the check reported 88 violations.
+
+    The trap generalises past the schema: the `node:fs` version of this mistake
+    fails the build, and every other version of it just makes the app slower.
+
+58. **`key={state.nonce}` on a form clears the fields, not the state that
+    renders them.** _2026-09-04, reviewing the handbook._ Every composer and
+    admin form in this app clears itself by remounting on the nonce the action
+    returns, which works because the inputs are uncontrolled — the DOM nodes are
+    new. A `useState` in the component that _declares_ the form is above that
+    boundary and survives, so anything driven by it silently carries over into
+    the next submission.
+
+    Twice, in the same review. `/kb/structure` kept "Agents only" selected after
+    adding an internal folder, so the next folder was created internal with an
+    empty name box. Worse, `ReplyForm` kept `usedId` — the canned response the
+    last reply used — in a hidden `cannedResponseId` field, so every subsequent
+    reply from the same open ticket incremented `usage_count` for a response it
+    did not contain, compounding with how many replies the agent sent.
+
+    The rule: state that a keyed form's submission depends on belongs _inside_
+    the keyed subtree, in a component of its own. State that is deliberately
+    sticky (`privately`, the side-conversation recipient) belongs outside it —
+    and both of those are visible controls, so what carries over is on screen
+    rather than in a hidden field.
+
 ## 7. Verification already done
+
+- **The knowledge-base role floor, against a real Postgres.** _2026-09-04._ The
+  predicate and the console handbook were exercised on a local Postgres 16 with
+  the migrations and `db/sql` applied, because `readableByRole` and
+  `effectiveFloor` are raw `sql` fragments used from pages and actions rather
+  than only from a job handler, and vitest executes no SQL.
+
+  Six article shapes — public; public carrying a floor; internal with no floor;
+  internal only through its folder (production's shape); internal with a floor
+  on the article; and article and folder disagreeing — read by each of the four
+  roles, through all four internal read models (`listArticlesForAdmin`,
+  `getArticleForEdit`, `searchForAgent`, `suggestForAgent`). 95 assertions, all
+  as intended: the floor is ignored on anything a customer can open, the folder
+  supplies it when the article does not, and the stricter of the two wins.
+
+  Then the handbook itself. Seeded into an empty database it wrote 5 folders and
+  15 articles; a second run and an `overwrite=true` run each reported everything
+  current and cut no `kb_article_versions` row. Editing an article's body by
+  hand made the next run report one drifted article and change nothing;
+  `overwrite=true` restored it and cut exactly one version row. On the seeded
+  data an agent sees 8 articles, a supervisor 11, an admin 14 and an account
+  admin 15 — and every customer-facing surface (`listCategories`,
+  `searchArticles`, `getArticle` by slug, and the sitemap) returns zero of them
+  for both an anonymous reader and a signed-in one.
 
 - **The knowledge base's formatting standard, applied to production.**
   _2026-09-03._ `normalise_kb_formatting` ran against the live database after

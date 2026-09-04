@@ -38,5 +38,5 @@ export async function GET(request: Request) {
   // not serve this app yet.
   const origin = requestBaseUrl(request.headers);
 
-  return Response.json({ articles: await searchForAgent(origin, locale, query) });
+  return Response.json({ articles: await searchForAgent(origin, agent.role, locale, query) });
 }

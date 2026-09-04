@@ -337,6 +337,82 @@ function ReplyForm({
   const [privately, setPrivately] = useState(false);
   useRefreshOnSuccess(state, onSent);
 
+  return (
+    <form key={state.nonce ?? 0} action={action} className="flex flex-col gap-2">
+      <input type="hidden" name="conversationId" value={conversationId} />
+      <input
+        type="hidden"
+        name="metaSendKind"
+        value={privately ? 'private_reply' : 'comment_reply'}
+      />
+
+      <ReplyBody
+        isCommentThread={isCommentThread}
+        privately={privately}
+        canned={canned}
+        knowledge={knowledge}
+      />
+
+      {isCommentThread ? (
+        <label className="flex items-start gap-2 rounded-md border border-[var(--border)] p-2 text-xs">
+          <input
+            type="checkbox"
+            checked={privately}
+            onChange={(event) => setPrivately(event.target.checked)}
+            className="mt-0.5"
+          />
+          <span>
+            <span className="font-medium">Reply privately instead</span>
+            <span className="block opacity-60">
+              Moves the conversation into the direct message inbox. Meta allows this once per
+              comment, so it cannot be undone or repeated.
+            </span>
+          </span>
+        </label>
+      ) : null}
+
+      <ErrorText>{state.error}</ErrorText>
+
+      <div className="flex items-center gap-3">
+        <label className="flex items-center gap-1.5 text-xs opacity-70">
+          <input type="checkbox" name="resolveAfter" />
+          Resolve after sending
+        </label>
+        <SubmitButton className="ml-auto" idle="Send reply" busy="Sending…" />
+      </div>
+    </form>
+  );
+}
+
+/**
+ * The reply box, and the two controls that write into it.
+ *
+ * A component of its own so that the `key` on the form resets what it
+ * remembers. React state lives with the component that declares it, and
+ * `usedId` declared in `ReplyForm` outlived the remount that clears the
+ * textarea: the reply after one that used a canned response posted the same
+ * `cannedResponseId` again, and `countCannedUse` incremented `usage_count` for
+ * a response that reply never contained — once more for every reply the agent
+ * sent before leaving the ticket. The column exists to rank what the team
+ * reaches for, so an over-count that compounds with traffic is worse than no
+ * column.
+ *
+ * `privately` stays in the parent deliberately: it is the send *mode*, and the
+ * server re-derives it from the conversation anyway (`metaSendKind` is forced
+ * to `dm` off a comment thread), so a stale tick cannot change where a message
+ * goes.
+ */
+function ReplyBody({
+  isCommentThread,
+  privately,
+  canned,
+  knowledge,
+}: {
+  isCommentThread: boolean;
+  privately: boolean;
+  canned: CannedResponseOption[];
+  knowledge: KnowledgeContext | null;
+}) {
   const bodyRef = useRef<HTMLTextAreaElement>(null);
 
   /*
@@ -386,14 +462,8 @@ function ReplyForm({
   );
 
   return (
-    <form key={state.nonce ?? 0} action={action} className="flex flex-col gap-2">
-      <input type="hidden" name="conversationId" value={conversationId} />
+    <>
       <input type="hidden" name="cannedResponseId" value={usedId} />
-      <input
-        type="hidden"
-        name="metaSendKind"
-        value={privately ? 'private_reply' : 'comment_reply'}
-      />
 
       <Textarea
         ref={bodyRef}
@@ -418,35 +488,7 @@ function ReplyForm({
           onInsert={insertText}
         />
       ) : null}
-
-      {isCommentThread ? (
-        <label className="flex items-start gap-2 rounded-md border border-[var(--border)] p-2 text-xs">
-          <input
-            type="checkbox"
-            checked={privately}
-            onChange={(event) => setPrivately(event.target.checked)}
-            className="mt-0.5"
-          />
-          <span>
-            <span className="font-medium">Reply privately instead</span>
-            <span className="block opacity-60">
-              Moves the conversation into the direct message inbox. Meta allows this once per
-              comment, so it cannot be undone or repeated.
-            </span>
-          </span>
-        </label>
-      ) : null}
-
-      <ErrorText>{state.error}</ErrorText>
-
-      <div className="flex items-center gap-3">
-        <label className="flex items-center gap-1.5 text-xs opacity-70">
-          <input type="checkbox" name="resolveAfter" />
-          Resolve after sending
-        </label>
-        <SubmitButton className="ml-auto" idle="Send reply" busy="Sending…" />
-      </div>
-    </form>
+    </>
   );
 }
 

@@ -6,8 +6,10 @@ import { and, eq, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { kbArticleVersions, kbArticles, kbCategories, kbFolders } from '@/db/schema';
 import { requirePermission } from '@/lib/auth/guard';
+import { ROLES_BY_SENIORITY, type AgentRole } from '@/lib/auth/permissions';
 import { htmlToText, preview, sanitiseArticleHtml } from '@/lib/html/sanitize';
-import { takenSlugs } from '@/lib/kb/admin';
+import { getArticleForEdit, takenSlugs } from '@/lib/kb/admin';
+import { folderFloor, meetsFloor } from '@/lib/kb/floors';
 import { normaliseArticleHtml } from '@/lib/kb/format';
 import { isLocale } from '@/lib/kb/locale';
 import { slugify, uniqueSlug } from '@/lib/kb/slug';
@@ -19,6 +21,34 @@ function ok(): KbState {
 }
 
 const VISIBILITIES = ['public', 'logged_in', 'agents_only', 'selected_companies'] as const;
+
+/**
+ * The role floor a form field may carry: one of the roles, or nothing at all.
+ *
+ * Parsed rather than cast, and empty means null rather than `'agent'`, so
+ * clearing the control clears the column instead of writing a floor nobody
+ * chose.
+ */
+function parseMinRole(value: FormDataEntryValue | null): AgentRole | null | 'invalid' {
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+  return ROLES_BY_SENIORITY.includes(raw as AgentRole) ? (raw as AgentRole) : 'invalid';
+}
+
+/**
+ * Refuses to act on an article the signed-in agent may not read.
+ *
+ * Every action below is reached with an id out of a `FormData` field, and
+ * `kb.edit` is supervisor and up — which is exactly the population an
+ * admins-only runbook is kept from. Without this, a supervisor could publish,
+ * restore, retitle or delete an article they cannot open, and `saveArticle`
+ * could be used to read one back by lowering its floor. `getArticleForEdit`
+ * applies the same predicate the pages do, so there is one rule rather than
+ * two.
+ */
+async function readable(id: string, role: AgentRole): Promise<boolean> {
+  return (await getArticleForEdit(id, role)) !== null;
+}
 
 /**
  * Creates or updates an article.
@@ -38,6 +68,7 @@ export async function saveArticle(_state: KbState, formData: FormData): Promise<
   const locale = String(formData.get('locale') ?? 'en');
   const rawBody = String(formData.get('bodyHtml') ?? '');
   const visibility = String(formData.get('visibility') ?? 'public');
+  const minRole = parseMinRole(formData.get('minRole'));
   const requestedSlug = String(formData.get('slug') ?? '').trim();
   const seoTitle = String(formData.get('seoTitle') ?? '').trim();
   const seoDescription = String(formData.get('seoDescription') ?? '').trim();
@@ -52,6 +83,8 @@ export async function saveArticle(_state: KbState, formData: FormData): Promise<
   if (!VISIBILITIES.includes(visibility as (typeof VISIBILITIES)[number])) {
     return { error: 'Unknown visibility' };
   }
+  if (minRole === 'invalid') return { error: 'Unknown minimum role' };
+  if (id && !(await readable(id, agent.role))) return { error: 'Article not found' };
 
   // Sanitise, then normalise, in that order: the sanitiser is the security
   // boundary and the normaliser is a formatting pass that relies on being handed
@@ -68,18 +101,48 @@ export async function saveArticle(_state: KbState, formData: FormData): Promise<
   // routes filter on the category's locale — so this is rejected rather than
   // silently filed somewhere nobody will find it.
   const folder = await db
-    .select({ id: kbFolders.id, categoryLocale: kbCategories.locale })
+    .select({
+      id: kbFolders.id,
+      categoryLocale: kbCategories.locale,
+      visibility: kbFolders.visibility,
+      minRole: kbFolders.minRole,
+    })
     .from(kbFolders)
     .innerJoin(kbCategories, eq(kbCategories.id, kbFolders.categoryId))
     .where(eq(kbFolders.id, folderId))
     .limit(1);
 
   if (!folder[0]) return { error: 'That folder no longer exists' };
+  // The picker no longer offers a folder above the caller, but the id arrives in
+  // a `FormData` field — the same reason `readable()` exists above. Filing an
+  // article into a folder you cannot read is a write whose result you cannot
+  // see: the redirect 404s, and the article is then out of reach of every read
+  // model. Answered as "no longer exists", so trying ids tells nobody anything.
+  if (!meetsFloor(agent.role, folderFloor(folder[0]))) {
+    return { error: 'That folder no longer exists' };
+  }
   if (folder[0].categoryLocale !== locale) {
     return {
       error: `That folder belongs to a ${folder[0].categoryLocale} category, so a ${locale} article cannot live in it`,
     };
   }
+
+  // Whether the article is internal is decided here rather than taken from the
+  // form, because it is the answer that decides whether the floor column is
+  // written at all — and the folder is half of it, which is the half a browser
+  // can be wrong about.
+  //
+  // Three cases, and the third is the one that bites. The editor renders the
+  // control only for an internal article, so a submission that carries no
+  // `minRole` field is not somebody clearing the floor; it is a form that never
+  // offered one. Writing null there would drop the floor off an article that is
+  // internal through its folder — the shape all fifteen of production's
+  // internal articles have — the first time anybody saved it from a stale tab
+  // or with the folder list a step behind. On something a customer can open the
+  // column is cleared, because the read rule ignores a floor there and a value
+  // nothing reads is a value that misleads the next person to look.
+  const internal = visibility === 'agents_only' || folder[0].visibility === 'agents_only';
+  const floor = internal ? (formData.has('minRole') ? { minRole } : {}) : { minRole: null };
 
   const baseSlug = slugify(requestedSlug || title, `article-${Date.now()}`);
   const slug = uniqueSlug(baseSlug, await takenSlugs(locale, id || undefined));
@@ -93,6 +156,7 @@ export async function saveArticle(_state: KbState, formData: FormData): Promise<
     bodyText,
     excerpt,
     visibility: visibility as (typeof VISIBILITIES)[number],
+    ...floor,
     tags,
     seo: {
       ...(seoTitle ? { title: seoTitle } : {}),
@@ -162,6 +226,7 @@ export async function setArticleStatus(_state: KbState, formData: FormData): Pro
   // becomes visible to every customer, which is a different level of trust from
   // being able to draft it.
   const agent = await requirePermission(status === 'published' ? 'kb.publish' : 'kb.edit');
+  if (!(await readable(id, agent.role))) return { error: 'Article not found' };
 
   await db
     .update(kbArticles)
@@ -179,9 +244,11 @@ export async function setArticleStatus(_state: KbState, formData: FormData): Pro
 }
 
 export async function deleteArticle(_state: KbState, formData: FormData): Promise<KbState> {
-  await requirePermission('kb.publish');
+  const agent = await requirePermission('kb.publish');
 
   const id = String(formData.get('id') ?? '');
+  if (!(await readable(id, agent.role))) return { error: 'Article not found' };
+
   await db.delete(kbArticles).where(eq(kbArticles.id, id));
 
   revalidatePath('/kb');
@@ -220,12 +287,14 @@ export async function createFolder(_state: KbState, formData: FormData): Promise
   const name = String(formData.get('name') ?? '').trim();
   const categoryId = String(formData.get('categoryId') ?? '');
   const visibility = String(formData.get('visibility') ?? 'public');
+  const minRole = parseMinRole(formData.get('minRole'));
 
   if (!name) return { error: 'Give the folder a name' };
   if (!categoryId) return { error: 'Choose a category' };
   if (!VISIBILITIES.includes(visibility as (typeof VISIBILITIES)[number])) {
     return { error: 'Unknown visibility' };
   }
+  if (minRole === 'invalid') return { error: 'Unknown minimum role' };
 
   const existing = await db
     .select({ slug: kbFolders.slug })
@@ -242,6 +311,11 @@ export async function createFolder(_state: KbState, formData: FormData): Promise
     slug,
     categoryId,
     visibility: visibility as (typeof VISIBILITIES)[number],
+    // Only where the folder is internal, for the reason `lib/kb/internal.ts`
+    // gives: the read rule ignores a floor on a folder a customer can open, and
+    // `/kb/structure` would badge that folder with an audience nothing
+    // enforces — "Admins and up" on a folder every signed-in customer can read.
+    minRole: visibility === 'agents_only' ? minRole : null,
   });
 
   revalidatePath('/kb/structure');
@@ -256,13 +330,18 @@ export async function createFolder(_state: KbState, formData: FormData): Promise
  * anyone having to decide which article is the original.
  */
 export async function linkTranslation(_state: KbState, formData: FormData): Promise<KbState> {
-  await requirePermission('kb.edit');
+  const agent = await requirePermission('kb.edit');
 
   const id = String(formData.get('id') ?? '');
   const otherId = String(formData.get('otherId') ?? '');
 
   if (!otherId) return { error: 'Choose an article to link to' };
   if (otherId === id) return { error: 'An article cannot be its own translation' };
+  // Both sides: linking is a write to one article and an assertion about the
+  // other, and either being out of reach makes this somebody else's business.
+  if (!(await readable(id, agent.role)) || !(await readable(otherId, agent.role))) {
+    return { error: 'Article not found' };
+  }
 
   const rows = await db
     .select({ id: kbArticles.id, locale: kbArticles.locale, group: kbArticles.translationGroupId })
@@ -287,6 +366,7 @@ export async function restoreVersion(_state: KbState, formData: FormData): Promi
 
   const id = String(formData.get('id') ?? '');
   const versionId = String(formData.get('versionId') ?? '');
+  if (!(await readable(id, agent.role))) return { error: 'Article not found' };
 
   const versions = await db
     .select({ title: kbArticleVersions.title, bodyHtml: kbArticleVersions.bodyHtml })

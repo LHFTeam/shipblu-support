@@ -6,7 +6,7 @@ import { articleCount, formatCount, isLocale, t, type Locale } from '@/lib/kb/lo
 import { getCategory, type FolderSummary } from '@/lib/kb/queries';
 import { kbViewer } from '@/lib/kb/viewer';
 import { decodeSlugParam } from '@/lib/kb/slug';
-import { EmptyNote, PageBody, PageHeader, Panel } from '../../chrome';
+import { PageBody, PageHeader, Panel } from '../../chrome';
 
 export const dynamic = 'force-dynamic';
 
@@ -52,21 +52,23 @@ export default async function CategoryPage({
         meta={category.description}
       />
 
+      {/*
+        No empty state: `getCategory` answers null when nothing inside is
+        readable, so this page is a 404 rather than a heading over a note — the
+        only thing that keeps a category whose folders are all internal off the
+        public help centre, since categories carry no visibility of their own.
+      */}
       <PageBody>
-        {category.folders.length === 0 ? (
-          <EmptyNote>{t(locale, 'emptyCategory')}</EmptyNote>
-        ) : (
-          <div className="grid items-start gap-4 lg:grid-cols-2">
-            {category.folders.map((folder) => (
-              <FolderPanel
-                key={folder.id}
-                locale={locale}
-                categorySlug={category.slug}
-                folder={folder}
-              />
-            ))}
-          </div>
-        )}
+        <div className="grid items-start gap-4 lg:grid-cols-2">
+          {category.folders.map((folder) => (
+            <FolderPanel
+              key={folder.id}
+              locale={locale}
+              categorySlug={category.slug}
+              folder={folder}
+            />
+          ))}
+        </div>
       </PageBody>
     </>
   );

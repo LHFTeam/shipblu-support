@@ -1,7 +1,9 @@
 import { and, asc, desc, eq, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { kbVisibilityEnum } from '@/db/schema/enums';
 import { kbArticles, kbCategories, kbFolders } from '@/db/schema';
+import type { AgentRole } from '@/lib/auth/permissions';
+import type { ArticleVisibility } from './floors';
+import { effectiveVisibility, readableByRole } from './internal';
 import type { Locale } from './locale';
 import { hybridMatch, hybridRank } from './rank';
 
@@ -12,10 +14,11 @@ import { hybridMatch, hybridRank } from './rank';
  * both on purpose. `queries.ts` serves customers and takes a required
  * `KbViewer` so no query there can forget the visibility rule; `admin.ts` serves
  * the article editor, where a draft is the whole point. An agent in the
- * composer is neither: they may *read* anything published, including the
- * internal folders no customer can reach, and may *link* only what the
- * recipient can open. Folding that into either of the others would mean putting
- * an agent branch inside the rule that keeps internal runbooks out of Google.
+ * composer is neither: they may *read* anything published their role is senior
+ * enough for, including the internal folders no customer can reach, and may
+ * *link* only what the recipient can open. Folding that into either of the
+ * others would mean putting an agent branch inside the rule that keeps internal
+ * runbooks out of Google.
  *
  * Drafts are excluded everywhere here. An unpublished article has no URL that
  * resolves and no reviewer has agreed to its contents; reading one is the
@@ -44,8 +47,8 @@ const MAX_BODY_CHARS = 4000;
  */
 export type Linkability = 'ok' | 'sign_in' | 'blocked';
 
-/** Taken from the schema rather than retyped, so the two cannot drift. */
-export type ArticleVisibility = (typeof kbVisibilityEnum.enumValues)[number];
+/** Re-exported where it was first defined, so existing importers keep working. */
+export type { ArticleVisibility };
 
 export type AgentArticleHit = {
   id: string;
@@ -63,34 +66,6 @@ export type AgentArticleHit = {
   /** Where the article lives on the help centre, whether or not it may be sent. */
   url: string;
 };
-
-/**
- * The article's effective visibility: the stricter of its own and its folder's.
- *
- * Not a detail. In production every one of the 112 articles carries
- * `visibility = 'public'`, and four of them sit in folders marked
- * `agents_only` — working hours and one per internal team. Reading the article
- * row alone would offer an agent a one-click link to a page that 404s for every
- * customer, which is the exact hole `folderVisibleTo` in `./visibility.ts`
- * exists to close. Kept in step with `levelAllowed` there: a new level has to be
- * added in both places.
- *
- * Those four are empty Freshdesk placeholders today, so the gate currently
- * guards nothing anyone would want to send. That is the wrong way round to
- * reason about it — the first sentence somebody writes into the working-hours
- * article is the one that must not become a customer-facing link.
- */
-const effectiveVisibility = sql<ArticleVisibility>`
-  case
-    when ${kbArticles.visibility} = 'agents_only'
-      or ${kbFolders.visibility} = 'agents_only' then 'agents_only'
-    when ${kbArticles.visibility} = 'selected_companies'
-      or ${kbFolders.visibility} = 'selected_companies' then 'selected_companies'
-    when ${kbArticles.visibility} = 'logged_in'
-      or ${kbFolders.visibility} = 'logged_in' then 'logged_in'
-    else 'public'
-  end
-`;
 
 /**
  * An exhaustive switch with no `default`, on purpose.
@@ -157,21 +132,35 @@ function toHit(row: Row, origin: string): AgentArticleHit {
   };
 }
 
-function published(locale: Locale, match: SQL): SQL {
-  return and(eq(kbArticles.status, 'published'), eq(kbArticles.locale, locale), match)!;
+/**
+ * Published, in this language, matching — and within this reader's reach.
+ *
+ * `readableByRole` is applied here rather than at each call site so the two
+ * entry points below cannot diverge: a search and a suggestion that disagreed
+ * about who may read an article would put a supervisor's runbook in front of an
+ * agent the moment a ticket happened to mention it.
+ */
+function published(role: AgentRole, locale: Locale, match: SQL): SQL {
+  return and(
+    eq(kbArticles.status, 'published'),
+    eq(kbArticles.locale, locale),
+    readableByRole(role),
+    match,
+  )!;
 }
 
 /**
  * Articles matching what the agent typed, best first.
  *
- * `origin` comes first for the same reason `searchArticles` in `./queries.ts`
- * takes its viewer first: it is the context the read happens in, not an option.
- * It is passed rather than read here because only the caller knows which origin
- * this is for — `requestBaseUrl()` for anything an agent or their customer will
- * click, `publicBaseUrl()` for anything we publish.
+ * `origin` and `role` come first for the same reason `searchArticles` in
+ * `./queries.ts` takes its viewer first: they are the context the read happens
+ * in, not options. The origin is passed rather than read here because only the
+ * caller knows which one this is for — `requestBaseUrl()` for anything an agent
+ * or their customer will click, `publicBaseUrl()` for anything we publish.
  */
 export async function searchForAgent(
   origin: string,
+  role: AgentRole,
   locale: Locale,
   query: string,
   limit = 8,
@@ -186,7 +175,7 @@ export async function searchForAgent(
     .from(kbArticles)
     .innerJoin(kbFolders, eq(kbFolders.id, kbArticles.folderId))
     .innerJoin(kbCategories, eq(kbCategories.id, kbFolders.categoryId))
-    .where(published(locale, hybridMatch(trimmed)))
+    .where(published(role, locale, hybridMatch(trimmed)))
     .orderBy(desc(rank), asc(kbArticles.title))
     .limit(limit);
 
@@ -212,6 +201,7 @@ export async function searchForAgent(
  */
 export async function suggestForAgent(
   origin: string,
+  role: AgentRole,
   locale: Locale,
   terms: string[],
   limit = 3,
@@ -227,7 +217,7 @@ export async function suggestForAgent(
     .from(kbArticles)
     .innerJoin(kbFolders, eq(kbFolders.id, kbArticles.folderId))
     .innerJoin(kbCategories, eq(kbCategories.id, kbFolders.categoryId))
-    .where(published(locale, matches))
+    .where(published(role, locale, matches))
     .orderBy(desc(rank), asc(kbArticles.title))
     .limit(limit);
 

@@ -105,7 +105,7 @@ export default async function ConversationPage({
       // and `suggestForAgent` returns nothing for fewer than two terms — so a
       // ticket with nothing to go on costs no query and renders no panel
       // furniture, the same way the help centre's blocks remove themselves.
-      terms.length ? suggestForAgent(kbOrigin, kbLocale, terms) : Promise.resolve([]),
+      terms.length ? suggestForAgent(kbOrigin, agent.role, kbLocale, terms) : Promise.resolve([]),
     ]);
 
   return (
