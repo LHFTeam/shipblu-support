@@ -1357,17 +1357,36 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
 
 ### 5.5 Loose ends
 
+- **Three superseded columns are still in the schema, waiting for every service
+  to be on new code.** `holidays.name`, `canned_responses.body_html` and
+  `canned_responses.body_text` were replaced by `*_ar` / `*_en` pairs in
+  migration 0025, which adds and does not drop. The reason is the deploy shape,
+  not caution: `preDeployCommand: npm run db:migrate` is on the two **web**
+  services only, so the worker and the four crons carry on running old code
+  after a web deploy has migrated — and old code selects `holidays.name` inside
+  `loadHoursCatalog`, which is on the SLA sweep, assignment, the nightly rollup
+  and the widget's open/closed check. Dropping in the same release would have
+  taken all of that down for the length of the deploy window. Drop them once
+  the worker and crons are confirmed on a build that no longer reads them; the
+  columns default to `''`, so nothing has to be written to them in the
+  meantime. Both tables were empty in production when 0025 was written
+  (`select count(*)` on each, 2026-09-04), so there is no content in the old
+  columns to move — check that again before dropping rather than assuming it.
+
 - **`contacts.locale` is never written, so every contact reads `'en'`.** All
   6,244 of them sit at the column default, and `lib/contacts/merge.ts` already
   documents why that is not the same as knowing: `'en'` means either "reads
   English" or "nobody has ever said". Anything that picks a language off it is
   answering an Arabic-first customer base in English — **CSAT surveys are doing
-  that today** (`worker/handlers/send-csat.ts` reads the column directly). The
-  out-of-hours reply works around it by reading the script of the customer's own
-  message (`preferredLocale()` in `lib/auto-response/resolve.ts`), which is a
-  workaround and not the fix. The fix is to set the column at ingest — the widget
-  and the portal both know the locale from the URL they were opened on, and a
-  WhatsApp or email contact can be read the same way the auto-response reads it.
+  that today** (`worker/handlers/send-csat.ts` reads the column directly). Two
+  senders work around it by reading the script of the customer's own message —
+  the out-of-hours reply and, since canned responses became bilingual, the
+  canned reply an automation rule sends — through `preferredLocale()` in
+  `lib/tickets/locale.ts`. That is a workaround and not the fix, and it is now
+  in one module precisely so the next sender does not invent a third answer. The
+  fix is to set the column at ingest — the widget and the portal both know the
+  locale from the URL they were opened on, and a WhatsApp or email contact can
+  be read the same way the auto-response reads it.
 - One imported article's detected language disagrees with its category. The
   importer counts and reports these rather than silently refiling them; someone
   who reads Arabic should look at it.
@@ -1483,6 +1502,18 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   The figures start from this change, so **a response the team has sent for
   months still starts at zero** and the ranking is only meaningful once some
   traffic has gone through it. The tooltip says so.
+
+  **A response is now two bodies, one per language, and the picker carries a
+  toggle beside it.** It opens on the language the customer is writing in — the
+  same `detectLocale` reading the knowledge panel beside it searches on — so an
+  agent answering an Arabic ticket reaches for the Arabic wording without
+  touching it. A response written in only one language stays in the list and
+  says so on its own option rather than disappearing, because the team writes
+  the Arabic first and hiding the rest would make the boilerplate look missing.
+  `send_reply` had to make the same choice with nobody to ask, and makes it per
+  ticket through `requesterLocale()` rather than at the rule — one rule serves
+  both halves of the queue. `usage_count` still counts replies rather than
+  languages: which language a response goes out in is not what the column ranks.
 
 - **The dead-scaffolding sweep, run rather than recommended.** §1 has said it is
   worth grepping for other columns nothing reads or writes; this is the answer as
@@ -3166,9 +3197,12 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
 
     The rule: state that a keyed form's submission depends on belongs _inside_
     the keyed subtree, in a component of its own. State that is deliberately
-    sticky (`privately`, the side-conversation recipient) belongs outside it —
-    and both of those are visible controls, so what carries over is on screen
-    rather than in a hidden field.
+    sticky (`privately`, the side-conversation recipient, and the canned
+    picker's language toggle) belongs outside it — and all three are visible
+    controls, so what carries over is on screen rather than in a hidden field.
+    The toggle is the case that shows why the distinction is not about risk: it
+    _should_ survive a send, because an agent who has decided to answer an
+    Arabic ticket in English is answering the whole thread in English.
 
 ## 7. Verification already done
 

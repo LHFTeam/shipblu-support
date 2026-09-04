@@ -14,7 +14,34 @@ import type { TimeRange, WeeklySchedule } from '@/db/schema/config';
  * the day.
  */
 
-export type Holiday = { date: string; name?: string };
+/**
+ * A day the office is shut, and what to call it in each language.
+ *
+ * Both names are optional and either one covers the other, so a calendar whose
+ * holidays are only named in Arabic is a complete calendar rather than one that
+ * renders half its messages blank. A holiday with neither is still a holiday —
+ * the date is what closes the office, and `holidayName` returning null is what
+ * lets `{{holiday}}` collapse to nothing instead of to the word "undefined".
+ */
+export type Holiday = { date: string; nameAr?: string; nameEn?: string };
+
+/**
+ * What to call a holiday in one language, or null if it is unnamed.
+ *
+ * The fallback is the same one every bilingual pair in this codebase takes, and
+ * it is right here for the reason it is right for the auto-response body: this
+ * name is interpolated into a message a customer is about to receive, and the
+ * holiday's name in the other language is a better answer than a sentence with
+ * a hole in it.
+ */
+export function holidayName(holiday: Holiday | null, locale: string): string | null {
+  if (!holiday) return null;
+
+  const ordered =
+    locale === 'ar' ? [holiday.nameAr, holiday.nameEn] : [holiday.nameEn, holiday.nameAr];
+
+  return ordered.map((name) => name?.trim()).find(Boolean) ?? null;
+}
 
 export type HoursConfig = {
   schedule: WeeklySchedule;

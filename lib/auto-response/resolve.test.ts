@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DateTime } from 'luxon';
 import type { HoursConfig } from '@/lib/hours';
-import { pickBody, pickRule, preferredLocale, substitute, type AutoResponseRule } from './resolve';
+import { pickBody, pickRule, substitute, type AutoResponseRule } from './resolve';
 
 /**
  * The decisions, not the plumbing: which rule wins when two match, which body a
@@ -27,7 +27,7 @@ const HOURS: HoursConfig = {
   },
   // A Sunday: a holiday landing on a working day, so it is the holiday and not
   // the weekend that closes the office.
-  holidays: [{ date: '2026-03-22', name: 'Eid al-Fitr' }],
+  holidays: [{ date: '2026-03-22', nameAr: 'عيد الفطر', nameEn: 'Eid al-Fitr' }],
 };
 
 function rule(overrides: Partial<AutoResponseRule> = {}): AutoResponseRule {
@@ -95,7 +95,7 @@ describe('pickRule', () => {
 });
 
 describe('pickBody', () => {
-  const holiday = { date: '2026-03-20', name: 'Eid al-Fitr' };
+  const holiday = { date: '2026-03-20', nameAr: 'عيد الفطر', nameEn: 'Eid al-Fitr' };
 
   it('sends the holiday body on a holiday', () => {
     const body = pickBody(rule({ bodyEn: 'closed', holidayBodyEn: 'eid' }), {
@@ -143,33 +143,6 @@ describe('pickBody', () => {
   });
 });
 
-describe('preferredLocale', () => {
-  it('honours a contact who has been marked Arabic', () => {
-    expect(preferredLocale('ar', 'where is my parcel')).toBe('ar');
-  });
-
-  // Every contact in production sits at the column default, which means nobody
-  // has said rather than "reads English". Taking it literally answers an
-  // Arabic-speaking customer base in English.
-  it('reads the language off the message when the contact is at the default', () => {
-    expect(preferredLocale('en', 'الشحنة لسه ما وصلتش')).toBe('ar');
-    expect(preferredLocale('en', 'my parcel has not arrived')).toBe('en');
-  });
-
-  it('is not thrown by a tracking number inside an Arabic message', () => {
-    expect(preferredLocale('en', 'SB123456 فين شحنتي؟')).toBe('ar');
-  });
-
-  it('is not thrown by an Arabic place name inside an English message', () => {
-    expect(preferredLocale('en', 'Please deliver my order to شبرا tomorrow')).toBe('en');
-  });
-
-  it('falls back to English when there is nothing to read', () => {
-    expect(preferredLocale('en', null)).toBe('en');
-    expect(preferredLocale('en', '   ')).toBe('en');
-  });
-});
-
 describe('substitute', () => {
   // Thursday 18:00 — the office shut an hour ago and does not open until Sunday.
   const thursdayEvening = cairo('2026-03-05T18:00');
@@ -201,10 +174,49 @@ describe('substitute', () => {
     const text = substitute(
       'Hello {{customer_name}}, ticket #{{ticket_number}} — closed for {{holiday}}.',
       HOURS,
-      { ...context, holiday: { date: '2026-03-22', name: 'Eid al-Fitr' } },
+      { ...context, holiday: { date: '2026-03-22', nameAr: 'عيد الفطر', nameEn: 'Eid al-Fitr' } },
       cairo('2026-03-22T11:00'),
     );
     expect(text).toBe('Hello Nour, ticket #4210 — closed for Eid al-Fitr.');
+  });
+
+  // The one placeholder whose value is itself translated. A body chosen for an
+  // Arabic reader that names the day in Latin script is the half-localised
+  // string this codebase already refuses in `formatOpening`.
+  it('names the holiday in the language the message is written in', () => {
+    const eid = { date: '2026-03-22', nameAr: 'عيد الفطر', nameEn: 'Eid al-Fitr' };
+
+    const arabic = substitute(
+      'مغلق بمناسبة {{holiday}}.',
+      HOURS,
+      { ...context, locale: 'ar', holiday: eid },
+      cairo('2026-03-22T11:00'),
+    );
+    expect(arabic).toBe('مغلق بمناسبة عيد الفطر.');
+  });
+
+  it('falls back to the name it has when only one language was written', () => {
+    const arabicOnly = { date: '2026-03-22', nameAr: 'عيد الفطر' };
+
+    const text = substitute(
+      'Closed for {{holiday}}.',
+      HOURS,
+      { ...context, holiday: arabicOnly },
+      cairo('2026-03-22T11:00'),
+    );
+    expect(text).toBe('Closed for عيد الفطر.');
+  });
+
+  // An unnamed holiday still closes the office; it just has nothing to
+  // interpolate, and the sentence has to survive that.
+  it('leaves nothing behind for a holiday with no name at all', () => {
+    const text = substitute(
+      'Closed for {{holiday}} today.',
+      HOURS,
+      { ...context, holiday: { date: '2026-03-22' } },
+      cairo('2026-03-22T11:00'),
+    );
+    expect(text).toBe('Closed for today.');
   });
 
   // A template written for the holiday body still renders when the value is

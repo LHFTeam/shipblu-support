@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { insertCanned } from './canned';
+import { availableLocales, insertCanned, resolveLocale } from './canned';
 
 describe('insertCanned', () => {
   it('fills an empty box without leading blank lines', () => {
@@ -66,5 +66,42 @@ describe('insertCanned', () => {
 
     const backwards = insertCanned('Hi there.', 'Snippet.', 5, 2);
     expect(backwards.text).toBe('Hi th\n\nSnippet.\n\nere.');
+  });
+});
+
+describe('availableLocales', () => {
+  it('reports only the languages the response was actually written in', () => {
+    expect(availableLocales({ ar: 'مرحبا', en: 'Hello' })).toEqual(['ar', 'en']);
+    expect(availableLocales({ ar: 'مرحبا', en: '' })).toEqual(['ar']);
+    expect(availableLocales({ ar: '', en: 'Hello' })).toEqual(['en']);
+  });
+
+  // The columns are `not null default ''`, so an unwritten language is blank
+  // rather than absent — and whitespace left behind by an editor is blank too.
+  it('does not count a body that is only whitespace', () => {
+    expect(availableLocales({ ar: '   \n ', en: 'Hello' })).toEqual(['en']);
+  });
+});
+
+describe('resolveLocale', () => {
+  const both = { ar: 'مرحبا', en: 'Hello' };
+
+  it('gives the language that was asked for when it exists', () => {
+    expect(resolveLocale(both, 'ar')).toBe('ar');
+    expect(resolveLocale(both, 'en')).toBe('en');
+  });
+
+  // Not a silent substitution: the picker has already labelled the option, and
+  // an automation sending the other language beats sending nothing.
+  it('falls back to the only language the response has', () => {
+    expect(resolveLocale({ ar: 'مرحبا', en: '' }, 'en')).toBe('ar');
+    expect(resolveLocale({ ar: '', en: 'Hello' }, 'ar')).toBe('en');
+  });
+
+  // Nothing `saveCannedResponse` will create, but the send path reads rows it
+  // did not write — and "no body" must not reach a customer as an empty reply.
+  it('is null when there is no body in either language', () => {
+    expect(resolveLocale({ ar: '', en: '' }, 'ar')).toBeNull();
+    expect(resolveLocale({ ar: ' ', en: '\n' }, 'en')).toBeNull();
   });
 });

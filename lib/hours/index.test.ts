@@ -4,6 +4,8 @@ import type { WeeklySchedule } from '@/db/schema/config';
 import {
   addBusinessMinutes,
   businessMinutesBetween,
+  holidayName,
+  holidayOn,
   isWithinBusinessHours,
   nextOpeningAt,
   type HoursConfig,
@@ -93,7 +95,7 @@ describe('isWithinBusinessHours', () => {
   it('respects a holiday', () => {
     const withHoliday: HoursConfig = {
       ...config,
-      holidays: [{ date: '2026-08-17', name: 'Test holiday' }],
+      holidays: [{ date: '2026-08-17', nameEn: 'Test holiday' }],
     };
     expect(isWithinBusinessHours(withHoliday, at('2026-08-17T12:00'))).toBe(false);
   });
@@ -268,5 +270,42 @@ describe('businessMinutesBetween', () => {
     const from = at('2026-08-20T16:00');
     const due = addBusinessMinutes(config, from, 240)!;
     expect(businessMinutesBetween(config, from, due)).toBe(240);
+  });
+});
+
+describe('holidayName', () => {
+  const eid = { date: '2026-03-22', nameAr: 'عيد الفطر', nameEn: 'Eid al-Fitr' };
+
+  it('gives the name in the language asked for', () => {
+    expect(holidayName(eid, 'ar')).toBe('عيد الفطر');
+    expect(holidayName(eid, 'en')).toBe('Eid al-Fitr');
+  });
+
+  // A calendar filled in by an Arabic-speaking team is a complete calendar. The
+  // alternative is an English acknowledgement with a hole where the day's name
+  // should be.
+  it('covers a missing name with the other language', () => {
+    expect(holidayName({ date: '2026-03-22', nameAr: 'عيد الفطر' }, 'en')).toBe('عيد الفطر');
+    expect(holidayName({ date: '2026-03-22', nameEn: 'Eid al-Fitr' }, 'ar')).toBe('Eid al-Fitr');
+  });
+
+  // Null rather than '' so `substitute` can tell "no name" from "a name that is
+  // empty", and collapse the space the placeholder sat in.
+  it('is null for a holiday with no name, and for no holiday at all', () => {
+    expect(holidayName({ date: '2026-03-22' }, 'en')).toBeNull();
+    expect(holidayName({ date: '2026-03-22', nameAr: '  ' }, 'ar')).toBeNull();
+    expect(holidayName(null, 'en')).toBeNull();
+  });
+
+  it('reads the name off the calendar for the day an instant falls on', () => {
+    const config: HoursConfig = { timezone: 'Africa/Cairo', schedule: CAIRO, holidays: [eid] };
+
+    // 00:30 Cairo on the holiday is 22:30 UTC the day before: the date that
+    // decides this is the local one, or a holiday starts two hours late.
+    const justAfterMidnight = DateTime.fromISO('2026-03-22T00:30', {
+      zone: 'Africa/Cairo',
+    }).toJSDate();
+
+    expect(holidayName(holidayOn(config, justAfterMidnight), 'ar')).toBe('عيد الفطر');
   });
 });

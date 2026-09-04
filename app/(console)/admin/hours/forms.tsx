@@ -14,7 +14,7 @@ type Schedule = {
   isDefault: boolean;
 };
 
-type Holiday = { id: string; date: string; name: string };
+type Holiday = { id: string; date: string; nameAr: string; nameEn: string };
 
 const DAYS: { key: keyof WeeklySchedule; label: string }[] = [
   { key: 'sun', label: 'Sunday' },
@@ -177,9 +177,21 @@ export function HolidayList({ scheduleId, holidays }: { scheduleId: string; holi
             onSaved={() => setAdding(false)}
           >
             <input type="hidden" name="businessHoursId" value={scheduleId} />
-            <div className="grid gap-2 sm:grid-cols-2">
-              <Input name="date" type="date" required />
-              <Input name="name" placeholder="Eid al-Fitr" required />
+            {/*
+              A name per language, because this one is not an internal label:
+              the out-of-hours auto-response drops it into the message a
+              customer reads, in the language that message is written in. One
+              name meant every Arabic acknowledgement naming the day in Latin
+              script.
+
+              Neither is required on its own — the action asks for one of the
+              two — so a calendar can be filled in in Arabic and completed in
+              English later.
+            */}
+            <div className="grid gap-2 sm:grid-cols-3">
+              <Input name="date" type="date" required aria-label="Date" />
+              <Input name="nameAr" dir="rtl" placeholder="عيد الفطر" aria-label="Arabic name" />
+              <Input name="nameEn" placeholder="Eid al-Fitr" aria-label="English name" />
             </div>
           </EditorForm>
         </div>
@@ -193,7 +205,14 @@ export function HolidayList({ scheduleId, holidays }: { scheduleId: string; holi
               className="flex items-center gap-2 rounded-md bg-[var(--muted)] px-2 py-1 text-xs"
             >
               <span className="font-medium">{holiday.date}</span>
-              <span className="text-[var(--muted-foreground)]">{holiday.name}</span>
+              {/*
+                Both names, because this list is where an admin checks that the
+                Arabic one is actually there — showing one and falling back
+                would render a half-filled calendar as a complete one.
+              */}
+              <span className="text-[var(--muted-foreground)]">
+                {[holiday.nameAr, holiday.nameEn].filter(Boolean).join(' · ')}
+              </span>
               <DangerAction
                 action={deleteHoliday}
                 id={holiday.id}

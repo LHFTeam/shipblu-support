@@ -8,7 +8,13 @@ import { Button, ErrorText, Input, Label, Select, Textarea } from '@/components/
 import { useNow } from '@/components/use-now';
 import type { AgentArticleHit } from '@/lib/kb/agent-search';
 import type { CannedResponseOption, ConversationDetail } from '@/lib/tickets/queries';
-import { insertCanned } from '@/lib/tickets/canned';
+import {
+  availableLocales,
+  CANNED_LOCALES,
+  insertCanned,
+  resolveLocale,
+  type CannedLocale,
+} from '@/lib/tickets/canned';
 import { describeWindow, metaWindowState } from '@/lib/meta/window';
 import { renderTemplatePreview, templateShape } from '@/lib/whatsapp/templates';
 import { formatRemaining, windowState } from '@/lib/whatsapp/window';
@@ -19,6 +25,30 @@ import { StartSideConversationForm } from './side-conversations';
 import type { TemplateOption } from './view';
 
 const INITIAL: ActionState = { error: null };
+
+/**
+ * The language toggle's two buttons, each written in its own script.
+ *
+ * "العربية" is what an Arabic reply looks like, which is the thing the agent is
+ * choosing; "AR" beside "EN" is two Latin abbreviations that have to be decoded
+ * first.
+ */
+const LOCALE_LABELS: Record<CannedLocale, string> = { ar: 'العربية', en: 'English' };
+
+/**
+ * The same two languages, named in English for the middle of a sentence.
+ *
+ * A dropdown option is one bidirectional run — "Delivery delay apology —
+ * العربية only" puts an RTL span inside an LTR line and the browser reorders
+ * the dash and the word "only" around it. The console is English throughout, so
+ * the option says "Arabic only" and the button an agent presses stays native.
+ */
+const LOCALE_NAMES: Record<CannedLocale, string> = { ar: 'Arabic', en: 'English' };
+
+/** The two bodies of a response, in the shape `lib/tickets/canned` reads. */
+function bodiesOf(response: CannedResponseOption) {
+  return { ar: response.bodyTextAr, en: response.bodyTextEn };
+}
 
 /**
  * What the knowledge panel needs, or null when the agent lacks `kb.view`.
@@ -43,6 +73,7 @@ export function Composer({
   templates,
   recipients,
   canned,
+  customerLocale,
   knowledge,
   canSideConversation,
 }: {
@@ -51,6 +82,13 @@ export function Composer({
   recipients: PickerEntry[];
   /** Reusable replies this agent may insert — already scoped to them. */
   canned: CannedResponseOption[];
+  /**
+   * The language the customer is writing in, from the script of their last
+   * message. The same reading the knowledge panel searches on, passed
+   * separately because it seeds the canned-response toggle for every agent —
+   * including the ones without `kb.view`, who get no `knowledge` at all.
+   */
+  customerLocale: CannedLocale;
   knowledge: KnowledgeContext | null;
   canSideConversation: boolean;
 }) {
@@ -250,6 +288,7 @@ export function Composer({
                 conversationId={conversation.id}
                 isCommentThread={isCommentThread}
                 canned={canned}
+                customerLocale={customerLocale}
                 knowledge={knowledge}
                 onSent={onSent}
               />
@@ -324,18 +363,34 @@ function ReplyForm({
   conversationId,
   isCommentThread = false,
   canned,
+  customerLocale,
   knowledge,
   onSent,
 }: {
   conversationId: string;
   isCommentThread?: boolean;
   canned: CannedResponseOption[];
+  customerLocale: CannedLocale;
   knowledge: KnowledgeContext | null;
   onSent?: () => void;
 }) {
   const [state, action] = useActionState(sendReply, INITIAL);
   const [privately, setPrivately] = useState(false);
   useRefreshOnSuccess(state, onSent);
+
+  /*
+    Which language the next canned response goes in.
+
+    Above the `key={state.nonce}` boundary deliberately, beside `privately`, and
+    for the reason `docs/PROJECT-STATE.md` §6.58 gives: what may survive a send
+    here is a *visible control*, never a hidden field. The toggle is on screen showing which
+    language the next insertion will use, so an agent can see what carried over
+    — and it should carry over. Somebody who has decided to answer an Arabic
+    ticket in English is answering the whole thread in English, and a toggle
+    that snapped back to the customer's script on every send would undo that
+    decision between the greeting and the sign-off.
+  */
+  const [cannedLocale, setCannedLocale] = useState<CannedLocale>(customerLocale);
 
   return (
     <form key={state.nonce ?? 0} action={action} className="flex flex-col gap-2">
@@ -350,6 +405,8 @@ function ReplyForm({
         isCommentThread={isCommentThread}
         privately={privately}
         canned={canned}
+        locale={cannedLocale}
+        onLocaleChange={setCannedLocale}
         knowledge={knowledge}
       />
 
@@ -406,11 +463,16 @@ function ReplyBody({
   isCommentThread,
   privately,
   canned,
+  locale,
+  onLocaleChange,
   knowledge,
 }: {
   isCommentThread: boolean;
   privately: boolean;
   canned: CannedResponseOption[];
+  /** The language the picker inserts, owned by the form above — see there. */
+  locale: CannedLocale;
+  onLocaleChange: (locale: CannedLocale) => void;
   knowledge: KnowledgeContext | null;
 }) {
   const bodyRef = useRef<HTMLTextAreaElement>(null);
@@ -454,8 +516,16 @@ function ReplyBody({
   }, []);
 
   const insertCannedResponse = useCallback(
-    (response: CannedResponseOption) => {
-      insertText(response.bodyText);
+    (response: CannedResponseOption, locale: CannedLocale) => {
+      const bodies = bodiesOf(response);
+
+      // The language it was actually written in, which is the one the option
+      // said it would insert. Null means a response with neither body — nothing
+      // `saveCannedResponse` can create, and nothing to put in the box.
+      const chosen = resolveLocale(bodies, locale);
+      if (!chosen) return;
+
+      insertText(bodies[chosen]);
       setUsedId(response.id);
     },
     [insertText],
@@ -479,7 +549,12 @@ function ReplyBody({
         required
       />
 
-      <CannedPicker responses={canned} onPick={insertCannedResponse} />
+      <CannedPicker
+        responses={canned}
+        locale={locale}
+        onLocaleChange={onLocaleChange}
+        onPick={insertCannedResponse}
+      />
 
       {knowledge ? (
         <KnowledgePanel
@@ -493,7 +568,7 @@ function ReplyBody({
 }
 
 /**
- * The canned response picker.
+ * The canned response picker, and the language it inserts.
  *
  * A `<select>` rather than a search palette. This codebase has no modals, the
  * list is a handful of rows per team rather than hundreds, and a control that
@@ -506,15 +581,27 @@ function ReplyBody({
  * down the screen, on a phone especially.
  *
  * Renders nothing at all when there are none, rather than an empty dropdown
- * that reads as broken. Today that is every console: `canned_responses` is
- * empty in production.
+ * that reads as broken.
+ *
+ * **The language is a control beside the list, not a second list.** Two entries
+ * per response would double a dropdown an agent scans by eye, and it would put
+ * the choice they rarely change — the customer is writing in one language, and
+ * they will use that one for every response in the reply — in front of them on
+ * every pick. So it is one toggle, set from the script of what the customer
+ * actually wrote, and an agent answering an English mail in Arabic flips it
+ * once. A response that has only the other language says so on its own option
+ * rather than disappearing from the list; see `resolveLocale`.
  */
 function CannedPicker({
   responses,
+  locale,
+  onLocaleChange,
   onPick,
 }: {
   responses: CannedResponseOption[];
-  onPick: (response: CannedResponseOption) => void;
+  locale: CannedLocale;
+  onLocaleChange: (locale: CannedLocale) => void;
+  onPick: (response: CannedResponseOption, locale: CannedLocale) => void;
 }) {
   if (responses.length === 0) return null;
 
@@ -523,44 +610,84 @@ function CannedPicker({
   // list that happens to be sorted.
   const folders = [...new Set(responses.map((r) => r.folder ?? ''))];
 
+  const label = (response: CannedResponseOption) => {
+    const available = availableLocales(bodiesOf(response));
+
+    // Only worth saying when the response cannot answer the language the
+    // toggle is set to. A response carrying both is the ordinary case, and
+    // marking every line would bury the exceptions in the noise.
+    if (available.length === 1 && available[0] !== locale) {
+      return `${response.title} — ${LOCALE_NAMES[available[0]!]} only`;
+    }
+
+    return response.title;
+  };
+
   return (
-    <label className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
-      <span className="shrink-0">Canned reply</span>
-      <Select
-        // Always reads "Insert…": it is an action, not a stored value, and a
-        // select that kept the last pick would claim the reply still contains
-        // something the agent may have since deleted.
-        value=""
-        onChange={(event) => {
-          const picked = responses.find((r) => r.id === event.target.value);
-          if (picked) onPick(picked);
-        }}
-        className="min-w-0 flex-1"
-      >
-        <option value="">Insert…</option>
-        {folders.map((folder) =>
-          folder ? (
-            <optgroup key={folder} label={folder}>
-              {responses
-                .filter((r) => (r.folder ?? '') === folder)
+    <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--muted-foreground)]">
+      <label className="flex min-w-0 flex-1 items-center gap-2">
+        <span className="shrink-0">Canned reply</span>
+        <Select
+          // Always reads "Insert…": it is an action, not a stored value, and a
+          // select that kept the last pick would claim the reply still contains
+          // something the agent may have since deleted.
+          value=""
+          onChange={(event) => {
+            const picked = responses.find((r) => r.id === event.target.value);
+            if (picked) onPick(picked, locale);
+          }}
+          className="min-w-0 flex-1"
+        >
+          <option value="">Insert…</option>
+          {folders.map((folder) =>
+            folder ? (
+              <optgroup key={folder} label={folder}>
+                {responses
+                  .filter((r) => (r.folder ?? '') === folder)
+                  .map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {label(r)}
+                    </option>
+                  ))}
+              </optgroup>
+            ) : (
+              responses
+                .filter((r) => (r.folder ?? '') === '')
                 .map((r) => (
                   <option key={r.id} value={r.id}>
-                    {r.title}
+                    {label(r)}
                   </option>
-                ))}
-            </optgroup>
-          ) : (
-            responses
-              .filter((r) => (r.folder ?? '') === '')
-              .map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.title}
-                </option>
-              ))
-          ),
-        )}
-      </Select>
-    </label>
+                ))
+            ),
+          )}
+        </Select>
+      </label>
+
+      <div
+        role="group"
+        aria-label="Canned reply language"
+        className="flex shrink-0 overflow-hidden rounded-md border border-[var(--border)]"
+      >
+        {CANNED_LOCALES.map((option) => (
+          <button
+            key={option}
+            type="button"
+            // The pressed state, not a radio: this changes what the next pick
+            // inserts and nothing about the reply being submitted, so it must
+            // not travel with the form.
+            aria-pressed={option === locale}
+            onClick={() => onLocaleChange(option)}
+            className={
+              option === locale
+                ? 'bg-brand-600 px-2 py-1 font-medium text-white'
+                : 'px-2 py-1 hover:bg-[var(--muted)]'
+            }
+          >
+            {LOCALE_LABELS[option]}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 

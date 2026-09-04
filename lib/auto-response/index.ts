@@ -3,12 +3,13 @@ import { db } from '@/db/client';
 import { autoResponses, contacts, conversations, messages, ticketStatuses } from '@/db/schema';
 import { loadHoursCatalog } from '@/lib/hours/catalog';
 import { groupHours } from '@/lib/hours/resolve';
-import { holidayOn, isWithinBusinessHours, nextOpeningAt } from '@/lib/hours';
+import { holidayName, holidayOn, isWithinBusinessHours, nextOpeningAt } from '@/lib/hours';
 import { textToHtml } from '@/lib/html/sanitize';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
 import { deliverAutomatedReply } from '@/lib/tickets/outbound';
 import { windowState } from '@/lib/whatsapp/window';
-import { pickBody, pickRule, preferredLocale, substitute, type AutoResponseRule } from './resolve';
+import { requesterLocale } from '@/lib/tickets/locale';
+import { pickBody, pickRule, substitute, type AutoResponseRule } from './resolve';
 
 /**
  * "Thanks — we are closed, and we will reply when we open."
@@ -36,7 +37,6 @@ type Ticket = {
   lastCustomerMessageAt: Date | null;
   autoRespondedAt: Date | null;
   contactEmail: string | null;
-  contactLocale: string;
   contactName: string | null;
 };
 
@@ -106,10 +106,13 @@ async function send(conversationId: string, at: Date): Promise<void> {
   const holiday = holidayOn(hours, at);
 
   const context = {
-    // Read from what the customer wrote when their contact record has never
-    // said — see `preferredLocale`. The message is already loaded for the
-    // RFC 3834 check above, so this costs nothing.
-    locale: preferredLocale(ticket.contactLocale, inbound?.bodyText ?? null),
+    // Asked of `lib/tickets/locale`, not read off `inbound` above. That message
+    // is the last inbound row of any kind — including the English `system`
+    // notice we write when a form attachment fails — and answering an Arabic
+    // customer in English because of our own notice is exactly the divergence
+    // the shared module exists to close. It costs one indexed query, on a path
+    // that sends at most one message per closed stretch.
+    locale: await requesterLocale(conversationId),
     holiday,
     ticketNumber: ticket.number,
     customerName: ticket.contactName,
@@ -138,9 +141,12 @@ async function send(conversationId: string, at: Date): Promise<void> {
     meta: { autoResponse: holiday ? 'holiday' : 'out_of_hours' },
   });
 
+  // English first in the log line — the audience is whoever is reading Render's
+  // logs, not the customer — falling back to the Arabic name when that is the
+  // only one the calendar carries.
   console.log(
     `[auto-response] acknowledged #${ticket.number} on ${ticket.channel}` +
-      `${holiday ? ` (${holiday.name ?? 'holiday'})` : ''}`,
+      `${holiday ? ` (${holidayName(holiday, 'en') ?? 'holiday'})` : ''}`,
   );
 }
 
@@ -220,7 +226,6 @@ async function loadTicket(conversationId: string): Promise<Ticket | null> {
       lastCustomerMessageAt: conversations.lastCustomerMessageAt,
       autoRespondedAt: conversations.autoRespondedAt,
       contactEmail: contacts.primaryEmail,
-      contactLocale: contacts.locale,
       contactName: contacts.name,
     })
     .from(conversations)
@@ -232,7 +237,7 @@ async function loadTicket(conversationId: string): Promise<Ticket | null> {
   const row = rows[0];
   if (!row) return null;
 
-  return { ...row, contactLocale: row.contactLocale ?? 'en' };
+  return row;
 }
 
 /**
@@ -246,9 +251,9 @@ async function loadTicket(conversationId: string): Promise<Ticket | null> {
  */
 async function lastInboundMessage(
   conversationId: string,
-): Promise<{ isAutomated: boolean; bodyText: string } | null> {
+): Promise<{ isAutomated: boolean } | null> {
   const rows = await db
-    .select({ meta: messages.meta, bodyText: messages.bodyText })
+    .select({ meta: messages.meta })
     .from(messages)
     .where(and(eq(messages.conversationId, conversationId), eq(messages.direction, 'inbound')))
     .orderBy(desc(messages.createdAt))
@@ -259,8 +264,5 @@ async function lastInboundMessage(
 
   const meta = row.meta ?? {};
 
-  return {
-    isAutomated: meta.isAutomated === true || meta.isBounce === true,
-    bodyText: row.bodyText,
-  };
+  return { isAutomated: meta.isAutomated === true || meta.isBounce === true };
 }

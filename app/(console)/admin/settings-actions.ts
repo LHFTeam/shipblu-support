@@ -792,18 +792,28 @@ export async function saveCannedResponse(
 
   const id = text(formData, 'id');
   const title = text(formData, 'title');
-  const bodyText = text(formData, 'bodyText');
+  const bodyTextAr = text(formData, 'bodyTextAr');
+  const bodyTextEn = text(formData, 'bodyTextEn');
   const folder = text(formData, 'folder') || null;
 
   if (!title) return { error: 'Give the response a title' };
-  if (!bodyText) return { error: 'Write the response' };
 
-  // Stored as both: email sends HTML, WhatsApp and the social channels send
-  // text, and deriving one from the other at send time would mean every channel
-  // guessing at line breaks.
-  const bodyHtml = textToHtml(bodyText);
+  // One language is a complete response; neither is a row nothing can send. The
+  // form asks for both and requires neither, so this is where the real rule is.
+  if (!bodyTextAr && !bodyTextEn) return { error: 'Write the response in at least one language' };
 
-  const values = { title, folder, bodyText, bodyHtml };
+  // Stored as both forms: email sends HTML, WhatsApp and the social channels
+  // send text, and deriving one from the other at send time would mean every
+  // channel guessing at line breaks. An unwritten language stays empty in both
+  // — `textToHtml('')` would otherwise leave markup that reads as a body.
+  const values = {
+    title,
+    folder,
+    bodyTextAr,
+    bodyHtmlAr: bodyTextAr ? textToHtml(bodyTextAr) : '',
+    bodyTextEn,
+    bodyHtmlEn: bodyTextEn ? textToHtml(bodyTextEn) : '',
+  };
 
   if (id) {
     await db.update(cannedResponses).set(values).where(eq(cannedResponses.id, id));
@@ -1005,13 +1015,18 @@ export async function addHoliday(
 
   const businessHoursId = text(formData, 'businessHoursId');
   const date = text(formData, 'date');
-  const name = text(formData, 'name');
+  const nameAr = text(formData, 'nameAr');
+  const nameEn = text(formData, 'nameEn');
 
   if (!businessHoursId) return { error: 'Pick a schedule' };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { error: 'Pick a date' };
-  if (!name) return { error: 'Name the holiday' };
 
-  await db.insert(holidays).values({ businessHoursId, date, name }).onConflictDoNothing();
+  // One name is enough — `holidayName` falls back to whichever was written —
+  // but a holiday with neither leaves `{{holiday}}` empty in an out-of-hours
+  // message that only exists to say which day it is.
+  if (!nameAr && !nameEn) return { error: 'Name the holiday in at least one language' };
+
+  await db.insert(holidays).values({ businessHoursId, date, nameAr, nameEn }).onConflictDoNothing();
 
   refresh('/admin/hours');
   return ok();
