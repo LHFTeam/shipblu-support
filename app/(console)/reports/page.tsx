@@ -79,6 +79,18 @@ export default async function ReportsPage({
           </Link>
         ) : null}
         {/*
+          Its own key, not `report.agents`: that one reads what people did, and
+          this one changes where the next ticket goes.
+        */}
+        {can(agent, 'agent.availability') ? (
+          <Link
+            href="/reports/team"
+            className="rounded-md border border-[var(--border)] px-2.5 py-1 text-sm hover:bg-[var(--muted)]"
+          >
+            Team availability
+          </Link>
+        ) : null}
+        {/*
           Behind `report.view` like this page rather than a key of its own: it
           answers what the team is being asked about, which is the same question
           this page answers, cut a different way.

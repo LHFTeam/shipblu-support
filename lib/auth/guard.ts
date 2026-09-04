@@ -3,7 +3,7 @@ import { count, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agents } from '@/db/schema';
 import { can, type Permission } from './permissions';
-import { getSessionAgent, type SessionAgent } from './session';
+import { currentSessionHash, getSessionAgent, type SessionAgent } from './session';
 
 /**
  * Server-side access checks for console pages and actions.
@@ -17,8 +17,17 @@ import { getSessionAgent, type SessionAgent } from './session';
 
 export async function requireAgent(): Promise<SessionAgent> {
   const agent = await getSessionAgent();
-  if (!agent) redirect('/login');
-  return agent;
+  if (agent) return agent;
+
+  // A cookie with no session behind it is a session that ended while somebody
+  // was using it — revoked, expired, or timed out for inactivity. Saying so is
+  // the difference between a setting and an apparent fault: an agent who is
+  // dumped on a login form with nothing on screen concludes the system logged
+  // them out at random, which is the guess the sign-out feature has to avoid.
+  //
+  // Deliberately not "inactivity", which this cannot know. Only the browser's
+  // own countdown reaching zero knows that much.
+  redirect((await currentSessionHash()) ? '/login?signedOut=session' : '/login');
 }
 
 export async function requirePermission(permission: Permission): Promise<SessionAgent> {

@@ -518,6 +518,43 @@ pushes occupancy above 100%, where it stops meaning anything. An interval's end
 is `coalesce(ended_at, last_beat_at)`, so a stream that died without signing off
 contributes the time it can account for rather than every hour since.
 
+**A connection is not a person.** `agents.last_seen_at` is refreshed every 25
+seconds for as long as a console tab is open, so anything asking "is somebody
+working?" that reads it answers yes for an empty desk. Only `agents.last_input_at`
+— a key, a pointer, a scroll, reported by `components/agent-activity.tsx` — moves
+when a human does, and it is what both idle timers in `presence_policy` are
+measured from. Four rules hold there, and each closes something that is invisible
+once it is wrong:
+
+- **Nothing on the request path may write `last_input_at` or
+  `sessions.last_activity_at`.** A prefetch, a poll or the presence keepalive
+  refreshing either one makes every timer unreachable while leaving the columns
+  looking healthy — and "nobody was ever signed out" is indistinguishable from
+  "the timeout works" from the outside.
+- **Why the switch went off is a fact, not a boolean.** `accepting_off_reason`
+  separates the agent's own away, a supervisor's, and the timer's, because only
+  the last may be undone by the next keypress. Without it, returning from lunch
+  resurrects an away somebody set deliberately.
+- **The browser reports, the server decides.** The idle report from
+  `/api/presence/activity` buys promptness, not trust: `applyIdleAway` re-checks
+  the window against the column the same endpoint is the only writer of. The
+  sign-out is enforced in `getSessionAgent()`, which is the one path every page
+  and action already takes, and swept in the background for the console nobody
+  closed.
+- **One clock, two windows, and the sign-out is never shorter than the away.**
+  Two idle detectors would eventually disagree about the same agent; a sign-out
+  that fires first makes the away state unreachable. `lib/presence/idle.ts` is
+  the single copy of every one of these decisions and the only part with tests,
+  because the sweep, the endpoint and the browser all have to answer identically.
+- **Switching a timer on must not act retroactively.** Nothing beats while the
+  windows are off, so the moment an admin enables the sign-out every session in
+  the table is already older than it — the first sweep would destroy the lot,
+  with no countdown, because the consoles rendered before the change do not know
+  a countdown exists. `signOutCutoff` therefore measures from the later of the
+  session's activity and `presence_policy.updated_at`. The away timer needs no
+  such grace, and that asymmetry is the point: being parked is undone by a
+  keypress, being signed out throws away an unsent reply.
+
 **A snapshot cannot be recomputed.** Anything of the form "how much was open at
 time T" has to be sampled at the time — `conversations` carries only current
 state, so counting it during a rebuild writes today's answer onto an old date.

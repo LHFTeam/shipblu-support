@@ -21,6 +21,7 @@ import {
   lastEnd,
   longestSeconds,
   mergeSpans,
+  subtractSpans,
   toSpan,
   totalSeconds,
   type Span,
@@ -216,6 +217,7 @@ export async function computeAgentDay(
 
   const online = new Map<string, Span[]>();
   const accepting = new Map<string, Span[]>();
+  const notAccepting = new Map<string, Span[]>();
 
   for (const row of presence) {
     if (!days.has(row.agentId)) continue;
@@ -224,9 +226,8 @@ export async function computeAgentDay(
     if (!span) continue;
 
     online.set(row.agentId, [...(online.get(row.agentId) ?? []), span]);
-    if (row.accepting) {
-      accepting.set(row.agentId, [...(accepting.get(row.agentId) ?? []), span]);
-    }
+    const bucket = row.accepting ? accepting : notAccepting;
+    bucket.set(row.agentId, [...(bucket.get(row.agentId) ?? []), span]);
   }
 
   for (const [agentId, bucket] of days) {
@@ -239,8 +240,19 @@ export async function computeAgentDay(
     bucket.longestSessionSeconds = longestSeconds(spans);
     bucket.firstOnlineAt = firstStart(spans);
     bucket.lastOnlineAt = lastEnd(spans);
+    // Stitched like presence, then the not-accepting intervals taken back out.
+    // The stitch has to stay: closing one of two tabs and reconnecting shreds an
+    // accepting stretch exactly as it shreds a connected one. But it cannot be
+    // allowed to weld across a *deliberate* gap — an agent parked at 09:10 who
+    // returns at 09:11 leaves a minute the idle timer took them out of the rota
+    // for, and welding it would report that minute as available. Rare enough to
+    // ignore when only a manual switch could produce it; several times a day per
+    // agent now that a timer can.
     bucket.acceptingSeconds = totalSeconds(
-      mergeSpans(accepting.get(agentId) ?? [], PRESENCE_STITCH_MS),
+      subtractSpans(
+        mergeSpans(accepting.get(agentId) ?? [], PRESENCE_STITCH_MS),
+        notAccepting.get(agentId) ?? [],
+      ),
     );
 
     const schedules = (groupsByAgent.get(agentId) ?? [null]).map((groupId) =>

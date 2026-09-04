@@ -2,12 +2,110 @@
 
 import { useActionState, useState } from 'react';
 import { useFormStatus } from 'react-dom';
-import { Badge, Button, ErrorText, Input, Label, Select } from '@/components/ui';
+import {
+  Badge,
+  Button,
+  ErrorText,
+  Field,
+  Input,
+  Label,
+  Select,
+  SuccessText,
+} from '@/components/ui';
 import { InfoTip, Tooltip } from '@/components/tooltip';
 import { formatRelative } from '@/lib/format';
 import { createInvite, setAgentActive, setAgentCapacity, type AdminState } from '../actions';
+import { savePresenceSettings } from '../settings-actions';
+import type { SettingsState } from '../settings-actions';
 
 const INITIAL: AdminState = { error: null };
+const SETTINGS_INITIAL: SettingsState = { error: null };
+
+/**
+ * The two idle windows, and the only place they are set.
+ *
+ * On the Agents page rather than a settings page of its own because it is a
+ * rule about these people, read next to the list it governs — an admin
+ * wondering why somebody shows as away should find the answer on the screen
+ * where they noticed it.
+ *
+ * Both boxes are emptied to turn a timer off, which is why the hint says so
+ * rather than leaving an admin to guess whether 0 means "immediately" or
+ * "never".
+ */
+export function IdlePolicyForm({
+  autoAwayAfterMins,
+  autoSignoutAfterMins,
+}: {
+  autoAwayAfterMins: number | null;
+  autoSignoutAfterMins: number | null;
+}) {
+  const [state, action] = useActionState(savePresenceSettings, SETTINGS_INITIAL);
+
+  return (
+    <form
+      action={action}
+      className="flex flex-col gap-3 rounded-lg border border-[var(--border)] p-4"
+    >
+      <div className="flex flex-col gap-3 sm:flex-row">
+        <Field
+          className="sm:w-56"
+          label="Stop routing work after"
+          hint="Minutes without a key or a click. Empty to turn it off."
+          explain={
+            <>
+              An agent who stops using the console is marked <b>away</b> and gets no new tickets,
+              exactly as if they had switched themselves off. The difference is that this one undoes
+              itself: the moment they touch the keyboard they are back in the rota. It measures
+              input, not the connection &mdash; a console left open on an empty desk stays connected
+              all day.
+            </>
+          }
+        >
+          <Input
+            name="autoAwayAfterMins"
+            type="number"
+            min={1}
+            max={1440}
+            step={1}
+            defaultValue={autoAwayAfterMins ?? ''}
+            placeholder="off"
+          />
+        </Field>
+
+        <Field
+          className="sm:w-56"
+          label="Sign out after"
+          hint="Minutes without a key or a click. Empty to turn it off."
+          explain={
+            <>
+              The session is destroyed and the agent signs in again. They get a countdown first,
+              because an unsent reply lives only in the browser. This cannot be shorter than the
+              away window &mdash; signing somebody out before ever marking them away would mean
+              nobody is ever seen as away. It applies per browser, so the machine being typed on
+              stays signed in while one left at home does not.
+            </>
+          }
+        >
+          <Input
+            name="autoSignoutAfterMins"
+            type="number"
+            min={1}
+            max={1440}
+            step={1}
+            defaultValue={autoSignoutAfterMins ?? ''}
+            placeholder="off"
+          />
+        </Field>
+      </div>
+
+      <ErrorText>{state.error}</ErrorText>
+      {state.ok ? <SuccessText>Saved.</SuccessText> : null}
+
+      <SubmitButton className="self-start" idle="Save" busy="Saving…" />
+    </form>
+  );
+}
 
 export function InviteForm() {
   const [state, action] = useActionState(createInvite, INITIAL);

@@ -63,6 +63,27 @@ export const agentRoleEnum = pgEnum('agent_role', [
 export const agentPresenceEnum = pgEnum('agent_presence', ['online', 'away', 'offline']);
 
 /**
+ * Why an agent is not being routed work.
+ *
+ * Null whenever they are accepting; set only alongside the switch going off. It
+ * exists because the three ways it can go off have to be undone differently, and
+ * a bare boolean cannot tell them apart:
+ *
+ * - `self` — the agent's own switch. Only they turn it back on.
+ * - `idle` — the console saw no input for the configured window. This is the
+ *   one the system may undo by itself, the moment they touch the keyboard
+ *   again, because nobody decided it.
+ * - `supervisor` — somebody else set it. Never auto-restored: a supervisor who
+ *   parks an agent must not have that undone by a mouse move, and an agent who
+ *   disagrees can still turn their own switch back on.
+ *
+ * Without the distinction, returning from lunch would silently resurrect an
+ * "away" a supervisor set for a reason, or a manual away would be treated as
+ * idleness and re-enabled by the first keypress.
+ */
+export const availabilityReasonEnum = pgEnum('availability_reason', ['self', 'idle', 'supervisor']);
+
+/**
  * How a group hands a ticket to a person.
  *
  * `manual` is the default and means what the product did before this existed:

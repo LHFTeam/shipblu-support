@@ -175,6 +175,7 @@ jobs:
           for job in \
             cleanup \
             sla_sweep \
+            presence_sweep \
             assign_sweep \
             run_time_automations \
             snapshot_backlog \
