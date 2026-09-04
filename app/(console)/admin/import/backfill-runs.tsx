@@ -70,7 +70,7 @@ export function BackfillRuns({ runs, empty }: { runs: BackfillRun[]; empty: stri
               </div>
 
               {run.lastError ? (
-                <pre className="mt-1.5 overflow-x-auto rounded bg-red-500/10 p-2 text-xs whitespace-pre-wrap text-red-700 dark:text-red-300">
+                <pre className="mt-1.5 overflow-x-auto rounded bg-red-500/10 p-2 text-xs whitespace-pre-wrap text-red-700">
                   {run.lastError.split('\n').slice(0, 6).join('\n')}
                 </pre>
               ) : null}

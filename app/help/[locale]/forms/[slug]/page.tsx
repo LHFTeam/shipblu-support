@@ -66,9 +66,7 @@ export default async function FormPage({
                 {t(locale, 'formAnonymousNext')}
               </p>
               {query.files === 'failed' ? (
-                <p className="mt-2 text-sm text-red-700 dark:text-red-300">
-                  {t(locale, 'formAttachmentFailed')}
-                </p>
+                <p className="mt-2 text-sm text-red-700">{t(locale, 'formAttachmentFailed')}</p>
               ) : null}
             </Panel>
 

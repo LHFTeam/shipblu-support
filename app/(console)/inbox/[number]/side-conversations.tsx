@@ -40,7 +40,7 @@ const INITIAL: ActionState = { error: null };
  * That label is load-bearing, not decoration.
  */
 
-const PANEL = 'border-violet-500/30 bg-violet-500/8 dark:bg-violet-400/8';
+const PANEL = 'border-violet-500/30 bg-violet-500/8';
 
 function SideIcon() {
   return (
@@ -64,11 +64,7 @@ function SideIcon() {
 
 /** Said on every surface an agent can type into. */
 function NotVisible() {
-  return (
-    <span className="text-[11px] text-violet-700/80 dark:text-violet-300/80">
-      Not visible to the customer
-    </span>
-  );
+  return <span className="text-[11px] text-violet-700/80">Not visible to the customer</span>;
 }
 
 export function SideConversationCard({
@@ -92,7 +88,7 @@ export function SideConversationCard({
       className={`max-w-[46rem] scroll-mt-4 rounded-lg border ${PANEL} px-3.5 py-2.5`}
     >
       <div className="flex flex-wrap items-baseline gap-2 text-xs text-[var(--muted-foreground)]">
-        <span className="flex items-center gap-1.5 font-medium text-violet-800 dark:text-violet-200">
+        <span className="flex items-center gap-1.5 font-medium text-violet-800">
           <SideIcon />
           Side conversation
         </span>
@@ -123,7 +119,7 @@ export function SideConversationCard({
           <button
             type="button"
             onClick={() => setOpen(true)}
-            className="mt-1.5 text-xs font-medium text-violet-700 hover:underline dark:text-violet-300"
+            className="mt-1.5 text-xs font-medium text-violet-700 hover:underline"
           >
             Open thread ({count} {count === 1 ? 'message' : 'messages'})
           </button>
@@ -179,7 +175,7 @@ export function SideConversationCard({
                 ) : null}
 
                 {message.direction === 'outbound' && message.deliveryStatus === 'failed' ? (
-                  <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                  <p className="mt-1 text-xs text-red-600">
                     Not delivered — {message.deliveryError ?? 'unknown error'}
                   </p>
                 ) : message.direction === 'outbound' && message.deliveryStatus === 'pending' ? (
@@ -260,7 +256,7 @@ function StateButton({ side }: { side: SideConversationView }) {
       type="button"
       disabled={busy}
       onClick={() => void toggle()}
-      className="ms-auto text-xs font-medium text-violet-700 hover:underline disabled:opacity-50 dark:text-violet-300"
+      className="ms-auto text-xs font-medium text-violet-700 hover:underline disabled:opacity-50"
     >
       {side.state === 'open' ? 'Mark done' : 'Reopen'}
     </button>

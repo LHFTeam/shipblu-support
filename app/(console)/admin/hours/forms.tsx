@@ -163,7 +163,7 @@ export function HolidayList({ scheduleId, holidays }: { scheduleId: string; holi
         <button
           type="button"
           onClick={() => setAdding(!adding)}
-          className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-300"
+          className="text-xs font-medium text-brand-600 hover:underline"
         >
           {adding ? 'Cancel' : '+ Add'}
         </button>

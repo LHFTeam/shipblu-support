@@ -198,14 +198,14 @@ export function Badge({
 }) {
   const styles = {
     neutral: 'bg-[var(--muted)] text-[var(--muted-foreground)]',
-    brand: 'bg-brand-500/15 text-brand-700 dark:text-brand-300',
-    open: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
-    pending: 'bg-amber-500/15 text-amber-700 dark:text-amber-300',
-    resolved: 'bg-blue-500/15 text-blue-700 dark:text-blue-300',
+    brand: 'bg-brand-500/15 text-brand-700',
+    open: 'bg-emerald-500/15 text-emerald-700',
+    pending: 'bg-amber-500/15 text-amber-700',
+    resolved: 'bg-blue-500/15 text-blue-700',
     closed: 'bg-[var(--muted)] text-[var(--muted-foreground)]',
-    warning: 'bg-amber-500/15 text-amber-700 dark:text-amber-300',
-    danger: 'bg-red-500/15 text-red-700 dark:text-red-300',
-    success: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
+    warning: 'bg-amber-500/15 text-amber-700',
+    danger: 'bg-red-500/15 text-red-700',
+    success: 'bg-emerald-500/15 text-emerald-700',
   }[tone];
 
   return (
@@ -220,10 +220,7 @@ export function Badge({
 export function ErrorText({ children }: { children: ReactNode }) {
   if (!children) return null;
   return (
-    <p
-      role="alert"
-      className="rounded-md bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-300"
-    >
+    <p role="alert" className="rounded-md bg-red-500/10 px-3 py-2 text-sm text-red-700">
       {children}
     </p>
   );
@@ -232,9 +229,7 @@ export function ErrorText({ children }: { children: ReactNode }) {
 export function SuccessText({ children }: { children: ReactNode }) {
   if (!children) return null;
   return (
-    <p className="rounded-md bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300">
-      {children}
-    </p>
+    <p className="rounded-md bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700">{children}</p>
   );
 }
 

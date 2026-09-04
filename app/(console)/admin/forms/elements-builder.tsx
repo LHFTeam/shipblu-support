@@ -209,7 +209,7 @@ export function ElementsBuilder({
             key={kind.value}
             type="button"
             onClick={() => setItems([...items, blank(kind.value)])}
-            className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-300"
+            className="text-xs font-medium text-brand-600 hover:underline"
           >
             + {kind.label}
           </button>

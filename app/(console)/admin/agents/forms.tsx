@@ -117,7 +117,7 @@ function CopyInviteLink({ inviteUrl, label }: { inviteUrl: string; label: string
       <code className="min-w-0 flex-1 truncate text-xs">{inviteUrl}</code>
       <span
         aria-live="polite"
-        className={`shrink-0 text-xs font-medium ${copyState === 'failed' ? 'text-red-600 dark:text-red-300' : 'text-brand-700 dark:text-brand-300'}`}
+        className={`shrink-0 text-xs font-medium ${copyState === 'failed' ? 'text-red-600' : 'text-brand-700'}`}
       >
         {copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Could not copy' : 'Copy'}
       </span>

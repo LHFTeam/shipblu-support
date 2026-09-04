@@ -321,6 +321,19 @@ screen, and `InfoTip` when it should be one gesture away. Never `title=` on a DO
 element — it never appears on a phone, which is where the console is read, and
 CI rejects it.
 
+**One palette, light.** The console, the help centre and the widget render the
+same colours whatever the reader's operating system asks for. So: no
+`@media (prefers-color-scheme: dark)`, no Tailwind `dark:` variant — it is that
+media query spelled shorter — and `color-scheme: light` stays on `:root`, which
+is the half a stylesheet cannot express by omission (it is what the browser
+paints a select's dropdown, the form-control chrome and the default scrollbar
+from). CI checks all three. The rule is mechanical because the failure is: a
+`dark:` utility appended to a class list is a colour nobody reviewing the page
+can see, and a returning dark block wakes every one of them at once against
+tokens stated for light surfaces. A real dark theme is a piece of work —
+re-step the tokens, decide whether the help centre follows the console, re-check
+the chart series — and `light-only` comes out in that commit.
+
 **Ticket forms.** A form is a row in `ticket_forms` whose layout is one jsonb
 document, parsed on every read by `parseFormElements` against the fields that
 currently exist — an element naming a deleted or deactivated field is dropped,

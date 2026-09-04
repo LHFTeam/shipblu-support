@@ -77,7 +77,7 @@ function ReadOnlyNotice({ reason, oneSided }: { reason: string; oneSided: boolea
         much more alarming thing than a delivery setting being off.
       */}
       {oneSided ? (
-        <p className="mt-2 flex items-start gap-2 text-xs text-amber-700 dark:text-amber-400">
+        <p className="mt-2 flex items-start gap-2 text-xs text-amber-700">
           <span aria-hidden="true" className="mt-0.5">
             ⚠
           </span>
@@ -608,7 +608,7 @@ function DeliveryState({ message }: { message: ConversationDetail['messages'][nu
     return (
       // A delivery error explains itself in paragraphs — what Meta said, and
       // what it means — so it is wrapped rather than run together into one line.
-      <p className="mt-1.5 whitespace-pre-wrap text-xs text-red-600 dark:text-red-400">
+      <p className="mt-1.5 whitespace-pre-wrap text-xs text-red-600">
         Not delivered — {message.deliveryError ?? 'unknown error'}
       </p>
     );
@@ -1826,7 +1826,7 @@ function RefreshShipmentButton({
         </span>
       </div>
 
-      {error ? <p className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</p> : null}
+      {error ? <p className="mt-1 text-xs text-red-600">{error}</p> : null}
     </div>
   );
 }
@@ -1886,7 +1886,7 @@ function LinkInput({
         aria-label={placeholder}
         className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-xs outline-none focus:border-brand-500"
       />
-      {error ? <p className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</p> : null}
+      {error ? <p className="mt-1 text-xs text-red-600">{error}</p> : null}
     </div>
   );
 }

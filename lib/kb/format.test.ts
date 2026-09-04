@@ -22,7 +22,7 @@ describe('normaliseArticleHtml', () => {
     expect(normaliseArticleHtml(html)).toBe('<ul><li>Reach us on live chat.</li></ul>');
   });
 
-  it('strips inline size and colour, which the dark theme cannot survive', () => {
+  it('strips inline size and colour, which override the stylesheet', () => {
     const html =
       '<p style="color:rgb(0, 0, 0);font-size:13px;text-align:left">' +
       '<span style="font-size:18px">Fees apply.</span></p>';
