@@ -53,22 +53,15 @@ export async function resolveContact(input: ResolveInput): Promise<ResolvedConta
   const identifier = normaliseIdentifier(input.channel, input.identifier);
   if (!identifier) throw new Error('Cannot resolve a contact without an identifier');
 
-  const existing = await db
-    .select({ contactId: contactIdentities.contactId })
-    .from(contactIdentities)
-    .where(
-      and(
-        eq(contactIdentities.channel, input.channel),
-        eq(contactIdentities.identifier, identifier),
-      ),
-    )
-    .limit(1);
+  // The same lookup `findContactByIdentity` does, called rather than repeated:
+  // two copies of how an identity is matched would let a future change — a case
+  // fold, a soft-delete filter, a merged-contact redirect — apply to one path
+  // and not the other, and an interaction would then resolve to a different
+  // contact than the message that created it.
+  const existingId = await findContactByIdentity(input.channel, identifier);
 
-  if (existing[0]) {
-    return {
-      contactId: existing[0].contactId,
-      created: false,
-    };
+  if (existingId) {
+    return { contactId: existingId, created: false };
   }
 
   const isEmail = input.channel === 'email';

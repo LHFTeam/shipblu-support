@@ -3,8 +3,8 @@ import { db } from '@/db/client';
 import { contacts, conversations, messages, ticketStatuses } from '@/db/schema';
 import { createSurvey, recentlySurveyed } from '@/lib/csat';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
+import { automatedReplyBlocked, carrierFor } from '@/lib/tickets/outbound';
 import { enqueue, type ClaimedJob } from '@/lib/queue';
-import { windowState } from '@/lib/whatsapp/window';
 
 /**
  * Sends one satisfaction survey, half an hour after a ticket was resolved.
@@ -47,6 +47,8 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
       assigneeAgentId: conversations.assigneeAgentId,
       groupId: conversations.groupId,
       lastCustomerMessageAt: conversations.lastCustomerMessageAt,
+      // Read by `automatedReplyBlocked`, to tell a comment ticket from a DM.
+      externalId: conversations.externalId,
       statusCategory: ticketStatuses.category,
       contactEmail: contacts.primaryEmail,
       contactLocale: contacts.locale,
@@ -91,10 +93,15 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
     return;
   }
 
-  // Outside the 24-hour window only an approved template can reach a WhatsApp
-  // customer, and a survey is not worth spending a template on.
-  if (ticket.channel === 'whatsapp' && !windowState(ticket.lastCustomerMessageAt).isOpen) {
-    console.log(`[send_csat] #${ticket.number}: WhatsApp window closed — no survey`);
+  // The third automated sender, through the same guard as the other two. It used
+  // to carry its own WhatsApp-only copy, which said nothing about Facebook or
+  // Instagram — where a survey half an hour after a resolve is routinely outside
+  // the 24-hour window, and where the only thing that would carry it is
+  // `HUMAN_AGENT`, a tag reserved for a message a person wrote. A survey is not
+  // worth spending a WhatsApp template on either.
+  const blocked = automatedReplyBlocked(ticket);
+  if (blocked) {
+    console.log(`[send_csat] #${ticket.number}: no survey — ${blocked}`);
     return;
   }
 
@@ -130,8 +137,14 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
     .where(eq(conversations.id, conversationId));
 
   if (!isWebchat) {
+    // `carrierFor` rather than a second copy of the channel-to-job mapping. The
+    // copy here read `whatsapp ? send_whatsapp : send_email`, so a survey on a
+    // Facebook or Instagram ticket was queued as an email to a contact who
+    // usually has no address — it failed in the worker rather than anywhere
+    // anybody was looking, which is the exact bug the shared function was
+    // written to end for the other two senders.
     await enqueue(
-      ticket.channel === 'whatsapp' ? 'send_whatsapp' : 'send_email',
+      carrierFor(ticket.channel),
       { messageId },
       { priority: 50, dedupeKey: `send:${messageId}` },
     );

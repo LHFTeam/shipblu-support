@@ -9,6 +9,7 @@ import type {
   NormalisedReceipt,
 } from '@/lib/meta/types';
 import { enqueue } from '@/lib/queue';
+import { onCustomerReply } from '@/lib/sla';
 import { findContactByIdentity, needsChannelProfile, resolveContact } from './contacts';
 import { afterInboundMessage, afterMessageStored } from './lifecycle';
 
@@ -293,6 +294,37 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
 // --- Interactions -----------------------------------------------------------
 
 /**
+ * The window advance, as a `set` object, exported so a test can assert what it
+ * binds.
+ *
+ * The instant is interpolated as an ISO string with an explicit cast, never as a
+ * `Date`. A bare Date in a `sql` template reaches postgres.js as an untyped
+ * parameter, which it cannot serialise — it assumes text and throws
+ * `ERR_INVALID_ARG_TYPE`; drizzle only maps a Date when a typed operator tells
+ * it which column it is being compared against, and a template does not.
+ * `staleTemplateFilter` carries the same note and the same kind of test, and
+ * `lib/reports/live.ts` works around the same wall.
+ *
+ * Worth a test rather than a comment because nothing else would catch it:
+ * `applyMetaInteraction` is reachable only through `process_meta_webhook`, which
+ * the `database` CI job does not run, so no Postgres ever plans this statement
+ * before production does.
+ *
+ * `greatest` never goes backwards, which matters because Meta redelivers and
+ * these events arrive interleaved with the messages they accompany. It is
+ * documented as ignoring nulls in its list, so a conversation whose customer has
+ * never written takes the interaction's own instant.
+ */
+export function interactionWindowSet(at: Date) {
+  const iso = at.toISOString();
+
+  return {
+    lastMessageAt: sql`greatest(${conversations.lastMessageAt}, ${iso}::timestamptz)`,
+    lastCustomerMessageAt: sql`greatest(${conversations.lastCustomerMessageAt}, ${iso}::timestamptz)`,
+  };
+}
+
+/**
  * A customer touching the thread without writing: a button, an ad click, a
  * reaction.
  *
@@ -330,38 +362,76 @@ export async function applyMetaInteraction(interaction: NormalisedInteraction): 
   const existing = await findLiveConversation(contactId, interaction.platform);
   if (!existing) return false;
 
-  await db.insert(conversationEvents).values({
-    conversationId: existing.id,
-    type: `meta_${interaction.kind}`,
-    actorLabel: `inbound_${interaction.platform}`,
-    data: {
-      summary: interaction.summary,
-      connection: interaction.connection,
-      standby: interaction.standby,
-      opensWindow: interaction.opensWindow,
-    },
-    createdAt: interaction.at,
+  const type = `meta_${interaction.kind}`;
+
+  // The idempotency every other path in this module has and this one lacked.
+  // `deliveryId` deliberately keys a delivery *by connection*, so the two live
+  // Instagram connections each store and process their own copy of the same
+  // event — which costs nothing for a message, because `ingestMetaMessage`
+  // dedupes on the mid, and cost this one a duplicate timeline row per press.
+  // The instant is the key: Meta sends the same `timestamp` on a redelivery and
+  // on both connections' copies, and one customer cannot press the same kind of
+  // button twice in the same millisecond.
+  const already = await db
+    .select({ id: conversationEvents.id })
+    .from(conversationEvents)
+    .where(
+      and(
+        eq(conversationEvents.conversationId, existing.id),
+        eq(conversationEvents.type, type),
+        eq(conversationEvents.createdAt, interaction.at),
+      ),
+    )
+    .limit(1);
+
+  if (already.length > 0) return false;
+
+  await db.transaction(async (tx) => {
+    await tx.insert(conversationEvents).values({
+      conversationId: existing.id,
+      type,
+      actorLabel: `inbound_${interaction.platform}`,
+      data: {
+        summary: interaction.summary,
+        connection: interaction.connection,
+        standby: interaction.standby,
+        opensWindow: interaction.opensWindow,
+        // The button's machine-readable identity, which the summary is not: two
+        // menu branches can carry the same title, and "which branch did they
+        // take" is the only question this event can answer later.
+        payload: interaction.payload,
+      },
+      createdAt: interaction.at,
+    });
+
+    if (!interaction.opensWindow) return;
+
+    // A resolved ticket is reopened, exactly as an inbound message reopens one.
+    // Moving the window on a resolved ticket without reopening it would leave a
+    // customer who has come back sitting in no queue, with the only trace an
+    // activity line in the sidebar of a ticket nobody has open.
+    if (existing.statusCategory === 'resolved') {
+      await reopen(tx, existing.id, existing.reopenCount, `inbound_${interaction.platform}`);
+    }
+
+    // Never backwards: a Get Started replayed after the customer's question must
+    // not wind the window, or the next-response target derived from it, back to
+    // before the question was asked. See `interactionWindowSet`.
+    await tx
+      .update(conversations)
+      .set(interactionWindowSet(interaction.at))
+      .where(eq(conversations.id, existing.id));
   });
 
-  if (!interaction.opensWindow) return true;
-
-  // Never backwards. Meta redelivers, and these arrive interleaved with the
-  // messages they accompany, so a Get Started replayed after the customer's
-  // question would otherwise wind the window — and the SLA due date derived from
-  // it — back to before the question was asked.
-  //
-  // `greatest` and not a `coalesce` around it: Postgres documents `greatest` as
-  // ignoring nulls in its list, so a conversation whose customer has never
-  // written takes the interaction's own instant. Verified against the production
-  // database rather than read off the manual, because the whole family of
-  // null-propagating functions reads identically at the call site.
-  await db
-    .update(conversations)
-    .set({
-      lastMessageAt: sql`greatest(${conversations.lastMessageAt}, ${interaction.at})`,
-      lastCustomerMessageAt: sql`greatest(${conversations.lastCustomerMessageAt}, ${interaction.at})`,
-    })
-    .where(eq(conversations.id, existing.id));
+  // The next-response clock, restarted the same way an inbound message restarts
+  // it. Moving `lastCustomerMessageAt` alone would not: the target is a stored
+  // column and `onCustomerReply` is its only writer, so without this the ticket
+  // would show as awaiting us in the live queue while carrying no due date —
+  // and the reason a reaction is excluded from all of this ("measuring an agent
+  // as late for not answering 👍") would describe a clock that was never wound.
+  // Outside the transaction and best-effort, exactly as `afterInboundMessage`
+  // calls it.
+  if (interaction.opensWindow) await onCustomerReply(existing.id, interaction.at);
 
   return true;
 }

@@ -390,7 +390,7 @@ async function sendCannedReply(
   // from a cron every fifteen minutes, so a rule that chases silence reaches the
   // customer days after they last wrote, which is exactly the far side of the
   // window.
-  const blocked = automatedReplyBlocked(conversation.channel, conversation.lastCustomerMessageAt);
+  const blocked = automatedReplyBlocked(conversation);
   if (blocked) {
     console.warn(`[automations] "${ruleName}" skipped a reply: ${blocked}`);
     return;

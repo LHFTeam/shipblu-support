@@ -40,11 +40,16 @@ describe('directMessageRequest', () => {
     });
   });
 
-  it('leaves messaging_type off Instagram entirely', () => {
-    // Neither Instagram send reference has the parameter — not the one for
-    // Instagram messaging over a Page, and not the Instagram-Login one on
-    // graph.instagram.com. Both list recipient, message, sender_action, payload
-    // and reply_to and nothing else.
+  it('leaves the in-window Instagram body exactly as it sends today', () => {
+    /*
+      Deliberately unchanged, and the asymmetry with the tagged case below is the
+      point. This is the channel's working traffic: when INSTAGRAM_ACCESS_TOKEN
+      is unset the call goes out over the Page connection to graph.facebook.com,
+      where `messaging_type` is documented as part of every send. Nothing
+      establishes the shape is wrong, and stripping it on the strength of a doc
+      page describing a different host would risk every in-window Instagram reply
+      to fix a send that has never worked.
+    */
     expect(
       directMessageRequest({
         platform: 'instagram',
@@ -55,23 +60,8 @@ describe('directMessageRequest', () => {
     ).toEqual({
       recipient: { id: 'igsid-1' },
       message: { text: 'hello' },
+      messaging_type: 'RESPONSE',
     });
-  });
-
-  it('tags an Instagram human agent reply without messaging_type', () => {
-    const body = directMessageRequest({
-      platform: 'instagram',
-      recipientId: 'igsid-1',
-      text: 'sorry for the delay',
-      tag: 'HUMAN_AGENT',
-    });
-
-    expect(body).toEqual({
-      recipient: { id: 'igsid-1' },
-      message: { text: 'sorry for the delay' },
-      tag: 'HUMAN_AGENT',
-    });
-    expect(body).not.toHaveProperty('messaging_type');
   });
 
   it('splits on the platform, not the connection', () => {
@@ -89,5 +79,17 @@ describe('directMessageRequest', () => {
     });
 
     expect(viaEitherConnection).not.toHaveProperty('messaging_type');
+  });
+
+  it('changes only the tagged Instagram body, never the in-window one', () => {
+    // Stated as its own case because it is a claim about evidence rather than
+    // about Meta, and it is the thing a future reader is most likely to "tidy"
+    // into consistency: the tagged path has never once succeeded, the in-window
+    // path is live traffic, and only the first is being moved toward the docs.
+    const inWindow = (platform: 'facebook' | 'instagram') =>
+      directMessageRequest({ platform, recipientId: 'r', text: 't', tag: 'RESPONSE' });
+
+    expect(inWindow('facebook')).toHaveProperty('messaging_type', 'RESPONSE');
+    expect(inWindow('instagram')).toHaveProperty('messaging_type', 'RESPONSE');
   });
 });

@@ -863,15 +863,19 @@ function describeEvent(type: string, data: Record<string, unknown>): string {
      * the payload, which is the button's name and the whole content of the
      * event.
      */
+    // `||` and not `??`: `data` is jsonb read back untyped, and an empty string
+    // is exactly what the fallback is for — `??` would let one through and end
+    // the sentence mid-word. `parse.ts` builds these summaries with `||` chains
+    // for the same reason.
     case 'meta_postback':
-      return `tapped ${String(data.summary ?? 'a button')}`;
+      return `tapped ${String(data.summary || 'a button')}`;
     case 'meta_referral':
-      return `arrived from ${String(data.summary ?? 'a link')}`;
+      return `arrived from ${String(data.summary || 'a link')}`;
     case 'meta_reaction':
       // Said in a way that does not read as a question waiting for an answer,
       // because it is not one: a reaction deliberately moves neither the
       // messaging window nor the next-response clock.
-      return `reacted with ${String(data.summary ?? 'a reaction')}`;
+      return `reacted with ${String(data.summary || 'a reaction')}`;
     case 'comment_hidden':
       return 'hid the comment on the post';
     case 'comment_unhidden':

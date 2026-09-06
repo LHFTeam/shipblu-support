@@ -191,11 +191,11 @@ export type NormalisedInteraction = {
   kind: 'postback' | 'referral' | 'reaction';
   /** Page-scoped id of the customer. */
   from: string;
-  accountId: string | null;
   at: Date;
   /**
    * Whether this counts as the customer asking us something — which is both what
-   * reopens the messaging window and what starts a next-response SLA clock.
+   * reopens the messaging window and what makes `applyMetaInteraction` restart
+   * the next-response SLA clock through `onCustomerReply`.
    *
    * True for a postback and a referral: pressing Get Started or clicking an ad
    * to open a thread is somebody wanting an answer. False for a reaction, which
@@ -204,9 +204,16 @@ export type NormalisedInteraction = {
   opensWindow: boolean;
   /** What to show on the timeline: a button's title, a reaction's emoji, a ref. */
   summary: string;
+  /**
+   * A postback's `payload`, or a referral's `ref` — the machine-readable half.
+   *
+   * Kept beside the summary rather than folded into it because the two answer
+   * different questions: a title is what the customer saw, and two menu branches
+   * can share one. Null on a reaction, which has no such identity.
+   */
+  payload: string | null;
   /** Arrived in `standby`, so another app holds thread control on this connection. */
   standby: boolean;
-  raw: Record<string, unknown>;
 };
 
 export type NormalisedMetaWebhook = {

@@ -52,8 +52,11 @@ export function deliveryId(payload: MetaWebhookPayload, connection: MetaConnecti
       // stored and processed again.
       //
       // A reaction's `mid` names the message reacted *to*, not the reaction, so
-      // it is not enough on its own: react and unreact on the same message would
-      // collide onto one key and the second would be discarded.
+      // neither it nor the action is enough on its own: the timestamp is what
+      // separates reacting 👍, taking it back, and reacting again. Without it the
+      // third rebuilds the first's key exactly — and the unique index spans the
+      // whole table with no expiry, so that delivery is answered "duplicate" and
+      // the reaction never reaches the timeline.
       if (event.postback) {
         parts.push(
           `p:${event.sender?.id}:${event.timestamp ?? ''}:${event.postback.payload ?? ''}`,
@@ -61,7 +64,8 @@ export function deliveryId(payload: MetaWebhookPayload, connection: MetaConnecti
       }
       if (event.reaction) {
         parts.push(
-          `k:${event.sender?.id}:${event.reaction.mid ?? ''}:${event.reaction.action ?? ''}`,
+          `k:${event.sender?.id}:${event.timestamp ?? ''}:${event.reaction.mid ?? ''}:` +
+            `${event.reaction.action ?? ''}`,
         );
       }
       if (event.referral && !event.postback) {

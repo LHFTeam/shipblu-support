@@ -124,22 +124,30 @@ describe('deliveryId', () => {
     expect(deliveryId(press, 'facebook_page')).toBe(key);
   });
 
-  it('tells a reaction apart from taking it back', () => {
+  it('tells a reaction apart from taking it back, and from re-adding it', () => {
     // A reaction's `mid` names the message reacted *to*, so keying on it alone
-    // would collide react with unreact and silently discard the second.
-    const react = (action: string) => ({
+    // would collide react with unreact. The timestamp is what separates the
+    // third case: reacting 👍, removing it, then reacting again rebuilds the
+    // first key exactly without it — and because the unique index spans the
+    // whole table with no expiry, that delivery is answered "duplicate" and the
+    // reaction never reaches the timeline.
+    const react = (action: string, timestamp: number) => ({
       object: 'page' as const,
       entry: [
         {
           id: '1',
-          messaging: [{ sender: { id: 'psid-1' }, reaction: { mid: 'm_abc', action } }],
+          messaging: [{ sender: { id: 'psid-1' }, timestamp, reaction: { mid: 'm_abc', action } }],
         },
       ],
     });
 
-    expect(deliveryId(react('react'), 'facebook_page')).not.toBe(
-      deliveryId(react('unreact'), 'facebook_page'),
-    );
+    const first = deliveryId(react('react', 1_755_000_000_000), 'facebook_page');
+    const undone = deliveryId(react('unreact', 1_755_000_060_000), 'facebook_page');
+    const again = deliveryId(react('react', 1_755_000_120_000), 'facebook_page');
+
+    expect(first).not.toBe(undone);
+    expect(first).not.toBe(again);
+    expect(undone).not.toBe(again);
   });
 
   it('stays inside the column it is written to', () => {

@@ -485,6 +485,20 @@ describe('window-opening interactions', () => {
     expect(parsed.interactions[0]?.kind).toBe('postback');
   });
 
+  it('keeps the postback payload, which the title cannot stand in for', () => {
+    // Two menu branches can carry the same title, so "which branch did they
+    // take" is answerable only from the payload — and the event is the only
+    // record of it.
+    const parsed = parse(
+      interactionPayload({ postback: { title: 'Track my order', payload: 'TRACK_ORDER_V2' } }),
+    );
+
+    expect(parsed.interactions[0]).toMatchObject({
+      summary: 'Track my order',
+      payload: 'TRACK_ORDER_V2',
+    });
+  });
+
   it('reads a reaction, but does not let it open the window', () => {
     // The one place the three part company: a reaction also moves the
     // next-response SLA target, and a customer answering our reply with a

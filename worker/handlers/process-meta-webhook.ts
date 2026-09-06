@@ -35,6 +35,9 @@ export async function processMetaWebhook(event: {
   let comments = 0;
   let receipts = 0;
   let interactions = 0;
+  // Interactions that found no live ticket, or had already been recorded. They
+  // did nothing, so they must not count toward `attempted` below.
+  let skipped = 0;
 
   for (const message of parsed.messages) {
     try {
@@ -68,6 +71,7 @@ export async function processMetaWebhook(event: {
     try {
       const applied = await applyMetaInteraction(interaction);
       if (applied) interactions += 1;
+      else skipped += 1;
       console.log(
         `[meta] ${interaction.platform} ${interaction.kind} from ${interaction.from} ` +
           `(${interaction.summary}) → ${applied ? 'recorded' : 'no live ticket'}`,
@@ -87,11 +91,18 @@ export async function processMetaWebhook(event: {
     }
   }
 
+  // What could meaningfully have failed. An interaction that no-ops — nobody to
+  // attach it to, or a copy already recorded — is not a success, and counting it
+  // as one widens this denominator: a batch of one failed customer message and
+  // one such interaction would no longer be "everything failed", so the job
+  // would report success, the webhook would be stamped processed, and the
+  // customer's message would be lost with no retry.
   const attempted =
     parsed.messages.length +
     parsed.comments.length +
     parsed.receipts.length +
-    parsed.interactions.length;
+    parsed.interactions.length -
+    skipped;
 
   if (failures.length > 0 && failures.length === attempted) {
     throw new Error(`every item in the batch failed: ${failures.join(' | ')}`);
@@ -108,7 +119,7 @@ export async function processMetaWebhook(event: {
   console.log(
     `[meta] ${event.id} via ${event.connection ?? 'an unrecorded connection'}: ` +
       `${messages} message(s), ${comments} comment(s), ${receipts} receipt(s), ` +
-      `${interactions} interaction(s), ${parsed.echoes} echo(es) ignored`,
+      `${interactions} interaction(s) (${skipped} skipped), ${parsed.echoes} echo(es) ignored`,
   );
 }
 

@@ -115,7 +115,7 @@ function readMessagingEvent(
   // customer's actual question silently not filed. A message is always the more
   // specific event.
   if (!message) {
-    const interaction = readInteraction(event, platform, connection, accountId, standby);
+    const interaction = readInteraction(event, platform, connection, standby);
     if (interaction) result.interactions.push(interaction);
     return;
   }
@@ -156,7 +156,8 @@ function readMessagingEvent(
  * Order matters. A single click can be both a referral and a postback — Meta
  * nests the referral inside the postback when somebody reaches the thread from
  * an ad and presses Get Started in the same motion — and it is one event, so the
- * postback wins and carries the referral in `raw` rather than producing two.
+ * postback wins and takes the referral's `ref` as its payload rather than
+ * producing two.
  *
  * A reaction is only counted when the customer *adds* one. `action: 'unreact'`
  * is somebody taking a thumbs-up back, which is not them asking for anything and
@@ -166,7 +167,6 @@ function readInteraction(
   event: MetaMessagingEvent,
   platform: MetaPlatform,
   connection: MetaConnection | null,
-  accountId: string | null,
   standby: boolean,
 ): NormalisedInteraction | null {
   const from = event.sender?.id;
@@ -176,10 +176,8 @@ function readInteraction(
     platform,
     connection,
     from,
-    accountId: event.recipient?.id ?? accountId,
     at: fromEpoch(event.timestamp),
     standby,
-    raw: event as unknown as Record<string, unknown>,
   };
 
   if (event.postback) {
@@ -192,6 +190,7 @@ function readInteraction(
         describeReferral(event.postback.referral) ||
         event.postback.payload?.trim() ||
         'a button',
+      payload: event.postback.payload?.trim() || event.postback.referral?.ref?.trim() || null,
     };
   }
 
@@ -201,6 +200,7 @@ function readInteraction(
       kind: 'referral',
       opensWindow: true,
       summary: describeReferral(event.referral),
+      payload: event.referral.ref?.trim() || event.referral.ad_id?.trim() || null,
     };
   }
 
@@ -209,12 +209,13 @@ function readInteraction(
       ...base,
       kind: 'reaction',
       // Deliberately false, and the one place these three part company. Meta
-      // does count a reaction as opening the window, but this flag also starts a
-      // next-response SLA clock — and a customer answering our reply with a
-      // thumbs-up has been served, not left waiting. Measuring an agent as late
-      // for not answering 👍 is the worse of the two errors.
+      // does count a reaction as opening the window, but `applyMetaInteraction`
+      // also restarts the next-response SLA clock on this flag — and a customer
+      // answering our reply with a thumbs-up has been served, not left waiting.
+      // Measuring an agent as late for not answering 👍 is the worse error.
       opensWindow: false,
       summary: event.reaction.emoji || event.reaction.reaction || 'a reaction',
+      payload: null,
     };
   }
 
@@ -226,7 +227,7 @@ function describeReferral(referral: MetaReferral | undefined): string {
   if (!referral) return '';
   if (referral.ad_id) return `an ad (${referral.ad_id})`;
   if (referral.ref) return `a link (ref: ${referral.ref})`;
-  return referral.source ? `${referral.source.toLowerCase()}` : 'a referral link';
+  return referral.source ? referral.source.toLowerCase() : 'a referral link';
 }
 
 /**
