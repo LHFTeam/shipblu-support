@@ -181,6 +181,12 @@ export function metaThreadStateFromMessage(input: {
   connection: MetaConnection;
   configuredAccountId: string | null;
   lastInboundMeta: Record<string, unknown> | null | undefined;
+  /** When that message arrived, for the comparison below. */
+  lastInboundAt?: Date | null;
+  /**
+   * When this app last took thread control of the conversation, if it ever has.
+   */
+  controlTakenAt?: Date | null;
 }): MetaThreadState {
   const meta = input.lastInboundMeta ?? {};
   const accountId = typeof meta.accountId === 'string' ? meta.accountId : null;
@@ -192,9 +198,46 @@ export function metaThreadStateFromMessage(input: {
     configuredAccountId: input.configuredAccountId,
     // Absent on every row written before the flag was recorded. Those threads
     // were answerable, so a missing value must not read as "cannot send".
-    standby: meta.standby === true,
+    standby: meta.standby === true && !holdsControl(input.controlTakenAt, input.lastInboundAt),
     inboundConnection: readConnection(meta.connection),
   });
+}
+
+/**
+ * Whether the newer of the two facts is "we took control".
+ *
+ * `standby` on a message is a permanent, true statement about *that message*:
+ * another app owned the thread when it arrived. It is not a statement about now,
+ * and it stopped being a safe proxy for now the moment a button could change
+ * thread control from inside the console — every ticket would keep refusing on
+ * the strength of a flag from before the handover, and the only thing that could
+ * clear it would be the customer writing again.
+ *
+ * So the verdict is whichever fact is newer, which is self-correcting in both
+ * directions and needs no webhook this app does not already receive. Take
+ * control and the next render unblocks. Lose it again — control moves, and only
+ * ever silently — and the next inbound message arrives in `standby` with a
+ * timestamp past ours, which puts the refusal straight back without anybody
+ * having to notice.
+ *
+ * The two instants come from different clocks: a message carries Meta's `sentAt`
+ * and the event carries ours. Seconds of skew are the whole error, and the
+ * quantity being compared is the gap between a customer's message and an agent
+ * pressing a button — minutes at the very least. A tie counts as *not* held,
+ * because the message is the fact we were given and control is the one we
+ * inferred.
+ */
+function holdsControl(
+  controlTakenAt: Date | null | undefined,
+  lastInboundAt: Date | null | undefined,
+): boolean {
+  if (!controlTakenAt) return false;
+  // No inbound message to be newer than. Nothing set `standby` either, so this
+  // is unreachable today; it answers "we hold it" rather than leaving the
+  // comparison to decide from a null.
+  if (!lastInboundAt) return true;
+
+  return controlTakenAt.getTime() > lastInboundAt.getTime();
 }
 
 /** The connection off a message's `meta`, ignoring anything it is not. */

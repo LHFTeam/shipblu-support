@@ -262,3 +262,74 @@ describe('metaThreadStateFromMessage and the connection on the row', () => {
     expect(state.reason).toBe('standby');
   });
 });
+
+/*
+  The rule that lets the console's "take thread control" button mean anything.
+
+  `standby` on a message is a permanent fact about that message and is never
+  rewritten, so the *only* thing that can reopen a ticket after a handover is
+  this comparison. Getting it backwards fails in the two worst ways available:
+  a composer that never reopens, or one that invites a reply Graph will refuse.
+*/
+describe('metaThreadStateFromMessage and control taken since', () => {
+  const inbound = { accountId: PAGE, standby: true, metaKind: 'direct_message' };
+
+  function withControl(controlTakenAt: Date | null, lastInboundAt: Date | null) {
+    return metaThreadStateFromMessage({
+      platform: 'facebook',
+      connection: 'facebook_page',
+      configuredAccountId: PAGE,
+      lastInboundMeta: inbound,
+      lastInboundAt,
+      controlTakenAt,
+    });
+  }
+
+  it('answers a thread taken after the message arrived', () => {
+    const state = withControl(new Date('2026-09-06T18:52:00Z'), new Date('2026-09-06T18:48:16Z'));
+
+    expect(state.canSend).toBe(true);
+    expect(state.reason).toBe('ours');
+  });
+
+  it('refuses again when a newer message arrived in standby', () => {
+    // Control moves back silently — the other tool can take the thread at any
+    // time — and a message landing in `standby` afterwards is the only notice
+    // of it we get. Without this the console would keep offering a reply that
+    // Graph refuses, on the strength of a handover that has since been undone.
+    const state = withControl(new Date('2026-09-06T18:52:00Z'), new Date('2026-09-06T19:10:00Z'));
+
+    expect(state.canSend).toBe(false);
+    expect(state.reason).toBe('standby');
+  });
+
+  it('treats an exact tie as not held', () => {
+    // The two instants come off different clocks — Meta's `sentAt` and ours —
+    // so a tie is not evidence. The message is the fact we were given; control
+    // is the one we inferred.
+    const at = new Date('2026-09-06T18:48:16Z');
+
+    expect(withControl(at, at).canSend).toBe(false);
+  });
+
+  it('leaves a ticket that has never been taken exactly as it was', () => {
+    expect(withControl(null, new Date('2026-09-06T18:48:16Z')).canSend).toBe(false);
+  });
+
+  it('does not let control rescue a message from another page', () => {
+    // A different refusal with a different remedy: the recipient's id does not
+    // exist on the page we send from, and no amount of thread control changes
+    // that.
+    const state = metaThreadStateFromMessage({
+      platform: 'facebook',
+      connection: 'facebook_page',
+      configuredAccountId: PAGE,
+      lastInboundMeta: { accountId: OTHER_PAGE, standby: true, metaKind: 'direct_message' },
+      lastInboundAt: new Date('2026-09-06T18:48:16Z'),
+      controlTakenAt: new Date('2026-09-06T18:52:00Z'),
+    });
+
+    expect(state.canSend).toBe(false);
+    expect(state.reason).toBe('other_account');
+  });
+});

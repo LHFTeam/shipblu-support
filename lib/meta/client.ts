@@ -1,6 +1,7 @@
 import { env } from '@/lib/env';
 import { commentRequest, type CommentOperation } from './comments';
-import { type MetaConnection, metaConnection } from './connection';
+import { CONNECTION_LABEL, type MetaConnection, metaConnection } from './connection';
+import { takeThreadControlRequest } from './handover';
 import { directMessageRequest } from './send';
 import type { MetaPlatform } from './types';
 
@@ -303,6 +304,62 @@ export async function sendDirectMessage(input: {
     messageId: result?.message_id ?? null,
     recipientId: result?.recipient_id ?? null,
   };
+}
+
+// --- Thread control ---------------------------------------------------------
+
+/**
+ * Takes thread control of one conversation, so this app may answer it.
+ *
+ * The counterpart to the refusal in `lib/meta/thread.ts`: that one explains why
+ * a ticket arriving in `standby` cannot be replied to, and until this existed
+ * the explanation ended in somebody opening another tool. The request shape and
+ * the protocol's rules are in `lib/meta/handover.ts`.
+ *
+ * **Facebook Page only, and the caller is expected to have established that.**
+ * Handover is a property of the Page connection — an Instagram account reached
+ * through Instagram Login is not installed on anything and has no primary
+ * receiver to take control from, so this call addressed to `graph.instagram.com`
+ * would be a request to an edge that does not exist there, refused with a
+ * sentence naming nothing (§6.43). `metaConnection()` decides the route, so the
+ * check belongs where the button does; this asserts it rather than repeating the
+ * decision, because being wrong here is invisible.
+ *
+ * Unlike a send, the answer is worth reading: Graph returns `{"success": true}`
+ * and this insists on it. A 200 with anything else in the body is a call that
+ * did not do what it said, and treating the status alone as proof is how the
+ * console would tell an agent the thread was theirs and leave the next reply to
+ * fail on its own.
+ */
+export async function takeThreadControl(input: {
+  platform: MetaPlatform;
+  recipientId: string;
+}): Promise<void> {
+  const connection = metaConnection(input.platform);
+  if (connection !== 'facebook_page') {
+    throw new Error(
+      `Thread control belongs to the Facebook Page connection, and ${input.platform} is ` +
+        `routed over ${CONNECTION_LABEL[connection]} — there is no thread to take control of`,
+    );
+  }
+
+  const result = await graph<{ success?: boolean }>(
+    input.platform,
+    `${accountId(input.platform)}/take_thread_control`,
+    { method: 'POST', body: takeThreadControlRequest({ recipientId: input.recipientId }) },
+  );
+
+  if (result?.success !== true) {
+    throw new MetaApiError(
+      'Meta accepted the request but did not confirm the handover',
+      200,
+      null,
+      null,
+      // Worth another press: nothing here says the request was wrong, only that
+      // it cannot be shown to have worked.
+      true,
+    );
+  }
 }
 
 // --- Comments ---------------------------------------------------------------
