@@ -22,6 +22,7 @@ import type { PickerEntry } from '@/lib/side-conversations/queries';
 import { addNote, sendReply, sendTemplateReply, type ActionState } from '../../actions';
 import { KnowledgePanel } from './knowledge';
 import { StartSideConversationForm } from './side-conversations';
+import { ThreadControl } from './thread-control';
 import type { TemplateOption } from './view';
 
 const INITIAL: ActionState = { error: null };
@@ -280,9 +281,19 @@ export function Composer({
               front costs them the paragraph they would otherwise lose.
             */
             threadBlocked ? (
-              <p className="rounded-md border border-[var(--border)] bg-[var(--muted)] p-3 text-sm text-[var(--muted-foreground)]">
-                {metaThread?.explanation}
-              </p>
+              <div className="rounded-md border border-[var(--border)] bg-[var(--muted)] p-3 text-sm text-[var(--muted-foreground)]">
+                <p className="whitespace-pre-line">{metaThread?.explanation}</p>
+                {/*
+                  Only under the standby refusal. The other two the thread state
+                  can give — a page this deployment cannot address, an account id
+                  that is not set — are not thread control and would not be fixed
+                  by taking it; offering the button there would send an agent
+                  pressing it at a refusal that has nothing to do with handover.
+                */}
+                {metaThread?.reason === 'standby' ? (
+                  <ThreadControl conversationId={conversation.id} />
+                ) : null}
+              </div>
             ) : (
               <ReplyForm
                 conversationId={conversation.id}

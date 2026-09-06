@@ -432,6 +432,58 @@ export function isProfilePermissionRefusal(error: MetaApiError): boolean {
 }
 
 /**
+ * Why taking thread control did not work, for the agent who pressed the button.
+ *
+ * The one refusal worth separating from the rest is **"this app is not the
+ * primary receiver"**, because it is the only one where the request was
+ * perfectly well formed and the answer is still no — and because the remedy is
+ * on a screen in the Meta app rather than anywhere in this system. A secondary
+ * receiver is not entitled to take a thread; it may only *ask* the primary app
+ * to hand it over, and that ask is answered by whoever runs the other tool.
+ *
+ * Graph does not spell that out. It refuses with the handover subcode this file
+ * already knows (`2018300`) or with one of the unspecified codes, so the sentence
+ * an agent gets says nothing about roles at all. Naming it here is the whole
+ * value of the function: without it the button looks broken rather than
+ * refused, and the next step — change which app is primary, in the Page's
+ * advanced messaging settings — is not one anybody would guess from "An unknown
+ * error has occurred."
+ */
+export function explainTakeControlError(error: MetaApiError, platform: MetaPlatform): string {
+  const base = error.userMessage ?? error.message;
+  const product = platform === 'instagram' ? 'Instagram' : 'Messenger';
+
+  if (error.code === ACCESS_TOKEN_CODE) {
+    return withReference(explainAuthError(error.code, base), error);
+  }
+
+  /*
+    Both shapes mean the same thing here, which they do not in `explainMetaSendError`.
+
+    There the handover subcode and the unspecified codes need telling apart —
+    one is thread control, the others could be half a dozen policies. On *this*
+    endpoint there is only one rule to break: the caller is not the app allowed
+    to call it. So they collapse, and the explanation says the single thing that
+    is true of all of them rather than hedging across three.
+  */
+  if (isHandoverRefusal(error) || (error.code !== null && UNSPECIFIED_CODES.has(error.code))) {
+    return withReference(
+      `${base}\n\nMeta refused the handover, which on this endpoint means one thing: this ` +
+        `app is **not the primary receiver** of the ${product} inbox. Only the primary ` +
+        `receiver may take a thread — a secondary one can only *request* control, and that ` +
+        `request is answered by whoever runs the other tool, not by Meta.\n\n` +
+        `So this is changed in the Meta app rather than here: the Page's advanced messaging ` +
+        `settings decide which app is primary. Nothing in this console can move it, and a ` +
+        `second press will be refused identically.`,
+      error,
+      'facebook_page',
+    );
+  }
+
+  return withReference(base, error, 'facebook_page');
+}
+
+/**
  * What to write in the worker log when a profile lookup fails.
  *
  * The refusal that matters is indistinguishable from the harmless one by its

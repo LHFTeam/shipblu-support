@@ -832,6 +832,14 @@ function describeEvent(type: string, data: Record<string, unknown>): string {
         ? `looked the customer up at Meta: ${String(name)}`
         : 'looked the customer up at Meta, which had no name for them';
     }
+    /*
+     * Worth a line of its own rather than being inferred from the reply that
+     * follows it. Thread control moves silently and in both directions, so
+     * "why could nobody answer this for two days, and what changed?" is a
+     * question the timeline can only answer if the moment it changed is on it.
+     */
+    case 'thread_control_taken':
+      return 'took thread control from the app that owned this conversation';
     case 'profile_refresh_refused':
       return data.permission === true
         ? 'asked Meta for the customer\u2019s profile and was refused — the app may not hold Business Asset User Profile Access'

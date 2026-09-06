@@ -55,8 +55,10 @@ import {
   requested as requestModeration,
 } from '@/lib/meta/moderation';
 import { describeProfileRefresh, refreshChannelProfile } from '@/lib/meta/profile-refresh';
+import { MetaApiError, takeThreadControl } from '@/lib/meta/client';
+import { explainTakeControlError } from '@/lib/meta/errors';
 import { metaWindowState } from '@/lib/meta/window';
-import { metaReplyTarget } from '@/lib/tickets/meta-thread';
+import { metaReplyTarget, THREAD_CONTROL_TAKEN } from '@/lib/tickets/meta-thread';
 import {
   attachShipment,
   attachShippingAccount,
@@ -633,6 +635,105 @@ export async function refreshRequesterProfile(
   return result.kind === 'applied' || result.kind === 'skipped'
     ? { ...ok(), message: described }
     : { error: described };
+}
+
+/**
+ * Takes thread control of a Messenger or Instagram conversation another app owns.
+ *
+ * The second control in this codebase to call a provider from an action rather
+ * than through the queue, and it qualifies under the same narrow exception
+ * `refreshRequesterProfile` documents above: an agent presses it and *waits*,
+ * and the entire output is Meta's answer. Queueing it would put the one sentence
+ * they need — very often "this app is not the primary receiver", which no retry
+ * will change — into a worker log they cannot read.
+ *
+ * It is also the answer to a refusal this console could previously only
+ * describe. A ticket arriving in the handover protocol's `standby` array is
+ * readable and unanswerable, and every remedy `lib/meta/thread.ts` could offer
+ * was in somebody else's software. This is the one the protocol actually exposes.
+ *
+ * Gated on `ticket.reply` rather than a key of its own. Taking control is not a
+ * separate capability an agent might be trusted with independently — it is the
+ * precondition for replying on this channel, it is undone by the other tool
+ * taking the thread back, and it changes nothing a customer can see. A key
+ * nobody would ever grant apart from `ticket.reply` is a key that only makes
+ * the permission screen longer.
+ */
+export async function claimThreadControl(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const agent = await requireAgent();
+  if (!can(agent, 'ticket.reply')) {
+    return { error: 'You do not have permission to reply to tickets' };
+  }
+
+  const row = await loadConversation(agent, String(formData.get('conversationId') ?? ''));
+  if (!row) return { error: 'Ticket not found' };
+
+  const readOnly = refuseIfReadOnly(row.conversation.channel);
+  if (readOnly) return readOnly;
+
+  const channel = row.conversation.channel;
+  if (channel !== 'facebook' && channel !== 'instagram') {
+    return { error: 'Only Facebook and Instagram conversations have thread control' };
+  }
+
+  // The recipient and the verdict both come from here rather than from the
+  // form: a page-scoped id in a FormData field is an argument to a Graph call,
+  // and re-reading is also what makes the check below describe the ticket as it
+  // is now rather than as the page rendered it.
+  const { recipientId, thread } = await metaReplyTarget(row.conversation.id, channel);
+
+  if (thread.reason !== 'standby') {
+    // Includes the case the button exists for having already succeeded. Saying
+    // so is better than taking control of a thread we hold: the call would
+    // succeed and the agent would learn nothing about why the composer was
+    // shut.
+    return {
+      error: thread.canSend
+        ? 'This ticket is already answerable from here — reload the page.'
+        : (thread.explanation ??
+          'This ticket cannot be answered from here, and not because of thread control.'),
+    };
+  }
+
+  if (!recipientId) {
+    return { error: 'This ticket has no inbound message, so there is no thread to take.' };
+  }
+
+  try {
+    await takeThreadControl({ platform: channel, recipientId });
+  } catch (error) {
+    if (error instanceof MetaApiError) return { error: explainTakeControlError(error, channel) };
+    throw error;
+  }
+
+  /*
+    The event is what actually reopens the composer, and it has to be written
+    for that to happen.
+
+    `standby` on the customer's last message is a permanent fact about that
+    message, so nothing here rewrites it — `metaThreadStateFromMessage` compares
+    the two timestamps instead and takes the newer. Which means a successful
+    Graph call whose event failed to insert would leave the ticket looking
+    exactly as refused as before, and this is the ordering that makes that the
+    only failure mode rather than the reverse.
+  */
+  await db.insert(conversationEvents).values({
+    conversationId: row.conversation.id,
+    type: THREAD_CONTROL_TAKEN,
+    actorAgentId: agent.id,
+  });
+
+  refresh(row.conversation.number);
+
+  return {
+    ...ok(),
+    message:
+      'Thread control taken — you can reply now. The other tool has been told, and it can ' +
+      'take the thread back at any time.',
+  };
 }
 
 /**
