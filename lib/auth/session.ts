@@ -39,6 +39,24 @@ export type SessionAgent = {
    * the session row is already being read there.
    */
   isAcceptingTickets: boolean;
+  /**
+   * How long this session has been idle *as the server measures it*, in
+   * milliseconds — the gap the inactivity sign-out is actually decided on.
+   *
+   * A duration rather than the instant, and that is the point of it. The console
+   * counts down in the browser, and the browser's clock is not ours: handing over
+   * `last_activity_at` would have every countdown wrong by whatever the two
+   * machines disagree by. A duration is skew-free — the browser subtracts it from
+   * its own `Date.now()` and lands on its own clock's version of the same moment.
+   *
+   * It exists because the two ends were measuring different things. The browser
+   * counted from the last key it saw; the server counts from the last beat it was
+   * *told* about, which the beat throttle puts up to a minute earlier. With a
+   * minute of warning that difference is the whole warning, so "Stay signed in"
+   * could arrive after the server had already given up — losing exactly the
+   * unsent reply the countdown is there to protect.
+   */
+  sessionIdleForMs: number;
 };
 
 export async function createSession(
@@ -133,6 +151,10 @@ export async function getSessionAgent(): Promise<SessionAgent | null> {
     permissions: row.permissions,
     avatarUrl: row.avatarUrl,
     isAcceptingTickets: row.isAcceptingTickets,
+    // Never negative. A row written by an instance whose clock runs ahead of
+    // this one's would otherwise read as idle for minus three minutes, and the
+    // browser would subtract that into the future and never warn at all.
+    sessionIdleForMs: Math.max(0, Date.now() - row.lastActivityAt.getTime()),
   };
 }
 

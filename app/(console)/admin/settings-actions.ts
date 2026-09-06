@@ -806,13 +806,32 @@ export async function saveCannedResponse(
   // send text, and deriving one from the other at send time would mean every
   // channel guessing at line breaks. An unwritten language stays empty in both
   // — `textToHtml('')` would otherwise leave markup that reads as a body.
+  const bodyHtmlAr = bodyTextAr ? textToHtml(bodyTextAr) : '';
+  const bodyHtmlEn = bodyTextEn ? textToHtml(bodyTextEn) : '';
+
   const values = {
     title,
     folder,
     bodyTextAr,
-    bodyHtmlAr: bodyTextAr ? textToHtml(bodyTextAr) : '',
+    bodyHtmlAr,
     bodyTextEn,
-    bodyHtmlEn: bodyTextEn ? textToHtml(bodyTextEn) : '',
+    bodyHtmlEn,
+    /*
+      The superseded pair, written for as long as it still exists.
+
+      `db/schema/config.ts` keeps these columns through one release because the
+      worker and the four crons deploy separately from the service that runs the
+      migration, and the old `sendCannedReply` selects them. That only buys
+      anything if they still say something: a response created after the
+      migration and never written here is `''` to the old code, which sends a
+      customer an empty automated reply rather than falling back to anything.
+      Arabic first, for the reason `DEFAULT_LOCALE` is — a single body can only
+      answer one half of the queue, and this is the larger half.
+
+      Goes when the columns do; `docs/PROJECT-STATE.md` §5.5 carries the removal.
+    */
+    bodyText: bodyTextAr || bodyTextEn,
+    bodyHtml: bodyHtmlAr || bodyHtmlEn,
   };
 
   if (id) {
@@ -1042,6 +1061,18 @@ export async function saveHoliday(
 
   const taken = 'That schedule already has a holiday on that date';
 
+  /*
+    The superseded single name, written for as long as the column exists.
+
+    Same reason as `saveCannedResponse`: only the two web services run
+    `db:migrate`, and `loadHoursCatalog` on the still-old worker and crons
+    selects `holidays.name`. Leaving it at its default would mean a holiday added
+    today closes the office correctly on old code and interpolates nothing into
+    `{{holiday}}` — a message whose whole job is naming the day. Arabic first,
+    like the canned pair. Goes when the column does.
+  */
+  const name = nameAr || nameEn;
+
   if (id) {
     // The schedule comes from the stored row, never from the form: the hidden
     // field is a claim by whoever posted it, and honouring it would let one
@@ -1071,14 +1102,14 @@ export async function saveHoliday(
 
     if (clash.length > 0) return { error: taken };
 
-    await db.update(holidays).set({ date, nameAr, nameEn }).where(eq(holidays.id, id));
+    await db.update(holidays).set({ date, nameAr, nameEn, name }).where(eq(holidays.id, id));
   } else {
     const businessHoursId = text(formData, 'businessHoursId');
     if (!businessHoursId) return { error: 'Pick a schedule' };
 
     const inserted = await db
       .insert(holidays)
-      .values({ businessHoursId, date, nameAr, nameEn })
+      .values({ businessHoursId, date, nameAr, nameEn, name })
       .onConflictDoNothing()
       .returning({ id: holidays.id });
 

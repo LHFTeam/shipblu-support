@@ -4,6 +4,7 @@ import {
   DEFAULT_POLICY,
   idleForMs,
   idleSince,
+  idleTick,
   shouldAutoAway,
   shouldRestoreOnInput,
   shouldSignOut,
@@ -175,6 +176,73 @@ describe('warningLeadMs', () => {
 
   it('is zero when nothing is going to happen', () => {
     expect(warningLeadMs(OFF)).toBe(0);
+  });
+});
+
+describe('idleTick', () => {
+  /** The production defaults, in the milliseconds the browser works in. */
+  const WINDOWS = { signoutMs: 30 * 60_000, awayMs: 10 * 60_000, warningLeadMs: 60_000 };
+
+  it('warns on the session clock, so the countdown outlives the beat throttle', () => {
+    // The case that made this a bug rather than a detail. The console beats at
+    // most once a minute, so an agent who stops typing at 09:00 may last have
+    // been *reported* at 08:59:01 — the server's clock is 59 seconds ahead of
+    // theirs. Measured on input, the warning would appear at 09:29 and the
+    // server would have destroyed the session at 09:29:01, a second later:
+    // "Stay signed in" posts to nothing and the unsent reply is gone.
+    const sessionMs = 29 * 60_000; // the server: one minute from the deadline
+    const inputMs = sessionMs - 59_000; // the person: still a minute and a bit
+
+    expect(idleTick({ sessionMs, inputMs }, WINDOWS)).toMatchObject({
+      signOut: false,
+      warn: true,
+      remainingMs: 60_000,
+    });
+  });
+
+  it('signs out on the session clock, not on the last key', () => {
+    // Input a minute fresher than the session, which is what the throttle
+    // guarantees. The server has already stopped honouring this session, so a
+    // browser still counting is a browser about to be surprised by a 401.
+    expect(idleTick({ sessionMs: 30 * 60_000, inputMs: 29 * 60_000 }, WINDOWS)).toMatchObject({
+      signOut: true,
+    });
+  });
+
+  it('does not raise a countdown in the tick that signs somebody out', () => {
+    // It would flash up and navigate away underneath itself.
+    expect(idleTick({ sessionMs: 45 * 60_000, inputMs: 45 * 60_000 }, WINDOWS)).toMatchObject({
+      signOut: true,
+      warn: false,
+    });
+  });
+
+  it('reports idleness off the person, not off the session', () => {
+    // The other direction, and the reason these are two clocks rather than one:
+    // a beat resets the session's clock but says nothing about whether anybody
+    // is still there. Somebody who pressed a key ten minutes ago is away even
+    // though the beat that carried that key is only nine minutes old.
+    expect(idleTick({ sessionMs: 9 * 60_000, inputMs: 10 * 60_000 }, WINDOWS).reportIdle).toBe(
+      true,
+    );
+    expect(idleTick({ sessionMs: 10 * 60_000, inputMs: 9 * 60_000 }, WINDOWS).reportIdle).toBe(
+      false,
+    );
+  });
+
+  it('does nothing at all with both windows off', () => {
+    expect(
+      idleTick(
+        { sessionMs: 12 * 60 * 60_000, inputMs: 12 * 60 * 60_000 },
+        { signoutMs: null, awayMs: null, warningLeadMs: 0 },
+      ),
+    ).toEqual({ signOut: false, warn: false, remainingMs: 0, reportIdle: false });
+  });
+
+  it('never counts down past zero', () => {
+    // The dialog renders `Math.ceil(remainingMs / 1000)`; a negative would read
+    // as "signed out in -3 seconds" in the half-second before the tick fires.
+    expect(idleTick({ sessionMs: 31 * 60_000, inputMs: 0 }, WINDOWS).remainingMs).toBe(0);
   });
 });
 

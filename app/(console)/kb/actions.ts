@@ -62,11 +62,14 @@ async function readable(id: string, role: AgentRole): Promise<EditableArticle | 
 /**
  * Refuses a floor the author could not themselves clear.
  *
- * The folder half of this is checked above, against `folderFloor`. This is the
- * article's own: a supervisor picks "Admins and up", saves, and is redirected
+ * Whether an article may be *filed* in a folder above the caller is checked
+ * separately, against `folderFloor`. This is the floor being written, and both
+ * writers ask it: a supervisor picks "Admins and up", saves, and is redirected
  * to an article that now answers 404 for them — locked out of their own work in
  * one action, and out of reach of every read model that could show it back to
- * them. You may put content above yourself only by asking somebody who is.
+ * them. `createFolder` is the same shape one level up, and worse, because a
+ * folder above its author never appears in their picker again. You may put
+ * content above yourself only by asking somebody who is.
  */
 function refuseUnreachableFloor(role: AgentRole, floor: AgentRole | null): KbState | null {
   if (meetsFloor(role, floor)) return null;
@@ -305,7 +308,7 @@ export async function createCategory(_state: KbState, formData: FormData): Promi
 }
 
 export async function createFolder(_state: KbState, formData: FormData): Promise<KbState> {
-  await requirePermission('kb.edit');
+  const agent = await requirePermission('kb.edit');
 
   const name = String(formData.get('name') ?? '').trim();
   const categoryId = String(formData.get('categoryId') ?? '');
@@ -318,6 +321,14 @@ export async function createFolder(_state: KbState, formData: FormData): Promise
     return { error: 'Unknown visibility' };
   }
   if (minRole === 'invalid') return { error: 'Unknown minimum role' };
+
+  // The same rule `saveArticle` applies to an article's own floor, and it bites
+  // harder here: a folder above its author does not merely hide one article,
+  // it is missing from `listFolderOptionsForRole` on `/kb/new` for ever after,
+  // so nothing can be filed in it by the person who made it.
+  const folderInternal = visibility === 'agents_only';
+  const unreachable = refuseUnreachableFloor(agent.role, folderInternal ? minRole : null);
+  if (unreachable) return unreachable;
 
   const existing = await db
     .select({ slug: kbFolders.slug })
@@ -338,7 +349,7 @@ export async function createFolder(_state: KbState, formData: FormData): Promise
     // gives: the read rule ignores a floor on a folder a customer can open, and
     // `/kb/structure` would badge that folder with an audience nothing
     // enforces — "Admins and up" on a folder every signed-in customer can read.
-    minRole: visibility === 'agents_only' ? minRole : null,
+    minRole: folderInternal ? minRole : null,
   });
 
   revalidatePath('/kb/structure');

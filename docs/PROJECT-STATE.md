@@ -1379,11 +1379,22 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   `loadHoursCatalog`, which is on the SLA sweep, assignment, the nightly rollup
   and the widget's open/closed check. Dropping in the same release would have
   taken all of that down for the length of the deploy window. Drop them once
-  the worker and crons are confirmed on a build that no longer reads them; the
-  columns default to `''`, so nothing has to be written to them in the
-  meantime. Both tables were empty in production when 0025 was written
-  (`select count(*)` on each, 2026-09-04), so there is no content in the old
-  columns to move — check that again before dropping rather than assuming it.
+  the worker and crons are confirmed on a build that no longer reads them, and
+  take the two writers below out in the same commit.
+
+  **They are written, and the sentence that used to be here said they need not
+  be.** "The columns default to `''`, so nothing has to be written to them in
+  the meantime" is true of the rows that existed and false of every row created
+  since: a canned response added after the migration reached the still-old
+  worker as an empty body, which it sends. So `saveCannedResponse` and
+  `saveHoliday` fill the superseded column from whichever language was written,
+  Arabic first. A window where only one side is written is not an expand phase,
+  it is the contract phase arriving early for anything new.
+
+  Both tables were empty in production when 0025 was written and still were on
+  2026-09-05 (`select count(*)` on each), which is the only reason this cost
+  nothing. `db/sql/004_bilingual_backfill.sql` moves the content anyway, because
+  staging and any future environment will not be empty — see §6.60.
 
 - **`contacts.locale` is never written, so every contact reads `'en'`.** All
   6,244 of them sit at the column default, and `lib/contacts/merge.ts` already
@@ -3243,6 +3254,33 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     have caught this — it was reporting the truth — and neither could
     `updated_at > created_at`, because the statement resetting the fixtures
     fires the same trigger. Diff every timestamp across the run.
+
+60. **Splitting a column into a bilingual pair is silent data loss until
+    something copies it across.** _2026-09-05, review of #137._ Migration 0025
+    added `canned_responses.body_{html,text}_{ar,en}` and
+    `holidays.name_{ar,en}` as `text NOT NULL DEFAULT ''` — the only shape an
+    `ADD COLUMN` on a live table can take — and the new read paths look at the
+    new columns only. Nothing copied the old ones. So every row that existed
+    before the migration read as having no body and no name at all:
+    `availableLocales` answers `[]`, the composer's picker lists a response and
+    inserts nothing when it is chosen, and `sendCannedReply` logs "references a
+    canned response with no body" and returns, so every automation rule that
+    replies stops replying. No error surfaces anywhere a person looks.
+
+    It reached `main` green because both tables are empty in production, which
+    is also why it cost nothing: the CI `database` job proves `db/sql` replays
+    idempotently against an _empty_ database, and a backfill is the one thing an
+    empty database cannot test. The fix is `db/sql/004_bilingual_backfill.sql`
+    plus a CI step that seeds a pre-split row before replaying — assert the
+    content moved, moved to the right language, and did not move again.
+
+    The second half is the same trap from the other end. `db/schema/config.ts`
+    keeps the superseded columns for one release because the worker and the four
+    crons deploy separately from the service that runs the migration and the old
+    code still selects them — but the new write path had stopped filling them,
+    so a row created after the migration was `''` to the old reader. An
+    expand/contract window only holds if both sides are written for its whole
+    length.
 
 ## 7. Verification already done
 
