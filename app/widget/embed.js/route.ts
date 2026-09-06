@@ -171,7 +171,12 @@ export async function GET() {
   // being set: a host page's own \`img\` rules cannot squash it. And
   // \`pointer-events\` off, so every click lands on the button, never on its
   // contents.
-  mark.style.cssText = 'width:30px;height:auto;display:block;pointer-events:none';
+  //
+  // 36 of the button's 56, and the wingspan is what caps it: the bird is drawn
+  // to its own bounding box with no padding of its own, so past this the tips
+  // reach into the corner radii and the mark reads as cropped rather than as
+  // large.
+  mark.style.cssText = 'width:36px;height:auto;display:block;pointer-events:none';
 
   /*
    * The mark is the only thing in the button, so a request that fails leaves a
