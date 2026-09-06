@@ -1,6 +1,7 @@
 import { env } from '@/lib/env';
 import { commentRequest, type CommentOperation } from './comments';
 import { type MetaConnection, metaConnection } from './connection';
+import { directMessageRequest } from './send';
 import type { MetaPlatform } from './types';
 
 /**
@@ -273,10 +274,16 @@ export type SendMessageResult = { messageId: string | null; recipientId: string 
 /**
  * Sends a direct message.
  *
- * `tag` is what keeps a reply legal outside the 24-hour window: HUMAN_AGENT
- * says a person is answering, which is the whole premise of this product, and
- * is valid for seven days. Sending without it outside the window is rejected
- * rather than queued.
+ * `tag` is what keeps a reply legal outside the 24-hour window: HUMAN_AGENT says
+ * a person is answering, which is the whole premise of this product, and is
+ * valid for seven days. Sending without it outside the window is rejected rather
+ * than queued — and it may only be asked for on a message a person actually
+ * wrote, which `messagingTag` decides and this function trusts.
+ *
+ * The body itself comes from `lib/meta/send.ts`, where the two platforms'
+ * shapes are written down and tested, for the same reason the comment requests
+ * live in `lib/meta/comments.ts`: Graph refuses a wrong-shaped body with a
+ * sentence that names nothing, so the shape cannot be checked from a response.
  */
 export async function sendDirectMessage(input: {
   platform: MetaPlatform;
@@ -284,13 +291,7 @@ export async function sendDirectMessage(input: {
   text: string;
   tag: 'RESPONSE' | 'HUMAN_AGENT';
 }): Promise<SendMessageResult> {
-  const body: Record<string, unknown> = {
-    recipient: { id: input.recipientId },
-    message: { text: input.text },
-    messaging_type: input.tag === 'HUMAN_AGENT' ? 'MESSAGE_TAG' : 'RESPONSE',
-  };
-
-  if (input.tag === 'HUMAN_AGENT') body.tag = 'HUMAN_AGENT';
+  const body = directMessageRequest(input);
 
   const result = await graph<{ message_id?: string; recipient_id?: string }>(
     input.platform,
