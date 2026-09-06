@@ -296,6 +296,15 @@ already cost a customer channel:
   vocabulary — §6.35. The referral webhook field is the smallest instance:
   Instagram spells it `messaging_referral` and the Page `messaging_referrals`,
   and Graph rejects the whole field list rather than the one bad name.
+- **An App Review _feature_ is not a permission, and nothing here can check
+  one.** A feature — Human Agent, Business Asset User Profile Access — is
+  granted to the _app_, appears in no token's `scopes`, and is **not** covered by
+  a role on the app the way a permission is at Standard Access. So
+  `check_meta_permissions` reporting every capability granted says nothing about
+  it, and the App Dashboard's usage counter for one cannot leave zero before the
+  grant: a call stopped at the capability gate is never counted against the
+  feature it was stopped by. `FEATURES` in `lib/meta/capabilities.ts` lists the
+  ones this system depends on so the job can name what it did not check — §6.61.
 
 **`HUMAN_AGENT` may only be put on a message a person actually wrote.** The tag
 is Meta's Human Agent feature and its allowed usage is a human agent answering
