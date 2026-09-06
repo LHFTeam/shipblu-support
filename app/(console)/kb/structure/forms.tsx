@@ -3,8 +3,7 @@
 import { useActionState, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Button, ErrorText, Input, Label, Select } from '@/components/ui';
-import { ROLES_BY_SENIORITY } from '@/lib/auth/permissions';
-import { FLOOR_LABELS } from '@/lib/kb/floors';
+import { FLOOR_LABELS, SELECTABLE_FLOORS } from '@/lib/kb/floors';
 import { createCategory, createFolder, type KbState } from '../actions';
 
 const INITIAL: KbState = { error: null };
@@ -122,7 +121,15 @@ function AudienceFields() {
           <Label htmlFor="folderMinRole">Who on the team</Label>
           <Select id="folderMinRole" name="minRole" defaultValue="">
             <option value="">Everyone on the team</option>
-            {ROLES_BY_SENIORITY.map((role) => (
+            {/*
+              `SELECTABLE_FLOORS`, the same list the article editor offers and
+              the same one `parseMinRole` accepts. Listing every role instead put
+              "Agents and up" on this picker: a value the action refuses outright
+              — `agent` is a floor every read model reports as none — so choosing
+              the first thing under the default answered "Unknown minimum role"
+              and created no folder at all.
+            */}
+            {SELECTABLE_FLOORS.map((role) => (
               <option key={role} value={role}>
                 {FLOOR_LABELS[role]}
               </option>

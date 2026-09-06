@@ -577,6 +577,18 @@ once it is wrong:
   that fires first makes the away state unreachable. `lib/presence/idle.ts` is
   the single copy of every one of these decisions and the only part with tests,
   because the sweep, the endpoint and the browser all have to answer identically.
+- **The away timer measures the person; the sign-out measures the session, and
+  the browser must not measure it for itself.** The console reports at most once
+  a minute, so `sessions.last_activity_at` is routinely a whole beat behind the
+  last key — and the countdown before a sign-out is itself only a minute long. A
+  browser counting from its own last keypress therefore warns up to a minute
+  after the deadline it is warning about: "Stay signed in" posts to a session
+  `getSessionAgent()` has already deleted, and the unsent reply the countdown
+  exists to protect goes with it. So `AgentActivity` anchors on
+  `SessionAgent.sessionIdleForMs` — a duration, not an instant, because the two
+  machines' clocks need not agree — and moves it only on a beat the server
+  accepted. `idleTick` takes both clocks and is where which one answers which
+  question is stated and tested.
 - **Switching a timer on must not act retroactively.** Nothing beats while the
   windows are off, so the moment an admin enables the sign-out every session in
   the table is already older than it — the first sweep would destroy the lot,

@@ -56,6 +56,10 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
         accepting={agent.isAcceptingTickets}
         awayAfterMins={policy.autoAwayAfterMins}
         signoutAfterMins={policy.autoSignoutAfterMins}
+        // The server's own measurement of this session, so the countdown in the
+        // browser runs to the same deadline `getSessionAgent()` enforces rather
+        // than to one up to a beat interval later.
+        sessionIdleForMs={agent.sessionIdleForMs}
         warningLeadMs={warningLeadMs(policy)}
       />
 

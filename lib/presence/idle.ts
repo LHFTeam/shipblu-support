@@ -222,6 +222,77 @@ export function warningLeadMs(policy: PresencePolicy): number {
 }
 
 /**
+ * The two clocks the console's timer runs against, as durations.
+ *
+ * Durations rather than instants because one of them is not this machine's to
+ * measure: `session` is how idle the *server* holds this session to be, and a
+ * browser handed an instant would compare it against a clock that need not
+ * agree. A duration survives the difference.
+ */
+export type IdleClocks = {
+  /**
+   * Since the last beat the server accepted — which is what
+   * `sessions.last_activity_at` holds, and therefore the only thing the
+   * inactivity sign-out is ever decided on.
+   */
+  sessionMs: number;
+  /** Since the last key, pointer or scroll this tab saw. */
+  inputMs: number;
+};
+
+/** What the browser should do this tick. Latches are the caller's. */
+export type IdleAction = {
+  /** The session is over; leave, and say why. */
+  signOut: boolean;
+  /** Put the countdown up. */
+  warn: boolean;
+  /** What it should say, in milliseconds. */
+  remainingMs: number;
+  /** Tell the server nobody is here. */
+  reportIdle: boolean;
+};
+
+/**
+ * Which timer has come due, given both clocks.
+ *
+ * Here rather than inside `components/agent-activity.tsx` for the reason the
+ * whole module is here — three parties have to agree — and because the thing
+ * that went wrong is not arithmetic but *which clock answers which question*,
+ * which is exactly what a signature can state and a test can hold.
+ *
+ * **The sign-out reads `sessionMs`; the away report reads `inputMs`.** They are
+ * not interchangeable and the gap between them is a whole beat interval: the
+ * console reports at most once a minute, so the server's clock is routinely up
+ * to sixty seconds behind the last key. Running the countdown off `inputMs` puts
+ * the warning up to a minute after the deadline it is warning about — and the
+ * warning is itself only a minute long, so "Stay signed in" would post to a
+ * session `getSessionAgent()` had already deleted, and the half-written reply in
+ * the box would go with it. That is the exact loss the countdown exists to
+ * prevent, so the countdown is measured on the server's clock even though the
+ * away report, which is a claim about the person, is not.
+ *
+ * The caller owns the latches — a warning already on screen, an idle report
+ * already sent — because those are facts about this tab rather than about time.
+ */
+export function idleTick(
+  clocks: IdleClocks,
+  windows: { signoutMs: number | null; awayMs: number | null; warningLeadMs: number },
+): IdleAction {
+  const { signoutMs, awayMs } = windows;
+
+  const signOut = signoutMs !== null && clocks.sessionMs >= signoutMs;
+
+  return {
+    signOut,
+    // Never alongside the sign-out: a dialog raised in the same tick it becomes
+    // moot flashes up as the page navigates away.
+    warn: !signOut && signoutMs !== null && clocks.sessionMs >= signoutMs - windows.warningLeadMs,
+    remainingMs: signoutMs === null ? 0 : Math.max(0, signoutMs - clocks.sessionMs),
+    reportIdle: awayMs !== null && clocks.inputMs >= awayMs,
+  };
+}
+
+/**
  * The problem with a pair of windows, or null when they are usable.
  *
  * Returned as a message rather than thrown: the caller is a settings form, and
