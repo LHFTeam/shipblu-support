@@ -61,12 +61,8 @@ export function explainMetaSendError(error: MetaApiError, context: MetaSendConte
   if (error.code === ACCESS_TOKEN_CODE)
     return withReference(explainAuthError(error.code, base), error, context.connection);
 
-  if (isUnspecified(error) && context.sendKind === 'dm' && context.tag === 'HUMAN_AGENT') {
-    return withReference(
-      `${base}\n\n${humanAgentExplanation(context.platform)}`,
-      error,
-      context.connection,
-    );
+  if (context.sendKind === 'dm' && context.tag === 'HUMAN_AGENT' && isHumanAgentRefusal(error)) {
+    return withReference(`${base}\n\n${humanAgentExplanation(context)}`, error, context.connection);
   }
 
   /*
@@ -151,6 +147,36 @@ export function explainMetaSendError(error: MetaApiError, context: MetaSendConte
 
 function isUnspecified(error: MetaApiError): boolean {
   return error.code === null || UNSPECIFIED_CODES.has(error.code);
+}
+
+/**
+ * Graph refused the tag rather than the message.
+ *
+ * Two shapes, and only the second has ever arrived. #49 wrote this branch for
+ * the unspecified refusal — code 1 or 2, "An unknown error has occurred." —
+ * because that is what the 2026-08-20 send died of, and keyed the branch on
+ * *that* and nothing else. The real refusal, read out of production on
+ * 2026-09-06, is `10 / HTTP 403` **naming the feature in the message**:
+ *
+ *   To use 'Human Agent', your use of this endpoint must be reviewed and
+ *   approved by Facebook.
+ *
+ * So the sentence written to explain this failure did not print on the one
+ * occasion it was needed — the third time in this file that a diagnostic keyed
+ * on a guessed code has been silent exactly when it mattered (§6.27, §6.34).
+ * Matched on the feature's name here, not on 10 alone: that code is how Graph
+ * refuses an app on any edge, and claiming Human Agent for all of them would be
+ * the same mistake pointed the other way. A refusal that names a different rule
+ * — "This message is sent outside of allowed window" — still falls through to
+ * its own words.
+ */
+const HUMAN_AGENT_CODE = 10;
+const HUMAN_AGENT_NAMED = /human[ _-]?agent/i;
+
+function isHumanAgentRefusal(error: MetaApiError): boolean {
+  if (isUnspecified(error)) return true;
+  if (error.code !== HUMAN_AGENT_CODE) return false;
+  return HUMAN_AGENT_NAMED.test(`${error.message} ${error.userMessage ?? ''}`);
 }
 
 /**
@@ -557,19 +583,42 @@ function cameFromGraph(error: MetaApiError): boolean {
  * choosing it: they answer a ticket the next working day and the send quietly
  * changes shape underneath them.
  */
-function humanAgentExplanation(platform: MetaPlatform): string {
-  const product = platform === 'instagram' ? 'Instagram' : 'Messenger';
+function humanAgentExplanation(context: MetaSendContext): string {
+  const product = context.platform === 'instagram' ? 'Instagram' : 'Messenger';
+
+  /*
+    Which submission has to carry the approval, which is the half an agent
+    cannot work out from Meta's sentence.
+
+    Human Agent is one feature name in the App Dashboard, but the app is
+    connected to Instagram twice and a grant is a property of the connection —
+    so an approval sitting on the Page connection does nothing for a send that
+    went out over `graph.instagram.com`. §6.35's rule, applied to App Review
+    rather than to a doc example.
+  */
+  const submission =
+    context.connection === 'instagram_login'
+      ? `the **Instagram API with Instagram Login** submission — the one whose permissions ` +
+        `are spelled \`instagram_business_*\`. An approval on the Page connection is a ` +
+        `different grant and does not reach this host`
+      : `the submission covering this Page`;
 
   return (
-    `This reply went out more than 24 hours after the customer's last message, ` +
-    `so it was tagged HUMAN_AGENT — the only way to answer inside the 7-day ` +
-    `window. ${product} refused it without naming a reason, which is what it ` +
-    `returns when the Meta app is not approved for the Human Agent feature: ` +
-    `that one needs App Review and business verification, and until it is ` +
-    `granted every reply between 24 hours and 7 days fails this way while ` +
-    `replies inside 24 hours keep working. Check Human Agent under App Review ` +
-    `for the Meta app. If it is already approved, nothing sends until the ` +
-    `customer messages again and reopens the 24-hour window.`
+    `Sent more than 24 hours after the customer's last message, so it was tagged HUMAN_AGENT — ` +
+    `the only way to answer inside the 7 days. Graph named the feature back, which it can only ` +
+    `do after reading the tag: the request is shaped right and nothing here will fix it.\n\n` +
+    `Human Agent is a **feature**, not a permission — it is not in the token's scope list, so ` +
+    `\`check_meta_permissions\` cannot see it and a clean run there says nothing about it. It ` +
+    `needs App Review and business verification, and Meta warns that Standard Access — the ` +
+    `level a role on the app buys — does not reliably cover one: "some features might not work ` +
+    `properly until your app has been granted Advanced Access". Testing from an account you ` +
+    `own is not the exemption it is for permissions.\n\n` +
+    `Check Human Agent under App Review on ${submission}. The dashboard's counter for the ` +
+    `feature stays at 0 meanwhile — a call stopped at the capability gate is never counted ` +
+    `against it — so that zero is this refusal restated, not a second fault.\n\n` +
+    `Every ${product} reply between 24 hours and 7 days fails this way until it is granted, ` +
+    `while replies inside 24 hours keep working. If it is already approved, nothing sends ` +
+    `until the customer writes again and reopens the 24-hour window.`
   );
 }
 

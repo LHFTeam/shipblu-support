@@ -1053,31 +1053,66 @@ shipblu.com` still serves Freshdesk, so each one took a reader out of this
   and have somebody on it reply. If all three are eaten the reply opens a new
   customer ticket instead, which is visible immediately: the mail lands in the
   inbox as a new ticket from a hub address rather than on the thread.
-- **Meta's Human Agent feature, which nothing has confirmed is approved.** A
+- **Meta's Human Agent feature is not approved. Confirmed 2026-09-06, and it is
+  the whole 24-hour-to-7-day path.** _Was a hypothesis; is now a reading._ A
   Facebook or Instagram reply sent more than 24 hours after the customer's last
-  message goes out tagged `HUMAN_AGENT`, and that tag requires the Human Agent
-  permission to be approved for the app **and the business to be verified**. On
-  2026-08-20 one such send failed eight times and died in the queue, and Graph's
-  only account of why was "An unknown error has occurred." #49 made that refusal
-  explain itself and named this as the likely cause, but **the diagnosis is a
-  hypothesis and the permission has never been checked** — nobody has looked at
-  the app's review status in the Meta dashboard. If it is not approved then every
-  FB/IG reply outside 24 hours fails, which on a support channel is most of them.
-  Check the dashboard before the channels are turned on, not after. This is the
-  one item on this list that no amount of code can settle.
+  message goes out tagged `HUMAN_AGENT`, and Graph now refuses it by name:
 
-  **There is now a second candidate for that refusal, and it is cheaper to rule
-  out.** The failed send was Instagram, and the body carried
-  `messaging_type: MESSAGE_TAG` — the Messenger shape. `messaging_type` is not a
-  parameter of the Instagram send on either connection: neither Instagram
-  reference lists it. `lib/meta/send.ts` now omits it from the **tagged**
-  Instagram body only. The in-window body is untouched and still carries
-  `messaging_type: RESPONSE`, because that is the channel's live traffic and it
-  works — and with `INSTAGRAM_ACCESS_TOKEN` unset it goes out over the Page
-  connection to `graph.facebook.com`, where the parameter is documented as part
-  of every send. Stripping it there on the strength of a doc page naming a
-  different host would risk every in-window reply to fix a send that has never
-  worked. Approval remains the likelier explanation and remains unchecked.
+  > To use 'Human Agent', your use of this endpoint must be reviewed and
+  > approved by Facebook.
+
+  `code 10, HTTP 403, trace AGtVAa9LUPmavPjHJ07bX3x, via graph.instagram.com`,
+  on message `308729d0-4a39-4af4-bdff-5cca1b1c017f` — a deliberate test send
+  6d15h after the customer's last message, so inside the seven days and outside
+  the twenty-four hours. That closes the item this list carried since 2026-08-20
+  as "a hypothesis, and the permission has never been checked": the feature is
+  not approved, and until it is, every FB/IG reply between 24 hours and 7 days
+  fails this way while replies inside 24 hours keep working — on a support
+  channel that is most of them. What is missing is the approval on the
+  **Instagram Login** submission, the connection the send is routed over, whose
+  permissions are spelled `instagram_business_*`; an approval on the Page
+  connection is a different grant and does not reach that host.
+
+  **It also retires the request-shape candidate.** The 2026-08-20 refusal named
+  nothing, so the Messenger-shaped body — `messaging_type: MESSAGE_TAG` on an
+  Instagram send — was a live second explanation, and `lib/meta/send.ts` was
+  written to drop it. This refusal was produced by that same body, and Graph
+  still named the feature: it can only do that after parsing `tag`, so the
+  parameter was not stopping the request from being understood. `send.ts` stays
+  as it is — it is right on the documentation either way, which is the reason
+  given for it there — but it is not what was failing.
+
+  Two things that look like counter-evidence and are not, both of which cost
+  time on 2026-09-06:
+
+  - **A role on the app is not the exemption here.** It is for a _permission_;
+    Human Agent is a _feature_, and Meta's own note on Standard Access is "some
+    features might not work properly until your app has been granted Advanced
+    Access." The feature reference adds that it "requires successful completion
+    of the App Review process" and "is only available with business
+    verification". So testing from an account you own does not route around it.
+    One thing left to rule out before concluding it is _only_ the approval: the
+    Instagram messaging guide requires a tester to hold a role on the app **and**
+    on the Instagram professional account, and the account that sent the inbound
+    DM is a different identity from the Facebook user holding the app role.
+  - **The dashboard's call counter for the feature sits at 0, and must.** A call
+    stopped at the capability gate never reaches the feature, so it is never
+    counted against it — the same reading recorded for Business Asset User
+    Profile Access below. That zero is this refusal restated, not a second
+    fault.
+
+  Corroboration that the credential and the route are sound: an Instagram
+  private reply went out over the same host and the same token four days earlier
+  (`72584c00-93ba-42be-8d4c-de3bc149139a`, `sent`).
+
+  What Meta documents, read from the live pages rather than from memory: message
+  tags are written up on the **Messenger Platform** Send API
+  (`graph.facebook.com/<PAGE_ID>/messages`), and the Instagram API with Instagram
+  Login messaging guide documents only `recipient` and `message` — it describes
+  the human-agent case in prose and gives no parameter for it. The feature is
+  nonetheless listed for _both_ login types on the Instagram App Review page, and
+  the 403 proves `graph.instagram.com` reads the tag. So it is supported and
+  ungranted, not unsupported.
 
   **Two things about the tag are settled in code and no longer need watching.**
   It can only be put on a message a person wrote — `send_meta` reads
@@ -3333,6 +3368,41 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     so a row created after the migration was `''` to the old reader. An
     expand/contract window only holds if both sides are written for its whole
     length.
+
+61. **An App Review _feature_ is invisible to every check this system makes, and
+    a role on the app does not exempt it.** _2026-09-06, testing the human agent
+    tag on Instagram._ Two gates share one refusal code and almost one sentence,
+    and only one of them is a permission:
+
+    |                                         | permission                           | feature            |
+    | --------------------------------------- | ------------------------------------ | ------------------ |
+    | e.g.                                    | `instagram_business_manage_messages` | Human Agent        |
+    | granted to                              | the token                            | the app            |
+    | visible in `debug_token`                | yes, in `scopes`                     | **never**          |
+    | a role on the app covers it             | yes, at Standard Access              | **no**             |
+    | dashboard call counter before the grant | moves                                | **cannot leave 0** |
+
+    Every column of the right-hand side was assumed to read like the left one.
+    `check_meta_permissions` reports on `scopes`, so it printed "every capability
+    is granted" — truthfully — while the app was refused; the counter sitting at
+    0 was read as a second, separate fault when it is the same fact seen from the
+    dashboard; and "I have a role on the app" was taken as the exemption it is
+    for a permission. `FEATURES` in `lib/meta/capabilities.ts` now holds the ones
+    this system depends on and the job prints them as _not checked_, which is the
+    only honest thing it can say about a gate a token cannot describe.
+
+    **The diagnostic written for this refusal did not fire, for the third time in
+    the same file.** `humanAgentExplanation` had been keyed on codes 1 and 2 —
+    the shape of the 2026-08-20 failure, which is the shape Graph uses when it
+    declines to say anything. The real refusal is `10` _with the feature named in
+    the message_, so it fell through to Meta's own sentence and none of the
+    context above. §6.27 and §6.34 are the same mistake on `fetch_meta_profile`
+    and on comment moderation. The rule that keeps being relearned: **key a
+    refusal branch on something read out of a log, and when the log finally
+    arrives, go back and widen the branch** — a matcher built from the documented
+    shape is silent exactly when it is needed. It now matches the feature's name
+    rather than code 10 alone, because 10 is how Graph refuses an app on any
+    edge.
 
 ## 7. Verification already done
 

@@ -1,6 +1,6 @@
 import { env, metaAppSecret } from '@/lib/env';
-import { diagnoseCapabilities, requiredScopes } from '@/lib/meta/capabilities';
-import { instagramLoginConfigured } from '@/lib/meta/connection';
+import { FEATURES, diagnoseCapabilities, requiredScopes } from '@/lib/meta/capabilities';
+import { CONNECTION_LABEL, instagramLoginConfigured } from '@/lib/meta/connection';
 
 /**
  * What the live Meta token actually carries, and which capability each gap stops.
@@ -140,8 +140,13 @@ export async function checkMetaPermissions(): Promise<void> {
   const blocked = reports.filter((report) => report.blocked);
 
   if (blocked.length === 0) {
-    console.log('\n[meta:permissions] every Facebook Page capability is granted.');
+    // "Granted" is about the scopes on this token and nothing else. Said that
+    // way round deliberately: the unqualified version of this line is what a
+    // Human Agent refusal reads as a contradiction of, and it is not one — see
+    // `reportFeatures`.
+    console.log('\n[meta:permissions] every Facebook Page capability is granted by this token.');
     await checkInstagramLogin();
+    reportFeatures();
     return;
   }
 
@@ -157,11 +162,42 @@ export async function checkMetaPermissions(): Promise<void> {
     `\n[meta:permissions] ${blocked.length} capability(s) blocked. These are grants, not ` +
       `approvals: re-run the authorisation with the permission in its scope list. Standard ` +
       `Access already covers an app admin, developer or tester on assets they administer, so ` +
-      `App Review is only needed to reach the general public.`,
+      `App Review is only needed to reach the general public — that last part is true of a ` +
+      `permission and not of a feature; see below.`,
   );
   console.warn(`[meta:permissions] full scope list to request: ${requiredScopes().join(',')}`);
 
   await checkInstagramLogin();
+  reportFeatures();
+}
+
+/**
+ * The gates this job cannot check, printed so a clean run above is not read as
+ * a clean bill of health.
+ *
+ * Everything before this line comes from `debug_token`, which describes the
+ * *token*. A feature is a property of the *app*, appears in no scope list, and
+ * is refused with a code that reads exactly like a permission problem — so the
+ * only honest thing this job can do about one is name it and say it did not
+ * check. Silence here is what let a Human Agent refusal sit behind "every
+ * capability is granted" for two weeks.
+ */
+function reportFeatures(): void {
+  console.log(
+    `\n[meta:permissions] not checked above, and not checkable from a token — App Review ` +
+      `**features**. They are a property of the app, so they appear in no scope list, and a ` +
+      `role on the app is not the exemption it is for a permission ("some features might not ` +
+      `work properly until your app has been granted Advanced Access"). Confirm each in the ` +
+      `App Dashboard under App Review:`,
+  );
+
+  for (const feature of FEATURES) {
+    console.log(
+      `[meta:permissions]   ${feature.name} (${CONNECTION_LABEL[feature.connection]}) — ` +
+        `without it, ${feature.symptom}`,
+    );
+    if (feature.refusal) console.log(`[meta:permissions]     refused as: ${feature.refusal}`);
+  }
 }
 
 /**
