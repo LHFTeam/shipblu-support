@@ -134,7 +134,6 @@ export async function GET() {
     'bottom:20px',
     'width:56px',
     'height:56px',
-    'border-radius:28px',
     'border:0',
     'background:#0b6bcb',
     'color:#fff',
@@ -255,6 +254,14 @@ export async function GET() {
    * here too: the reader's eye ends on the other side in Arabic, and a chat
    * button pinned bottom-right of an Arabic page reads as something the site
    * forgot to translate.
+   *
+   * The launcher's own corners are direction-dependent for the same reason, so
+   * they are set here rather than in the style attribute. It is ShipBlu's
+   * speech bubble rather than a disc: three rounded corners and one drawn
+   * almost square, which is the tail. The tail points inwards — bottom-left
+   * against a button parked bottom-right, and mirrored in Arabic — because a
+   * tail aimed at the corner of the viewport points at nothing, and the shape
+   * stops reading as a bubble at all.
    */
   function applyPlacement() {
     var rtl = locale === 'ar';
@@ -262,6 +269,7 @@ export async function GET() {
 
     launcher.style.left = rtl ? '20px' : '';
     launcher.style.right = rtl ? '' : '20px';
+    launcher.style.borderRadius = rtl ? '24px 24px 6px 24px' : '24px 24px 24px 6px';
     badge.style.left = rtl ? '-2px' : '';
     badge.style.right = rtl ? '' : '-2px';
     // Nothing to return to on a full screen, and the panel carries its own

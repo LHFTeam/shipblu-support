@@ -70,19 +70,17 @@ export default async function KbLayout({
             aria-label={t(locale, 'mainNavLabel')}
             className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm sm:ms-auto"
           >
-            <Link
-              href={`/${locale}`}
-              className="hidden font-medium text-[var(--kb-heading)] underline-offset-4 hover:underline sm:inline"
-            >
-              {t(locale, 'knowledgeBase')}
-            </Link>
-
             {/*
               Tracking sits in the header rather than only on the front page,
               because the visitor who wants it most is the one who arrived on an
               article from a search engine and still does not know where their
-              parcel is. Shown at every width, unlike the link above it: on a
-              phone it is the more likely of the two.
+              parcel is.
+
+              It is the only plain link here, and deliberately so: a
+              "Knowledge base" link used to sit beside it, pointing at the same
+              front page the logo immediately to its left already goes to. Two
+              controls a thumb-width apart with one destination is not a second
+              way in — it reads as a nav whose page is missing.
             */}
             <Link
               href={`/${locale}/track`}
