@@ -423,6 +423,18 @@ agent-bound complaints and a leading indicator of inbound volume. That is also
 why there is **no backfill job**: with the bot channel excluded there are 55
 conversations in the entire archive to categorise.
 
+And now **the chat launcher knows the difference between a customer and us.**
+The help centre answers on the console's own hostname, so every agent reading an
+article — which the knowledge panel inside the composer is built to make them do
+— had a blue chat button floating over it, one click from filing a webchat
+ticket into their own queue. `viewerIsTeamMember()` in `lib/widget/audience.ts`
+reads the session rather than the cookie, because a stale cookie hiding the
+launcher would take live chat away from a customer silently and for good, and
+the help layout leaves `ChatWidget` out for anyone the console recognises. Only
+on the pages we render: `embed.js` is cached publicly for five minutes, so a
+merchant's own site cannot be told this without either dropping that cache or
+letting a shared one hand a reader an answer about somebody else.
+
 **The bot channel is live, and everything else is not.** This is the single most
 important thing to understand about the current state, and the easiest to read
 backwards.

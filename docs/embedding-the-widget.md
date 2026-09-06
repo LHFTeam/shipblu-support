@@ -157,6 +157,23 @@ with nothing read yet simply shows no list. Set `locale` correctly and the
 questions arrive in the visitor's language — that is the only thing the host
 page controls here.
 
+## Who the launcher is not drawn for
+
+On the pages this app renders — the help centre, the customer portal, the
+tracking page — the launcher is left out entirely for a reader signed in to the
+agent console. That is a surface the team reads on too, and a chat an agent
+opens against their own queue is a contact and a conversation with nobody
+behind either, in the tables the reports are drawn from.
+`viewerIsTeamMember()` in `lib/widget/audience.ts` is the decision, taken on the
+server, per request.
+
+**A host page of your own gets no such filtering and should not expect any.**
+`embed.js` is one publicly cached response shared by every reader of every site
+carrying it, so it cannot answer differently for one of them. Nothing about
+`/widget` or `/api/widget/*` changes either: an agent who opens the chat from a
+dashboard gets a working chat, because a launcher opening an empty box is the
+worse of the two.
+
 ## What the agent sees
 
 The requester's name, email and phone on the ticket, the shipping account in the
