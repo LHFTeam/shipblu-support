@@ -293,18 +293,45 @@ already cost a customer channel:
   says nothing about a reply sent with the Instagram account's own token.
 - **A Meta doc example proves nothing until you check which host its URL names.**
   The two connections differ in the host, the token, the ids _and_ the field
-  vocabulary — §6.35.
+  vocabulary — §6.35. The referral webhook field is the smallest instance:
+  Instagram spells it `messaging_referral` and the Page `messaging_referrals`,
+  and Graph rejects the whole field list rather than the one bad name.
 
-Graph request shapes are written down in `lib/meta/comments.ts` rather than built
-inline, and asserted there against Meta's reference, because **a wrong shape is
-invisible in the response**: Graph refuses a nonexistent edge with `100
-"Unsupported post request … does not exist, cannot be loaded due to missing
-permissions, or does not support this operation"`, which is word for word what it
-says about a comment the customer deleted. When adding or changing one, read the
-node reference **for the version `GRAPH_VERSION` actually names** — an edge
-missing from it is a finding, not an omission by the doc, and removal notices sit
-on a separate legacy page that a search for the working endpoint will not surface
-(§6.43).
+**`HUMAN_AGENT` may only be put on a message a person actually wrote.** The tag
+is Meta's Human Agent feature and its allowed usage is a human agent answering
+inside seven days; putting it on something the software composed is a false
+statement about work nobody did, and the feature reference is explicit that
+unapproved usage risks messaging restrictions on the app. So `messagingTag(state,
+author)` takes the author as a required argument, `send_meta` derives it from
+`messages.author_agent_id` rather than from the job payload — the column
+recording the person is the only thing that can substantiate the claim — and
+`automatedReplyBlocked` in `lib/tickets/outbound.ts` stops the automation engine
+and the out-of-hours acknowledgement at **24 hours** on `facebook` and
+`instagram`, not at seven days. The seven days belong to a human. The guard is
+shared with WhatsApp's template rule because a guard only one of the two
+automated senders applies is not a guard, and it refuses before the row is
+written: delivery refuses it too, but by then the customer's timeline carries a
+reply that permanently failed.
+
+Graph request shapes are written down in `lib/meta/comments.ts` and
+`lib/meta/send.ts` rather than built inline, and asserted there against Meta's
+reference, because **a wrong shape is invisible in the response**: Graph refuses
+a nonexistent edge with `100 "Unsupported post request … does not exist, cannot
+be loaded due to missing permissions, or does not support this operation"`, which
+is word for word what it says about a comment the customer deleted. When adding
+or changing one, read the node reference **for the version `GRAPH_VERSION`
+actually names** — an edge missing from it is a finding, not an omission by the
+doc, and removal notices sit on a separate legacy page that a search for the
+working endpoint will not surface (§6.43).
+
+The direct-message body splits on the **platform**, which is the one place it is
+not the connection: `messaging_type` is documented for Messenger and is not a
+parameter of the Instagram send at all — not on `graph.facebook.com` and not on
+`graph.instagram.com`. Both Instagram references list `recipient`, `message`,
+`sender_action`, `payload` and `reply_to`, and describe the human agent case as
+tagging the response, so a tag there travels alone. Branching on the connection
+instead would leave the Page-borne half of Instagram sending a Messenger body
+into an Instagram inbox.
 
 A WhatsApp business account's access token is read
 directly from `process.env`, for a different reason: its variable's _name_ is a

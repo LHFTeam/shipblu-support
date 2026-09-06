@@ -1056,14 +1056,45 @@ shipblu.com` still serves Freshdesk, so each one took a reader out of this
 - **Meta's Human Agent feature, which nothing has confirmed is approved.** A
   Facebook or Instagram reply sent more than 24 hours after the customer's last
   message goes out tagged `HUMAN_AGENT`, and that tag requires the Human Agent
-  permission to be approved for the app. On 2026-08-20 one such send failed
-  eight times and died in the queue, and Graph's only account of why was "An
-  unknown error has occurred." #49 made that refusal explain itself and named
-  this as the likely cause, but **the diagnosis is a hypothesis and the
-  permission has never been checked** — nobody has looked at the app's review
-  status in the Meta dashboard. If it is not approved then every FB/IG reply
-  outside 24 hours fails, which on a support channel is most of them. Check the
-  dashboard before the channels are turned on, not after.
+  permission to be approved for the app **and the business to be verified**. On
+  2026-08-20 one such send failed eight times and died in the queue, and Graph's
+  only account of why was "An unknown error has occurred." #49 made that refusal
+  explain itself and named this as the likely cause, but **the diagnosis is a
+  hypothesis and the permission has never been checked** — nobody has looked at
+  the app's review status in the Meta dashboard. If it is not approved then every
+  FB/IG reply outside 24 hours fails, which on a support channel is most of them.
+  Check the dashboard before the channels are turned on, not after. This is the
+  one item on this list that no amount of code can settle.
+
+  **There is now a second candidate for that refusal, and it is cheaper to rule
+  out.** The failed send was Instagram, and the body carried
+  `messaging_type: MESSAGE_TAG` — the Messenger shape. `messaging_type` is not a
+  parameter of the Instagram send on either connection: neither Instagram
+  reference lists it. `lib/meta/send.ts` now builds the body per platform and
+  omits it for Instagram, which is right on the documentation regardless of which
+  cause it was. Approval remains the likelier explanation and remains unchecked.
+
+  **Two things about the tag are settled in code and no longer need watching.**
+  It can only be put on a message a person wrote — `send_meta` reads
+  `messages.author_agent_id`, and the automated senders stop at 24 hours rather
+  than seven days — so a scheduled canned response can no longer be delivered to
+  Meta as human-written work. And the request bodies for both platforms are
+  asserted in unit tests against the node references.
+
+- **A reaction does not reopen the messaging window in this system, and Meta says
+  it should.** `messaging_postbacks`, the referral field and `message_reactions`
+  are now subscribed and parsed, and `applyMetaInteraction` records all three on
+  the ticket timeline. A postback and a referral also move
+  `lastCustomerMessageAt`, so they reopen the 24-hour window as Meta's policy
+  describes. A reaction deliberately does not: that column is also what the
+  next-response SLA target is measured from, so a customer answering a reply with
+  a thumbs-up would be recorded as waiting for us and the agent measured late for
+  not answering it. Closing the gap properly needs a second column —
+  "when did the customer last interact" is a different question from "when did
+  they last ask us something", the same split as `agents.last_seen_at` against
+  `last_input_at` — and the window would read the later of the two. Until then a
+  thread whose only activity in seven days is a reaction is refused a reply, and
+  the customer has to write again.
 
   **There are six dead `send_meta` rows now, not one.** The Instagram
   HUMAN_AGENT one from 2026-08-20, and five Facebook DMs on 23–24 August that
