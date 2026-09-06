@@ -18,7 +18,7 @@ vi.mock('@/db/client', () => ({
 
 vi.mock('@/lib/queue', () => ({ enqueue: mocks.enqueue }));
 
-import { deliverAutomatedReply } from './outbound';
+import { automatedReplyBlocked, deliverAutomatedReply } from './outbound';
 
 describe('deliverAutomatedReply', () => {
   beforeEach(() => {
@@ -71,6 +71,58 @@ describe('deliverAutomatedReply', () => {
     expect(stamp).toBeDefined();
     expect(stamp).not.toBeInstanceOf(Date);
     expect(sqlShape(stamp!.queryChunks!)).toBe('coalesce( first_auto_replied_at ,  ? )');
+  });
+});
+
+const NOW = new Date('2026-08-19T12:00:00Z');
+const ago = (ms: number) => new Date(NOW.getTime() - ms);
+
+const HOUR = 60 * 60 * 1000;
+const DAY = 24 * HOUR;
+
+/**
+ * The guard both automated senders go through. Tested here rather than at each
+ * of them because a guard that only one caller applies is not a guard, and the
+ * automation engine — a cron over every live ticket — is the caller that reaches
+ * the far side of every window.
+ */
+
+describe('automatedReplyBlocked', () => {
+  it('lets an automated reply through inside every window', () => {
+    for (const channel of ['whatsapp', 'facebook', 'instagram']) {
+      expect(automatedReplyBlocked(channel, ago(2 * HOUR), NOW)).toBeNull();
+    }
+  });
+
+  it('stops a Meta reply at 24 hours, not at seven days', () => {
+    // The seven days Meta allows belong to HUMAN_AGENT, and that tag may only be
+    // used for a message a person wrote. So a rule's reach on these channels
+    // ends where the standard window does — three days in, the send would have
+    // to claim a human wrote it.
+    for (const channel of ['facebook', 'instagram']) {
+      expect(automatedReplyBlocked(channel, ago(3 * DAY), NOW)).toContain('HUMAN_AGENT');
+      expect(automatedReplyBlocked(channel, ago(8 * DAY), NOW)).not.toBeNull();
+    }
+  });
+
+  it('stops a WhatsApp reply outside its 24 hours', () => {
+    expect(automatedReplyBlocked('whatsapp', ago(3 * DAY), NOW)).toContain('template');
+  });
+
+  it('stops every windowed channel when the customer has never written', () => {
+    for (const channel of ['whatsapp', 'facebook', 'instagram']) {
+      expect(automatedReplyBlocked(channel, null, NOW)).not.toBeNull();
+    }
+  });
+
+  it('leaves the channels that have no window alone', () => {
+    // Email, the portal and web chat can be written to whenever — an old ticket
+    // is not a closed door there, and blocking one would silence the
+    // acknowledgement on the channel it matters most on.
+    for (const channel of ['email', 'portal', 'webchat']) {
+      expect(automatedReplyBlocked(channel, ago(30 * DAY), NOW)).toBeNull();
+      expect(automatedReplyBlocked(channel, null, NOW)).toBeNull();
+    }
   });
 });
 

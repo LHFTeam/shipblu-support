@@ -89,10 +89,37 @@ export function metaWindowState(
   };
 }
 
-/** What the send path should put on the request. */
-export function messagingTag(state: MetaWindowState): 'RESPONSE' | 'HUMAN_AGENT' | null {
+/**
+ * Who wrote the message being sent.
+ *
+ * Not bookkeeping: it decides whether `HUMAN_AGENT` may be used at all. The tag
+ * is a claim about *this* message — Meta's own words are that it lets a business
+ * "have a human agent respond to user messages" — so putting it on something the
+ * software composed is a false statement to Meta about work nobody did, and the
+ * feature reference is explicit that unapproved usage risks messaging
+ * restrictions on the app. It is not a rule a send path can be trusted to
+ * remember, so it is an argument here instead.
+ */
+export type MetaSendAuthor = 'human' | 'automated';
+
+/**
+ * What the send path should put on the request, or null when it must not send.
+ *
+ * `author` is required rather than defaulted, the same device
+ * `readableByRole(role)` uses: there is no one-argument version to reach by
+ * accident, so a new send path cannot inherit `HUMAN_AGENT` without saying who
+ * it is speaking for.
+ *
+ * Null has two meanings and the caller must tell them apart — the seven days are
+ * gone, or the message is automated and the standard window has closed. Only the
+ * first is about the customer.
+ */
+export function messagingTag(
+  state: MetaWindowState,
+  author: MetaSendAuthor,
+): 'RESPONSE' | 'HUMAN_AGENT' | null {
   if (state.isOpen) return 'RESPONSE';
-  if (state.needsHumanAgentTag) return 'HUMAN_AGENT';
+  if (state.needsHumanAgentTag && author === 'human') return 'HUMAN_AGENT';
   return null;
 }
 

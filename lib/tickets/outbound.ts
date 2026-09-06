@@ -1,7 +1,9 @@
 import { eq, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversationEvents, conversations, messages } from '@/db/schema';
+import { metaWindowState } from '@/lib/meta/window';
 import { enqueue } from '@/lib/queue';
+import { windowState as whatsappWindowState } from '@/lib/whatsapp/window';
 
 /**
  * Putting a message the software wrote in front of the customer.
@@ -20,6 +22,56 @@ import { enqueue } from '@/lib/queue';
  * already went out without any of it counting as a first response. Whether
  * anything gets a usage count still belongs to the caller.
  */
+
+/**
+ * Why this channel will not carry an automated reply right now, or null.
+ *
+ * One function rather than a check at each sender, because the two senders — the
+ * out-of-hours acknowledgement and the automation engine's canned reply — write
+ * through the same door and a guard on one of them is not a guard. The
+ * out-of-hours message is composed moments after the customer wrote and so
+ * almost never trips this; the automation engine runs from a cron every fifteen
+ * minutes over every live ticket, and a "chase after three days" rule reaches
+ * these channels squarely outside the window.
+ *
+ * It refuses *before* the message row exists, which is the point. Delivery
+ * refuses it too — `send_meta` will not tag an automated message `HUMAN_AGENT`
+ * — but by then the customer's timeline carries a reply that permanently failed,
+ * and an agent reading the ticket has to work out that nobody was ever going to
+ * see it.
+ *
+ * The three channels that answer non-null:
+ *
+ *   whatsapp             outside 24 hours only an approved template sends, and
+ *                        an automation has no way to fill one in.
+ *   facebook, instagram  outside 24 hours only `HUMAN_AGENT` sends, and that tag
+ *                        may only be used for a message a person wrote. So the
+ *                        seven days Meta allows are a human's to use, not a
+ *                        rule's, and this closes at 24 hours rather than at
+ *                        seven days.
+ *
+ * Everything else — email, the portal, web chat — has no window at all.
+ */
+export function automatedReplyBlocked(
+  channel: string,
+  lastCustomerMessageAt: Date | null,
+  now: Date = new Date(),
+): string | null {
+  if (channel === 'whatsapp') {
+    return whatsappWindowState(lastCustomerMessageAt, now).isOpen
+      ? null
+      : 'the WhatsApp 24-hour window is closed and only an approved template would send';
+  }
+
+  if (channel === 'facebook' || channel === 'instagram') {
+    return metaWindowState(lastCustomerMessageAt, now).isOpen
+      ? null
+      : 'the 24-hour window is closed, and past it only HUMAN_AGENT sends — a tag ' +
+          'reserved for a message a person wrote';
+  }
+
+  return null;
+}
 
 export type AutomatedReply = {
   conversationId: string;

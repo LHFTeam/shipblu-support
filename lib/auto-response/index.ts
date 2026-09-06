@@ -6,8 +6,7 @@ import { groupHours } from '@/lib/hours/resolve';
 import { holidayName, holidayOn, isWithinBusinessHours, nextOpeningAt } from '@/lib/hours';
 import { textToHtml } from '@/lib/html/sanitize';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
-import { deliverAutomatedReply } from '@/lib/tickets/outbound';
-import { windowState } from '@/lib/whatsapp/window';
+import { automatedReplyBlocked, deliverAutomatedReply } from '@/lib/tickets/outbound';
 import { requesterLocale } from '@/lib/tickets/locale';
 import { pickBody, pickRule, substitute, type AutoResponseRule } from './resolve';
 
@@ -90,11 +89,11 @@ async function send(conversationId: string, at: Date): Promise<void> {
   const inbound = await lastInboundMessage(conversationId);
   if (inbound?.isAutomated) return;
 
-  // Free-form WhatsApp needs the 24-hour window open. The customer's message is
-  // what opened it, so this only fires on a replay of something old — where
-  // sending would fail at Meta and leave a permanently failed message on the
-  // customer's timeline.
-  if (ticket.channel === 'whatsapp' && !windowState(ticket.lastCustomerMessageAt).isOpen) return;
+  // WhatsApp, Facebook and Instagram all need the 24-hour window open for a
+  // message the software wrote. The customer's message is what opened it, so
+  // this only fires on a replay of something old — where sending would fail at
+  // Meta and leave a permanently failed message on the customer's timeline.
+  if (automatedReplyBlocked(ticket.channel, ticket.lastCustomerMessageAt, at)) return;
 
   if (ticket.channel === 'email' && !ticket.contactEmail) return;
 
