@@ -134,7 +134,6 @@ export async function GET() {
     'bottom:20px',
     'width:56px',
     'height:56px',
-    'border-radius:28px',
     'border:0',
     'background:#0b6bcb',
     'color:#fff',
@@ -149,41 +148,54 @@ export async function GET() {
   ].join(';');
 
   /*
-   * The launcher's face.
+   * The launcher's face: a speech bubble with two lines of text in it.
    *
-   * An <img> rather than the 💬 emoji this used to be. An emoji is drawn by
-   * whatever font the visitor's own device supplies, so the button was Apple's
-   * blue speech bubble on an iPhone, Segoe's outline on Windows and something
-   * else again on Android — three products, none of them ShipBlu, on the one
-   * control that is supposed to say whose support this is.
+   * Not the 💬 emoji this started as. An emoji is drawn by whatever font the
+   * visitor's own device supplies, so the button was Apple's blue speech bubble
+   * on an iPhone, Segoe's outline on Windows and something else again on
+   * Android — three products, none of them ShipBlu, on the one control that is
+   * supposed to say whose support this is.
    *
-   * Served from /widget/ rather than anywhere else under public/, and that is
-   * load-bearing rather than tidy: \`/widget\` is already the one prefix
-   * \`proxy.ts\` lets through without a session *and* leaves unrewritten on the
-   * help-centre hostname. An asset one directory to the side would redirect a
-   * visitor on a merchant's site to /login, and 404 under /help on the custom
-   * domain.
+   * And marked up rather than fetched, which the \`<img>\` it replaces could not
+   * be. That request went out cross-origin from the merchant's page, so a
+   * strict \`img-src\` on their side blocked it and a bad network dropped it —
+   * and the launcher then fell back to the very emoji the mark exists to avoid.
+   * An element in the document is subject to no \`img-src\` policy and makes no
+   * request, so the face cannot fail to arrive and there is no fallback left to
+   * need. That was the only thing under \`public/\`, which is now gone with it.
+   *
+   * One path, wound so that \`evenodd\` cuts the two lines out as holes rather
+   * than painting them in a second copy of the button's blue. Restyle the
+   * button and the glyph follows it; a hard-coded #0b6bcb in here would go on
+   * showing the old colour in two slots nobody would think to look at.
    */
-  var markFailed = false;
-  var mark = document.createElement('img');
-  mark.src = BASE + '/widget/logomark-white.png';
-  mark.alt = '';
-  // The mark is wider than it is tall, so height follows width rather than
-  // being set: a host page's own \`img\` rules cannot squash it. And
+  var SVG_NS = 'http://www.w3.org/2000/svg';
+  var mark = document.createElementNS(SVG_NS, 'svg');
+  // Both dimensions, in the viewBox's own 3:2. Width alone leaves the height to
+  // SVG2's intrinsic sizing, which an older browser answers with 150px — and
+  // this file is the one thing on the page that has to render on all of them.
+  mark.setAttribute('viewBox', '0 0 24 16');
+  mark.setAttribute('width', '24');
+  mark.setAttribute('height', '16');
+  // The button already carries the label; the glyph would only repeat it. And
+  // \`focusable\` because legacy Edge makes an <svg> a tab stop otherwise, which
+  // would put a stop with nothing in it inside the button.
+  mark.setAttribute('aria-hidden', 'true');
+  mark.setAttribute('focusable', 'false');
   // \`pointer-events\` off, so every click lands on the button, never on its
   // contents.
-  mark.style.cssText = 'width:30px;height:auto;display:block;pointer-events:none';
+  mark.style.cssText = 'display:block;pointer-events:none';
 
-  /*
-   * The mark is the only thing in the button, so a request that fails leaves a
-   * blank blue disc with no hint that it opens anything. The emoji is the worse
-   * mark and the better fallback: it needs nothing from the network, which is
-   * the one thing that has just gone wrong.
-   */
-  mark.addEventListener('error', function () {
-    markFailed = true;
-    paintLauncher();
-  });
+  var markPath = document.createElementNS(SVG_NS, 'path');
+  markPath.setAttribute('fill', '#fff');
+  markPath.setAttribute('fill-rule', 'evenodd');
+  markPath.setAttribute(
+    'd',
+    'M4.5,0H19.5A4.5,4.5 0 0 1 24,4.5V11.5A4.5,4.5 0 0 1 19.5,16H4.5A4.5,4.5 0 0 1 0,11.5V4.5A4.5,4.5 0 0 1 4.5,0Z' +
+      'M5.2,4.9H18.8A1.2,1.2 0 0 1 18.8,7.3H5.2A1.2,1.2 0 0 1 5.2,4.9Z' +
+      'M5.2,8.7H13.8A1.2,1.2 0 0 1 13.8,11.1H5.2A1.2,1.2 0 0 1 5.2,8.7Z'
+  );
+  mark.appendChild(markPath);
 
   var closeGlyph = document.createElement('span');
   closeGlyph.textContent = '✕';
@@ -213,9 +225,7 @@ export async function GET() {
    */
   function paintLauncher() {
     while (launcher.firstChild) launcher.removeChild(launcher.firstChild);
-    if (open) launcher.appendChild(closeGlyph);
-    else if (markFailed) launcher.appendChild(document.createTextNode('💬'));
-    else launcher.appendChild(mark);
+    launcher.appendChild(open ? closeGlyph : mark);
     launcher.appendChild(badge);
   }
 
@@ -255,6 +265,14 @@ export async function GET() {
    * here too: the reader's eye ends on the other side in Arabic, and a chat
    * button pinned bottom-right of an Arabic page reads as something the site
    * forgot to translate.
+   *
+   * The launcher's own corners are direction-dependent for the same reason, so
+   * they are set here rather than in the style attribute. It is ShipBlu's
+   * speech bubble rather than a disc: three rounded corners and one drawn
+   * almost square, which is the tail. The tail points inwards — bottom-left
+   * against a button parked bottom-right, and mirrored in Arabic — because a
+   * tail aimed at the corner of the viewport points at nothing, and the shape
+   * stops reading as a bubble at all.
    */
   function applyPlacement() {
     var rtl = locale === 'ar';
@@ -262,6 +280,7 @@ export async function GET() {
 
     launcher.style.left = rtl ? '20px' : '';
     launcher.style.right = rtl ? '' : '20px';
+    launcher.style.borderRadius = rtl ? '24px 24px 6px 24px' : '24px 24px 24px 6px';
     badge.style.left = rtl ? '-2px' : '';
     badge.style.right = rtl ? '' : '-2px';
     // Nothing to return to on a full screen, and the panel carries its own
