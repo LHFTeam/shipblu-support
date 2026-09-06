@@ -167,7 +167,7 @@ export async function GET() {
    * One path, wound so that \`evenodd\` cuts the two lines out as holes rather
    * than painting them in a second copy of the button's blue. Restyle the
    * button and the glyph follows it; a hard-coded #0b6bcb in here would go on
-   * showing the old colour in two 13x2 slots nobody would think to look at.
+   * showing the old colour in two slots nobody would think to look at.
    */
   var SVG_NS = 'http://www.w3.org/2000/svg';
   var mark = document.createElementNS(SVG_NS, 'svg');
@@ -192,8 +192,8 @@ export async function GET() {
   markPath.setAttribute(
     'd',
     'M4.5,0H19.5A4.5,4.5 0 0 1 24,4.5V11.5A4.5,4.5 0 0 1 19.5,16H4.5A4.5,4.5 0 0 1 0,11.5V4.5A4.5,4.5 0 0 1 4.5,0Z' +
-      'M6.7,4.9H17.3A1.2,1.2 0 0 1 17.3,7.3H6.7A1.2,1.2 0 0 1 6.7,4.9Z' +
-      'M6.7,8.7H13.3A1.2,1.2 0 0 1 13.3,11.1H6.7A1.2,1.2 0 0 1 6.7,8.7Z'
+      'M5.2,4.9H18.8A1.2,1.2 0 0 1 18.8,7.3H5.2A1.2,1.2 0 0 1 5.2,4.9Z' +
+      'M5.2,8.7H13.8A1.2,1.2 0 0 1 13.8,11.1H5.2A1.2,1.2 0 0 1 5.2,8.7Z'
   );
   mark.appendChild(markPath);
 
