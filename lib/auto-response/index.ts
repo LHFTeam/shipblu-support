@@ -6,8 +6,7 @@ import { groupHours } from '@/lib/hours/resolve';
 import { holidayName, holidayOn, isWithinBusinessHours, nextOpeningAt } from '@/lib/hours';
 import { textToHtml } from '@/lib/html/sanitize';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
-import { deliverAutomatedReply } from '@/lib/tickets/outbound';
-import { windowState } from '@/lib/whatsapp/window';
+import { automatedReplyBlocked, deliverAutomatedReply } from '@/lib/tickets/outbound';
 import { requesterLocale } from '@/lib/tickets/locale';
 import { pickBody, pickRule, substitute, type AutoResponseRule } from './resolve';
 
@@ -35,6 +34,7 @@ type Ticket = {
   isSpam: boolean;
   deletedAt: Date | null;
   lastCustomerMessageAt: Date | null;
+  externalId: string | null;
   autoRespondedAt: Date | null;
   contactEmail: string | null;
   contactName: string | null;
@@ -90,11 +90,17 @@ async function send(conversationId: string, at: Date): Promise<void> {
   const inbound = await lastInboundMessage(conversationId);
   if (inbound?.isAutomated) return;
 
-  // Free-form WhatsApp needs the 24-hour window open. The customer's message is
-  // what opened it, so this only fires on a replay of something old — where
-  // sending would fail at Meta and leave a permanently failed message on the
-  // customer's timeline.
-  if (ticket.channel === 'whatsapp' && !windowState(ticket.lastCustomerMessageAt).isOpen) return;
+  // WhatsApp, Facebook and Instagram all need the 24-hour window open for a
+  // message the software wrote. The customer's message is what opened it, so
+  // this only fires on a replay of something old — where sending would fail at
+  // Meta and leave a permanently failed message on the customer's timeline.
+  //
+  // Measured against the real clock, not against `at`. `at` is the inbound
+  // message's own `sentAt`, handed down by `afterInboundMessage`, and ingest
+  // has just written that same instant to `lastCustomerMessageAt` — so passing
+  // it here would compare the value with itself, report every window open and
+  // silently disable the guard on exactly the replayed backlog it is for.
+  if (automatedReplyBlocked(ticket)) return;
 
   if (ticket.channel === 'email' && !ticket.contactEmail) return;
 
@@ -224,6 +230,8 @@ async function loadTicket(conversationId: string): Promise<Ticket | null> {
       isSpam: conversations.isSpam,
       deletedAt: conversations.deletedAt,
       lastCustomerMessageAt: conversations.lastCustomerMessageAt,
+      // Only to tell a comment ticket from a direct message; the guard reads it.
+      externalId: conversations.externalId,
       autoRespondedAt: conversations.autoRespondedAt,
       contactEmail: contacts.primaryEmail,
       contactName: contacts.name,

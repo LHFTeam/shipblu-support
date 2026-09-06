@@ -293,18 +293,65 @@ already cost a customer channel:
   says nothing about a reply sent with the Instagram account's own token.
 - **A Meta doc example proves nothing until you check which host its URL names.**
   The two connections differ in the host, the token, the ids _and_ the field
-  vocabulary — §6.35.
+  vocabulary — §6.35. The referral webhook field is the smallest instance:
+  Instagram spells it `messaging_referral` and the Page `messaging_referrals`,
+  and Graph rejects the whole field list rather than the one bad name.
 
-Graph request shapes are written down in `lib/meta/comments.ts` rather than built
-inline, and asserted there against Meta's reference, because **a wrong shape is
-invisible in the response**: Graph refuses a nonexistent edge with `100
-"Unsupported post request … does not exist, cannot be loaded due to missing
-permissions, or does not support this operation"`, which is word for word what it
-says about a comment the customer deleted. When adding or changing one, read the
-node reference **for the version `GRAPH_VERSION` actually names** — an edge
-missing from it is a finding, not an omission by the doc, and removal notices sit
-on a separate legacy page that a search for the working endpoint will not surface
-(§6.43).
+**`HUMAN_AGENT` may only be put on a message a person actually wrote.** The tag
+is Meta's Human Agent feature and its allowed usage is a human agent answering
+inside seven days; putting it on something the software composed is a false
+statement about work nobody did, and the feature reference is explicit that
+unapproved usage risks messaging restrictions on the app. So `messagingTag(state,
+author)` takes the author as a required argument, `send_meta` derives it from
+`messages.author_agent_id` rather than from the job payload — the column
+recording the person is the only thing that can substantiate the claim — and
+`automatedReplyBlocked` in `lib/tickets/outbound.ts` stops **all three** automated
+senders — the automation engine, the out-of-hours acknowledgement and the CSAT
+survey — at **24 hours** on `facebook` and `instagram`, not at seven days. The
+seven days belong to a human. It is shared with WhatsApp's template rule because
+a guard only some of the senders apply is not a guard, and it refuses before the
+row is written: delivery refuses it too, but by then the customer's timeline
+carries a reply that permanently failed. Route a new automated sender through it
+and through `carrierFor`, which is the same lesson twice — `send_csat` kept
+private copies of both and so surveyed Facebook tickets by email.
+
+Two things it must be given rather than guess. **A Meta comment ticket has no
+messaging window**: it is answered on the comment edge, which `send_meta` reaches
+before it consults the clock, so the guard takes the ticket's `external_id` and
+never blocks one. And **the clock is the real one** — the ingest lifecycle hands
+a message's own `sentAt` down as its timestamp, and that is exactly
+`lastCustomerMessageAt`, so passing it as `now` compares a value with itself and
+reports every window open. That is precisely the replayed backlog the guard is
+for.
+
+Graph request shapes are written down in `lib/meta/comments.ts` and
+`lib/meta/send.ts` rather than built inline, and asserted there against Meta's
+reference, because **a wrong shape is invisible in the response**: Graph refuses
+a nonexistent edge with `100 "Unsupported post request … does not exist, cannot
+be loaded due to missing permissions, or does not support this operation"`, which
+is word for word what it says about a comment the customer deleted. When adding
+or changing one, read the node reference **for the version `GRAPH_VERSION`
+actually names** — an edge missing from it is a finding, not an omission by the
+doc, and removal notices sit on a separate legacy page that a search for the
+working endpoint will not surface (§6.43).
+
+The direct-message body splits on the **platform**, which is the one place it is
+not the connection: `messaging_type` is documented for Messenger and appears in
+neither Instagram send reference — not the `graph.facebook.com` one nor the
+`graph.instagram.com` one. Both list `recipient`, `message`, `sender_action`,
+`payload` and `reply_to`, and describe the human agent case as tagging the
+response. Branching on the connection instead would leave the Page-borne half of
+Instagram sending a Messenger body into an Instagram inbox.
+
+**Only the tagged Instagram body drops it; the in-window one keeps it**, and that
+asymmetry is a statement about evidence, not about Meta. The tagged path has
+never once succeeded, so moving it toward the documentation costs nothing. The
+in-window path is the channel's live traffic and works today with
+`messaging_type: RESPONSE` on it — and with `INSTAGRAM_ACCESS_TOKEN` unset it
+goes out over the Page connection to `graph.facebook.com`, where the parameter is
+documented as part of every send. Do not tidy the two halves into consistency
+without a live round trip: the risk is every in-window Instagram reply, to fix a
+send that has never worked.
 
 A WhatsApp business account's access token is read
 directly from `process.env`, for a different reason: its variable's _name_ is a
@@ -650,6 +697,16 @@ It does not cover queries in pages and actions. So a raw `sql` fragment, a
 against the real database before it is pushed — `execute_sql` on the production
 project answers it in one call, and reading the row count back is also how you
 learn the predicate selects what you meant.
+
+**A bare `Date` interpolated into a `sql` template is the same class of trap.**
+postgres.js gets it as an untyped parameter, assumes text and throws
+`ERR_INVALID_ARG_TYPE`; drizzle maps a Date only when a typed operator tells it
+the column, and a template never does. Interpolate `at.toISOString()` behind an
+explicit `::timestamptz`. `interactionWindowSet` and `staleTemplateFilter` are
+both exported purely so a test can read `toSQL().params` back and assert no raw
+Date survives — do that for any new fragment holding an instant. An `EXPLAIN` of
+the statement typed out by hand does **not** catch this: the literal is a literal
+there, and the bug is in what drizzle binds.
 
 One shape in particular: **`any(...)` in a raw fragment is only correct when
 what is inside the parentheses is an array _column_.**

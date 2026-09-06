@@ -1056,14 +1056,66 @@ shipblu.com` still serves Freshdesk, so each one took a reader out of this
 - **Meta's Human Agent feature, which nothing has confirmed is approved.** A
   Facebook or Instagram reply sent more than 24 hours after the customer's last
   message goes out tagged `HUMAN_AGENT`, and that tag requires the Human Agent
-  permission to be approved for the app. On 2026-08-20 one such send failed
-  eight times and died in the queue, and Graph's only account of why was "An
-  unknown error has occurred." #49 made that refusal explain itself and named
-  this as the likely cause, but **the diagnosis is a hypothesis and the
-  permission has never been checked** — nobody has looked at the app's review
-  status in the Meta dashboard. If it is not approved then every FB/IG reply
-  outside 24 hours fails, which on a support channel is most of them. Check the
-  dashboard before the channels are turned on, not after.
+  permission to be approved for the app **and the business to be verified**. On
+  2026-08-20 one such send failed eight times and died in the queue, and Graph's
+  only account of why was "An unknown error has occurred." #49 made that refusal
+  explain itself and named this as the likely cause, but **the diagnosis is a
+  hypothesis and the permission has never been checked** — nobody has looked at
+  the app's review status in the Meta dashboard. If it is not approved then every
+  FB/IG reply outside 24 hours fails, which on a support channel is most of them.
+  Check the dashboard before the channels are turned on, not after. This is the
+  one item on this list that no amount of code can settle.
+
+  **There is now a second candidate for that refusal, and it is cheaper to rule
+  out.** The failed send was Instagram, and the body carried
+  `messaging_type: MESSAGE_TAG` — the Messenger shape. `messaging_type` is not a
+  parameter of the Instagram send on either connection: neither Instagram
+  reference lists it. `lib/meta/send.ts` now omits it from the **tagged**
+  Instagram body only. The in-window body is untouched and still carries
+  `messaging_type: RESPONSE`, because that is the channel's live traffic and it
+  works — and with `INSTAGRAM_ACCESS_TOKEN` unset it goes out over the Page
+  connection to `graph.facebook.com`, where the parameter is documented as part
+  of every send. Stripping it there on the strength of a doc page naming a
+  different host would risk every in-window reply to fix a send that has never
+  worked. Approval remains the likelier explanation and remains unchecked.
+
+  **Two things about the tag are settled in code and no longer need watching.**
+  It can only be put on a message a person wrote — `send_meta` reads
+  `messages.author_agent_id`, and all three automated senders stop at 24 hours
+  rather than seven days — so a scheduled canned response can no longer be
+  delivered to Meta as human-written work. And the request bodies for both
+  platforms are asserted in unit tests against the node references.
+
+  One residual hole, recorded rather than fixed because the failure direction is
+  safe: `messages.author_agent_id` is `ON DELETE SET NULL`, so if an agent is
+  deleted while a reply of theirs sits failed-but-retryable, the retry reads it
+  as automated and refuses it. That is a refusal, never a false claim of human
+  authorship — the right way round — but it is a real reply that will not go
+  out.
+
+- **A reaction does not reopen the messaging window in this system, and Meta says
+  it should.** `messaging_postbacks`, the referral field and `message_reactions`
+  are now subscribed and parsed, and `applyMetaInteraction` records all three on
+  the ticket timeline. A postback and a referral also move
+  `lastCustomerMessageAt`, so they reopen the 24-hour window as Meta's policy
+  describes. A reaction deliberately does not: that column is also what the
+  next-response SLA target is measured from, so a customer answering a reply with
+  a thumbs-up would be recorded as waiting for us and the agent measured late for
+  not answering it. Closing the gap properly needs a second column —
+  "when did the customer last interact" is a different question from "when did
+  they last ask us something", the same split as `agents.last_seen_at` against
+  `last_input_at` — and the window would read the later of the two. Until then a
+  thread whose only activity in seven days is a reaction is refused a reply, and
+  the customer has to write again.
+
+  A second, smaller consequence of the same design: a postback or a referral
+  counts as the customer having written, so it re-arms the automation engine's
+  `alreadyReplied` guard, which asks for an `auto_replied` event newer than
+  `last_customer_message_at`. A customer tapping through a button menu can
+  therefore be sent the same canned reply again with no message in between. That
+  follows from the decision that a button press _is_ contact — the guard is
+  documented as keying on "since the customer last wrote" — but it is worth
+  knowing before `messaging_postbacks` starts delivering.
 
   **There are six dead `send_meta` rows now, not one.** The Instagram
   HUMAN_AGENT one from 2026-08-20, and five Facebook DMs on 23–24 August that

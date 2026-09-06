@@ -120,8 +120,24 @@ describe('the Instagram object', () => {
       REQUIRED_INSTAGRAM_FIELDS,
     );
 
-    expect(plan.adding).toEqual(['comments']);
-    expect(plan.merged).toEqual(['messages', 'comments']);
+    expect(plan.adding).toEqual([
+      'comments',
+      'messaging_postbacks',
+      'messaging_referral',
+      'message_reactions',
+    ]);
+    // Spelled out rather than compared against the constant under test: the
+    // Instagram vocabulary takes `messaging_referral` and the Page's takes
+    // `messaging_referrals`, and an assertion built from the same array would
+    // pass with either typed into either list — while Graph rejects the whole
+    // write over the one character.
+    expect(plan.merged).toEqual([
+      'messages',
+      'comments',
+      'messaging_postbacks',
+      'messaging_referral',
+      'message_reactions',
+    ]);
   });
 
   it('refuses to write a list that would drop the messaging fields', () => {
@@ -184,8 +200,14 @@ describe('planInstagramLoginSubscription', () => {
       REQUIRED_INSTAGRAM_FIELDS,
     );
 
-    expect(plan.adding).toEqual(['comments']);
-    expect(plan.merged).toEqual(['messages', 'mentions', 'comments']);
+    expect(plan.adding).toEqual([
+      'comments',
+      'messaging_postbacks',
+      'messaging_referral',
+      'message_reactions',
+    ]);
+    expect(plan.merged.slice(0, 2)).toEqual(['messages', 'mentions']);
+    expect(plan.merged).toContain('mentions');
   });
 
   it('reports an account with no subscription at all', () => {
@@ -200,13 +222,19 @@ describe('planInstagramLoginSubscription', () => {
 
     expect(plan.subscribed).toBe(false);
     expect(plan.current).toEqual([]);
-    expect(plan.merged).toEqual(['messages', 'comments']);
+    expect(plan.merged).toEqual([
+      'messages',
+      'comments',
+      'messaging_postbacks',
+      'messaging_referral',
+      'message_reactions',
+    ]);
   });
 
-  it('is a no-op once both fields are subscribed', () => {
+  it('is a no-op once every field is subscribed', () => {
     const plan = planInstagramLoginSubscription(
       IG_ACCOUNT,
-      ['messages', 'comments'],
+      ['messages', 'comments', 'messaging_postbacks', 'messaging_referral', 'message_reactions'],
       REQUIRED_INSTAGRAM_FIELDS,
     );
 
@@ -234,11 +262,12 @@ describe('planPageSubscription', () => {
       REQUIRED_PAGE_FIELDS,
     );
 
-    expect(plan.adding).toEqual(['feed']);
-    expect(plan.merged).toEqual(['messages', 'messaging_postbacks', 'feed']);
-    // The field nothing asked for survives. Writing only what this codebase
-    // knows about would silently unsubscribe whatever else the Page carries.
-    expect(plan.merged).toContain('messaging_postbacks');
+    expect(plan.adding).toEqual(['feed', 'messaging_referrals', 'message_reactions']);
+    expect(plan.merged.slice(0, 2)).toEqual(['messages', 'messaging_postbacks']);
+    // The field already installed survives, and is not added twice. Writing only
+    // what this codebase knows about would silently unsubscribe whatever else
+    // the Page carries.
+    expect(plan.merged.filter((field) => field === 'messaging_postbacks')).toHaveLength(1);
   });
 
   it('reports an app that is not installed on the Page at all', () => {
@@ -252,23 +281,45 @@ describe('planPageSubscription', () => {
 
     expect(plan.installed).toBe(false);
     expect(plan.current).toEqual([]);
-    expect(plan.merged).toEqual(['messages', 'feed']);
+    expect(plan.merged).toEqual([
+      'messages',
+      'feed',
+      'messaging_postbacks',
+      'messaging_referrals',
+      'message_reactions',
+    ]);
   });
 
   it('distinguishes installed-with-nothing from not installed', () => {
     const plan = planPageSubscription(PAGE, [], REQUIRED_PAGE_FIELDS);
 
     expect(plan.installed).toBe(true);
-    expect(plan.merged).toEqual(['messages', 'feed']);
+    expect(plan.merged).toEqual([
+      'messages',
+      'feed',
+      'messaging_postbacks',
+      'messaging_referrals',
+      'message_reactions',
+    ]);
   });
 
-  it('is a no-op once both fields are on the Page', () => {
+  it('is a no-op once every field is on the Page', () => {
     // Re-running this job is the normal way to check it, so "nothing to add"
     // has to be reachable rather than a write that reorders the list.
-    const plan = planPageSubscription(PAGE, ['messages', 'feed'], REQUIRED_PAGE_FIELDS);
+    const plan = planPageSubscription(
+      PAGE,
+      ['messages', 'feed', 'messaging_postbacks', 'messaging_referrals', 'message_reactions'],
+      REQUIRED_PAGE_FIELDS,
+    );
 
     expect(plan.adding).toEqual([]);
-    expect(plan.merged).toEqual(['messages', 'feed']);
+    expect(plan.merged).toEqual([
+      'messages',
+      'feed',
+      'messaging_postbacks',
+      'messaging_referrals',
+      'message_reactions',
+    ]);
   });
 
   it('carries the page id through to the write', () => {

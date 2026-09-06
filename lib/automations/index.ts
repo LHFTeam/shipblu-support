@@ -16,11 +16,10 @@ import { scheduleSurvey } from '@/lib/csat';
 import { resolveLocale } from '@/lib/tickets/canned';
 import { readOnlyChannels } from '@/lib/tickets/channel-policy';
 import { requesterLocale } from '@/lib/tickets/locale';
-import { deliverAutomatedReply } from '@/lib/tickets/outbound';
+import { automatedReplyBlocked, deliverAutomatedReply } from '@/lib/tickets/outbound';
 import { matches } from '@/lib/rules/conditions';
 import { conversationFacts } from '@/lib/rules/facts';
 import { onGroupChanged, onStatusChanged } from '@/lib/sla';
-import { windowState } from '@/lib/whatsapp/window';
 import { parseActions, type Action } from './actions';
 
 /**
@@ -384,15 +383,16 @@ async function sendCannedReply(
     return;
   }
 
-  // WhatsApp outside the 24-hour window can only be reopened with an approved
-  // template, which an automation has no way to fill in. Skipping is the only
-  // honest option: attempting it would fail at Meta and leave a permanently
-  // failed message on the customer's timeline.
-  if (
-    conversation.channel === 'whatsapp' &&
-    !windowState(conversation.lastCustomerMessageAt).isOpen
-  ) {
-    console.warn(`[automations] "${ruleName}" skipped a reply: WhatsApp window closed`);
+  // A rule cannot reopen a closed messaging window on any of the three channels
+  // that have one, and skipping is the only honest option: attempting it would
+  // fail at Meta and leave a permanently failed message on the customer's
+  // timeline. This engine is the reason the guard has to exist at all — it runs
+  // from a cron every fifteen minutes, so a rule that chases silence reaches the
+  // customer days after they last wrote, which is exactly the far side of the
+  // window.
+  const blocked = automatedReplyBlocked(conversation);
+  if (blocked) {
+    console.warn(`[automations] "${ruleName}" skipped a reply: ${blocked}`);
     return;
   }
 

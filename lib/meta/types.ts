@@ -52,10 +52,24 @@ export type MetaMessagingEvent = {
     is_deleted?: boolean;
     is_unsupported?: boolean;
   };
-  postback?: { mid?: string; title?: string; payload?: string };
+  postback?: { mid?: string; title?: string; payload?: string; referral?: MetaReferral };
   reaction?: { mid?: string; action?: string; emoji?: string; reaction?: string };
+  /**
+   * How the customer arrived: an m.me link carrying `ref`, a Click-to-Messenger
+   * ad, or one of the website plugins. Delivered on its own for a returning
+   * customer and nested inside `postback` when the same click also pressed Get
+   * Started, which is why both spellings are read.
+   */
+  referral?: MetaReferral;
   delivery?: { mids?: string[]; watermark?: number };
   read?: { mids?: string[]; watermark?: number };
+};
+
+export type MetaReferral = {
+  ref?: string;
+  source?: string;
+  type?: string;
+  ad_id?: string;
 };
 
 export type MetaRawAttachment = {
@@ -153,10 +167,60 @@ export type NormalisedReceipt = {
   watermark: Date | null;
 };
 
+/**
+ * A customer touching the thread without writing anything.
+ *
+ * Meta's messaging policy lists these alongside a message as things that open
+ * the standard 24-hour window: tapping Get Started or any other button
+ * (`postback`), arriving from an m.me `ref` link, a Click-to-Messenger ad or a
+ * website plugin (`referral`), and reacting to a message (`reaction`). Every one
+ * of them was previously dropped by the parser, which reads every event without
+ * a `message` as nothing at all — so a customer who tapped a button existed to
+ * this system only if they also typed.
+ *
+ * They are normalised apart from messages, and not turned into `messages` rows,
+ * because none of them is something an agent can answer. A reaction rendered as
+ * an inbound reply would be categorised, counted as support demand and answered.
+ *
+ * `opensWindow` is the distinction that matters, and it is not the same question
+ * as "did the customer interact". See `applyMetaInteraction`.
+ */
+export type NormalisedInteraction = {
+  platform: MetaPlatform;
+  connection: MetaConnection | null;
+  kind: 'postback' | 'referral' | 'reaction';
+  /** Page-scoped id of the customer. */
+  from: string;
+  at: Date;
+  /**
+   * Whether this counts as the customer asking us something — which is both what
+   * reopens the messaging window and what makes `applyMetaInteraction` restart
+   * the next-response SLA clock through `onCustomerReply`.
+   *
+   * True for a postback and a referral: pressing Get Started or clicking an ad
+   * to open a thread is somebody wanting an answer. False for a reaction, which
+   * is an acknowledgement of an answer already given.
+   */
+  opensWindow: boolean;
+  /** What to show on the timeline: a button's title, a reaction's emoji, a ref. */
+  summary: string;
+  /**
+   * A postback's `payload`, or a referral's `ref` — the machine-readable half.
+   *
+   * Kept beside the summary rather than folded into it because the two answer
+   * different questions: a title is what the customer saw, and two menu branches
+   * can share one. Null on a reaction, which has no such identity.
+   */
+  payload: string | null;
+  /** Arrived in `standby`, so another app holds thread control on this connection. */
+  standby: boolean;
+};
+
 export type NormalisedMetaWebhook = {
   messages: NormalisedDirectMessage[];
   comments: NormalisedComment[];
   receipts: NormalisedReceipt[];
+  interactions: NormalisedInteraction[];
   /** Echoes of our own outbound messages, counted but never ingested. */
   echoes: number;
 };

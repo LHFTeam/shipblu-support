@@ -98,6 +98,58 @@ describe('deliveryId', () => {
     expect(deliveryId({}, 'facebook_page')).toBeNull();
   });
 
+  it('keys a postback-only batch, which used to have no key at all', () => {
+    // A button press carries no message and no comment, so before interactions
+    // were parsed this batch produced no parts and a null key — and nulls are
+    // distinct to the unique index, so every redelivery of the same press was
+    // stored and processed again.
+    const press = {
+      object: 'page' as const,
+      entry: [
+        {
+          id: '1',
+          messaging: [
+            {
+              sender: { id: 'psid-1' },
+              timestamp: 1_755_000_000_000,
+              postback: { title: 'Get Started', payload: 'GET_STARTED' },
+            },
+          ],
+        },
+      ],
+    };
+
+    const key = deliveryId(press, 'facebook_page');
+    expect(key).not.toBeNull();
+    expect(deliveryId(press, 'facebook_page')).toBe(key);
+  });
+
+  it('tells a reaction apart from taking it back, and from re-adding it', () => {
+    // A reaction's `mid` names the message reacted *to*, so keying on it alone
+    // would collide react with unreact. The timestamp is what separates the
+    // third case: reacting 👍, removing it, then reacting again rebuilds the
+    // first key exactly without it — and because the unique index spans the
+    // whole table with no expiry, that delivery is answered "duplicate" and the
+    // reaction never reaches the timeline.
+    const react = (action: string, timestamp: number) => ({
+      object: 'page' as const,
+      entry: [
+        {
+          id: '1',
+          messaging: [{ sender: { id: 'psid-1' }, timestamp, reaction: { mid: 'm_abc', action } }],
+        },
+      ],
+    });
+
+    const first = deliveryId(react('react', 1_755_000_000_000), 'facebook_page');
+    const undone = deliveryId(react('unreact', 1_755_000_060_000), 'facebook_page');
+    const again = deliveryId(react('react', 1_755_000_120_000), 'facebook_page');
+
+    expect(first).not.toBe(undone);
+    expect(first).not.toBe(again);
+    expect(undone).not.toBe(again);
+  });
+
   it('stays inside the column it is written to', () => {
     const many = {
       object: 'page',

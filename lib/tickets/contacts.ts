@@ -22,26 +22,46 @@ export type ResolvedContact = {
   created: boolean;
 };
 
+/**
+ * The contact behind an identity, without creating one.
+ *
+ * `resolveContact` writes a contact when it finds none, which is right for a
+ * message — somebody wrote to us and there has to be a customer to file it
+ * under. It is wrong for an event that can only ever attach to a thread that
+ * already exists: a button press from a stranger would leave a contact row with
+ * no ticket, no message and nothing to answer, one per press.
+ */
+export async function findContactByIdentity(
+  channel: ResolveInput['channel'],
+  identifier: string,
+): Promise<string | null> {
+  const normalised = normaliseIdentifier(channel, identifier);
+  if (!normalised) return null;
+
+  const rows = await db
+    .select({ contactId: contactIdentities.contactId })
+    .from(contactIdentities)
+    .where(
+      and(eq(contactIdentities.channel, channel), eq(contactIdentities.identifier, normalised)),
+    )
+    .limit(1);
+
+  return rows[0]?.contactId ?? null;
+}
+
 export async function resolveContact(input: ResolveInput): Promise<ResolvedContact> {
   const identifier = normaliseIdentifier(input.channel, input.identifier);
   if (!identifier) throw new Error('Cannot resolve a contact without an identifier');
 
-  const existing = await db
-    .select({ contactId: contactIdentities.contactId })
-    .from(contactIdentities)
-    .where(
-      and(
-        eq(contactIdentities.channel, input.channel),
-        eq(contactIdentities.identifier, identifier),
-      ),
-    )
-    .limit(1);
+  // The same lookup `findContactByIdentity` does, called rather than repeated:
+  // two copies of how an identity is matched would let a future change — a case
+  // fold, a soft-delete filter, a merged-contact redirect — apply to one path
+  // and not the other, and an interaction would then resolve to a different
+  // contact than the message that created it.
+  const existingId = await findContactByIdentity(input.channel, identifier);
 
-  if (existing[0]) {
-    return {
-      contactId: existing[0].contactId,
-      created: false,
-    };
+  if (existingId) {
+    return { contactId: existingId, created: false };
   }
 
   const isEmail = input.channel === 'email';
