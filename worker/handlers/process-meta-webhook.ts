@@ -3,7 +3,12 @@ import { db } from '@/db/client';
 import { webhookEvents } from '@/db/schema';
 import type { MetaConnection } from '@/lib/meta/connection';
 import { parseMetaWebhook } from '@/lib/meta/parse';
-import { applyMetaReceipt, ingestMetaComment, ingestMetaMessage } from '@/lib/tickets/ingest-meta';
+import {
+  applyMetaInteraction,
+  applyMetaReceipt,
+  ingestMetaComment,
+  ingestMetaMessage,
+} from '@/lib/tickets/ingest-meta';
 
 /**
  * Turns a stored Facebook or Instagram payload into conversations.
@@ -29,6 +34,7 @@ export async function processMetaWebhook(event: {
   let messages = 0;
   let comments = 0;
   let receipts = 0;
+  let interactions = 0;
 
   for (const message of parsed.messages) {
     try {
@@ -58,6 +64,21 @@ export async function processMetaWebhook(event: {
     }
   }
 
+  for (const interaction of parsed.interactions) {
+    try {
+      const applied = await applyMetaInteraction(interaction);
+      if (applied) interactions += 1;
+      console.log(
+        `[meta] ${interaction.platform} ${interaction.kind} from ${interaction.from} ` +
+          `(${interaction.summary}) → ${applied ? 'recorded' : 'no live ticket'}`,
+      );
+    } catch (error) {
+      failures.push(
+        `${interaction.kind}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
   for (const receipt of parsed.receipts) {
     try {
       receipts += await applyMetaReceipt(receipt);
@@ -66,7 +87,11 @@ export async function processMetaWebhook(event: {
     }
   }
 
-  const attempted = parsed.messages.length + parsed.comments.length + parsed.receipts.length;
+  const attempted =
+    parsed.messages.length +
+    parsed.comments.length +
+    parsed.receipts.length +
+    parsed.interactions.length;
 
   if (failures.length > 0 && failures.length === attempted) {
     throw new Error(`every item in the batch failed: ${failures.join(' | ')}`);
@@ -83,7 +108,7 @@ export async function processMetaWebhook(event: {
   console.log(
     `[meta] ${event.id} via ${event.connection ?? 'an unrecorded connection'}: ` +
       `${messages} message(s), ${comments} comment(s), ${receipts} receipt(s), ` +
-      `${parsed.echoes} echo(es) ignored`,
+      `${interactions} interaction(s), ${parsed.echoes} echo(es) ignored`,
   );
 }
 

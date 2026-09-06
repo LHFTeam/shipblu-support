@@ -1,14 +1,15 @@
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels, conversationEvents, conversations, messages, ticketStatuses } from '@/db/schema';
 import type {
   MetaPlatform,
   NormalisedComment,
   NormalisedDirectMessage,
+  NormalisedInteraction,
   NormalisedReceipt,
 } from '@/lib/meta/types';
 import { enqueue } from '@/lib/queue';
-import { needsChannelProfile, resolveContact } from './contacts';
+import { findContactByIdentity, needsChannelProfile, resolveContact } from './contacts';
 import { afterInboundMessage, afterMessageStored } from './lifecycle';
 
 /**
@@ -287,6 +288,82 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
   await afterInboundMessage(result.conversationId, result.createdConversation, comment.createdAt);
 
   return { ...result, duplicate: false };
+}
+
+// --- Interactions -----------------------------------------------------------
+
+/**
+ * A customer touching the thread without writing: a button, an ad click, a
+ * reaction.
+ *
+ * Three decisions, and each of them is a thing this could get wrong invisibly:
+ *
+ * **It writes no `messages` row.** None of these is something an agent can
+ * answer, and a reaction rendered as an inbound reply would be categorised as
+ * support demand, counted in the volume a manager staffs from, and shown to an
+ * agent as a question. The `conversation_events` row is what a person reads
+ * instead — it explains why a window is open, or why the customer went quiet
+ * after a thumbs-up.
+ *
+ * **It creates no conversation.** A bare Get Started is a ticket with nothing in
+ * it to answer, opening a first-response SLA clock against a question nobody
+ * asked. The customer's actual message arrives seconds later on the same thread
+ * and opens the ticket properly, carrying its own subject. If it never arrives,
+ * there was nothing to answer.
+ *
+ * **Only `opensWindow` moves `lastCustomerMessageAt`**, which is the column both
+ * the Meta messaging window and the next-response SLA target are measured from.
+ * A postback or a referral is somebody asking for something, so both are right.
+ * A reaction is not, so it moves nothing — see the note on the flag in
+ * `lib/meta/parse.ts`.
+ *
+ * Returns whether anything was written, for the job's log line.
+ */
+export async function applyMetaInteraction(interaction: NormalisedInteraction): Promise<boolean> {
+  // Looked up rather than resolved: `resolveContact` writes a contact when it
+  // finds none, and an interaction has nothing to file under one. A stranger
+  // pressing Get Started would leave a contact row with no ticket and no
+  // message, one per press.
+  const contactId = await findContactByIdentity(interaction.platform, interaction.from);
+  if (!contactId) return false;
+
+  const existing = await findLiveConversation(contactId, interaction.platform);
+  if (!existing) return false;
+
+  await db.insert(conversationEvents).values({
+    conversationId: existing.id,
+    type: `meta_${interaction.kind}`,
+    actorLabel: `inbound_${interaction.platform}`,
+    data: {
+      summary: interaction.summary,
+      connection: interaction.connection,
+      standby: interaction.standby,
+      opensWindow: interaction.opensWindow,
+    },
+    createdAt: interaction.at,
+  });
+
+  if (!interaction.opensWindow) return true;
+
+  // Never backwards. Meta redelivers, and these arrive interleaved with the
+  // messages they accompany, so a Get Started replayed after the customer's
+  // question would otherwise wind the window — and the SLA due date derived from
+  // it — back to before the question was asked.
+  //
+  // `greatest` and not a `coalesce` around it: Postgres documents `greatest` as
+  // ignoring nulls in its list, so a conversation whose customer has never
+  // written takes the interaction's own instant. Verified against the production
+  // database rather than read off the manual, because the whole family of
+  // null-propagating functions reads identically at the call site.
+  await db
+    .update(conversations)
+    .set({
+      lastMessageAt: sql`greatest(${conversations.lastMessageAt}, ${interaction.at})`,
+      lastCustomerMessageAt: sql`greatest(${conversations.lastCustomerMessageAt}, ${interaction.at})`,
+    })
+    .where(eq(conversations.id, existing.id));
+
+  return true;
 }
 
 // --- Receipts ---------------------------------------------------------------

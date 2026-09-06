@@ -82,14 +82,34 @@ export const REQUIRED_WHATSAPP_FIELDS = ['messages', 'message_echoes'] as const;
  * events nothing ingests, and an unread webhook field is not free — it is a
  * `webhook_events` row and a job per event, forever.
  *
- * The same two names serve both Instagram connections, which is not a
+ * `messaging_postbacks`, `messaging_referral` and `message_reactions` are the
+ * three ways a customer touches a thread without writing in it — a button, an
+ * arrival from an ad or an m.me link, and a reaction. Meta's messaging policy
+ * counts all three alongside a message as things that open the standard 24-hour
+ * window, and `lib/meta/parse.ts` dropped every one of them until they were
+ * ingested, which is why they are only being subscribed now: an unread webhook
+ * field is a `webhook_events` row and a job per event, forever. They are read by
+ * `applyMetaInteraction`, which writes a timeline event and — for the two that
+ * mean the customer is asking for something — moves the window.
+ *
+ * The same two *message* names serve both Instagram connections, which is not a
  * coincidence worth relying on elsewhere: `messages` and `comments` are spelled
  * identically in the Instagram Login vocabulary and in the app-level Instagram
  * one. The Page's vocabulary is a different matter entirely — it has no
  * `comments` at all — which is why `REQUIRED_PAGE_FIELDS` is a separate list and
- * not a reuse of this one.
+ * not a reuse of this one. **And the referral field is not spelled the same on
+ * the two**: Instagram's is `messaging_referral` and the Page's is
+ * `messaging_referrals`. One character, in the vocabulary difference §6.35 is
+ * about, and Graph rejects the whole write rather than the one bad name — so the
+ * two lists below cannot be folded together however similar they look.
  */
-export const REQUIRED_INSTAGRAM_FIELDS = ['messages', 'comments'] as const;
+export const REQUIRED_INSTAGRAM_FIELDS = [
+  'messages',
+  'comments',
+  'messaging_postbacks',
+  'messaging_referral',
+  'message_reactions',
+] as const;
 
 /**
  * What the Facebook Page pipeline needs delivered.
@@ -99,7 +119,15 @@ export const REQUIRED_INSTAGRAM_FIELDS = ['messages', 'comments'] as const;
  * `lib/meta/parse.ts` keeps the comments and drops the rest, which is the cost
  * of the only field Meta offers.
  */
-export const REQUIRED_PAGE_FIELDS = ['messages', 'feed'] as const;
+export const REQUIRED_PAGE_FIELDS = [
+  'messages',
+  'feed',
+  'messaging_postbacks',
+  // Plural here and singular on Instagram. See the note above
+  // `REQUIRED_INSTAGRAM_FIELDS`; this is not a typo either way round.
+  'messaging_referrals',
+  'message_reactions',
+] as const;
 
 /**
  * Object → the fields that object must carry.

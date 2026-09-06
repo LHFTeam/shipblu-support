@@ -44,6 +44,29 @@ export function deliveryId(payload: MetaWebhookPayload, connection: MetaConnecti
       if (event.delivery?.watermark)
         parts.push(`d:${event.sender?.id}:${event.delivery.watermark}`);
       if (event.read?.watermark) parts.push(`r:${event.sender?.id}:${event.read.watermark}`);
+
+      // Window-opening interactions, which carry no usable id of their own
+      // either. Without these a postback-only or referral-only batch produces
+      // *no* parts at all and so a null key, which the unique index treats as
+      // distinct every time — every redelivery of the same button press would be
+      // stored and processed again.
+      //
+      // A reaction's `mid` names the message reacted *to*, not the reaction, so
+      // it is not enough on its own: react and unreact on the same message would
+      // collide onto one key and the second would be discarded.
+      if (event.postback) {
+        parts.push(
+          `p:${event.sender?.id}:${event.timestamp ?? ''}:${event.postback.payload ?? ''}`,
+        );
+      }
+      if (event.reaction) {
+        parts.push(
+          `k:${event.sender?.id}:${event.reaction.mid ?? ''}:${event.reaction.action ?? ''}`,
+        );
+      }
+      if (event.referral && !event.postback) {
+        parts.push(`f:${event.sender?.id}:${event.timestamp ?? ''}:${event.referral.ref ?? ''}`);
+      }
     }
 
     for (const change of entry.changes ?? []) {

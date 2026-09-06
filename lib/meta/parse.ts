@@ -6,14 +6,17 @@ import type {
   MetaMessagingEvent,
   MetaPlatform,
   MetaRawAttachment,
+  MetaReferral,
   MetaWebhookPayload,
   NormalisedComment,
+  NormalisedInteraction,
   NormalisedMetaWebhook,
   NormalisedReceipt,
 } from './types';
 
 /**
- * Flattens a Meta webhook batch into direct messages, comments and receipts.
+ * Flattens a Meta webhook batch into direct messages, comments, receipts and the
+ * interactions that open a messaging window without being messages.
  *
  * Nothing here throws. A payload we cannot read becomes an empty result,
  * because throwing makes Meta redeliver the whole batch — including the parts
@@ -39,6 +42,7 @@ export function parseMetaWebhook(
     messages: [],
     comments: [],
     receipts: [],
+    interactions: [],
     echoes: 0,
   };
 
@@ -98,7 +102,23 @@ function readMessagingEvent(
   }
 
   const message = event.message;
-  if (!message) return;
+
+  // Everything the customer can do to a thread *without* writing in it. Below
+  // the receipts and above the message guard that used to be the end of this
+  // function and dropped every one of them: Meta's messaging policy counts a
+  // button press, an ad click and a reaction alongside a message as things that
+  // open the standard window, and this parser saw none of them.
+  //
+  // Conditioned on there being no message rather than checked first, because
+  // Meta can hang a `referral` on a message event — somebody arriving from an ad
+  // and typing straight away — and a message read as an interaction would be a
+  // customer's actual question silently not filed. A message is always the more
+  // specific event.
+  if (!message) {
+    const interaction = readInteraction(event, platform, connection, accountId, standby);
+    if (interaction) result.interactions.push(interaction);
+    return;
+  }
 
   // Meta echoes back everything the page sends, including our own agent
   // replies. Ingesting an echo would file our reply as if the customer had
@@ -128,6 +148,85 @@ function readMessagingEvent(
     standby,
     raw: event as unknown as Record<string, unknown>,
   });
+}
+
+/**
+ * A postback, a referral or a reaction, as one shape.
+ *
+ * Order matters. A single click can be both a referral and a postback — Meta
+ * nests the referral inside the postback when somebody reaches the thread from
+ * an ad and presses Get Started in the same motion — and it is one event, so the
+ * postback wins and carries the referral in `raw` rather than producing two.
+ *
+ * A reaction is only counted when the customer *adds* one. `action: 'unreact'`
+ * is somebody taking a thumbs-up back, which is not them asking for anything and
+ * reads on a timeline as noise.
+ */
+function readInteraction(
+  event: MetaMessagingEvent,
+  platform: MetaPlatform,
+  connection: MetaConnection | null,
+  accountId: string | null,
+  standby: boolean,
+): NormalisedInteraction | null {
+  const from = event.sender?.id;
+  if (!from) return null;
+
+  const base = {
+    platform,
+    connection,
+    from,
+    accountId: event.recipient?.id ?? accountId,
+    at: fromEpoch(event.timestamp),
+    standby,
+    raw: event as unknown as Record<string, unknown>,
+  };
+
+  if (event.postback) {
+    return {
+      ...base,
+      kind: 'postback',
+      opensWindow: true,
+      summary:
+        event.postback.title?.trim() ||
+        describeReferral(event.postback.referral) ||
+        event.postback.payload?.trim() ||
+        'a button',
+    };
+  }
+
+  if (event.referral) {
+    return {
+      ...base,
+      kind: 'referral',
+      opensWindow: true,
+      summary: describeReferral(event.referral),
+    };
+  }
+
+  if (event.reaction && event.reaction.action === 'react') {
+    return {
+      ...base,
+      kind: 'reaction',
+      // Deliberately false, and the one place these three part company. Meta
+      // does count a reaction as opening the window, but this flag also starts a
+      // next-response SLA clock — and a customer answering our reply with a
+      // thumbs-up has been served, not left waiting. Measuring an agent as late
+      // for not answering 👍 is the worse of the two errors.
+      opensWindow: false,
+      summary: event.reaction.emoji || event.reaction.reaction || 'a reaction',
+    };
+  }
+
+  return null;
+}
+
+/** An arrival route, in the terms an agent reading the ticket would use. */
+function describeReferral(referral: MetaReferral | undefined): string {
+  if (!referral) return '';
+  if (referral.ad_id) return `an ad (${referral.ad_id})`;
+  if (referral.ref) return `a link (ref: ${referral.ref})`;
+  return referral.source ? `${referral.source.toLowerCase()}` : 'a referral link';
 }
 
 /**

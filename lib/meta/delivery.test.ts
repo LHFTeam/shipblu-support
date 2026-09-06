@@ -98,6 +98,50 @@ describe('deliveryId', () => {
     expect(deliveryId({}, 'facebook_page')).toBeNull();
   });
 
+  it('keys a postback-only batch, which used to have no key at all', () => {
+    // A button press carries no message and no comment, so before interactions
+    // were parsed this batch produced no parts and a null key — and nulls are
+    // distinct to the unique index, so every redelivery of the same press was
+    // stored and processed again.
+    const press = {
+      object: 'page' as const,
+      entry: [
+        {
+          id: '1',
+          messaging: [
+            {
+              sender: { id: 'psid-1' },
+              timestamp: 1_755_000_000_000,
+              postback: { title: 'Get Started', payload: 'GET_STARTED' },
+            },
+          ],
+        },
+      ],
+    };
+
+    const key = deliveryId(press, 'facebook_page');
+    expect(key).not.toBeNull();
+    expect(deliveryId(press, 'facebook_page')).toBe(key);
+  });
+
+  it('tells a reaction apart from taking it back', () => {
+    // A reaction's `mid` names the message reacted *to*, so keying on it alone
+    // would collide react with unreact and silently discard the second.
+    const react = (action: string) => ({
+      object: 'page' as const,
+      entry: [
+        {
+          id: '1',
+          messaging: [{ sender: { id: 'psid-1' }, reaction: { mid: 'm_abc', action } }],
+        },
+      ],
+    });
+
+    expect(deliveryId(react('react'), 'facebook_page')).not.toBe(
+      deliveryId(react('unreact'), 'facebook_page'),
+    );
+  });
+
   it('stays inside the column it is written to', () => {
     const many = {
       object: 'page',

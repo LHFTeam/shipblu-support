@@ -22,6 +22,33 @@ export type ResolvedContact = {
   created: boolean;
 };
 
+/**
+ * The contact behind an identity, without creating one.
+ *
+ * `resolveContact` writes a contact when it finds none, which is right for a
+ * message — somebody wrote to us and there has to be a customer to file it
+ * under. It is wrong for an event that can only ever attach to a thread that
+ * already exists: a button press from a stranger would leave a contact row with
+ * no ticket, no message and nothing to answer, one per press.
+ */
+export async function findContactByIdentity(
+  channel: ResolveInput['channel'],
+  identifier: string,
+): Promise<string | null> {
+  const normalised = normaliseIdentifier(channel, identifier);
+  if (!normalised) return null;
+
+  const rows = await db
+    .select({ contactId: contactIdentities.contactId })
+    .from(contactIdentities)
+    .where(
+      and(eq(contactIdentities.channel, channel), eq(contactIdentities.identifier, normalised)),
+    )
+    .limit(1);
+
+  return rows[0]?.contactId ?? null;
+}
+
 export async function resolveContact(input: ResolveInput): Promise<ResolvedContact> {
   const identifier = normaliseIdentifier(input.channel, input.identifier);
   if (!identifier) throw new Error('Cannot resolve a contact without an identifier');

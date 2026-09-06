@@ -855,6 +855,23 @@ function describeEvent(type: string, data: Record<string, unknown>): string {
         ? `identified the visitor as ${who}`
         : `identified the visitor as ${who} \u2014 the dashboard's word, not verified`;
     }
+    /*
+     * The customer touching the thread without writing in it, and the reason
+     * these are on the timeline at all: without them a window that reopened —
+     * or a customer who answered with a thumbs-up and then said nothing — is an
+     * unexplained gap. The default below would print "meta postback" and drop
+     * the payload, which is the button's name and the whole content of the
+     * event.
+     */
+    case 'meta_postback':
+      return `tapped ${String(data.summary ?? 'a button')}`;
+    case 'meta_referral':
+      return `arrived from ${String(data.summary ?? 'a link')}`;
+    case 'meta_reaction':
+      // Said in a way that does not read as a question waiting for an answer,
+      // because it is not one: a reaction deliberately moves neither the
+      // messaging window nor the next-response clock.
+      return `reacted with ${String(data.summary ?? 'a reaction')}`;
     case 'comment_hidden':
       return 'hid the comment on the post';
     case 'comment_unhidden':
