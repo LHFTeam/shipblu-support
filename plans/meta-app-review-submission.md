@@ -144,6 +144,14 @@ subscribed and is why **no comment webhook has ever arrived** — 0 of 4,503
 (`POST /{app-id}/subscriptions`) and there is no page-level equivalent in the
 codebase, so this one has to be made by hand or written.
 
+_Both halves of that have since been overtaken, and the paragraph is kept
+because the reasoning for the call still holds. `subscribe_meta_webhooks` now
+does have the page-level write (`object=page`), and the "no comment webhook has
+ever arrived" count is out of date: real Instagram `comments` deliveries began
+arriving at 15:22 UTC on 2026-08-30, the first ever. `docs/PROJECT-STATE.md` §6
+has what was actually wrong — a subscription and a signing secret, not the
+permission._
+
 ## The screencast problem nobody has hit yet
 
 Worth knowing before recording rather than after a rejection. Meta's screencast
@@ -649,6 +657,262 @@ and the cause is this permission at Advanced Access. §6.42 has the full entry.
   presses, and delete asks a second time before it fires.
 - Anything about a Facebook Login or a consent screen. There is none.
 
+## `pages_read_engagement`, written out
+
+A hybrid of the two cases above. It is mostly a dependency, like
+`pages_show_list` — Meta's reference lists it under `instagram_manage_comments`,
+which is the permission this submission actually needs it for — but unlike
+`pages_show_list` it does have one real call site, so the description can name a
+call rather than resting on the dependency alone.
+
+Meta's reference, checked 2026-09-07:
+
+> **Allowed Usage** "Get content posted by your Page." "Get names, PSIDs, and
+> profile pictures of your Page followers." "Get metadata about your Page."
+>
+> **Dependencies** `pages_show_list`
+
+**The app uses the first bullet and neither of the other two**, which is the
+thing to be precise about: this permission's headline grant is a list of the
+Page's _followers_ with their PSIDs and pictures, and asking for it while
+appearing to want that is asking for far more than the console does. The one
+call is `latestPagePostId()` in `lib/meta/client.ts`:
+
+```
+GET /me/published_posts?limit=1&fields=id
+```
+
+It reads one id — the Page's newest own post — and it exists for
+`test_comment_permission`, which needs somewhere harmless to put its test
+comment and must not guess at one. `published_posts` rather than `feed` on
+purpose: `feed` includes posts other people made on the Page, and commenting on
+a stranger's post is a different permission refused differently.
+
+### Paste into "How will your app use this permission?"
+
+```
+ShipBlu Support is an internal customer-support helpdesk built and operated by
+ShipBlu, a last-mile delivery company in Egypt, and used solely by ShipBlu's own
+support agents to answer ShipBlu's own customers. It is not offered to any other
+business and no other business can connect to it.
+
+We are requesting pages_read_engagement for two reasons.
+
+First, it is a dependency. Meta's permission reference lists pages_read_engagement
+as a required dependency of instagram_manage_comments, which is the permission
+we need in order to answer customers who comment on our own Instagram posts, and
+which is requested in this same submission.
+
+Second, the app makes one call that this permission covers: it reads the ID of
+the most recent post published by our own Page, so that an administrator can
+verify our Facebook comment integration is working by posting and removing a
+test comment on our own post. That is the only use, it reads one post ID, and it
+is run by a ShipBlu administrator rather than by any customer-facing flow.
+
+We do not use the other capabilities this permission grants. The app does not
+read the list of our Page's followers, or their names, PSIDs or profile
+pictures. It does not read Page metadata, insights, or any content beyond that
+single post ID. It reads no Page other than ShipBlu's own, and it never reads
+posts that other people have made on our Page.
+```
+
+### Reviewer notes and the unlock call
+
+Same Facebook-login note as the others — reuse the `pages_show_list` block. For
+the screencast, this permission has no user-facing surface at all: say so, and
+point at the Instagram comment flow it is a dependency of.
+
+The unlock call in the table earlier in this file is
+`GET /{page-id}?fields=name,fan_count`. **Prefer the call the app actually
+makes**, which logs the same permission and is honest about the usage:
+
+```
+GET /me/published_posts?limit=1&fields=id
+```
+
+— with a Page token, where `me` is the Page. Or simply
+`npm run job -- test_comment_permission`, which begins by making exactly that
+call before it comments.
+
+## `instagram_manage_comments`, written out
+
+### Read this first: it may be the wrong half of a pair
+
+`instagram_manage_comments` is the **Facebook Page connection's** Instagram
+comment permission. Its opposite number on the direct connection is
+`instagram_business_manage_comments`, and this account is connected **both
+ways at once** — that is settled, and `docs/PROJECT-STATE.md` §6 states the
+conclusion flatly: "Both sets are needed now, and `check_meta_permissions`
+reports them separately."
+
+What decides which one a screencast would actually demonstrate is
+`metaConnection()` in `lib/meta/connection.ts`, and it decides from
+configuration: **for Instagram the direct connection wins whenever
+`INSTAGRAM_ACCESS_TOKEN` is set.** It is set. The Human Agent refusal read out
+of production on 2026-09-06 came back `via graph.instagram.com` (§5.2), and
+`endpoint()` only addresses that host when the variable holds a credential.
+
+So, today: every Instagram comment reply, hide, unhide and delete this console
+issues goes to `graph.instagram.com` with the Instagram token, where the
+permission that governs it is `instagram_business_manage_comments`. A screencast
+of an agent hiding an Instagram comment demonstrates **that** permission, not
+this one — which is precisely the "submitting while both are live risks
+demonstrating the wrong half" warning in
+`plans/instagram-comment-management.md`, arriving.
+
+Three ways forward, and this file cannot pick for you:
+
+1. **Submit `instagram_business_manage_comments` instead**, and film it as the
+   console behaves today. Nothing has to change to record it.
+2. **Submit `instagram_manage_comments` and film it over the Page**, which means
+   unsetting `INSTAGRAM_ACCESS_TOKEN` for the recording so `metaConnection()`
+   falls back to the Page. No deploy — it is one environment variable — but it
+   also moves which app secret verifies inbound Instagram deliveries, so read
+   §6.28's ordering rule before touching it, and put it back afterwards.
+3. **Submit both**, which the older section of this file argues against on the
+   grounds that App Review wants a screencast per permission and only one
+   connection can be exercised at a time. That objection was written when one
+   connection was believed to be live. With both live and both needed, it is
+   worth re-reading rather than obeying — but each still needs its own footage,
+   and (2)'s variable flip is how you get the second reel.
+
+**The submission text below is written to serve either name**, because the
+description is about what the console does rather than about a host. If you go
+with the direct connection, swap the names and nothing else:
+
+| The Page connection         | The direct connection                |
+| --------------------------- | ------------------------------------ |
+| `instagram_basic`           | `instagram_business_basic`           |
+| `instagram_manage_comments` | `instagram_business_manage_comments` |
+
+Meta's reference for this one, checked 2026-09-07:
+
+> **Allowed Usage** "Read, update and delete comments of Instagram Business
+> accounts."
+>
+> **Dependencies** `instagram_basic`, `pages_read_engagement`, `pages_show_list`
+
+Note the same gap as on the Facebook side: "update" is doing the work for
+hiding, which is not named. The Explorer check recommended above for
+`POST /{comment-id}?is_hidden=true` has an Instagram twin — `?hide=true`, which
+is what Instagram calls the same field — and settling both at once costs one
+extra call.
+
+### Paste into "How will your app use this permission?"
+
+```
+ShipBlu Support is an internal customer-support helpdesk built and operated by
+ShipBlu, a last-mile delivery company in Egypt, and used solely by ShipBlu's own
+support agents to answer ShipBlu's own customers. It is not offered to any other
+business and no other business can connect to it.
+
+Customers ask us about their deliveries by commenting on posts on ShipBlu's own
+Instagram professional account. We use this permission to receive those comments
+and to answer them.
+
+When a customer comments on one of our posts, the comment is delivered to our
+webhook and becomes a support ticket in our agent console, so that a ShipBlu
+support agent sees it alongside that same customer's messages from Instagram
+Direct, Messenger, WhatsApp and email. The agent then does one of the following,
+each of which is a deliberate action by a named agent on that ticket:
+
+1. Replies publicly, underneath the customer's comment, so that the answer is
+   visible to everyone reading the post. One good public answer to "where is my
+   parcel" saves the next twenty customers from asking, which is why we answer
+   on the post rather than only in private.
+
+2. Replies privately, taking the conversation into Instagram Direct, when the
+   answer involves the customer's own delivery details — an address, a phone
+   number, a payment amount — which must not be posted in public.
+
+3. Hides a comment, when it should not remain publicly visible. This is
+   reversible and is what an agent reaches for first, because the words stay on
+   the record for us while ceasing to be visible to everyone else.
+
+4. Deletes a comment, when a customer has posted personal information such as a
+   home address or phone number in public, or when a comment is abusive towards
+   our staff or other customers.
+
+We do not publish posts, stories or media to the account. We do not comment
+anywhere except in reply to a customer who has commented on our own post first.
+We read no Instagram account but ShipBlu's own. The data we keep from a comment
+is its text, its ID, and the commenter's username and ID, in our own database,
+shown only to ShipBlu support agents and used only to answer that support
+conversation.
+```
+
+### The screencast, and the two things that make it harder than the Facebook one
+
+**Meta's stated screencast requirement for this permission is about publishing a
+photo post** — "demonstrate creating a new photo post and publish the post to
+the business user's Instagram feed" — which this app does not do and never will.
+That is a documentation inconsistency on a permission whose Allowed Usage is
+about comments, and it is worth naming in the reviewer notes rather than either
+obeying it or ignoring it. Film what the permission is for: receiving a comment
+and answering, hiding and deleting it.
+
+**And unlike the Facebook comment reel, this one has a real prerequisite.**
+`CAPABILITIES` records it, from Meta's own webhooks reference: Advanced Access is
+required to receive `comments` notifications at all, and Standard Access does not
+cover it even for an app admin on their own public post. That is the circularity
+the earlier section of this file describes — the approval wants footage the
+approval gates.
+
+**What has changed since that was written, and it is the important correction:
+real Instagram `comments` deliveries do now arrive.** The first ones ever landed
+at 15:22 UTC on 2026-08-30, and the reason none had arrived before was a
+subscription and a signing secret rather than the permission (§6.28 and the
+entry above it). So a comment ticket can exist today, which means the footage is
+reachable — the question is only which connection's token answers it, per the
+three options at the top of this section.
+
+The shot list is the Facebook one with Instagram's own steps, plus the private
+reply, which has no Facebook equivalent worth filming:
+
+```
+1. A person comments on a post on the ShipBlu Instagram account.
+2. The comment appears as a new ticket in the ShipBlu Support agent console.
+3. The agent replies publicly; cut to the post, showing the reply under the
+   customer's comment.
+4. The agent uses "Reply privately"; cut to Instagram Direct, showing the
+   message arriving in the customer's inbox.
+5. The agent presses Hide; cut to the post, showing the comment gone from
+   public view. Unhide, and it returns.
+6. The agent presses Delete and confirms; cut to the post.
+```
+
+Two mechanics that will otherwise cost a take. An Instagram public reply is
+posted to the **root** of the comment thread, not to the newest reply in it —
+`commentReplyTarget()` handles that, but it means step 3 filmed on a thread the
+customer has already replied inside will look like it landed in the wrong place
+unless you say so. And **a private reply is allowed exactly once per comment,
+ever, within seven days** — so step 4 cannot be re-shot against the same
+comment. Rehearse it on a different comment than the one you film.
+
+### The unlock call
+
+| Permission                  | The call that logs it                                            |
+| --------------------------- | ---------------------------------------------------------------- |
+| `instagram_manage_comments` | `GET /{ig-media-id}/comments`, then reply to or hide one of them |
+
+Get the media id from `GET /{page-id}?fields=instagram_business_account` →
+`GET /{ig-id}/media`, which is the `instagram_basic` unlock in the same table and
+is worth running in the same sitting. Over the direct connection the equivalent
+is addressed to `graph.instagram.com` with the Instagram token — the host is the
+whole difference, and an example proves nothing until you check which host its
+URL names (§6.35).
+
+### What must not be said in this submission
+
+- That the app publishes posts, stories, reels or media to Instagram. It does
+  not, whatever the screencast requirement asks to see.
+- That the app reads or moderates comments on any account but ShipBlu's own.
+- That hiding or deleting is automated. Every one is an agent pressing a button,
+  and delete asks a second time.
+- That the app sends unsolicited private replies. A private reply answers a
+  comment the customer wrote, once, within Meta's seven-day limit.
+- Anything about a Facebook Login or a consent screen. There is none.
+
 ## The order to work in
 
 1. Make the seven calls in the table above, with a Page token held by an app
@@ -661,8 +925,9 @@ and the cause is this permission at Advanced Access. §6.42 has the full entry.
    advanced access** has ungreyed on each permission.
 3. Add `pages_show_list`, `pages_read_user_content`, `pages_manage_engagement`,
    `pages_read_engagement` and `instagram_manage_comments` to the submission.
-   `pages_show_list`, `pages_read_user_content` and `pages_manage_engagement`
-   are written out above, form field by form field.
+   All five are written out above, form field by form field — read the Instagram
+   one's first subsection before submitting it, because which of the two
+   Instagram comment permissions this should be is a live question.
 4. Drop **Page Public Content Access** and **`whatsapp_business_manage_events`**;
    neither has a call site to film.
 5. Settle the Facebook-login beat in the reviewer notes before recording.
