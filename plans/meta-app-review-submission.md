@@ -264,6 +264,169 @@ the Instagram move back to the Page, and the fact that **no comment webhook has
 ever arrived** on either object — which is what a comment screencast needs
 first.
 
+## The `pages_show_list` submission, written out
+
+Step 3 above says to add it; this is what to put in the form. It is the first
+of the five to be written out because it is the one that unblocks
+`pages_messaging`, which is the channel that already carries live customer
+traffic.
+
+**The dependency is Meta's, not our reading of it.** The permission reference
+for `pages_messaging` lists, verbatim:
+
+> **Dependencies** `pages_manage_metadata` `pages_show_list`
+
+Checked 2026-09-07. `pages_show_list` itself lists `Dependencies: None`, so it
+is the root of the chain — which is also why it is a dependency of
+`pages_read_engagement`, `instagram_basic` and around twenty-five others. A
+submission that asks for `pages_messaging` without it is asking for something
+Meta will not grant.
+
+So the use-case description below leads with that, rather than inventing a
+feature. **The app makes no call that `pages_show_list` gates.** It never calls
+`GET /me/accounts` and never enumerates the Pages a person manages — verified by
+grep, and true by design: there is nothing to discover, because the one Page
+this app serves is named by `FACEBOOK_PAGE_ID` in the deployment environment and
+answered with `META_PAGE_ACCESS_TOKEN` beside it. Claiming otherwise in the
+description would be a claim a reviewer can check and we would lose.
+
+### Paste into "How will your app use this permission?"
+
+```
+ShipBlu Support is an internal customer-support helpdesk built and operated by
+ShipBlu, a last-mile delivery company in Egypt. It is used solely by ShipBlu's
+own support agents to answer ShipBlu's own customers. It is not a product we
+offer to anyone else, and no other business can connect to it.
+
+We are requesting pages_show_list as a dependency, not as a capability we
+exercise directly. Meta's permission reference lists pages_show_list, together
+with pages_manage_metadata, as a required dependency of pages_messaging.
+pages_messaging is the permission this app genuinely needs and already uses:
+customers message the ShipBlu Facebook Page about their deliveries, those
+messages reach our webhook, and our support agents reply to them from our
+console within Meta's messaging window. Since pages_messaging cannot be granted
+without pages_show_list, we are requesting it here for that reason alone.
+
+The app makes no call to the endpoint pages_show_list gates. It does not call
+GET /me/accounts and does not list, search for, or enumerate the Pages that any
+person manages, because it has no need to discover a Page. The single Page it
+serves is identified by a Page ID and a Page access token that are set as
+server-side configuration values in our own deployment environment and read only
+by our backend. They were issued once for ShipBlu's own Page and are not
+obtained from any user at runtime.
+
+This app has no Facebook Login. Our agents sign in with an email address and a
+password issued by ShipBlu. There is no OAuth flow anywhere in the application,
+no "connect your Page" screen, and no code path by which a person outside
+ShipBlu could grant this app access to a Page they manage. The administration
+screen that configures the Facebook channel cannot accept a Page at all — it
+only selects which internal support team an incoming message is routed to, and
+the Page ID and token are deliberately kept out of the application database and
+held in the deployment environment instead. The app is therefore single-tenant
+by construction: the only Page data it can ever touch is ShipBlu's own.
+
+Data handling: we store no list of Pages, because we never retrieve one. What we
+store is only what is needed to answer a customer's message — the message
+itself, and the sender's page-scoped ID, name and profile picture — in our own
+database, used only to display and answer that support conversation and shown
+only to ShipBlu support agents.
+```
+
+### Paste into the reviewer notes / step-by-step instructions
+
+The first line of Meta's screencast requirement is "demonstrate the complete
+Facebook login process on your app platform, showing how your app user grants
+your app this permission", and there is nothing to film for it — the same beat
+that blocks `pages_manage_engagement` and `instagram_manage_comments` further up
+this file. Say so before the reviewer discovers it:
+
+```
+Please note that this app has no Facebook Login flow, so there is no consent
+step to demonstrate. It is a single-tenant internal tool: the ShipBlu Page and
+its access token were configured once, by ShipBlu, in the App Dashboard and in
+our own server environment. There is no third-party user to consent, and no
+screen on which a person could grant this app a permission.
+
+pages_show_list has no user interface of its own in this app, because it is
+requested as a dependency of pages_messaging rather than as a feature. What the
+accompanying screencast shows is the flow it exists to support:
+
+1. A customer sends a message to the ShipBlu Facebook Page.
+2. The message is delivered to our webhook and appears as a support ticket in
+   the ShipBlu Support agent console.
+3. A ShipBlu support agent opens the ticket and replies to the customer.
+4. The reply is delivered back to the customer in Messenger.
+
+No step in that flow lists or selects a Page: the Page is fixed in our server
+configuration.
+```
+
+### The one thing to decide before submitting
+
+Meta's form may ask for **test credentials** so a reviewer can sign in and see
+the flow. There is no good answer to hand over as-is: the production console
+holds real customer conversations, and giving a reviewer an agent login is
+handing a third party the archive.
+
+The recommendation is a purpose-made demo agent on staging, with synthetic
+tickets and no production data, created for the submission and disabled after —
+not a production account with its permissions trimmed, because permissions are
+checked per action and a trimmed account still reads real tickets. Staging is
+suspended and pinned to a feature branch (`docs/PROJECT-STATE.md` §2), so
+standing it up is real work and should not be discovered on submission day. If
+that is more than this submission is worth, the alternative is to say in the
+notes that the app is an internal tool with no public sign-up and to rest the
+review on the screencast alone — which is the honest position, and one Meta does
+accept for single-tenant apps, but it is a judgement call rather than something
+this file can settle.
+
+### Before you can submit: the "no API calls" unlock
+
+**Request advanced access** stays greyed out until Meta has logged one
+successful call against the permission, and the call has to fall inside the 30
+days before you submit. For this permission it is one line in the Graph API
+Explorer:
+
+```
+GET /me/accounts
+```
+
+**With a _user_ access token, not a Page token** — which is a correction to the
+table further up this file, where all seven unlock calls are described as Page
+token calls. `/me/accounts` answers "which Pages does this _person_ manage", so
+under a Page token `me` is the Page itself and the call does not do what is
+wanted. In the Graph API Explorer: pick the app, pick **User Token**, add
+`pages_show_list` to the scope list, generate, then send the call. The person
+generating it needs a role on the app and admin on the Page — Standard Access
+already covers exactly that, with nothing approved.
+
+Two different tokens are in play there and it is worth keeping them apart. The
+Explorer call is made with a **user** token and exists only to put a logged call
+against the permission so the dashboard button ungreys. What the app sends with
+at runtime is the **Page** token in `META_PAGE_ACCESS_TOKEN`, and that one has
+to carry the permission in its own right — `npm run job --
+check_meta_permissions` prints its scope list, which is where to confirm the
+grant landed rather than trusting the dashboard's view of it. A permission
+present on the Explorer's user token and absent from the Page token is §6.28
+happening again.
+
+### What must not be said in this submission
+
+Each of these would be checkable and false:
+
+- That the app lists, searches or displays Pages, or lets a user pick one.
+- That an agent connects a Page, or that a Page is connected through the app.
+- That the app has a Facebook Login, or any OAuth flow.
+- That the app is available to, or usable by, businesses other than ShipBlu.
+- Anything about a screen where a person grants the permission. There is none.
+
+One loose end this raises but does not close: `CAPABILITIES` in
+`lib/meta/capabilities.ts` records the Messenger row's permissions as
+`['pages_messaging']` alone, so `check_meta_permissions` would report Messenger
+as fine on a token missing `pages_show_list` — which is a grant Meta requires
+and the diagnostic cannot see. Adding the two dependencies to that row would
+close it, at the cost of a BLOCKED line until they are granted.
+
 ## The order to work in
 
 1. Make the seven calls in the table above, with a Page token held by an app
@@ -276,6 +439,7 @@ first.
    advanced access** has ungreyed on each permission.
 3. Add `pages_show_list`, `pages_read_user_content`, `pages_manage_engagement`,
    `pages_read_engagement` and `instagram_manage_comments` to the submission.
+   `pages_show_list` is written out above, form field by form field.
 4. Drop **Page Public Content Access** and **`whatsapp_business_manage_events`**;
    neither has a call site to film.
 5. Settle the Facebook-login beat in the reviewer notes before recording.
