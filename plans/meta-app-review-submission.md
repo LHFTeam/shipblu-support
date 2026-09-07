@@ -266,6 +266,105 @@ it out of the note and let the permission list say it: `instagram_basic` and
 `instagram_business_*` family is ever submitted it is a separate use case with
 its own description.
 
+## The `instagram_manage_comments` copy, drafted
+
+The same shape as the section above: what goes in the dashboard between the
+quotes, what the person pasting it needs to know outside them.
+
+**The circularity this file describes is broken, and that is the reason this
+copy can be written at all.** The paragraph below under _What cannot be
+demonstrated today_ said the `comments` webhook could not arrive before
+approval, so the footage could not exist before the approval that wants it.
+Comment traffic has been arriving since 29 August and the feature has been
+worked end to end. Counted on 2026-09-07:
+
+```sql
+select w.connection, w.payload->>'object', c->>'field', count(*)
+from webhook_events w,
+     lateral jsonb_array_elements(w.payload->'entry') e,
+     lateral jsonb_array_elements(coalesce(e->'changes','[]'::jsonb)) c
+group by 1, 2, 3;
+-- instagram_login  instagram  comments   5   (30 Aug – 2 Sep)
+-- facebook_page    instagram  comments   2   (2 Sep)
+-- facebook_page    page       feed      60   (1 Sep – 7 Sep)
+```
+
+Four Instagram comment tickets exist, and two public replies went out with
+`delivery_status = 'sent'` and no failures. So there is footage — a real
+customer comment, a real ticket, a real reply — which is what every previous
+version of this section said was impossible.
+
+**Two caveats, and the first decides what the copy may claim.** The working path
+is `instagram_login`: the worker log has `sent as comment_reply on instagram via
+instagram_login` for both sends, so what is demonstrable today is
+`instagram_business_manage_comments`, the other family's permission, exactly as
+in the section above. And the Facebook half is not in the same state — 12
+Facebook comment tickets, 18 outbound, **16 failed** with the `(#100)
+Unsupported post request … does not exist, cannot be loaded due to missing
+permissions` that §6.42 attributes to `pages_manage_engagement` at Advanced
+Access. **Do not film the Facebook half.**
+
+The two `facebook_page` / `comments` deliveries want an explanation before
+anybody leans on them: Meta's reference says Advanced Access is required to
+receive that field at all, and the `connection` column says these were verified
+with `META_APP_SECRET` rather than the Instagram one. Either the prerequisite is
+softer than documented for an app role-holder's own comment, or the labelling is
+wrong. Worth one look, not worth blocking on — the Instagram Login copies are
+what the tickets were built from.
+
+### Use-case description
+
+> ShipBlu Support is the in-house helpdesk of ShipBlu, a parcel delivery company
+> in Egypt. It is single-tenant: it serves one business — ours — and the only
+> Facebook Page and Instagram professional account it is connected to are
+> ShipBlu's own. Its users are our support agents, who sign in with a company
+> account. It has no third-party users and is not distributed.
+>
+> Our customers ask us where their parcels are in the comments under our
+> Instagram posts. Those comments are support requests, and we use
+> `instagram_manage_comments` to receive them and to answer them.
+>
+> When somebody comments on one of our posts, the `comments` webhook opens a
+> ticket in our agent console holding that comment and the thread under it. A
+> support agent then does one of four things, each of them under this
+> permission:
+>
+> - replies publicly beneath the customer's comment
+>   (`POST /{comment-id}/replies`), which is the ordinary case;
+> - answers privately instead (`POST /{ig-account-id}/messages`, addressed to
+>   the comment id) when the answer would contain the customer's address, phone
+>   number or order details, which must not be published under a public post;
+> - hides a comment (`POST /{comment-id}?hide=true`) when it exposes somebody's
+>   personal information, and unhides it when it was hidden in error;
+> - deletes a comment (`DELETE /{comment-id}`) — used for spam and abuse under
+>   our own posts.
+>
+> Every one of those is initiated by a ShipBlu support agent working a ticket.
+> None of it is automated, and none of it is done to any account's comments but
+> our own. The comment text is stored as part of the ticket so that an agent can
+> read the conversation. It is not shown to anyone outside our company, and it
+> is not sold or shared with any third party.
+
+### Reviewer note
+
+> **This app has no Facebook Login flow, because it has no third-party users.**
+> [The same paragraph as the `instagram_basic` note above — settle it once.]
+>
+> The recording shows a customer commenting on one of our Instagram posts; the
+> comment arriving as a ticket in our agent console; the agent replying publicly
+> and the reply appearing under the comment on Instagram; the agent hiding the
+> comment and unhiding it; and the agent answering the same customer privately
+> where the answer would have exposed their delivery address.
+>
+> Every comment in the recording is on ShipBlu's own Instagram account and its
+> own posts. The person commenting is a member of our team, so no customer's
+> personal data appears in the recording.
+
+**Film the private reply last.** It is the one operation with a bound that is
+not a permission — a private reply is legal for seven days after the comment,
+and once — so a retake needs a fresh comment. The other three are repeatable
+against the same one.
+
 ## Locale and gender, now that they are wanted
 
 Both were excluded from the profile call on purpose, and the reason is the thing
@@ -337,14 +436,18 @@ justify for `contacts.timezone`, which no screen reads and nothing writes.
 
 ## What cannot be demonstrated today
 
-**Instagram comments have a blocker that _is_ a permission, and it is circular.**
-`instagram_manage_comments` is a prerequisite for the `comments` webhook, not
-just for acting on one, so the footage cannot be recorded before approval and
-the approval wants the footage. Facebook is not symmetric: `feed` needs only
-`pages_manage_metadata` and `pages_show_list`, which the token already has, so a
-Facebook comment ticket exists today (#10939) and can be filmed. For Instagram
-the way through is the role-holder exemption under Standard Access, or Meta
-support — not another subscribe job.
+**The Instagram half is no longer the blocker, and the Facebook half now is —
+they have swapped since this was written.** _Re-checked 2026-09-07; the counts
+are under the drafted `instagram_manage_comments` copy above._ This paragraph
+used to say `instagram_manage_comments` was a prerequisite for the `comments`
+webhook, so the footage could not exist before the approval that wants it.
+Comments have been arriving since 29 August, four Instagram comment tickets
+exist, and both public replies sent from them succeeded — over the direct
+Instagram connection, so what is demonstrable is the `instagram_business_*`
+family's permission rather than this one. Facebook is the one that cannot be
+filmed: `feed` deliveries arrive freely, 12 tickets are open on them, and 16 of
+18 outbound comment replies failed on the missing `pages_manage_engagement`
+(§6.42).
 
 **The other blocker is not a permission.** Freshworks is still the
 live support service and still the account's default Meta app, so it holds
