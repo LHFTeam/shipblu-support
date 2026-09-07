@@ -213,7 +213,32 @@ function reportFeatures(): void {
  * to have checked it would be worse than saying it cannot be — the thing that
  * cost §6.28 a day was a scope list everybody trusted because it looked right.
  */
-type InstagramMe = { user_id?: string; id?: string; username?: string; error?: unknown };
+type InstagramMe = {
+  user_id?: string;
+  id?: string;
+  username?: string;
+  error?: { code?: number; message?: string };
+};
+
+/*
+  How Graph refuses the *app* rather than the *token*, which is the distinction
+  this probe now has to draw.
+
+  `GET /me` is `instagram_business_basic`'s call and nothing else's, and that
+  permission is not currently requested — the direct connection is narrowed to
+  the two `manage_*` permissions (`lib/meta/capabilities.ts`). So a refusal here
+  is two different facts wearing one HTTP status: a credential that is dead,
+  which takes the whole Instagram channel with it, or a capability gate on this
+  one edge, while sends and moderation keep working on permissions of their own.
+  Announcing the first about the second is an afternoon spent regenerating a
+  token that was fine.
+
+  Deliberately narrow: 10 and 200 are the two codes Graph refuses an app with
+  (§6.61 — 10 is how it refuses one on any edge), and anything else keeps the
+  loud reading below. Over-warning about a live channel costs a re-check;
+  under-warning about a dead one costs the channel.
+*/
+const CAPABILITY_GATE_CODES = new Set([10, 200]);
 
 async function checkInstagramLogin(): Promise<void> {
   console.log('');
@@ -254,6 +279,22 @@ async function checkInstagramLogin(): Promise<void> {
       `[meta:permissions] INSTAGRAM_ACCESS_TOKEN is set but graph.instagram.com refused it ` +
         `(HTTP ${status}): ${JSON.stringify(body?.error ?? body)}`,
     );
+
+    const code = body?.error?.code;
+
+    if (typeof code === 'number' && CAPABILITY_GATE_CODES.has(code)) {
+      console.warn(
+        '[meta:permissions] that is a capability gate, not a bad credential: this call is ' +
+          '`instagram_business_basic`, which is not being requested while the direct ' +
+          'connection is narrowed to the two permissions below. So the token was not shown ' +
+          'to be invalid here and the account it belongs to could not be confirmed — send ' +
+          'one message and moderate one comment to settle those, since each is gated by its ' +
+          'own permission and neither goes through this edge.',
+      );
+      remindInstagramScopes();
+      return;
+    }
+
     console.error(
       '[meta:permissions] every Instagram send, reply and moderation is routed to this ' +
         'credential while it is set — see metaConnection() in lib/meta/connection.ts — so ' +
@@ -280,6 +321,17 @@ async function checkInstagramLogin(): Promise<void> {
     );
   }
 
+  remindInstagramScopes();
+}
+
+/**
+ * The grant this host will not describe, so the reader can check it by hand.
+ *
+ * Printed on the refusal path too, and that is the point of it being a function:
+ * a capability gate on `GET /me` is precisely the run where somebody needs to
+ * know which permissions the authorisation was supposed to ask for.
+ */
+function remindInstagramScopes(): void {
   console.warn(
     `[meta:permissions] this host publishes no scope list, so the grant cannot be checked ` +
       `from here — confirm in the App Dashboard under Instagram → API setup with Instagram ` +

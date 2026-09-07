@@ -84,8 +84,13 @@ describe('diagnoseCapabilities', () => {
   it('names the direct connection permissions in their own spelling', () => {
     // `instagram_business_*`, not `instagram_*`. Requesting the wrong set is an
     // App Review submission against a flow nothing uses.
+    //
+    // Two rather than three: `instagram_business_basic` is deliberately not
+    // requested while the connection is being tested against the two `manage_*`
+    // permissions alone — see the note above these rows in `capabilities.ts` for
+    // what that costs. Pinned as an exact list so restoring it is a decision
+    // somebody makes rather than a line that drifts back in.
     expect(requiredScopes('instagram_login')).toEqual([
-      'instagram_business_basic',
       'instagram_business_manage_comments',
       'instagram_business_manage_messages',
     ]);

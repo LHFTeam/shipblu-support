@@ -121,6 +121,24 @@ export const CAPABILITIES: readonly Capability[] = [
     symptom: 'names and pictures still resolve; the two extra fields stay empty',
     permissions: ['pages_user_locale', 'pages_user_gender'],
   },
+  /*
+    The two rows below are narrowed to one permission each, deliberately, on
+    2026-09-07: the direct connection is being tested against
+    `instagram_business_manage_messages` and `instagram_business_manage_comments`
+    alone, so `instagram_business_basic` is not being requested for now.
+
+    It is a statement about what the authorisation asks for, not a claim about
+    what Meta will hand over: the permission reference lists
+    `instagram_business_basic` as a dependency of *both* of them, so an
+    authorisation naming only these two may well come back carrying three. What
+    the narrowing actually costs is one call — `GET graph.instagram.com/me` is
+    `instagram_business_basic`'s and nothing else's, so `check_meta_permissions`
+    can no longer confirm which account the token belongs to, and says so rather
+    than reading the refusal as a dead credential. Sends and moderation are
+    gated by the two permissions named here and are untouched.
+
+    Put `instagram_business_basic` back on both rows to restore the full list.
+  */
   {
     /*
       The same two capabilities again, spelled the other way.
@@ -135,13 +153,13 @@ export const CAPABILITIES: readonly Capability[] = [
     name: 'Instagram direct messages (direct connection)',
     connection: 'instagram_login',
     symptom: 'Instagram DMs arrive but every reply is refused by graph.instagram.com',
-    permissions: ['instagram_business_basic', 'instagram_business_manage_messages'],
+    permissions: ['instagram_business_manage_messages'],
   },
   {
     name: 'Instagram comment webhooks and moderation (direct connection)',
     connection: 'instagram_login',
     symptom: 'no ticket is opened when somebody comments on a post, while DMs still arrive',
-    permissions: ['instagram_business_basic', 'instagram_business_manage_comments'],
+    permissions: ['instagram_business_manage_comments'],
     advancedAccess:
       'Meta requires Advanced Access to deliver `comments` to the general public. The direct ' +
       'connection did start delivering them at Standard Access on 2026-08-30, but every ' +
@@ -178,8 +196,9 @@ export function diagnoseCapabilities(
    * Which connection's token these scopes came from.
    *
    * Rows belonging to the other connection are left out rather than reported
-   * missing. A Page token is *supposed* to lack `instagram_business_basic`, and
-   * saying otherwise turns a correct configuration into six blocked lines.
+   * missing. A Page token is *supposed* to lack
+   * `instagram_business_manage_messages`, and saying otherwise turns a correct
+   * configuration into six blocked lines.
    */
   connection: MetaConnection = 'facebook_page',
 ): CapabilityReport[] {
