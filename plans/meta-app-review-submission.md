@@ -427,6 +427,228 @@ as fine on a token missing `pages_show_list` — which is a grant Meta requires
 and the diagnostic cannot see. Adding the two dependencies to that row would
 close it, at the cost of a BLOCKED line until they are granted.
 
+## `pages_read_user_content` and `pages_manage_engagement`, written out
+
+These two are not the `pages_show_list` case. That one is a dependency with no
+call behind it, and the description has to say so. **These two have real call
+sites**, they are the Facebook half of the comment feature merged in #87, and
+one of them has a production refusal to point at — so the description is an
+ordinary use-case description and the difficulty moves elsewhere: to the
+screencast, and to one question about hiding that is worth settling before
+submitting rather than after.
+
+Meta's reference for both, checked 2026-09-07:
+
+| Permission                | Allowed Usage, verbatim                                                                                                                                              | Dependencies                                 |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| `pages_read_user_content` | "Get user generated content on your Page", "Get posts that your Page is tagged in", "Delete comments posted by users on your Page"                                   | `pages_show_list`                            |
+| `pages_manage_engagement` | "Publish a comment on a Page post", "Update your comment on a Page post", "Delete a comment on a Page post", "Like a Page post or remove your Like from a Page post" | `pages_read_user_content`, `pages_show_list` |
+
+The split between them is **whose words are being acted on**, which is the thing
+to get right in both descriptions: deleting a _customer's_ comment is
+`pages_read_user_content`; publishing, editing or deleting the _Page's own_
+comment is `pages_manage_engagement`. The console does both, from the same strip
+of buttons, and a description that blurs them invites the reviewer to conclude
+the app is asking for more than it does.
+
+### The one thing to settle first: which permission covers hiding
+
+`setCommentHidden` posts `is_hidden` on the comment node, and hiding is the
+control an agent reaches for first — it is reversible, and the words stay on the
+record for us while ceasing to be visible to everyone else. **Meta's Allowed Usage for
+`pages_manage_engagement` does not enumerate hiding.** It lists publish, update,
+delete and like. `CAPABILITIES` in `lib/meta/capabilities.ts` assumes this
+permission covers hide and unhide, and that assumption has never been tested
+against Graph — no hide has ever been issued in production.
+
+Two readings, and they are not equally cheap to be wrong about. Either "update
+your comment on a Page post" covers a field update on the comment node whoever
+wrote the comment, or hiding somebody else's comment is a different grant and this
+submission is missing it. Settle it with one Graph API Explorer call on a real
+customer comment before recording anything:
+
+```
+POST /{comment-id}?is_hidden=true      (then is_hidden=false to put it back)
+```
+
+If it is accepted, the reading is confirmed and the call doubles as the logged
+call that ungreys the button. If it is refused with a permission error naming
+something else, add that permission to the submission — finding this out from a
+rejected screencast costs a review cycle.
+
+### `pages_read_user_content` — paste into "How will your app use this permission?"
+
+```
+ShipBlu Support is an internal customer-support helpdesk built and operated by
+ShipBlu, a last-mile delivery company in Egypt, and used solely by ShipBlu's own
+support agents to answer ShipBlu's own customers. It is not offered to any other
+business and no other business can connect to it.
+
+Customers ask us about their deliveries by commenting on posts on the ShipBlu
+Facebook Page. We use pages_read_user_content for those comments, which are user
+generated content on our own Page, in two ways:
+
+1. To receive them. A comment on one of our posts is delivered to our webhook
+   and becomes a support ticket in our agent console, so that a support agent
+   sees the customer's question alongside the same customer's messages from
+   Messenger, WhatsApp and email, and can answer it. Without this the comment is
+   simply never answered.
+
+2. To delete a customer's comment when it has to be removed. Support agents
+   delete a comment in two situations: when a customer has posted personal
+   information in public — a delivery address or a phone number, which happens
+   regularly on delivery questions and which we remove for the customer's own
+   protection — and when a comment is abusive towards our staff or other
+   customers. Deletion is done by an agent, on a named ticket, and is recorded
+   against that agent in our system.
+
+We do not crawl, bulk-read, export or archive Page content. We do not read posts
+the Page is tagged in. We read a customer's comment when Meta delivers it to us,
+because that customer is asking us a question, and we act on that one comment.
+
+The data we store from a comment is the comment text, its ID, and the
+commenter's name and page-scoped ID, in our own database, shown only to ShipBlu
+support agents and used only to answer and resolve that support conversation.
+```
+
+### `pages_manage_engagement` — paste into "How will your app use this permission?"
+
+```
+ShipBlu Support is an internal customer-support helpdesk built and operated by
+ShipBlu, a last-mile delivery company in Egypt, and used solely by ShipBlu's own
+support agents to answer ShipBlu's own customers. It is not offered to any other
+business and no other business can connect to it.
+
+When a customer comments on a post on the ShipBlu Facebook Page asking about a
+delivery, the comment becomes a support ticket in our agent console. We use
+pages_manage_engagement so that a ShipBlu support agent can answer that customer
+publicly, by publishing a reply comment underneath theirs, and so that an agent
+can hide a comment that should not stay visible.
+
+Publishing the reply in public is the point of the feature rather than an
+implementation detail: one good public answer to "where is my parcel" saves the
+next twenty customers from asking, which is why we answer on the post rather
+than only in a private message.
+
+Specifically, the app:
+
+1. Publishes a comment in reply to a customer's comment on our own Page's post,
+   written by a named ShipBlu support agent in our console.
+2. Hides, and later unhides, a customer's comment on our own Page's post, when
+   an agent judges that it should not remain publicly visible.
+3. Deletes a comment our own Page published — for example, a reply an agent sent
+   in error.
+
+The app does not like or unlike posts, does not publish standalone posts to the
+Page, and does not comment anywhere except in reply to a customer who has
+commented on our own Page first. Every one of these actions is taken by a signed
+in ShipBlu support agent holding an internal permission for it, is attributed to
+that agent in our system, and is visible on the ticket to their supervisor.
+```
+
+### Reviewer notes and the screencast
+
+The Facebook-login beat blocks both of these exactly as it blocks
+`pages_show_list` — Meta's screencast requirement for `pages_manage_engagement`
+opens with "demonstrate the complete Facebook login process on your app
+platform, showing how your app user grants your app this permission", and this
+app has none. Reuse the `pages_show_list` reviewer note verbatim and add the
+flow below.
+
+**What is different, and it is good news: the comment screencast is not blocked
+by thread control.** Every _messaging_ screencast on this submission is blocked
+until the Freshworks cutover, because another app holds thread control and every
+send is refused. Comments do not go through the handover protocol at all —
+`deliver()` in `worker/handlers/send-meta.ts` returns on the `comment_reply`
+branch before it ever consults `thread.canSend`, because a comment is answered
+on the comment edge. So a Facebook comment ticket can be worked end to end as
+soon as the permissions are on the token, with the cutover still pending.
+
+Meta asks specifically to "show how your app user publishes a comment on their
+Facebook Page on your app platform" and to "display the newly published comment
+on the app user's page". Both halves are filmable:
+
+```
+1. A person comments on a post on the ShipBlu Facebook Page.
+2. The comment appears as a new ticket in the ShipBlu Support agent console.
+3. The agent types a reply and sends it. (pages_manage_engagement — publish)
+4. Cut to the Facebook post: the reply is now visible under the customer's
+   comment.
+5. Back in the console, the agent presses Hide on the customer's comment; the
+   ticket shows "hidden from the public". (pages_manage_engagement — hide)
+6. Cut to the post: the comment is no longer publicly visible. Unhide, and it
+   returns.
+7. The agent presses Delete on the customer's comment and confirms.
+   (pages_read_user_content — delete a comment posted by a user)
+8. Cut to the post: the comment is gone.
+```
+
+Steps 5–8 are the strip of buttons rendered by
+`app/(console)/inbox/[number]/comment-moderation.tsx`, under an inbound comment,
+for an agent holding `ticket.moderate_comment`. Film with an agent who holds it,
+or the buttons are not on screen. Step 7 is the only step that demonstrates
+`pages_read_user_content` as a write, so do not cut it for length — and use a
+comment posted by a role-holder rather than a real customer's, since it is
+destroyed on camera.
+
+### Before you can submit: the unlock calls
+
+Same gate as before — **Request advanced access** stays greyed until Meta logs a
+successful call, inside the 30 days before submitting.
+
+| Permission                | The call that logs it                                                         |
+| ------------------------- | ----------------------------------------------------------------------------- |
+| `pages_read_user_content` | `GET /{page-id}/posts` → `GET /{post-id}/comments`, in the Graph API Explorer |
+| `pages_manage_engagement` | `npm run job -- test_comment_permission`                                      |
+
+`test_comment_permission` exists for exactly this (§6.42): it comments on the
+Page's newest published post and deletes the comment in the same run, so one
+clean run exercises publish and delete in both directions against the real Page.
+Read its outcome rather than just its exit — succeeding means the scope is on
+the token and only the Advanced Access grant is missing; being refused with the
+same `code 200` an agent gets means the scope is **not on the token at all**,
+which no test call fixes and which needs the Page token re-minted with
+`pages_manage_engagement` in its OAuth scope list.
+
+Note what that job does **not** cover. It deletes a comment the app itself
+published, which is `pages_manage_engagement`'s "delete a comment on a Page
+post". Deleting a _customer's_ comment is `pages_read_user_content`, and nothing
+in the codebase exercises that half deliberately — hence the Explorer read in
+the table above, which is harmless and logs the permission without destroying
+anybody's words.
+
+The Explorer call for `pages_read_user_content` is a dashboard mechanic, not a
+claim about the app: **the app never calls `GET /{page-id}/posts`**, and the
+description above deliberately does not say it does. Comments reach this system
+through the Page `feed` webhook subscription, and there is no `/posts` or
+`/feed` read anywhere in the repo.
+
+### The evidence that `pages_manage_engagement` is genuinely needed
+
+Worth having to hand if a reviewer pushes back, and worth remembering is a real
+observation rather than a prediction. On 2026-09-01 an agent tried to answer a
+Facebook comment on ticket #13755. Graph answered:
+
+```
+POST /{page-post-id}_{comment-id}/comments
+HTTP 403 — code 200, "(#200) Permissions error"
+```
+
+Across all time, `meta->>'sendKind' = 'comment_reply'` has exactly one row in
+`messages` and it is that failure. **No comment reply has ever succeeded here**,
+and the cause is this permission at Advanced Access. §6.42 has the full entry.
+
+### What must not be said in either submission
+
+- That the app reads, lists or archives Page posts. It does not; comments arrive
+  by webhook.
+- That the app reads posts the Page is tagged in. It does not.
+- That the app likes posts, or publishes posts of its own.
+- That the app moderates comments on any Page but ShipBlu's own.
+- That deletion is automated. Every hide, unhide and delete is a button an agent
+  presses, and delete asks a second time before it fires.
+- Anything about a Facebook Login or a consent screen. There is none.
+
 ## The order to work in
 
 1. Make the seven calls in the table above, with a Page token held by an app
@@ -439,7 +661,8 @@ close it, at the cost of a BLOCKED line until they are granted.
    advanced access** has ungreyed on each permission.
 3. Add `pages_show_list`, `pages_read_user_content`, `pages_manage_engagement`,
    `pages_read_engagement` and `instagram_manage_comments` to the submission.
-   `pages_show_list` is written out above, form field by form field.
+   `pages_show_list`, `pages_read_user_content` and `pages_manage_engagement`
+   are written out above, form field by form field.
 4. Drop **Page Public Content Access** and **`whatsapp_business_manage_events`**;
    neither has a call site to film.
 5. Settle the Facebook-login beat in the reviewer notes before recording.
