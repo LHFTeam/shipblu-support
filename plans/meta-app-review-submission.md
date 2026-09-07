@@ -20,8 +20,8 @@ Eleven new requests, two renewals:
 | Business Asset User Profile Access | `fetchProfile`, `lib/meta/profile-refresh.ts`              | **Keep**   |
 | `pages_messaging`                  | `sendDirectMessage`, the `page` webhook                    | **Keep**   |
 | `whatsapp_business_messaging`      | `lib/whatsapp/client.ts` — five endpoints                  | **Keep**   |
-| `instagram_basic`                  | the Instagram profile read, on the Page token              | **Keep**   |
-| `instagram_manage_messages`        | `sendDirectMessage` for Instagram DMs                      | **Keep**   |
+| `instagram_basic`                  | nothing today — see the drafted copy below                 | **Keep**   |
+| `instagram_manage_messages`        | `sendDirectMessage` for Instagram DMs — but see below²     | **Keep**   |
 | `pages_user_locale`                | `fetchProfile` extended → `contact_identities`             | **Keep**   |
 | `pages_user_gender`                | `fetchProfile` extended → `contacts.gender`                | **Keep**   |
 | `pages_manage_metadata`            | receiving Page webhooks                                    | **Keep**¹  |
@@ -29,6 +29,10 @@ Eleven new requests, two renewals:
 | `whatsapp_business_manage_events`  | nothing                                                    | **Remove** |
 | `public_profile` (renewal)         | nothing — mandatory for every app, cannot be removed       | Keep       |
 | `email` (renewal)                  | nothing — agent auth is a password, `lib/auth/password.ts` | **Remove** |
+
+² The routing correction under the drafted copy below applies to this row as
+well: while `INSTAGRAM_ACCESS_TOKEN` is set, that send goes out over the direct
+Instagram connection, where the permission is `instagram_business_manage_messages`.
 
 ¹ The app performs this one now: `subscribe_meta_webhooks object=page` writes
 `POST /{page-id}/subscribed_apps` as well as the app-level subscription, so
@@ -164,6 +168,104 @@ single-tenant app serving only its owner's Page has no third-party user to
 consent, and the use-case description has to say so. Do not discover it halfway
 through a recording.
 
+## The `instagram_basic` copy, drafted
+
+Written down here rather than typed straight into the dashboard. The submission
+is the one artefact of this work that cannot be reviewed afterwards — the App
+Dashboard keeps no history of what was sent — and a rejection arrives quoting a
+sentence back at you.
+
+**First, a correction to the row at the top of this file.** It said
+`instagram_basic` was exercised by "the Instagram profile read, on the Page
+token". That was true when it was written on 27 August and is not true now.
+`INSTAGRAM_ACCESS_TOKEN` is set, so `metaConnection()` sends **every** Instagram
+call — the profile read included — over the direct Instagram connection to
+`graph.instagram.com`, whose permission family is `instagram_business_*`. Read
+out of the worker log rather than reasoned about:
+
+```
+2026-09-06 20:02:49  [send_meta] … sent as dm on instagram via instagram_login
+2026-09-06 10:31:32  [meta] instagram via instagram_login POST
+                     graph.instagram.com/…/messages failed with 403
+2026-09-02 11:54:56  [send_meta] … sent as comment_reply on instagram via instagram_login
+```
+
+So **no Graph call this app makes today consumes `instagram_basic`.** That is
+not an argument for dropping it — §6.36 is explicit that both connections are
+live on purpose and that both permission families are needed — but it decides
+what the description may honestly say, and it makes the account-resolution call
+in the unlock table the only thing that will put a number against this
+permission before the submission goes in.
+
+### Use-case description
+
+> ShipBlu Support is the in-house helpdesk of ShipBlu, a parcel delivery company
+> in Egypt. It is single-tenant: it serves one business — ours — and the only
+> Facebook Page and Instagram professional account it is connected to are
+> ShipBlu's own. Its users are our support agents, who sign in with a company
+> account. It has no third-party users and is not distributed.
+>
+> We use `instagram_basic` to identify the Instagram professional account linked
+> to our Facebook Page. Our Page is subscribed to Instagram messaging and
+> comment webhooks, and a delivery names the account only by id. The app
+> resolves that id against the Page (`GET /{page-id}?fields=instagram_business_account`)
+> and reads the account's basic profile, so that an incoming customer message is
+> matched to our own account before it is shown to an agent or answered. Nothing
+> is trusted on the strength of an identifier arriving in a webhook body.
+>
+> `instagram_basic` is also the dependency Meta names for
+> `instagram_manage_messages` and `instagram_manage_comments`, both requested
+> alongside it, which are what let an agent answer the customer's message or
+> comment.
+>
+> What is read under this permission is our own account's profile. It is used
+> inside the agent console for routing and display, is not shown to anyone
+> outside our company, and is not sold or shared with any third party.
+
+**One sentence in that is not true yet**, and it is the one a reviewer can
+check: the app makes no `instagram_business_account` call. Either make it —
+Graph API Explorer, per the unlock table, which is also what ungreys **Request
+advanced access** — or write it into the ingest path so the claim describes
+running code. Submitting the paragraph before one of those is describing
+something Meta cannot see, which is the failure mode this whole file exists to
+avoid.
+
+### Reviewer note
+
+> **This app has no Facebook Login flow, because it has no third-party users.**
+>
+> The screencast instructions for this permission open by asking us to
+> demonstrate the login process by which an app user grants it. ShipBlu Support
+> is a single-tenant internal helpdesk. The only Page and Instagram account it
+> will ever be connected to are our own, and that connection was made once, by
+> an administrator, in the App Dashboard. Our support agents sign in with a
+> company password in order to read tickets; they are never asked to grant a
+> Facebook permission, and there is no consent screen to record because no user
+> of this app is ever asked to consent to anything. The recording therefore
+> begins where the granted permission is used.
+>
+> The recording shows a customer sending our Instagram account a message, the
+> message arriving as a ticket in our agent console, an agent answering it from
+> the console, and the answer arriving back in Instagram. The account
+> identification this permission covers happens server-side, between the second
+> and third of those, and has no screen of its own.
+
+**The Facebook-login beat is the same sentence on several permissions already
+submitted**, so settle the wording once and reuse it rather than writing four
+variants a reviewer can compare.
+
+**Whether to volunteer the two-connection arrangement is a judgement call, and
+it should be made deliberately rather than discovered in the edit.** Saying that
+this account is connected both through our Page and through Instagram Login is
+true and pre-empts a reviewer's confusion at seeing two identities; it also
+points at the fact that the Instagram traffic they are about to watch is served
+by the _other_ family. Not saying it risks nothing today, because a reviewer
+sees granted usage rather than a routing table. The recommendation is to leave
+it out of the note and let the permission list say it: `instagram_basic` and
+`instagram_manage_*` describe the Page connection, and if the
+`instagram_business_*` family is ever submitted it is a separate use case with
+its own description.
+
 ## Locale and gender, now that they are wanted
 
 Both were excluded from the profile call on purpose, and the reason is the thing
@@ -278,7 +380,9 @@ first.
    `pages_read_engagement` and `instagram_manage_comments` to the submission.
 4. Drop **Page Public Content Access** and **`whatsapp_business_manage_events`**;
    neither has a call site to film.
-5. Settle the Facebook-login beat in the reviewer notes before recording.
+5. Settle the Facebook-login beat in the reviewer notes before recording. The
+   drafted `instagram_basic` copy above carries a wording for it that is meant
+   to be reused on every permission whose instructions open with it.
 6. With `feed` and `comments` finally subscribed (step 1's last row does the
    Page half), have a role-holder comment on one of the account's own posts and
    work the resulting ticket in the console — reply, hide, unhide, delete. That
