@@ -330,8 +330,13 @@ const schema = z.object({
    * waiting thirty seconds has already lost its reader, so the only thing a
    * longer ceiling buys is the 40-minute queue of §62.
    *
-   * Tunable per service because the worker and the web app have different
-   * appetites: a backfill may legitimately want longer, a request never does.
+   * Declared in `shipblu-shared` and left at its default: it is a property of
+   * the driver rather than of an environment, and both halves of the system are
+   * better off agreeing on it than differing by accident. A service that
+   * genuinely needs longer — a backfill may, a request never does — sets it at
+   * the service level, which Render gives precedence over the group, and that is
+   * the deliberate per-service exception AGENTS.md describes rather than the
+   * normal way to configure this.
    */
   DB_QUERY_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
 

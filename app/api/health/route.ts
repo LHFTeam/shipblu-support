@@ -1,6 +1,6 @@
-import { sql } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
-import { db, poolPressure } from '@/db/client';
+import { databaseProbe, poolPressure } from '@/db/client';
+import { env } from '@/lib/env';
 import { queueDepth } from '@/lib/queue';
 
 export const dynamic = 'force-dynamic';
@@ -11,9 +11,15 @@ export const dynamic = 'force-dynamic';
  * Well under `DB_QUERY_TIMEOUT_MS`, and that ordering is the point: the query
  * deadline exists to stop a request hanging, while this exists to *report*, and
  * a health check that waits as long as the work it is checking on tells Render
- * nothing it can act on.
+ * nothing it can act on. Clamped rather than asserted, because the deadline is
+ * configurable and a five-second constant is only "well under" it by
+ * convention — `probeTimeout()` keeps the ordering true by construction.
  */
 const PROBE_TIMEOUT_MS = 5_000;
+
+function probeTimeout(): number {
+  return Math.min(PROBE_TIMEOUT_MS, env().DB_QUERY_TIMEOUT_MS);
+}
 
 /**
  * Fails rather than waits.
@@ -24,16 +30,23 @@ const PROBE_TIMEOUT_MS = 5_000;
  * request it was still waiting on rather than an unhealthy instance, which is
  * why the freeze ran to a full replacement cycle instead of a restart (§62).
  */
-async function within<T>(label: string, work: Promise<T>): Promise<T> {
+async function within<T>(label: string, work: Promise<T>, abandon?: () => void): Promise<T> {
+  const timeoutMs = probeTimeout();
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
       work,
       new Promise<never>((_, reject) => {
-        timer = setTimeout(
-          () => reject(new Error(`${label} did not answer in ${PROBE_TIMEOUT_MS}ms`)),
-          PROBE_TIMEOUT_MS,
-        );
+        timer = setTimeout(() => {
+          // Cancel what we are about to stop waiting for, where the caller gave
+          // us the means. Losing a race does nothing to a query: it keeps its
+          // place in postgres.js's queue for the whole `DB_QUERY_TIMEOUT_MS`,
+          // six times this window, and Render polls this endpoint on a far
+          // shorter one — so an endpoint that only raced would contribute a
+          // queued query per poll to the saturation it is reporting on.
+          abandon?.();
+          reject(new Error(`${label} did not answer in ${timeoutMs}ms`));
+        }, timeoutMs);
       }),
     ]);
   } finally {
@@ -55,9 +68,15 @@ export async function GET() {
   const started = Date.now();
 
   try {
-    await within('select 1', db.execute(sql`select 1`));
+    const probe = databaseProbe();
+    await within('select 1', probe.done, probe.abandon);
     const dbLatencyMs = Date.now() - started;
 
+    // Left raced rather than made cancellable, because drizzle hands back a
+    // `QueryPromise` with no query behind it to cancel. Acceptable here and not
+    // above: this runs only once `select 1` has already come back, so the pool
+    // was answering a moment ago, and it is a grouped count over a table of a
+    // few thousand rows. If it does time out, the query deadline bounds it.
     const queue = await within('queue depth', queueDepth());
 
     return NextResponse.json({

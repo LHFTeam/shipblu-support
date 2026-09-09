@@ -31,11 +31,11 @@ const UNVERIFIED_WEBHOOK_DAYS = 7;
 /**
  * Which `webhook_events` rows the nightly pass may delete.
  *
- * Two clauses with two clocks, and the second one is a bug fix. The predicate
- * used to be `processed_at is not null and processed_at < …` alone, which meant
- * a payload that **failed signature verification never got a `processed_at`, so
+ * Three clauses, and the first two clocks are the point. The predicate used to
+ * be `processed_at is not null and processed_at < …` alone, which meant a
+ * payload that **failed signature verification never got a `processed_at`, so
  * it never matched, so it was never deleted** — exempt from retention forever.
- * On 2026-09-09 that was 4,647 rows, the oldest from 19 August: the Instagram
+ * On 2026-09-09 that was 4,648 rows, the oldest from 19 August: the Instagram
  * §6.26/§6.29 signature failures, still on disk three weeks later.
  *
  * The exemption ran exactly the wrong way round. The docblock above says these
@@ -43,20 +43,38 @@ const UNVERIFIED_WEBHOOK_DAYS = 7;
  * the case where we have *less* reason to keep it — there is no message to show
  * for it and nothing downstream ever read it.
  *
- * Kept as two clauses rather than widened into one on `received_at`, because
- * the distinction is the point: "processed, and old" and "we could not
- * establish who sent this" are different facts with different useful lifetimes.
+ * **The short clock keys on the signature, not on the missing timestamp**, and
+ * that distinction is load-bearing rather than pedantic. `process-webhook.ts`
+ * writes `processed_at` on success, on a deliberate drop and on a duplicate,
+ * and on failure writes only `error` — so "no `processed_at`" also describes a
+ * verified delivery whose processing failed for good, and whose job reached
+ * `dead`. `completedJobRetentionFilter()` below keeps a dead job forever on the
+ * stated grounds that it needs a human, and its payload is the only thing that
+ * can be replayed: a seven-day clock on the absence of a timestamp would have
+ * deleted the evidence a week after the failure and left the job pointing at a
+ * row that no longer exists. Today the two predicates select the same 4,531
+ * rows — production holds no verified-but-unprocessed row at all — so this is
+ * written before the case arrives rather than after it.
+ *
+ * The third clause exists so that nothing is exempt forever, which was the
+ * original bug: a verified row whose processing never completed is kept for the
+ * full thirty days, the same lifetime as a processed one.
  *
  * Exported so `cleanup.test.ts` can read the SQL back. The `database` CI job
  * runs this handler but asserts nothing about it — it proves the statement
  * *plans*, not that the predicate selects what was meant.
  */
 export function webhookRetentionFilter(): SQL {
+  const processedHorizon = sql.raw(`interval '${PROCESSED_WEBHOOK_DAYS} days'`);
+
   return sql`(
     (${webhookEvents.processedAt} is not null
-      and ${webhookEvents.processedAt} < now() - ${sql.raw(`interval '${PROCESSED_WEBHOOK_DAYS} days'`)})
-    or (${webhookEvents.processedAt} is null
+      and ${webhookEvents.processedAt} < now() - ${processedHorizon})
+    or (${webhookEvents.signatureVerified} = false
       and ${webhookEvents.receivedAt} < now() - ${sql.raw(`interval '${UNVERIFIED_WEBHOOK_DAYS} days'`)})
+    or (${webhookEvents.processedAt} is null
+      and ${webhookEvents.signatureVerified}
+      and ${webhookEvents.receivedAt} < now() - ${processedHorizon})
   )`;
 }
 

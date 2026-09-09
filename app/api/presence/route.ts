@@ -31,6 +31,13 @@ export async function GET(request: Request) {
   /** True while this stream's own beat chain is still outstanding. */
   let beating = false;
 
+  // Assigned by `start`, called by `cancel` too — the two teardown paths must be
+  // the same code, because they can both run for one stream. This route kept a
+  // second copy of the sign-off in `cancel()` while the other two SSE routes
+  // were consolidated; the copies had already drifted, the one in `cancel()`
+  // never detaching the abort listener.
+  let cleanup = () => {};
+
   const stream = new ReadableStream({
     start(controller) {
       const sendKeepalive = () => {
@@ -46,10 +53,11 @@ export async function GET(request: Request) {
         console.error('[presence] could not record presence', error);
       });
 
-      const cleanup = () => {
+      cleanup = () => {
         if (closed) return;
         closed = true;
         if (heartbeat) clearInterval(heartbeat);
+        request.signal.removeEventListener('abort', cleanup);
         void goOffline(agent.id).catch(() => {
           /* the staleness check covers a missed sign-off */
         });
@@ -108,12 +116,7 @@ export async function GET(request: Request) {
     },
 
     cancel() {
-      if (closed) return;
-      closed = true;
-      if (heartbeat) clearInterval(heartbeat);
-      void goOffline(agent.id).catch(() => {
-        /* the staleness check covers a missed sign-off */
-      });
+      cleanup();
     },
   });
 

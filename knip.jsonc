@@ -44,6 +44,14 @@
   // AGENTS.md says not to add your call site to — or a sweeping deletion whose
   // third case is actively wrong. So they stay a hand-run: `npm run
   // knip:exports` covers exactly the complement of the list below.
+  //
+  // "Exactly" is checked rather than asserted, and it did not hold when this
+  // was first written: knip 6.35.1 knows seventeen issue types, six are gated
+  // here and the hand-run named eight, so `catalog`, `catalogReferences` and
+  // `cycles` were covered by neither — which is the same shape of hole an
+  // `exclude` list would have left. Two of the three cannot fire on this repo
+  // (npm has no catalog protocol), and that is exactly why nobody would have
+  // noticed the sentence was false; `cycles` can.
   "include": [
     "dependencies",
     "devDependencies",

@@ -37,10 +37,38 @@ const POOL_MAX = 10;
  */
 let inFlight = 0;
 let peakInFlight = 0;
+/**
+ * When the peak happened.
+ *
+ * A high-water mark with no clock beside it cannot distinguish pressure now
+ * from pressure an hour ago: one transient spike pins `peak` at the ceiling for
+ * the life of the instance, and the number stops being attributable to the
+ * measurement anybody is taking with it.
+ */
+let peakAt: string | null = null;
+
+/**
+ * Transactions currently open.
+ *
+ * Counted separately because a transaction *reserves* one of the `POOL_MAX`
+ * connections for its whole lifetime rather than queueing for one — so
+ * `inFlight` alone can read zero while every slot is held, which is exactly the
+ * misattribution these counters exist to prevent. See `instrumentClient()`.
+ */
+let openTransactions = 0;
+
+/** Latched by the ceiling warning in `deadline()`, so saturation is one line. */
+let atCeiling = false;
 
 /** For `/api/health`, which is the one caller that should say this out loud. */
-export function poolPressure(): { inFlight: number; peak: number; max: number } {
-  return { inFlight, peak: peakInFlight, max: POOL_MAX };
+export function poolPressure(): {
+  inFlight: number;
+  transactions: number;
+  peak: number;
+  peakAt: string | null;
+  max: number;
+} {
+  return { inFlight, transactions: openTransactions, peak: peakInFlight, peakAt, max: POOL_MAX };
 }
 
 /**
@@ -53,8 +81,41 @@ export function poolPressure(): { inFlight: number; peak: number; max: number } 
 type Settleable = {
   resolve: (value: unknown) => unknown;
   reject: (error: unknown) => unknown;
-  cancel: () => unknown;
+  /**
+   * The cancel primitive itself, rather than the `cancel()` method that calls
+   * it. `cancelQuietly()` below says why the method cannot be used.
+   */
+  canceller: ((query: unknown) => unknown) | null;
 };
+
+/**
+ * `query.cancel()`, minus the unhandled rejection.
+ *
+ * postgres.js's method is `this.canceller && (this.canceller(this),
+ * this.canceller = null)`, and the comma operator throws away the promise the
+ * canceller returns. For a query already on the wire that promise is a *new*
+ * TCP connection carrying a protocol CancelRequest, and it rejects through
+ * `socket.once('error', reject)` when that connection is refused or reset —
+ * which is what a saturated pooler does to a new connection. Nothing would be
+ * listening to it, and Node 22 exits the process on an unhandled rejection: the
+ * worker and the job runner both run under plain `tsx` with no handler of their
+ * own, so the mitigation would crash-loop them on precisely the condition this
+ * timer fires against.
+ *
+ * So the canceller is called directly, its promise is given a handler, and it is
+ * nulled exactly as `cancel()` does so a second call is a no-op. A cancel that
+ * could not be delivered needs no log line of its own: the query rejects either
+ * way, and that rejection is what the caller sees.
+ */
+function cancelQuietly(query: Settleable): void {
+  const { canceller } = query;
+  if (!canceller) return;
+
+  query.canceller = null;
+  void Promise.resolve(canceller.call(query, query)).catch(() => {
+    /* the CancelRequest could not be delivered; the query still rejects */
+  });
+}
 
 /**
  * Gives every query a deadline, because the pool's queue has none.
@@ -66,10 +127,12 @@ type Settleable = {
  * 2026-09-08 outage: requests queued from 20 seconds to 40 minutes behind ten
  * busy slots while every external signal said the database was healthy.
  *
- * `query.cancel()` is the one primitive that helps. For a query still in the
- * queue it removes it and rejects with `57014`; for one already sent it opens a
+ * Cancelling is the one primitive that helps. For a query still in the queue it
+ * removes it and rejects with `57014`; for one already sent it opens a
  * *separate* socket to send a protocol CancelRequest, which is what makes it
- * work at all when the pool is the thing that is exhausted.
+ * work at all when the pool is the thing that is exhausted. It goes through
+ * `cancelQuietly()` rather than the library's own `cancel()`, for the reason
+ * stated there.
  *
  * Two things this deliberately does not do. It does not call `.then()` on the
  * query: that would run postgres.js's `handle()` and dispatch immediately,
@@ -84,20 +147,31 @@ function deadline<T>(query: T, timeoutMs: number): T {
   const settleable = query as T & Settleable;
 
   inFlight += 1;
-  if (inFlight > peakInFlight) peakInFlight = inFlight;
+  if (inFlight > peakInFlight) {
+    peakInFlight = inFlight;
+    peakAt = new Date().toISOString();
+  }
 
-  // Logged at the boundary rather than every query: the number is only ever
-  // interesting when it is near the ceiling, and that is exactly the moment the
-  // last incident had nothing to say for itself.
-  if (inFlight >= POOL_MAX) {
+  // Latched on the way up rather than tested on every query. As a level test
+  // this logged once per `client.unsafe()` for as long as the pressure lasted —
+  // thousands of identical lines over the fifty minutes of §62, pushing the one
+  // useful signal out of Render's retention, which is the opposite of what it
+  // is for. Re-armed on the way down, so a saturation event is one line and its
+  // recovery is another.
+  if (inFlight >= POOL_MAX && !atCeiling) {
+    atCeiling = true;
     console.warn(`[db] ${inFlight} queries in flight against max ${POOL_MAX}`);
   }
 
-  const timer = setTimeout(() => settleable.cancel(), timeoutMs);
+  const timer = setTimeout(() => cancelQuietly(settleable), timeoutMs);
 
   const settle = () => {
     clearTimeout(timer);
     inFlight -= 1;
+    if (atCeiling && inFlight < POOL_MAX) {
+      atCeiling = false;
+      console.warn(`[db] pool pressure cleared, ${inFlight} in flight`);
+    }
   };
 
   const { resolve, reject } = settleable;
@@ -105,6 +179,93 @@ function deadline<T>(query: T, timeoutMs: number): T {
   settleable.reject = (error) => (settle(), reject.call(settleable, error));
 
   return query;
+}
+
+/**
+ * Handles that already carry the deadline.
+ *
+ * Not belt and braces: `getSql()` adopts `globalThis.__shipbluSql` across a dev
+ * hot reload, so a re-run module scope would otherwise wrap the previous
+ * scope's wrapper — after N reloads every query arms N timers and N module
+ * scopes keep N disagreeing `inFlight` counters, none of them right.
+ */
+const instrumented = new WeakSet<object>();
+
+/** The three members of a postgres.js handle this needs to reach. */
+type Instrumentable = {
+  unsafe: (...args: unknown[]) => unknown;
+  begin?: (...args: unknown[]) => unknown;
+  savepoint?: (...args: unknown[]) => unknown;
+};
+
+/**
+ * Installs the deadline on one postgres.js handle, once.
+ *
+ * `unsafe` is an **own property of each handle** rather than something
+ * inherited: the library's `Sql(handler)` factory declares its own `unsafe`
+ * closure and `Object.assign`s it onto the handle it returns. That is what makes
+ * patching a handle possible at all — and what makes patching the pool alone
+ * insufficient, because a transaction body is handed a *fresh* handle:
+ * `begin()` calls `scope()`, which calls `Sql(handler)` again, and drizzle then
+ * runs every statement of the transaction through that handle's `unsafe`.
+ *
+ * Leaving that half out would have left ~20 call sites unbounded, the three
+ * five-minute sweeps among them, and it is the worse half: a transaction
+ * *reserves* one of the `POOL_MAX` connections for its whole lifetime, so one
+ * that never finishes takes a slot with it rather than queueing behind one.
+ * `savepoint` is wrapped for the same reason, one level further in.
+ *
+ * Exported for `db/client.test.ts`, in the same spirit as `interactionWindowSet`
+ * — the wrapping is the whole mechanism and there is no other way to reach it
+ * without a live connection.
+ */
+export function instrumentClient<T>(client: T, timeoutMs: number): T {
+  const handle = client as unknown as Instrumentable & object;
+  if (instrumented.has(handle)) return client;
+  instrumented.add(handle);
+
+  const native = handle.unsafe.bind(handle);
+  handle.unsafe = (...args: unknown[]) => deadline(native(...args), timeoutMs);
+
+  const nativeBegin = handle.begin;
+  if (nativeBegin) {
+    handle.begin = (...args: unknown[]) =>
+      nativeBegin.apply(handle, instrumentScope(args, timeoutMs, true));
+  }
+
+  const nativeSavepoint = handle.savepoint;
+  if (nativeSavepoint) {
+    handle.savepoint = (...args: unknown[]) =>
+      nativeSavepoint.apply(handle, instrumentScope(args, timeoutMs, false));
+  }
+
+  return client;
+}
+
+/**
+ * Rewrites a `begin`/`savepoint` argument list so the scoped handle its body is
+ * called with is instrumented too. Both take the body as their last argument,
+ * with an optional name or option string before it.
+ *
+ * `counts` is true only for `begin`, so a savepoint inside a transaction does
+ * not count as a second open transaction.
+ */
+function instrumentScope(args: unknown[], timeoutMs: number, counts: boolean): unknown[] {
+  const last = args.length - 1;
+  const body = args[last];
+  if (typeof body !== 'function') return args;
+
+  const run = body as (client: unknown) => unknown;
+  const wrapped = async (client: unknown) => {
+    if (counts) openTransactions += 1;
+    try {
+      return await run(instrumentClient(client, timeoutMs));
+    } finally {
+      if (counts) openTransactions -= 1;
+    }
+  };
+
+  return args.map((arg, index) => (index === last ? wrapped : arg));
 }
 
 let pool: ReturnType<typeof postgres> | undefined;
@@ -125,10 +286,7 @@ export function getSql(): ReturnType<typeof postgres> {
   // the one chokepoint where a deadline can be attached without touching call
   // sites, and without wrapping the returned query in something that would lose
   // `.values()` and `.cursor()`.
-  const native = pool.unsafe.bind(pool);
-  const timeoutMs = env().DB_QUERY_TIMEOUT_MS;
-  pool.unsafe = ((...args: Parameters<typeof native>) =>
-    deadline(native(...args), timeoutMs)) as typeof pool.unsafe;
+  instrumentClient(pool, env().DB_QUERY_TIMEOUT_MS);
 
   if (env().NODE_ENV !== 'production') globalThis.__shipbluSql = pool;
   return pool;
@@ -154,6 +312,27 @@ export const db: Db = new Proxy({} as Db, {
     return typeof value === 'function' ? value.bind(target) : value;
   },
 });
+
+/**
+ * `select 1`, in a form `/api/health` can abandon.
+ *
+ * Raced against a timer there, and the cancel is the reason this exists rather
+ * than a plain `db.execute`: losing a race does nothing to the query, which
+ * keeps its place in postgres.js's queue for the whole `DB_QUERY_TIMEOUT_MS`.
+ * Render polls the health endpoint far more often than that, so an endpoint
+ * that only raced would add a queued query per poll to the saturation it exists
+ * to report on.
+ *
+ * A tagged template rather than `unsafe`, so it carries no deadline of its own —
+ * the caller's is shorter and is the one that should apply.
+ */
+export function databaseProbe(): { done: Promise<unknown>; abandon: () => void } {
+  const query = getSql()`select 1`;
+  return {
+    done: query as unknown as Promise<unknown>,
+    abandon: () => cancelQuietly(query as unknown as Settleable),
+  };
+}
 
 /**
  * A dedicated session-mode connection for LISTEN. Callers own the lifetime and

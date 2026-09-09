@@ -122,7 +122,8 @@ is excluded for a different reason: no `entry`/`project` is declared, so the
 `worker/` tree is reachable only through the `worker` script in `package.json`,
 and landing a module one commit before importing it would fail a check whose
 message talks about dead files. `npm run knip:exports` is the hand-run and
-covers exactly the complement of the gated list; `knip.jsonc` carries the
+covers exactly the complement of the gated list — all eleven of knip's other
+issue types, which is checked against its `ISSUE_TYPES` rather than assumed; `knip.jsonc` carries the
 reasoning, including which two categories the first attempt got wrong.
 
 Three things CI still cannot check, so they remain yours:

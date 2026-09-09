@@ -191,6 +191,11 @@ export async function deleteGroup(
 
   await db.delete(groups).where(eq(groups.id, id));
   refresh('/admin/groups');
+  // Same reason as `saveGroup`, and the easier one to forget: the catalogue
+  // holds `groups.business_hours_id` as its override map, so a deleted group
+  // that carried a schedule keeps resolving to it for the rest of the TTL, and
+  // any due date computed in that window comes from a row that is gone.
+  forgetHoursCatalog();
   return ok();
 }
 

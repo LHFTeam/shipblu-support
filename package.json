@@ -19,7 +19,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "knip": "knip",
-    "knip:exports": "knip --include exports,types,enumMembers,duplicates,namespaceMembers,nsExports,nsTypes,files",
+    "knip:exports": "knip --include exports,types,enumMembers,duplicates,namespaceMembers,nsExports,nsTypes,files,catalog,catalogReferences,cycles",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

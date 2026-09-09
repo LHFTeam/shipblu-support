@@ -114,12 +114,21 @@ export async function GET(request: Request) {
       }, 25_000);
 
       try {
-        listener = sessionSql();
+        // Held locally as well as on `listener`, because `releaseListener()`
+        // nulls the shared reference the moment an abort arrives — and it can
+        // arrive during any of the awaits below. Reading `listener.listen` on
+        // the next iteration would then throw a TypeError that the catch logs
+        // as "could not LISTEN", inventing a failure of the one step that had
+        // in fact succeeded. The `closed` check is what actually stops the loop.
+        const client = sessionSql();
+        listener = client;
+
         // One session connection owns every topic for this view. Register them
         // sequentially rather than pipelining LISTEN statements during the
         // connection's own startup; this runs once per stream, not per event.
         for (const topic of topics) {
-          await listener.listen(topic, () => send('conversation', '{}'));
+          if (closed) break;
+          await client.listen(topic, () => send('conversation', '{}'));
         }
 
         // Moving the abort handler up is not enough on its own. `listener` is
