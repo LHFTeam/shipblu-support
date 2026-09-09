@@ -86,6 +86,7 @@ ungrouped:
         #   CATEGORISE_DISABLED_RULES   rule keys to stop applying
         #   CATEGORISE_AUTO_MIN         confidence at which a category auto-applies
         #   CATEGORISE_RECORD_MIN       confidence below which nothing is written
+        #   DB_QUERY_TIMEOUT_MS         query deadline (default 30000)
         #
         # Shared rather than per-environment because both halves of one system
         # have to agree on the answer: the web service applies the pattern when

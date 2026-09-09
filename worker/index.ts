@@ -94,6 +94,16 @@ async function main() {
       '[worker] could not LISTEN (check DATABASE_URL_SESSION) — falling back to polling',
       error,
     );
+    // The client can exist even when the LISTEN on it failed, and nulling the
+    // reference first threw away the only handle to it — a session connection
+    // opened with `idle_timeout: 0`, held until something reaped it. Same leak
+    // the two SSE routes had (§62); here it survives for the life of the
+    // process, so a restart loop leaked one per attempt.
+    if (listener) {
+      await listener.end({ timeout: 5 }).catch(() => {
+        /* already gone, or never established */
+      });
+    }
     listener = null;
   }
 

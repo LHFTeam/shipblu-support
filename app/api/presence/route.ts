@@ -28,6 +28,8 @@ export async function GET(request: Request) {
   const encoder = new TextEncoder();
   let heartbeat: ReturnType<typeof setInterval> | null = null;
   let closed = false;
+  /** True while this stream's own beat chain is still outstanding. */
+  let beating = false;
 
   const stream = new ReadableStream({
     start(controller) {
@@ -70,19 +72,34 @@ export async function GET(request: Request) {
         // turned into a stampede against the same database.
         sendKeepalive();
 
-        void (async () => {
-          // Then the session, before the beat rather than after it. A beat
-          // first would put a signed-out agent back to `online` for 25 seconds,
-          // every time round the loop. A database that cannot answer fails open
-          // — a blip must not sign the whole team out.
-          if (tokenHash && !(await sessionIsLive(tokenHash).catch(() => true))) {
-            cleanup();
-            return;
-          }
+        // One chain at a time. The keepalive above is unconditional and
+        // synchronous, so this stream stays open however slow the database is —
+        // which means without this guard every 25s tick started another chain
+        // that never settled. Over the fifty minutes of §62 that is roughly a
+        // hundred and twenty of them per stream, each holding its closure and a
+        // place in a queue that has no end, all while the browser saw a healthy
+        // stream and had no reason to back off. Skipping a beat costs nothing:
+        // the staleness check below already covers a missed one.
+        if (beating) return;
+        beating = true;
 
-          await beat(agent.id).catch(() => {
-            /* the staleness check covers a missed beat */
-          });
+        void (async () => {
+          try {
+            // Then the session, before the beat rather than after it. A beat
+            // first would put a signed-out agent back to `online` for 25
+            // seconds, every time round the loop. A database that cannot answer
+            // fails open — a blip must not sign the whole team out.
+            if (tokenHash && !(await sessionIsLive(tokenHash).catch(() => true))) {
+              cleanup();
+              return;
+            }
+
+            await beat(agent.id).catch(() => {
+              /* the staleness check covers a missed beat */
+            });
+          } finally {
+            beating = false;
+          }
         })();
       }, 25_000);
       sendKeepalive();

@@ -34,6 +34,27 @@ export async function GET(request: Request) {
   let pushing = false;
   let pushAgain = false;
 
+  /**
+   * Releases the session connection, once, and says so when it fails. Same
+   * reasoning as the console stream in `app/api/events/route.ts`: a session
+   * client is opened with `idle_timeout: 0`, so a floating `end()` that never
+   * completed is indistinguishable from one that did, and the backend is held
+   * until something reaps it (§62).
+   */
+  const releaseListener = async () => {
+    const held = listener;
+    if (!held) return;
+    listener = null;
+    try {
+      await held.end({ timeout: 5 });
+    } catch (error) {
+      console.error('[widget:sse] failed to release the LISTEN connection', error);
+    }
+  };
+
+  // Assigned by `start`, called by `cancel` too — one teardown, two callers.
+  let cleanup = () => {};
+
   const stream = new ReadableStream({
     async start(controller) {
       const send = (event: string, data: unknown) => {
@@ -66,18 +87,24 @@ export async function GET(request: Request) {
         }
       };
 
-      try {
-        if (topic) {
-          listener = sessionSql();
-          await listener.listen(topic, () => void push());
+      cleanup = () => {
+        if (closed) return;
+        closed = true;
+        if (heartbeat) clearInterval(heartbeat);
+        request.signal.removeEventListener('abort', cleanup);
+        void releaseListener();
+        try {
+          controller.close();
+        } catch {
+          /* already closed */
         }
-        send('ready', {});
-      } catch (error) {
-        console.error('[widget:sse] could not LISTEN', error);
-        // The widget falls back to polling on this, rather than sitting on a
-        // stream that will never carry anything.
-        send('degraded', {});
-      }
+      };
+
+      // Wired before the connection is opened rather than after it is
+      // listening: a visitor who closes the tab while the LISTEN round trip is
+      // in flight would otherwise leave nothing attached to the request
+      // lifecycle, and the backend stranded (§62).
+      request.signal.addEventListener('abort', cleanup);
 
       heartbeat = setInterval(() => {
         if (closed) return;
@@ -88,25 +115,35 @@ export async function GET(request: Request) {
         }
       }, 25_000);
 
-      const cleanup = () => {
-        if (closed) return;
-        closed = true;
-        if (heartbeat) clearInterval(heartbeat);
-        void listener?.end();
-        try {
-          controller.close();
-        } catch {
-          /* already closed */
+      try {
+        if (topic) {
+          listener = sessionSql();
+          await listener.listen(topic, () => void push());
         }
-      };
 
-      request.signal.addEventListener('abort', cleanup);
+        // Moving the abort handler up is not enough by itself: `listener` is
+        // still null when an abort arrives mid-await, so `cleanup` releases
+        // nothing and the connection assigned a moment later belongs to a
+        // visitor who has already gone.
+        if (closed) {
+          await releaseListener();
+          return;
+        }
+
+        send('ready', {});
+      } catch (error) {
+        console.error('[widget:sse] could not LISTEN', error);
+        // The connection can be live even when a LISTEN on it failed, so it is
+        // released here rather than left to a cleanup that may never run.
+        await releaseListener();
+        // The widget falls back to polling on this, rather than sitting on a
+        // stream that will never carry anything.
+        send('degraded', {});
+      }
     },
 
     cancel() {
-      closed = true;
-      if (heartbeat) clearInterval(heartbeat);
-      void listener?.end();
+      cleanup();
     },
   });
 
