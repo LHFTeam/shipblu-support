@@ -1739,15 +1739,34 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   the refusal. Decide it deliberately: either accept the reply and reopen the
   thread, or refuse it and say so on the ticket.
 
-- **The console cannot link an article to a translation.** `linkTranslation` in
-  `app/(console)/kb/actions.ts` implemented it and was never referenced from any
-  `.tsx` file in the repo's history, so it was a live `'use server'` endpoint
-  with no caller — deleted on this branch, with `git show b1d911a` holding the
-  implementation. Translation groups are still set at import by
-  `import-freshdesk-kb` and read by the help centre's language switcher, so the
-  gap is only manual linking. A picker belongs on the editor beside the language
-  field; write it against a fresh copy rather than restoring the endpoint, since
-  the old one was never exercised.
+- **Nothing the console can do puts two articles in the same translation group,
+  so a natively written article can never get a language switcher.**
+  `kb_articles.translation_group_id` is `notNull().defaultRandom()` and
+  `saveArticle` never sets it, so every article created in the console is alone
+  in a group of its own, permanently. The help centre's switcher is
+  `translationsOf(viewer, article.translationGroupId)` — it renders whatever
+  shares the group — so an Arabic article and its English twin written here show
+  no link to each other, and there is no screen that can join them.
+
+  `linkTranslation` was the one code path that could, and it was never
+  referenced from any `.tsx` file in the repo's history: a live `'use server'`
+  endpoint with no caller, deleted on this branch (`git show b1d911a` has it).
+  Deleting it removed the implementation, not the capability — the capability
+  was never reachable.
+
+  **This costs nothing today and everything at the first natively authored
+  pair.** All 112 production articles came from Freshdesk, where the importer
+  sets the groups: 54 of the 58 groups are correct ar/en pairs, and the four
+  singletons are placeholder rows all titled "مقالة جديدة", not content waiting
+  to be linked (queried 2026-09-09). So the switcher is right for every article
+  that exists. The gap opens the moment the team writes one — which is the point
+  of `seed_console_handbook` and the editor.
+
+  Two halves to close, and the second is the one that was missing: a picker on
+  the editor beside the language field, **and** `saveArticle` accepting a group
+  to join at creation, so writing the second language is one action rather than
+  a save followed by a link. Write it fresh rather than restoring the endpoint,
+  which was never exercised.
 
 ---
 
