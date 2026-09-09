@@ -8,10 +8,10 @@ import { currentSessionHash, getSessionAgent, type SessionAgent } from './sessio
 /**
  * Server-side access checks for console pages and actions.
  *
- * `middleware.ts` only checks that a session cookie exists — it runs on the edge
+ * `proxy.ts` only checks that a session cookie exists — it runs on the edge
  * without database access, so it can redirect an obviously-signed-out visitor
  * but cannot tell a revoked session from a live one. Every page and every action
- * therefore re-checks here, against the database. The middleware is a
+ * therefore re-checks here, against the database. The proxy is a
  * convenience; this is the control.
  */
 

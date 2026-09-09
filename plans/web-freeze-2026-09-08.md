@@ -211,6 +211,9 @@ Named for whoever picks this up; deliberately not done here.
   `needsBootstrap()` behind the cookie check. Both are small and both cut the
   peak slot demand of the two paths that hung longest.
 
-One more, unrelated to the freeze but found on the way: `db/sql/001` L399 still
-fires `pg_notify('conversation_changed', …)` unconditionally on every trigger
-invocation, and **nothing listens to it** any more.
+One more, unrelated to the freeze but found on the way: `db/sql/001` fired
+`pg_notify('conversation_changed', …)` unconditionally on every trigger
+invocation, and **nothing had listened to it** since the §6.23 work replaced it
+with the per-channel and per-conversation topics. **Removed 2026-09-09**, in the
+same change as the dead-code pass; the contract test asserts its absence rather
+than its presence.
