@@ -8,11 +8,10 @@ import {
   sideConversations,
 } from '@/db/schema';
 import { env } from '@/lib/env';
+import { readEmailBody } from '@/lib/email/body';
 import { classifyAutomation } from '@/lib/email/loop-protection';
-import { stripQuotedHtml, stripQuotedText } from '@/lib/email/quote-strip';
 import { resolveThread } from '@/lib/email/threading';
 import type { ParsedInboundEmail } from '@/lib/email/types';
-import { htmlToText, sanitiseEmailHtml } from '@/lib/html/sanitize';
 import { buildAttachmentPath, uploadObject } from '@/lib/storage';
 
 /**
@@ -138,16 +137,7 @@ export async function ingestSideReply(
    */
   const automation = classifyAutomation(email);
 
-  const rawHtml = email.htmlBody ?? null;
-  const strippedHtml = rawHtml ? stripQuotedHtml(rawHtml) : null;
-  const strippedText = stripQuotedText(email.textBody ?? '');
-
-  const sanitisedHtml = strippedHtml ? sanitiseEmailHtml(strippedHtml.visible) : null;
-  const bodyText = strippedText.visible.trim()
-    ? strippedText.visible
-    : sanitisedHtml
-      ? htmlToText(sanitisedHtml)
-      : '';
+  const body = readEmailBody(email);
 
   const result = await db.transaction(async (tx) => {
     const inserted = await tx
@@ -161,9 +151,9 @@ export async function ingestSideReply(
         fromName: email.from.name ?? null,
         toAddresses: email.to.map((a) => a.address),
         ccAddresses: email.cc.map((a) => a.address),
-        bodyHtml: sanitisedHtml,
-        bodyText,
-        rawBody: rawHtml ?? email.textBody ?? null,
+        bodyHtml: body.bodyHtml,
+        bodyText: body.bodyText,
+        rawBody: body.rawBody,
         channelMessageId: email.messageId,
         inReplyTo: email.inReplyTo ?? null,
         deliveryStatus: 'delivered',
@@ -172,7 +162,7 @@ export async function ingestSideReply(
           automationReason: automation.reason,
           isAutomated: automation.isAutomated,
           isBounce: automation.isBounce,
-          strippedBy: strippedText.matchedBy ?? strippedHtml?.matchedBy ?? null,
+          strippedBy: body.strippedBy,
           spfPass: email.spfPass,
           spamScore: email.spamScore,
         },

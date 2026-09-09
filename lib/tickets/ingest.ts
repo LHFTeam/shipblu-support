@@ -9,11 +9,10 @@ import {
   ticketStatuses,
 } from '@/db/schema';
 import { env } from '@/lib/env';
+import { readEmailBody } from '@/lib/email/body';
 import { classifyAutomation, isSelfAddressed } from '@/lib/email/loop-protection';
-import { stripQuotedHtml, stripQuotedText } from '@/lib/email/quote-strip';
 import { resolveThread, stripSubjectPrefixes } from '@/lib/email/threading';
 import type { ParsedInboundEmail } from '@/lib/email/types';
-import { htmlToText, sanitiseEmailHtml } from '@/lib/html/sanitize';
 import { ingestSideReply, resolveSideConversation } from '@/lib/side-conversations/ingest';
 import { buildAttachmentPath, uploadObject } from '@/lib/storage';
 import { resolveContact } from './contacts';
@@ -118,16 +117,7 @@ export async function ingestInboundEmail(email: ParsedInboundEmail): Promise<Ing
 
   // --- Body: strip quotes, sanitise, derive text ---------------------------
 
-  const rawHtml = email.htmlBody ?? null;
-  const strippedHtml = rawHtml ? stripQuotedHtml(rawHtml) : null;
-  const strippedText = stripQuotedText(email.textBody ?? '');
-
-  const sanitisedHtml = strippedHtml ? sanitiseEmailHtml(strippedHtml.visible) : null;
-  const bodyText = strippedText.visible.trim()
-    ? strippedText.visible
-    : sanitisedHtml
-      ? htmlToText(sanitisedHtml)
-      : '';
+  const body = readEmailBody(email);
 
   const emailChannel = await defaultEmailChannel();
 
@@ -204,10 +194,10 @@ export async function ingestInboundEmail(email: ParsedInboundEmail): Promise<Ing
         direction: 'inbound',
         kind: 'reply',
         authorContactId: contactId,
-        bodyHtml: sanitisedHtml,
-        bodyText,
+        bodyHtml: body.bodyHtml,
+        bodyText: body.bodyText,
         // The untouched original, so a wrong strip is recoverable.
-        rawBody: rawHtml ?? email.textBody ?? null,
+        rawBody: body.rawBody,
         channelMessageId: email.messageId,
         inReplyTo: email.inReplyTo ?? null,
         fromAddress: email.from.address,
@@ -218,7 +208,7 @@ export async function ingestInboundEmail(email: ParsedInboundEmail): Promise<Ing
           automationReason: automation.reason,
           isAutomated: automation.isAutomated,
           isBounce: automation.isBounce,
-          strippedBy: strippedText.matchedBy ?? strippedHtml?.matchedBy ?? null,
+          strippedBy: body.strippedBy,
           spfPass: email.spfPass,
           spamScore: email.spamScore,
         },
@@ -243,7 +233,7 @@ export async function ingestInboundEmail(email: ParsedInboundEmail): Promise<Ing
   await afterMessageStored({
     conversationId: result.conversationId,
     messageId: result.messageId,
-    bodyText,
+    bodyText: body.bodyText,
     kind: 'reply',
     direction: 'inbound',
   });
