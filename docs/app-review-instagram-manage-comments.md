@@ -155,9 +155,9 @@ screencast below).
 2. On any Instagram post published by @shipblu, leave a comment from your own
    Instagram account.
 
-3. In the console, open Inbox. A new ticket appears within a few seconds,
-   on the Instagram channel, carrying your comment, your username and a link
-   back to the comment. This is the "comments" webhook arriving.
+3. In the console, open Inbox. A new ticket appears within a few seconds, on
+   the Instagram channel, carrying your comment, your username and a "public
+   comment" badge. This is the "comments" webhook arriving.
 
 4. Open the ticket and type an answer in the reply box, then send it. Refresh
    the Instagram post: the answer is now a public reply to your comment. The

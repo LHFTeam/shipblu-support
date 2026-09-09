@@ -1291,6 +1291,16 @@ instagram_login`, and not one reads `via facebook_page`. Receiving is this
 
   `docs/app-review-instagram-manage-comments.md` carries the submission text,
   the reviewer instructions, and the query behind each fact above.
+  `docs/app-review-pages-read-engagement.md` covers the dependency that has to
+  go in with it, and records the gap that will decide whether the pair is
+  approved: **nothing in the console renders the post a comment was left on.**
+  `ingestMetaComment` stores `postId` on the message and on the
+  `comment_thread_opened` event, and no screen reads it — there is not one
+  `facebook.com` or `instagram.com` link in the ticket view. Meta's screencast
+  for `pages_read_engagement` asks to see a post's content displayed in the
+  app, and there is nothing to film. Showing the post beside the comment is
+  the fix and is worth doing anyway: an agent answering #13798's "أسوأ شركه
+  شحن" cannot see what it was posted under.
 
   Both pipelines were proven on 2026-08-29 and they landed in different places:
 
