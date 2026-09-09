@@ -30,7 +30,24 @@ export function getSql(): ReturnType<typeof postgres> {
   const create = () =>
     postgres(env().DATABASE_URL, {
       prepare: false,
-      max: 10,
+      /**
+       * Sized against the widest page, not against a round number.
+       *
+       * Two changes below this line each cost capacity: one pool now serves the
+       * page-render and route-handler bundles that used to have ten apiece, and
+       * every web query is a transaction, so a connection is held for BEGIN,
+       * SET LOCAL, the statement and COMMIT rather than one round trip. Keeping
+       * ten through both would leave the render path with roughly a quarter of
+       * what it had — while `conversationDetail` alone fans out about a dozen
+       * concurrent queries, which is how a single agent opening two tickets
+       * used to saturate it.
+       *
+       * This is a Supavisor *transaction* pooler connection, so these are
+       * client connections the pooler multiplexes, not backends against
+       * `max_connections`. The session-mode LISTEN connections are the ones
+       * that pin a backend each, and they are counted separately.
+       */
+      max: 24,
       idle_timeout: 20,
       connect_timeout: 10,
     });

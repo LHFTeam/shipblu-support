@@ -10,13 +10,23 @@ export const WEB_POOL_COOLDOWN_MS = 5_000;
 
 export class DatabaseDeadlineError extends Error {
   readonly code = 'WEB_DATABASE_DEADLINE';
-  constructor() {
-    super('Database operation exceeded its deadline; its outcome may be unknown.');
+  /**
+   * True when the operation never reached a connection. The distinction is a
+   * safety claim, not a label: work that is still queued for BEGIN has provably
+   * not touched the database, while work that was sent and went quiet has an
+   * unknown outcome. Only the second may have written something.
+   */
+  constructor(readonly waitedForConnection = false) {
+    super(
+      waitedForConnection
+        ? 'Database pool is saturated; the request waited too long for a connection.'
+        : 'Database operation exceeded its deadline; its outcome may be unknown.',
+    );
   }
 }
 
 type Generation = { raw: Sql; client: Sql; id: string; retired: boolean };
-type Observation = { startedAt: number; poolId: string; kind: string };
+type Observation = { startedAt: number; poolId: string; kind: string; acquired: boolean };
 
 /**
  * A web-only Drizzle adapter. Supavisor transaction pooling cannot promise a
@@ -25,10 +35,13 @@ type Observation = { startedAt: number; poolId: string; kind: string };
  * BEGIN's pool wait, the callback, savepoints and COMMIT.
  *
  * We deliberately do not retry, cancel by backend PID (which can race with the
- * next pooled query), or recycle on 57014. Only a client deadline retires a pool:
- * a server timeout normally rejects within the shorter statement budget. Forced
- * end rejects outstanding work, including queued queries; the cooldown prevents
- * a failing dependency from causing an unbounded connection/retry loop.
+ * next pooled query), or recycle on 57014: a server timeout rejects within the
+ * shorter statement budget and leaves the pool usable. Retirement is reserved
+ * for the one thing a budget cannot fix — a connection that answered BEGIN and
+ * then stopped answering — because forced end rejects all outstanding work,
+ * queued queries included, and the cooldown then refuses new ones. A deadline
+ * reached while still waiting for a connection says the pool is busy, not
+ * broken, and is refused without retiring anything.
  */
 export class WebPool {
   private generation: Generation | undefined;
@@ -62,47 +75,63 @@ export class WebPool {
     if (generation.retired) throw new DatabaseDeadlineError();
   }
 
-  private observe<T>(generation: Generation, kind: string, run: () => Promise<T>): Promise<T> {
+  private observe<T>(
+    generation: Generation,
+    kind: string,
+    run: (acquired: () => void) => Promise<T>,
+  ): Promise<T> {
     this.assertLive(generation);
     const operationId = randomUUID();
     const startedAt = Date.now();
-    this.outstanding.set(operationId, { startedAt, poolId: generation.id, kind });
+    const observation: Observation = { startedAt, poolId: generation.id, kind, acquired: false };
+    this.outstanding.set(operationId, observation);
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         const operations = [...this.outstanding.values()].filter(
           (op) => op.poolId === generation.id,
         );
         this.report({
-          event: 'deadline',
+          event: observation.acquired ? 'deadline' : 'queue_deadline',
           poolId: generation.id,
           operationId,
           kind,
           elapsedMs: Date.now() - startedAt,
           outstanding: operations.length,
+          waiting: operations.filter((op) => !op.acquired).length,
           oldestMs: Date.now() - Math.min(...operations.map((op) => op.startedAt)),
         });
-        // Invalidate before end(): callbacks released by shutdown must not issue
-        // further queries, nor may a cached Drizzle instance reuse this client.
-        if (!generation.retired) {
-          generation.retired = true;
-          if (this.generation === generation) this.generation = undefined;
-          this.retryAfter = Date.now() + this.policy.cooldownMs;
-          void generation.raw.end({ timeout: 0 }).catch(() => {
-            this.report({ event: 'pool_close_failed', poolId: generation.id });
-          });
-        }
+        // Retire only on evidence the pool is dead rather than merely busy. A
+        // connection that answered BEGIN and then went quiet is the black hole
+        // this class exists for. An operation still queued for a connection is
+        // load: retiring on it rejects the whole backlog, opens the cooldown,
+        // and hands the fresh pool the same backlog a moment later — a flap
+        // manufactured out of a busy minute. The caller is still refused either
+        // way, so no request hangs.
+        if (observation.acquired) this.retire(generation);
         this.outstanding.delete(operationId);
-        reject(new DatabaseDeadlineError());
+        reject(new DatabaseDeadlineError(!observation.acquired));
       }, this.policy.deadlineMs);
       // Attach both handlers immediately: late rejection after a deadline must
       // not become an unhandled rejection or overwrite the caller's result.
       Promise.resolve()
-        .then(run)
+        .then(() => run(() => (observation.acquired = true)))
         .then(resolve, reject)
         .finally(() => {
           clearTimeout(timer);
           this.outstanding.delete(operationId);
         });
+    });
+  }
+
+  /** Invalidate before end(): callbacks released by shutdown must not issue
+   * further queries, nor may a cached Drizzle instance reuse this client. */
+  private retire(generation: Generation) {
+    if (generation.retired) return;
+    generation.retired = true;
+    if (this.generation === generation) this.generation = undefined;
+    this.retryAfter = Date.now() + this.policy.cooldownMs;
+    void generation.raw.end({ timeout: 0 }).catch(() => {
+      this.report({ event: 'pool_close_failed', poolId: generation.id });
     });
   }
 
@@ -138,8 +167,9 @@ export class WebPool {
             if (transaction) {
               return transaction.savepoint((tx) => callback(this.adapt(generation, tx)));
             }
-            return this.observe(generation, 'transaction', () =>
+            return this.observe(generation, 'transaction', (acquired) =>
               generation.raw.begin(async (tx) => {
+                acquired();
                 this.assertLive(generation);
                 await tx.unsafe(`set local statement_timeout = '${this.policy.statementMs}ms'`);
                 const result = await callback(this.adapt(generation, tx));
@@ -172,8 +202,9 @@ export class WebPool {
       return values ? query.values() : query;
     };
     if (transaction) return execute(transaction);
-    return this.observe(generation, 'query', () =>
+    return this.observe(generation, 'query', (acquired) =>
       generation.raw.begin(async (tx) => {
+        acquired();
         this.assertLive(generation);
         await tx.unsafe(`set local statement_timeout = '${this.policy.statementMs}ms'`);
         return execute(tx);

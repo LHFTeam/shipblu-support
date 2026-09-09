@@ -821,9 +821,10 @@ return router state without running the page; `?_rsc=` alone does not identify
 a prefetch (the request headers matter). Check a completed full navigation and
 its expected content. `/api/health` now does that for a private, dynamic Server
 Component with a database read; it is not a claim that every console feature
-works. Web DB deadlines cover queue wait and retire the pool, never the process;
-workers and migrations keep their separate budgets (see
-`plans/web-outage-hardening.md`). And a silent success is worse than a failure:
+works. Web DB deadlines cover queue wait and always refuse the caller, but retire the
+pool only when the operation had a connection and lost it — never on queue wait,
+which is load, and never the process; workers and migrations keep their separate
+budgets (see `plans/web-outage-hardening.md`). And a silent success is worse than a failure:
 break down any count that could hide a systematic gap along the dimension that
 can fail — per language, per channel, per account.
 

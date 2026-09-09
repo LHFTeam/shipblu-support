@@ -57,11 +57,12 @@ async function main() {
     () => {},
   );
   try {
-    await assert.rejects(
-      Promise.resolve(queuedPool.getSql().unsafe('select 1')),
-      DatabaseDeadlineError,
-    );
-    console.log('web-db: deadline before connection acquisition passed');
+    const client = queuedPool.getSql();
+    await assert.rejects(Promise.resolve(client.unsafe('select 1')), DatabaseDeadlineError);
+    // Busy is not broken. A deadline reached while still queued for a
+    // connection must refuse the caller and keep the pool.
+    assert.equal(queuedPool.getSql(), client, 'queue wait must not retire the pool');
+    console.log('web-db: deadline before connection acquisition passed without retiring');
   } finally {
     reserved.release();
     await queuedPool.close();

@@ -22,11 +22,17 @@ the router-state shortcut depends on request headers as well as loading boundari
 
 ## Implemented policy
 
-- One lazy `globalThis` web pool per Node process, shared by both Next bundles.
-  Keep `max: 10`. Two accidental pools were not a capacity target. Increasing
-  this needs workload measurements and a connection budget including replicas,
-  deploy overlap, worker, crons and LISTEN; the database limit is 60, and
-  Supavisor client slots do not map one-to-one onto backends.
+- One lazy `globalThis` web pool per Node process, shared by both Next bundles,
+  at `max: 24`. The two accidental pools were not a capacity target, but they
+  were capacity: unifying them halves the render path's slots, and making every
+  operation a transaction holds each slot for four round trips instead of one,
+  so keeping ten would leave that path with about a quarter of what it had —
+  against a `conversationDetail` that fans out roughly a dozen concurrent
+  queries. Sized to clear the widest page twice over. This is a transaction-mode
+  Supavisor pool, so these are client slots the pooler multiplexes rather than
+  backends against the database limit of 60; the session-mode LISTEN
+  connections are the ones that pin a backend each. Tuning further still needs
+  workload measurements across replicas, deploy overlap, worker and crons.
 - A 5-second server statement timeout and a 10-second client deadline for web
   database operations. The client timer begins before `BEGIN` queues for a
   connection and covers the transaction callback, savepoints and COMMIT too.
@@ -38,9 +44,17 @@ the router-state shortcut depends on request headers as well as loading boundari
   client with its existing limits. There are no new deployment variables.
   The adapter supports the installed Drizzle driver's unsafe/values/begin/
   savepoint protocol; raw tagged calls deliberately refuse to bypass it.
-- A client deadline invalidates and force-ends that pool generation, refuses
-  further use of its cached clients and waits 5 seconds before allowing a new
-  generation. Concurrent DB work can fail too; HTTP/SSE sockets and the process
+- A client deadline always refuses its caller, but only a deadline reached
+  **after** the operation held a connection retires the pool generation — force-
+  ending it, refusing its cached clients and waiting 5 seconds before a new
+  generation. A deadline reached while still queued for `BEGIN` reports
+  `queue_deadline` and changes nothing: that is load, and retiring on it rejects
+  the whole backlog, opens the cooldown and hands the fresh pool the same
+  backlog a moment later — a flap manufactured out of a busy minute. The
+  distinction is also a safety claim the caller can read off
+  `DatabaseDeadlineError.waitedForConnection`: queued work provably never
+  reached the database, while work that was sent and went quiet has an unknown
+  outcome. Concurrent DB work can fail too; HTTP/SSE sockets and the process
   are not deliberately killed. A `57014` on its own never retires anything.
   There are **no retries**: an interrupted write or COMMIT can have an unknown
   outcome. JavaScript callbacks cannot be cancelled, but late callbacks cannot

@@ -1669,10 +1669,12 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   The production-only split between route-handler and SSR database pools was
   reproduced; the original event that stalled the client pool remains unproved.
   `plans/web-outage-hardening.md` records the evidence and policy: one lazy web
-  pool (max 10), 5-second transaction-local statement limits, a 10-second client
-  deadline including queue wait, bounded pool retirement without retries or
-  process exit, and readiness that completes a private Server Component plus DB
-  read. Workers/crons/migrations retain their own budgets. A plain 57014 does not
+  pool (max 24, sized against the widest page now that one pool serves both
+  bundles and every operation is a transaction), 5-second transaction-local
+  statement limits, a 10-second client deadline including queue wait, pool
+  retirement only when a held connection stops answering — never on queue wait,
+  and never with retries or a process exit — and readiness that completes a
+  private Server Component plus DB read. Workers/crons/migrations retain their own budgets. A plain 57014 does not
   recycle the pool. CI includes real-Postgres fault injection and a production
   cross-layer singleton/readiness check. No production recovery claim follows
   merely from these code changes; staging workload and deployment verification

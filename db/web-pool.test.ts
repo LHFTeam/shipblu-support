@@ -59,19 +59,49 @@ describe('web database budgets', () => {
     await expect(pool.getSql().unsafe('select 1').values()).resolves.toEqual([[1]]);
   });
 
-  it('bounds BEGIN queue wait, retires once, refuses stale clients and reconnects after cooldown', async () => {
+  it('refuses a queue-wait deadline without retiring a pool that is only busy', async () => {
+    const fake = driver();
+    const queued = deferred<unknown>();
+    fake.begin.mockImplementation(() => queued.promise);
+    const create = vi.fn().mockReturnValue(fake.raw);
+    const report = vi.fn();
+    const pool = new WebPool(create, policy, report);
+    const client = pool.getSql();
+    const result = Promise.resolve(client.unsafe('select sensitive_value')).catch(
+      (e: unknown) => e,
+    );
+    await vi.advanceTimersByTimeAsync(101);
+    const error = await result;
+    expect(error).toBeInstanceOf(DatabaseDeadlineError);
+    // Nothing reached a connection, so the caller knows no write happened.
+    expect((error as DatabaseDeadlineError).waitedForConnection).toBe(true);
+    expect(fake.tx.unsafe).not.toHaveBeenCalled();
+    // Retiring here would reject the rest of the backlog and hand the fresh
+    // pool the same backlog after the cooldown.
+    expect(fake.end).not.toHaveBeenCalled();
+    expect(pool.getSql()).toBe(client);
+    expect(JSON.stringify(report.mock.calls)).toContain('queue_deadline');
+    expect(JSON.stringify(report.mock.calls)).not.toContain('sensitive_value');
+    queued.reject(new Error('late shutdown rejection'));
+    await vi.advanceTimersByTimeAsync(1);
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it('retires on a stalled connection, refuses stale clients and reconnects after cooldown', async () => {
     const first = driver();
     const second = driver();
-    const queued = deferred<unknown>();
-    first.begin.mockImplementation(() => queued.promise);
+    const stuck = deferred<unknown>();
+    first.run.mockReturnValue(stuck.promise);
     const create = vi.fn().mockReturnValueOnce(first.raw).mockReturnValue(second.raw);
     const report = vi.fn();
     const pool = new WebPool(create, policy, report);
     const stale = pool.getSql();
     const result = Promise.resolve(stale.unsafe('select sensitive_value')).catch((e: unknown) => e);
     await vi.advanceTimersByTimeAsync(101);
-    expect(await result).toBeInstanceOf(DatabaseDeadlineError);
-    expect(first.tx.unsafe).not.toHaveBeenCalled();
+    const error = await result;
+    expect(error).toBeInstanceOf(DatabaseDeadlineError);
+    // It answered BEGIN and then went quiet, so its outcome is unknown.
+    expect((error as DatabaseDeadlineError).waitedForConnection).toBe(false);
     expect(first.end).toHaveBeenCalledExactlyOnceWith({ timeout: 0 });
     expect(() => pool.getSql()).toThrow('recovering');
     expect(JSON.stringify(report.mock.calls)).not.toContain('sensitive_value');
@@ -80,7 +110,7 @@ describe('web database budgets', () => {
     await expect(Promise.resolve(stale.unsafe('select 1'))).rejects.toBeInstanceOf(
       DatabaseDeadlineError,
     );
-    queued.reject(new Error('late shutdown rejection'));
+    stuck.resolve([]);
     await vi.advanceTimersByTimeAsync(1);
     expect(create).toHaveBeenCalledTimes(2);
   });
