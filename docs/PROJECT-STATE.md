@@ -1053,6 +1053,26 @@ shipblu.com` still serves Freshdesk, so each one took a reader out of this
   and have somebody on it reply. If all three are eaten the reply opens a new
   customer ticket instead, which is visible immediately: the mail lands in the
   inbox as a new ticket from a hub address rather than on the thread.
+- **`whatsapp_business_management` is a dependency of
+  `whatsapp_business_messaging`, the app already calls it hourly, and it is on
+  no line of the submission.** _2026-09-09._ Meta's reference makes the
+  dependency explicit. The hourly template sync is a management call —
+  `listTemplates` reads `GET /{waba-id}/message_templates` — and it is working:
+  36 templates are in the table, `APPROVED` and `REJECTED`. So the app depends
+  on a permission nobody has asked for, which is the same shape as
+  `pages_show_list` under the two Meta submissions.
+
+  Two more facts about WhatsApp that a submission has to be written around, both
+  read from production the same day. **Four outbound messages exist in the whole
+  archive** — three delivered (2026-08-18 ×2, 2026-08-27 14:06) and one failed
+  before the number was configured — and **every one is free-form text**, so
+  `sendTemplate` has never run in production despite being what the composer
+  offers once the window closes. And **the 44,149 inbound WhatsApp messages are
+  the bot number's**, on a channel `lib/tickets/channel-policy.ts` makes
+  read-only, with zero outbound; the support line `838961722630554` has eight.
+  Do not let that figure be quoted as support volume.
+  `docs/app-review-whatsapp-business-messaging.md` carries the submission.
+
 - **Meta's Human Agent feature is not approved. Confirmed 2026-09-06, and it is
   the whole 24-hour-to-7-day path.** _Was a hypothesis; is now a reading._ A
   Facebook or Instagram reply sent more than 24 hours after the customer's last
