@@ -1739,34 +1739,44 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   the refusal. Decide it deliberately: either accept the reply and reopen the
   thread, or refuse it and say so on the ticket.
 
-- **Nothing the console can do puts two articles in the same translation group,
-  so a natively written article can never get a language switcher.**
-  `kb_articles.translation_group_id` is `notNull().defaultRandom()` and
-  `saveArticle` never sets it, so every article created in the console is alone
-  in a group of its own, permanently. The help centre's switcher is
-  `translationsOf(viewer, article.translationGroupId)` — it renders whatever
-  shares the group — so an Arabic article and its English twin written here show
-  no link to each other, and there is no screen that can join them.
+- **An article can now be linked to its translation from the console, and that
+  is the first half of two.** `kb_articles.translation_group_id` is
+  `notNull().defaultRandom()`, so every article starts alone in a group of its
+  own, and the help centre's switcher renders whatever shares the group
+  (`translationsOf`). Until this branch nothing outside the Freshdesk importer
+  ever wrote the column: `linkTranslation` was the one code path that could and
+  had never been referenced from any `.tsx` file, so it was a live `'use server'`
+  endpoint with no caller. It is now wired to a **Translations** section in the
+  article sidebar, which lists what this article is already linked to and offers
+  every other article the reader may see in another language. Both sides are
+  re-checked server-side, and the candidate list goes through `readableByRole`
+  for a sharper reason than the other read models: an unfiltered dropdown would
+  leak the titles of admins-only runbooks to a supervisor.
 
-  `linkTranslation` was the one code path that could, and it was never
-  referenced from any `.tsx` file in the repo's history: a live `'use server'`
-  endpoint with no caller, deleted on this branch (`git show b1d911a` has it).
-  Deleting it removed the implementation, not the capability — the capability
-  was never reachable.
+  **This costs nothing today and would have opened at the first natively
+  authored pair.** All 112 production articles came from Freshdesk, where the
+  importer sets the groups: 54 of the 58 groups are correct ar/en pairs, and the
+  four singletons are placeholder rows all titled "مقالة جديدة", not content
+  waiting to be linked (queried 2026-09-09). The gap was prospective, which is
+  why it was worth closing before `seed_console_handbook` and the editor start
+  producing native content.
 
-  **This costs nothing today and everything at the first natively authored
-  pair.** All 112 production articles came from Freshdesk, where the importer
-  sets the groups: 54 of the 58 groups are correct ar/en pairs, and the four
-  singletons are placeholder rows all titled "مقالة جديدة", not content waiting
-  to be linked (queried 2026-09-09). So the switcher is right for every article
-  that exists. The gap opens the moment the team writes one — which is the point
-  of `seed_console_handbook` and the editor.
+  **TODO — the second half, and two rough edges the first half leaves:**
 
-  Two halves to close, and the second is the one that was missing: a picker on
-  the editor beside the language field, **and** `saveArticle` accepting a group
-  to join at creation, so writing the second language is one action rather than
-  a save followed by a link. Write it fresh rather than restoring the endpoint,
-  which was never exercised.
+  1. **`saveArticle` should accept a group to join at creation.** Writing the
+     second language is currently a save followed by a separate link, and a
+     person can do the first and forget the second — which produces exactly the
+     unlinked pair this exists to prevent. "Add a translation" from an existing
+     article, carrying its group into the new row, is the workflow that cannot
+     be half-completed.
+  2. **There is no unlink.** A wrong link can be pointed somewhere else but not
+     undone back to "alone", because that means allocating a fresh
+     `translation_group_id` and nothing exposes that. Cheap to add next to the
+     picker; left out here to keep the restoration reviewable.
+  3. **Linking moves only this article, so a group it was already in is left
+     behind.** Right for two locales — "this is the Arabic of that" — and the
+     thing to revisit if a third is ever added, when the intent becomes "merge
+     these groups" rather than "point this one".
 
 ---
 
@@ -3527,6 +3537,14 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     endpoint whose authorisation a review pass hardened without anyone noticing
     nothing could reach it. **An unreferenced export in a `'use server'` file is
     not inert the way an unreferenced function is; it is a published endpoint.**
+
+    **Two of the twenty-seven were wired up rather than deleted, and the check
+    does not care which.** `findRedirect` was live logic the legacy route had
+    copied inline, and `linkTranslation` was the only implementation of a
+    capability the help centre already renders the other half of (§5.5). That is
+    the right shape for this rule: "nothing references this" is a fact, and
+    whether the answer is a deletion or a caller is a judgement the check should
+    force someone to make rather than make for them.
 
     `plans/query-optimisation-and-cleanup.md` had already scanned for these,
     verified them by hand, confirmed three, and asked for the check to be made

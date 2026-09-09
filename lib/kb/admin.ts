@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, ilike, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, ilike, ne, or, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agents, kbArticleVersions, kbArticles, kbCategories, kbFolders } from '@/db/schema';
 import type { AgentRole } from '@/lib/auth/permissions';
@@ -266,4 +266,45 @@ export async function takenSlugs(locale: string, excludeArticleId?: string): Pro
     .where(eq(kbArticles.locale, locale));
 
   return rows.filter((row) => row.id !== excludeArticleId).map((row) => row.slug);
+}
+
+export type TranslationOption = {
+  id: string;
+  title: string;
+  locale: string;
+  status: string;
+  translationGroupId: string;
+};
+
+/**
+ * Every other article the reader could link this one to, or is already linked to.
+ *
+ * Through `readableByRole` like every other read model here, and for the sharper
+ * reason: linking names another article in the console and moves this one into
+ * its group, so an unfiltered list would let a supervisor discover the titles of
+ * admins-only runbooks through a dropdown. `linkTranslation` re-checks both
+ * sides server-side — this only decides what is worth offering.
+ *
+ * Returned unsplit, with each row's group id, because the caller needs the same
+ * rows twice: the ones sharing this article's group are its current
+ * translations, and the rest in another language are what it could join. One
+ * query rather than two that could disagree about which articles exist.
+ */
+export async function listTranslationOptions(
+  articleId: string,
+  role: AgentRole,
+): Promise<TranslationOption[]> {
+  return db
+    .select({
+      id: kbArticles.id,
+      title: kbArticles.title,
+      locale: kbArticles.locale,
+      status: kbArticles.status,
+      translationGroupId: kbArticles.translationGroupId,
+    })
+    .from(kbArticles)
+    .innerJoin(kbFolders, eq(kbFolders.id, kbArticles.folderId))
+    .where(and(ne(kbArticles.id, articleId), readableByRole(role)))
+    .orderBy(asc(kbArticles.locale), asc(kbArticles.title))
+    .limit(500);
 }

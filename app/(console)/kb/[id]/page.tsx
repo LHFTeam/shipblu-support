@@ -4,7 +4,12 @@ import { notFound } from 'next/navigation';
 import { Badge } from '@/components/ui';
 import { requirePermission } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
-import { getArticleForEdit, listFolderOptionsForRole, listVersions } from '@/lib/kb/admin';
+import {
+  getArticleForEdit,
+  listFolderOptionsForRole,
+  listTranslationOptions,
+  listVersions,
+} from '@/lib/kb/admin';
 import { FLOOR_LABELS } from '@/lib/kb/floors';
 import { direction } from '@/lib/kb/locale';
 import { requestBaseUrl } from '@/lib/kb/site';
@@ -129,9 +134,10 @@ export default async function ArticlePage({ params }: { params: Promise<{ id: st
 
   // Role-filtered, like `/kb/new`: the picker decides where this article can be
   // moved to, and a folder above the reader is not somewhere they can move it.
-  const [folders, versions] = await Promise.all([
+  const [folders, versions, translationOptions] = await Promise.all([
     listFolderOptionsForRole(agent.role),
     listVersions(id),
+    listTranslationOptions(id, agent.role),
   ]);
 
   return (
@@ -163,6 +169,9 @@ export default async function ArticlePage({ params }: { params: Promise<{ id: st
       <ArticleSidebar
         articleId={article.id}
         status={article.status}
+        locale={article.locale}
+        translationGroupId={article.translationGroupId}
+        translationOptions={translationOptions}
         publicUrl={publicUrl}
         versions={versions}
         stats={{
