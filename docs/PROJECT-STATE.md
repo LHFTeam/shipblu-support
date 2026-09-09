@@ -1259,8 +1259,40 @@ on node type (User)` with no subcode, which that predicate declines by design,
   nothing.
 
 - **Instagram comment management. Facebook comments now work; Instagram's are
-  gated by the permission itself.** _Updated 2026-08-29._ Both pipelines were
-  proven this morning and they landed in different places:
+  gated by the permission itself.** _Updated 2026-08-29._
+
+  **The gate opened on 2026-09-02, so read the correction before the item.**
+  `instagram_manage_comments` was granted at 10:43:06 UTC — the `permissions`
+  webhook recorded it once, alongside `pages_manage_engagement`,
+  `pages_manage_posts` and `pages_read_engagement` — and the **Page-borne copy**
+  of the `comments` webhook began arriving 71 minutes later. Real Instagram
+  comment tickets exist now (#13770 on 2026-09-02, #13817 on 2026-09-09), and
+  the console has answered them: a public reply, a private reply and three
+  deletes all completed with `error: null`. So "no real Instagram comment has
+  ever arrived" below, and §6.42's "no comment reply has ever succeeded", are
+  both superseded — everything under this bullet is the history of how it was
+  diagnosed, not the current state.
+
+  Two things it does **not** settle, and both matter to the submission:
+
+  1. **Every real comment so far is from one account that holds a role on the
+     app.** That is exactly what Standard Access covers, so this is not yet
+     evidence that a member of the public's comment is delivered. The same
+     caution `lib/meta/capabilities.ts` already carries for the direct
+     connection applies here: a stranger's comment arriving is the thing that
+     settles it.
+  2. **The app is not acting under this permission.** `INSTAGRAM_ACCESS_TOKEN`
+     is set, so every outbound Instagram call — reply, private reply, hide,
+     delete — goes over the direct connection under
+     `instagram_business_manage_comments`. Verified in the worker log: every
+     `send_meta` line on Instagram between 2026-08-25 and 2026-09-09 reads `via
+instagram_login`, and not one reads `via facebook_page`. Receiving is this
+     permission's; acting is the other one's.
+
+  `docs/app-review-instagram-manage-comments.md` carries the submission text,
+  the reviewer instructions, and the query behind each fact above.
+
+  Both pipelines were proven on 2026-08-29 and they landed in different places:
 
   - **Facebook: working end to end.** A real comment on a Page post arrived as
     `page` / `feed` / `item: comment`, verified and processed, and
@@ -2926,6 +2958,13 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     succeeded" — and the database settles it: across all time,
     `meta->>'sendKind' = 'comment_reply'` has exactly one row and it is this
     failure. **No comment reply has ever succeeded here.**
+
+    **That last sentence expired on 2026-09-02**, the day the comment
+    permissions were granted (§5.2). Comment replies now succeed on both
+    platforms — 22 on Facebook and 3 on Instagram in the ten days to
+    2026-09-09 — so the discriminator quoted above has flipped: a refusal on
+    the comment edge today is about _this_ comment rather than about the
+    approval. The entry is kept for the diagnosis, which was right.
 
     `lib/meta/errors.ts` now matches 3, 10 and 200 on the comment edges — the
     same three codes the profile lookups already treat as "Graph refused the app,
