@@ -1186,7 +1186,29 @@ shipblu.com` still serves Freshdesk, so each one took a reader out of this
   call refused at the capability gate never reaches the permission, so it is
   never counted against it. The counter measures _granted_ usage; it cannot
   leave zero while the app is unapproved, and it is therefore not an independent
-  problem to chase — it is the refusal, restated. The way to move it before
+  problem to chase — it is the refusal, restated.
+
+  **Read that as "the feature's counter", because the permission's counter is a
+  different number and it is large.** _2026-09-09, from the dashboard._ The same
+  refused calls **are** counted against `pages_read_engagement`, whose reference
+  covers this endpoint's data — "names, PSIDs, and profile pictures of your Page
+  followers". The request reached the endpoint the permission covers, so the
+  permission counts it; the feature refused it, so the feature does not. Both
+  counters are correct and they disagree by hundreds. This is §6.61's table
+  observed from both ends on a single call, and it is the cheapest way to tell a
+  feature gate from a permission gate without reading a log: **compare the two
+  counters.** The volume, for scale — 171 `fetch_meta_profile` jobs between
+  2026-09-02 and 2026-09-09, all `facebook`, each making two Graph reads because
+  `fetchProfile` retries narrower, so about 340 calls, every one refused. 4 of
+  83 Facebook identities carry a name, and those came from the `feed` webhook's
+  own `from.name` rather than from this endpoint.
+
+  The refusal has also **changed shape** and nobody has explained why: §5.2
+  recorded Facebook refusals as `(#3) Application does not have the capability`,
+  and today's are `(#100) … does not exist, cannot be loaded due to missing
+permissions`. The handler still classifies it correctly, so this is a note for
+  whoever next reads a `(#3)` in this file and cannot find one in the log.
+  `docs/app-review-pages-read-engagement.md` carries the rest. The way to move it before
   approval is Meta's role exemption: a lookup for a person who holds a role on
   the app (admin, developer, tester) is answered without App Review, so have
   somebody with a role message the Page and run

@@ -1,40 +1,91 @@
 # The `pages_read_engagement` App Review submission
 
-Sibling of `docs/app-review-instagram-manage-comments.md`, and it has to be
-read differently. That one describes a feature the product has and a reviewer
-can watch working. This one is a **dependency**: Meta requires it for the
-permission we actually want, and the app's own use of it is one call that no
-screen has ever shown the result of.
+Sibling of `docs/app-review-instagram-manage-comments.md`.
 
-Written 2026-09-09 against production.
+Written 2026-09-09 against production, and **corrected the same day**: the first
+version of this file said the app's only use of this permission was one call
+that had never run. That was wrong, and the App Dashboard is what said so — it
+reports many calls. They are real, they are the app's busiest Graph read, and
+section D now names them. What follows is the corrected account.
+
+## What the app actually uses it for
+
+**The customer's name and picture.** A Messenger or Instagram webhook carries a
+scoped id and nothing else — no name, no handle, unlike WhatsApp, which puts
+the profile name in the payload. `fetchProfile` in `lib/meta/client.ts` reads
+`GET /{page-scoped-id}?fields=first_name,last_name,name,profile_pic` on
+`graph.facebook.com` with the Page token, and it is the only thing that can
+tell this system who wrote in. Without it the console shows a support agent a
+seventeen-digit number where a customer's name belongs.
+
+That is inside this permission's documented scope. Meta's reference for
+`pages_read_engagement` lists three things it allows, and the second is the
+one: _"Get names, PSIDs, and profile pictures of your Page followers."_
+
+**The volume is not small.** 171 `fetch_meta_profile` jobs between 2026-09-02
+and 2026-09-09, every one of them on `facebook`, and each job makes **two**
+Graph reads rather than one — `fetchProfile` asks for the extended field list
+first and retries with the base list on refusal — so roughly 340 calls in eight
+days. The console's **Refresh profile** button makes more, in the action rather
+than through a job. That is what the dashboard is counting.
+
+**A second call site exists and has never run.** `latestPagePostId()` —
+`GET me/published_posts?limit=1&fields=id` — is reached only by the
+`test_comment_permission` job, which logs `[meta:test]` unconditionally and has
+produced no such line in thirty days on either service. It is a diagnostic, not
+a feature, and it is not what the dashboard is showing.
+
+**And it is a dependency regardless.** Meta's reference lists
+`pages_read_engagement` under `instagram_manage_comments`, alongside
+`instagram_basic` and `pages_show_list`, and names it again in the
+prerequisites for the Instagram `comments` webhook field
+(`docs/PROJECT-STATE.md` §5.2). So it has to be on the submission whatever the
+call counts say.
 
 ## Before you paste any of this
 
-**Why it is on the submission at all.** Meta's permission reference lists
-`pages_read_engagement` as a dependency of `instagram_manage_comments`,
-alongside `instagram_basic` and `pages_show_list`. It is named a second time in
-the prerequisites for the Instagram `comments` webhook field itself —
-`instagram_manage_comments` + `pages_manage_metadata` + one of
-`pages_read_engagement` / `pages_show_list` (`docs/PROJECT-STATE.md` §5.2). So
-it is not optional and it is not padding: without it the comment permission
-cannot be granted, and Meta's own guidance for a dependency is to submit it and
-name the main permission in the use-case description.
+**Every one of those calls is being refused, and the dashboard counting them is
+not evidence otherwise.** Today's log, on repeat:
 
-**It is already granted.** 2026-09-02 at 10:43:05 UTC, one second before
-`instagram_manage_comments` in the same `permissions` webhook batch. As with
-that one, this submission is for Advanced Access rather than for the grant.
+```
+[fetch_meta_profile] facebook 28289874257321462 refused: Unsupported get request.
+  Object with ID '28289874257321462' does not exist, cannot be loaded due to
+  missing permissions, or does not support this operation.
+[fetch_meta_profile] this is the refusal that means the Meta app may not hold
+  Business Asset User Profile Access — check App Review before treating it as a
+  property of this one customer
+```
 
-**The app has made one kind of `pages_read_engagement` call, and there is no
-evidence it has ever run.** The only call site in the repository is
-`latestPagePostId()` in `lib/meta/client.ts` — `GET me/published_posts?limit=1&fields=id`
-— and the only thing that reaches it is the `test_comment_permission` job,
-which exists to unlock `pages_manage_engagement`'s Advanced Access button
-(§6.42). That job logs `[meta:test]` unconditionally on every run, and **no
-such line exists in thirty days of Render logs on either service.** Nothing
-else in the codebase reads a Page post, a follower list or Page metadata.
+In the database: **4 of 83 Facebook identities carry a display name**, and one
+carries a locale. The handful that do are almost certainly named from the
+`feed` webhook's own `from.name`, which comment deliveries include — not from
+this endpoint, which has resolved nobody.
 
-**So the screencast Meta asks for cannot be recorded today.** The requirement
-is three beats:
+**That reconciles the two counters, and it is §6.61's table read from the other
+side.** §5.2 records the App Dashboard reporting **0 calls against Business
+Asset User Profile Access**, and explains it correctly: a call stopped at a
+capability gate is never counted against the feature that stopped it. The
+permission's counter is a different counter. The request reached the endpoint
+`pages_read_engagement` covers, so it is counted there; the _feature_ refused
+it, so it is not counted against the feature. A permission's counter moves
+before the grant and a feature's cannot — which is exactly what §6.61's table
+says, now observed from both ends on one call.
+
+Two consequences for the submission:
+
+- **The "successful call" gate is satisfied for this permission.** The App
+  Dashboard's Request advanced access button unlocks on logged calls, and there
+  are hundreds. No `test_comment_permission` run is needed for this one — that
+  job is for `pages_manage_engagement`.
+- **A screencast cannot show a resolved name today.** The endpoint refuses, so
+  a reviewer following the steps sees a numeric id where a customer's name
+  should be. The fix is not on this permission: it is the **Business Asset User
+  Profile Access** feature, which has to be on the same submission and is what
+  is actually refusing. Say so in the notes rather than filming a screen that
+  shows a number.
+
+**And there is a screencast requirement this app still cannot meet.** Meta asks
+for three beats:
 
 > 1. "Demonstrate the complete Facebook login process on your app platform,
 >    showing how your app user grants your app this permission."
@@ -43,35 +94,20 @@ is three beats:
 > 3. "Showcase that the post content is successfully displayed on your app
 >    platform"
 
-Beat 1 is the same unfilmable beat as the comment submission — this app has no
-Facebook Login, and section C of that file has the sentence to give Meta
-instead. **Beats 2 and 3 are worse than unfilmable: there is nothing to point a
-camera at.** A comment ticket knows which post it belongs to —
-`ingestMetaComment` stores `postId` on the message's `meta` and on the
-`comment_thread_opened` event — and **nothing renders it**. There is not one
-`facebook.com` or `instagram.com` link anywhere in the ticket view. The agent
-sees the comment, a "public comment" badge, and the commenter; they do not see
-the post the comment is on.
+Beats 2 and 3 are about the **Page-content** half of the permission, which the
+app does not use and does not display. A comment ticket knows which post it
+belongs to — `ingestMetaComment` stores `postId` on the message and on the
+`comment_thread_opened` event — and nothing renders it; there is not one
+`facebook.com` or `instagram.com` link in the ticket view. Beat 1 is the same
+unfilmable step as the comment submission; section C of that file has the
+sentence to give Meta instead.
 
-Two honest ways forward, and they are not equal:
-
-- **Submit it as the dependency it is** (what section A does). Legitimate, it
-  is Meta's documented route for a dependency, and it costs nothing. The risk
-  is a reviewer who works the screencast checklist literally and rejects the
-  whole submission — including `instagram_manage_comments`, which is approved
-  or rejected with it.
-- **Build the post-context panel first.** Show the post a comment was left on,
-  on the ticket: its text, its permalink, and the reply count. That makes beats
-  2 and 3 filmable exactly as written, and it is worth doing on its own merits —
-  an agent currently answers "أسوأ شركه شحن ومندوبينكم يلعبو بيا" (#13798)
-  without being able to see what it was posted under. `postId` is already
-  stored, so this is a Graph read and a panel, not a data-model change.
-
-**Recommendation: submit as a dependency now.** The panel is the right product
-change and the wrong thing to block a submission on, and if this comes back
-rejected on the screencast then it is the fix — and the rejection will have
-told you that the literal reading is the one being applied, which is worth
-knowing before building to it.
+So the submission rests on the follower-identity half, which is the half the
+app genuinely uses, and says plainly that it does not read Page content. If a
+rejection comes back citing beats 2 and 3, the fix is to show the post beside
+the comment on the ticket — worth building anyway, since an agent answering
+#13798's "أسوأ شركه شحن" cannot see what it was posted under, and `postId` is
+already stored.
 
 ## A. Use case description
 
@@ -80,37 +116,41 @@ ShipBlu Support is the in-house helpdesk that ShipBlu, a last-mile delivery
 company operating in Egypt, uses to answer its own customers. It is a
 single-tenant application: the only Facebook Page and Instagram professional
 account it is connected to are ShipBlu's own, which we own and administer. It
-does not onboard other businesses and it never reads a Page belonging to
-anyone else.
+does not onboard other businesses and it never reads a Page belonging to anyone
+else.
 
-We are requesting pages_read_engagement as a dependency of
-instagram_manage_comments, which is the permission this submission is really
-about and which is submitted alongside it.
+We use pages_read_engagement for one thing at volume, and we need it as a
+dependency for a second.
 
-Our customers ask delivery questions in the comments on our own Facebook and
-Instagram posts. instagram_manage_comments is what lets those comments reach
-our support queue as tickets, and lets our agents answer, hide and delete them
-from the same console they answer email and WhatsApp in. Meta's permission
-reference lists pages_read_engagement as a dependency of that permission, and
-Meta's prerequisites for receiving the Instagram "comments" webhook field name
-it again. We cannot receive or act on a comment on our own posts without it.
+1. Identifying the customer who wrote to us. A Messenger message and a comment
+   on our Page arrive carrying a page-scoped ID and no name. That ID is the
+   only thing our support agents would otherwise see. We call
+   GET /{page-scoped-id}?fields=first_name,last_name,name,profile_pic so the
+   ticket shows the person's name and profile picture, which is what lets an
+   agent greet them properly, recognise a returning customer, and match the
+   conversation to a delivery record. This is the "names, PSIDs, and profile
+   pictures of your Page followers" that this permission covers, and it is our
+   busiest Graph read: around 340 calls in the eight days before this
+   submission, one pair per customer who writes in.
 
-The app's own direct use of the permission is narrow and we would rather state
-it plainly than overstate it: we read our Page's most recent published post
-(GET /me/published_posts) to identify the post to run an API permission check
-against. We do not read follower lists, we do not read Page insights, and we do
-not read any Page other than our own.
+2. As a required dependency of instagram_manage_comments, submitted alongside
+   this one. Meta's permission reference lists pages_read_engagement as a
+   dependency of it, and the prerequisites for the Instagram "comments" webhook
+   field name it again. That permission is what brings comments on our posts
+   into our support queue and lets our agents reply to, hide and delete them.
 
-All access is to content published by our own Page, on behalf of our own
-business, by our own support agents.
+We do not read Page insights, we do not read follower lists in bulk, and we do
+not read any Page other than our own. A profile is read only for a person who
+has just written to us, in response to their own message, and it is stored on
+that person's contact record so the agent answering them knows who they are.
+
+We should be straightforward about the current state: these calls are being
+refused today, because our app does not yet hold the Business Asset User
+Profile Access feature, which is submitted with this request. Our agents
+currently see a numeric ID in place of every Facebook customer's name.
 ```
 
 ## B. Step-by-step instructions for the reviewer
-
-The honest instruction set for a dependency is short, and it should send the
-reviewer to the thing the dependency is for rather than invent a flow that does
-not exist. Paste this after the `instagram_manage_comments` instructions, or
-reference them if the two are submitted together.
 
 ```text
 Test account
@@ -118,37 +158,35 @@ Test account
   Email:    <reviewer agent email>
   Password: <supplied in this form>
 
-pages_read_engagement is requested as a dependency of
-instagram_manage_comments. Its effect is visible in that permission's flow
-rather than in a screen of its own, so these steps are the same ones:
-
 1. Open the URL above and sign in.
 
-2. Leave a comment from your own account on any post published by our Facebook
-   Page or by @shipblu on Instagram.
+2. From your own Facebook account, send a message to our Page, or leave a
+   comment on one of its posts.
 
 3. In the console, open Inbox. A ticket appears within a few seconds carrying
-   your comment, your name, and a "public comment" badge.
+   your message. Open it.
 
-4. Open the ticket, type an answer and send it. Refresh the post: the answer is
-   now a public reply to your comment.
+4. The ticket header shows the customer. Where our app has been able to read
+   the profile, this is the person's name and picture; where it has not, it is
+   the page-scoped ID that the webhook delivered. Press "Fetch name from Meta"
+   in the ticket header — this calls the User Profile API for that ID and
+   writes Meta's answer, or Meta's refusal, onto the ticket's timeline where
+   the agent can read it.
 
-5. Use Hide and then Delete on the customer's comment in the ticket, and
-   refresh the post after each to see the effect.
+5. Open the contact record from the ticket to see the same name and picture
+   stored against the customer, alongside the other channels they have
+   contacted us on.
 
-Our application does not render Page post content on a screen of its own. It
-reads our own Page's most recent published post only to select a post for an
-API permission check, which is a maintenance operation rather than a user-
-facing feature. We have described that plainly in the use case rather than
-building a screen in order to demonstrate a permission we need as a
-dependency.
+Note: at the time of writing, step 4 returns a refusal for customers, because
+our app does not yet hold the Business Asset User Profile Access feature, which
+is submitted with this request. The refusal is displayed on the ticket rather
+than hidden, which is what you will see if you follow the steps before that
+feature is approved. Under Meta's role exemption a lookup for a person holding
+a role on our app is answered without App Review, and that is what the
+screencast shows.
 ```
 
 ## C. What to say about the screencast
-
-There is no recording that satisfies beats 2 and 3, so the notes have to say
-so rather than submit footage of something else and hope it passes for the
-same thing. Put this in the submission notes:
 
 ```text
 Two notes on the screencast requirements for this permission.
@@ -159,51 +197,71 @@ administer, and they were connected once through the App Dashboard rather than
 by any app user granting a permission. Our support agents authenticate with a
 password against our own system.
 
-Second, we do not display Facebook Page post content in our application, so
-there is no screen on which a post's content is accessed and shown. We are
-requesting pages_read_engagement because Meta lists it as a required dependency
-of instagram_manage_comments, which is submitted alongside it and which our
-application does use fully — receiving comment notifications, replying
-publicly, hiding, unhiding and deleting. The screencast accompanying this
-submission demonstrates that permission end to end.
+Second, we do not read or display Facebook Page post content, so there is no
+screen on which a post's content is accessed and shown. Our use of this
+permission is the follower-identity half of it: resolving the name and profile
+picture of a customer who has written to our Page, so the support agent
+answering them knows who they are. The screencast demonstrates that, and the
+comment handling that this permission is also a dependency of.
 ```
 
-If the panel gets built first, replace the second paragraph and record the two
-beats properly: open a comment ticket, show the post text and permalink beside
-the comment, and show that the content came from the Page.
+Record it with a lookup for somebody who **holds a role on the app** — admin,
+developer or tester. Meta answers those without App Review, which is the one
+way to film a resolved name and picture before the feature is granted; §5.2 has
+the same trick written down for Business Asset User Profile Access.
 
 ## D. What the claims above rest on
 
-| Claim                                             | Checked how                                                                     | Answer on 2026-09-09                                                    |
-| ------------------------------------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| The permission is granted                         | `permissions` webhooks in `webhook_events` — the §5.2 query                     | granted 2026-09-02 10:43:05 UTC, once                                   |
-| It is a dependency of `instagram_manage_comments` | Meta's permission reference; `docs/PROJECT-STATE.md` §5.2 for the webhook's own | dependency there, and named in the `comments` field prerequisites       |
-| The app's only call site                          | every `graph(` call in `lib/meta/`                                              | one — `latestPagePostId()`, `GET me/published_posts`                    |
-| What reaches that call site                       | callers of `latestPagePostId`                                                   | `worker/handlers/test-comment-permission.ts`, nothing else              |
-| Whether that job has ever run                     | Render logs on web and worker, text `meta:test` and `test_comment_permission`   | **no line in 30 days on either service**                                |
-| Whether any screen shows post content             | `postId` and `facebook.com` / `instagram.com` across `app/(console)/inbox/`     | `postId` stored on the message and the event; rendered nowhere, no link |
+| Claim                                             | Checked how                                                                 | Answer on 2026-09-09                                              |
+| ------------------------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| The permission is granted                         | `permissions` webhooks in `webhook_events` — the §5.2 query                 | granted 2026-09-02 10:43:05 UTC, once                             |
+| What generates the call volume                    | `jobs` where `type = 'fetch_meta_profile'`, grouped by platform and status  | 171 jobs, all `facebook`, 2026-09-02 → 2026-09-09                 |
+| Two Graph calls per job, not one                  | `fetchProfile` in `lib/meta/client.ts` — extended attempt, then base retry  | ≈340 calls in eight days                                          |
+| Every one of them refused                         | worker log, text `fetch_meta_profile`                                       | `(#100) … cannot be loaded due to missing permissions`, on repeat |
+| And the refusals leave the console empty          | `contact_identities` for `facebook` and `instagram`                         | 4 of 83 Facebook identities named; 1 has a locale                 |
+| The other call site has never run                 | Render logs, text `meta:test` and `test_comment_permission`                 | no line in 30 days on either service                              |
+| Nothing displays Page post content                | `postId` and `facebook.com` / `instagram.com` across `app/(console)/inbox/` | stored on the message and the event; rendered nowhere, no link    |
+| It is a dependency of `instagram_manage_comments` | Meta's permission reference; §5.2 for the webhook field's prerequisites     | dependency there, and named in the `comments` prerequisites       |
 
-A successful GET leaves no log line — `graph()` in `lib/meta/client.ts` warns
-only on failure — so the fifth row rests on `test_comment_permission`'s own
-unconditional `[meta:test]` output, not on the absence of the Graph call. A run
-from somebody's laptop against production credentials would leave no trace
-here either way.
+A successful GET leaves no log line — `graph()` warns only on failure — so the
+"never run" row rests on `test_comment_permission`'s own unconditional output,
+not on the absence of the Graph call.
 
 ## E. Before pressing submit
 
-- [ ] **`pages_show_list` is on the submission too.** It is this permission's
-      own dependency and `instagram_manage_comments`'s, and it has **never
-      appeared in a `permissions` webhook** — so it may not be on the token at
-      all. `npm run job -- check_meta_permissions` from a Render shell on
-      `shipblu-support-worker` reads `granular_scopes` and settles it.
-- [ ] **This is submitted with `instagram_manage_comments`, not on its own.**
-      A dependency submitted alone has no use case to describe.
-- [ ] **Make one successful call against it before submitting**, so the App
-      Dashboard's "Request advanced access" button is live.
-      `npm run job -- test_comment_permission` calls `GET me/published_posts`
-      first, then exercises `pages_manage_engagement` in both directions. It
-      writes a comment to the live Page and deletes it in the same run. Meta
-      logs the call within about two days and wants it inside the 30 days
-      before submission, so do this immediately before submitting.
-- [ ] **The decision from the top of this file is made** — dependency framing,
-      or build the post-context panel first.
+- [ ] **Business Asset User Profile Access is on the same submission.** It is
+      what is actually refusing the calls this permission covers, and approving
+      one without the other leaves the console showing numeric ids.
+- [ ] **`pages_show_list` is on it too.** Dependency of this permission and of
+      `instagram_manage_comments`, and it has **never appeared in a
+      `permissions` webhook** — so it may not be on the token.
+      `npm run job -- check_meta_permissions` reads `granular_scopes` and
+      settles it.
+- [ ] **Film the role-holder lookup**, not a customer's — a customer's is
+      refused today and a recording of a refusal is a rejected submission.
+      **Confirm it still resolves before filming**, with `Refresh profile` on a
+      ticket from somebody holding a role. §5.2 recorded that working on
+      2026-08-27, and the refusal on customers has since changed shape from
+      `(#3)` to `(#100)`, which is a change nobody has explained.
+- [ ] **Know what the reviewer will see** if they follow section B literally
+      before the feature lands: a numeric id and a refusal on the timeline. The
+      note in section B says so; keep it there rather than hoping they do not
+      try it.
+
+## Worth fixing separately
+
+Around 340 Graph calls in eight days, every one refused, and the result
+discarded each time. One subject was looked up **35 times in 24 minutes** on
+2026-09-02 — 70 calls for one person, all answered the same way.
+
+The repeats are not a dedupe bug: `AGENTS.md` is explicit that a profile
+refresh must enqueue without a key and be idempotent, because a key is spent
+for good and would silence the retry that approval is supposed to fix. What is
+missing is a short circuit while the feature is known to be ungranted — the
+handler could stop asking for a subject Graph has already refused this way,
+until something changes. That would take the dashboard's usage graph from
+"hundreds of refused calls" to a number that means something, and stop burning
+rate limit on an answer that is currently fixed.
+
+Not done here, because it is a behaviour change rather than a submission, and
+because the refusals are also the evidence trail this file rests on.
