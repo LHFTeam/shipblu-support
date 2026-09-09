@@ -157,6 +157,14 @@ jobs:
       - name: Replay is idempotent
         run: npm run db:migrate
 
+      - name: Web database deadlines on real PostgreSQL
+        run: npx tsx scripts/ci/web-database.ts
+
+      - name: Production readiness and cross-layer pool singleton
+        run: |
+          npm run build
+          npx tsx scripts/ci/web-readiness.ts
+
       # The bilingual backfill is the one file in db/sql whose whole job is rows
       # that already exist, so replaying it against an empty database proves
       # nothing about it. Seed the shape it exists for — content in the

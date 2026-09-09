@@ -1,39 +1,19 @@
-import { sql } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
-import { db } from '@/db/client';
-import { queueDepth } from '@/lib/queue';
+import { checkReadiness } from '@/lib/health/readiness';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
-/**
- * Render's health check target. Measures the database round trip because the app
- * and database are colocated in Frankfurt specifically to keep this low — if
- * this number climbs, the colocation assumption has broken.
- */
+/** Do not flush a successful status until this instance finishes a DB-backed render. */
 export async function GET() {
-  const started = Date.now();
-
-  try {
-    await db.execute(sql`select 1`);
-    const dbLatencyMs = Date.now() - started;
-
-    const queue = await queueDepth();
-
-    return NextResponse.json({
-      status: 'ok',
-      dbLatencyMs,
-      queue,
+  const result = await checkReadiness();
+  return NextResponse.json(
+    {
+      status: result.ok ? 'ok' : 'error',
+      renderLatencyMs: result.renderLatencyMs,
       commit: process.env.RENDER_GIT_COMMIT?.slice(0, 7) ?? null,
-      timestamp: new Date().toISOString(),
-    });
-  } catch (error) {
-    return NextResponse.json(
-      {
-        status: 'error',
-        error: error instanceof Error ? error.message : 'unknown',
-        timestamp: new Date().toISOString(),
-      },
-      { status: 503 },
-    );
-  }
+      timestamp: result.checkedAt,
+    },
+    { status: result.ok ? 200 : 503, headers: { 'Cache-Control': 'no-store' } },
+  );
 }

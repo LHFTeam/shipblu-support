@@ -2,6 +2,7 @@ import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { env, sessionDatabaseUrl } from '@/lib/env';
 import * as schema from './schema';
+import { WebPool } from './web-pool';
 
 /**
  * Two connection paths, as designed:
@@ -19,18 +20,14 @@ import * as schema from './schema';
  */
 
 declare global {
-  // Next's dev server hot-reloads modules; without this the pool is recreated on
-  // every reload and Postgres runs out of connections.
+  // Production also needs this: Next bundles route handlers and page renders
+  // separately. A module-local singleton gave /api/health a different pool.
   var __shipbluSql: ReturnType<typeof postgres> | undefined;
+  var __shipbluWebPool: WebPool | undefined;
 }
 
-let pool: ReturnType<typeof postgres> | undefined;
-
 export function getSql(): ReturnType<typeof postgres> {
-  if (pool) return pool;
-
-  pool =
-    globalThis.__shipbluSql ??
+  const create = () =>
     postgres(env().DATABASE_URL, {
       prepare: false,
       max: 10,
@@ -38,16 +35,27 @@ export function getSql(): ReturnType<typeof postgres> {
       connect_timeout: 10,
     });
 
-  if (env().NODE_ENV !== 'production') globalThis.__shipbluSql = pool;
-  return pool;
+  // Next replaces NEXT_RUNTIME with 'nodejs' in its server bundles. Worker,
+  // cron, seed and migration processes run outside Next and keep their existing
+  // budgets; NODE_ENV=production alone must never enable interactive deadlines.
+  if (process.env.NEXT_RUNTIME === 'nodejs') {
+    globalThis.__shipbluWebPool ??= new WebPool(create);
+    return globalThis.__shipbluWebPool.getSql();
+  }
+  return (globalThis.__shipbluSql ??= create());
 }
 
 type Db = PostgresJsDatabase<typeof schema>;
 
 let instance: Db | undefined;
+let instanceSql: ReturnType<typeof postgres> | undefined;
 
 function getDb(): Db {
-  if (!instance) instance = drizzle(getSql(), { schema });
+  const client = getSql();
+  if (!instance || instanceSql !== client) {
+    instance = drizzle(client, { schema });
+    instanceSql = client;
+  }
   return instance;
 }
 
@@ -78,9 +86,11 @@ export function sessionSql() {
 
 /** Closes the pool if one was ever opened. Used by the worker and job runner. */
 export async function closeDb(): Promise<void> {
-  if (pool) {
-    await pool.end();
-    pool = undefined;
-    globalThis.__shipbluSql = undefined;
-  }
+  const webPool = globalThis.__shipbluWebPool;
+  const pool = globalThis.__shipbluSql;
+  globalThis.__shipbluWebPool = undefined;
+  globalThis.__shipbluSql = undefined;
+  instance = undefined;
+  instanceSql = undefined;
+  await Promise.all([webPool?.close(), pool?.end()]);
 }

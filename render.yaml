@@ -271,6 +271,8 @@ projects:
             # so a rolled-back deploy re-running them is safe.
             preDeployCommand: npm run db:migrate
             startCommand: npm run start
+            # Waits for a complete instance-local DB-backed page render, not
+            # just SELECT 1 in the route-handler layer that survived the freeze.
             healthCheckPath: /api/health
             scaling:
               minInstances: 1
