@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
-import { count, eq } from 'drizzle-orm';
+import { count } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agents } from '@/db/schema';
 import { can, type Permission } from './permissions';
@@ -45,13 +45,4 @@ export async function requirePermission(permission: Permission): Promise<Session
 export async function needsBootstrap(): Promise<boolean> {
   const rows = await db.select({ total: count() }).from(agents);
   return (rows[0]?.total ?? 0) === 0;
-}
-
-export async function agentExists(email: string): Promise<boolean> {
-  const rows = await db
-    .select({ id: agents.id })
-    .from(agents)
-    .where(eq(agents.email, email))
-    .limit(1);
-  return rows.length > 0;
 }

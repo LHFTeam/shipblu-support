@@ -203,19 +203,6 @@ export async function onCustomerReply(
 }
 
 /**
- * The single call every inbound path makes: a message from the customer either
- * starts a ticket's clocks or restarts the response one.
- */
-export async function onInboundMessage(
-  conversationId: string,
-  createdConversation: boolean,
-  at: Date = new Date(),
-): Promise<void> {
-  if (createdConversation) return applySlaOnCreate(conversationId);
-  return onCustomerReply(conversationId, at);
-}
-
-/**
  * Stops or restarts the clock on a status change.
  *
  * This is what makes "Pending — waiting on customer" not count against the

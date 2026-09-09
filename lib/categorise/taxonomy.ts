@@ -794,11 +794,6 @@ export const CAUSE_REQUIRED_AREAS: readonly string[] = [
   'payment',
 ];
 
-/** Whether a category key sits in one of those areas. */
-export function causeRequiredFor(categoryKey: string): boolean {
-  return CAUSE_REQUIRED_AREAS.includes(areaOf(categoryKey));
-}
-
 /**
  * The one category the detector treats as exclusive, named because three
  * modules branch on it.

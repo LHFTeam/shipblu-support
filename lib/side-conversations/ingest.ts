@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { desc, eq, inArray } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   attachments as attachmentsTable,
@@ -271,15 +271,4 @@ async function storeAttachments(
       );
     }
   }
-}
-
-/** Used by the reply action to refuse writing into a thread that is done. */
-export async function isSideConversationOpen(sideConversationId: string): Promise<boolean> {
-  const rows = await db
-    .select({ state: sideConversations.state })
-    .from(sideConversations)
-    .where(and(eq(sideConversations.id, sideConversationId), eq(sideConversations.state, 'open')))
-    .limit(1);
-
-  return rows.length > 0;
 }

@@ -3,7 +3,7 @@ import type { ComponentProps } from 'react';
 /**
  * Inline icons.
  *
- * Hand-drawn rather than an icon package: the console uses about fifteen, and a
+ * Hand-drawn rather than an icon package: the console uses two dozen, and a
  * dependency would ship several hundred plus a tree-shaking configuration to
  * avoid them. Each is a 24-grid stroke path so they sit together at any size.
  */
@@ -92,32 +92,6 @@ export function SearchIcon(props: IconProps) {
   );
 }
 
-export function ClockIcon(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <circle cx="12" cy="12" r="8" />
-      <path d="M12 7.5V12l3 1.8" />
-    </Icon>
-  );
-}
-
-export function BoltIcon(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <path d="M13 3 5.5 13.5H11L10.5 21 18.5 10H13z" />
-    </Icon>
-  );
-}
-
-export function TagIcon(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <path d="M4 11.5V5a1 1 0 0 1 1-1h6.5L20 12.5 12.5 20z" />
-      <circle cx="8" cy="8" r="1.4" />
-    </Icon>
-  );
-}
-
 export function ListIcon(props: IconProps) {
   return (
     <Icon {...props}>
@@ -125,44 +99,6 @@ export function ListIcon(props: IconProps) {
       <circle cx="4.3" cy="6.5" r="1.1" fill="currentColor" stroke="none" />
       <circle cx="4.3" cy="12" r="1.1" fill="currentColor" stroke="none" />
       <circle cx="4.3" cy="17.5" r="1.1" fill="currentColor" stroke="none" />
-    </Icon>
-  );
-}
-
-export function ChatIcon(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <path d="M20 12.5c0 3.6-3.6 6.5-8 6.5-1 0-2-.15-2.9-.42L4 20l1.3-3.5C4.5 15.4 4 14 4 12.5 4 8.9 7.6 6 12 6s8 2.9 8 6.5z" />
-    </Icon>
-  );
-}
-
-export function UsersIcon(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <circle cx="8" cy="9" r="2.8" />
-      <circle cx="16.5" cy="9.5" r="2.3" />
-      <path d="M3 18.5a5 5 0 0 1 10 0M14.5 18.5a4.3 4.3 0 0 1 6.5-3.7" />
-    </Icon>
-  );
-}
-
-export function PlugIcon(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <path d="M9 3.5v5M15 3.5v5" />
-      <path d="M6.5 8.5h11v3a5.5 5.5 0 0 1-11 0z" />
-      <path d="M12 17v3.5" />
-    </Icon>
-  );
-}
-
-export function DownloadIcon(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <path d="M12 4v10" />
-      <path d="m8 10.5 4 4 4-4" />
-      <path d="M5 19h14" />
     </Icon>
   );
 }
@@ -195,14 +131,6 @@ export function ChevronUpIcon(props: IconProps) {
   return (
     <Icon {...props}>
       <path d="m6 14.5 6-6 6 6" />
-    </Icon>
-  );
-}
-
-export function PlusIcon(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <path d="M12 5.5v13M5.5 12h13" />
     </Icon>
   );
 }
@@ -315,16 +243,6 @@ export function WarningIcon(props: IconProps) {
     <Icon {...props}>
       <path d="M12 4.5 21 19.5H3z" />
       <path d="M12 10v4M12 16.8v.2" />
-    </Icon>
-  );
-}
-
-export function LifeBuoyIcon(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <circle cx="12" cy="12" r="8.5" />
-      <circle cx="12" cy="12" r="3.5" />
-      <path d="m6 6 3.5 3.5M18 6l-3.5 3.5M6 18l3.5-3.5M18 18l-3.5-3.5" />
     </Icon>
   );
 }

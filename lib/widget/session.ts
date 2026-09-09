@@ -23,13 +23,6 @@ import { resolveContact } from '@/lib/tickets/contacts';
  * is why the token is 256 bits of randomness rather than anything derived.
  */
 
-export type VisitorSession = {
-  token: string;
-  contactId: string;
-  conversationId: string | null;
-  isNew: boolean;
-};
-
 export function issueVisitorToken(): string {
   return generateToken();
 }

@@ -67,11 +67,3 @@ export function clearLoginAttempts(email: string, ip: string | null): void {
   buckets.delete(`email:${email}`);
   if (ip) buckets.delete(`ip:${ip}`);
 }
-
-/** Keeps the map from growing without bound on a long-lived instance. */
-export function pruneThrottleBuckets(): void {
-  const now = Date.now();
-  for (const [key, bucket] of buckets) {
-    if (bucket.resetAt <= now) buckets.delete(key);
-  }
-}
