@@ -12,6 +12,7 @@ import {
 import { preview } from '@/lib/html/sanitize';
 import { readOnlyChannels } from '@/lib/tickets/channel-policy';
 import { afterInboundMessage, afterMessageStored } from '@/lib/tickets/lifecycle';
+import { defaultOpenStatusId } from '@/lib/tickets/statuses';
 
 /**
  * The customer's own view of their tickets.
@@ -375,23 +376,4 @@ async function portalChannel() {
     .limit(1);
 
   return rows[0] ?? null;
-}
-
-async function defaultOpenStatusId(tx: typeof db): Promise<string | null> {
-  const preferred = await tx
-    .select({ id: ticketStatuses.id })
-    .from(ticketStatuses)
-    .where(and(eq(ticketStatuses.category, 'open'), eq(ticketStatuses.isDefault, true)))
-    .limit(1);
-
-  if (preferred[0]) return preferred[0].id;
-
-  const fallback = await tx
-    .select({ id: ticketStatuses.id })
-    .from(ticketStatuses)
-    .where(eq(ticketStatuses.category, 'open'))
-    .orderBy(ticketStatuses.position)
-    .limit(1);
-
-  return fallback[0]?.id ?? null;
 }

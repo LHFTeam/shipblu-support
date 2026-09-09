@@ -18,6 +18,7 @@ import { ingestSideReply, resolveSideConversation } from '@/lib/side-conversatio
 import { buildAttachmentPath, uploadObject } from '@/lib/storage';
 import { resolveContact } from './contacts';
 import { afterInboundMessage, afterMessageStored } from './lifecycle';
+import { defaultOpenStatusId } from './statuses';
 
 export type IngestResult = {
   conversationId: string;
@@ -304,27 +305,6 @@ async function findConversation(
   }
 
   return null;
-}
-
-async function defaultOpenStatusId(tx: typeof db): Promise<string | null> {
-  const rows = await tx
-    .select({ id: ticketStatuses.id })
-    .from(ticketStatuses)
-    .where(and(eq(ticketStatuses.category, 'open'), eq(ticketStatuses.isDefault, true)))
-    .limit(1);
-
-  if (rows[0]) return rows[0].id;
-
-  // Fall back to any open status, so a misconfigured default cannot stop mail
-  // being filed.
-  const fallback = await tx
-    .select({ id: ticketStatuses.id })
-    .from(ticketStatuses)
-    .where(eq(ticketStatuses.category, 'open'))
-    .orderBy(ticketStatuses.position)
-    .limit(1);
-
-  return fallback[0]?.id ?? null;
 }
 
 async function defaultEmailChannel() {
