@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type postgres from 'postgres';
-import { DatabaseDeadlineError, WebPool } from './web-pool';
+import { DatabaseDeadlineError, DatabaseRecoveringError, WebPool } from './web-pool';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -103,7 +103,17 @@ describe('web database budgets', () => {
     // It answered BEGIN and then went quiet, so its outcome is unknown.
     expect((error as DatabaseDeadlineError).waitedForConnection).toBe(false);
     expect(first.end).toHaveBeenCalledExactlyOnceWith({ timeout: 0 });
-    expect(() => pool.getSql()).toThrow('recovering');
+    // Typed, because a cooldown is an instruction to wait and a fault is an
+    // instruction to surface; a bare Error cannot tell a caller which it has.
+    expect(() => pool.getSql()).toThrow(DatabaseRecoveringError);
+    try {
+      pool.getSql();
+    } catch (error) {
+      expect((error as DatabaseRecoveringError).retryAfterMs).toBeGreaterThan(0);
+      expect((error as DatabaseRecoveringError).retryAfterMs).toBeLessThanOrEqual(
+        policy.cooldownMs,
+      );
+    }
     expect(JSON.stringify(report.mock.calls)).not.toContain('sensitive_value');
     await vi.advanceTimersByTimeAsync(20);
     await expect(pool.getSql().unsafe('select 1')).resolves.toEqual([{ value: 1 }]);

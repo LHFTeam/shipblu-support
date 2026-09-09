@@ -25,6 +25,19 @@ export class DatabaseDeadlineError extends Error {
   }
 }
 
+/**
+ * Refused before anything ran, so — like a queue-wait deadline — this one is a
+ * promise that the database was not touched. Typed rather than a bare `Error`
+ * because the two are opposite instructions to a caller: a pool in cooldown is
+ * a wait, and a fault is something to surface.
+ */
+export class DatabaseRecoveringError extends Error {
+  readonly code = 'WEB_DATABASE_RECOVERING';
+  constructor(readonly retryAfterMs: number) {
+    super('Database pool is recovering from a stalled connection; retry shortly.');
+  }
+}
+
 type Generation = { raw: Sql; client: Sql; id: string; retired: boolean };
 type Observation = { startedAt: number; poolId: string; kind: string; acquired: boolean };
 
@@ -60,7 +73,8 @@ export class WebPool {
   ) {}
 
   getSql(): Sql {
-    if (Date.now() < this.retryAfter) throw new Error('Database pool is recovering.');
+    const cooldownMs = this.retryAfter - Date.now();
+    if (cooldownMs > 0) throw new DatabaseRecoveringError(cooldownMs);
     if (!this.generation) {
       const raw = this.create();
       const generation = { raw, client: raw, id: randomUUID(), retired: false };
