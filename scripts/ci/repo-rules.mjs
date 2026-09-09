@@ -1201,6 +1201,115 @@ function checkClientBundleStaysOutOfTheDatabase() {
 }
 
 // ---------------------------------------------------------------------------
+// Exports nothing calls
+//
+// AGENTS.md: "When you learn something durable ... prefer a check in
+// scripts/ci/repo-rules.mjs over a paragraph here."
+//
+// plans/query-optimisation-and-cleanup.md scanned for these by hand, found "a
+// crude scan suggested 40", verified them one at a time, and asked for the
+// check to be made mechanical so the next session would not redo the scan. It
+// was redone anyway, and turned up twenty-six: nine unused icons, a server
+// action no form submits, and four functions whose doc comments described
+// callers that do not exist — `onInboundMessage` called itself "the single call
+// every inbound path makes" while no path made it.
+//
+// That last kind is why this is worth a check rather than a cleanup. Dead code
+// costs nothing to execute; a dead function with a confident comment costs the
+// next reader their afternoon, because it reads as the system's behaviour.
+//
+// Values only — a function, const, class or enum. An exported *type* is not
+// checked: annotating a return with a named exported type is good practice
+// here, and the great majority of them are referenced only from the signature
+// they describe, so flagging those would push the codebase to un-export shapes
+// that callers legitimately need to name.
+// ---------------------------------------------------------------------------
+
+/**
+ * Names the framework imports by calling convention rather than by reference.
+ *
+ * Next resolves these out of a route module's exports itself, so nothing in the
+ * repository mentions them and every one would read as dead. Route handlers are
+ * the endpoint; the rest configure the segment.
+ */
+const FRAMEWORK_EXPORTS = new Set([
+  'GET',
+  'POST',
+  'PUT',
+  'PATCH',
+  'DELETE',
+  'HEAD',
+  'OPTIONS',
+  'generateStaticParams',
+  'generateMetadata',
+  'generateViewport',
+  'metadata',
+  'viewport',
+  'dynamic',
+  'dynamicParams',
+  'revalidate',
+  'runtime',
+  'fetchCache',
+  'preferredRegion',
+  'maxDuration',
+  'config',
+  'proxy',
+  'middleware',
+]);
+
+const VALUE_EXPORT =
+  /^export\s+(?:async\s+)?(?:function\*?|const|let|var|abstract\s+class|class|enum)\s+([A-Za-z0-9_$]+)/gm;
+
+const IDENTIFIER = /[A-Za-z_$][A-Za-z0-9_$]*/g;
+
+function checkNoDeadExports() {
+  const rule = 'dead-exports';
+
+  // db/schema is reached as a namespace — `import * as schema` in db/client.ts,
+  // handed to drizzle() — so no file names a table and a per-name scan cannot
+  // see the use. Excluded from the population rather than exempted per name.
+  const files = scannableSource.filter((f) => !f.startsWith('db/schema/') && !f.endsWith('.d.ts'));
+
+  // One pass for every identifier in the tree, so this stays linear rather than
+  // scanning every file once per exported name.
+  const mentions = new Map();
+  const bodies = new Map();
+  for (const file of files) {
+    const contents = stripComments(readFileSync(path.join(ROOT, file), 'utf8'));
+    bodies.set(file, contents);
+    const counts = new Map();
+    for (const [name] of contents.matchAll(IDENTIFIER)) {
+      counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+    for (const [name, n] of counts) {
+      if (!mentions.has(name)) mentions.set(name, new Map());
+      mentions.get(name).set(file, n);
+    }
+  }
+
+  for (const file of files) {
+    const contents = bodies.get(file);
+    for (const match of contents.matchAll(VALUE_EXPORT)) {
+      const name = match[1];
+      if (FRAMEWORK_EXPORTS.has(name)) continue;
+
+      const seen = mentions.get(name) ?? new Map();
+      const elsewhere = [...seen.keys()].filter((f) => f !== file).length;
+      if (elsewhere > 0) continue;
+      // Two mentions in its own file means it is used here and merely
+      // over-exported, which is a much smaller thing than being uncalled.
+      if ((seen.get(file) ?? 0) > 1) continue;
+
+      fail(
+        rule,
+        `${file}:${lineOf(contents, match.index)}`,
+        `${name} is exported and never referenced anywhere — delete it, or if it is a capability worth keeping, wire it up in the same commit`,
+      );
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 
 const RULES = [
   ['env-parity', checkEnvParity],
@@ -1222,6 +1331,7 @@ const RULES = [
   ['form-system-keys', checkFormSystemKeys],
   ['automated-reply-boundary', checkAutomatedRepliesDoNotCountAsAgentReplies],
   ['client-bundle', checkClientBundleStaysOutOfTheDatabase],
+  ['dead-exports', checkNoDeadExports],
 ];
 
 for (const [name, run] of RULES) {

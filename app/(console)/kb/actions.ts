@@ -50,9 +50,9 @@ function parseMinRole(value: FormDataEntryValue | null): AgentRole | null | 'inv
  * two.
  *
  * It returns the row rather than a boolean so the check and the read are one
- * query: the callers needing the current title and body were fetching the same
- * row again immediately afterwards, and `linkTranslation` paid for it twice in
- * a row because `||` short-circuits.
+ * query: the callers needing the current title and body — `saveArticle` for the
+ * version row it cuts, `restoreVersion` for the state it is replacing — were
+ * fetching the same row again immediately afterwards.
  */
 async function readable(id: string, role: AgentRole): Promise<EditableArticle | null> {
   if (!id) return null;
@@ -353,40 +353,6 @@ export async function createFolder(_state: KbState, formData: FormData): Promise
   });
 
   revalidatePath('/kb/structure');
-  return ok();
-}
-
-/**
- * Links an article to another as its translation.
- *
- * Translations are grouped by a shared `translation_group_id` rather than by a
- * pointer from one to the other, so a third language joins the group without
- * anyone having to decide which article is the original.
- */
-export async function linkTranslation(_state: KbState, formData: FormData): Promise<KbState> {
-  const agent = await requirePermission('kb.edit');
-
-  const id = String(formData.get('id') ?? '');
-  const otherId = String(formData.get('otherId') ?? '');
-
-  if (!otherId) return { error: 'Choose an article to link to' };
-  if (otherId === id) return { error: 'An article cannot be its own translation' };
-  // Both sides: linking is a write to one article and an assertion about the
-  // other, and either being out of reach makes this somebody else's business.
-  const [mine, other] = await Promise.all([
-    readable(id, agent.role),
-    readable(otherId, agent.role),
-  ]);
-  if (!mine || !other) return { error: 'Article not found' };
-
-  if (mine.locale === other.locale) {
-    return { error: 'Both articles are in the same language' };
-  }
-
-  const target = other.translationGroupId;
-  await db.update(kbArticles).set({ translationGroupId: target }).where(eq(kbArticles.id, id));
-
-  revalidatePath(`/kb/${id}`);
   return ok();
 }
 
