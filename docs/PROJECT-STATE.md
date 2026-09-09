@@ -5,7 +5,7 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-09-02, against `main` at `aec5d4f`.
+Last updated: 2026-09-09, against `main` at `4c3cecd`.
 
 ---
 
@@ -1682,7 +1682,21 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
     and sends a proper Terminate; it never closes mid-query.
 
   What triggers it inside Supavisor (or the Render↔Supabase network) is **not
-  established** — it cannot be instrumented from the app side.
+  established**.
+
+  **Revised 2026-09-09: the app can produce this signature on its own, and the
+  ruling-out above has a gap.** The 09-08 freeze stranded five connections that
+  the reaper then killed, and the web process was the cause —
+  `app/api/events/route.ts` wires its abort handler at L98, _after_ seven
+  sequential `LISTEN` round trips, so a client that disconnects inside that
+  window leaves a `sessionSql()` client (`idle_timeout: 0`) with no remaining
+  handle, and the `catch` at L68–73 omits `end()`. No pooler needed. The
+  aborted-render experiment above tested _aborting a render_; it did not test a
+  stalled event loop or an exhausted pool, which is what happened. That is a gap
+  in the experiment rather than a contradiction of it — but "it cannot be
+  instrumented from the app side" was wrong, and the instrumentation that is
+  actually missing is postgres.js's own queue depth. See
+  `plans/web-freeze-2026-09-08.md` and §62.
 
   So it is reaped rather than prevented: `transaction_timeout = '5min'` is set
   on the `postgres` role, which terminates any transaction spanning longer than
@@ -3403,6 +3417,41 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     shape is silent exactly when it is needed. It now matches the feature's name
     rather than code 10 alone, because 10 is how Graph refuses an app on any
     edge.
+
+62. **A query that times out is not evidence the query is slow, and "canceling
+    statement due to statement timeout" names the victim rather than the cause.**
+    _2026-09-08, over most of a day spent reading a 55-minute freeze as a
+    Supabase problem._ The app's only error line was a failed
+    `attachments ⋈ messages` select on one conversation. Run against production
+    unchanged, that statement is a three-index nested loop over a **192-row**
+    table for a ticket with **five messages**: `Execution Time: 0.399 ms`. It was
+    killed at the two-minute `statement_timeout`. It was not blocked on a lock
+    either — `log_lock_waits = on`, `deadlock_timeout = 1s`, and not one
+    lock-wait line in the window.
+
+    The two minutes were spent waiting for a **pool slot**, not in Postgres.
+    `db/client.ts` runs `max: 10` with no query timeout and no checkout timeout
+    anywhere in the repo, and postgres.js queues beyond `max` in memory,
+    uncapped and untimed: a query submitted when all ten slots are busy returns
+    a promise that settles when a slot frees and **never rejects**. So Postgres
+    logs nothing, CPU idles (0.1–0.3% throughout), and the one statement that
+    had reached a backend is the only thing that leaves a trace — pointing at
+    itself.
+
+    **The one-step test: look at the worker.** It shares the database, the
+    pooler and the network, and it was answering in 46–661 ms in the middle of
+    the freeze. If the worker is healthy while the web service is not, the
+    database is not the problem, and no amount of `pg_stat_statements` will say
+    so — its top entry here is a catalogue query Supabase Studio issues.
+
+    Two consequences worth carrying separately. `app/api/health/route.ts` awaits
+    `select 1` on the same exhausted pool and only catches _rejections_, so it
+    hangs instead of returning its 503 — which is why the instance was not
+    replaced for 50 minutes. And this shape is **chronic, not incidental**:
+    `destination stream closed early` appears on eight days between 08-26 and
+    09-08, across twelve instance ids, peaking at 26 collapses inside 900 ms on
+    09-03. Full reconstruction in `plans/web-freeze-2026-09-08.md`; §5 is revised
+    in light of it.
 
 ## 7. Verification already done
 

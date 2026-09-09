@@ -136,6 +136,13 @@ that leak consumes. Change one number, watch, keep the `pg_stat_activity` query
 from §5 to hand. Right now the database is healthy: 18 connections, 1 active,
 nothing stuck.
 
+**This is not where the freeze comes from.** The recurring web-service freeze
+was diagnosed separately on 2026-09-09 and is not a database problem at all:
+`plans/web-freeze-2026-09-08.md` has it, and §62 the short version. Churn is
+still worth reducing, but nothing on this page would have prevented that
+outage, and the pool finding that matters there is the **absence of a checkout
+timeout** on `max: 10` rather than `idle_timeout`.
+
 ## Mirror artefacts, recorded so they are not mistaken for load
 
 **`SELECT name FROM pg_timezone_names` is the single most expensive statement in
