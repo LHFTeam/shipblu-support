@@ -51,6 +51,13 @@ jobs:
             run: npm run format:check
           - name: test
             run: npx vitest run
+          - name: knip
+            # Unused and unlisted dependencies only — see knip.jsonc for why the
+            # unused-export categories are excluded rather than gated. An
+            # unlisted dependency is the one that bites without warning: it
+            # resolves today through somebody else's transitive tree and stops
+            # the day that package tidies its own.
+            run: npm run knip
           - name: build
             # `npm run build` pins NODE_ENV=production deliberately. Several
             # failure modes here — React's export-condition resolution under the

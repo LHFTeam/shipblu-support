@@ -32,8 +32,14 @@ describe('realtime SQL producer contract', () => {
     );
   });
 
-  it('keeps the old global topic only as a documented deploy compatibility path', () => {
-    expect(producer).toContain('Compatibility for the old app instance/client bundle');
-    expect(producer).toContain("pg_notify('conversation_changed', payload)");
+  it('emits no global topic, so one write cannot wake every browser', () => {
+    // The regression Â§6.23 was about: a single `conversation_changed` reaching
+    // every console and widget turned one message insert into a full inbox
+    // render everywhere. It was kept for one deploy window after that and is
+    // now gone, so this asserts its absence rather than its presence.
+    // Asserted against the NOTIFY call rather than the bare name, because the
+    // file still explains what was removed and why — and a check that
+    // forbade mentioning it would delete the reasoning along with the bug.
+    expect(producer).not.toContain("pg_notify('conversation_changed'");
   });
 });

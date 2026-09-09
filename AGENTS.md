@@ -83,7 +83,7 @@ npx prettier --write AGENTS.md         # one file
 
 | Job          | What it runs                                                          |
 | ------------ | --------------------------------------------------------------------- |
-| `verify`     | `tsc`, `eslint`, `format:check`, `vitest`, `build` — one job each     |
+| `verify`     | `tsc`, `eslint`, `format:check`, `vitest`, `knip`, `build` — one each |
 | `repo-rules` | `scripts/ci/repo-rules.mjs`, and migration drift against `db/schema/` |
 | `database`   | migrations, `db/sql/` and every DB-only job handler, on real Postgres |
 
@@ -107,6 +107,14 @@ this file now live — the env-var catalogue, the job registry, the `db/sql`
 rules, the confinement of the delivery payload, and the rest. Each check carries
 the reason it exists. If one of them is wrong, change it there and say why in
 the same commit; do not add your call site to an exemption list.
+
+`knip` gates **unused and unlisted dependencies only**. Its unused-_export_
+categories find 112 things here and are excluded rather than gated, because that
+number is not a backlog: it mixes genuinely dead code with functions used inside
+their own module (drop the `export`, not the function) and with exports whose
+only consumer is `repo-rules.mjs` reading them by regex — deleting `handlers` on
+knip's word would break the job-registry check. Run `npm run knip:exports` by
+hand and verify each one; `knip.jsonc` carries the full reasoning.
 
 Three things CI still cannot check, so they remain yours:
 
