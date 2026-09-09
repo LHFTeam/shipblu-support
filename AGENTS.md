@@ -816,9 +816,14 @@ as "no data" either: the bot channel has been copying real traffic in since
 August, so there is an archive worth measuring against. `docs/PROJECT-STATE.md`
 §1 carries the current figures; that is the file that gets updated, not this one.
 
-A 200 in the request logs is not evidence a page renders — RSC prefetches of a
-`force-dynamic` route return 200 without running it, so only full navigations
-(no `?_rsc=`) tell you anything. And a silent success is worse than a failure:
+A 200 in the request logs is not evidence a page renders. RSC prefetches can
+return router state without running the page; `?_rsc=` alone does not identify
+a prefetch (the request headers matter). Check a completed full navigation and
+its expected content. `/api/health` now does that for a private, dynamic Server
+Component with a database read; it is not a claim that every console feature
+works. Web DB deadlines cover queue wait and retire the pool, never the process;
+workers and migrations keep their separate budgets (see
+`plans/web-outage-hardening.md`). And a silent success is worse than a failure:
 break down any count that could hide a systematic gap along the dimension that
 can fail — per language, per channel, per account.
 

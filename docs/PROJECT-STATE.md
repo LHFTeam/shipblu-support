@@ -1665,6 +1665,19 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   cannot carry a payload (`run-job.ts` passes `{}`), so the queue is the route
   for anything other than the default three-day window.
 
+- **September 8 web freeze: safeguards implemented, deployment not yet verified.**
+  The production-only split between route-handler and SSR database pools was
+  reproduced; the original event that stalled the client pool remains unproved.
+  `plans/web-outage-hardening.md` records the evidence and policy: one lazy web
+  pool (max 10), 5-second transaction-local statement limits, a 10-second client
+  deadline including queue wait, bounded pool retirement without retries or
+  process exit, and readiness that completes a private Server Component plus DB
+  read. Workers/crons/migrations retain their own budgets. A plain 57014 does not
+  recycle the pool. CI includes real-Postgres fault injection and a production
+  cross-layer singleton/readiness check. No production recovery claim follows
+  merely from these code changes; staging workload and deployment verification
+  are still required. The Next disconnect-log cleanup is a separate follow-up.
+
 - **Connections are left mid-transaction by the pooler. Reaped, not solved.**
   Backends appear as `state=active` + `wait_event=ClientRead` with an open
   transaction — the extended query protocol interrupted after Execute and

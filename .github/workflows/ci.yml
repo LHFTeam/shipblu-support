@@ -158,9 +158,11 @@ jobs:
         run: npm run db:migrate
 
       - name: Web database deadlines on real PostgreSQL
+        timeout-minutes: 2
         run: npx tsx scripts/ci/web-database.ts
 
       - name: Production readiness and cross-layer pool singleton
+        timeout-minutes: 5
         run: |
           npm run build
           npx tsx scripts/ci/web-readiness.ts
