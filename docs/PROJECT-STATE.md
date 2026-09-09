@@ -1054,13 +1054,26 @@ shipblu.com` still serves Freshdesk, so each one took a reader out of this
   customer ticket instead, which is visible immediately: the mail lands in the
   inbox as a new ticket from a hub address rather than on the thread.
 - **`whatsapp_business_management` is a dependency of
-  `whatsapp_business_messaging`, the app already calls it hourly, and it is on
-  no line of the submission.** _2026-09-09._ Meta's reference makes the
-  dependency explicit. The hourly template sync is a management call —
-  `listTemplates` reads `GET /{waba-id}/message_templates` — and it is working:
-  36 templates are in the table, `APPROVED` and `REJECTED`. So the app depends
-  on a permission nobody has asked for, which is the same shape as
-  `pages_show_list` under the two Meta submissions.
+  `whatsapp_business_messaging`, the app calls it hourly, it is on no line of
+  the submission, and Graph has been refusing it for a week.** _2026-09-09._
+  Meta's reference makes the dependency explicit. The hourly template sync is a
+  management call — `listTemplates` reads `GET /{waba-id}/message_templates` —
+  and it is answered `(#200) You do not have permission to access this field.`
+  on both WABAs, every hour, so `shipblu-whatsapp-template-sync` is a
+  permanently red cron.
+
+  **The 36 templates in the table are not evidence that it works** — an earlier
+  version of this entry read them that way. They are a photograph of one
+  minute: every row carries `synced_at = 2026-09-02 11:01:12.371`, the single
+  successful run in the record. The runs at 00:00 and 01:00 that morning were
+  already refused and every run since has been. That minute sits between the
+  re-authorisation at 10:43:06 that granted the comment permissions and the
+  `pages_messaging` revocation at 11:17:07, so this is a grant that was **held
+  and lost that morning**, not one never requested — worth knowing before
+  anybody re-mints the token, and worth saying to Meta if the submission is
+  queried. The one successful call also ages out of Meta's 30-day window on
+  2 October, and while the permission is refused there is no way to make
+  another.
 
   Two more facts about WhatsApp that a submission has to be written around, both
   read from production the same day. **Four outbound messages exist in the whole

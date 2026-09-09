@@ -18,15 +18,21 @@ and they are the rest of this section.
 
 ## Before you paste any of this
 
-**1. It has a dependency nobody has requested.** Meta's reference states that
-`whatsapp_business_messaging` **requires `whatsapp_business_management`**. That
-permission is on no line of `plans/meta-app-review-submission.md`'s eleven
-requests, and the app is already depending on it: the hourly template sync
-calls `listTemplates` → `GET /{waba-id}/message_templates`, which is a
-management call rather than a messaging one, and there are **36 templates in
-the table** (`APPROVED` and `REJECTED`), so it is succeeding today. Add it to
-the submission. This is the same shape as `pages_show_list` on the other two —
-a dependency the app leans on and the paperwork does not mention.
+**1. It has a dependency nobody has requested, and that dependency is
+refused.** Meta's reference states that `whatsapp_business_messaging`
+**requires `whatsapp_business_management`**. That permission is on no line of
+`plans/meta-app-review-submission.md`'s eleven requests, and the app depends on
+it hourly: the template sync calls `listTemplates` →
+`GET /{waba-id}/message_templates`, which is a management call rather than a
+messaging one.
+
+The first version of this file read the 36 templates in the table as proof that
+call was working. It is not: the sync has succeeded **once**, at 2026-09-02
+11:01:12, which is the `synced_at` on all 36 rows, and every run before and
+since is refused with `(#200) You do not have permission to access this field.`
+The cron has been red every hour for a week.
+`docs/app-review-whatsapp-business-management.md` is that submission, and it is
+the blocker for this one — messaging cannot be granted without it.
 
 **2. Inbound is switched off on purpose, and it does not block the recording.**
 WhatsApp deliveries have failed signature verification since **2026-08-30
