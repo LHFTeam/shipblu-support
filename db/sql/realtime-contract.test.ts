@@ -8,6 +8,13 @@ const producer = readFileSync(
 );
 
 /**
+ * The same file with `--` comments removed, so an assertion about what the SQL
+ * *does* cannot be satisfied or broken by what the SQL *says*.
+ * `scripts/ci/repo-rules.mjs` strips the same way before asserting on this file.
+ */
+const code = producer.replace(/--[^\n]*/g, '');
+
+/**
  * Contract tests at the TypeScript/PL/pgSQL boundary.
  *
  * There is intentionally no second implementation of the trigger in test code.
@@ -32,8 +39,31 @@ describe('realtime SQL producer contract', () => {
     );
   });
 
-  it('keeps the old global topic only as a documented deploy compatibility path', () => {
-    expect(producer).toContain('Compatibility for the old app instance/client bundle');
-    expect(producer).toContain("pg_notify('conversation_changed', payload)");
+  it('emits no global topic, so one write cannot wake every browser', () => {
+    // The regression §6.23 was about: a single `conversation_changed` reaching
+    // every console and widget turned one message insert into a full inbox
+    // render everywhere. It was kept for one deploy window after that and is
+    // now gone.
+    //
+    // Asserted positively — every NOTIFY in the file must be one of the two
+    // scoped forms — rather than by forbidding the old name. Forbidding a
+    // literal fails at both ends: `pg_notify('inbox_changed', payload)` would
+    // reintroduce the exact regression while passing, and a future author who
+    // documents the removal by quoting the old statement in a comment would
+    // turn this red with no behaviour change.
+    //
+    // Comments are stripped first, the same way scripts/ci/repo-rules.mjs does
+    // it for this file, so the prose above the trigger can keep explaining what
+    // was removed and why.
+    const statements = code.match(/pg_notify\(\s*[^)]*/g) ?? [];
+    expect(statements.length).toBeGreaterThan(0);
+
+    for (const call of statements) {
+      // A scoped topic is built from a prefix and an id, never a bare literal
+      // that every listener could subscribe to. `job_enqueued` is the worker's
+      // own queue wake-up, which is process-to-process and fans out to one
+      // consumer rather than to every open browser.
+      expect(call).toMatch(/'conversation_' \|\||'conversation_queue_' \|\||'job_enqueued'/);
+    }
   });
 });

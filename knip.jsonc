@@ -1,0 +1,55 @@
+{
+  // A positive allowlist, not an exclude list, and that is the whole design.
+  //
+  // What this gates: dependency hygiene. A declared dependency nothing imports
+  // is supply-chain surface nobody is watching; an *unlisted* one is worse,
+  // because the build resolves it today through somebody else's transitive tree
+  // and stops the day they tidy their own.
+  //
+  // What it does not gate, and why an `exclude` list was the wrong tool for
+  // saying so. knip enables every issue type it knows except three by default,
+  // so `exclude` describes the gate only for the categories that existed when
+  // it was written — a knip minor that adds a default-on category silently
+  // widens a blocking CI job. It also hid two mistakes on the first attempt
+  // here: `nsExports`/`nsTypes` were listed and are knip's own defaults
+  // (no-ops), while `files`, `duplicates` and `namespaceMembers` stayed gated
+  // despite being exactly what the reasoning below says must not be.
+  //
+  // `files` in particular would be a trap: no `entry`/`project` is declared, so
+  // the worker/ tree is reachable only because knip parses the `worker` script
+  // in package.json, and scripts/ci/ only via the github-actions plugin. Change
+  // either invocation shape and CI reports the worker as dead code. Worse, the
+  // ordinary case of landing a module in one commit and importing it in the
+  // next would fail a check whose message talks about dead files.
+  //
+  // The unused-*export* categories are the ones this repo cannot gate at all.
+  // Run bare, knip reports ~110 of them, and that is not a backlog — it
+  // conflates three things:
+  //
+  //   - genuinely dead code (three functions, deleted in the commit that added
+  //     this file);
+  //   - functions used inside their own module, where the fix is dropping the
+  //     `export` keyword rather than the function. `hoursForTicket` is declared
+  //     at lib/sla/index.ts:69 and called four times from the same file, at
+  //     lines 133, 196, 240 and 315 — the furthest 246 lines below it, so a
+  //     reader who checks only the neighbourhood of the declaration will
+  //     wrongly conclude it is dead;
+  //   - exports whose only consumer is not an import at all. `handlers` and
+  //     `PLANNED_JOB_TYPES` in worker/handlers/index.ts are read by
+  //     scripts/ci/repo-rules.mjs with a regex, so deleting them on knip's word
+  //     would break the job-registry check that keeps the three job registries
+  //     agreeing.
+  //
+  // Gating that would need a ~110-line ignore list — the "exemption list"
+  // AGENTS.md says not to add your call site to — or a sweeping deletion whose
+  // third case is actively wrong. So they stay a hand-run: `npm run
+  // knip:exports` covers exactly the complement of the list below.
+  "include": [
+    "dependencies",
+    "devDependencies",
+    "optionalPeerDependencies",
+    "unlisted",
+    "unresolved",
+    "binaries",
+  ],
+}

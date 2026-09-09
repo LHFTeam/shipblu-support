@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
-import { count, eq } from 'drizzle-orm';
+import { count } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agents } from '@/db/schema';
 import { can, type Permission } from './permissions';
@@ -8,10 +8,10 @@ import { currentSessionHash, getSessionAgent, type SessionAgent } from './sessio
 /**
  * Server-side access checks for console pages and actions.
  *
- * `middleware.ts` only checks that a session cookie exists — it runs on the edge
+ * `proxy.ts` only checks that a session cookie exists — it runs on the edge
  * without database access, so it can redirect an obviously-signed-out visitor
  * but cannot tell a revoked session from a live one. Every page and every action
- * therefore re-checks here, against the database. The middleware is a
+ * therefore re-checks here, against the database. The proxy is a
  * convenience; this is the control.
  */
 
@@ -72,13 +72,4 @@ export async function needsBootstrap(): Promise<boolean> {
   const empty = (rows[0]?.total ?? 0) === 0;
   if (!empty) agentsExist = true;
   return empty;
-}
-
-export async function agentExists(email: string): Promise<boolean> {
-  const rows = await db
-    .select({ id: agents.id })
-    .from(agents)
-    .where(eq(agents.email, email))
-    .limit(1);
-  return rows.length > 0;
 }
