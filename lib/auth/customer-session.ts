@@ -147,9 +147,8 @@ export async function destroyAllCustomerSessions(identityId: string): Promise<vo
 
 /** Called by the cleanup cron job, alongside the agent one. */
 export async function deleteExpiredCustomerSessions(): Promise<number> {
-  const deleted = await db
-    .delete(contactSessions)
-    .where(lt(contactSessions.expiresAt, new Date()))
-    .returning({ tokenHash: contactSessions.tokenHash });
-  return deleted.length;
+  // `.count` rather than `.returning()`: the hashes were only ever
+  // counted, so fetching them was work done to be discarded.
+  const deleted = await db.delete(contactSessions).where(lt(contactSessions.expiresAt, new Date()));
+  return deleted.count;
 }

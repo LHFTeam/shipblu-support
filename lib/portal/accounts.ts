@@ -301,9 +301,8 @@ async function claimToken(
 
 /** Called by the cleanup cron job. */
 export async function deleteExpiredContactTokens(): Promise<number> {
-  const deleted = await db
-    .delete(contactTokens)
-    .where(lt(contactTokens.expiresAt, new Date()))
-    .returning({ tokenHash: contactTokens.tokenHash });
-  return deleted.length;
+  // `.count` rather than `.returning()`: the hashes were only ever
+  // counted, so fetching them was work done to be discarded.
+  const deleted = await db.delete(contactTokens).where(lt(contactTokens.expiresAt, new Date()));
+  return deleted.count;
 }

@@ -263,9 +263,8 @@ export async function agentsWithLiveSessions(agentIds: string[]): Promise<Set<st
 
 /** Called by the cleanup cron job. */
 export async function deleteExpiredSessions(): Promise<number> {
-  const deleted = await db
-    .delete(sessions)
-    .where(lt(sessions.expiresAt, new Date()))
-    .returning({ tokenHash: sessions.tokenHash });
-  return deleted.length;
+  // `.count` rather than `.returning()`: the hashes were only ever
+  // counted, so fetching them was work done to be discarded.
+  const deleted = await db.delete(sessions).where(lt(sessions.expiresAt, new Date()));
+  return deleted.count;
 }
