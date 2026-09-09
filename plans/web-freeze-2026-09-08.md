@@ -124,14 +124,24 @@ one misattributed `Failed query` line.
 
 Five properties of the current code turn a burst into a self-sustaining stall.
 
-**1. One anonymous `/ar` can exhaust the pool by itself.**
+**1. `/ar` renders within one or two queries of the ceiling.**
 `app/help/[locale]/page.tsx:45` fans out to eight concurrent queries (the hours
 catalog is four of them on its own), and `getSessionCustomer()` is called
 **three times per render** — `lib/kb/viewer.ts:19`, `page.tsx:51`,
 `account-nav.tsx:18` — none memoised, unlike `webchatChannel`, which correctly
-uses React `cache()`. With both session cookies present that is roughly twelve
+uses React `cache()`. With both session cookies present that is roughly eleven
 concurrent queries against `max: 10`, for the site's front door, `force-dynamic`
 and uncacheable.
+
+_Corrected 2026-09-09._ This paragraph first read "one anonymous `/ar` can
+exhaust the pool by itself", which overstates the anonymous case: with no
+cookies both session reads return at **zero** queries, so an anonymous render
+peaks around **eight** — two simultaneous visitors cross the ceiling, one does
+not. The three `getSessionCustomer()` calls are also not concurrent with each
+other: one precedes the `Promise.all`, one sits inside it, one is in the layout.
+And for scale, `/ar` takes **2–16 requests a day** today (Render
+`http_request_count`, 09-02 → 09-09) — a real hazard, but one that matters most
+once the help centre carries live traffic.
 
 **2. `/login` queues on the pool before it looks at the cookie.**
 `app/(auth)/login/page.tsx:15` awaits `needsBootstrap()` — a `count(*)` over

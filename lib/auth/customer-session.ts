@@ -1,3 +1,4 @@
+import { cache } from 'react';
 import { cookies } from 'next/headers';
 import { and, eq, gt, lt } from 'drizzle-orm';
 import { db } from '@/db/client';
@@ -66,8 +67,22 @@ export async function createCustomerSession(
  * the same reason the agent version re-checks `is_active`: revoking portal
  * access has to take effect now, not whenever a cookie happens to expire. A
  * blocked contact is refused here too — the one place that cannot be forgotten.
+ *
+ * `cache()` because the help centre needs this several times on one render and
+ * each call is a three-table join. `/ar` asks three times — the viewer, the
+ * page's own `Promise.all`, and the account nav in the layout — and the article,
+ * tracking and category pages ask twice each, because `generateMetadata` and the
+ * page component are separate calls. On a `max: 10` pool that is most of the
+ * ceiling spent re-answering one question (§62).
+ *
+ * Safe here in a way it deliberately is not for `getSessionAgent()`: no route
+ * handler calls this, the write below is already throttled to once an hour, and
+ * nothing reads `last_used_at` except that throttle — so collapsing three reads
+ * and their writes into one leaves the sliding expiry identical. The agent
+ * version carries a `DELETE` keyed on `new Date()` and returns a live clock
+ * reading to the sign-out countdown, so it must keep re-reading.
  */
-export async function getSessionCustomer(): Promise<SessionCustomer | null> {
+export const getSessionCustomer = cache(async (): Promise<SessionCustomer | null> => {
   const store = await cookies();
   const token = store.get(CUSTOMER_SESSION_COOKIE)?.value;
   if (!token) return null;
@@ -113,7 +128,7 @@ export async function getSessionCustomer(): Promise<SessionCustomer | null> {
     locale: row.locale,
     companyId: row.companyId,
   };
-}
+});
 
 export async function destroyCustomerSession(): Promise<void> {
   const store = await cookies();
