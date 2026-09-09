@@ -1,4 +1,4 @@
-import { relations, sql } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import {
   boolean,
   index,
@@ -198,18 +198,3 @@ export const kbArticleFeedback = pgTable(
   },
   (t) => [index('kb_article_feedback_article_idx').on(t.articleId)],
 );
-
-export const kbCategoriesRelations = relations(kbCategories, ({ many }) => ({
-  folders: many(kbFolders),
-}));
-
-export const kbFoldersRelations = relations(kbFolders, ({ one, many }) => ({
-  category: one(kbCategories, { fields: [kbFolders.categoryId], references: [kbCategories.id] }),
-  articles: many(kbArticles),
-}));
-
-export const kbArticlesRelations = relations(kbArticles, ({ one, many }) => ({
-  folder: one(kbFolders, { fields: [kbArticles.folderId], references: [kbFolders.id] }),
-  author: one(agents, { fields: [kbArticles.authorAgentId], references: [agents.id] }),
-  versions: many(kbArticleVersions),
-}));

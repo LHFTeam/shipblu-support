@@ -1,4 +1,4 @@
-import { relations, sql } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import {
   boolean,
   index,
@@ -445,35 +445,6 @@ export const passwordResets = pgTable(
   },
   (t) => [index('password_resets_agent_idx').on(t.agentId)],
 );
-
-export const agentsRelations = relations(agents, ({ many }) => ({
-  groupMembers: many(groupMembers),
-  sessions: many(sessions),
-  skills: many(agentSkills),
-}));
-
-export const skillsRelations = relations(skills, ({ many }) => ({
-  agents: many(agentSkills),
-}));
-
-export const agentSkillsRelations = relations(agentSkills, ({ one }) => ({
-  agent: one(agents, { fields: [agentSkills.agentId], references: [agents.id] }),
-  skill: one(skills, { fields: [agentSkills.skillId], references: [skills.id] }),
-}));
-
-export const groupsRelations = relations(groups, ({ many }) => ({
-  members: many(groupMembers),
-}));
-
-export const groupMembersRelations = relations(groupMembers, ({ one }) => ({
-  group: one(groups, { fields: [groupMembers.groupId], references: [groups.id] }),
-  agent: one(agents, { fields: [groupMembers.agentId], references: [agents.id] }),
-}));
-
-export const sessionsRelations = relations(sessions, ({ one }) => ({
-  agent: one(agents, { fields: [sessions.agentId], references: [agents.id] }),
-}));
-
 /**
  * The history `agents.presence` cannot keep.
  *

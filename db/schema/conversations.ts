@@ -1,4 +1,4 @@
-import { relations, sql } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import {
   type AnyPgColumn,
   bigserial,
@@ -441,33 +441,3 @@ export const conversationPresence = pgTable(
     index('conversation_presence_updated_idx').on(t.updatedAt),
   ],
 );
-
-export const conversationsRelations = relations(conversations, ({ one, many }) => ({
-  requester: one(contacts, {
-    fields: [conversations.requesterContactId],
-    references: [contacts.id],
-  }),
-  assignee: one(agents, { fields: [conversations.assigneeAgentId], references: [agents.id] }),
-  group: one(groups, { fields: [conversations.groupId], references: [groups.id] }),
-  status: one(ticketStatuses, {
-    fields: [conversations.statusId],
-    references: [ticketStatuses.id],
-  }),
-  messages: many(messages),
-  events: many(conversationEvents),
-  watchers: many(conversationWatchers),
-}));
-
-export const messagesRelations = relations(messages, ({ one, many }) => ({
-  conversation: one(conversations, {
-    fields: [messages.conversationId],
-    references: [conversations.id],
-  }),
-  authorAgent: one(agents, { fields: [messages.authorAgentId], references: [agents.id] }),
-  authorContact: one(contacts, { fields: [messages.authorContactId], references: [contacts.id] }),
-  attachments: many(attachments),
-}));
-
-export const attachmentsRelations = relations(attachments, ({ one }) => ({
-  message: one(messages, { fields: [attachments.messageId], references: [messages.id] }),
-}));
