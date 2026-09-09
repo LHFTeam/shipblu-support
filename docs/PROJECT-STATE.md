@@ -5,7 +5,7 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-09-09, against `main` at `4c3cecd`.
+Last updated: 2026-09-09, against `main` at `b1d911a`.
 
 ---
 
@@ -1713,6 +1713,41 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   from pg_stat_activity
   where xact_start < now() - interval '5 minutes' and pid <> pg_backend_pid();
   ```
+
+- **The sign-in throttle's bucket map has no bound, and the function that was
+  meant to bound it was never called.** `lib/auth/throttle.ts` keys a bucket per
+  email and per IP for sign-in and for anything that sends mail to a typed
+  address. `hit()` resets an expired bucket for a key it sees again, and
+  `clearLoginAttempts` deletes a key on success — so nothing ever removes a key
+  that is not hit again. `pruneThrottleBuckets()` existed for exactly this,
+  carried the comment "keeps the map from growing without bound on a long-lived
+  instance", and had no caller in the repo's history; it is deleted rather than
+  left as a promise nothing keeps. An attacker spraying distinct addresses at
+  `/login` therefore grows a per-instance map without limit, which is a slow
+  memory leak on the one endpoint that is reachable unauthenticated. The fix is
+  to prune inside `hit()` — amortised, on a sampled fraction of calls — rather
+  than to re-export a sweeper, because there is no timer in the web process to
+  hang one on and a job cannot reach another instance's heap.
+
+- **A side conversation that is marked done still accepts an inbound reply.**
+  `isSideConversationOpen` claimed in its own doc comment to be "used by the
+  reply action to refuse writing into a thread that is done"; nothing called it,
+  and no other guard does the job. So a hub answering an old thread appends to
+  it after an agent has closed it. Whether that is wrong is a product question —
+  the answer arriving late is still the answer, and dropping it silently is
+  worse — which is why the pass deleted the false comment rather than inventing
+  the refusal. Decide it deliberately: either accept the reply and reopen the
+  thread, or refuse it and say so on the ticket.
+
+- **The console cannot link an article to a translation.** `linkTranslation` in
+  `app/(console)/kb/actions.ts` implemented it and was never referenced from any
+  `.tsx` file in the repo's history, so it was a live `'use server'` endpoint
+  with no caller — deleted on this branch, with `git show b1d911a` holding the
+  implementation. Translation groups are still set at import by
+  `import-freshdesk-kb` and read by the help centre's language switcher, so the
+  gap is only manual linking. A picker belongs on the editor beside the language
+  field; write it against a fresh copy rather than restoring the endpoint, since
+  the old one was never exercised.
 
 ---
 
@@ -3452,6 +3487,35 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     09-08, across twelve instance ids, peaking at 26 collapses inside 900 ms on
     09-03. Full reconstruction in `plans/web-freeze-2026-09-08.md`; §5 is revised
     in light of it.
+
+63. **A doc comment naming its own callers is not evidence it has any, and a
+    dead function is cheapest to run and dearest to read.** _2026-09-09, found
+    while deleting dead exports rather than by debugging anything._ Twenty-seven
+    exported values had exactly one mention in the repo — their own declaration.
+    Four of them described the system's behaviour in the present tense and got
+    it wrong: `onInboundMessage` opened with "the single call every inbound path
+    makes" while no path made it (`lib/tickets/lifecycle.ts` inlines the same
+    branch); `isSideConversationOpen` said "used by the reply action to refuse
+    writing into a thread that is done", which nothing does; `allRuleKeys`
+    claimed the disabled-rules check and the structural tests used it, and
+    neither did; `resetEmailProviderCache` existed for tests that swap drivers,
+    and no test swaps drivers. Each reads as a description of the running system
+    and is a description of an intention.
+
+    Two further consequences of the same absence. `pruneThrottleBuckets`
+    promised a bound that was therefore never enforced (§5.5), and
+    `linkTranslation` was a `'use server'` export with no caller — a live POST
+    endpoint whose authorisation a review pass hardened without anyone noticing
+    nothing could reach it. **An unreferenced export in a `'use server'` file is
+    not inert the way an unreferenced function is; it is a published endpoint.**
+
+    `plans/query-optimisation-and-cleanup.md` had already scanned for these,
+    verified them by hand, confirmed three, and asked for the check to be made
+    mechanical so the next session would not redo the scan. The next session
+    redid the scan. The rule is now `dead-exports` in
+    `scripts/ci/repo-rules.mjs`, which finds all twenty-seven on `b1d911a` and
+    none on the branch that fixed them — because a scan a session performs is a
+    scan every later session performs.
 
 ## 7. Verification already done
 
