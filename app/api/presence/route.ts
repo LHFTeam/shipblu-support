@@ -40,10 +40,6 @@ export async function GET(request: Request) {
         }
       };
 
-      void goOnline(agent.id).catch((error) => {
-        console.error('[presence] could not record presence', error);
-      });
-
       const cleanup = () => {
         if (closed) return;
         closed = true;
@@ -58,9 +54,37 @@ export async function GET(request: Request) {
         }
       };
 
+      /**
+       * The signal can already have fired by the time this stream starts, and
+       * an `abort` listener added to an aborted signal never runs. That matters
+       * more here than anywhere else in the console: the beat below is what
+       * keeps an agent in the assignment rota, so a leaked interval would go on
+       * writing `online` every 25 seconds for the life of the process, on
+       * behalf of a tab that is already gone — the exact failure the session
+       * re-check in the heartbeat exists to prevent.
+       *
+       * Closed directly rather than through `cleanup`, because `goOnline` has
+       * not run yet: signing off a presence we never asserted would take an
+       * agent's other console offline.
+       */
+      if (request.signal.aborted) {
+        closed = true;
+        try {
+          controller.close();
+        } catch {
+          /* already closed */
+        }
+        return;
+      }
+      request.signal.addEventListener('abort', cleanup);
+
+      void goOnline(agent.id).catch((error) => {
+        console.error('[presence] could not record presence', error);
+      });
+
       // The beat is both a proxy keepalive and assignment's proof that this
       // stream is still alive. A killed instance heals through staleness even
-      // when it never gets a chance to run the sign-off below.
+      // when it never gets a chance to run the sign-off above.
       heartbeat = setInterval(() => {
         // The keepalive byte goes out first and synchronously. It is what stops
         // the proxy timing this stream out, and it must never wait on a
@@ -86,8 +110,6 @@ export async function GET(request: Request) {
         })();
       }, 25_000);
       sendKeepalive();
-
-      request.signal.addEventListener('abort', cleanup);
     },
 
     cancel() {
