@@ -56,17 +56,57 @@ export async function GET(request: Request) {
         }
       };
 
+      // Nulled before ending so the two paths that can reach it — the abort
+      // handler and the setup checks below — cannot both close the same client,
+      // and so a client created after an abort is still closed by the checks.
+      const closeListener = () => {
+        const client = listener;
+        listener = null;
+        void client?.end();
+      };
+
+      const cleanup = () => {
+        if (closed) return;
+        closed = true;
+        if (heartbeat) clearInterval(heartbeat);
+        closeListener();
+        try {
+          controller.close();
+        } catch {
+          /* already closed */
+        }
+      };
+
+      /**
+       * Registered before the first await, and not after the LISTEN loop.
+       *
+       * Opening this stream costs a connection plus one round trip per topic —
+       * eight of them for `channel=all` — and an agent moving between tickets
+       * aborts the previous request inside that window routinely. Attaching the
+       * handler afterwards attached it to a signal that had already fired, and
+       * an `abort` listener added to an aborted signal never runs: `cleanup`
+       * never happened, and the session connection stayed open for as long as
+       * the process did. One was still holding its LISTEN half an hour after
+       * its request completed (`docs/PROJECT-STATE.md` §5).
+       */
+      if (request.signal.aborted) return cleanup();
+      request.signal.addEventListener('abort', cleanup);
+
       try {
         listener = sessionSql();
+        // The abort may have fired while there was nothing yet to close.
+        if (closed) return closeListener();
         // One session connection owns every topic for this view. Register them
         // sequentially rather than pipelining LISTEN statements during the
         // connection's own startup; this runs once per stream, not per event.
         for (const topic of topics) {
           await listener.listen(topic, () => send('conversation', '{}'));
+          if (closed) return closeListener();
         }
         send('ready', '{}');
       } catch (error) {
         console.error('[sse] could not LISTEN', error);
+        if (closed) return closeListener();
         // Tell the client to fall back to polling rather than leaving it
         // waiting on a stream that will never carry anything.
         send('degraded', '{}');
@@ -82,26 +122,14 @@ export async function GET(request: Request) {
           /* closed */
         }
       }, 25_000);
-
-      const cleanup = () => {
-        if (closed) return;
-        closed = true;
-        if (heartbeat) clearInterval(heartbeat);
-        void listener?.end();
-        try {
-          controller.close();
-        } catch {
-          /* already closed */
-        }
-      };
-
-      request.signal.addEventListener('abort', cleanup);
     },
 
     cancel() {
       closed = true;
       if (heartbeat) clearInterval(heartbeat);
-      void listener?.end();
+      const client = listener;
+      listener = null;
+      void client?.end();
     },
   });
 
