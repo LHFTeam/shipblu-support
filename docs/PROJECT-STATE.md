@@ -1735,15 +1735,23 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   addresses a window apart settle under 4,000 entries, where the unswept version
   holds 20,002.
 
-- **A side conversation that is marked done still accepts an inbound reply.**
+- **A side conversation marked done reopens when the hub actually answers, and
+  this is already right — an earlier draft of this entry said otherwise.**
   `isSideConversationOpen` claimed in its own doc comment to be "used by the
-  reply action to refuse writing into a thread that is done"; nothing called it,
-  and no other guard does the job. So a hub answering an old thread appends to
-  it after an agent has closed it. Whether that is wrong is a product question —
-  the answer arriving late is still the answer, and dropping it silently is
-  worse — which is why the pass deleted the false comment rather than inventing
-  the refusal. Decide it deliberately: either accept the reply and reopen the
-  thread, or refuse it and say so on the ticket.
+  reply action to refuse writing into a thread that is done". Nothing called it,
+  and the comment described a policy this system does not have: `ingestSideReply`
+  sets `state: 'open'` and clears `closed_at` when a reply arrives on a `done`
+  thread, guarded by `!automation.isAutomated` so an out-of-office does not
+  count. That is the better answer of the two — refusing would drop the thing an
+  agent was waiting for — and it matches what a customer's reply does to a
+  resolved ticket.
+
+  Recorded because the mistake is instructive twice over. The dead function's
+  comment sent one reader looking for a refusal that was never written, which is
+  §6.63's whole point; and this entry then repeated the claim as a known gap,
+  which would have sent the next session to "fix" working behaviour. A gap
+  asserted from a deleted function's comment is not a gap until the live path
+  has been read.
 
 - **An article can now be linked to its translation from the console, and that
   is the first half of two.** `kb_articles.translation_group_id` is
