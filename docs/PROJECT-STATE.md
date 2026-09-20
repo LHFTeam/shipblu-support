@@ -1714,20 +1714,26 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   where xact_start < now() - interval '5 minutes' and pid <> pg_backend_pid();
   ```
 
-- **The sign-in throttle's bucket map has no bound, and the function that was
-  meant to bound it was never called.** `lib/auth/throttle.ts` keys a bucket per
-  email and per IP for sign-in and for anything that sends mail to a typed
-  address. `hit()` resets an expired bucket for a key it sees again, and
-  `clearLoginAttempts` deletes a key on success — so nothing ever removes a key
-  that is not hit again. `pruneThrottleBuckets()` existed for exactly this,
-  carried the comment "keeps the map from growing without bound on a long-lived
-  instance", and had no caller in the repo's history; it is deleted rather than
-  left as a promise nothing keeps. An attacker spraying distinct addresses at
-  `/login` therefore grows a per-instance map without limit, which is a slow
-  memory leak on the one endpoint that is reachable unauthenticated. The fix is
-  to prune inside `hit()` — amortised, on a sampled fraction of calls — rather
-  than to re-export a sweeper, because there is no timer in the web process to
-  hang one on and a job cannot reach another instance's heap.
+- **The sign-in throttle's bucket map is bounded now; for the whole of the
+  project's history it was not.** `lib/auth/throttle.ts` keys a bucket per email
+  and per source, for sign-in and for anything that sends mail to a typed
+  address. `hit()` only resets a key it sees _again_ and `clearLoginAttempts`
+  only deletes on a successful sign-in — and the `mail:` / `mailip:` keys had no
+  remover at all — so a key used once was never removed by anything.
+  `pruneThrottleBuckets()` was written for exactly this, carried the comment
+  "keeps the map from growing without bound on a long-lived instance", and had
+  no caller in the repo's history. So an attacker spraying distinct addresses at
+  `/login` was filling a Map rather than being throttled by one, on the endpoint
+  that is reachable without signing in.
+
+  Swept inside `hit()` instead, amortised: one O(size) pass per 256 _new_ keys,
+  counted on the branch that adds one, so the sweep is paid for by the growth it
+  bounds. Not a timer and not the `cleanup` job, because neither can reach this
+  — the map is per-process heap, a request-scoped web process has nothing to
+  hang an interval on, and a job runs in the worker. `throttleBucketCount()` is
+  exported only so a test can assert the bound: ten rounds of a thousand fresh
+  addresses a window apart settle under 4,000 entries, where the unswept version
+  holds 20,002.
 
 - **A side conversation that is marked done still accepts an inbound reply.**
   `isSideConversationOpen` claimed in its own doc comment to be "used by the
@@ -3545,6 +3551,20 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     the right shape for this rule: "nothing references this" is a fact, and
     whether the answer is a deletion or a caller is a judgement the check should
     force someone to make rather than make for them.
+
+    **The first version of the check was itself the bug it was written about.**
+    It counted bare identifiers across the repo and called an export live if the
+    token turned up anywhere else, which is not the question. `lib/portal/tickets.ts`
+    still held a dead `contactName` and a dead `subjectFrom` that no module
+    imported, and the count waved both through — `contactName` because it is an
+    ordinary object key in three other files, `subjectFrom` because two ingest
+    modules happen to define their own. So the check certified a file clean while
+    the defect was still in it, which is worse than no check once §6.63 tells the
+    next session the scan is mechanical. It asks the module graph now: an export
+    is live when another module names it in an import or a re-export, and nothing
+    else counts. The resolver was already in the same file, doing this correctly
+    for the client-bundle rule, and is now shared rather than reimplemented — the
+    private-copy lesson again, in the file that enforces it.
 
     `plans/query-optimisation-and-cleanup.md` had already scanned for these,
     verified them by hand, confirmed three, and asked for the check to be made

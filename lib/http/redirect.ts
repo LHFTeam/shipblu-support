@@ -19,5 +19,26 @@ import { NextResponse } from 'next/server';
  * workaround for the trap above; it is the form that is correct on all of them.
  */
 export function redirectTo(path: string, status: 301 | 302 | 303 | 307 | 308): NextResponse {
-  return new NextResponse(null, { status, headers: { Location: path } });
+  return new NextResponse(null, { status, headers: { Location: headerSafe(path) } });
+}
+
+/**
+ * Percent-encodes the bytes a `Location` header cannot carry, and nothing else.
+ *
+ * A header value is a ByteString: anything above 0xFF throws
+ * `Cannot convert argument to a ByteString`, which surfaces as a 500 rather
+ * than a redirect. `slugify` deliberately preserves Arabic and Arabic is the
+ * default locale — 58 of the 112 articles in production have a non-ASCII slug —
+ * so an un-encoded path here is a 500 on the ordinary case, not an edge one.
+ * `encodeSlugParam` exists for callers that build a path from a slug; this is
+ * the backstop at the one place every redirect actually passes through, so a
+ * caller that forgets cannot produce a 500.
+ *
+ * Only non-ASCII is touched, which is what makes it safe to apply to a path
+ * that is *already* encoded: `%` is ASCII, so a `%D8` sequence is left alone
+ * rather than becoming `%25D8`. `encodeURI` would double-encode it, and
+ * `kb_redirects.to_path` is typed by an admin and may arrive either way.
+ */
+function headerSafe(path: string): string {
+  return path.replace(/[^\x00-\x7F]/g, (char) => encodeURIComponent(char));
 }

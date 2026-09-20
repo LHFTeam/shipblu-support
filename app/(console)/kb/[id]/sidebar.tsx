@@ -5,7 +5,7 @@ import { useActionState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Badge, Button, ErrorText, Select } from '@/components/ui';
 import { formatRelative } from '@/lib/format';
-import type { ArticleVersion, TranslationOption } from '@/lib/kb/admin';
+import type { ArticleVersion, TranslationGroup, TranslationOption } from '@/lib/kb/admin';
 import {
   deleteArticle,
   linkTranslation,
@@ -19,18 +19,16 @@ const INITIAL: KbState = { error: null };
 export function ArticleSidebar({
   articleId,
   status,
-  locale,
-  translationGroupId,
-  translationOptions,
+  translations,
+  translationCandidates,
   publicUrl,
   versions,
   stats,
 }: {
   articleId: string;
   status: string;
-  locale: string;
-  translationGroupId: string;
-  translationOptions: TranslationOption[];
+  translations: TranslationGroup;
+  translationCandidates: TranslationOption[];
   publicUrl: string | null;
   versions: ArticleVersion[];
   stats: { views: number; helpful: number; unhelpful: number };
@@ -38,15 +36,11 @@ export function ArticleSidebar({
   const [statusState, statusAction] = useActionState(setArticleStatus, INITIAL);
   const [linkState, linkAction] = useActionState(linkTranslation, INITIAL);
 
-  // The same rows read twice, which is why they arrive in one list: anything
-  // already sharing this article's group is a translation of it, and anything
-  // else in another language is something it could become one of. A same-locale
-  // article is never offered — the action refuses it, and an option that always
-  // errors is worse than no option.
-  const linked = translationOptions.filter((a) => a.translationGroupId === translationGroupId);
-  const candidates = translationOptions.filter(
-    (a) => a.translationGroupId !== translationGroupId && a.locale !== locale,
-  );
+  // `total` counts the group without the role filter, so "not linked" is only
+  // ever said when the group really is empty. Deriving this by filtering the
+  // candidate list is what made the console claim an article had no translation
+  // when it had one it could not show.
+  const hidden = translations.total - translations.readable.length;
   const [restoreState, restoreAction] = useActionState(restoreVersion, INITIAL);
   const [deleteState, deleteAction] = useActionState(deleteArticle, INITIAL);
 
@@ -118,14 +112,14 @@ export function ArticleSidebar({
       <section className="mb-5 border-t border-[var(--border)] pt-4">
         <h2 className="mb-2 text-xs font-medium opacity-60">Translations</h2>
 
-        {linked.length === 0 ? (
+        {translations.total === 0 ? (
           <p className="mb-2 text-xs opacity-50">
             Not linked to any other language. The help centre shows a language switcher only between
             articles that are linked.
           </p>
         ) : (
           <ul className="mb-2 flex flex-col gap-1 text-xs">
-            {linked.map((article) => (
+            {translations.readable.map((article) => (
               <li key={article.id} className="flex items-baseline gap-2">
                 <Badge>{article.locale}</Badge>
                 <Link
@@ -134,12 +128,21 @@ export function ArticleSidebar({
                 >
                   {article.title}
                 </Link>
+                {/*
+                  A draft or archived translation is not on the help centre —
+                  `translationsOf` applies the reader's visibility — so showing it
+                  the same as a live one asserts a switcher that nobody sees.
+                */}
+                {article.status !== 'published' ? (
+                  <span className="shrink-0 opacity-50">{article.status}</span>
+                ) : null}
               </li>
             ))}
+            {hidden > 0 ? <li className="opacity-50">{hidden} more you cannot open</li> : null}
           </ul>
         )}
 
-        {candidates.length === 0 ? (
+        {translationCandidates.length === 0 ? (
           <p className="text-xs opacity-50">No article in another language to link to yet.</p>
         ) : (
           <form action={linkAction} className="flex flex-col gap-2">
@@ -149,7 +152,7 @@ export function ArticleSidebar({
             </label>
             <Select id="otherId" name="otherId" defaultValue="" className="w-full text-xs">
               <option value="">Link to an article…</option>
-              {candidates.map((article) => (
+              {translationCandidates.map((article) => (
                 <option key={article.id} value={article.id}>
                   {article.locale} — {article.title}
                   {article.status === 'published' ? '' : ` (${article.status})`}
@@ -157,13 +160,18 @@ export function ArticleSidebar({
               ))}
             </Select>
             <LinkButton />
+            {/*
+              Inside the form: it explains a consequence of using this control,
+              so it made no sense on a page where the control is absent. The
+              "left behind" half only applies once there is a group to leave.
+            */}
+            <p className="text-xs opacity-50">
+              {translations.total > 0
+                ? 'This article joins the one you pick, so the language it is linked to now is left behind.'
+                : 'Pick the same article in the other language. The help centre will then offer a switcher between them.'}
+            </p>
           </form>
         )}
-
-        <p className="mt-1 text-xs opacity-50">
-          This article joins the one you pick, so any language it was linked to before is left
-          behind.
-        </p>
 
         <ErrorText>{linkState.error}</ErrorText>
       </section>

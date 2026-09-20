@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, ilike, ne, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, ilike, ne, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agents, kbArticleVersions, kbArticles, kbCategories, kbFolders } from '@/db/schema';
 import type { AgentRole } from '@/lib/auth/permissions';
@@ -273,38 +273,137 @@ export type TranslationOption = {
   title: string;
   locale: string;
   status: string;
-  translationGroupId: string;
+};
+
+export type TranslationGroup = {
+  /** The other members of this article's group that the reader may open. */
+  readable: TranslationOption[];
+  /** How many other members it has in total, readable or not. */
+  total: number;
 };
 
 /**
- * Every other article the reader could link this one to, or is already linked to.
+ * What this article is already linked to.
  *
- * Through `readableByRole` like every other read model here, and for the sharper
- * reason: linking names another article in the console and moves this one into
- * its group, so an unfiltered list would let a supervisor discover the titles of
- * admins-only runbooks through a dropdown. `linkTranslation` re-checks both
- * sides server-side — this only decides what is worth offering.
+ * Its own query rather than a filter over the candidate list, for two reasons
+ * that both end in the console asserting something false. A capped list can
+ * truncate the one row that matters, and `readableByRole` can hide it — either
+ * way an article with a translation renders as having none, and the obvious
+ * remedy (link it again) moves it somewhere else and orphans the pair.
  *
- * Returned unsplit, with each row's group id, because the caller needs the same
- * rows twice: the ones sharing this article's group are its current
- * translations, and the rest in another language are what it could join. One
- * query rather than two that could disagree about which articles exist.
+ * So `total` is counted **without** the role filter while `readable` applies
+ * it. Nothing leaks: a count says a translation exists, which the help centre's
+ * language switcher already says to anyone who can read either article, whereas
+ * the title is what an admins-only runbook is being kept from. A group has one
+ * article per locale, so this is two or three rows, not a scan.
  */
-export async function listTranslationOptions(
+export async function translationGroupOf(
   articleId: string,
+  translationGroupId: string,
+  role: AgentRole,
+): Promise<TranslationGroup> {
+  const others = and(
+    eq(kbArticles.translationGroupId, translationGroupId),
+    ne(kbArticles.id, articleId),
+  )!;
+
+  const [readable, counted] = await Promise.all([
+    db
+      .select({
+        id: kbArticles.id,
+        title: kbArticles.title,
+        locale: kbArticles.locale,
+        status: kbArticles.status,
+      })
+      .from(kbArticles)
+      .innerJoin(kbFolders, eq(kbFolders.id, kbArticles.folderId))
+      .where(and(others, readableByRole(role)))
+      .orderBy(asc(kbArticles.locale)),
+    db
+      .select({ total: sql<number>`count(*)::int` })
+      .from(kbArticles)
+      .where(others),
+  ]);
+
+  return { readable, total: counted[0]?.total ?? 0 };
+}
+
+/**
+ * The articles this one could become a translation of.
+ *
+ * Three conditions, and the third is the one that is easy to miss. A candidate
+ * must be readable — an unfiltered dropdown would let a supervisor discover the
+ * titles of admins-only runbooks, which is exactly the population a floor keeps
+ * them from. It must be in another language, because a group holds one article
+ * per locale. And **its group must not already hold this article's locale**:
+ * joining one that does produces a group with two `ar` articles, which
+ * `translationsOf` does not de-duplicate — the help centre then renders two
+ * switcher links with the same React key and `generateMetadata` silently drops
+ * one of the two hreflang alternates. There is no unlink, so that group cannot
+ * be repaired from the console.
+ *
+ * Filtered in SQL rather than in the component so the cap below cannot let a
+ * bad option through, and `linkTranslation` refuses the same case server-side
+ * because a picker is a convenience and not a guarantee.
+ */
+export async function listTranslationCandidates(
+  articleId: string,
+  locale: string,
   role: AgentRole,
 ): Promise<TranslationOption[]> {
+  // Every group that already holds this locale — including this article's own,
+  // since it is in this locale, which is why no separate exclusion of
+  // `translationGroupId` is needed. A subquery rather than a correlated
+  // `not exists`: `notInArray` is a typed operator drizzle binds itself, where a
+  // raw fragment naming an aliased table is a statement no test here can
+  // execute (AGENTS.md, Tests). `translation_group_id` is `not null`, so the
+  // `NOT IN` cannot be poisoned by a null.
+  const groupsHoldingThisLocale = db
+    .select({ groupId: kbArticles.translationGroupId })
+    .from(kbArticles)
+    .where(eq(kbArticles.locale, locale));
+
   return db
     .select({
       id: kbArticles.id,
       title: kbArticles.title,
       locale: kbArticles.locale,
       status: kbArticles.status,
-      translationGroupId: kbArticles.translationGroupId,
     })
     .from(kbArticles)
     .innerJoin(kbFolders, eq(kbFolders.id, kbArticles.folderId))
-    .where(and(ne(kbArticles.id, articleId), readableByRole(role)))
+    .where(
+      and(
+        ne(kbArticles.id, articleId),
+        ne(kbArticles.locale, locale),
+        notInArray(kbArticles.translationGroupId, groupsHoldingThisLocale),
+        readableByRole(role),
+      ),
+    )
     .orderBy(asc(kbArticles.locale), asc(kbArticles.title))
     .limit(500);
+}
+
+/**
+ * Whether the target group already holds an article in `locale`.
+ *
+ * Deliberately **not** role-filtered: an article the caller cannot see still
+ * occupies its locale's slot in the group, so filtering here would let a
+ * supervisor create the duplicate-locale group the candidate query exists to
+ * prevent. It returns a boolean, so it reports that the slot is taken without
+ * naming what took it.
+ */
+export async function translationGroupHasLocale(
+  translationGroupId: string,
+  locale: string,
+): Promise<boolean> {
+  const rows = await db
+    .select({ id: kbArticles.id })
+    .from(kbArticles)
+    .where(
+      and(eq(kbArticles.translationGroupId, translationGroupId), eq(kbArticles.locale, locale)),
+    )
+    .limit(1);
+
+  return rows.length > 0;
 }

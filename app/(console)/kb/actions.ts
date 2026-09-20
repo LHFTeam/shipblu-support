@@ -8,7 +8,12 @@ import { kbArticleVersions, kbArticles, kbCategories, kbFolders } from '@/db/sch
 import { requirePermission } from '@/lib/auth/guard';
 import type { AgentRole } from '@/lib/auth/permissions';
 import { htmlToText, preview, sanitiseArticleHtml } from '@/lib/html/sanitize';
-import { getArticleForEdit, takenSlugs, type EditableArticle } from '@/lib/kb/admin';
+import {
+  getArticleForEdit,
+  takenSlugs,
+  translationGroupHasLocale,
+  type EditableArticle,
+} from '@/lib/kb/admin';
 import { FLOOR_LABELS, SELECTABLE_FLOORS, folderFloor, meetsFloor } from '@/lib/kb/floors';
 import { normaliseArticleHtml } from '@/lib/kb/format';
 import { isLocale } from '@/lib/kb/locale';
@@ -391,9 +396,26 @@ export async function linkTranslation(_state: KbState, formData: FormData): Prom
   }
 
   const target = other.translationGroupId;
+
+  // A group holds one article per locale. Joining one that already has this
+  // article's language produces a group with two `ar` rows, which
+  // `translationsOf` does not de-duplicate: the help centre renders two
+  // switcher links with the same React key and drops one of the two hreflang
+  // alternates. The picker does not offer such a candidate, but a picker is a
+  // convenience and this id arrives in a `FormData` field, so the refusal has
+  // to be here. Asked without the role filter on purpose — an article the
+  // caller cannot see still occupies the slot.
+  if (await translationGroupHasLocale(target, mine.locale)) {
+    return { error: 'That article already has a translation in this language' };
+  }
   await db.update(kbArticles).set({ translationGroupId: target }).where(eq(kbArticles.id, id));
 
+  // Both sides, because the effect is symmetric: the other article's
+  // Translations section now lists this one. Revalidating only `id` left the
+  // page a reader reaches by clicking straight through from the new link
+  // asserting "not linked to any other language".
   revalidatePath(`/kb/${id}`);
+  revalidatePath(`/kb/${otherId}`);
   return ok();
 }
 

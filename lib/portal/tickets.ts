@@ -3,13 +3,11 @@ import { db } from '@/db/client';
 import {
   agents,
   channels,
-  contacts,
   conversationEvents,
   conversations,
   messages,
   ticketStatuses,
 } from '@/db/schema';
-import { preview } from '@/lib/html/sanitize';
 import { readOnlyChannels } from '@/lib/tickets/channel-policy';
 import { afterInboundMessage, afterMessageStored } from '@/lib/tickets/lifecycle';
 import { defaultOpenStatusId } from '@/lib/tickets/statuses';
@@ -351,21 +349,6 @@ export async function appendReply(
 
   await afterInboundMessage(result.id, false, now);
   return { ok: true };
-}
-
-/** Display name for the person who is signed in, for the header. */
-export async function contactName(contactId: string): Promise<string | null> {
-  const rows = await db
-    .select({ name: contacts.name })
-    .from(contacts)
-    .where(eq(contacts.id, contactId))
-    .limit(1);
-  return rows[0]?.name ?? null;
-}
-
-/** Subject line for a ticket opened from the portal, when none was given. */
-export function subjectFrom(body: string): string {
-  return preview(body, 80) || 'Support request';
 }
 
 async function portalChannel() {

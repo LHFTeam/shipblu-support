@@ -445,6 +445,7 @@ export const passwordResets = pgTable(
   },
   (t) => [index('password_resets_agent_idx').on(t.agentId)],
 );
+
 /**
  * The history `agents.presence` cannot keep.
  *

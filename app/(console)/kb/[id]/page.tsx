@@ -7,8 +7,9 @@ import { can } from '@/lib/auth/permissions';
 import {
   getArticleForEdit,
   listFolderOptionsForRole,
-  listTranslationOptions,
+  listTranslationCandidates,
   listVersions,
+  translationGroupOf,
 } from '@/lib/kb/admin';
 import { FLOOR_LABELS } from '@/lib/kb/floors';
 import { direction } from '@/lib/kb/locale';
@@ -134,10 +135,11 @@ export default async function ArticlePage({ params }: { params: Promise<{ id: st
 
   // Role-filtered, like `/kb/new`: the picker decides where this article can be
   // moved to, and a folder above the reader is not somewhere they can move it.
-  const [folders, versions, translationOptions] = await Promise.all([
+  const [folders, versions, translations, translationCandidates] = await Promise.all([
     listFolderOptionsForRole(agent.role),
     listVersions(id),
-    listTranslationOptions(id, agent.role),
+    translationGroupOf(id, article.translationGroupId, agent.role),
+    listTranslationCandidates(id, article.locale, agent.role),
   ]);
 
   return (
@@ -169,9 +171,8 @@ export default async function ArticlePage({ params }: { params: Promise<{ id: st
       <ArticleSidebar
         articleId={article.id}
         status={article.status}
-        locale={article.locale}
-        translationGroupId={article.translationGroupId}
-        translationOptions={translationOptions}
+        translations={translations}
+        translationCandidates={translationCandidates}
         publicUrl={publicUrl}
         versions={versions}
         stats={{
