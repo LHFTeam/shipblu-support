@@ -607,9 +607,10 @@ export async function searchArticles(
 /**
  * Resolves a legacy Freshdesk path.
  *
- * Looked up on 404 rather than on every request: after cutover almost all
- * traffic uses the new URLs, and putting this in the hot path would add a query
- * to every page load to serve a shrinking minority.
+ * Reached only for a path the proxy already recognised as a Freshdesk URL,
+ * which is why this is not in the hot path: after cutover almost all traffic
+ * uses the new URLs, and looking every request up here would add a query to
+ * every page load to serve a shrinking minority.
  */
 export async function findRedirect(fromPath: string): Promise<string | null> {
   const rows = await db

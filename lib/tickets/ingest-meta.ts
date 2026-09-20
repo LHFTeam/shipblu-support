@@ -12,6 +12,7 @@ import { enqueue } from '@/lib/queue';
 import { onCustomerReply } from '@/lib/sla';
 import { findContactByIdentity, needsChannelProfile, resolveContact } from './contacts';
 import { afterInboundMessage, afterMessageStored } from './lifecycle';
+import { defaultOpenStatusId } from './statuses';
 
 /**
  * Inbound Facebook and Instagram → conversations.
@@ -582,25 +583,6 @@ async function reopen(
     actorLabel,
     data: { reason: 'customer_replied', resolvedBy: reopened[0]?.resolvedBy ?? null },
   });
-}
-
-async function defaultOpenStatusId(tx: typeof db): Promise<string | null> {
-  const preferred = await tx
-    .select({ id: ticketStatuses.id })
-    .from(ticketStatuses)
-    .where(and(eq(ticketStatuses.category, 'open'), eq(ticketStatuses.isDefault, true)))
-    .limit(1);
-
-  if (preferred[0]) return preferred[0].id;
-
-  const fallback = await tx
-    .select({ id: ticketStatuses.id })
-    .from(ticketStatuses)
-    .where(eq(ticketStatuses.category, 'open'))
-    .orderBy(ticketStatuses.position)
-    .limit(1);
-
-  return fallback[0]?.id ?? null;
 }
 
 async function channelFor(platform: MetaPlatform) {

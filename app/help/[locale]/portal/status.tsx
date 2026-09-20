@@ -1,5 +1,5 @@
 import { Badge } from '@/components/ui';
-import { t, type Locale } from '@/lib/kb/locale';
+import { type Locale } from '@/lib/kb/locale';
 
 /**
  * A ticket's state as the customer should see it.
@@ -36,9 +36,4 @@ export function StatusBadge({
   return (
     <Badge tone={TONES[category]}>{label ?? CATEGORY_LABELS[category]?.[locale] ?? category}</Badge>
   );
-}
-
-/** Screen-reader-friendly prefix used in the ticket list. */
-export function statusLabelText(locale: Locale): string {
-  return t(locale, 'ticketStatus');
 }

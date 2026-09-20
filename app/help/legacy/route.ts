@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import { and, eq, like, or } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { kbArticles, kbFolders, kbRedirects } from '@/db/schema';
+import { kbArticles, kbFolders } from '@/db/schema';
 import { DEFAULT_LOCALE } from '@/lib/kb/locale';
+import { findRedirect } from '@/lib/kb/queries';
 import { freshdeskArticleId } from '@/lib/kb/slug';
 import { redirectTo } from '@/lib/http/redirect';
 
@@ -24,20 +25,8 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
   const path = new URL(request.url).searchParams.get('path') ?? '';
 
-  const explicit = await db
-    .select({
-      toPath: kbRedirects.toPath,
-      slug: kbArticles.slug,
-      locale: kbArticles.locale,
-    })
-    .from(kbRedirects)
-    .leftJoin(kbArticles, eq(kbArticles.id, kbRedirects.articleId))
-    .where(eq(kbRedirects.fromPath, path))
-    .limit(1);
-
-  const row = explicit[0];
-  if (row?.slug) return permanent(`/${row.locale}/a/${row.slug}`);
-  if (row?.toPath) return permanent(row.toPath);
+  const explicit = await findRedirect(path);
+  if (explicit) return permanent(explicit);
 
   const freshdeskId = freshdeskArticleId(path);
   if (freshdeskId) {

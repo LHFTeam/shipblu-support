@@ -5,7 +5,7 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-09-09, against `main` at `4c3cecd`.
+Last updated: 2026-09-09, against `main` at `b1d911a`.
 
 ---
 
@@ -1713,6 +1713,84 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   from pg_stat_activity
   where xact_start < now() - interval '5 minutes' and pid <> pg_backend_pid();
   ```
+
+- **The sign-in throttle's bucket map is bounded now; for the whole of the
+  project's history it was not.** `lib/auth/throttle.ts` keys a bucket per email
+  and per source, for sign-in and for anything that sends mail to a typed
+  address. `hit()` only resets a key it sees _again_ and `clearLoginAttempts`
+  only deletes on a successful sign-in — and the `mail:` / `mailip:` keys had no
+  remover at all — so a key used once was never removed by anything.
+  `pruneThrottleBuckets()` was written for exactly this, carried the comment
+  "keeps the map from growing without bound on a long-lived instance", and had
+  no caller in the repo's history. So an attacker spraying distinct addresses at
+  `/login` was filling a Map rather than being throttled by one, on the endpoint
+  that is reachable without signing in.
+
+  Swept inside `hit()` instead, amortised: one O(size) pass per 256 _new_ keys,
+  counted on the branch that adds one, so the sweep is paid for by the growth it
+  bounds. Not a timer and not the `cleanup` job, because neither can reach this
+  — the map is per-process heap, a request-scoped web process has nothing to
+  hang an interval on, and a job runs in the worker. `throttleBucketCount()` is
+  exported only so a test can assert the bound: ten rounds of a thousand fresh
+  addresses a window apart settle under 4,000 entries, where the unswept version
+  holds 20,002.
+
+- **A side conversation marked done reopens when the hub actually answers, and
+  this is already right — an earlier draft of this entry said otherwise.**
+  `isSideConversationOpen` claimed in its own doc comment to be "used by the
+  reply action to refuse writing into a thread that is done". Nothing called it,
+  and the comment described a policy this system does not have: `ingestSideReply`
+  sets `state: 'open'` and clears `closed_at` when a reply arrives on a `done`
+  thread, guarded by `!automation.isAutomated` so an out-of-office does not
+  count. That is the better answer of the two — refusing would drop the thing an
+  agent was waiting for — and it matches what a customer's reply does to a
+  resolved ticket.
+
+  Recorded because the mistake is instructive twice over. The dead function's
+  comment sent one reader looking for a refusal that was never written, which is
+  §6.63's whole point; and this entry then repeated the claim as a known gap,
+  which would have sent the next session to "fix" working behaviour. A gap
+  asserted from a deleted function's comment is not a gap until the live path
+  has been read.
+
+- **An article can now be linked to its translation from the console, and that
+  is the first half of two.** `kb_articles.translation_group_id` is
+  `notNull().defaultRandom()`, so every article starts alone in a group of its
+  own, and the help centre's switcher renders whatever shares the group
+  (`translationsOf`). Until this branch nothing outside the Freshdesk importer
+  ever wrote the column: `linkTranslation` was the one code path that could and
+  had never been referenced from any `.tsx` file, so it was a live `'use server'`
+  endpoint with no caller. It is now wired to a **Translations** section in the
+  article sidebar, which lists what this article is already linked to and offers
+  every other article the reader may see in another language. Both sides are
+  re-checked server-side, and the candidate list goes through `readableByRole`
+  for a sharper reason than the other read models: an unfiltered dropdown would
+  leak the titles of admins-only runbooks to a supervisor.
+
+  **This costs nothing today and would have opened at the first natively
+  authored pair.** All 112 production articles came from Freshdesk, where the
+  importer sets the groups: 54 of the 58 groups are correct ar/en pairs, and the
+  four singletons are placeholder rows all titled "مقالة جديدة", not content
+  waiting to be linked (queried 2026-09-09). The gap was prospective, which is
+  why it was worth closing before `seed_console_handbook` and the editor start
+  producing native content.
+
+  **TODO — the second half, and two rough edges the first half leaves:**
+
+  1. **`saveArticle` should accept a group to join at creation.** Writing the
+     second language is currently a save followed by a separate link, and a
+     person can do the first and forget the second — which produces exactly the
+     unlinked pair this exists to prevent. "Add a translation" from an existing
+     article, carrying its group into the new row, is the workflow that cannot
+     be half-completed.
+  2. **There is no unlink.** A wrong link can be pointed somewhere else but not
+     undone back to "alone", because that means allocating a fresh
+     `translation_group_id` and nothing exposes that. Cheap to add next to the
+     picker; left out here to keep the restoration reviewable.
+  3. **Linking moves only this article, so a group it was already in is left
+     behind.** Right for two locales — "this is the Arabic of that" — and the
+     thing to revisit if a third is ever added, when the intent becomes "merge
+     these groups" rather than "point this one".
 
 ---
 
@@ -3452,6 +3530,57 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     09-08, across twelve instance ids, peaking at 26 collapses inside 900 ms on
     09-03. Full reconstruction in `plans/web-freeze-2026-09-08.md`; §5 is revised
     in light of it.
+
+63. **A doc comment naming its own callers is not evidence it has any, and a
+    dead function is cheapest to run and dearest to read.** _2026-09-09, found
+    while deleting dead exports rather than by debugging anything._ Twenty-seven
+    exported values had exactly one mention in the repo — their own declaration.
+    Four of them described the system's behaviour in the present tense and got
+    it wrong: `onInboundMessage` opened with "the single call every inbound path
+    makes" while no path made it (`lib/tickets/lifecycle.ts` inlines the same
+    branch); `isSideConversationOpen` said "used by the reply action to refuse
+    writing into a thread that is done", which nothing does; `allRuleKeys`
+    claimed the disabled-rules check and the structural tests used it, and
+    neither did; `resetEmailProviderCache` existed for tests that swap drivers,
+    and no test swaps drivers. Each reads as a description of the running system
+    and is a description of an intention.
+
+    Two further consequences of the same absence. `pruneThrottleBuckets`
+    promised a bound that was therefore never enforced (§5.5), and
+    `linkTranslation` was a `'use server'` export with no caller — a live POST
+    endpoint whose authorisation a review pass hardened without anyone noticing
+    nothing could reach it. **An unreferenced export in a `'use server'` file is
+    not inert the way an unreferenced function is; it is a published endpoint.**
+
+    **Two of the twenty-seven were wired up rather than deleted, and the check
+    does not care which.** `findRedirect` was live logic the legacy route had
+    copied inline, and `linkTranslation` was the only implementation of a
+    capability the help centre already renders the other half of (§5.5). That is
+    the right shape for this rule: "nothing references this" is a fact, and
+    whether the answer is a deletion or a caller is a judgement the check should
+    force someone to make rather than make for them.
+
+    **The first version of the check was itself the bug it was written about.**
+    It counted bare identifiers across the repo and called an export live if the
+    token turned up anywhere else, which is not the question. `lib/portal/tickets.ts`
+    still held a dead `contactName` and a dead `subjectFrom` that no module
+    imported, and the count waved both through — `contactName` because it is an
+    ordinary object key in three other files, `subjectFrom` because two ingest
+    modules happen to define their own. So the check certified a file clean while
+    the defect was still in it, which is worse than no check once §6.63 tells the
+    next session the scan is mechanical. It asks the module graph now: an export
+    is live when another module names it in an import or a re-export, and nothing
+    else counts. The resolver was already in the same file, doing this correctly
+    for the client-bundle rule, and is now shared rather than reimplemented — the
+    private-copy lesson again, in the file that enforces it.
+
+    `plans/query-optimisation-and-cleanup.md` had already scanned for these,
+    verified them by hand, confirmed three, and asked for the check to be made
+    mechanical so the next session would not redo the scan. The next session
+    redid the scan. The rule is now `dead-exports` in
+    `scripts/ci/repo-rules.mjs`, which finds all twenty-seven on `b1d911a` and
+    none on the branch that fixed them — because a scan a session performs is a
+    scan every later session performs.
 
 ## 7. Verification already done
 

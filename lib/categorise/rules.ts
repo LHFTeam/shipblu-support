@@ -840,11 +840,6 @@ export const PATTERNS: readonly PatternRule[] = [
   },
 ];
 
-/** Every rule key, for the disabled-rules check and the structural tests. */
-export function allRuleKeys(): string[] {
-  return [...PHRASES.map((p) => p.key), ...PATTERNS.map((p) => p.key)];
-}
-
 /**
  * Rules an operator has turned off, read straight from `process.env`.
  *

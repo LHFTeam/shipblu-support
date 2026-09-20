@@ -1479,20 +1479,6 @@ export async function deleteAutomationRule(
   return ok();
 }
 
-export async function toggleAutomationRule(
-  _state: SettingsState,
-  formData: FormData,
-): Promise<SettingsState> {
-  await requirePermission('admin.automations');
-
-  const id = text(formData, 'id');
-  const active = formData.get('active') === 'true';
-
-  await db.update(automationRules).set({ isActive: active }).where(eq(automationRules.id, id));
-  refresh('/admin/automations');
-  return ok();
-}
-
 // --- Internal recipients ----------------------------------------------------
 
 /**

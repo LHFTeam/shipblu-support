@@ -314,13 +314,6 @@ export function parseTimestamp(timestamp: string | undefined): Date {
   return new Date(seconds * 1000);
 }
 
-/** Meta's own signal for whether this delivery was a status-only batch. */
-export function isStatusOnly(webhook: NormalisedWebhook): boolean {
-  return (
-    webhook.messages.length === 0 && webhook.echoes.length === 0 && webhook.statuses.length > 0
-  );
-}
-
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }

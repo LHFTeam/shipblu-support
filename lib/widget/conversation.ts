@@ -11,6 +11,7 @@ import {
 } from '@/db/schema';
 import { preview } from '@/lib/html/sanitize';
 import { afterInboundMessage, afterMessageStored } from '@/lib/tickets/lifecycle';
+import { defaultOpenStatusId } from '@/lib/tickets/statuses';
 import type { VisitorDetails } from './contact';
 import { recordIdentityOnConversation } from './identify';
 import { findLiveConversation, webchatChannel } from './session';
@@ -277,23 +278,4 @@ async function reopenIfResolved(
     .returning({ resolvedBy: conversations.resolvedByAgentId });
 
   return { resolvedBy: reopened[0]?.resolvedBy ?? null };
-}
-
-async function defaultOpenStatusId(tx: typeof db): Promise<string | null> {
-  const preferred = await tx
-    .select({ id: ticketStatuses.id })
-    .from(ticketStatuses)
-    .where(and(eq(ticketStatuses.category, 'open'), eq(ticketStatuses.isDefault, true)))
-    .limit(1);
-
-  if (preferred[0]) return preferred[0].id;
-
-  const fallback = await tx
-    .select({ id: ticketStatuses.id })
-    .from(ticketStatuses)
-    .where(eq(ticketStatuses.category, 'open'))
-    .orderBy(ticketStatuses.position)
-    .limit(1);
-
-  return fallback[0]?.id ?? null;
 }
