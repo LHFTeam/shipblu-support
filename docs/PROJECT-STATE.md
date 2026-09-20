@@ -795,6 +795,17 @@ Nothing is stranded at this moment — 17 backends, none in the
 live defect rather than an active incident. Read `plans/web-freeze-2026-09-08.md`
 before touching any of it.
 
+**#151 is closed as superseded, and one idea in it is worth keeping.** Its
+readiness probe made `/api/health` verify a _completed private Server Component
+render_ on the same instance, rather than a pair of database probes. That is a
+real answer to the rule §8 already states — a 200 is not evidence a page renders
+— and the freeze is exactly the case that proves it: the health check went on
+reporting success while every console page hung. The rest of #151 (a second pool
+module with generation retirement and cooldown) is not worth carrying beside the
+deadline instrumentation that landed, and it can fail concurrent database work by
+its own description. Nobody has written the probe as a follow-up anywhere else,
+so it is written here.
+
 One figure makes #155 more urgent than its own description says: `webhook_events`
 is **402,172 rows and 1006 MB** as of 2026-09-20, against the 206,053 that PR
 measured eleven days earlier. Retention is the change that stops a table
