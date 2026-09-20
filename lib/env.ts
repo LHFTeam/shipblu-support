@@ -157,6 +157,23 @@ const schema = z.object({
    */
   SHIPBLU_API_URL: z.url().optional(),
 
+  /**
+   * Signs the identity the delivery platform asserts for a myBlu app user.
+   *
+   * Optional, and its absence is the normal state rather than a broken one. The
+   * app's handshake is authenticated by introspecting its platform bearer
+   * against `api.shipblu.com`, which is already a backend assertion; this
+   * secret exists only for the day the platform would rather sign at login than
+   * widen what `/customer-accounts/` returns. While it is unset, a signature is
+   * ignored and the phone rests on whatever introspection said. Once it is set,
+   * a signature that does not verify is a 401 rather than a quiet downgrade —
+   * the same rule, and the same reason, as `WIDGET_IDENTITY_SECRET`.
+   *
+   * Its own value per environment, never shared with staging: a claim minted
+   * against one deployment would otherwise be replayable at the other.
+   */
+  MOBILE_IDENTITY_SECRET: z.string().optional(),
+
   SUPABASE_URL: z.url().optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
   SUPABASE_STORAGE_BUCKET: z.string().default('attachments'),

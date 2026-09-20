@@ -185,6 +185,15 @@ projects:
               #                            never the staging one: a signature
               #                            minted against one deployment would
               #                            otherwise be replayable at the other.
+              #   MOBILE_IDENTITY_SECRET   the same thing for the myBlu app, and
+              #                            unset today. The app's handshake is
+              #                            authenticated by introspecting its
+              #                            platform bearer against
+              #                            api.shipblu.com, which is already a
+              #                            backend assertion; this is only for
+              #                            the day the platform would rather
+              #                            sign at login. Per environment, for
+              #                            the same replay reason as above.
               #
               #   KB_NOTICE_EN             service notice, English
               #   KB_NOTICE_AR             service notice, Arabic

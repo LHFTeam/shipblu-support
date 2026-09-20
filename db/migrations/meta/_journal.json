@@ -190,6 +190,13 @@
       "when": 1789921868465,
       "tag": "0026_perfect_mandroid",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1789924263591,
+      "tag": "0027_nebulous_abomination",
+      "breakpoints": true
     }
   ]
 }

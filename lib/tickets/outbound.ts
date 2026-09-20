@@ -143,7 +143,7 @@ export async function deliverAutomatedReply(reply: AutomatedReply): Promise<stri
       // Coalesced rather than overwritten: this records that the customer has
       // been acknowledged at all, so the second automated reply on a ticket
       // must not move it and make a rule keyed off it fire again.
-      firstAutoRepliedAt: sql`coalesce(${conversations.firstAutoRepliedAt}, ${now})`,
+      firstAutoRepliedAt: firstAutoRepliedFragment(now),
     })
     .where(eq(conversations.id, reply.conversationId));
 
@@ -159,6 +159,27 @@ export async function deliverAutomatedReply(reply: AutomatedReply): Promise<stri
   }
 
   return messageId;
+}
+
+/**
+ * `coalesce(first_auto_replied_at, <now>)`, with the instant bound as text.
+ *
+ * A bare `Date` interpolated into a `sql` template reaches postgres.js as an
+ * untyped parameter, which assumes text and throws `ERR_INVALID_ARG_TYPE` —
+ * drizzle maps a Date only when a typed operator names the column, and a
+ * template never does. This threw on **every** automated reply on every
+ * channel: the out-of-hours acknowledgement and the automation engine's canned
+ * reply both come through here, and both died after writing the message row, so
+ * the customer's timeline carried a reply whose conversation was never updated.
+ *
+ * Exported purely so a test can read `toSQL().params` back and assert no raw
+ * Date survived, the same device `interactionWindowSet` and
+ * `staleTemplateFilter` exist for. An `EXPLAIN` of the statement typed out by
+ * hand does not catch this: the literal is a literal there, and the bug is in
+ * what drizzle binds.
+ */
+export function firstAutoRepliedFragment(at: Date) {
+  return sql`coalesce(${conversations.firstAutoRepliedAt}, ${at.toISOString()}::timestamptz)`;
 }
 
 /**

@@ -18,7 +18,12 @@ vi.mock('@/db/client', () => ({
 
 vi.mock('@/lib/queue', () => ({ enqueue: mocks.enqueue }));
 
-import { automatedReplyBlocked, carrierFor, deliverAutomatedReply } from './outbound';
+import {
+  automatedReplyBlocked,
+  carrierFor,
+  deliverAutomatedReply,
+  firstAutoRepliedFragment,
+} from './outbound';
 
 describe('deliverAutomatedReply', () => {
   beforeEach(() => {
@@ -70,7 +75,9 @@ describe('deliverAutomatedReply', () => {
     // leave the first one's timestamp alone, or a rule keyed off it fires again.
     expect(stamp).toBeDefined();
     expect(stamp).not.toBeInstanceOf(Date);
-    expect(sqlShape(stamp!.queryChunks!)).toBe('coalesce( first_auto_replied_at ,  ? )');
+    expect(sqlShape(stamp!.queryChunks!)).toBe(
+      'coalesce( first_auto_replied_at ,  ? ::timestamptz)',
+    );
   });
 });
 
@@ -194,6 +201,39 @@ describe('carrierFor', () => {
     // failure is visible than silently marked delivered, which is what a null
     // default would do. Only a channel that genuinely delivers in place is null.
     expect(carrierFor('something_new')).toBe('send_email');
+  });
+});
+
+describe('the first-auto-replied stamp', () => {
+  it('binds the instant as text rather than as a Date', () => {
+    // This shipped broken and threw on *every* automated reply, on every
+    // channel: a bare Date in a `sql` template reaches postgres.js as an
+    // untyped parameter, which assumes text and throws ERR_INVALID_ARG_TYPE.
+    // The message row was already written by then, so the customer's timeline
+    // carried a reply whose conversation was never updated — and the rule
+    // engine never learned the acknowledgement had gone out, so it would send
+    // another.
+    //
+    // The test above had asserted this fragment's *shape* since it was written,
+    // and the shape rendered the offending value as `?`. That is the whole
+    // lesson: the bug is in what drizzle binds, so only reading the params back
+    // finds it. tsc type-checks the builder rather than the statement, and an
+    // EXPLAIN of the SQL typed out by hand has a literal where the bind is.
+    const at = new Date('2026-09-20T17:16:00.301Z');
+    const chunks = firstAutoRepliedFragment(at).queryChunks as unknown[];
+
+    for (const chunk of chunks) {
+      expect(chunk).not.toBeInstanceOf(Date);
+      expect((chunk as { value?: unknown }).value).not.toBeInstanceOf(Date);
+    }
+
+    // And the instant still reaches the statement, as text. Collected chunk by
+    // chunk rather than serialised: a column chunk holds its table, which holds
+    // its columns, so JSON.stringify of the whole thing is circular — which is
+    // the same reason `sqlShape` below exists.
+    // Drizzle puts an interpolated scalar into the chunk list as itself, which
+    // is exactly why the Date version reached postgres.js unconverted.
+    expect(chunks.filter((chunk) => typeof chunk === 'string')).toContain(at.toISOString());
   });
 });
 

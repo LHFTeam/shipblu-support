@@ -32,6 +32,11 @@ const PUBLIC_PREFIXES = [
   // /login that the widget cannot follow.
   '/api/widget',
   '/widget',
+  // The myBlu app's support API. It authenticates with its own bearer token
+  // rather than a console cookie, so without this entry every call from the app
+  // is a 307 to /login — which a native client cannot follow and would surface
+  // to the customer as an unparseable HTML body.
+  '/api/v1/support',
   '/robots.txt',
   '/sitemap.xml',
   '/_next',

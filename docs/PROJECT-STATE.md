@@ -834,6 +834,15 @@ is code:
   carried `{"address": ""}` until then, written by `saveChannel`'s catch-all
   branch, which is why anything reading that column treats its shape as
   untrusted.
+- **A `mobile` channel row is needed before myBlu can route.** The support API
+  the app calls is built (`lib/myblu/`, `app/api/v1/support/`,
+  `docs/myblu-support-api.md`), and it works without the row — but a ticket then
+  arrives with `group_id` null and nothing assigns it, which is precisely the
+  §5.1 trap that let 71 Meta tickets accumulate unassignable. Not seeded, for
+  the reason `locations` is empty: the row needs a default group only the team
+  can choose. Settings → Channels, type **myBlu app**. Nothing else about the
+  app's integration is configuration — `MOBILE_IDENTITY_SECRET` is optional and
+  deliberately unset.
 - **Every bot transcript is one-sided, and the fix is one job away.** The app has
   never been subscribed to `message_echoes`, so the archive holds what customers
   said to the bot and nothing the bot said back — 10,007 inbound rows on
@@ -1439,10 +1448,16 @@ the console wraps them with the agent's permissions and the endpoint would wrap
 them with the key's. Baking `can()` in would force the endpoint to invent a fake
 agent, which is how an API ends up reaching further than any human.
 
-What is left is the endpoint and its credential. There is still **no inbound API
-key mechanism anywhere in this system**: `lib/auth/tokens.ts` and the widget's
-visitor token (only the SHA-256 stored) are the precedent to extend, and a new
-`api_keys` table is the missing piece. Two things to decide before writing it,
+What is left is the endpoint and its credential. There is still no **API key**
+mechanism in this system — but it is no longer true that nothing credentialled
+calls in from outside: the myBlu support API (`lib/myblu/`) is the first, and it
+is worth reading before building this one because it answers the same questions
+differently and on purpose. It authenticates a _person_ rather than a service, by
+introspecting the caller's own `api.shipblu.com` bearer and issuing a session
+token of its own (`mobile_sessions`, only the SHA-256 stored) — so it needs no
+key at all. A partner API authenticates a _service_, which is what still wants
+`api_keys`. `lib/auth/tokens.ts` and the widget's visitor token remain the
+precedent for the storage shape. Two things to decide before writing it,
 both much cheaper now than as a retrofit:
 
 - one server-to-server platform key, or per-merchant keys? It determines whether
@@ -3452,6 +3467,41 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     09-08, across twelve instance ids, peaking at 26 collapses inside 900 ms on
     09-03. Full reconstruction in `plans/web-freeze-2026-09-08.md`; §5 is revised
     in light of it.
+
+63. **Every automated reply has been throwing since `deliverAutomatedReply` was
+    written, and the test that covered the line is why nobody noticed.** The
+    out-of-hours acknowledgement and the automation engine's canned reply both
+    go through it, and both died at
+
+    ```
+    update "conversations" set "first_auto_replied_at" = coalesce(…, $1), …
+    TypeError [ERR_INVALID_ARG_TYPE]: The "string" argument must be of type
+      string … Received an instance of Date
+    ```
+
+    the `sql` template trap AGENTS.md already documents: a bare `Date`
+    interpolated into a template reaches postgres.js as an untyped parameter,
+    which assumes text. The failure lands **after** the `messages` row is
+    inserted, so the visible symptom is not "no acknowledgement" — it is a
+    customer timeline carrying a reply whose conversation was never updated, and
+    a rule engine that never learns the acknowledgement went out and so composes
+    another. Nothing reports it: both senders are called from a lifecycle hook
+    whose callers do not await a result anybody reads.
+
+    The instructive half is why it survived a test written specifically about
+    that line. `outbound.test.ts` asserted the fragment's _shape_ —
+    `coalesce( first_auto_replied_at ,  ? )` — and the offending value is the
+    `?`. `tsc` type-checks the drizzle builder rather than the statement, and an
+    `EXPLAIN` of the SQL typed out by hand has a literal exactly where the bind
+    is. **Only reading the params back finds it**, which is what
+    `interactionWindowSet` and `staleTemplateFilter` are exported for; the
+    fragment is now `firstAutoRepliedFragment` and tested the same way.
+
+    Found by driving the real code against a local Postgres while verifying an
+    unrelated change — which is the actual lesson. Vitest runs without a
+    database, and the `database` CI job runs job handlers; this lives in `lib/`
+    and is reached from a server action, so nothing in CI was ever going to
+    execute it.
 
 ## 7. Verification already done
 

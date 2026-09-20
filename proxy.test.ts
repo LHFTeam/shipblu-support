@@ -60,6 +60,18 @@ describe('every other hostname', () => {
     expect(rewrittenTo(visit('https://shipblu-support.onrender.com/ar'))).toBe('/help/ar');
   });
 
+  it('lets the myBlu app reach its API without a console session', () => {
+    // A native client cannot follow the signed-out redirect, so a missing
+    // public prefix here does not look like an auth failure to the app — it
+    // looks like the support API returning HTML.
+    expect(visit('https://shipblu-support.onrender.com/api/v1/support/session').status).not.toBe(
+      307,
+    );
+    expect(
+      visit('https://shipblu-support.onrender.com/api/v1/support/conversations/42').status,
+    ).not.toBe(307);
+  });
+
   it('lets a signed-out visitor reach the widget but not the console', () => {
     expect(visit('https://shipblu-support.onrender.com/widget').status).not.toBe(307);
     expect(visit('https://shipblu-support.onrender.com/inbox').status).toBe(307);

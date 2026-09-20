@@ -231,18 +231,35 @@ returns a full instant whose **time component is an artifact of when you asked**
 `YYYY-MM-DD` and never convert through a `Date` — the value carries `+03:00`, so
 a call answered after 21:00 UTC reads as the previous day in UTC.
 
-**Background work.** Anything slow, external or retryable is a job — with one
-narrow exception, written down because it looks like a violation: a control an
-agent presses and _waits on_, whose entire output is the provider's answer, calls
-the provider in the action instead. `refreshRequesterProfile` is the only one
-today. The rule exists so a customer's ticket never depends on Graph being up and
-so unattended work gets retried; a person clicking a button is neither, and
-queueing it would put the one sentence they are waiting for into a worker log
-they cannot read — which is exactly how a missing Meta approval hid for a month
+**Background work.** Anything slow, external or retryable is a job — with two
+narrow exceptions, both written down because they look like violations.
+
+The first: a control an agent presses and _waits on_, whose entire output is the
+provider's answer, calls the provider in the action instead.
+`refreshRequesterProfile` is the only one of those. The rule exists so a
+customer's ticket never depends on Graph being up and so unattended work gets
+retried; a person clicking a button is neither, and queueing it would put the one
+sentence they are waiting for into a worker log they cannot read — which is
+exactly how a missing Meta approval hid for a month
 (`docs/PROJECT-STATE.md` §6.27). Where this applies, the provider call itself
 stays in one shared function the job and the action both use
 (`lib/meta/profile-refresh.ts`), so the two paths cannot answer differently for
-the same subject. Everything else is a job: add the type
+the same subject.
+
+The second is `lib/myblu/platform.ts` — the myBlu handshake introspecting an
+access token against `api.shipblu.com` — and it is its own exception rather than
+an instance of the first, because the first's reasoning does not fit: that one
+turns on a customer's ticket never depending on a provider, and a failed
+handshake means they cannot open support at all. What justifies it is structural
+instead — **an authentication decision cannot be queued.** A job answering "is
+this token live" thirty seconds later is useless to a caller holding a request
+open, and a credential check has no retry semantics, so neither half of the rule
+applies. It runs once per handshake and never per request; the session token
+carries the answer afterwards, which is what keeps the outbound call off the path
+the app spends its time on. It fails closed: an unreachable platform is a 503 and
+never a session.
+
+Everything else is a job: add the type
 to `JobType` in `lib/queue/index.ts`, a handler under `worker/handlers/`, and
 register it in `worker/handlers/index.ts`. CI checks that the three agree, and
 that every cron in `render.yaml` names a type that exists. Use `dedupeKey` for anything a webhook retry could
@@ -323,6 +340,17 @@ row is written: delivery refuses it too, but by then the customer's timeline
 carries a reply that permanently failed. Route a new automated sender through it
 and through `carrierFor`, which is the same lesson twice — `send_csat` kept
 private copies of both and so surveyed Facebook tickets by email.
+
+**`carrierFor` answers `null` for a channel that delivers in place**, and both
+halves of what that means — the `delivered`/`deliveredAt` stamp and whether
+anything is enqueued — come from that one call. Web chat and the myBlu app both
+read the `messages` table the reply is written to, so the row _is_ the delivery.
+This used to be a local `const isWebchat = channel === 'webchat'` written out
+three times, in the console composer, `deliverAutomatedReply` and `send_csat`;
+anything not literally `'webchat'` therefore got `pending` plus `send_email`,
+which for a consumer with no address is a reply the agent believes they sent and
+nobody receives. A fourth in-place channel must not have to find three call
+sites.
 
 Two things it must be given rather than guess. **A Meta comment ticket has no
 messaging window**: it is answered on the comment edge, which `send_meta` reaches
@@ -800,6 +828,28 @@ deleting it, and drop the sections that genuinely do not apply.
   is what promotes a claim to a fact. `docs/embedding-the-widget.md` is the
   contract the other side implements; changing what the signature covers breaks
   a deployed integration silently, so add a second accepted form instead.
+- **The myBlu app's bearer proves _a_ customer, never _which_ customer.**
+  `lib/myblu/` is the widget's rule applied to a caller that holds a real
+  credential, which is exactly why it is easy to get wrong: the platform bearer
+  says a live myBlu user is calling, a phone in the request body claims which
+  one, and nothing links the two — so believing the pair would let any myBlu
+  user read any Egyptian mobile's support history. A phone is a fact only when
+  `api.shipblu.com` asserted it, through introspection or a
+  `MOBILE_IDENTITY_SECRET` signature; then it resolves as a `whatsapp` identity,
+  because the same string under a channel of its own would guarantee two
+  identities for one number and `normaliseIdentifier` phone-normalises for
+  `whatsapp` alone. Otherwise the session is device-scoped on
+  `sha256(installId)` — the install id rather than the session token, which
+  rotates — and the claim only decorates, surfacing the person as a merge
+  candidate an agent confirms. The contact lookup is over `contact_identities`
+  and never `contacts.primary_phone`: that column can hold a value somebody
+  typed, and matching on it would let one person's claim be the grounds on which
+  another's session adopts a contact. `docs/myblu-support-api.md` is the
+  contract the app implements.
+- **Only the myBlu handshake may answer 401.** The app calls `logout()` on any
+  authenticated 401, so a stale support session is a **403** and an unreachable
+  platform is a **503** — a token expiry or an `api.shipblu.com` outage that
+  signed every myBlu user out of the app would be far worse than either.
 - Side conversation recipients come from a directory and are re-read
   server-side; a free-text address is checked against the requester's own
   identities and our mailbox in the action, not only in the composer.

@@ -3,6 +3,7 @@ import { db } from '@/db/client';
 import { conversationPresence, jobs, webhookEvents } from '@/db/schema';
 import { deleteExpiredCustomerSessions } from '@/lib/auth/customer-session';
 import { deleteExpiredSessions } from '@/lib/auth/session';
+import { deleteExpiredMobileSessions } from '@/lib/myblu/session';
 import { deleteExpiredContactTokens } from '@/lib/portal/accounts';
 import type { ClaimedJob } from '@/lib/queue';
 
@@ -17,6 +18,7 @@ import type { ClaimedJob } from '@/lib/queue';
 export async function cleanup(_job: ClaimedJob): Promise<void> {
   const expiredSessions = await deleteExpiredSessions();
   const expiredCustomerSessions = await deleteExpiredCustomerSessions();
+  const expiredMobileSessions = await deleteExpiredMobileSessions();
   // Spent and expired verification/reset links. They are useless once expired
   // and they are credentials-adjacent, so there is no reason to keep them.
   const expiredContactTokens = await deleteExpiredContactTokens();
@@ -44,6 +46,7 @@ export async function cleanup(_job: ClaimedJob): Promise<void> {
 
   console.log(
     `[cleanup] sessions=${expiredSessions} customer_sessions=${expiredCustomerSessions} ` +
+      `mobile_sessions=${expiredMobileSessions} ` +
       `contact_tokens=${expiredContactTokens} presence=${stalePresence.length} ` +
       `webhooks=${oldWebhooks.length} jobs=${oldJobs.length}`,
   );

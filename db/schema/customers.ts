@@ -339,6 +339,84 @@ export const contactTokens = pgTable(
   ],
 );
 
+/**
+ * Sessions for a native app's support chat — today only myBlu.
+ *
+ * A third session table, and the reason is the same one that split
+ * `contact_sessions` from `sessions`: the resolver, not the row shape. Every
+ * row in `contact_sessions` is accepted by `getSessionCustomer()` as a portal
+ * cookie, gated only on the identity being verified and carrying a password. A
+ * myBlu session minted against an identity that happens to have both would
+ * therefore be a full portal login the moment somebody pasted it into
+ * `CUSTOMER_SESSION_COOKIE` — a 7-day app credential escalating into a 14-day
+ * web one. A `purpose` column would close that only for as long as both
+ * resolvers remember to filter on it; a separate table cannot be forgotten.
+ *
+ * Keyed on the contact rather than on an identity, because the contact is what
+ * every read is scoped by and because an app session survives its identity
+ * being merged into another contact — `mergeContacts` re-points identities, and
+ * a session pointing at the loser would strand the person on an empty history.
+ */
+export const mobileSessions = pgTable(
+  'mobile_sessions',
+  {
+    /** SHA-256 of the bearer the app holds. The raw token is never stored. */
+    tokenHash: text('token_hash').primaryKey(),
+    contactId: uuid('contact_id')
+      .notNull()
+      .references(() => contacts.id, { onDelete: 'cascade' }),
+
+    /**
+     * Which app this is, so a second one later is a value rather than a table.
+     */
+    app: text('app').notNull().default('myblu'),
+
+    /**
+     * SHA-256 of the install id the app generates and keeps in secure storage.
+     *
+     * Not the token: the token rotates, and keying identity on a rotating value
+     * would mint a new contact on every re-handshake and strand the previous
+     * session's tickets on the previous contact.
+     */
+    installIdHash: text('install_id_hash').notNull(),
+
+    /**
+     * What the delivery platform said this token belongs to, normalised —
+     * `phone:201…` or `email:a@b.c`, and null when it named neither.
+     *
+     * Stored so a later handshake on the same install can notice that the
+     * device now belongs to somebody else, which is `applyVisitorIdentity`'s
+     * `'reset'` case and the only thing standing between a shared phone and one
+     * person reading another's support history.
+     */
+    subject: text('subject'),
+
+    /**
+     * Whether the platform, rather than the app, named the person.
+     *
+     * Read by the console badge: an agent should know whether the name on a
+     * ticket is one `api.shipblu.com` confirmed or one the app asserted.
+     */
+    verified: boolean('verified').notNull().default(false),
+
+    locale: text('locale'),
+    appVersion: text('app_version'),
+    platform: text('platform'),
+
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('mobile_sessions_contact_idx').on(t.contactId),
+    index('mobile_sessions_expires_idx').on(t.expiresAt),
+    // The handshake's lookup: this install, on this app. Not unique — a session
+    // is replaced rather than updated when the subject changes, and the old row
+    // stays readable until it expires or the sweep takes it.
+    index('mobile_sessions_install_idx').on(t.app, t.installIdHash),
+  ],
+);
+
 export const companiesRelations = relations(companies, ({ many }) => ({
   contacts: many(contacts),
 }));
@@ -358,4 +436,8 @@ export const contactSessionsRelations = relations(contactSessions, ({ one }) => 
     fields: [contactSessions.identityId],
     references: [contactIdentities.id],
   }),
+}));
+
+export const mobileSessionsRelations = relations(mobileSessions, ({ one }) => ({
+  contact: one(contacts, { fields: [mobileSessions.contactId], references: [contacts.id] }),
 }));

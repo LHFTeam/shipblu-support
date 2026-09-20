@@ -171,6 +171,17 @@ export type NewTicket = {
   priority?: 'low' | 'medium' | 'high' | 'urgent' | null;
   type?: string | null;
   tags?: string[];
+  /**
+   * Which channel the ticket arrives on, defaulting to the portal.
+   *
+   * A parameter rather than a second copy of this function, because everything
+   * below it — the status lookup, the first message, the two lifecycle hooks,
+   * the ids returned for an attachment write — is identical for any surface
+   * where a signed-in customer types a first message. The myBlu app is the
+   * second such surface. What the value changes is the channel row consulted
+   * for the default group, and the discriminator every read and report keys on.
+   */
+  channel?: 'portal' | 'mobile';
 };
 
 /**
@@ -184,15 +195,18 @@ export type NewTicket = {
 export type CreatedTicket = { number: number; conversationId: string; messageId: string };
 
 /**
- * Opens a ticket from the portal or from a form.
+ * Opens a ticket from the portal, a form, or the myBlu app.
  *
  * Channel `portal` rather than `email`: it did not arrive by mail and has no
  * Message-ID, so filing it as email would put it in reporting's email column
- * and leave the threading code looking for a header that was never there.
+ * and leave the threading code looking for a header that was never there. The
+ * same argument is why the app passes `mobile` rather than reusing this
+ * default.
  */
 export async function createTicket(contactId: string, input: NewTicket): Promise<CreatedTicket> {
   const now = new Date();
-  const portal = await portalChannel();
+  const channel = input.channel ?? 'portal';
+  const origin = await originChannel(channel);
 
   const created = await db.transaction(async (tx) => {
     const statusId = await defaultOpenStatusId(tx);
@@ -203,15 +217,15 @@ export async function createTicket(contactId: string, input: NewTicket): Promise
     const inserted = await tx
       .insert(conversations)
       .values({
-        channel: 'portal',
-        channelId: portal?.id ?? null,
+        channel,
+        channelId: origin?.id ?? null,
         statusId,
         subject: input.subject,
         requesterContactId: contactId,
         // The form's group first, then the channel's. Worth noting the second
         // is usually null: no `channels` row is seeded for `portal`, so before
         // forms existed a portal ticket reached the inbox with no group at all.
-        groupId: input.groupId ?? portal?.defaultGroupId ?? null,
+        groupId: input.groupId ?? origin?.defaultGroupId ?? null,
         formId: input.formId ?? null,
         // `undefined` rather than null where the caller has no opinion, so
         // Drizzle omits the column and the schema default applies.
@@ -367,11 +381,20 @@ export function subjectFrom(body: string): string {
   return preview(body, 80) || 'Support request';
 }
 
-async function portalChannel() {
+/**
+ * The channel row a new ticket routes through.
+ *
+ * Ordered oldest-first: nothing stops an admin adding a second row of a type,
+ * and without an order Postgres may return either — so the admin would
+ * configure one row while this read the other. The same rule `webchatChannel()`
+ * states, applied here because this function now serves two types.
+ */
+async function originChannel(type: 'portal' | 'mobile') {
   const rows = await db
     .select({ id: channels.id, defaultGroupId: channels.defaultGroupId })
     .from(channels)
-    .where(and(eq(channels.type, 'portal'), eq(channels.isActive, true)))
+    .where(and(eq(channels.type, type), eq(channels.isActive, true)))
+    .orderBy(asc(channels.createdAt), asc(channels.id))
     .limit(1);
 
   return rows[0] ?? null;
