@@ -317,6 +317,29 @@ const schema = z.object({
    */
   LOG_ALL_INCOMING_WEBHOOKS: z.string().optional(),
 
+  /**
+   * How long any one query may wait for a pool slot plus execution, before
+   * `db/client.ts` cancels it.
+   *
+   * There is no library setting for this — postgres.js queues past `max` with no
+   * deadline and a promise that never rejects — so the number is ours to choose,
+   * and it is chosen against two facts rather than as a round figure. The
+   * slowest statement this system issues on purpose is the nightly rollup at
+   * roughly three seconds, so thirty leaves an order of magnitude of headroom
+   * for a maintenance query nobody wants to see fail. And a page that has been
+   * waiting thirty seconds has already lost its reader, so the only thing a
+   * longer ceiling buys is the 40-minute queue of §62.
+   *
+   * Declared in `shipblu-shared` and left at its default: it is a property of
+   * the driver rather than of an environment, and both halves of the system are
+   * better off agreeing on it than differing by accident. A service that
+   * genuinely needs longer — a backfill may, a request never does — sets it at
+   * the service level, which Render gives precedence over the group, and that is
+   * the deliberate per-service exception AGENTS.md describes rather than the
+   * normal way to configure this.
+   */
+  DB_QUERY_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+
   WORKER_CONCURRENCY: z.coerce.number().int().positive().default(5),
   WORKER_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(1000),
 });

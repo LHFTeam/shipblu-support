@@ -83,14 +83,14 @@ npx prettier --write AGENTS.md         # one file
 
 | Job          | What it runs                                                          |
 | ------------ | --------------------------------------------------------------------- |
-| `verify`     | `tsc`, `eslint`, `format:check`, `vitest`, `build` — one job each     |
+| `verify`     | `tsc`, `eslint`, `format:check`, `vitest`, `knip`, `build` — one each |
 | `repo-rules` | `scripts/ci/repo-rules.mjs`, and migration drift against `db/schema/` |
 | `database`   | migrations, `db/sql/` and every DB-only job handler, on real Postgres |
 
 Run the same thing locally when you want the answer sooner:
 
 ```bash
-npx tsc --noEmit && npx eslint . && npx vitest run && npm run build
+npx tsc --noEmit && npx eslint . && npx vitest run && npm run knip && npm run build
 node scripts/ci/repo-rules.mjs
 ```
 
@@ -107,6 +107,38 @@ this file now live — the env-var catalogue, the job registry, the `db/sql`
 rules, the confinement of the delivery payload, and the rest. Each check carries
 the reason it exists. If one of them is wrong, change it there and say why in
 the same commit; do not add your call site to an exemption list.
+
+`knip` gates **dependency hygiene and nothing else** — `dependencies`,
+`devDependencies`, `optionalPeerDependencies`, `unlisted`, `unresolved` and
+`binaries`, named as a positive `include` allowlist in `knip.jsonc` so a knip
+minor that adds a default-on category cannot silently widen a blocking job.
+
+Its unused-_export_ categories are excluded, and `files` with them. Run bare it
+reports ~110 exports, which is not a backlog: it mixes genuinely dead code with
+functions used inside their own module (drop the `export`, not the function) and
+with exports whose only consumer is `repo-rules.mjs` reading them by regex —
+deleting `handlers` on knip's word would break the job-registry check. `files`
+is excluded for a different reason: no `entry`/`project` is declared, so the
+`worker/` tree is reachable only through the `worker` script in `package.json`,
+and landing a module one commit before importing it would fail a check whose
+message talks about dead files. `npm run knip:exports` is the hand-run and
+covers exactly the complement of the gated list — all eleven of knip's other
+issue types, which is checked against its `ISSUE_TYPES` rather than assumed; `knip.jsonc` carries the
+reasoning, including which two categories the first attempt got wrong.
+
+**A dead value export is gated all the same, by `repo-rules.mjs` rather than by
+knip.** The two arrived from opposite directions in the same fortnight and are
+complementary rather than duplicates, so do not delete either as redundant: knip
+answers "is this dependency real", `dead-exports` answers "does anything import
+this". The second asks the module graph — an export is live when another module
+names it in an `import` or a re-export — so it separates the three cases above
+instead of conflating them, and it carries the framework-convention exemptions
+(`GET`, `metadata`, `dynamic`) that make knip's bare number ~110 in the first
+place. It checks **values only**; an exported _type_ is deliberately out of
+scope, because most are referenced only from the signature they name and
+flagging them would push the codebase to un-export shapes callers need. So
+`knip:exports` is what still covers the type half — not, as it read before this
+check existed, the whole of unused exports.
 
 Three things CI still cannot check, so they remain yours:
 
@@ -731,7 +763,12 @@ identically, which is why this is not a CI check: telling them apart needs the
 type of the interpolated expression, not its spelling. Use `inArray()` for a
 list of values (§6.46).
 
-Playwright (`npm run test:e2e`) exists but is not part of the pre-push loop.
+Playwright is a declared dependency and `npm run test:e2e` is a declared script,
+but **there are no specs and no config**: nothing is tracked under any
+`playwright.config.*` and there is no `*.spec.ts` in the repo, so the command
+cannot currently run. `knip` reports the dependency as used because the binary
+appears in a script, which is worth knowing before treating a green dependency
+check as evidence that every dev dependency is earning its place.
 
 ## Tool use and live infrastructure
 

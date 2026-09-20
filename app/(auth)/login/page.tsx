@@ -10,10 +10,16 @@ export default async function LoginPage({
 }: {
   searchParams: Promise<{ next?: string; signedOut?: string }>;
 }) {
+  // The session first, because it is the cheaper question: `getSessionAgent()`
+  // returns without touching the database when there is no cookie, while
+  // `needsBootstrap()` always counts rows on a cold latch. Asking in the other
+  // order made a signed-out visitor wait on a pool slot to be told to sign in,
+  // which is where one of these spent 390 seconds during the freeze (§62).
+  if (await getSessionAgent()) redirect('/inbox');
+
   // A fresh deploy has no accounts at all; send the first visitor to setup
   // rather than to a form nobody can pass.
   if (await needsBootstrap()) redirect('/setup');
-  if (await getSessionAgent()) redirect('/inbox');
 
   const { next, signedOut } = await searchParams;
 

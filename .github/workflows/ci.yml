@@ -3,11 +3,14 @@ name: CI
 # Everything AGENTS.md used to ask an agent to run before pushing, plus the
 # checks it could only ask them to remember.
 #
-# The four-command pre-push loop (tsc, eslint, vitest, build) is the `verify`
-# job. `repo-rules` is the prose that a machine can check. `database` is the gap
+# The pre-push loop (tsc, eslint, format, vitest, knip, build) is the `verify`
+# job. `format` and `knip` are the two most likely to fail for a reason that has
+# nothing to do with the code under review, so read the job name before the log.
+#
+# `repo-rules` is the prose that a machine can check. `database` is the gap
 # AGENTS.md called out and could not close: the unit tests run without a
 # database, so no SQL was ever executed before a push — `backfill_meta_profiles`
-# shipped with all four checks green and died on its first real run with
+# shipped with every static check green and died on its first real run with
 # `operator does not exist: text = channel`. Here it runs against real Postgres.
 
 on:
@@ -51,6 +54,14 @@ jobs:
             run: npm run format:check
           - name: test
             run: npx vitest run
+          - name: knip
+            # Dependency hygiene only, named as a positive allowlist in
+            # knip.jsonc — which is also where the reasoning lives for why the
+            # unused-export categories and `files` are not gated. An unlisted
+            # dependency is the one that bites without warning: it resolves
+            # today through somebody else's transitive tree and stops the day
+            # that package tidies its own.
+            run: npm run knip
           - name: build
             # `npm run build` pins NODE_ENV=production deliberately. Several
             # failure modes here — React's export-condition resolution under the
