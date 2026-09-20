@@ -1887,6 +1887,27 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
      thing to revisit if a third is ever added, when the intent becomes "merge
      these groups" rather than "point this one".
 
+- **`jobs` carries the high-water mark of its busiest week, and reclaiming it is
+  a manual step.** On 2026-09-09 the table held **1,150 live rows in 52 MB**, 30
+  MB of it indexes, `jobs_dedupe_idx` alone 15 MB — the one table the Supabase
+  advisor calls bloated. That is its shape rather than a fault: ~200,000 rows are
+  inserted and deleted every seven weeks, and vacuum makes space reusable
+  without shrinking the files.
+
+  `db/sql/005_storage_parameters.sql` lowers the autovacuum scale factors so the
+  churn is collected on absolute counts rather than on a fifth of a table that is
+  almost always tiny. That slows further bloat; it gives nothing back. Reclaiming
+  what is already there is:
+
+  ```sql
+  REINDEX INDEX CONCURRENTLY jobs_dedupe_idx;
+  ```
+
+  Run it by hand — `CONCURRENTLY` cannot go in `db/sql/`, because `db/migrate.ts`
+  sends each file as one `sql.unsafe(contents)` and therefore one implicit
+  transaction. Check the `pg_stat_activity` query above for a conflicting lock
+  first: this is the table the worker claims from every second.
+
 ---
 
 ## 6. Traps that have already bitten us

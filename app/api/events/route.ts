@@ -45,6 +45,30 @@ export async function GET(request: Request) {
   let heartbeat: ReturnType<typeof setInterval> | null = null;
   let closed = false;
 
+  /**
+   * Releases the session connection, once, and says so when it fails.
+   *
+   * This used to be `void listener?.end()` in three places. A session client is
+   * opened with `idle_timeout: 0`, so it holds a backend until something ends
+   * it — and a floating promise means an `end()` that never completed looked
+   * exactly like one that did. Five of these leaked on 2026-09-08 and were only
+   * found because `transaction_timeout` reaped them (§5, §62).
+   */
+  const releaseListener = async () => {
+    const held = listener;
+    if (!held) return;
+    listener = null;
+    try {
+      await held.end({ timeout: 5 });
+    } catch (error) {
+      console.error('[sse] failed to release the LISTEN connection', error);
+    }
+  };
+
+  // Assigned by `start`, called by `cancel` too — the two teardown paths must be
+  // the same code, because they can both run for one stream.
+  let cleanup = () => {};
+
   const stream = new ReadableStream({
     async start(controller) {
       const send = (event: string, data: string) => {
@@ -56,24 +80,30 @@ export async function GET(request: Request) {
         }
       };
 
-      try {
-        listener = sessionSql();
-        // One session connection owns every topic for this view. Register them
-        // sequentially rather than pipelining LISTEN statements during the
-        // connection's own startup; this runs once per stream, not per event.
-        for (const topic of topics) {
-          await listener.listen(topic, () => send('conversation', '{}'));
+      cleanup = () => {
+        if (closed) return;
+        closed = true;
+        if (heartbeat) clearInterval(heartbeat);
+        request.signal.removeEventListener('abort', cleanup);
+        void releaseListener();
+        try {
+          controller.close();
+        } catch {
+          /* already closed */
         }
-        send('ready', '{}');
-      } catch (error) {
-        console.error('[sse] could not LISTEN', error);
-        // Tell the client to fall back to polling rather than leaving it
-        // waiting on a stream that will never carry anything.
-        send('degraded', '{}');
-      }
+      };
 
-      // Proxies drop idle connections at around 60s; a comment line keeps the
-      // stream alive without becoming an event or a route refresh.
+      // Wired before the connection is opened rather than after it is listening.
+      // The seven LISTEN round trips below are seven chances for the client to
+      // go away, and while this listener was registered after them there was
+      // nothing at all attached to the request lifecycle for that whole window
+      // — so an abort during it stranded the backend permanently (§62).
+      request.signal.addEventListener('abort', cleanup);
+
+      // Armed early for the same reason: a stream that takes a while to start
+      // listening still has to look alive to the proxy in front of it. Proxies
+      // drop idle connections at around 60s; a comment line keeps the stream
+      // alive without becoming an event or a route refresh.
       heartbeat = setInterval(() => {
         if (closed) return;
         try {
@@ -83,25 +113,47 @@ export async function GET(request: Request) {
         }
       }, 25_000);
 
-      const cleanup = () => {
-        if (closed) return;
-        closed = true;
-        if (heartbeat) clearInterval(heartbeat);
-        void listener?.end();
-        try {
-          controller.close();
-        } catch {
-          /* already closed */
-        }
-      };
+      try {
+        // Held locally as well as on `listener`, because `releaseListener()`
+        // nulls the shared reference the moment an abort arrives — and it can
+        // arrive during any of the awaits below. Reading `listener.listen` on
+        // the next iteration would then throw a TypeError that the catch logs
+        // as "could not LISTEN", inventing a failure of the one step that had
+        // in fact succeeded. The `closed` check is what actually stops the loop.
+        const client = sessionSql();
+        listener = client;
 
-      request.signal.addEventListener('abort', cleanup);
+        // One session connection owns every topic for this view. Register them
+        // sequentially rather than pipelining LISTEN statements during the
+        // connection's own startup; this runs once per stream, not per event.
+        for (const topic of topics) {
+          if (closed) break;
+          await client.listen(topic, () => send('conversation', '{}'));
+        }
+
+        // Moving the abort handler up is not enough on its own. `listener` is
+        // still null when an abort arrives mid-await, so `cleanup` runs with
+        // nothing to release and the connection assigned a moment later belongs
+        // to a request that has already gone.
+        if (closed) {
+          await releaseListener();
+          return;
+        }
+
+        send('ready', '{}');
+      } catch (error) {
+        console.error('[sse] could not LISTEN', error);
+        // The connection may be live even though a LISTEN on it failed, so it
+        // is released here rather than left to a cleanup that may never run.
+        await releaseListener();
+        // Tell the client to fall back to polling rather than leaving it
+        // waiting on a stream that will never carry anything.
+        send('degraded', '{}');
+      }
     },
 
     cancel() {
-      closed = true;
-      if (heartbeat) clearInterval(heartbeat);
-      void listener?.end();
+      cleanup();
     },
   });
 

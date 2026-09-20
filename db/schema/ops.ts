@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import {
   boolean,
   index,
@@ -62,8 +63,19 @@ export const webhookEvents = pgTable(
   },
   (t) => [
     uniqueIndex('webhook_events_provider_event_idx').on(t.provider, t.providerEventId),
-    // The worker's claim query: unprocessed, oldest first.
-    index('webhook_events_unprocessed_idx').on(t.processedAt, t.receivedAt),
+
+    // The unprocessed backlog, oldest first — and partial, because that is the
+    // only set anything asks for.
+    //
+    // It used to be a full index on `(processed_at, received_at)` described as
+    // "the worker's claim query", which was wrong twice: the worker claims from
+    // `jobs`, and a leading `processed_at` that is non-null on ~98% of rows
+    // indexes the answer nobody wants. It cost 13 MB and was maintained on all
+    // 206,053 inserts to serve **155 scans in 47 days**. As a partial index it
+    // is kilobytes, and only an unprocessed row touches it at all.
+    index('webhook_events_unprocessed_idx')
+      .on(t.receivedAt)
+      .where(sql`${t.processedAt} is null`),
   ],
 );
 
