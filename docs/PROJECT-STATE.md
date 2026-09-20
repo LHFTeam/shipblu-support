@@ -10,11 +10,13 @@ were re-measured against production on that date; where a number here disagrees
 with an older paragraph elsewhere in the file, the older one has not been
 re-checked.
 
-**Production is not running `main`.** It has served `b1d911a` since 2026-09-10 —
-which is the commit this file was previously written against — while `main` is
-twelve commits ahead. `autoDeploy` is `no` on every service (§2), so a merge
-changes nothing that is running. Check `/api/health`, which reports the commit,
-before concluding any change below is live.
+**Production runs `6d9b7f3`, deployed 2026-09-20 23:38–23:49 UTC** — all seven
+services, web first for the migration. For the eleven days before that it served
+`b1d911a` while `main` ran ahead of it, which is the trap rather than the
+footnote: `autoDeploy` is `no` on every service (§2), so a merge changes nothing
+that is running, and the gap is invisible because CI is green and the old code
+keeps serving. Check `/api/health`, which reports the commit, before concluding
+any change below is live.
 
 ---
 
@@ -811,11 +813,12 @@ is **402,172 rows and 1006 MB** as of 2026-09-20, against the 206,053 that PR
 measured eleven days earlier. Retention is the change that stops a table
 doubling every fortnight.
 
-**And `main` is not deployed.** See the note under the title: production has
-served `b1d911a` since 2026-09-10 while `main` is twelve commits ahead, and
-`autoDeploy` is off. Anything merged in that window — including the job whose
-handler a queued row will look for — is not running. Deploying is a precondition
-for most of §5.1, not a separate chore.
+~~**And `main` is not deployed.**~~ **Deployed 2026-09-20.** All seven services
+are on `6d9b7f3`; `/api/health` reports the commit and the new `pool` block from
+#153. The standing hazard is unchanged, though, and it is why this paragraph
+stays: `autoDeploy` is off everywhere, so the next merge is again not running
+until somebody triggers it — including the job whose handler a queued row will
+look for.
 
 ### 5.1 Configuration and cutover — the real remaining work
 
@@ -3708,6 +3711,48 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     `scripts/ci/repo-rules.mjs`, which finds all twenty-seven on `b1d911a` and
     none on the branch that fixed them — because a scan a session performs is a
     scan every later session performs.
+
+64. **A migration's lock estimate ages with the tables it locks, and #157's was
+    eleven days stale.** _2026-09-20, found by re-measuring before the deploy
+    rather than after it._ The declined finding on #157 costed migration 0026's
+    five non-concurrent `CREATE INDEX` and concluded "the builds are sub-second"
+    from `messages` at 44,705 rows / 39 MB and `conversations` at 13,817 / 3.9
+    MB. Both figures were right when written. By the deploy `messages` was 95,452
+    rows / 85 MB — and the **sixth** index, the partial rebuild on
+    `webhook_events`, had never been costed at all, on a table that had reached
+    **402,197 rows and 894 MB of heap**. A non-concurrent build holds a SHARE
+    lock for a full heap scan, and `webhook_events` is the table every inbound
+    webhook inserts into before returning 200.
+
+    What made it safe was timing rather than luck: checked immediately before
+    merging, inbound was **4 deliveries in ten minutes** against a 24-hour mean
+    of ~1,309/hour, because 23:40 UTC is 02:40 in Cairo. The deploy ran
+    23:38–23:41 and 46 webhooks landed in the following quarter hour with nothing
+    dropped. Run this migration's shape in the Cairo small hours, and re-read the
+    table sizes rather than the pull request's — `lock_timeout` bounds _acquiring_
+    the lock, never holding it, so a stale estimate does not fail loudly, it just
+    blocks writes for as long as the scan takes.
+
+65. **The index nobody had measured was costing an admin page nineteen seconds.**
+    _2026-09-20, measured either side of the same deploy._ `#155` replaced
+    `webhook_events_unprocessed_idx` — a full index on `(processed_at,
+received_at)` — with a partial one on `received_at where processed_at is
+null`, and argued it from write cost and 13 MB of disk. The read side turned
+    out to be the bigger half. `lib/reports/live.ts`'s `count(*)`/`min(received_at)`
+    under `where processed_at is null`, which is on an admin page:
+
+    |                | before        | after     |
+    | -------------- | ------------- | --------- |
+    | Execution time | **19,445 ms** | **86 ms** |
+    | Heap fetches   | 24,848        | 99        |
+    | Buffers        | 21,956        | 242       |
+
+    The leading column was non-null on ~98% of rows, so the index-only scan was
+    doing a heap fetch for nearly every one. Nobody had run an `EXPLAIN` on it;
+    the page was presumably just known to be slow. The lesson is the method —
+    when a rewrite is argued from write cost, `EXPLAIN (analyze, buffers)` the
+    read it serves before and after, because that is where the number nobody
+    expected turns up.
 
 ## 7. Verification already done
 
