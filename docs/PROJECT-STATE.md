@@ -5,7 +5,16 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-09-09, against `main` at `b1d911a`.
+Last updated: 2026-09-20, against `main` at `7f93718`. The figures in §1 and §5
+were re-measured against production on that date; where a number here disagrees
+with an older paragraph elsewhere in the file, the older one has not been
+re-checked.
+
+**Production is not running `main`.** It has served `b1d911a` since 2026-09-10 —
+which is the commit this file was previously written against — while `main` is
+twelve commits ahead. `autoDeploy` is `no` on every service (§2), so a merge
+changes nothing that is running. Check `/api/health`, which reports the commit,
+before concluding any change below is live.
 
 ---
 
@@ -439,9 +448,11 @@ letting a shared one hand a reader an answer about somebody else.
 important thing to understand about the current state, and the easiest to read
 backwards.
 
-`channels` holds exactly one row: `whatsapp_bot`. Through it, real traffic has
-been arriving since 2026-08-18 — **10,716 conversations as of 2026-08-26**, still
-around 1,500 a day. The database is not empty and the system is not idle.
+`channels` now holds six rows — one per channel the app can receive on. Through
+`whatsapp_bot`, real traffic has been arriving since 2026-08-18: **28,547
+conversations and 95,930 inbound messages as of 2026-09-20**, still around 1,500
+a day and now 99% of everything in the database. The database is not empty and
+the system is not idle.
 
 But that channel is **read-only observation by design**. Another service owns
 that number and holds the conversation; we receive a copy of both sides.
@@ -450,31 +461,30 @@ from "all channels" even for an admin, and keeps it out of the SLA sweep, the
 time-based automations and every reporting metric. Nobody on the team works
 those conversations. They are transcripts, not a queue.
 
-Every human channel put together holds **30 conversations** — 22 Facebook, 3
-email, 2 Instagram, 2 WhatsApp, 1 webchat. Email, WhatsApp and webchat are test
-traffic from 18–21 August, but **Facebook and Instagram are not any more**: 105
-inbound Messenger DMs and 4 Instagram ones from real people, the most recent
-today, all of them filed under bare numeric ids and none of them answered by
-anybody. That is not the channel being configured — no `channels` row exists for
-either — it is the app being connected to a page and an account that the public
-can already write to. There is still no human WhatsApp row and no `portal` row.
-A `webchat` row and an email mailbox row **do** now exist — measured 2026-08-31,
-"Web Chat" and "Support Mailbox", both active and both routed to a group — which
-is a correction to what this section said before. `sla_policies` is still empty, so the SLA
-cron sweeps nothing every 5 minutes. `automation_rules` holds exactly **one**
-rule as of 2026-08-28 — "Close resolved tickets after 3 days", seeded by
-`db/seed.ts` and inserted into production by hand (§6.30) — which is the first
-work the 15-minute sweep has ever had. `locations` is still empty, all sixteen
-of them.
+Every human channel put together holds **173 conversations** — 140 Facebook, 18
+Instagram, 6 WhatsApp, 5 webchat, 4 email. Email, WhatsApp and webchat are still
+test traffic from 18–21 August, but **Facebook and Instagram are not**: those 158
+threads are real people writing to a page and an account the public can already
+reach, filed under bare numeric ids and none of them answered by anybody.
+
+**The channel rows are no longer the gap.** All five human channels now have one
+— "Support Mailbox", "Facebook Page", "Instagram", "Web Chat", "WhatsApp
+Support" — every one active and routed to `Support`; `whatsapp_bot` alone carries
+no default group, which is right. There is still no `portal` row, so a ticket
+opened from the customer portal lands with no default group.
+
+`sla_policies` holds **4** rows and `automation_rules` **1** ("Close resolved
+tickets after 3 days", §6.30), so both crons finally have work. `locations` is
+**still empty, all sixteen of them** — the one register nobody has entered.
 
 So: **the system still cannot take a real human support ticket**, and the
 remaining work is mostly not code — it is configuration, live-provider
-verification, and cutover. The agent productivity report is the sharpest example
-of what that costs: on 2026-08-21 production held **3 agents, 1 assigned
-conversation and 7 agent-authored messages**, so every figure on that page will
-read as a near-empty row until the team is actually working in the product. That
-is an argument for having landed the capture early, not for reading the report
-yet. Treat "phase N is complete" as a statement about the
+verification, and cutover. But the team has started arriving: **11 agents** as of
+2026-09-20, up from 3, of whom 10 have signed in at least once, and 161
+conversations now carry an assignee. The capture tables the productivity report
+reads are filling accordingly — 5,203 backlog snapshots, 479 presence intervals
+and 215 `agent_metrics_daily` rows — so the report is no longer empty, which is
+the argument for having landed the capture early. Treat "phase N is complete" as a statement about the
 codebase, never about the product being usable by the support team. But do not
 read "not configured" as "no data": there is a real archive now, it is worth
 measuring things against, and §6.17 is what happens when you measure carelessly.
@@ -765,6 +775,37 @@ or a log line, and §6.2 is a warning about what happens when it is not.
 
 In rough priority order. Nothing here is blocked by anything else.
 
+### 5.0 The queue in front of the queue
+
+Two things sit ahead of everything below, and neither is a feature.
+
+**Ten pull requests are open, and five of them are one change.** #151 and
+#153–#157 are all the 2026-09-08 web freeze; #157 is the integration branch that
+carries #153–#156 as four merges, and #151 is a second, independently written
+answer to the same problem — the duplicate-work failure §3 warns about, arriving
+exactly as described. They have not moved since 2026-09-09. **The defect they fix
+is still live in `main`**: `app/api/events/route.ts` wires its abort handler
+after seven sequential `LISTEN` awaits, and the `catch` beside it returns without
+`end()`, so a client that disconnects inside that window strands a
+`sessionSql()` connection opened with `idle_timeout: 0`. `transaction_timeout`
+reaps it five minutes later; that is the whole of the mitigation today.
+
+Nothing is stranded at this moment — 17 backends, none in the
+`state=active` + `wait_event=ClientRead` shape, checked 2026-09-20 — so this is a
+live defect rather than an active incident. Read `plans/web-freeze-2026-09-08.md`
+before touching any of it.
+
+One figure makes #155 more urgent than its own description says: `webhook_events`
+is **402,172 rows and 1006 MB** as of 2026-09-20, against the 206,053 that PR
+measured eleven days earlier. Retention is the change that stops a table
+doubling every fortnight.
+
+**And `main` is not deployed.** See the note under the title: production has
+served `b1d911a` since 2026-09-10 while `main` is twelve commits ahead, and
+`autoDeploy` is off. Anything merged in that window — including the job whose
+handler a queued row will look for — is not running. Deploying is a precondition
+for most of §5.1, not a separate chore.
+
 ### 5.1 Configuration and cutover — the real remaining work
 
 The system cannot take a single real ticket until this is done, and none of it
@@ -811,10 +852,12 @@ is code:
   the Meta inboxes are answered here or not at all, so the channel rows, the
   agents and the groups below need to be in place first rather than after.
 
-- **Channel rows.** `channels` holds one row, `whatsapp_bot`, and it is the
-  observed bot number rather than anything the team answers (§1). Email
-  mailboxes, the _human_ WhatsApp business number, the Facebook page and
-  Instagram account, and a `webchat` channel each still need a row.
+- ~~**Channel rows.**~~ **Done, bar one.** All five human channels have a row as
+  of 2026-09-20 — "Support Mailbox", "Facebook Page", "Instagram", "Web Chat",
+  "WhatsApp Support" — active and routed to `Support`, and `whatsapp_bot` is
+  still the observed bot number the team does not answer (§1). **A `portal` row
+  is the one still missing**, so a ticket opened from the customer portal lands
+  with no default group and nothing routes it.
   A WhatsApp row now also needs a **business account** to point at — Settings →
   Channels, "WhatsApp business accounts". Nothing has to be done by hand for the
   existing setup: the hourly template sync turns `WHATSAPP_WABA_ID` into the
@@ -836,8 +879,12 @@ is code:
   untrusted.
 - **Every bot transcript is one-sided, and the fix is one job away.** The app has
   never been subscribed to `message_echoes`, so the archive holds what customers
-  said to the bot and nothing the bot said back — 10,007 inbound rows on
-  `whatsapp_bot` and **zero outbound**. The missing half is never delivered
+  said to the bot and nothing the bot said back — **95,930 inbound rows on
+  `whatsapp_bot` and zero outbound**, re-measured 2026-09-20. That is nearly ten
+  times the 10,007 this entry first recorded, which is the argument for running
+  the job rather than a reason to keep deferring it: the archive is growing at
+  ~1,500 conversations a day and every one of them is half a transcript that can
+  never be reconstructed afterwards. The missing half is never delivered
   rather than delivered and dropped, and its size is known exactly, because the
   delivery statuses _do_ arrive: 14,828 distinct outbound wamids in the three
   days to 2026-08-22 against 10,024 inbound messages, so roughly 60% of each
@@ -853,16 +900,22 @@ is code:
   Do not do this with a hand-written `curl`: the Graph call _replaces_ the field
   list rather than adding to it, so naming only the new field unsubscribes
   `messages` and stops inbound WhatsApp entirely, and Meta answers that with a 200.
-- **Agents.** Three accounts exist. The rest of the team needs inviting, and
-  `groups` (3 rows) needs its membership — which is now load-bearing rather than
+- **Agents.** **11 accounts exist** as of 2026-09-20 (1 account_admin, 4 admins,
+  2 supervisors, 4 agents), up from 3, and 10 of them have signed in at least
+  once. **Seven `send_agent_invite` jobs died on 2026-09-03** with `the token …
+cannot be unsealed — APP_SECRET may have been rotated`, so some of that
+  onboarding did not go out by email; check nobody is still waiting on one before
+  inviting the rest. `groups` (3 rows) still needs its membership — which is now load-bearing rather than
   decorative: auto-assignment only ever considers members of the ticket's group,
   so a group with an empty roster hands out nothing and says `no_group_members`
   on the timeline.
 - ~~**Assignment is configured but off.**~~ **Switched on for `Support` on
-  2026-09-02**, round robin, all three agents on the roster. Still `manual` on
-  `Customer Care` and `Merchant Care`, whose rosters are empty and which no
-  channel points at — they route nothing until somebody decides what belongs in
-  them.
+  2026-09-02**, round robin; 161 conversations now carry an assignee. **The
+  roster is still 3 of 11 agents**, though, which is the thing to fix next here —
+  eight of the people who now have accounts are in no group, and auto-assignment
+  only ever considers members of the ticket's group. `Customer Care` and
+  `Merchant Care` still have empty rosters and no channel points at them, so they
+  route nothing until somebody decides what belongs in them.
 
   Two things were in the way and are worth knowing about, because both made the
   feature look broken rather than unconfigured:
@@ -895,9 +948,10 @@ is code:
   settings overview carries the same check. No seed data was written: nobody has
   given us the real names, codes and addresses, and inventing them would put
   plausible-looking wrong codes in every environment.
-- **SLA policies and automation rules are both empty**, so the sweep and the
-  time-based cron currently run over nothing every 5 and 15 minutes. Whatever
-  Freshdesk enforces today needs transcribing.
+- ~~**SLA policies and automation rules are both empty.**~~ `sla_policies` holds
+  **4** rows and `automation_rules` **1** as of 2026-09-20, so neither cron runs
+  over nothing any more. Whatever else Freshdesk enforces today still needs
+  transcribing, and one automation rule is not a rule set.
 - **The side conversation picker's two registers.** One is now filled and one is
   not. `internal_recipients` has 3 rows, all of them teams — so the picker
   offers those three and nothing else. **Every hub is still missing**, because
@@ -935,6 +989,16 @@ is code:
   path on `shipblu-support.onrender.com` answers 200; and Render's HTTP metrics
   broken down by host show **zero** requests reaching this service on
   `support.shipblu.com` over 48 hours. The DNS has never been pointed here.
+
+  **Still true on 2026-09-20, and still nobody's half-hour.** Re-measured the
+  same way: production's `/widget/embed.js` still emits
+  `https://support.shipblu.com`, that host still answers `302 → /support/home`
+  (Freshdesk's own path) at the root and still 404s
+  `/en/a/packaging-guidelines`. What has changed is only the blast radius, and
+  only for now — one CSAT survey has ever been created and `contact_tokens` is
+  empty, so almost nothing has been mailed a dead link _yet_. That is the reason
+  to unset the variable now rather than an argument for leaving it: the day the
+  portal opens is the day every verification and reset email starts carrying one.
 
   So every absolute URL built from `publicBaseUrl()` currently names a host that
   does not serve this app. That is the sitemap, `robots.txt`, every canonical
@@ -1006,9 +1070,21 @@ is code:
   The variables live in the `shipblu-shared` group because the web service and
   the worker have to agree: the worker links on the pattern, the console searches
   on it, and a service that disagreed would link a ticket the search could never
-  find again. **After this deploys, run the backfill from `/admin/import`** — the
-  live path only ever sees new messages, so the 24 above stay unlinked until it
-  runs, and it has still never been run once (§6.20).
+  find again. ~~**After this deploys, run the backfill from `/admin/import`.**~~
+  **Detection is live and working**: 40 `conversation_shipments` rows exist as of
+  2026-09-20 and **38 of them were found by the detector** rather than typed by
+  an agent, which is the ratio the second `/admin/import` card was built to
+  report.
+
+  **What has no schedule is the re-read.** `sync_stale_shipments` still has no
+  cron entry in `render.yaml` (§1), only 17 `sync_shipment` jobs have ever run,
+  and **34 of the 40 shipments were last synced more than two days ago** — the
+  most recent sync anywhere is 2026-09-19. So the tracking page now reliably
+  finds a parcel and then answers about it from stale data, which is the failure
+  mode that invites an agent to repeat an old status to a customer as current.
+  Deciding the cadence is still a question about the platform's rate limits that
+  nobody has answered; picking any number and writing the cron is better than the
+  status quo.
 
 - **`/admin/import` now has a second card** whose figures answer whether the
   pattern is right: it splits links into those the detector found and those
@@ -1456,6 +1532,24 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
 
 ### 5.5 Loose ends
 
+- **The dead-letter queue has 56 rows in it and nobody has read them.**
+  `/api/health` has reported `dead: 56` for eleven days. Three populations, and
+  they want different answers:
+
+  - **43 × `download_media`, all `Media download failed (500)`.** Outage-shaped
+    rather than systematic — they cluster on 2026-08-29/30 (36 of them) and
+    2026-09-09 (5), against 240 completed including one that succeeded today. But
+    a dead job is never cleaned up and the dedupe key is **spent for good**
+    (`download_media:<mediaId>`), so re-enqueuing does nothing and those 43
+    customer attachments are gone. If a customer photographing a damaged parcel
+    matters, the recovery path is a handler that keys differently, not a retry.
+  - **7 × `send_agent_invite`**, 2026-09-03 — see §5.1's agents entry.
+  - **6 × `send_meta`**, unchanged and already diagnosed in §5.2.
+
+  The lesson worth keeping is the shape: nothing surfaces a dead job to a human.
+  The count is on `/api/health` and on `/admin`, and both are places you have to
+  already suspect something to look at.
+
 - **Three superseded columns are still in the schema, waiting for every service
   to be on new code.** `holidays.name`, `canned_responses.body_html` and
   `canned_responses.body_text` were replaced by `*_ar` / `*_en` pairs in
@@ -1484,7 +1578,8 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   staging and any future environment will not be empty — see §6.60.
 
 - **`contacts.locale` is never written, so every contact reads `'en'`.** All
-  6,244 of them sit at the column default, and `lib/contacts/merge.ts` already
+  **28,661** of them sit at the column default (re-counted 2026-09-20; it was
+  6,244 when this was written, so the cost of the workaround is growing), and `lib/contacts/merge.ts` already
   documents why that is not the same as knowing: `'en'` means either "reads
   English" or "nobody has ever said". Anything that picks a language off it is
   answering an Arabic-first customer base in English — **CSAT surveys are doing
