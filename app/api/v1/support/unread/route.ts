@@ -1,9 +1,6 @@
 import { NextResponse } from 'next/server';
-import { hashToken } from '@/lib/auth/tokens';
-import { allow } from '@/lib/kb/rate-limit';
 import { unreadCount } from '@/lib/myblu/conversation';
-import { apiError } from '@/lib/myblu/errors';
-import { authorise, bearerFrom } from '../_shared';
+import { authorise, handle } from '../_shared';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,12 +12,10 @@ export const dynamic = 'force-dynamic';
  * expensive of the two by an order of magnitude.
  */
 export async function GET(request: Request) {
-  const auth = await authorise(request);
-  if ('error' in auth) return auth.error;
+  return handle(request, async () => {
+    const auth = await authorise(request, 'unread', 60);
+    if ('error' in auth) return auth.error;
 
-  if (!allow(`myblu-unread:${hashToken(bearerFrom(request))}`, 60, 60_000)) {
-    return apiError(request, 'rate_limited');
-  }
-
-  return NextResponse.json({ unread: await unreadCount(auth.session.contactId) });
+    return NextResponse.json({ unread: await unreadCount(auth.session.contactId) });
+  });
 }

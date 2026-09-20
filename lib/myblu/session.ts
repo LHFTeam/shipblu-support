@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, lt } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, lt } from 'drizzle-orm';
 import { cache } from 'react';
 import { db } from '@/db/client';
 import { channels, contactIdentities, contacts, mobileSessions } from '@/db/schema';
@@ -6,7 +6,8 @@ import { generateToken, hashToken } from '@/lib/auth/tokens';
 import type { HoursConfig } from '@/lib/hours';
 import { loadHoursCatalog } from '@/lib/hours/catalog';
 import { groupHours } from '@/lib/hours/resolve';
-import { linkIdentity, resolveContact } from '@/lib/tickets/contacts';
+import { resolveMergedContact } from '@/lib/contacts/merge';
+import { resolveContact } from '@/lib/tickets/contacts';
 import type { ResolvedIdentity } from './identity';
 
 /**
@@ -84,16 +85,15 @@ export async function contactFor(identity: ResolvedIdentity, installId: string):
           displayName: identity.name,
         });
 
-    // The app's own identity alongside it, so a later handshake that arrives
-    // with the platform unreachable still finds the same contact rather than
-    // opening a second one. Safe here and only here: the contact was selected
-    // by a value the platform asserted, not by the install id.
-    await linkIdentity(resolved.contactId, {
-      channel: 'mobile',
-      identifier: hashToken(installId),
-      displayName: identity.name,
-    });
-
+    // **No `mobile` identity is written for the install.** It is tempting —
+    // it would let a later handshake find the same contact without asking the
+    // platform again — and it is the one thing here that would undo everything
+    // else. The install identity is what an *unverified* handshake resolves on,
+    // so linking it to a contact the platform named means the next person to
+    // pick up the handset, on a profile that names nobody, resolves straight
+    // onto this customer's history. The case it was meant to serve cannot
+    // happen anyway: a handshake that cannot reach the platform answers 503 and
+    // never gets here.
     return resolved.contactId;
   }
 
@@ -145,7 +145,13 @@ export async function decorate(contactId: string, identity: ResolvedIdentity): P
     await db.update(contacts).set(patch).where(eq(contacts.id, contactId));
   }
 
-  if (identity.email) {
+  // **Only when the platform named the address.** `contacts.primaryEmail` above
+  // is decoration and merge bait, the same standing as the phone beside it. An
+  // identity row is neither: it is the key `resolveContact` selects on, so
+  // writing one from an unverified claim would let somebody type a stranger's
+  // address and have that stranger's future email land on their own contact —
+  // adoption by the back door, and exactly what this module's header forbids.
+  if (identity.email && identity.verified) {
     await db
       .insert(contactIdentities)
       .values({
@@ -183,7 +189,10 @@ export async function installChangedHands(
     .where(
       and(eq(mobileSessions.app, 'myblu'), eq(mobileSessions.installIdHash, hashToken(installId))),
     )
-    .orderBy(asc(mobileSessions.createdAt))
+    // Newest first: the question is who held this device *last*, and a device
+    // used anonymously twenty times before its owner ever verified would
+    // otherwise fill the window with null subjects and never answer true.
+    .orderBy(desc(mobileSessions.createdAt))
     .limit(20);
 
   return rows.some((row) => row.subject !== null && row.subject !== subject);
@@ -246,6 +255,15 @@ export const resolveSession = cache(async (token: string): Promise<MobileSession
   const row = rows[0];
   if (!row) return null;
 
+  // Follow the tombstone. A device-scoped contact exists to be merged into the
+  // customer's real record — that is the whole point of writing the phone as
+  // merge bait — and `mergeContacts` re-points identities and conversations at
+  // the survivor while soft-deleting the loser, so the FK's cascade never
+  // fires and this row keeps naming a contact that now owns nothing. Without
+  // this the reward for an agent doing the right thing is the customer's app
+  // going blank for up to seven days.
+  const contactId = await resolveMergedContact(row.contactId);
+
   // Slide it, but at most hourly. The app polls an open thread every few
   // seconds; a write per poll would make reading a conversation the most
   // write-heavy thing in the product.
@@ -257,7 +275,7 @@ export const resolveSession = cache(async (token: string): Promise<MobileSession
       .where(eq(mobileSessions.tokenHash, tokenHash));
   }
 
-  return { contactId: row.contactId, verified: row.verified, locale: row.locale };
+  return { contactId, verified: row.verified, locale: row.locale };
 });
 
 export async function revokeSession(token: string): Promise<void> {
@@ -289,9 +307,11 @@ export async function deleteExpiredMobileSessions(): Promise<number> {
  * — so the admin would configure one row while the API read the other.
  *
  * Null is a working state for the API and a misconfiguration for the team: a
- * ticket still opens, but with no group, so nothing routes it and auto-assignment
- * never sees it. `/admin` reports the missing row, the same way it reports a
- * skill no active agent holds.
+ * ticket still opens, but with no group, so nothing routes it and
+ * auto-assignment never sees it — and `mobileHours()` below then resolves
+ * against no group, so the handshake tells every customer support is closed.
+ * `/admin` carries its own row for this, separate from the "some channel is
+ * configured" check that an existing email row already satisfies.
  */
 export const mobileChannel = cache(async () => {
   const rows = await db

@@ -94,9 +94,22 @@ export type PortalTicketDetail = PortalTicket & {
   canReply: boolean;
 };
 
+/**
+ * Which slice of a long thread to read.
+ *
+ * The portal renders a page and takes the default — the oldest 200, which is
+ * where a reader starts. A polling client needs the opposite end: past 200
+ * messages the oldest window never changes, so every poll would return the same
+ * prefix and the customer's thread would silently freeze while the agent's
+ * replies kept landing. `newestFirst` selects the most recent `limit` and
+ * returns them in reading order.
+ */
+export type TicketWindow = { newestFirst?: boolean; limit?: number };
+
 export async function getTicket(
   contactId: string,
   number: number,
+  window: TicketWindow = {},
 ): Promise<PortalTicketDetail | null> {
   const rows = await db
     .select({
@@ -118,6 +131,11 @@ export async function getTicket(
         eq(conversations.number, number),
         eq(conversations.requesterContactId, contactId),
         isNull(conversations.deletedAt),
+        // A merged-away ticket is gone from `listTickets`, so leaving it
+        // readable here means a client holding its number keeps polling and
+        // replying into a conversation the console has folded into another and
+        // nobody is working.
+        isNull(conversations.mergedIntoId),
         eq(conversations.isSpam, false),
         notInArray(conversations.channel, readOnlyChannels()),
       ),
@@ -126,6 +144,8 @@ export async function getTicket(
 
   const ticket = rows[0];
   if (!ticket) return null;
+
+  const limit = window.limit ?? 200;
 
   const timeline = await db
     .select({
@@ -138,8 +158,10 @@ export async function getTicket(
     .from(messages)
     .leftJoin(agents, eq(agents.id, messages.authorAgentId))
     .where(and(eq(messages.conversationId, ticket.id), eq(messages.kind, 'reply')))
-    .orderBy(asc(messages.createdAt))
-    .limit(200);
+    .orderBy(window.newestFirst ? desc(messages.createdAt) : asc(messages.createdAt))
+    .limit(limit);
+
+  if (window.newestFirst) timeline.reverse();
 
   return {
     ...ticket,
@@ -286,6 +308,13 @@ export async function appendReply(
   contactId: string,
   number: number,
   body: string,
+  /**
+   * Who is answering, for the timeline. The portal is the default because it
+   * was the only caller; the app passes its own so an agent reading a `mobile`
+   * ticket is not told it was reopened from a portal its requester has never
+   * signed into.
+   */
+  actorLabel = 'portal',
 ): Promise<ReplyResult> {
   const now = new Date();
 
@@ -303,6 +332,7 @@ export async function appendReply(
           eq(conversations.number, number),
           eq(conversations.requesterContactId, contactId),
           isNull(conversations.deletedAt),
+          isNull(conversations.mergedIntoId),
           eq(conversations.isSpam, false),
           notInArray(conversations.channel, readOnlyChannels()),
         ),
@@ -324,7 +354,7 @@ export async function appendReply(
         await tx.insert(conversationEvents).values({
           conversationId: ticket.id,
           type: 'reopened',
-          actorLabel: 'portal',
+          actorLabel,
           data: { reason: 'customer_replied', resolvedBy: reopened[0]?.resolvedBy ?? null },
         });
       }

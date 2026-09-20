@@ -1,14 +1,11 @@
 import { NextResponse } from 'next/server';
-import { hashToken } from '@/lib/auth/tokens';
 import { parseWidgetConfig } from '@/lib/widget/config';
 import { DEFAULT_LOCALE, isLocale } from '@/lib/kb/locale';
 import { folderArticles, popularArticles, searchArticles } from '@/lib/kb/queries';
-import { allow } from '@/lib/kb/rate-limit';
-import { requestBaseUrl } from '@/lib/kb/site';
+import { publicBaseUrl } from '@/lib/kb/site';
 import { ANONYMOUS } from '@/lib/kb/visibility';
-import { apiError } from '@/lib/myblu/errors';
 import { mobileChannel } from '@/lib/myblu/session';
-import { authorise, bearerFrom } from '../_shared';
+import { authorise, handle } from '../_shared';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,40 +29,44 @@ const RESULTS = 5;
  * a myBlu user is a recipient.
  */
 export async function GET(request: Request) {
-  const auth = await authorise(request);
-  if ('error' in auth) return auth.error;
+  return handle(request, async () => {
+    const auth = await authorise(request, 'articles', 60);
+    if ('error' in auth) return auth.error;
 
-  if (!allow(`myblu-articles:${hashToken(bearerFrom(request))}`, 60, 60_000)) {
-    return apiError(request, 'rate_limited');
-  }
+    const params = new URL(request.url).searchParams;
+    const requested = params.get('locale') ?? auth.session.locale ?? DEFAULT_LOCALE;
+    // The tag only: the app sends `ar` or `en`, but a client sending `ar-EG`
+    // should get Arabic rather than the default.
+    const tag = requested.split('-')[0]!.toLowerCase();
+    const locale = isLocale(tag) ? tag : DEFAULT_LOCALE;
 
-  const params = new URL(request.url).searchParams;
-  const requested = params.get('locale') ?? auth.session.locale ?? DEFAULT_LOCALE;
-  // The tag only: the app sends `ar` or `en`, but a client sending `ar-EG`
-  // should get Arabic rather than the default.
-  const tag = requested.split('-')[0]!.toLowerCase();
-  const locale = isLocale(tag) ? tag : DEFAULT_LOCALE;
+    // `publicBaseUrl()`, not the host this request arrived on. The widget uses
+    // the request's host because its links are for somebody already reading a
+    // page served from it; these go to a native app and open in the customer's
+    // browser, so a link built from the console's hostname is the address they
+    // see, share and bookmark. The help centre's own domain is the one that is
+    // meant to be public.
+    const base = publicBaseUrl();
+    const query = (params.get('q') ?? '').trim();
 
-  const base = requestBaseUrl(request.headers);
-  const query = (params.get('q') ?? '').trim();
+    // Three characters, the same floor the widget's search uses: shorter than
+    // that matches most of the corpus and suggests nothing useful.
+    const hits =
+      query.length >= 3
+        ? await searchArticles(ANONYMOUS, locale, query, RESULTS)
+        : await curated(locale);
 
-  // Three characters, the same floor the widget's search uses: shorter than
-  // that matches most of the corpus and suggests nothing useful.
-  const hits =
-    query.length >= 3
-      ? await searchArticles(ANONYMOUS, locale, query, RESULTS)
-      : await curated(locale);
-
-  return NextResponse.json({
-    locale,
-    articles: hits.map((hit) => ({
-      title: hit.title,
-      slug: hit.slug,
-      // `encodeURI`, because an article slug can be Arabic: ASCII slugify
-      // erases it entirely, so these are real UTF-8 slugs that have to survive
-      // being put in a URL.
-      url: `${base}/${locale}/a/${encodeURI(hit.slug)}`,
-    })),
+    return NextResponse.json({
+      locale,
+      articles: hits.map((hit) => ({
+        title: hit.title,
+        slug: hit.slug,
+        // `encodeURI`, because an article slug can be Arabic: ASCII slugify
+        // erases it entirely, so these are real UTF-8 slugs that have to survive
+        // being put in a URL.
+        url: `${base}/${locale}/a/${encodeURI(hit.slug)}`,
+      })),
+    });
   });
 }
 

@@ -172,7 +172,17 @@ export type FaqFolderChoice = {
  * the action refuses one too, because this list is a convenience and not a
  * control.
  */
-export function WebchatSettings({
+/**
+ * The FAQ-folder setting, for whichever in-app chat surface owns the row.
+ *
+ * Both the widget and the myBlu app read a folder per locale out of their own
+ * channel's config, and `saveChannel` stores it for both — so a form hardcoded
+ * to `webchat` leaves the app's half of that setting with no way to reach it,
+ * and `curated()` silently falls back to the most-read list for ever. The type
+ * is a prop for the same reason `createTicket` now takes a channel: the second
+ * surface is not a special case of the first.
+ */
+export function InAppChatSettings({
   channel,
   groups,
   folders,
@@ -180,12 +190,15 @@ export function WebchatSettings({
   channel: {
     id: string;
     name: string;
+    type: 'webchat' | 'mobile';
     defaultGroupId: string | null;
     faqFolders: Record<string, string>;
   };
   groups: { id: string; name: string }[];
   folders: FaqFolderChoice[];
 }) {
+  const surface = channel.type === 'mobile' ? 'myBlu app' : 'Chat widget';
+  const reader = channel.type === 'mobile' ? 'the app' : 'the widget';
   const [state, action] = useActionState(saveChannel, INITIAL);
   const [editing, setEditing] = useState(false);
 
@@ -198,12 +211,12 @@ export function WebchatSettings({
       <div className="flex flex-wrap items-center gap-3">
         <div className="min-w-0 flex-1">
           <h3 className="flex flex-wrap items-center gap-2 text-sm font-medium">
-            Chat widget
+            {surface}
             {chosen.length === 0 ? <Badge tone="warning">no questions chosen</Badge> : null}
           </h3>
           <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">
             {chosen.length === 0
-              ? 'The widget lists the most-read articles until a folder is chosen here.'
+              ? `${reader[0]!.toUpperCase()}${reader.slice(1)} lists the most-read articles until a folder is chosen here.`
               : chosen.map((folder) => `${folder.categoryLocale}: ${folder.name}`).join(' · ')}
           </p>
         </div>
@@ -217,7 +230,7 @@ export function WebchatSettings({
   return (
     <form action={action} className="flex flex-col gap-3">
       <input type="hidden" name="id" value={channel.id} />
-      <input type="hidden" name="type" value="webchat" />
+      <input type="hidden" name="type" value={channel.type} />
       <input type="hidden" name="name" value={channel.name} />
 
       <div className="grid gap-3 sm:grid-cols-2">
@@ -227,9 +240,9 @@ export function WebchatSettings({
             label={locale === 'ar' ? 'Arabic questions' : 'English questions'}
             explain={
               <>
-                The folder whose articles the widget lists, in the order the knowledge base editor
-                put them in. A folder has no language of its own — it takes its category&rsquo;s —
-                so each language is chosen separately. With none chosen the widget falls back to the
+                The folder whose articles {reader} lists, in the order the knowledge base editor put
+                them in. A folder has no language of its own — it takes its category&rsquo;s — so
+                each language is chosen separately. With none chosen {reader} falls back to the
                 most-read articles, which is a reasonable list but nobody&rsquo;s decision.
               </>
             }

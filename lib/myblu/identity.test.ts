@@ -117,7 +117,16 @@ describe('the install id', () => {
     expect(parseInstallId('0123456789abcdef')).toBe('0123456789abcdef');
   });
 
-  it('accepts a UUID and refuses something carrying separators we key on', () => {
+  it('refuses the colon, which is the separator the changed-hands scope uses', () => {
+    // The handshake composes `installId:subject` and hashes it. An id allowed
+    // to contain a colon could therefore be crafted to hash to exactly another
+    // device's scope and resolve onto that person's contact — so this is the
+    // one character in the alphabet doing security work, not tidiness.
+    expect(parseInstallId('3f7a1c84-2b19-4f6e-9a0d:phone:201001234567')).toBeNull();
+    expect(parseInstallId('0123456789abcdef:phone:201001234567')).toBeNull();
+  });
+
+  it('accepts a UUID and refuses whitespace', () => {
     expect(parseInstallId('3f7a1c84-2b19-4f6e-9a0d-1e2f3a4b5c6d')).toBe(
       '3f7a1c84-2b19-4f6e-9a0d-1e2f3a4b5c6d',
     );

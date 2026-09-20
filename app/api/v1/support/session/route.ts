@@ -2,7 +2,13 @@ import { NextResponse } from 'next/server';
 import { isWithinBusinessHours, nextOpeningAt } from '@/lib/hours';
 import { allow, clientIp } from '@/lib/kb/rate-limit';
 import { apiError } from '@/lib/myblu/errors';
-import { parseClaim, parseInstallId, resolveIdentity, verifyClaim } from '@/lib/myblu/identity';
+import {
+  identitySigningEnabled,
+  parseClaim,
+  parseInstallId,
+  resolveIdentity,
+  verifyClaim,
+} from '@/lib/myblu/identity';
 import { introspect } from '@/lib/myblu/platform';
 import {
   contactFor,
@@ -13,7 +19,7 @@ import {
   revokeSession,
 } from '@/lib/myblu/session';
 import { ShipbluApiError } from '@/lib/shipments/platform';
-import { bearerFrom, localeOf } from '../_shared';
+import { bearerFrom, handle, localeOf } from '../_shared';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,6 +36,10 @@ export const dynamic = 'force-dynamic';
  * without it, it is a free amplifier aimed at `api.shipblu.com`.
  */
 export async function POST(request: Request) {
+  return handle(request, () => openSession(request));
+}
+
+async function openSession(request: Request): Promise<Response> {
   if (!allow(`myblu-session:${clientIp(request)}`, 30, 60_000)) {
     return apiError(request, 'rate_limited');
   }
@@ -66,8 +76,20 @@ export async function POST(request: Request) {
   }
 
   const claim = parseClaim(body);
-  const signature = body.signature;
-  const signatureVerified = verifyClaim(claim, signature);
+  const signature = typeof body.signature === 'string' ? body.signature.trim() : '';
+  const signatureVerified = signature ? verifyClaim(claim, signature) : false;
+
+  // A signature that does not verify is refused rather than quietly downgraded,
+  // once there is a secret to check it against. The downgrade is the failure
+  // mode worth designing against: a platform that starts signing with the wrong
+  // secret — a rotation half-applied, staging's value in production — would
+  // otherwise keep succeeding, every customer would silently drop to a
+  // device-scoped history, and nothing anywhere would report it. Without a
+  // secret there is nothing to check, so a signature is noise from an
+  // integration pointed at the wrong environment and is ignored.
+  if (signature && !signatureVerified && identitySigningEnabled()) {
+    return apiError(request, 'platform_token_invalid');
+  }
 
   const identity = resolveIdentity({
     profile: introspection.profile,

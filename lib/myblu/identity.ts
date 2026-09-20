@@ -62,12 +62,19 @@ export function parseClaim(raw: unknown): MobileClaim {
  * under: a short or empty value would put every app that sent one onto the same
  * contact. Shape rather than format, so the app may use a UUID today and
  * something else later without a deploy here.
+ *
+ * **`:` is excluded deliberately**, and it is the one character in this rule
+ * that is doing security work. The handshake composes a changed-hands scope as
+ * `installId:subject`, so an id allowed to contain a colon could be crafted to
+ * hash to exactly another device's scope and resolve onto that person's
+ * contact. Keeping the separator out of the alphabet makes the composition
+ * unambiguous rather than merely unlikely.
  */
 export function parseInstallId(raw: unknown): string | null {
   if (typeof raw !== 'string') return null;
   const value = raw.trim();
   if (value.length < MIN_INSTALL_ID || value.length > MAX_INSTALL_ID) return null;
-  return /^[A-Za-z0-9_.:-]+$/.test(value) ? value : null;
+  return /^[A-Za-z0-9_.-]+$/.test(value) ? value : null;
 }
 
 /**

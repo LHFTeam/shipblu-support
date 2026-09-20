@@ -51,9 +51,10 @@ A UUID the app creates on first launch and stores in `expo-secure-store`. It is
 a device is recognised across the session token rotating and across
 sign-out/sign-in.
 
-Sixteen characters minimum, 128 maximum, `A-Z a-z 0-9 _ . : -` only. Regenerating
-it — on reinstall, say — starts the person a fresh support history when the
-platform cannot identify them (see below); it costs nothing when it can.
+Sixteen characters minimum, 128 maximum, `A-Z a-z 0-9 _ . -` only — no colon,
+which this API keeps for its own use. Regenerating it — on reinstall, say —
+starts the person a fresh support history when the platform cannot identify them
+(see below); it costs nothing when it can.
 
 ### `identityVerified`, and why the phone the app sends is not enough
 

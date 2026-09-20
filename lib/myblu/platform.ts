@@ -145,9 +145,15 @@ async function fetchProfile(url: string, bearer: string): Promise<Introspection>
     );
   }
 
-  // 401 and 403 are the platform saying the credential is no good. 404 is too:
-  // the endpoint exists, so a miss means it resolved the token to no account.
-  if (response.status === 401 || response.status === 403 || response.status === 404) {
+  // 401 and 403 are the platform saying the credential is no good, and only
+  // these two. **404 is deliberately not among them**: it is at least as likely
+  // to mean the endpoint moved, lost its trailing slash behind a proxy, or was
+  // renamed — and because the caller turns a rejected token into the one 401
+  // this API answers, reading a deploy as a dead credential would sign every
+  // myBlu user out of the consumer app, not just out of support. Transient is
+  // the safe reading of an ambiguous status when the expensive direction is a
+  // forced global sign-out.
+  if (response.status === 401 || response.status === 403) {
     throw new ShipbluApiError('The delivery platform rejected this token', 401, false);
   }
 

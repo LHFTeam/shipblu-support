@@ -8,7 +8,7 @@ import { requirePermission } from '@/lib/auth/guard';
 import { env } from '@/lib/env';
 import { listFolderOptions } from '@/lib/kb/admin';
 import { offerableFaqFolders, parseWidgetConfig } from '@/lib/widget/config';
-import { ChannelForm, WebchatSettings } from './forms';
+import { ChannelForm, InAppChatSettings } from './forms';
 import { NewWhatsAppAccount, WhatsAppAccountEditor, type WhatsAppAccountRow } from './waba-forms';
 
 export const dynamic = 'force-dynamic';
@@ -58,12 +58,18 @@ export default async function ChannelsPage() {
     }),
   );
 
-  // The same row `webchatChannel()` reads — oldest active first. Picking by a
-  // different rule would let an admin configure one row while the widget read
-  // another, and the setting would look saved and do nothing.
-  const webchat = channelList
-    .filter((channel) => channel.type === 'webchat' && channel.isActive)
-    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0];
+  // The same rows `webchatChannel()` and `mobileChannel()` read — oldest active
+  // first, per type. Picking by a different rule would let an admin configure
+  // one row while the surface read another, and the setting would look saved
+  // and do nothing.
+  const inAppChannels = (['webchat', 'mobile'] as const)
+    .map(
+      (type) =>
+        channelList
+          .filter((channel) => channel.type === type && channel.isActive)
+          .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0],
+    )
+    .filter((channel): channel is (typeof channelList)[number] => Boolean(channel));
 
   const accountChoices = accountList.map((account) => ({ id: account.id, name: account.name }));
   const templatesByAccount = new Map(templateCounts.map((row) => [row.accountId, row.total]));
@@ -162,7 +168,14 @@ export default async function ChannelsPage() {
                       ? 'hardcoded in server environment variables'
                       : channel.type === 'webchat'
                         ? 'the widget'
-                        : (channel.config.address as string) || 'no address'}
+                        : channel.type === 'mobile'
+                          ? 'the myBlu app'
+                          : // Only the channels that genuinely have an address
+                            // fall through to this. Letting an in-app channel
+                            // land here is the catch-all mistake `saveChannel`
+                            // records production still carrying, printed at the
+                            // admin instead of stored.
+                            (channel.config.address as string) || 'no address'}
                 </span>
               </li>
             );
@@ -172,20 +185,21 @@ export default async function ChannelsPage() {
         {/* Above the "add a channel" form because it is a setting on a row that
             already exists, not another row to create — and because the widget is
             the one channel whose configuration a customer sees directly. */}
-        {webchat ? (
-          <Card className="mb-4">
-            <WebchatSettings
+        {inAppChannels.map((channel) => (
+          <Card key={channel.id} className="mb-4">
+            <InAppChatSettings
               channel={{
-                id: webchat.id,
-                name: webchat.name,
-                defaultGroupId: webchat.defaultGroupId,
-                faqFolders: parseWidgetConfig(webchat.config).faqFolders,
+                id: channel.id,
+                name: channel.name,
+                type: channel.type as 'webchat' | 'mobile',
+                defaultGroupId: channel.defaultGroupId,
+                faqFolders: parseWidgetConfig(channel.config).faqFolders,
               }}
               groups={groupList}
               folders={faqFolders}
             />
           </Card>
-        ) : null}
+        ))}
 
         <ChannelForm groups={groupList} whatsappAccounts={accountChoices} />
       </section>

@@ -44,6 +44,13 @@ export default async function AdminIndexPage() {
       statuses: sql<number>`(select count(*)::int from ${ticketStatuses})`,
       canned: sql<number>`(select count(*)::int from ${cannedResponses})`,
       channels: sql<number>`(select count(*)::int from ${channels} where is_active)`,
+      // Its own count rather than a share of the one above. The myBlu app's
+      // API works without this row and routes nowhere with it missing: every
+      // app ticket arrives with no group, so nothing assigns it — the §5.1 trap
+      // that let 71 Meta tickets accumulate unassignable. An existing email row
+      // satisfies "some channel is configured", which is why this cannot be
+      // folded into that check.
+      mobileChannels: sql<number>`(select count(*)::int from ${channels} where is_active and type = 'mobile')`,
       locations: sql<number>`(select count(*)::int from ${locations})`,
       routingGroups: sql<number>`(select count(*)::int from ${groups} where assignment_strategy <> 'manual')`,
       allGroups: sql<number>`(select count(*)::int from ${groups})`,
@@ -100,6 +107,13 @@ export default async function AdminIndexPage() {
       title: 'Channels',
       good: `${counts?.channels} active`,
       bad: 'None configured — tickets still arrive, but with no default group',
+    },
+    {
+      ok: (counts?.mobileChannels ?? 0) > 0,
+      href: '/admin/channels',
+      title: 'myBlu app channel',
+      good: 'Routing app tickets to a group',
+      bad: 'No row — support chat in the app opens tickets that route to nobody',
     },
     {
       // Sixteen is the number, and a register stuck at fourteen is the failure

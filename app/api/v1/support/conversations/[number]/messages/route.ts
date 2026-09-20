@@ -1,13 +1,9 @@
 import { NextResponse } from 'next/server';
-import { hashToken } from '@/lib/auth/tokens';
-import { allow } from '@/lib/kb/rate-limit';
 import { getConversation, reply } from '@/lib/myblu/conversation';
 import { apiError } from '@/lib/myblu/errors';
-import { authorise, bearerFrom } from '../../../_shared';
+import { authorise, handle, MAX_BODY } from '../../../_shared';
 
 export const dynamic = 'force-dynamic';
-
-const MAX_BODY = 5_000;
 
 /**
  * A customer's reply.
@@ -22,34 +18,32 @@ const MAX_BODY = 5_000;
  * and a separate code is a branch on both sides that nothing reads differently.
  */
 export async function POST(request: Request, context: { params: Promise<{ number: string }> }) {
-  const auth = await authorise(request);
-  if ('error' in auth) return auth.error;
+  return handle(request, async () => {
+    const auth = await authorise(request, 'reply', 30);
+    if ('error' in auth) return auth.error;
 
-  if (!allow(`myblu-reply:${hashToken(bearerFrom(request))}`, 30, 60_000)) {
-    return apiError(request, 'rate_limited');
-  }
+    const { number: raw } = await context.params;
+    const number = Number.parseInt(raw, 10);
+    if (!Number.isInteger(number) || number <= 0) return apiError(request, 'not_found');
 
-  const { number: raw } = await context.params;
-  const number = Number.parseInt(raw, 10);
-  if (!Number.isInteger(number) || number <= 0) return apiError(request, 'not_found');
+    let body: Record<string, unknown>;
+    try {
+      body = ((await request.json()) ?? {}) as Record<string, unknown>;
+    } catch {
+      return apiError(request, 'invalid_request');
+    }
 
-  let body: Record<string, unknown>;
-  try {
-    body = ((await request.json()) ?? {}) as Record<string, unknown>;
-  } catch {
-    return apiError(request, 'invalid_request');
-  }
+    const text = typeof body.body === 'string' ? body.body.trim().slice(0, MAX_BODY) : '';
+    if (!text) return apiError(request, 'invalid_request');
 
-  const text = typeof body.body === 'string' ? body.body.trim().slice(0, MAX_BODY) : '';
-  if (!text) return apiError(request, 'invalid_request');
+    const result = await reply(auth.session.contactId, number, text);
+    if (!result.ok) return apiError(request, 'not_found');
 
-  const result = await reply(auth.session.contactId, number, text);
-  if (!result.ok) return apiError(request, 'not_found');
+    // The thread back, so the app can reconcile its optimistic row against the
+    // server's id in one round trip rather than sending and then polling.
+    const thread = await getConversation(auth.session.contactId, number);
+    if (!thread) return apiError(request, 'not_found');
 
-  // The thread back, so the app can reconcile its optimistic row against the
-  // server's id in one round trip rather than sending and then polling.
-  const thread = await getConversation(auth.session.contactId, number);
-  if (!thread) return apiError(request, 'not_found');
-
-  return NextResponse.json(thread, { status: 201, headers: { 'Cache-Control': 'no-store' } });
+    return NextResponse.json(thread, { status: 201, headers: { 'Cache-Control': 'no-store' } });
+  });
 }

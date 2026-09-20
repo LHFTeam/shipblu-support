@@ -8,7 +8,6 @@ import {
   getTicket,
   listTickets,
   subjectFrom,
-  type PortalTicketDetail,
 } from '@/lib/portal/tickets';
 import { attachShipment, upsertShipmentStub } from '@/lib/shipments/links';
 import { normaliseTrackingNumber } from '@/lib/shipments/format';
@@ -74,7 +73,11 @@ export async function getConversation(
   number: number,
   since?: Date | null,
 ): Promise<MobileThread | null> {
-  const ticket = await getTicket(contactId, number);
+  // The newest window, not the oldest. Past 200 replies the oldest slice never
+  // changes, so a polling client would receive the same prefix for ever while
+  // the agent's answers kept landing — the thread would appear frozen to the
+  // customer and healthy to everybody else.
+  const ticket = await getTicket(contactId, number, { newestFirst: true, limit: 200 });
   if (!ticket) return null;
 
   return {
@@ -147,7 +150,7 @@ export async function openConversation(
     body,
   });
 
-  const tracking = normaliseTrackingNumber(input.trackingNumber ?? '');
+  const tracking = plausibleTrackingNumber(input.trackingNumber);
   if (tracking) {
     const shipmentId = await upsertShipmentStub(tracking);
     const attached = await attachShipment({
@@ -169,12 +172,40 @@ export async function openConversation(
   return { number: created.number, conversationId: created.conversationId };
 }
 
+/**
+ * A tracking number worth writing a row for, or null.
+ *
+ * `upsertShipmentStub` inserts a `shipments` row and queues a platform sync for
+ * whatever it is handed, and `normaliseTrackingNumber` validates nothing — it
+ * strips separators and upper-cases. Every other writer reaches that function
+ * through the detector, which only ever offers it something matching
+ * `SHIPMENT_TRACKING_PATTERN`; this is the one path where a caller names the
+ * number directly, so the bound belongs here. Without it the field is an
+ * unbounded write into `shipments` plus an outbound call to `api.shipblu.com`
+ * per distinct value — the hazard AGENTS.md states for the unauthenticated
+ * lookup, reached with nothing more than a myBlu bearer.
+ *
+ * Deliberately wider than `DEFAULT_TRACKING_PATTERN`'s 13+ digits, because the
+ * shape myBlu actually sends has not been observed here and rejecting a real
+ * number would drop the parcel link silently. Wide enough to accept anything
+ * plausible, narrow enough that the column cannot be used as storage.
+ *
+ * An unusable value is dropped rather than refused: the customer's message is
+ * what matters, and failing their ticket over a malformed parcel reference
+ * would be the wrong trade.
+ */
+function plausibleTrackingNumber(raw: string | null | undefined): string | null {
+  if (!raw || raw.length > 128) return null;
+  const canonical = normaliseTrackingNumber(raw);
+  return /^[A-Z0-9-]{4,64}$/.test(canonical) ? canonical : null;
+}
+
 export async function reply(
   contactId: string,
   number: number,
   body: string,
 ): Promise<{ ok: boolean }> {
-  return appendReply(contactId, number, body.trim().slice(0, MAX_BODY));
+  return appendReply(contactId, number, body.trim().slice(0, MAX_BODY), 'myblu');
 }
 
 /**
@@ -195,7 +226,14 @@ export async function unreadCount(contactId: string): Promise<number> {
         isNull(conversations.mergedIntoId),
         eq(conversations.isSpam, false),
         notInArray(conversations.channel, readOnlyChannels()),
-        gt(conversations.lastAgentMessageAt, conversations.lastCustomerMessageAt),
+        // `lastMessageAt`, not `lastAgentMessageAt`. The latter is deliberately
+        // not moved by `deliverAutomatedReply` or `send_csat` — an automated
+        // message is not an agent replying — so keying on it would miss the
+        // out-of-hours acknowledgement, which for a customer writing in at
+        // night is the *first* thing they get back. `lastMessageAt` moves for
+        // any message; when the customer sent it, the two are equal and `>` is
+        // correctly false.
+        gt(conversations.lastMessageAt, conversations.lastCustomerMessageAt),
       ),
     );
 
@@ -211,13 +249,23 @@ export async function unreadCount(contactId: string): Promise<number> {
  */
 export async function threadVersion(contactId: string, number: number): Promise<string | null> {
   const rows = await db
-    .select({ id: conversations.id, lastMessageAt: conversations.lastMessageAt })
+    .select({
+      id: conversations.id,
+      lastMessageAt: conversations.lastMessageAt,
+      // Part of the version, because a status change moves no message. An agent
+      // resolving or closing a ticket without replying would otherwise leave
+      // every poll answering 304 for ever: the app would keep rendering
+      // `canReply: true` on a closed ticket, and the customer's reply would be
+      // refused by an endpoint their screen said was open.
+      statusId: conversations.statusId,
+    })
     .from(conversations)
     .where(
       and(
         eq(conversations.number, number),
         eq(conversations.requesterContactId, contactId),
         isNull(conversations.deletedAt),
+        isNull(conversations.mergedIntoId),
         eq(conversations.isSpam, false),
         notInArray(conversations.channel, readOnlyChannels()),
       ),
@@ -235,7 +283,7 @@ export async function threadVersion(contactId: string, number: number): Promise<
   // The count as well as the instant: two messages written inside the same
   // millisecond would otherwise share a version, and the second would never
   // reach a client that had already seen the first.
-  return `"${row.lastMessageAt.getTime()}-${latest[0]?.n ?? 0}"`;
+  return `"${row.lastMessageAt.getTime()}-${latest[0]?.n ?? 0}-${row.statusId}"`;
 }
 
 function summary(ticket: {
@@ -259,5 +307,3 @@ function summary(ticket: {
     createdAt: ticket.createdAt.toISOString(),
   };
 }
-
-export type { PortalTicketDetail };
