@@ -183,6 +183,13 @@
       "when": 1788554836979,
       "tag": "0025_bilingual_canned_responses_and_holiday_names",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1789921868465,
+      "tag": "0026_perfect_mandroid",
+      "breakpoints": true
     }
   ]
 }

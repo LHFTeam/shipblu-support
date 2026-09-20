@@ -91,6 +91,20 @@ const CHANNELS: Record<string, { label: string; className: string; mark: ReactNo
     className: 'bg-slate-500/15 text-slate-700',
     mark: null,
   },
+  mobile: {
+    // The myBlu consumer app. Its own colour rather than web chat's, because
+    // the thing an agent needs at a glance is that this person is holding a
+    // phone: the reply lands in an app they may not have open, and there is no
+    // email address behind it to fall back to.
+    label: 'myBlu app',
+    className: 'bg-sky-500/15 text-sky-700',
+    mark: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="size-3">
+        <rect x="6" y="2.5" width="12" height="19" rx="2.5" />
+        <path d="M10.5 18.5h3" />
+      </svg>
+    ),
+  },
 };
 
 export function channelInfo(channel: Channel) {

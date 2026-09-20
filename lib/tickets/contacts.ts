@@ -12,7 +12,8 @@ import { normaliseEmail, normaliseIdentifier } from '@/lib/auth/normalise';
  */
 
 export type ResolveInput = {
-  channel: 'email' | 'whatsapp' | 'webchat' | 'facebook' | 'instagram' | 'portal' | 'api';
+  channel:
+    'email' | 'whatsapp' | 'webchat' | 'facebook' | 'instagram' | 'portal' | 'api' | 'mobile';
   identifier: string;
   displayName?: string | null;
 };

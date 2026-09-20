@@ -68,7 +68,7 @@ import { parseSearchTerm } from './search';
 export type InboxFilters = {
   view: 'all' | 'mine' | 'unassigned';
   statusCategory: 'open' | 'pending' | 'resolved' | 'closed' | 'all' | 'unresolved';
-  channel: 'all' | 'email' | 'whatsapp' | 'webchat' | 'facebook' | 'instagram' | 'whatsapp_bot';
+  channel: 'all' | FilterableChannel;
   q: string;
 };
 

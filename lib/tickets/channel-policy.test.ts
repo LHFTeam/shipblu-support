@@ -25,6 +25,7 @@ it('lists every database channel, including ones only shown through all', () => 
     'portal',
     'api',
     'whatsapp_bot',
+    'mobile',
   ]);
 });
 

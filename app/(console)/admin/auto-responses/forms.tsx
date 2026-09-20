@@ -30,6 +30,7 @@ const CHANNELS: { value: string; label: string }[] = [
   { value: 'email', label: 'Email' },
   { value: 'whatsapp', label: 'WhatsApp' },
   { value: 'webchat', label: 'Web chat' },
+  { value: 'mobile', label: 'myBlu app' },
   { value: 'facebook', label: 'Facebook' },
   { value: 'instagram', label: 'Instagram' },
   { value: 'portal', label: 'Customer portal' },

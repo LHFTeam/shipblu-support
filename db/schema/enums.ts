@@ -19,6 +19,17 @@ export const channelEnum = pgEnum('channel', [
   // is per channel: sharing `whatsapp` would collapse a customer's bot
   // transcript and their support ticket into one conversation.
   'whatsapp_bot',
+  // The myBlu consumer app's in-app support chat. Its own value rather than
+  // `webchat` for the reason directly above: `findLiveConversation` threads on
+  // the discriminator, so sharing it would fold a person's web-widget chat and
+  // their app chat into one conversation — and `webchatChannel()` takes the
+  // oldest `webchat` row, so app tickets would silently inherit the widget's
+  // default group and opening hours while a row named for the app was never
+  // read. Not `api` either: §5.4 reserves that for the server-to-server read
+  // API, whose scope question ("may this key see restricted channels?") becomes
+  // unanswerable if one value means both "a customer typed this in an app" and
+  // "an external key called us".
+  'mobile',
 ]);
 
 export const directionEnum = pgEnum('direction', ['inbound', 'outbound']);

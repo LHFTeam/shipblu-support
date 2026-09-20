@@ -111,10 +111,10 @@ export type AutomatedReply = {
 /** The new message's id, for the caller's log and follow-up writes. */
 export async function deliverAutomatedReply(reply: AutomatedReply): Promise<string> {
   const isEmail = reply.channel === 'email';
-  // Web chat has no carrier: the message is in the database, and the widget's
-  // stream is already reading from it. Marking it pending would leave every
-  // chat reply showing as unsent forever.
-  const isWebchat = reply.channel === 'webchat';
+  // Null means the channel has no carrier: the message is in the database and
+  // the customer's own client is already reading from it. Marking it pending
+  // would leave every chat reply showing as unsent forever.
+  const carrier = carrierFor(reply.channel);
 
   const now = new Date();
 
@@ -128,8 +128,8 @@ export async function deliverAutomatedReply(reply: AutomatedReply): Promise<stri
       bodyText: reply.bodyText,
       bodyHtml: isEmail ? reply.bodyHtml : null,
       toAddresses: isEmail && reply.requesterEmail ? [reply.requesterEmail] : [],
-      deliveryStatus: isWebchat ? 'delivered' : 'pending',
-      ...(isWebchat ? { deliveredAt: now } : {}),
+      deliveryStatus: carrier ? 'pending' : 'delivered',
+      ...(carrier ? {} : { deliveredAt: now }),
       meta: reply.meta ?? {},
     })
     .returning({ id: messages.id });
@@ -154,19 +154,16 @@ export async function deliverAutomatedReply(reply: AutomatedReply): Promise<stri
     data: { messageId, ...(reply.eventData ?? {}) },
   });
 
-  if (!isWebchat) {
-    await enqueue(
-      carrierFor(reply.channel),
-      { messageId },
-      { priority: 20, dedupeKey: `send:${messageId}` },
-    );
+  if (carrier) {
+    await enqueue(carrier, { messageId }, { priority: 20, dedupeKey: `send:${messageId}` });
   }
 
   return messageId;
 }
 
 /**
- * The job that carries a message on each channel.
+ * The job that carries a message on each channel, or **null where writing the
+ * row is delivery**.
  *
  * Facebook and Instagram go to `send_meta` rather than falling into the email
  * branch, which is what the console has always done and what the automated
@@ -179,8 +176,25 @@ export async function deliverAutomatedReply(reply: AutomatedReply): Promise<stri
  * `portal` sends by email deliberately. A portal ticket's customer is reachable
  * at the address they registered with, and `send_email` falls back to it when
  * the message names no recipient.
+ *
+ * **Null is the third answer, and it used to be three copies of
+ * `channel === 'webchat'`.** Web chat and the myBlu app both read the `messages`
+ * table the reply is written to, so there is no provider to hand it to: the row
+ * *is* the delivery, and a `pending` status on one would show the customer's own
+ * screen a message that never finishes sending. Each of the three senders —
+ * the console composer, `deliverAutomatedReply` below and `send_csat` — spelled
+ * that as its own local `isWebchat`, guarding both the `delivered`/`deliveredAt`
+ * stamp and the enqueue. Anything not literally `'webchat'` therefore got
+ * `pending` plus whatever this function returned, and for an in-app channel that
+ * is `send_email` to a recipient who usually has no address: the agent sees a
+ * sent reply, the job dies in a worker log, the customer gets nothing.
+ *
+ * That is the same bug `send_csat`'s private copy of this mapping already caused
+ * once for Facebook. One function answering both halves is what stops a fourth
+ * sender, or a fourth in-place channel, from having to notice.
  */
-export function carrierFor(channel: string): 'send_whatsapp' | 'send_meta' | 'send_email' {
+export function carrierFor(channel: string): 'send_whatsapp' | 'send_meta' | 'send_email' | null {
+  if (channel === 'webchat' || channel === 'mobile') return null;
   if (channel === 'whatsapp') return 'send_whatsapp';
   if (channel === 'facebook' || channel === 'instagram') return 'send_meta';
   return 'send_email';

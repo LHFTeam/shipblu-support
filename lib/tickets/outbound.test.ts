@@ -179,6 +179,22 @@ describe('carrierFor', () => {
     expect(carrierFor('email')).toBe('send_email');
     expect(carrierFor('portal')).toBe('send_email');
   });
+
+  it('answers null for a channel whose client reads the messages table', () => {
+    // The three senders all derive both the delivery status and whether to
+    // enqueue from this one call, so null is what stops an in-app reply being
+    // queued as an email to a consumer who has no address — and what stops it
+    // showing a permanent "sending…" on a screen the customer is looking at.
+    expect(carrierFor('webchat')).toBeNull();
+    expect(carrierFor('mobile')).toBeNull();
+  });
+
+  it('falls back to email for a channel it has never heard of', () => {
+    // Deliberate: a ticket on an unrouted channel is better queued somewhere a
+    // failure is visible than silently marked delivered, which is what a null
+    // default would do. Only a channel that genuinely delivers in place is null.
+    expect(carrierFor('something_new')).toBe('send_email');
+  });
 });
 
 /**

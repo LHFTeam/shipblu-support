@@ -16,6 +16,7 @@ describe('queue topics', () => {
       'conversation_queue_instagram',
       'conversation_queue_portal',
       'conversation_queue_api',
+      'conversation_queue_mobile',
     ]);
   });
 

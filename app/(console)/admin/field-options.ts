@@ -52,6 +52,7 @@ export async function ticketFieldOptions(): Promise<FieldOption[]> {
         { value: 'webchat', label: 'Web chat' },
         { value: 'facebook', label: 'Facebook' },
         { value: 'instagram', label: 'Instagram' },
+        { value: 'mobile', label: 'myBlu app' },
       ],
     },
     {

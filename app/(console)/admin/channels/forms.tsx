@@ -7,7 +7,8 @@ import { saveChannel, type AdminState } from '../actions';
 
 const INITIAL: AdminState = { error: null };
 
-type ChannelType = 'email' | 'whatsapp' | 'webchat' | 'facebook' | 'instagram' | 'whatsapp_bot';
+type ChannelType =
+  'email' | 'whatsapp' | 'webchat' | 'facebook' | 'instagram' | 'whatsapp_bot' | 'mobile';
 
 export function ChannelForm({
   groups,
@@ -37,6 +38,7 @@ export function ChannelForm({
             <option value="webchat">Web chat</option>
             <option value="facebook">Facebook</option>
             <option value="instagram">Instagram</option>
+            <option value="mobile">myBlu app</option>
             <option value="whatsapp_bot">WhatsApp — customer bot</option>
           </Select>
         </Field>
@@ -46,9 +48,9 @@ export function ChannelForm({
         </Field>
 
         <div className="sm:flex-1">
-          {type === 'webchat' ? (
+          {type === 'webchat' || type === 'mobile' ? (
             <p className="text-xs text-[var(--muted-foreground)] sm:pt-6">
-              The widget needs no address — only a default group.
+              In-app chat needs no address — only a default group.
             </p>
           ) : isWhatsApp ? (
             <Field

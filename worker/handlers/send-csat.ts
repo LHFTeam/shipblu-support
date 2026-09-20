@@ -86,7 +86,11 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
   }
 
   const isEmail = ticket.channel === 'email';
-  const isWebchat = ticket.channel === 'webchat';
+  // Null means no provider carries this: the customer's own client reads the
+  // table the row is written to. `carrierFor` answers both halves — the status
+  // the row starts in and whether anything is queued — so a channel added later
+  // cannot be right here and wrong in the enqueue below.
+  const carrier = carrierFor(ticket.channel);
 
   if (isEmail && !ticket.contactEmail) {
     console.log(`[send_csat] #${ticket.number} has no email address to survey`);
@@ -120,8 +124,8 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
       bodyText: TEXT[locale](ticket.number, survey.url),
       bodyHtml: isEmail ? HTML[locale](ticket.number, survey.url) : null,
       toAddresses: isEmail && ticket.contactEmail ? [ticket.contactEmail] : [],
-      deliveryStatus: isWebchat ? 'delivered' : 'pending',
-      ...(isWebchat ? { deliveredAt: new Date() } : {}),
+      deliveryStatus: carrier ? 'pending' : 'delivered',
+      ...(carrier ? {} : { deliveredAt: new Date() }),
       meta: { csatSurveyId: survey.id },
     })
     .returning({ id: messages.id });
@@ -136,18 +140,14 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
     .set({ lastMessageAt: new Date() })
     .where(eq(conversations.id, conversationId));
 
-  if (!isWebchat) {
+  if (carrier) {
     // `carrierFor` rather than a second copy of the channel-to-job mapping. The
     // copy here read `whatsapp ? send_whatsapp : send_email`, so a survey on a
     // Facebook or Instagram ticket was queued as an email to a contact who
     // usually has no address — it failed in the worker rather than anywhere
     // anybody was looking, which is the exact bug the shared function was
     // written to end for the other two senders.
-    await enqueue(
-      carrierFor(ticket.channel),
-      { messageId },
-      { priority: 50, dedupeKey: `send:${messageId}` },
-    );
+    await enqueue(carrier, { messageId }, { priority: 50, dedupeKey: `send:${messageId}` });
   }
 
   console.log(`[send_csat] surveyed #${ticket.number} on ${ticket.channel}`);

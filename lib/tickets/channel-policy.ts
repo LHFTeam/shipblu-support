@@ -39,6 +39,7 @@ export const CONVERSATION_CHANNELS = [
   'portal',
   'api',
   'whatsapp_bot',
+  'mobile',
 ] as const satisfies readonly ConversationChannel[];
 
 type _AllChannelsAreListed =
@@ -65,6 +66,7 @@ export const FILTERABLE_CHANNELS = [
   'webchat',
   'facebook',
   'instagram',
+  'mobile',
   'whatsapp_bot',
 ] as const satisfies readonly ConversationChannel[];
 

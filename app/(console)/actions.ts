@@ -32,6 +32,7 @@ import { requireAgent, requirePermission } from '@/lib/auth/guard';
 import { env } from '@/lib/env';
 import { can } from '@/lib/auth/permissions';
 import { canSeeChannel, readOnlyReason } from '@/lib/tickets/channel-policy';
+import { carrierFor } from '@/lib/tickets/outbound';
 import type { SessionAgent } from '@/lib/auth/session';
 import { htmlToText, sanitiseEmailHtml } from '@/lib/html/sanitize';
 import { enqueue } from '@/lib/queue';
@@ -318,7 +319,10 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
   }
 
   const isEmail = conversation.channel === 'email';
-  const isWebchat = conversation.channel === 'webchat';
+  // Null means no provider carries this — the customer's own client reads the
+  // table. One call answers both the status the row starts in and whether a
+  // send is queued, so the two cannot disagree for a channel added later.
+  const carrier = carrierFor(conversation.channel);
   const html = isEmail ? sanitiseEmailHtml(textToHtml(body)) : null;
 
   const parentMessageId = await lastInboundChannelMessageId(conversationId);
@@ -334,12 +338,12 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
       bodyHtml: html,
       toAddresses: isEmail && row.requesterEmail ? [row.requesterEmail] : [],
       inReplyTo: parentMessageId,
-      // Web chat has no outbound provider: writing the row *is* delivery,
-      // because the visitor's open stream reads the same table. Marking it
-      // pending would leave a permanent "sending…" badge on a message the
-      // customer is already looking at.
-      deliveryStatus: isWebchat ? 'delivered' : 'pending',
-      ...(isWebchat ? { deliveredAt: new Date() } : {}),
+      // An in-place channel has no outbound provider: writing the row *is*
+      // delivery, because the customer's open stream or next poll reads the
+      // same table. Marking it pending would leave a permanent "sending…"
+      // badge on a message the customer is already looking at.
+      deliveryStatus: carrier ? 'pending' : 'delivered',
+      ...(carrier ? {} : { deliveredAt: new Date() }),
       meta:
         conversation.channel === 'whatsapp'
           ? { sendKind: 'text' }
@@ -368,9 +372,9 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
   // timeline anyway.
   await onAgentReply(conversationId);
 
-  if (!isWebchat) {
+  if (carrier) {
     await enqueue(
-      conversation.channel === 'whatsapp' ? 'send_whatsapp' : isMeta ? 'send_meta' : 'send_email',
+      carrier,
       { messageId },
       // dedupeKey on the message id: a double-submit or a retried action can
       // never queue the same reply twice.

@@ -875,6 +875,7 @@ const AUTO_RESPONSE_CHANNELS = [
   'facebook',
   'instagram',
   'portal',
+  'mobile',
 ] as const;
 
 type AutoResponseChannel = (typeof AUTO_RESPONSE_CHANNELS)[number];

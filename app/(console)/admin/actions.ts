@@ -248,7 +248,11 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
   const whatsappAccountId = String(formData.get('whatsappAccountId') ?? '') || null;
 
   if (!name) return { error: 'Give the channel a name' };
-  if (!['email', 'whatsapp', 'webchat', 'facebook', 'instagram', 'whatsapp_bot'].includes(type)) {
+  if (
+    !['email', 'whatsapp', 'webchat', 'facebook', 'instagram', 'whatsapp_bot', 'mobile'].includes(
+      type,
+    )
+  ) {
     return { error: 'Unknown channel type' };
   }
 
@@ -287,7 +291,11 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
   // lives in `lib/widget/config.ts`, shared with the picker that offers them.
   let faqFolders: Record<string, string> = {};
 
-  if (type === 'webchat') {
+  // Both in-place chat channels, not just the widget: `mobile` falling through
+  // to the catch-all below is what would give its row `{"address": ""}`, which
+  // is the value production still carries on the widget's row from exactly that
+  // mistake.
+  if (type === 'webchat' || type === 'mobile') {
     const chosen = Object.fromEntries(
       LOCALES.map((locale) => [locale, String(formData.get(`faqFolder_${locale}`) ?? '')]),
     );
@@ -307,10 +315,11 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
       ? { phoneNumberId }
       : type === 'facebook' || type === 'instagram'
         ? {}
-        : type === 'webchat'
-          ? // The widget has no address. The row used to store an empty one
-            // because this branch was the catch-all; production still carries
-            // `{"address": ""}` from that, and this replaces it.
+        : type === 'webchat' || type === 'mobile'
+          ? // Neither in-place chat channel has an address. The row used to
+            // store an empty one because this branch was the catch-all;
+            // production still carries `{"address": ""}` from that, and this
+            // replaces it.
             { faqFolders }
           : { address };
 
