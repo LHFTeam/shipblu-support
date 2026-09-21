@@ -5,18 +5,19 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-09-20, against `main` at `7f93718`. The figures in §1 and §5
-were re-measured against production on that date; where a number here disagrees
+Last updated: 2026-09-21, against `main` at `d5d791f`. The figures in §1 and §5
+were re-measured against production on 2026-09-20; where a number here disagrees
 with an older paragraph elsewhere in the file, the older one has not been
 re-checked.
 
-**Production runs `6d9b7f3`, deployed 2026-09-20 23:38–23:49 UTC** — all seven
-services, web first for the migration. For the eleven days before that it served
-`b1d911a` while `main` ran ahead of it, which is the trap rather than the
-footnote: `autoDeploy` is `no` on every service (§2), so a merge changes nothing
-that is running, and the gap is invisible because CI is green and the old code
-keeps serving. Check `/api/health`, which reports the commit, before concluding
-any change below is live.
+**Production runs `d5d791f`, deployed 2026-09-21 13:17–13:22 UTC** — the six
+unsuspended services, web first for the migration. It served `510024c` for the
+thirteen hours before that and `b1d911a` for eleven days before _that_, while
+`main` ran ahead of it, which is the trap rather than the footnote: `autoDeploy`
+is `no` on every production service (§2), so a merge changes nothing that is
+running, and the gap is invisible because CI is green and the old code keeps
+serving. Check `/api/health`, which reports the commit, before concluding any
+change below is live.
 
 ---
 
@@ -517,8 +518,11 @@ declared all seven services as one flat list.
 | `shipblu-whatsapp-template-sync` | cron `0 * * * *`              | `crn-da1jgtg1ne8s73ciquk0` | `main`                       |
 | `shipblu-nightly`                | cron `0 0 * * *`              | `crn-da1jgtg1ne8s73ciqumg` | `main`                       |
 
-¹ `shipblu-sla-sweep` runs **three** jobs,
-`sla_sweep && presence_sweep && assign_sweep`, chained the way `shipblu-nightly`
+¹ `shipblu-sla-sweep` is **declared** to run three jobs,
+`sla_sweep && presence_sweep && assign_sweep` — but the running service drops
+the middle one, and has since before anyone measured it. See §6.66; the rest of
+this footnote describes the intent, which the repo still expresses correctly.
+It is chained the way `shipblu-nightly`
 chains cleanup and the rollup — same cadence, none of them long, and a second
 container booting every five minutes to run a query that usually returns nothing
 is not worth it. The order matters and the `&&` does too: the SLA sweep goes
@@ -529,8 +533,8 @@ and a failure in any half takes the run red rather than reporting success
 because the rest worked. So the service name understates what it does — grep
 `render.yaml` for `startCommand` rather than trusting a cron's name.
 
-**No service on Render deploys itself.** `autoDeploy` is `no` and
-`autoDeployTrigger` is `off` on every one of the seven, so merging to `main`
+**No production service on Render deploys itself.** `autoDeploy` is `no` and
+`autoDeployTrigger` is `off` on all six of them, so merging to `main`
 changes nothing that is running — a deploy is triggered by hand, from the
 dashboard or the API, and until it is, `main` and production are different
 software. This is easy to miss precisely because it looks like nothing went
@@ -539,11 +543,15 @@ what a service is actually running before concluding a change is live, and
 before enqueueing a job whose handler only exists in the new code — the running
 worker would take it, find no handler, and kill it.
 
-**Staging is currently suspended, and it is pinned to the feature branch
-`claude/shipblu-support-app-03p2we` rather than to a staging branch.** Both are
-deliberate-looking but neither is written down anywhere else, so: if you resume
-staging, check what branch you are actually about to deploy. Do not assume it
-tracks `main`.
+**Staging is suspended, and the branch it would deploy is not the one this
+repo says.** `render.yaml` pins it to the feature branch
+`claude/shipblu-support-app-03p2we`; the running service says `main`, with
+`autoDeploy: yes` and `autoDeployTrigger: commit` — the only service in the
+project that deploys itself. So the warning this paragraph used to carry, "do
+not assume it tracks `main`", was exactly backwards: the live service does, and
+the blueprint is what is stale. Resuming staging therefore arms an automatic
+deploy of `main` on the next commit, against staging's own database. Read the
+service, not the file, before you resume it. See §6.67.
 
 ### Supabase — org `ihngokrzwjmgpogkecug`
 
@@ -3789,6 +3797,68 @@ null`, and argued it from write cost and 13 MB of disk. The read side turned
     when a rewrite is argued from write cost, `EXPLAIN (analyze, buffers)` the
     read it serves before and after, because that is where the number nobody
     expected turns up.
+
+66. **A cron has been running two of its three jobs for as long as anyone has
+    looked, and `render.yaml` says otherwise.** _2026-09-21, found by reading
+    `list_services` against the file while deploying something else._
+    `render.yaml:400` declares `shipblu-sla-sweep` as
+    `sla_sweep && presence_sweep && assign_sweep`. The running service
+    (`crn-da1jgtg1ne8s73ciqup0`) is `sla_sweep && assign_sweep`. The other three
+    crons match their blueprint entries character for character, so this is not
+    a sync that failed — it is one hand-edit to one service, and nothing records
+    who made it or why.
+
+    **`presence_sweep` therefore runs nowhere in production**, and has not for
+    at least as long as the dashboard has held that command. It is the
+    background half of the idle policy — the half that catches a slept laptop, a
+    dropped network, a console on an instance a deploy replaced, and a browser
+    closed without ever going idle.
+
+    What it does _not_ mean is that agents stay signed in. `getSessionAgent()`
+    enforces the sign-out on every page and every action, so an abandoned
+    session is already refused on its owner's next request. What accumulates is
+    the rows, and the rota: an abandoned console goes on reporting its owner as
+    available until somebody touches it.
+
+    Measured before proposing the fix, which is the useful half of this entry.
+    `presence_policy` holds **zero rows**, so `loadPresencePolicy()` returns
+    `UNSET` — `DEFAULT_POLICY` (away 10 min, sign-out 30) with `changedAt: null`.
+    That null matters: `signOutCutoff`'s grace period only protects a window
+    somebody _just enabled_, and there is nothing to grant a grace against here.
+    So the first run after this is fixed deletes **31 of 32 sessions** and parks
+    **0 agents** — zero because `shouldAutoAway` requires `presence = 'online'`
+    and only one agent is, and that one is inside the window.
+
+    **No check in this repo can catch this.** `job-registry` in
+    `scripts/ci/repo-rules.mjs` proves every `npm run job --` in `render.yaml`
+    names a real `JobType`; nothing compares `render.yaml` to the dashboard,
+    because CI has no Render credential and the blueprint is not authoritative
+    over a service somebody edited by hand. `render.yaml` describes the system
+    we meant; `list_services` is the only thing that reports the one that is
+    running. Read the second before believing the first about anything
+    operational — a cron's declared command included.
+
+67. **A warning in this file about live infrastructure had drifted into saying
+    the opposite of the truth, and still read as careful.** _2026-09-21, same
+    pass._ §2 used to say staging "is pinned to the feature branch
+    `claude/shipblu-support-app-03p2we` rather than to a staging branch" and
+    told the reader not to assume it tracks `main`. `render.yaml:508` does say
+    that. The running service says `branch: main`, `autoDeploy: yes`,
+    `autoDeployTrigger: commit` — it is the **only service in the project that
+    deploys itself**, and the advice was backwards.
+
+    Inert today, because staging is suspended. The cost is banked rather than
+    paid: resuming it arms an automatic deploy of `main` on the next commit,
+    against staging's own Supabase project, at a moment when whoever resumed it
+    believed they were deploying an eleven-month-old feature branch.
+
+    The shape is worth more than the instance. A sentence about infrastructure
+    is true on the day it is written and silently expires afterwards, and a
+    confidently-worded one expires no more slowly — this one survived several
+    passes over this file precisely because it sounded like somebody had
+    checked. Both §2 paragraphs now name their source, and anything in this file
+    that asserts what a service is configured to do should be read as a claim
+    with a date on it, re-checked against `list_services` before it is acted on.
 
 ## 7. Verification already done
 
