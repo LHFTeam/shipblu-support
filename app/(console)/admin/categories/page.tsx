@@ -60,12 +60,20 @@ export default async function CategoriesPage() {
         title="Categories and causes"
         description="What tickets are about, and why they happen. Labels are yours to change; which words match which category lives in code, with tests."
         actions={
-          <Link
-            href="/admin/categories/review"
-            className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm hover:bg-[var(--muted)]"
-          >
-            Review queue
-          </Link>
+          <>
+            <Link
+              href="/admin/categories/review"
+              className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm hover:bg-[var(--muted)]"
+            >
+              Review queue
+            </Link>
+            <Link
+              href="/admin/categories/shadow"
+              className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm hover:bg-[var(--muted)]"
+            >
+              Shadow runs
+            </Link>
+          </>
         }
       />
 
