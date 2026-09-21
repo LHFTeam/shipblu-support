@@ -1,6 +1,8 @@
-import { sql } from 'drizzle-orm';
+import { inArray, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
+import { conversations } from '@/db/schema';
 import { UNCLASSIFIED_KEY } from '@/lib/categorise/taxonomy';
+import type { ConversationChannel } from '@/lib/tickets/channel-policy';
 
 /**
  * What a shadow run found, read back out.
@@ -12,9 +14,26 @@ import { UNCLASSIFIED_KEY } from '@/lib/categorise/taxonomy';
  * `docs/PROJECT-STATE.md` makes about silent successes — break a count down along
  * the dimension that can fail systematically, per channel and per script.
  *
+ * **Every query here joins `conversations`, so every one of them takes the
+ * channel gate.** That is the lesson `/admin/categories/review` carries in its
+ * own most important line: a query that reaches `conversations` and is served to
+ * anybody holding an admin permission has quietly routed around
+ * `ticket.view.bot`. Aggregates are a weaker leak than the ticket list that page
+ * shows, which is a reason to apply the same rule rather than to invent a softer
+ * one. `undefined` means no caller to gate — the job handler, running as cron.
+ *
  * `count(*)` is a bigint, which postgres.js hands over as a string, so everything
  * is coerced on the way out rather than at each call site.
  */
+
+/** No gate, or an `in (…)` over exactly what this caller may see. */
+function channelGate(visibleChannels: readonly ConversationChannel[] | undefined): SQL {
+  if (visibleChannels === undefined) return sql``;
+  // `inArray` and not `= any(${list})` — the second reads identically and is the
+  // §6.46 trap, because a JS array interpolates as one bind parameter per element
+  // and reaches Postgres as a row constructor.
+  return sql` AND ${inArray(conversations.channel, [...visibleChannels])}`;
+}
 
 export type SliceRow = {
   channel: string;
@@ -56,14 +75,61 @@ export type RunReport = {
     failed: number;
     inputTokens: number;
     avgLatencyMs: number | null;
+    firstAt: Date | null;
+    lastAt: Date | null;
+    withContext: number;
   };
 };
 
-export async function reportFor(runLabel: string): Promise<RunReport> {
-  // `'meta.unclassified' = any(r.rules_keys)` and `r.predicted_key = any(r.rules_keys)`:
+/** One line per run, newest first, for choosing which to look at. */
+export type RunLabelRow = {
+  runLabel: string;
+  rows: number;
+  failed: number;
+  lastAt: Date | null;
+};
+
+export async function runLabels(
+  visibleChannels?: readonly ConversationChannel[],
+): Promise<RunLabelRow[]> {
+  const gate = channelGate(visibleChannels);
+
+  const rows = await db.execute<{
+    run_label: string;
+    rows: string;
+    failed: string;
+    last_at: string | null;
+  }>(sql`
+    SELECT
+      ai_category_runs.run_label AS run_label,
+      count(*) AS rows,
+      count(*) FILTER (WHERE ai_category_runs.error IS NOT NULL) AS failed,
+      max(ai_category_runs.created_at) AS last_at
+    FROM ai_category_runs
+    JOIN conversations ON conversations.id = ai_category_runs.conversation_id
+    WHERE true${gate}
+    GROUP BY 1
+    ORDER BY max(ai_category_runs.created_at) DESC
+    LIMIT 50
+  `);
+
+  return rows.map((row) => ({
+    runLabel: row.run_label,
+    rows: Number(row.rows),
+    failed: Number(row.failed),
+    lastAt: row.last_at === null ? null : new Date(row.last_at),
+  }));
+}
+
+export async function reportFor(
+  runLabel: string,
+  visibleChannels?: readonly ConversationChannel[],
+): Promise<RunReport> {
+  const gate = channelGate(visibleChannels);
+
+  // `'meta.unclassified' = any(rules_keys)` and `predicted_key = any(rules_keys)`:
   // in both, what is inside the parentheses is an array *column*, which is the
-  // one shape where `any()` in a raw fragment is correct (§6.46). A JS array
-  // there would reach Postgres as a row constructor and be refused.
+  // one shape where `any()` in a raw fragment is correct (§6.46).
   const slices = await db.execute<{
     channel: string;
     script: string;
@@ -76,23 +142,25 @@ export async function reportFor(runLabel: string): Promise<RunReport> {
     avg_confidence: string | null;
   }>(sql`
     SELECT
-      c.channel::text AS channel,
-      CASE WHEN m.body_text ~ '[؀-ۿ]' THEN 'arabic' ELSE 'other' END AS script,
+      conversations.channel::text AS channel,
+      CASE WHEN messages.body_text ~ '[؀-ۿ]' THEN 'arabic' ELSE 'other' END AS script,
       count(*) AS rows,
-      count(*) FILTER (WHERE r.error IS NULL) AS predicted,
-      count(*) FILTER (WHERE r.error IS NOT NULL) AS failed,
-      count(*) FILTER (WHERE ${UNCLASSIFIED_KEY} = any(r.rules_keys)) AS rules_unclassified,
+      count(*) FILTER (WHERE ai_category_runs.error IS NULL) AS predicted,
+      count(*) FILTER (WHERE ai_category_runs.error IS NOT NULL) AS failed,
+      count(*) FILTER (WHERE ${UNCLASSIFIED_KEY} = any(ai_category_runs.rules_keys))
+        AS rules_unclassified,
       count(*) FILTER (
-        WHERE ${UNCLASSIFIED_KEY} = any(r.rules_keys)
-          AND r.predicted_key IS NOT NULL
-          AND r.predicted_key <> ${UNCLASSIFIED_KEY}
+        WHERE ${UNCLASSIFIED_KEY} = any(ai_category_runs.rules_keys)
+          AND ai_category_runs.predicted_key IS NOT NULL
+          AND ai_category_runs.predicted_key <> ${UNCLASSIFIED_KEY}
       ) AS named_where_rules_gave_up,
-      count(*) FILTER (WHERE r.predicted_key = any(r.rules_keys)) AS agreed,
-      avg(r.confidence) AS avg_confidence
-    FROM ai_category_runs r
-    JOIN conversations c ON c.id = r.conversation_id
-    LEFT JOIN messages m ON m.id = r.message_id
-    WHERE r.run_label = ${runLabel}
+      count(*) FILTER (WHERE ai_category_runs.predicted_key = any(ai_category_runs.rules_keys))
+        AS agreed,
+      avg(ai_category_runs.confidence) AS avg_confidence
+    FROM ai_category_runs
+    JOIN conversations ON conversations.id = ai_category_runs.conversation_id
+    LEFT JOIN messages ON messages.id = ai_category_runs.message_id
+    WHERE ai_category_runs.run_label = ${runLabel}${gate}
     GROUP BY 1, 2
     ORDER BY count(*) DESC
   `);
@@ -105,35 +173,39 @@ export async function reportFor(runLabel: string): Promise<RunReport> {
   }>(sql`
     SELECT
       CASE
-        WHEN r.confidence IS NULL THEN 'unreported'
-        WHEN r.confidence >= 0.9 THEN '0.90 and up'
-        WHEN r.confidence >= 0.7 THEN '0.70 to 0.89'
-        WHEN r.confidence >= 0.5 THEN '0.50 to 0.69'
+        WHEN ai_category_runs.confidence IS NULL THEN 'unreported'
+        WHEN ai_category_runs.confidence >= 0.9 THEN '0.90 and up'
+        WHEN ai_category_runs.confidence >= 0.7 THEN '0.70 to 0.89'
+        WHEN ai_category_runs.confidence >= 0.5 THEN '0.50 to 0.69'
         ELSE 'below 0.50'
       END AS band,
       count(*) AS rows,
-      count(*) FILTER (WHERE r.predicted_key = ${UNCLASSIFIED_KEY}) AS said_unclassified,
-      count(*) FILTER (WHERE r.predicted_key = any(r.rules_keys)) AS agreed_with_rules
-    FROM ai_category_runs r
-    WHERE r.run_label = ${runLabel} AND r.error IS NULL
+      count(*) FILTER (WHERE ai_category_runs.predicted_key = ${UNCLASSIFIED_KEY})
+        AS said_unclassified,
+      count(*) FILTER (WHERE ai_category_runs.predicted_key = any(ai_category_runs.rules_keys))
+        AS agreed_with_rules
+    FROM ai_category_runs
+    JOIN conversations ON conversations.id = ai_category_runs.conversation_id
+    WHERE ai_category_runs.run_label = ${runLabel} AND ai_category_runs.error IS NULL${gate}
     GROUP BY 1
     -- Ordered by the band's own floor, not by its label: sorting the text puts
     -- "below 0.50" above "0.90 and up", which reads as the opposite of the point.
-    ORDER BY min(r.confidence) DESC NULLS LAST
+    ORDER BY min(ai_category_runs.confidence) DESC NULLS LAST
   `);
 
   const disagreements = await db.execute<{ ai_key: string; rules_key: string; rows: string }>(sql`
     SELECT
-      coalesce(r.predicted_key, '(none)') AS ai_key,
+      coalesce(ai_category_runs.predicted_key, '(none)') AS ai_key,
       CASE
-        WHEN ${UNCLASSIFIED_KEY} = any(r.rules_keys) THEN ${UNCLASSIFIED_KEY}
-        ELSE coalesce(r.rules_keys[1], '(none)')
+        WHEN ${UNCLASSIFIED_KEY} = any(ai_category_runs.rules_keys) THEN ${UNCLASSIFIED_KEY}
+        ELSE coalesce(ai_category_runs.rules_keys[1], '(none)')
       END AS rules_key,
       count(*) AS rows
-    FROM ai_category_runs r
-    WHERE r.run_label = ${runLabel}
-      AND r.error IS NULL
-      AND NOT (r.predicted_key = any(r.rules_keys))
+    FROM ai_category_runs
+    JOIN conversations ON conversations.id = ai_category_runs.conversation_id
+    WHERE ai_category_runs.run_label = ${runLabel}
+      AND ai_category_runs.error IS NULL
+      AND NOT (ai_category_runs.predicted_key = any(ai_category_runs.rules_keys))${gate}
     GROUP BY 1, 2
     ORDER BY count(*) DESC
     LIMIT 15
@@ -145,17 +217,24 @@ export async function reportFor(runLabel: string): Promise<RunReport> {
     failed: string;
     input_tokens: string | null;
     avg_latency_ms: string | null;
+    first_at: string | null;
+    last_at: string | null;
+    with_context: string;
     models: string[] | null;
   }>(sql`
     SELECT
       count(*) AS rows,
-      count(*) FILTER (WHERE r.error IS NULL) AS predicted,
-      count(*) FILTER (WHERE r.error IS NOT NULL) AS failed,
-      coalesce(sum(r.input_tokens), 0) AS input_tokens,
-      avg(r.latency_ms) AS avg_latency_ms,
-      array_remove(array_agg(DISTINCT r.model), NULL) AS models
-    FROM ai_category_runs r
-    WHERE r.run_label = ${runLabel}
+      count(*) FILTER (WHERE ai_category_runs.error IS NULL) AS predicted,
+      count(*) FILTER (WHERE ai_category_runs.error IS NOT NULL) AS failed,
+      coalesce(sum(ai_category_runs.input_tokens), 0) AS input_tokens,
+      avg(ai_category_runs.latency_ms) AS avg_latency_ms,
+      min(ai_category_runs.created_at) AS first_at,
+      max(ai_category_runs.created_at) AS last_at,
+      count(*) FILTER (WHERE ai_category_runs.with_context) AS with_context,
+      array_remove(array_agg(DISTINCT ai_category_runs.model), NULL) AS models
+    FROM ai_category_runs
+    JOIN conversations ON conversations.id = ai_category_runs.conversation_id
+    WHERE ai_category_runs.run_label = ${runLabel}${gate}
   `);
 
   const total = totals[0];
@@ -191,6 +270,9 @@ export async function reportFor(runLabel: string): Promise<RunReport> {
       failed: Number(total?.failed ?? 0),
       inputTokens: Number(total?.input_tokens ?? 0),
       avgLatencyMs: total?.avg_latency_ms == null ? null : Number(total.avg_latency_ms),
+      firstAt: total?.first_at == null ? null : new Date(total.first_at),
+      lastAt: total?.last_at == null ? null : new Date(total.last_at),
+      withContext: Number(total?.with_context ?? 0),
     },
   };
 }
