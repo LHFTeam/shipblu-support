@@ -10,11 +10,13 @@ were re-measured against production on that date; where a number here disagrees
 with an older paragraph elsewhere in the file, the older one has not been
 re-checked.
 
-**Production is not running `main`.** It has served `b1d911a` since 2026-09-10 —
-which is the commit this file was previously written against — while `main` is
-twelve commits ahead. `autoDeploy` is `no` on every service (§2), so a merge
-changes nothing that is running. Check `/api/health`, which reports the commit,
-before concluding any change below is live.
+**Production runs `6d9b7f3`, deployed 2026-09-20 23:38–23:49 UTC** — all seven
+services, web first for the migration. For the eleven days before that it served
+`b1d911a` while `main` ran ahead of it, which is the trap rather than the
+footnote: `autoDeploy` is `no` on every service (§2), so a merge changes nothing
+that is running, and the gap is invisible because CI is green and the old code
+keeps serving. Check `/api/health`, which reports the commit, before concluding
+any change below is live.
 
 ---
 
@@ -811,11 +813,12 @@ is **402,172 rows and 1006 MB** as of 2026-09-20, against the 206,053 that PR
 measured eleven days earlier. Retention is the change that stops a table
 doubling every fortnight.
 
-**And `main` is not deployed.** See the note under the title: production has
-served `b1d911a` since 2026-09-10 while `main` is twelve commits ahead, and
-`autoDeploy` is off. Anything merged in that window — including the job whose
-handler a queued row will look for — is not running. Deploying is a precondition
-for most of §5.1, not a separate chore.
+~~**And `main` is not deployed.**~~ **Deployed 2026-09-20.** All seven services
+are on `6d9b7f3`; `/api/health` reports the commit and the new `pool` block from
+#153. The standing hazard is unchanged, though, and it is why this paragraph
+stays: `autoDeploy` is off everywhere, so the next merge is again not running
+until somebody triggers it — including the job whose handler a queued row will
+look for.
 
 ### 5.1 Configuration and cutover — the real remaining work
 
@@ -888,29 +891,54 @@ is code:
   carried `{"address": ""}` until then, written by `saveChannel`'s catch-all
   branch, which is why anything reading that column treats its shape as
   untrusted.
-- **Every bot transcript is one-sided, and the fix is one job away.** The app has
-  never been subscribed to `message_echoes`, so the archive holds what customers
-  said to the bot and nothing the bot said back — **95,930 inbound rows on
-  `whatsapp_bot` and zero outbound**, re-measured 2026-09-20. That is nearly ten
-  times the 10,007 this entry first recorded, which is the argument for running
-  the job rather than a reason to keep deferring it: the archive is growing at
-  ~1,500 conversations a day and every one of them is half a transcript that can
-  never be reconstructed afterwards. The missing half is never delivered
-  rather than delivered and dropped, and its size is known exactly, because the
-  delivery statuses _do_ arrive: 14,828 distinct outbound wamids in the three
-  days to 2026-08-22 against 10,024 inbound messages, so roughly 60% of each
-  conversation is absent. The receiving code has been ready since the channel
-  landed — `lib/whatsapp/parse.ts`, `ingestWhatsAppEcho` — and has only ever seen
-  Meta's documentation sample replayed by hand, five payloads on the test number
-  `16505551111`. `META_APP_ID` is set, so all that is left is
-  `npm run job -- subscribe_meta_webhooks` — from a Render shell on
-  `shipblu-support-worker` once this is on `main`, because that is where the
-  credentials are and the job ships with this change rather than being deployed
-  already. It reads the fields Meta has now, adds what is missing, and refuses
-  to write a list that would drop `messages`.
-  Do not do this with a hand-written `curl`: the Graph call _replaces_ the field
-  list rather than adding to it, so naming only the new field unsubscribes
-  `messages` and stops inbound WhatsApp entirely, and Meta answers that with a 200.
+- **Every bot transcript is one-sided, and no subscription can fix it — Meta
+  discontinued the field.** The archive holds what customers said to the bot and
+  nothing the bot said back: **95,930 inbound rows on `whatsapp_bot` and zero
+  outbound**, against 0 of 395,391 stored deliveries carrying an echo of any
+  kind. The size of the hole is known exactly, because the delivery statuses
+  _do_ arrive: 14,828 distinct outbound wamids in the three days to 2026-08-22
+  against 10,024 inbound messages, so roughly 60% of each conversation is
+  absent, permanently.
+
+  **This entry said "the fix is one job away" for a month and it was wrong.**
+  Running the job on 2026-09-21 is what settled it. `message_echoes` was a real
+  WhatsApp field and Meta has since discontinued it; the team that owns this
+  integration confirmed that, and the run corroborates it three ways. Graph
+  refuses a subscription naming it with `"An unknown error occurred"` — what it
+  answers for a field it does not know. The field is absent from the
+  `whatsapp_business_account` webhook reference for v23.0, the version
+  `GRAPH_VERSION` names. And the job's own read-back listed twelve subscribed
+  fields with no trace of it.
+
+  **`smb_message_echoes` is not the alternative to reach for, and its silence is
+  the proof.** It is the surviving echo field — a business replying from the
+  WhatsApp Business app or a companion device — and it has been **subscribed on
+  this app the whole time**, across all 395,391 deliveries, without ever firing
+  once. That is the evidence that this number is not operated that way: it is
+  sent on through the Cloud API, where the sender already knows what it sent and
+  Meta offers no echo to a third-party app.
+
+  So the bot's half is **not reachable by webhook at all**, and the remaining
+  routes are outside this system: the service that operates the number hands the
+  transcripts over directly, or they stay missing. Anyone reaching for a
+  subscription change here is repeating a month of it.
+
+  Two things were kept rather than deleted, both deliberately.
+  `lib/whatsapp/parse.ts` still reads a `message_echoes` array — it costs one
+  `?? []` and it is the shape the stored archive was parsed with, so a replayed
+  historical delivery does not silently lose its echoes. And the branch beside
+  it that treats a message from our own number as an echo is load-bearing on its
+  own terms: without it our own outbound arriving under `messages` is filed as a
+  customer message, inventing a contact for our own phone number.
+
+  The general lesson is §6.43's, one product further out than the case recorded
+  there: **a removal notice sits somewhere a search for the working endpoint
+  never surfaces.** `message_echoes` still reads as current everywhere except
+  the reference that governs it, and the nearest thing to a check is the one
+  AGENTS.md already gives — read the node reference for the version
+  `GRAPH_VERSION` actually names, and treat a field missing from it as a
+  finding rather than as an omission by the doc.
+
 - **Agents.** **11 accounts exist** as of 2026-09-20 (1 account_admin, 4 admins,
   2 supervisors, 4 agents), up from 3, and 10 of them have signed in at least
   once. **Seven `send_agent_invite` jobs died on 2026-09-03** with `the token …
@@ -1543,9 +1571,10 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
 
 ### 5.5 Loose ends
 
-- **The dead-letter queue has 56 rows in it and nobody has read them.**
-  `/api/health` has reported `dead: 56` for eleven days. Three populations, and
-  they want different answers:
+- **The dead-letter queue has 57 rows in it and, until 2026-09-21, nobody had
+  read them.** `/api/health` reported `dead: 56` unchanged for eleven days; the
+  57th was added deliberately on 2026-09-21 and is the only one anybody has
+  acted on. Four populations, and they want different answers:
 
   - **43 × `download_media`, all `Media download failed (500)`.** Outage-shaped
     rather than systematic — they cluster on 2026-08-29/30 (36 of them) and
@@ -1556,10 +1585,20 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
     matters, the recovery path is a handler that keys differently, not a retry.
   - **7 × `send_agent_invite`**, 2026-09-03 — see §5.1's agents entry.
   - **6 × `send_meta`**, unchanged and already diagnosed in §5.2.
+  - **1 × `subscribe_meta_webhooks`**, 2026-09-21, and this one is a result
+    rather than a fault. It was enqueued on purpose to add `message_echoes`, and
+    its five identical refusals are the evidence that Meta has discontinued that
+    field — the §5.1 entry above is what it produced. It changed nothing in
+    production: the merge preserved `messages` on every attempt and inbound never
+    paused. Left in the table rather than deleted, because deleting the row would
+    throw away the only durable record of that run; `last_error` on it is the
+    Graph refusal itself.
 
   The lesson worth keeping is the shape: nothing surfaces a dead job to a human.
   The count is on `/api/health` and on `/admin`, and both are places you have to
-  already suspect something to look at.
+  already suspect something to look at. The eleven days of an unmoving `dead: 56`
+  is the demonstration — it took somebody querying the table for any of it to be
+  read, and three of the four populations are still unactioned.
 
 - **Three superseded columns are still in the schema, waiting for every service
   to be on new code.** `holidays.name`, `canned_responses.body_html` and
@@ -3708,6 +3747,48 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     `scripts/ci/repo-rules.mjs`, which finds all twenty-seven on `b1d911a` and
     none on the branch that fixed them — because a scan a session performs is a
     scan every later session performs.
+
+64. **A migration's lock estimate ages with the tables it locks, and #157's was
+    eleven days stale.** _2026-09-20, found by re-measuring before the deploy
+    rather than after it._ The declined finding on #157 costed migration 0026's
+    five non-concurrent `CREATE INDEX` and concluded "the builds are sub-second"
+    from `messages` at 44,705 rows / 39 MB and `conversations` at 13,817 / 3.9
+    MB. Both figures were right when written. By the deploy `messages` was 95,452
+    rows / 85 MB — and the **sixth** index, the partial rebuild on
+    `webhook_events`, had never been costed at all, on a table that had reached
+    **402,197 rows and 894 MB of heap**. A non-concurrent build holds a SHARE
+    lock for a full heap scan, and `webhook_events` is the table every inbound
+    webhook inserts into before returning 200.
+
+    What made it safe was timing rather than luck: checked immediately before
+    merging, inbound was **4 deliveries in ten minutes** against a 24-hour mean
+    of ~1,309/hour, because 23:40 UTC is 02:40 in Cairo. The deploy ran
+    23:38–23:41 and 46 webhooks landed in the following quarter hour with nothing
+    dropped. Run this migration's shape in the Cairo small hours, and re-read the
+    table sizes rather than the pull request's — `lock_timeout` bounds _acquiring_
+    the lock, never holding it, so a stale estimate does not fail loudly, it just
+    blocks writes for as long as the scan takes.
+
+65. **The index nobody had measured was costing an admin page nineteen seconds.**
+    _2026-09-20, measured either side of the same deploy._ `#155` replaced
+    `webhook_events_unprocessed_idx` — a full index on `(processed_at,
+received_at)` — with a partial one on `received_at where processed_at is
+null`, and argued it from write cost and 13 MB of disk. The read side turned
+    out to be the bigger half. `lib/reports/live.ts`'s `count(*)`/`min(received_at)`
+    under `where processed_at is null`, which is on an admin page:
+
+    |                | before        | after     |
+    | -------------- | ------------- | --------- |
+    | Execution time | **19,445 ms** | **86 ms** |
+    | Heap fetches   | 24,848        | 99        |
+    | Buffers        | 21,956        | 242       |
+
+    The leading column was non-null on ~98% of rows, so the index-only scan was
+    doing a heap fetch for nearly every one. Nobody had run an `EXPLAIN` on it;
+    the page was presumably just known to be slow. The lesson is the method —
+    when a rewrite is argued from write cost, `EXPLAIN (analyze, buffers)` the
+    read it serves before and after, because that is where the number nobody
+    expected turns up.
 
 ## 7. Verification already done
 

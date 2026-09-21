@@ -52,17 +52,35 @@ export const PAGE_OBJECT = 'page';
  * `messages` carries inbound customer messages *and* delivery statuses, so it is
  * the field the whole channel rests on — it is listed here because this job
  * rewrites the field list wholesale and the merge must be able to prove it is
- * still present, not because anything expects it to be missing.
+ * still present, not because anything expects it to be missing. It is the only
+ * entry, and the reason there is only one is worth keeping.
  *
- * `message_echoes` is the bot's half of the transcript: the read-only
- * `whatsapp_bot` channel is a number another service sends on, and without
- * echoes we archive what customers said and nothing said back to them.
+ * **`message_echoes` was here and has been removed: Meta discontinued it.** It
+ * was the bot's half of the transcript — `whatsapp_bot` is a number another
+ * service sends on, so without echoes we archive what customers said and
+ * nothing said back to them — and that is still a real gap. It is simply not a
+ * gap a subscription can close. Attested by the team that owns this
+ * integration, and corroborated three ways on 2026-09-21: the field is absent
+ * from the `whatsapp_business_account` webhook reference for v23.0, which is
+ * the version `GRAPH_VERSION` names; Graph refuses a write naming it with
+ * `"An unknown error occurred"`, which is what it answers for a field it does
+ * not know; and a run of this job against production read back twelve
+ * subscribed fields with no trace of it.
  *
- * `smb_message_echoes` is deliberately absent. It looks like the same thing and
- * is not — it covers a business replying from the WhatsApp Business app or a
- * linked companion device, which is not how this number is operated.
+ * Leaving it in cost more than a stale comment. The job is the only way this
+ * repo writes a subscription, so a required field Graph rejects makes *every*
+ * run fail at the write — including a run somebody starts to add `comments` or
+ * `feed` for a different channel. A field list is not a wish list: it is the
+ * list this code will refuse to proceed without.
+ *
+ * `smb_message_echoes` is still deliberately absent, but not for the reason
+ * given here before. It covers a business replying from the WhatsApp Business
+ * app or a linked companion device — and it is **already subscribed on this
+ * app**, where it has produced 0 of 395,391 stored deliveries. So it is not an
+ * untried alternative to reach for; it has been on the whole time, and its
+ * silence is the evidence that this number is not operated that way.
  */
-export const REQUIRED_WHATSAPP_FIELDS = ['messages', 'message_echoes'] as const;
+export const REQUIRED_WHATSAPP_FIELDS = ['messages'] as const;
 
 /**
  * What the Instagram pipeline needs delivered.
@@ -280,7 +298,7 @@ export type SubscriptionPlan = {
  *
  * This exists as a pure function because of what the write does. Graph's
  * `POST /{app-id}/subscriptions` does not add fields — it *replaces* the list
- * with whatever `fields` holds, so a request naming only `message_echoes`
+ * with whatever `fields` holds, so a request naming only `account_alerts`
  * silently unsubscribes `messages` and every inbound WhatsApp message and
  * delivery status stops arriving. Meta reports that as success.
  *
