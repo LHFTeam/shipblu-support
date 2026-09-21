@@ -1571,9 +1571,10 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
 
 ### 5.5 Loose ends
 
-- **The dead-letter queue has 56 rows in it and nobody has read them.**
-  `/api/health` has reported `dead: 56` for eleven days. Three populations, and
-  they want different answers:
+- **The dead-letter queue has 57 rows in it and, until 2026-09-21, nobody had
+  read them.** `/api/health` reported `dead: 56` unchanged for eleven days; the
+  57th was added deliberately on 2026-09-21 and is the only one anybody has
+  acted on. Four populations, and they want different answers:
 
   - **43 × `download_media`, all `Media download failed (500)`.** Outage-shaped
     rather than systematic — they cluster on 2026-08-29/30 (36 of them) and
@@ -1584,10 +1585,20 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
     matters, the recovery path is a handler that keys differently, not a retry.
   - **7 × `send_agent_invite`**, 2026-09-03 — see §5.1's agents entry.
   - **6 × `send_meta`**, unchanged and already diagnosed in §5.2.
+  - **1 × `subscribe_meta_webhooks`**, 2026-09-21, and this one is a result
+    rather than a fault. It was enqueued on purpose to add `message_echoes`, and
+    its five identical refusals are the evidence that Meta has discontinued that
+    field — the §5.1 entry above is what it produced. It changed nothing in
+    production: the merge preserved `messages` on every attempt and inbound never
+    paused. Left in the table rather than deleted, because deleting the row would
+    throw away the only durable record of that run; `last_error` on it is the
+    Graph refusal itself.
 
   The lesson worth keeping is the shape: nothing surfaces a dead job to a human.
   The count is on `/api/health` and on `/admin`, and both are places you have to
-  already suspect something to look at.
+  already suspect something to look at. The eleven days of an unmoving `dead: 56`
+  is the demonstration — it took somebody querying the table for any of it to be
+  read, and three of the four populations are still unactioned.
 
 - **Three superseded columns are still in the schema, waiting for every service
   to be on new code.** `holidays.name`, `canned_responses.body_html` and
