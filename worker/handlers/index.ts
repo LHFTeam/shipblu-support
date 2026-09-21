@@ -1,5 +1,6 @@
 import type { ClaimedJob, JobType } from '@/lib/queue';
 import { assignSweep } from './assign-sweep';
+import { backfillCategoriseAi } from './backfill-categorise-ai';
 import { backfillMessageLocations } from './backfill-message-locations';
 import { backfillMetaProfiles } from './backfill-meta-profiles';
 import { backfillShipmentLinks } from './backfill-shipment-links';
@@ -42,6 +43,7 @@ export type JobHandler = (job: ClaimedJob) => Promise<void>;
  */
 export const handlers: Partial<Record<JobType, JobHandler>> = {
   assign_sweep: () => assignSweep(),
+  backfill_categorise_ai: (job) => backfillCategoriseAi(job),
   backfill_message_locations: (job) => backfillMessageLocations(job),
   backfill_meta_profiles: (job) => backfillMetaProfiles(job),
   backfill_shipment_links: (job) => backfillShipmentLinks(job),

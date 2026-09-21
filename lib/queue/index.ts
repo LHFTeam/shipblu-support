@@ -30,6 +30,7 @@ export type JobType =
   | 'backfill_shipment_links'
   | 'backfill_message_locations'
   | 'backfill_meta_profiles'
+  | 'backfill_categorise_ai'
   | 'normalise_kb_formatting'
   | 'seed_console_handbook'
   | 'cleanup';

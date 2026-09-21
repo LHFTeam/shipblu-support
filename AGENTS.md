@@ -512,6 +512,43 @@ rule that contributed rather than from how many did, so a pile of single
 keywords is held below the auto band however many of them agree.
 See `plans/ticket-categorisation.md`.
 
+**The one AI provider, and the one thing it is allowed to touch.**
+`lib/typesafe/` calls TypeSafe's System One endpoint and `lib/categorise-ai/`
+asks it the categorisation question — the repo's first and only model call. It is
+a **shadow**: every answer lands in `ai_category_runs` and nothing else, so no
+rollup, no review queue and no primary ladder can see it. That separation is not
+caution to be tidied away later. `conversation_categories.confidence` is an
+evidence grade, hand-assigned and combined by noisy-OR, and three screens explain
+it as one; TypeSafe returns a probability. One column holding both would be
+undetectable from the outside. Anything wanting to promote a result argues for it
+in its own change.
+
+Four rules hold, and the module is inert until somebody starts it — presence of
+`TYPESAFE_API_KEY` is the flag, the `instagramLoginConfigured()` device, and the
+key lives in `shipblu-support-production` rather than the shared group because the
+job sends real customer text to a third party:
+
+- **The option list comes from `ticket_categories`, never from `TAXONOMY`.** A
+  retired category leaves the rules path at once; if it did not leave the model's
+  choices at the same moment the two would answer over different vocabularies and
+  every disagreement between them would be an artefact.
+- **`meta.unclassified` is always offered, and the instructions name it.** Given
+  55 options and no way out, a model asked about "؟" names something, and a forced
+  guess is the over-detection `plans/ticket-categorisation.md` warns about.
+- **The rules baseline is computed in the same call**, from `detectCategories` —
+  not read back from `conversation_categories`, whose rows agents have since
+  confirmed, rejected and added. The first measures the detector; the second
+  measures the team.
+- **Nothing retries inside the provider.** Backoff is the queue's, per
+  `lib/email/providers/postmark.ts`, which is also why `@typesafe-ai/sdk` is not
+  used: it retries internally and brings an error taxonomy where the only thing a
+  handler reads is `isTransient`.
+
+The job is hand-run and on no cron — a shadow run is an experiment with a label
+on it. `dryRun=true` builds every request, calls nothing and writes nothing, which
+is why it can sit in CI's `database` job loop and put the selection and report
+queries in front of real Postgres. See `plans/categorisation-through-typesafe.md`.
+
 **Knowledge base article formatting.** `lib/kb/format.ts` is the standard, and
 it is code rather than prose because it is enforced: `normaliseArticleHtml`
 runs on every write, wrapped round the sanitiser as
