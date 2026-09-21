@@ -891,29 +891,54 @@ is code:
   carried `{"address": ""}` until then, written by `saveChannel`'s catch-all
   branch, which is why anything reading that column treats its shape as
   untrusted.
-- **Every bot transcript is one-sided, and the fix is one job away.** The app has
-  never been subscribed to `message_echoes`, so the archive holds what customers
-  said to the bot and nothing the bot said back — **95,930 inbound rows on
-  `whatsapp_bot` and zero outbound**, re-measured 2026-09-20. That is nearly ten
-  times the 10,007 this entry first recorded, which is the argument for running
-  the job rather than a reason to keep deferring it: the archive is growing at
-  ~1,500 conversations a day and every one of them is half a transcript that can
-  never be reconstructed afterwards. The missing half is never delivered
-  rather than delivered and dropped, and its size is known exactly, because the
-  delivery statuses _do_ arrive: 14,828 distinct outbound wamids in the three
-  days to 2026-08-22 against 10,024 inbound messages, so roughly 60% of each
-  conversation is absent. The receiving code has been ready since the channel
-  landed — `lib/whatsapp/parse.ts`, `ingestWhatsAppEcho` — and has only ever seen
-  Meta's documentation sample replayed by hand, five payloads on the test number
-  `16505551111`. `META_APP_ID` is set, so all that is left is
-  `npm run job -- subscribe_meta_webhooks` — from a Render shell on
-  `shipblu-support-worker` once this is on `main`, because that is where the
-  credentials are and the job ships with this change rather than being deployed
-  already. It reads the fields Meta has now, adds what is missing, and refuses
-  to write a list that would drop `messages`.
-  Do not do this with a hand-written `curl`: the Graph call _replaces_ the field
-  list rather than adding to it, so naming only the new field unsubscribes
-  `messages` and stops inbound WhatsApp entirely, and Meta answers that with a 200.
+- **Every bot transcript is one-sided, and no subscription can fix it — Meta
+  discontinued the field.** The archive holds what customers said to the bot and
+  nothing the bot said back: **95,930 inbound rows on `whatsapp_bot` and zero
+  outbound**, against 0 of 395,391 stored deliveries carrying an echo of any
+  kind. The size of the hole is known exactly, because the delivery statuses
+  _do_ arrive: 14,828 distinct outbound wamids in the three days to 2026-08-22
+  against 10,024 inbound messages, so roughly 60% of each conversation is
+  absent, permanently.
+
+  **This entry said "the fix is one job away" for a month and it was wrong.**
+  Running the job on 2026-09-21 is what settled it. `message_echoes` was a real
+  WhatsApp field and Meta has since discontinued it; the team that owns this
+  integration confirmed that, and the run corroborates it three ways. Graph
+  refuses a subscription naming it with `"An unknown error occurred"` — what it
+  answers for a field it does not know. The field is absent from the
+  `whatsapp_business_account` webhook reference for v23.0, the version
+  `GRAPH_VERSION` names. And the job's own read-back listed twelve subscribed
+  fields with no trace of it.
+
+  **`smb_message_echoes` is not the alternative to reach for, and its silence is
+  the proof.** It is the surviving echo field — a business replying from the
+  WhatsApp Business app or a companion device — and it has been **subscribed on
+  this app the whole time**, across all 395,391 deliveries, without ever firing
+  once. That is the evidence that this number is not operated that way: it is
+  sent on through the Cloud API, where the sender already knows what it sent and
+  Meta offers no echo to a third-party app.
+
+  So the bot's half is **not reachable by webhook at all**, and the remaining
+  routes are outside this system: the service that operates the number hands the
+  transcripts over directly, or they stay missing. Anyone reaching for a
+  subscription change here is repeating a month of it.
+
+  Two things were kept rather than deleted, both deliberately.
+  `lib/whatsapp/parse.ts` still reads a `message_echoes` array — it costs one
+  `?? []` and it is the shape the stored archive was parsed with, so a replayed
+  historical delivery does not silently lose its echoes. And the branch beside
+  it that treats a message from our own number as an echo is load-bearing on its
+  own terms: without it our own outbound arriving under `messages` is filed as a
+  customer message, inventing a contact for our own phone number.
+
+  The general lesson is §6.43's, one product further out than the case recorded
+  there: **a removal notice sits somewhere a search for the working endpoint
+  never surfaces.** `message_echoes` still reads as current everywhere except
+  the reference that governs it, and the nearest thing to a check is the one
+  AGENTS.md already gives — read the node reference for the version
+  `GRAPH_VERSION` actually names, and treat a field missing from it as a
+  finding rather than as an omission by the doc.
+
 - **Agents.** **11 accounts exist** as of 2026-09-20 (1 account_admin, 4 admins,
   2 supervisors, 4 agents), up from 3, and 10 of them have signed in at least
   once. **Seven `send_agent_invite` jobs died on 2026-09-03** with `the token …
