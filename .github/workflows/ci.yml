@@ -266,7 +266,8 @@ jobs:
             "backfill_meta_profiles limit=1" \
             "backfill_shipment_links limit=1" \
             "backfill_message_locations limit=1" \
-            "normalise_kb_formatting dryRun=true"
+            "normalise_kb_formatting dryRun=true" \
+            "backfill_categorise_ai dryRun=true limit=1"
           do
             echo "::group::npm run job -- $job"
             npm run job -- $job

@@ -292,6 +292,23 @@ const schema = z.object({
   FRESHDESK_DOMAIN: z.string().optional(),
   FRESHDESK_API_KEY: z.string().optional(),
 
+  /**
+   * TypeSafe's System One API, read by the shadow categorisation run in
+   * `lib/categorise-ai/` and by nothing else.
+   *
+   * Unset is the resting state rather than a misconfiguration. Presence of the
+   * key is what enables the job — the device `instagramLoginConfigured()` uses —
+   * so this ships inert and stays inert until somebody deliberately starts a
+   * measurement. No page and no action reads either value; the only reader is a
+   * hand-run job, which is why a missing key here can never fail a request.
+   *
+   * `TYPESAFE_MODEL` pins a run to one Jev version. Left unset the request asks
+   * for the `jev-latest` alias, and every row records the version the *response*
+   * named, so even an unpinned run stays attributable afterwards.
+   */
+  TYPESAFE_API_KEY: z.string().optional(),
+  TYPESAFE_MODEL: z.string().optional(),
+
   /** Worker tuning. */
   /**
    * `true` prints every inbound webhook delivery — headers and raw body — before

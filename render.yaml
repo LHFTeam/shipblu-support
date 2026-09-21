@@ -192,6 +192,20 @@ projects:
               #   KB_NOTICE_HREF           optional "read the update" link
               #   KB_NOTICE_TONE           info | warning | danger
               #
+              #   TYPESAFE_API_KEY         TypeSafe System One, read only by the
+              #                            shadow categorisation job. Unset means
+              #                            that job says so and does nothing,
+              #                            which is its resting state: nothing on
+              #                            a request path reads this.
+              #   TYPESAFE_MODEL           pins a run to one Jev version instead
+              #                            of the moving `jev-latest` alias.
+              #
+              # Here rather than in shipblu-shared for a reason that is not the
+              # Meta one: the job sends real customer message text to a third
+              # party. A key staging could inherit is a key a stray run there
+              # could copy this archive out with, and the run is hand-started, so
+              # nothing else would stop it.
+              #
               # The notice keys are dashboard-owned rather than declared here
               # because their whole point is that ops can put a delay warning in
               # front of every customer without opening a pull request. Unset is
