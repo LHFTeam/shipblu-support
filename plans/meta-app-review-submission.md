@@ -1048,8 +1048,8 @@ Outbound: a ShipBlu support agent types a reply in our console and the app
 delivers it to that customer. Every conversation starts with the customer
 messaging us; we send no marketing, broadcasts or promotional content. Three
 kinds of automatic message exist - an acknowledgement when a customer writes
-while our office is closed, a standard reply that a ShipBlu supervisor has set
-up for a particular kind of request, and a short satisfaction survey after a
+while our office is closed, a standard reply that our support team has set up for
+a particular kind of request, and a short satisfaction survey after a
 ticket is resolved - and all three are sent only inside the 24-hour window that
 follows the customer's own message. When a customer comments publicly with something that should not
 stay public, such as an address or phone number, an agent can send them one
