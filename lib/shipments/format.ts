@@ -60,3 +60,17 @@ export function normaliseTrackingNumber(value: string): string {
 export function normaliseSbid(value: string): string {
   return normaliseTrackingNumber(value).replace(/^SB(?:ID)?/, '');
 }
+
+/**
+ * Whether a normalised value could be a tracking number or an SBID at all.
+ *
+ * The normalisers strip the separators people write inside an identifier, not
+ * everything that cannot be part of one, so a search box's `%` comes out as
+ * `%`. A search that treats that as a reference either narrows to one nobody
+ * holds or, inside a LIKE, matches every row. Letters and digits of any script
+ * are allowed — the digits have already been folded to ASCII — because the
+ * cost of a wrong refusal is only a text search in place of a reference one.
+ */
+export function couldBeReference(normalised: string): boolean {
+  return /^[\p{L}\p{N}]+$/u.test(normalised);
+}

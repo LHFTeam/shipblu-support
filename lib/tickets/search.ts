@@ -7,7 +7,8 @@
  */
 
 import { detectShipmentRefs, shipmentPatterns } from '@/lib/shipments/detect';
-import { normaliseSbid, normaliseTrackingNumber } from '@/lib/shipments/format';
+import { couldBeReference, normaliseSbid, normaliseTrackingNumber } from '@/lib/shipments/format';
+import { containing } from '@/lib/search/like';
 
 export type SearchTerm = {
   /** ILIKE pattern for free-text columns. Wildcards in the query are literal. */
@@ -59,15 +60,6 @@ function stripPrefix(query: string, prefixes: readonly string[]): string | null 
 /** Anything that shows up between the digits of a written-down phone number. */
 const PHONE_PUNCTUATION = /^[\d+()\-.\s]+$/;
 
-/**
- * `%` and `_` are wildcards to ILIKE, and a backslash escapes them. A customer
- * called "100%" or a subject with an underscore would otherwise search for
- * something other than what was typed.
- */
-function escapeLike(value: string): string {
-  return value.replace(/[\\%_]/g, '\\$&');
-}
-
 export function parseSearchTerm(query: string): SearchTerm {
   const raw = query.trim();
 
@@ -77,7 +69,7 @@ export function parseSearchTerm(query: string): SearchTerm {
   const trackingRest = stripPrefix(raw, TRACKING_PREFIXES);
   if (trackingRest !== null) {
     const trackingNumber = normaliseTrackingNumber(trackingRest);
-    if (trackingNumber) {
+    if (couldBeReference(trackingNumber)) {
       return { ...textTerm(trackingRest), trackingNumber, sbid: null, scope: 'tracking' };
     }
     return textTerm(trackingRest);
@@ -86,7 +78,7 @@ export function parseSearchTerm(query: string): SearchTerm {
   const sbidRest = stripPrefix(raw, SBID_PREFIXES);
   if (sbidRest !== null) {
     const sbid = normaliseSbid(sbidRest);
-    if (sbid) {
+    if (couldBeReference(sbid)) {
       return { ...textTerm(sbidRest), trackingNumber: null, sbid, scope: 'sbid' };
     }
     return textTerm(sbidRest);
@@ -127,11 +119,11 @@ function textTerm(query: string): SearchTerm {
   const looksLikePhone = PHONE_PUNCTUATION.test(q) && digits.length >= 6;
 
   return {
-    pattern: `%${escapeLike(q)}%`,
+    pattern: containing(q),
     number,
     // Only when the punctuation actually got in the way: for a query that is
     // already bare digits the free-text pattern covers the phone column too.
-    phonePattern: looksLikePhone && digits !== q ? `%${digits}%` : null,
+    phonePattern: looksLikePhone && digits !== q ? containing(digits) : null,
     trackingNumber: null,
     sbid: null,
     scope: 'any',

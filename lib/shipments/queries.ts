@@ -13,9 +13,10 @@ import {
   ticketStatuses,
 } from '@/db/schema';
 import type { ConversationChannel } from '@/lib/tickets/channel-policy';
-import { normaliseSbid, normaliseTrackingNumber } from './format';
+import { couldBeReference, normaliseSbid, normaliseTrackingNumber } from './format';
 import { deriveRequesterRole, type RequesterRole } from './roles';
 import { returnsForShipments } from './lookup';
+import { containing } from '@/lib/search/like';
 
 /**
  * Reading shipments, shipping accounts and what is attached to them.
@@ -549,9 +550,11 @@ export async function searchContacts(query: string, limit = 20) {
   const q = query.trim();
   if (!q) return { contacts: [], accounts: [], shipments: [] };
 
-  const pattern = `%${q.replace(/[\\%_]/g, '\\$&')}%`;
-  // A query with no alphanumerics normalises to '' and would become a bare '%%'
-  // — every shipment in the account, presented as a search result.
+  const pattern = containing(q);
+  // Only a value that could be a reference is searched as one. Normalising
+  // strips separators, not everything else: a lone `%` came out as `%` and, as a
+  // tracking number, listed every shipment in the account — and a query with no
+  // alphanumerics at all comes out as '', which would do the same.
   const canonical = normaliseTrackingNumber(q);
   const canonicalSbid = normaliseSbid(q);
 
@@ -588,9 +591,9 @@ export async function searchContacts(query: string, limit = 20) {
       })
       .from(shippingAccounts)
       .where(
-        canonicalSbid
+        couldBeReference(canonicalSbid)
           ? or(
-              ilike(shippingAccounts.sbid, `%${canonicalSbid}%`),
+              ilike(shippingAccounts.sbid, containing(canonicalSbid)),
               ilike(shippingAccounts.name, pattern),
             )
           : ilike(shippingAccounts.name, pattern),
@@ -606,7 +609,11 @@ export async function searchContacts(query: string, limit = 20) {
         syncState: shipments.syncState,
       })
       .from(shipments)
-      .where(canonical ? ilike(shipments.trackingNumber, `%${canonical}%`) : sql`false`)
+      .where(
+        couldBeReference(canonical)
+          ? ilike(shipments.trackingNumber, containing(canonical))
+          : sql`false`,
+      )
       .orderBy(desc(shipments.createdAt))
       .limit(limit),
   ]);

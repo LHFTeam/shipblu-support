@@ -123,7 +123,19 @@ describe('parseSearchTerm — shipments', () => {
     expect(term.sbid).toBeNull();
   });
 
-  it('escapes ILIKE wildcards in the residual pattern', () => {
-    expect(parseSearchTerm('track:50%').pattern).toBe('%50\\%%');
+  /**
+   * `%` survives normalisation, so `track:50%` used to narrow the inbox to an
+   * exact match on the tracking number "50%", which nothing holds — an empty
+   * list where the comment on `parseSearchTerm` promises a text search.
+   */
+  it('degrades a prefixed value no reference can hold to a text search', () => {
+    const tracking = parseSearchTerm('track:50%');
+    expect(tracking.scope).toBe('any');
+    expect(tracking.trackingNumber).toBeNull();
+    expect(tracking.pattern).toBe('%50\\%%');
+
+    const sbid = parseSearchTerm('sbid:%');
+    expect(sbid.scope).toBe('any');
+    expect(sbid.sbid).toBeNull();
   });
 });

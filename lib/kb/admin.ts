@@ -5,6 +5,7 @@ import type { AgentRole } from '@/lib/auth/permissions';
 import { folderFloor, meetsFloor } from './floors';
 import type { ArticleVisibility } from './floors';
 import { effectiveFloor, effectiveVisibility, readableByRole } from './internal';
+import { containing } from '@/lib/search/like';
 
 /**
  * Read models for KB authoring.
@@ -79,7 +80,7 @@ export async function listArticlesForAdmin(
   if (filters.status !== 'all') where.push(eq(kbArticles.status, filters.status));
   if (filters.locale !== 'all') where.push(eq(kbArticles.locale, filters.locale));
   if (filters.q) {
-    const term = `%${filters.q}%`;
+    const term = containing(filters.q);
     where.push(or(ilike(kbArticles.title, term), ilike(kbArticles.slug, term))!);
   }
 
