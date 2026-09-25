@@ -18,7 +18,13 @@ vi.mock('@/db/client', () => ({
 
 vi.mock('@/lib/queue', () => ({ enqueue: mocks.enqueue }));
 
-import { automatedReplyBlocked, carrierFor, deliverAutomatedReply, sendsByEmail } from './outbound';
+import {
+  automatedReplyBlocked,
+  carrierFor,
+  deliverAutomatedReply,
+  lacksEmailRecipient,
+  sendsByEmail,
+} from './outbound';
 
 describe('deliverAutomatedReply', () => {
   beforeEach(() => {
@@ -194,6 +200,28 @@ describe('sendsByEmail', () => {
     for (const channel of ['whatsapp', 'facebook', 'instagram', 'webchat']) {
       expect(sendsByEmail(channel)).toBe(false);
     }
+  });
+
+  // `carrierFor` sends anything it does not recognise to `send_email`, so these
+  // two are pinned rather than left to whatever that fallback happens to say.
+  it('writes an api message as an email, and nothing on the read-only bot channel', () => {
+    expect(sendsByEmail('api')).toBe(true);
+    expect(sendsByEmail('whatsapp_bot')).toBe(false);
+  });
+});
+
+describe('lacksEmailRecipient', () => {
+  it('stops an automated message to a portal contact with no address', () => {
+    // The out-of-hours acknowledgement asked `channel === 'email'` here, so this
+    // ticket passed, was queued to `send_email`, and failed on every retry.
+    expect(lacksEmailRecipient('portal', null)).toBe(true);
+    expect(lacksEmailRecipient('email', null)).toBe(true);
+  });
+
+  it('lets through a ticket with an address, or one no email carries', () => {
+    expect(lacksEmailRecipient('portal', 'customer@example.com')).toBe(false);
+    expect(lacksEmailRecipient('whatsapp', null)).toBe(false);
+    expect(lacksEmailRecipient('webchat', null)).toBe(false);
   });
 });
 

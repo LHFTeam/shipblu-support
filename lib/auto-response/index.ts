@@ -6,7 +6,11 @@ import { groupHours } from '@/lib/hours/resolve';
 import { holidayName, holidayOn, isWithinBusinessHours, nextOpeningAt } from '@/lib/hours';
 import { textToHtml } from '@/lib/html/sanitize';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
-import { automatedReplyBlocked, deliverAutomatedReply } from '@/lib/tickets/outbound';
+import {
+  automatedReplyBlocked,
+  deliverAutomatedReply,
+  lacksEmailRecipient,
+} from '@/lib/tickets/outbound';
 import { requesterLocale } from '@/lib/tickets/locale';
 import { pickBody, pickRule, substitute, type AutoResponseRule } from './resolve';
 
@@ -108,7 +112,9 @@ async function send(conversationId: string, at: Date): Promise<void> {
   // silently disable the guard on exactly the replayed backlog it is for.
   if (automatedReplyBlocked(ticket)) return;
 
-  if (ticket.channel === 'email' && !ticket.contactEmail) return;
+  // Asked of the carrier, as the CSAT survey asks it: a portal ticket is
+  // acknowledged by email too, and with no address it would be queued to fail.
+  if (lacksEmailRecipient(ticket.channel, ticket.contactEmail)) return;
 
   // Already acknowledged, and the office has not opened since. One message per
   // closed stretch, however many times the customer writes into it — the office
