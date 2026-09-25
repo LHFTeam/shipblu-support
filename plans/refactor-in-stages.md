@@ -1,0 +1,765 @@
+# Refactoring in stages
+
+_Written 2026-09-25, against `main` at `8abc62a`. It is based on a read-only
+audit of `app/`, `lib/`, `worker/`, `db/`, `components/`, `scripts/` and CI.
+Every defect listed in Stage 2 was confirmed by reading the code, not inferred
+from the audit's summary. There were no open pull requests when this was
+written._
+
+## Context
+
+The request was to bring the codebase in line with best practice, planned and
+carried out in stages.
+
+**The baseline is strong.**
+
+- Typing is strict: `strict`, `noUncheckedIndexedAccess` and
+  `verbatimModuleSyntax` are on.
+- There is no `any`, no `@ts-ignore` and no TODO marker.
+- There are 1,500+ tests, and CI enforces twenty invariants through
+  `scripts/ci/repo-rules.mjs`.
+
+**The debt is structural, not stylistic.** Four kinds:
+
+1. **Logic has leaked into `app/`.**
+   - `app/` has about 127 database write sites.
+   - The three action files are large:
+     - `app/(console)/actions.ts`: 2,036 lines
+     - `admin/settings-actions.ts`: 1,840 lines
+     - `admin/actions.ts`: 613 lines
+   - About twenty admin pages query `db` directly.
+   - `inbox/[number]/view.tsx` is a single 1,969-line client component.
+2. **One lifecycle is written seven times.**
+   - Inbound ingest has seven copies: email, WhatsApp ×2, Meta ×2, widget,
+     portal ×2.
+   - The outbound agent reply has two copies.
+   - The copies have already drifted apart: Stage 2, item 2 is one result.
+3. **Primitives are missing, so every file rolls its own.** There is no:
+   - logger (about 240 raw `console.*` calls);
+   - FormData or action-state helper (eleven state types, and `ok()` defined
+     four times);
+   - typed job payload;
+   - non-retryable job error;
+   - fetch timeout on most providers;
+   - shared test fixture.
+4. **The guard-rails are soft.**
+   - ESLint runs only the Next presets, and warnings never fail CI.
+   - `repo-rules.mjs` is one untested 1,435-line file.
+   - Its `server-actions` check only matches files named `actions.ts`, so
+     `settings-actions.ts` is not checked for `'use server'` today.
+
+### What this supersedes, and why
+
+`plans/query-optimisation-and-cleanup.md` (2026-09-09) argued against a sweeping
+refactor, for three reasons:
+
+- concurrent sessions collide and throw work away;
+- the comments are the asset;
+- the three large files should be left alone until something else needs them
+  opened.
+
+The refactor has now been asked for explicitly. Those three risks are real, so
+this plan answers them rather than setting them aside:
+
+- Every PR is small, covers one seam, and can be reverted on its own.
+- Pure moves never share a PR with behaviour changes.
+- A seam is claimed in the table below before work starts.
+- No comment is removed unless it is proven false.
+- The hot files are split last, behind a gate.
+
+### Decisions taken with the requester
+
+- **A database-backed test tier.** New `*.db.test.ts` files run only in CI's
+  `database` job; unit tests stay database-free. The ingest paths are
+  transactions of raw SQL, so mocking the Drizzle builder would only test the
+  mock. Without real SQL underneath, the consolidation in Stage 4 is not safe.
+- **Playwright is removed.** It is a dependency and a script with no config and
+  no specs. It comes back with its first spec.
+- **All stages are planned, with a gate before Stage 5.** Stage 5 is the first to
+  split the files other sessions edit most:
+  - `view.tsx`: 21 changes in the last month
+  - `settings-actions.ts`: 14
+  - `actions.ts`: 12
+
+## Tracking
+
+Claim a row before starting it by adding the branch name, and update it when
+the PR opens and when it merges. If a row is claimed and its PR is open, do not
+start another PR on the same files.
+
+| Stage | Item                                             | Branch / PR | Status  |
+| ----- | ------------------------------------------------ | ----------- | ------- |
+| 0.1   | Commit this plan                                 | this PR     | open    |
+| 0.2   | Harden `server-actions` and minimum-count guards |             | pending |
+| 0.3   | Split `repo-rules.mjs` into per-rule modules     |             | pending |
+| 0.4   | CI tidy-up                                       |             | pending |
+| 0.5   | Remove Playwright                                |             | pending |
+| 1.1   | `lib/testing/` fixtures                          |             | pending |
+| 1.2   | Database test tier                               |             | pending |
+| 1.3   | Characterise the seven ingest entry points       |             | pending |
+| 1.4   | Webhook route tests                              |             | pending |
+| 1.5   | DB test for the admin overview's raw SQL         |             | pending |
+| 2.1   | Email webhook dedupes before it verifies         |             | pending |
+| 2.2   | Portal agent replies bypass `carrierFor()`       |             | pending |
+| 2.3   | Contacts pages cannot scroll                     |             | pending |
+| 2.4   | `PermanentJobError`                              |             | pending |
+| 2.5   | Ids taken from `FormData`                        |             | pending |
+| 2.6   | KB admin search does not escape LIKE             |             | pending |
+| 2.7   | One `GRAPH_VERSION`                              |             | pending |
+| 2.8   | Fetch timeouts, one provider per PR              |             | pending |
+| 3     | Shared primitives (one row per PR as opened)     |             | pending |
+| 4.1   | Split `lib/tickets/queries.ts`                   |             | pending |
+| 4.2   | Shared ingest steps                              |             | pending |
+| 4.3   | Meta Graph transport                             |             | pending |
+| 4.4   | Worker: typed payloads, backfill, KB import      |             | pending |
+| ⛳    | Gate: check in with the requester                |             | pending |
+| 5.x   | Server side of `app/`                            |             | pending |
+| 6.x   | Client components                                |             | pending |
+| 7     | Lint tightening, finish logging                  |             | pending |
+
+## Ground rules for every PR
+
+**PR size and shape**
+
+- One seam per PR, roughly 400 changed lines or fewer, not counting pure moves.
+  Each PR can be reverted on its own.
+- Pure moves are separate from behaviour changes.
+  - A move PR contains the moved code plus import edits and nothing else, and it
+    reads that way under
+    `git diff origin/main -M -C --color-moved=dimmed-zebra`.
+  - A behaviour PR carries a test that fails on `main`.
+- Record move and format commits in a new `.git-blame-ignore-revs`.
+
+**Comments**
+
+- Comments move with their code, word for word.
+- Change only a reference the move broke ("above", "this file", a line number)
+  or a claim that is false. The reasoning prose is the asset.
+
+**How the repo's own checks shape the order**
+
+- **`dead-exports` fails an export nothing imports.** So every PR that adds a
+  shared helper also switches its callers over in the same PR. "Add it now,
+  adopt it later" is red.
+- **No `export *` barrels and no re-export shims.** `dead-exports` treats a
+  namespace or wholesale re-export as opaque and stops checking that module.
+  Repoint every importer instead.
+- **`repo-rules.mjs` hard-codes about 25 paths.** A move that touches one updates
+  the script in the same PR. It also updates the path wherever AGENTS.md, the
+  README or `docs/PROJECT-STATE.md` mentions the file. Keep PROJECT-STATE edits
+  to path substitutions, because it changes more than any other file.
+
+**Concurrent sessions (AGENTS.md "Git and working alongside other agents")**
+
+- Run `git fetch origin main` and check the open PRs before claiming a row.
+- Never split a file that an open PR touches.
+- A split of a hot file is opened and merged the same day. If `main` moves under
+  it, redo the move from fresh `main` rather than resolving conflicts in a
+  1,000-line diff.
+
+---
+
+## Stage 0 — guard-rails, CI and housekeeping
+
+No change to how the app behaves.
+
+### 0.1 Commit this plan
+
+Add a pointer to this file from the "On the refactor" section of
+`plans/query-optimisation-and-cleanup.md`.
+
+### 0.2 Harden `server-actions` (`scripts/ci/repo-rules.mjs:650`)
+
+- Check in both directions:
+  - every `'use server'` module is named `actions.ts` or `*-actions.ts`;
+  - every `app/**/*actions.ts` carries the directive.
+- Add minimum-count guards, like the `declared.length < 20` that env-parity
+  already has, to the checks that would pass silently on zero matches:
+  `server-actions`, `client-bundle`, `dead-exports` and `job-registry`.
+- Stage 5 would otherwise create new `*-actions.ts` files the check never
+  looks at.
+
+### 0.3 Split `repo-rules.mjs` as a pure move
+
+- Helpers go to `scripts/ci/lib.mjs`, and each check to
+  `scripts/ci/rules/<name>.mjs`.
+- The `RULES` table and the `node scripts/ci/repo-rules.mjs` entry point stay
+  where they are. CI, AGENTS.md and knip's github-actions plugin all name them.
+- Then add `scripts/**/*.test.mjs` to the vitest include, with fixture tests for
+  the three checks that walk the module graph: `server-actions`, `client-bundle`
+  and `dead-exports`.
+
+### 0.4 Tidy CI (`.github/workflows/ci.yml`)
+
+- **Commands.**
+  - Call `npm run typecheck`, `npm run lint` and `npm run test` rather than bare
+    `npx`, so CI and `package.json` cannot drift.
+  - Add `--max-warnings=0` to lint, once it is confirmed clean.
+- **Actions.**
+  - Pin actions to commit SHAs.
+  - Add Dependabot for `github-actions` only. npm updates would compete with the
+    sessions.
+- **The `database` job.**
+  - Move the inline psql assertions (the bilingual backfill and the handbook's
+    idempotency) into `scripts/ci/*.sql`, as `db-invariants.sql` already is.
+  - Run `npm run db:seed` in the job. The characterisation tests in Stage 1 need
+    the default statuses.
+  - Move the job's hand-kept handler list into `scripts/ci/db-jobs.txt`, with a
+    "run" section and a "skip: reason" section. A repo-rules check then asserts
+    that every `JobType` appears exactly once, so a new database-only handler
+    cannot be forgotten.
+
+### 0.5 Remove Playwright
+
+Remove, through `npm uninstall` so that `package-lock.json` is regenerated:
+
+- `@playwright/test` and the `test:e2e` script;
+- its entries in `.gitignore`, `.prettierignore`, `eslint.config.mjs`,
+  `tsconfig.json` and the vitest `e2e/**` exclude;
+- the AGENTS.md paragraph about it.
+
+## Stage 1 — test scaffolding and characterisation
+
+This comes before any structural move.
+
+### 1.1 `lib/testing/` fixtures
+
+- **`env.ts`.** `useTestEnv()` sets `DATABASE_URL` and `APP_SECRET`, calls
+  `resetEnvCache()`, and restores both afterwards. It replaces the stub copied
+  into about sixteen test files.
+- **`fetch.ts`.** `stubFetch` and `respondWith` replace the copies in
+  `lib/meta/client.test.ts:10` and `lib/whatsapp/client.test.ts:12`, and the
+  `globalThis.fetch =` assignments.
+- **`time.ts`.** Cairo wall-clock builders through luxon, following AGENTS.md
+  §Time.
+- Adopt all three in the same PR, because `dead-exports` requires it.
+- No global `setupFiles`: `lib/env.test.ts` depends on the variables being
+  absent.
+
+### 1.2 The database test tier
+
+- `vitest.db.config.mts` includes `**/*.db.test.ts`, and the default config
+  excludes those files.
+- `lib/testing/db.ts` provides truncate and seed.
+- The `database` job runs the tier after migrate and seed.
+- Update AGENTS.md §Tests in the same PR.
+
+### 1.3 Characterise the seven ingest entry points
+
+The entry points are:
+
+- `lib/tickets/ingest.ts`
+- `lib/tickets/ingest-whatsapp.ts` (both)
+- `lib/tickets/ingest-meta.ts` (both)
+- `lib/widget/conversation.ts`
+- `lib/portal/tickets.ts` (both)
+
+Tests record what the code does today, quirks included.
+
+- **Cases every path gets:**
+  - a new ticket;
+  - a threaded reply;
+  - resolved → reopened, with its event;
+  - a duplicate delivery.
+- **Cases specific to one path:**
+  - `whatsapp_bot` skips `afterInboundMessage`;
+  - a Meta comment versus a direct message;
+  - the side-conversation token resolves before `resolveContact`.
+- **What the tests assert:** rows in `conversations`, `messages`,
+  `conversation_events` and `jobs`.
+- **Fixtures carry no attachments**, because email ingest uploads to storage
+  inline.
+
+Email ingest, WhatsApp ingest and `lib/tickets/lifecycle.ts` have no tests at
+all today.
+
+### 1.4 Webhook route tests
+
+For each of the three webhook routes, pin the status code and the stored
+`providerEventId`, for a verified payload and for an unverified one.
+
+### 1.5 The admin overview's raw SQL
+
+`app/(console)/admin/page.tsx:37-60` is twelve raw subqueries outside a job
+handler. Today it first executes in production.
+
+## Stage 2 — verified defects
+
+Each fix is one small PR, written test-first. This stage may overlap Stage 1.
+
+### 2.1 The email webhook dedupes before it verifies
+
+`app/api/webhooks/email/[provider]/route.ts:79-104` stores `providerEventId` on
+an unverified payload, and returns `duplicate` before it checks the signature.
+So a forged delivery can claim a real delivery's id first, and the real one is
+then dropped as a duplicate.
+
+- **Fix:** store the id only when verified, as WhatsApp
+  (`app/api/webhooks/whatsapp/route.ts:85-93`) and Meta already do.
+- **Status code:** the route answers 401 where the other two answer 403.
+  Changing that is a separate commit, made after reading Postmark's retry
+  semantics for each status.
+
+### 2.2 Portal agent replies bypass `carrierFor()`
+
+- `sendReply` (`app/(console)/actions.ts:320-336`) decides whether a reply is
+  email with `channel === 'email'`.
+- `deliverAutomatedReply` (`lib/tickets/outbound.ts:111`) stopped doing exactly
+  that, because `portal` is carried by `send_email` too.
+- As a result, an agent's reply on a portal ticket is stored with no `bodyHtml`
+  and no `toAddresses`. The worker then falls back to `contact.primaryEmail` and
+  a single `<p>`.
+
+Three places change:
+
+- `sendReply` uses `carrierFor()`;
+- the carrier re-derived inline at `actions.ts:372` becomes a call to
+  `carrierFor()`;
+- `worker/handlers/send-csat.ts:88`, which makes the same `=== 'email'` test,
+  is fixed too.
+
+### 2.3 The contacts pages cannot scroll (§6.53)
+
+Four pages open with `p-4 md:p-6` and no scroll container:
+
+- `app/(console)/contacts/page.tsx:32`
+- `[id]/page.tsx:80`
+- `accounts/[sbid]/page.tsx:46`
+- `shipments/[tracking]/page.tsx:71`
+
+So everything below the fold is unreachable.
+
+- Add the `app-scroll h-full overflow-y-auto` wrapper to each.
+- Add a repo-rules check that every `(console)` page outside `admin/` and
+  `inbox/` opens one. AGENTS.md prefers a check to a paragraph.
+
+### 2.4 A job that must not be retried cannot say so
+
+- **The bug.** `worker/handlers/send-notification-email.ts:29-32` says a bad
+  payload fails "rather than burning five attempts". But it throws a plain
+  `Error`, and `failJob` (`lib/queue/index.ts:204`) retries every error.
+  `worker/handlers/send-agent-invite.ts:35` has the same bug.
+- **The fix.**
+  - Add `PermanentJobError` to `lib/queue`. `failJob` marks it `dead` at once,
+    so it stays visible and can be replayed.
+  - Unit-test `failJob`.
+- **Left alone.** The catch-and-return senders, such as `send_whatsapp`, record
+  their failure on the message row, which is where an agent sees it.
+
+### 2.5 Ids taken from `FormData`
+
+- **`updateTicket`** (`actions.ts:927-975`) writes the assignee and group ids it
+  was given. The foreign key proves the row exists; it does not prove the agent
+  is active.
+  - Validate the uuid.
+  - Re-read that the agent is active and that the group exists.
+- **The `delete*` actions in `settings-actions.ts`** pass `text(formData, 'id')`
+  straight to a query. Pass it through `uuidField`.
+- **`app/api/attachments/[id]`** answers a malformed uuid with a 500 (Postgres
+  error 22P02). It should answer 404.
+
+### 2.6 The KB admin search does not escape LIKE
+
+In `lib/kb/admin.ts:82`, `%` and `_` in the search box act as wildcards.
+
+- Share `escapeLike` from `lib/tickets/search.ts:67`.
+- Adopt it here, and in the inline copies in `lib/shipments/queries.ts` and
+  `lib/contacts/merge.ts`.
+
+### 2.7 One `GRAPH_VERSION`
+
+It is declared four times:
+
+- `lib/meta/client.ts:23`
+- `lib/meta/subscriptions.ts:38`
+- `lib/whatsapp/client.ts:14`
+- `worker/handlers/check-meta-permissions.ts:40`
+
+AGENTS.md treats it as one value. Move it to `lib/meta/graph.ts` and import it
+everywhere.
+
+### 2.8 Fetch timeouts
+
+Only `lib/shipments/platform.ts` and `lib/typesafe/client.ts` set one today.
+This is low priority, one provider per PR.
+
+- **Idempotent GETs** get a timeout first.
+- **Sends** get at least 60 seconds or no timeout at all. A timeout after the
+  provider has accepted a send means a retry, and a retry means a duplicate
+  message to a customer.
+
+## Stage 3 — shared primitives
+
+Each PR also switches every caller in its seam, because `dead-exports` requires
+that.
+
+### FormData and action state
+
+- **`lib/http/form-data.ts`** holds `text`, `uuidField`, `int`,
+  `optionalMinutes` and `optionalNumber`, lifted from
+  `settings-actions.ts:77-110`, plus a new `bool`.
+- **`lib/http/action-state.ts`** holds `ActionState`, `ok()` and `INITIAL`.
+- Both are pure, so client forms can import `INITIAL`.
+- Adopt them one action file per PR. A specialised state becomes
+  `ActionState & {…}`.
+
+### Logging: `lib/log.ts`
+
+An in-house module of about fifty lines, with no new dependency.
+
+- **Call shape.** `logger('send_whatsapp').info('sent', { messageId })` prints
+  `[send_whatsapp] sent messageId=…` through `console.*`.
+- **The `[tag]` prefix stays**, because Render log searches and
+  `docs/PROJECT-STATE.md` quote those strings.
+- **It never calls `env()`**, following the precedent in `lib/webhooks/log.ts`:
+  a diagnostic must not be able to fail the thing it describes.
+- **It is never handed headers or payloads.** `lib/webhooks/log.ts` stays the
+  only raw-payload logger, because it redacts.
+- **Migration order** is `worker/`, then `lib/`, then `app/`, keeping every
+  message's text word for word.
+- **Why not pino.** It adds a dependency to an eleven-package runtime tree. Its
+  transports run in worker threads that fight Next's bundling. And JSON lines
+  break the `[tag]` grep workflow.
+- **Alongside it,** `errorMessage()` in `lib/errors.ts` replaces thirty-one
+  copies of `e instanceof Error ? e.message : String(e)`.
+
+### Constant-time compares
+
+- Use `safeEqual` (`lib/auth/tokens.ts:24`) in:
+  - `lib/email/providers/postmark.ts:139`
+  - WhatsApp's `verifyChallenge`
+  - `lib/health/probe.ts:85`
+- Leave `lib/whatsapp/verify.ts`'s compare alone. It compares hex-decoded HMACs,
+  which is a different operation.
+
+### Email helpers
+
+- The worker's `escapeHtml` becomes `textToEscapedHtml` in `lib/email/html.ts`.
+  Its output must be byte-identical:
+  - it keeps `\n` → `<br>`;
+  - it does not escape `'`.
+- `buildReferences` (copied in `send-email.ts` and `send-side-email.ts`) moves
+  beside it.
+- **Do not merge it with the existing `escapeHtml`.** That would change the
+  bytes of every email.
+
+### HTTP helpers
+
+- `lib/kb/rate-limit.ts` moves to `lib/http/rate-limit.ts` as a pure move. The
+  widget and CSAT routes use it as well as the knowledge base.
+- A new `readJsonBody(request, schema)` is adopted route by route. Error bodies
+  stay byte-identical, because the widget parses them.
+
+### Queue
+
+A typed `hasActiveJob(type)` in `lib/queue` replaces the three raw-SQL copies at
+`app/(console)/admin/actions.ts:381`, `:431` and `:475`.
+
+### Vocabulary
+
+- `lib/tickets/vocabulary.ts` is client-safe and holds `PRIORITIES`,
+  `STATUS_CATEGORIES` and the roles.
+- A unit test asserts they equal the `enumValues` in `db/schema/enums.ts`.
+- It replaces the hard-coded lists at:
+  - `actions.ts:977`
+  - `settings-actions.ts:382` and `:1209`
+  - `admin/actions.ts:88`
+  - `view.tsx:707`
+
+### Constants
+
+- `TEAM_TIME_ZONE` replaces the seven `'Africa/Cairo'` literals in `lib/`.
+  Tests keep the literal.
+- `proxy.ts` builds its locale pattern from `LOCALES` in `lib/kb/locale.ts`.
+
+### Widget
+
+- **`lib/widget/protocol.ts`** holds the postMessage names that
+  `app/widget/chat.tsx` and `app/widget/embed.js/route.ts` both spell out today.
+  The names do not change, because `docs/embedding-the-widget.md` is a contract.
+- **Move `app/widget/types.ts` to `lib/widget/types.ts`.** That removes the only
+  import from `lib/` into `app/` (`lib/widget/view.ts:11`).
+
+## Stage 4 — structural moves in `lib/` and `worker/`
+
+### 4.1 Split `lib/tickets/queries.ts` (937 lines) as a pure move
+
+The new files:
+
+- `inbox-filters.ts`: pure and client-safe (parsers and cursor)
+- `visibility.ts`
+- `inbox.ts`
+- `conversation.ts`
+- `lookups.ts`
+
+Every importer is repointed; there is no barrel.
+
+### 4.2 Shared ingest steps (only once 1.3 is green)
+
+One helper per PR, and each PR switches every caller over.
+
+- **`requireDefaultOpenStatusId(tx)`** replaces the seven copies of
+  `'No default open ticket status configured'`.
+- **`reopenResolved(tx, …)`** replaces three inline copies, plus the private
+  `reopen()` (`ingest-meta.ts:565`) and `reopenIfResolved()`
+  (`widget/conversation.ts:256`).
+- **One `findLiveConversation`**, used only where the predicates are identical,
+  proven by a `toSQL()` test.
+
+**No general ingest pipeline.** These paths differ in ways that matter, and they
+stay explicit at the call site:
+
+- the side-conversation token is resolved before `resolveContact`;
+- `whatsapp_bot` skips `afterInboundMessage`;
+- Meta comment threads;
+- the `greatest()` in `interactionWindowSet`.
+
+### 4.3 The Meta Graph transport
+
+- Move `graph()`, `MetaApiError` and the transient codes out of
+  `lib/meta/client.ts` into `lib/meta/graph.ts`.
+- `lib/meta/subscriptions.ts` then uses that transport instead of its three
+  private wrappers.
+- The request shapes in `lib/meta/comments.ts` and `lib/meta/send.ts` are
+  untouched.
+
+### 4.4 Worker
+
+- **Typed payloads.**
+  - A zod schema per job in `lib/queue/payloads.ts`.
+  - `parseJobPayload(job, schema)` throws `PermanentJobError` on bad input.
+  - A typed `enqueue` overload.
+  - The schemas must accept the booleans and numbers that `run-job.ts`'s
+    `key=value` parser produces.
+- **What stays byte-identical.** The `JobType` union text and
+  `Partial<Record<JobType, JobHandler>>`, because the job-registry regex reads
+  them. `PLANNED_JOB_TYPES` is deliberate.
+- **Backfills.** The keyset cursor loop and the tally table move to
+  `lib/queue/backfill.ts`, from:
+  - `backfill-shipment-links`
+  - `backfill-message-locations`
+  - `backfill-categorise-ai`
+- **KB import.** The KB upserts that `import-freshdesk-kb.ts` and
+  `seed-console-handbook.ts` each implement move to `lib/kb/import.ts`.
+  - The Freshdesk path gets a DB test.
+  - The handbook path is already run twice in CI.
+- **Sweeps.** Sweep logic moves from `assign-sweep.ts` into `lib/assignment`,
+  and from `sla-sweep.ts` into `lib/sla`. The `automated-reply-boundary` path in
+  `repo-rules.mjs` moves in the same PR.
+- **Send guards.** The "already delivered" guard (four copies) and the
+  mark-failed update (two copies) become shared helpers.
+
+### ⛳ Gate
+
+Check in with the requester before Stage 5:
+
+- what has landed and what is still open;
+- confirmation that no open PR touches the hot files.
+
+## Stage 5 — the server side of `app/`
+
+### 5.1 `admin/settings-actions.ts`
+
+- Each save/delete pair moves to `app/(console)/admin/<domain>/actions.ts`,
+  beside the `forms.tsx` that already lives there. About three domains per PR.
+- `admin/actions.ts` splits the same way, into `agents/`, `channels/`,
+  `import/` and `categories/`.
+- `forms-shared.tsx` adopts `lib/http/action-state`.
+
+### 5.2 `app/(console)/actions.ts`
+
+**First: move the shared private guards.**
+
+- `loadConversation`, `refuseIf*`, `refresh` and `applyStatusCategory` move into
+  a plain module, `lib/tickets/console-guards.ts`.
+- They cannot be exported from a `'use server'` file: every export there becomes
+  a public POST endpoint.
+
+**Then split into siblings, one PR each, each merged the same day:**
+
+- `reply-actions.ts`
+- `meta-actions.ts`
+- `ticket-actions.ts`
+- `shipment-actions.ts`
+- `side-conversation-actions.ts`
+- `availability-actions.ts`
+- `category-actions.ts`
+
+### 5.3 Deduplicate inside the actions
+
+These changes preserve behaviour.
+
+- **`lib/tickets/agent-reply.ts`.** It covers the whole reply sequence for
+  `sendReply` and `sendTemplateReply`: store, bump `lastMessageAt`,
+  `onAgentReply`, enqueue through `carrierFor`, then `afterMessageStored`.
+- **It must not live in `outbound.ts`.** The `automated-reply-boundary` check
+  forbids `lastAgentMessageAt` there, and that check is what keeps automated
+  replies out of the response metric.
+- **`lib/tickets/status.ts`.** It replaces the two copies of the status-change
+  transaction, at `actions.ts:900-920` and `:1111-1128`.
+
+### 5.4 Admin pages stop importing `db`
+
+- Their queries move into `lib/<domain>/`. That covers `admin/import/page.tsx`,
+  `admin/page.tsx` and `admin/field-options.ts`, and about seventeen others.
+- Then a repo-rules check asserts that no `page.tsx` imports `db/client`.
+  `app/probe/page.tsx` is the one exception, and the reason is written down.
+
+### 5.5 One receive path for webhooks
+
+- **`lib/webhooks/receive.ts`** handles the raw body and redacted headers,
+  persists the event (with the id only when verified), and enqueues it.
+- **Each route keeps its own verification and status codes in plain view.**
+  That includes both Instagram app secrets.
+
+### 5.6 Help-centre actions
+
+- One copy each of `localeOf` and `requestMeta`.
+- Share only the genuinely identical part of agent and customer sign-in:
+  - `app/(auth)/actions.ts:40-75`
+  - `app/help/[locale]/account/actions.ts:62-92`
+
+## Stage 6 — client components, hottest file last
+
+### 6.1 Break the import cycle
+
+`composer.tsx` imports `TemplateOption` from `view.tsx`, which imports
+`Composer`. Move `TemplateOption` into `inbox/[number]/types.ts`.
+
+### 6.2 Extract the event wording
+
+`describeEvent` and `SKIP_REASONS` (`view.tsx:749-933`) are pure wording. Move
+them to `lib/tickets/event-labels.ts`, with tests.
+
+### 6.3 Split `view.tsx`
+
+The pieces become kebab-case siblings, the way `comment-moderation.tsx` and
+`side-conversations.tsx` already are. Leaves go first, one or two files per PR:
+
+- `header.tsx`
+- `window-indicator.tsx`, after which the copy in `inbox/list.tsx:566-594` goes
+- `timeline.tsx`
+- `sidebar.tsx`
+- `ticket-fields.tsx`, where the local `Field` becomes `SidebarField` so it no
+  longer shadows the one in `components/ui.tsx`
+- `categories-field.tsx`
+- `shipments-field.tsx`
+
+### 6.4 `useFieldAction`
+
+- It replaces the nine imperative `new FormData()` + `action()` +
+  `router.refresh()` calls.
+- `TagField` currently ignores the error it is returned. Showing it is a
+  behaviour change, so it gets its own PR.
+
+### 6.5 The rest
+
+- **The widget chat.** `app/widget/chat.tsx` splits into three hooks:
+  `use-widget-session.ts`, `use-message-stream.ts` and `use-host-bridge.ts`.
+- **The embed script.** `embed.js` stays a template literal.
+- **Large pages.** `composer.tsx` and `admin/dashboard/page.tsx` split into
+  section components.
+- **`SubmitButton`.** Its seven copies become one in the shared UI.
+- **The reports page.** Its local `Stat` and `Table` give way to `components/`.
+  The RTL fix from `text-left` to `text-start` is its own PR.
+
+## Stage 7 — tighten lint and finish logging
+
+1. **Type-aware lint for `lib/**` and `worker/**`.**
+   - Add `typescript-eslint` as an explicit devDependency. It is only transitive
+     today, and knip gates `unlisted`.
+   - Turn on `no-floating-promises`, `no-misused-promises` (with
+     `checksVoidReturn.attributes: false`), `await-thenable` and
+     `switch-exhaustiveness-check`.
+   - They start as warnings in a non-blocking `lint:strict` job. Each directory
+     is promoted to error once it is clean, and `app/**` comes last.
+2. **Layering, through `no-restricted-imports`.**
+   - `lib/` and `worker/` may not import `@/app/*`.
+   - `components/` may not import `@/db/*`.
+3. **`no-console` as an error.** The exceptions are `lib/log.ts`, `scripts/`,
+   `db/migrate.ts` and `worker/run-job.ts`.
+4. **AGENTS.md** records the new conventions:
+   - the logger;
+   - the form-data and action-state helpers;
+   - typed payloads;
+   - `PermanentJobError`;
+   - the database test tier.
+
+## Out of scope — do not do these
+
+**Documentation and comments**
+
+- Do not delete, shorten or "clean up" comments, or `docs/PROJECT-STATE.md` §6.
+- Do not act on knip's ~110 unused exports. `knip.jsonc` explains why that number
+  is not a backlog.
+
+**`server-only`**
+
+Do not add it to anything the worker or vitest imports, which means
+`db/client.ts` and most of `lib/`. It throws outside the `react-server` export
+condition.
+
+**Database**
+
+- Do not drop indexes that look unused.
+- Do not move the category registries out of `db/schema/config.ts`.
+- Do not add `relations()` nothing reads.
+- Do not touch the pool or the instrumentation in `db/client.ts`. That is the
+  separate §5.0 fix: the `instrumented` WeakSet.
+
+**Meta**
+
+- Do not reshape the Graph requests in `lib/meta/comments.ts` or
+  `lib/meta/send.ts`.
+- Do not tidy the Instagram `messaging_type` asymmetry.
+- Do not drop either Instagram app secret.
+
+**Things that look like duplication but are not**
+
+- `lib/queue/backoff.ts` and `failJob`'s schedule answer different questions:
+  one is the loop's backoff by failure kind, the other each job's retry
+  schedule.
+- Agent replies do not go through `outbound.ts`.
+- The two `escapeHtml` variants stay separate.
+
+**Contracts and deliberate reads**
+
+- Do not change the widget protocol or its signature format.
+- Do not replace the documented, deliberate `process.env` reads:
+  - `lib/shipments/detect.ts`
+  - `lib/categorise/rules.ts`
+  - `lib/webhooks/log.ts`
+  - `lib/whatsapp/accounts.ts`
+
+**Authorisation**
+
+Do not turn a `requirePermission` redirect into a returned error without saying
+so in the PR.
+
+**Sweeps**
+
+No repo-wide `import/order` pass, and no `<button>` → `<Button>` sweep. Both
+touch every file and prevent no bug.
+
+## Verification
+
+- **Every PR.**
+  - Run
+    `npx tsc --noEmit && npx eslint . && npx vitest run && npm run knip && npm run build`,
+    then `node scripts/ci/repo-rules.mjs`.
+  - CI's `verify`, `repo-rules` and `database` jobs must all be green.
+- **Pure moves.** The diff under
+  `git diff origin/main -M -C --color-moved=dimmed-zebra` shows only moved
+  blocks and import lines.
+- **Behaviour PRs.** The new test fails on `main` and passes on the branch.
+- **From 1.2 onward.**
+  - The database tier (`npx vitest run -c vitest.db.config.mts`, against a local
+    Postgres) stays green through every change in Stages 4 and 5.
+  - It is the proof that the ingest and action consolidations changed nothing.
+- **Client-component moves.**
+  - The per-route First Load JS table from `npm run build` does not grow.
+  - The inbox ticket page and the widget are driven in the dev server: send a
+    reply; change the status, assignee and tags; link a shipment; open the
+    widget chat.
+- **Raw SQL outside a job handler.** It runs through the database tier, or as an
+  `EXPLAIN` against production through `execute_sql`, before it is pushed.

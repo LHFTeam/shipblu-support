@@ -183,6 +183,13 @@ default, not a signal.
 
 ## On the refactor and the comments
 
+> **Superseded on 2026-09-25 by `plans/refactor-in-stages.md`**, for the part
+> about the refactor. A staged refactor has since been asked for explicitly.
+> That plan answers the risks below instead of avoiding them: small
+> single-seam PRs, moves kept apart from behaviour changes, seams claimed in its
+> tracking table, and the three large files split last, behind a gate. What this
+> section says about the comments still stands.
+
 The stated scope was "refactor code properly" and "clean up and update project
 comments". Both deserve a straight answer, because the evidence does not support
 doing them the way they were asked for.
