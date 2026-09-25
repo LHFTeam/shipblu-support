@@ -197,13 +197,30 @@ export async function completeJob(id: string): Promise<void> {
 }
 
 /**
+ * A failure no retry can fix, so the job is marked dead at once instead of
+ * spending its remaining attempts.
+ *
+ * For input that is wrong — a payload that fails its handler's schema — and not
+ * for a provider that said no. A provider's refusal is either transient, which
+ * is what retries are for, or permanent in a way a handler records on the row a
+ * person reads (`send_whatsapp` marks the message failed and returns), which is
+ * where an agent will see it. Nor for a job type with no handler: with
+ * `autoDeploy` off, the web service can enqueue a type before the worker that
+ * runs it is deployed, and a retry is exactly what rescues that job.
+ */
+export class PermanentJobError extends Error {
+  override readonly name = 'PermanentJobError';
+}
+
+/**
  * Exponential backoff with a 1-hour ceiling: 10s, 40s, 90s, ... A job that has
  * used all its attempts becomes 'dead' rather than being deleted, so failures
- * stay visible and can be inspected and replayed.
+ * stay visible and can be inspected and replayed. A `PermanentJobError` goes
+ * there on its first attempt.
  */
 export async function failJob(job: ClaimedJob, error: unknown): Promise<void> {
   const message = error instanceof Error ? `${error.message}\n${error.stack ?? ''}` : String(error);
-  const exhausted = job.attempts >= job.maxAttempts;
+  const exhausted = error instanceof PermanentJobError || job.attempts >= job.maxAttempts;
 
   if (exhausted) {
     await db

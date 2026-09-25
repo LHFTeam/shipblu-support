@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { sendTransactionalEmail } from '@/lib/email/transactional';
-import type { ClaimedJob } from '@/lib/queue';
+import { PermanentJobError, type ClaimedJob } from '@/lib/queue';
 
 /**
  * Sends one transactional email that does not belong to a ticket — today, the
@@ -29,7 +29,9 @@ export async function sendNotificationEmail(job: ClaimedJob): Promise<void> {
   if (!payload.success) {
     // A malformed payload will never succeed on retry, so fail it here with a
     // message naming the field rather than burning five attempts on it.
-    throw new Error(`send_notification_email: invalid payload — ${payload.error.message}`);
+    throw new PermanentJobError(
+      `send_notification_email: invalid payload — ${payload.error.message}`,
+    );
   }
 
   await sendTransactionalEmail(payload.data, 'send_notification_email');

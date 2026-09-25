@@ -6,7 +6,7 @@ import { inviteEmail } from '@/lib/auth/invite-email';
 import { unsealInviteToken } from '@/lib/auth/invite-token';
 import { sendTransactionalEmail } from '@/lib/email/transactional';
 import { appUrl, env } from '@/lib/env';
-import type { ClaimedJob } from '@/lib/queue';
+import { PermanentJobError, type ClaimedJob } from '@/lib/queue';
 
 /**
  * Emails an invited agent their activation link.
@@ -32,7 +32,7 @@ const payloadSchema = z.object({ inviteId: z.uuid() });
 export async function sendAgentInvite(job: ClaimedJob): Promise<void> {
   const payload = payloadSchema.safeParse(job.payload);
   if (!payload.success) {
-    throw new Error(`send_agent_invite: invalid payload — ${payload.error.message}`);
+    throw new PermanentJobError(`send_agent_invite: invalid payload — ${payload.error.message}`);
   }
 
   const rows = await db
