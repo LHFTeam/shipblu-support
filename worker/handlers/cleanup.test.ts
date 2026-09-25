@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import { jobs, webhookEvents } from '@/db/schema';
 import { resetEnvCache } from '@/lib/env';
-import { completedJobRetentionFilter, retentionBatch, webhookRetentionFilter } from './cleanup';
+import { completedJobRetentionFilter, webhookRetentionFilter } from './cleanup';
 
 /**
  * No database. These read the statement back through `toSQL()`, which is the
@@ -114,72 +114,6 @@ describe('job retention', () => {
     expect(text).toContain("'completed'");
     expect(text).toContain('"completed_at" <');
     expect(text).toContain("interval '7 days'");
-    expect(params.some((param) => param instanceof Date)).toBe(false);
-  });
-});
-
-describe('retention batching', () => {
-  /**
-   * The regression these pin is not a wrong predicate but an unbounded one.
-   *
-   * `#153` put a 30-second deadline on every query and `#155` widened webhook
-   * retention, both in the same release. The `webhook_events` delete already
-   * took 25.5 s the night they shipped; four days later it crossed the
-   * deadline and was cancelled with `57014`, and every night it failed left the
-   * rows behind to slow the next attempt. Two nights out of five, while the
-   * table grew from 402,172 rows to 440,587.
-   *
-   * Neither test can catch that recurring — Vitest runs no SQL, and the
-   * `database` job runs this handler against an empty schema where one
-   * statement and a thousand are indistinguishable. What they can hold is the
-   * shape that makes the statement bounded, so removing the bound is a failing
-   * test rather than a slow rediscovery in production.
-   */
-  it('bounds one webhook batch with a limit', () => {
-    const { sql: text, params } = db
-      .delete(webhookEvents)
-      .where(retentionBatch(webhookEvents, webhookRetentionFilter()))
-      .toSQL();
-
-    expect(text).toContain('limit');
-    // The bound is a parameter, not spliced text: the batch size is a module
-    // constant today, which is not a reason to let it reach the parser.
-    expect(params).toContain(5000);
-  });
-
-  it('selects the ids it deletes from the same table', () => {
-    const { sql: text } = db
-      .delete(jobs)
-      .where(retentionBatch(jobs, completedJobRetentionFilter()))
-      .toSQL();
-
-    // A subquery naming the wrong table would delete by ids that mean nothing
-    // there — and with a uuid key it would quietly match nothing rather than
-    // fail, so this is checked rather than assumed.
-    expect(text).toMatch(/delete from "jobs"[\s\S]*select "jobs"\."id" from "jobs"/);
-  });
-
-  it('keeps the retention predicate inside the batch, not beside it', () => {
-    const { sql: text } = db
-      .delete(webhookEvents)
-      .where(retentionBatch(webhookEvents, webhookRetentionFilter()))
-      .toSQL();
-
-    // The predicate belongs to the *subquery*. Hoisted out, `limit` would pick
-    // an arbitrary 5,000 rows of the whole table and the delete would take
-    // them — retention turning into an indiscriminate trim, which on
-    // webhook_events is customer message content.
-    const subquery = text.slice(text.indexOf('select'));
-    expect(subquery).toContain('signature_verified');
-    expect(subquery).toContain('limit');
-  });
-
-  it('binds no javascript Date', () => {
-    const { params } = db
-      .delete(webhookEvents)
-      .where(retentionBatch(webhookEvents, webhookRetentionFilter()))
-      .toSQL();
-
     expect(params.some((param) => param instanceof Date)).toBe(false);
   });
 });

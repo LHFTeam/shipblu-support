@@ -3946,22 +3946,59 @@ null`, and argued it from write cost and 13 MB of disk. The read side turned
     duration, so adding one is a change to every long-running statement in the
     system, whether or not the diff mentions them.**
 
-    Fixed by batching: `deleteInBatches` removes a bounded 5,000 rows per
-    statement, so the work per statement is fixed however far behind the table
-    has fallen, and a bad night costs more round trips rather than a cancelled
-    statement and no progress. `retentionBatch` is exported so the shape is
-    pinned by tests — checked by mutation, since removing the bound fails two
-    of them.
+    **The fix is the deadline, and it took a wrong turn to establish that.**
+    `DB_QUERY_TIMEOUT_MS` is set to 180,000 on `shipblu-nightly` alone — the
+    per-service exception `lib/env.ts` already describes, on the one service
+    that is the case it describes. The first attempt was to batch the delete
+    into 5,000-row statements, and review caught that it is **strictly worse**
+    before it shipped.
 
-    `DB_QUERY_TIMEOUT_MS` is also set to 180,000 on `shipblu-nightly` alone,
-    which is the per-service exception `lib/env.ts` already describes for
-    exactly this case. It stays as a backstop rather than as the fix: the
-    failure it prevents is silent and compounding, and it sits below the
-    `transaction_timeout = '5min'` on the `postgres` role so which limit fired
-    stays legible.
+    The reason is worth keeping, because the batching looked obviously right:
+    **the cost is not the deleting, it is finding the rows.** No index serves
+    this predicate — an `OR` needs every arm indexed before Postgres will build
+    a `BitmapOr`, and only the third arm has one. So the plan is a sequential
+    scan of the whole table, and a bounded `LIMIT` does not bound a scan. On
+    2026-09-25:
 
-    The stop-gap went in before the fix, deliberately: the fix needs a deploy
-    and the next run was hours away.
+    ```
+    Seq Scan on webhook_events  (actual time=970.599..18946.837 rows=5000)
+      Rows Removed by Filter: 332234
+      Buffers: shared hit=13339 read=97073
+    Execution Time: 18959.439 ms
+    ```
+
+    18,959 ms to find the _first_ 5,000 of **27,976 matches in 436,200 rows**.
+    Batching pays that per batch, so six batches cost six full scans where one
+    statement cost one. The bound that appears to make each statement cheap
+    makes the job quadratic.
+
+    Two numbers settle what the problem actually was. Only **6% of the table is
+    deletable**, and the oldest row is **exactly the retention horizon** — so
+    retention keeps the table bounded whenever it runs, and this was never a
+    backlog that needed draining in pieces. It was one scan that outgrew one
+    deadline.
+
+    **Left open, deliberately: indexing the predicate.** Two partial indexes
+    would let the other two arms be served — `processed_at` where it is not
+    null, and `received_at` where `signature_verified` is false — and turn the
+    scan into a bitmap. That is the real optimisation, and it is a build lock on
+    a 1.2 GB table, which §6.64 is the lesson about. Its own change, its own
+    window. Not urgent: at 30-day retention and current volume the scan grows
+    with daily traffic rather than without bound, and 180 s is several times the
+    headroom needed.
+
+    **Also left, with reasons: the `&&`.** `cleanup && rollup_metrics` still
+    skips the rollup when cleanup fails. `;` is what the sibling cron uses and
+    the argument there is explicit — a snapshot's measurement cannot be taken
+    again once the hour has passed. A rollup's can: it rebuilds three days on
+    every run, so a skipped night self-heals on the next one. Swapping the
+    operator would trade a visible failure for a silent one, since the cron's
+    exit code would then be the rollup's alone. The reason it was ever a problem
+    was cleanup failing nightly, which is what the deadline fixes.
+
+    The deadline was raised before any of this was understood, because the next
+    run was hours away and any fix needed a deploy. That ordering was right even
+    though the fix it was buying time for turned out to be the wrong one.
 
 ## 7. Verification already done
 

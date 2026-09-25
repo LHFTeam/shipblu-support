@@ -83,88 +83,6 @@ export function completedJobRetentionFilter(): SQL {
   return sql`${jobs.status} = 'completed' and ${jobs.completedAt} < now() - interval '7 days'`;
 }
 
-/**
- * How many rows one retention statement may remove.
- *
- * Small enough that a batch finishes well inside `DB_QUERY_TIMEOUT_MS` on the
- * largest table here, and large enough that a normal night is a handful of
- * round trips rather than hundreds.
- */
-const RETENTION_BATCH = 5_000;
-
-/**
- * The most batches one table gets in one run — a bound on the job, not on the
- * backlog.
- *
- * It exists so a table that is growing faster than retention can drain it ends
- * the night with a log line saying so, rather than with a cron that runs until
- * Render kills it. At the batch size above this is five million rows, which is
- * an order of magnitude past anything this system has produced.
- */
-const MAX_RETENTION_BATCHES = 1_000;
-
-/** The two tables retention batches over. Both are keyed by a uuid `id`. */
-type RetentionTable = typeof webhookEvents | typeof jobs;
-
-/**
- * One batch's statement, exported so `cleanup.test.ts` can read it back.
- *
- * `in (select … limit n)` rather than `ctid`: the subquery stops as soon as it
- * has found `n` matching rows — the case that matters here, where matches are
- * plentiful — and a primary key reads as what it is to the next person.
- *
- * The `limit` is interpolated as a bound parameter rather than pasted in, so
- * the batch size cannot become a way to write SQL. It is a module constant
- * today; that is not a reason to let it be spliced.
- */
-export function retentionBatch(table: RetentionTable, where: SQL): SQL {
-  return sql`delete from ${table} where ${table.id} in (
-    select ${table.id} from ${table} where ${where} limit ${RETENTION_BATCH}
-  )`;
-}
-
-/**
- * Delete everything matching `where`, a bounded number of rows at a time.
- *
- * **One unbounded `delete` is what broke this job.** `#153` gave every query a
- * 30-second deadline and `#155` widened webhook retention, and both landed in
- * the same release — on the night they shipped, the `webhook_events` delete
- * already took 25.5 s. It crossed 30 s four days later, and from then on the
- * statement was cancelled (`57014`) before it removed anything. That is a
- * ratchet rather than a flat failure: every night it fails, the rows it should
- * have removed are still there to slow the next attempt, so the table and the
- * runtime climb together. It failed on 2026-09-23 and again on 2026-09-25 while
- * the table went from 402,172 rows to 440,587.
- *
- * Raising the deadline only moves where the ratchet bites. Batching removes it:
- * the work per statement is fixed, so the time per statement is roughly fixed
- * however far behind the table has fallen, and a bad night costs more round
- * trips rather than a cancelled statement and no progress at all.
- *
- * The loop stops on a short batch, which is the only reliable signal that the
- * predicate has nothing left: a count taken first would be one more full scan
- * of the table this exists to stop scanning.
- */
-async function deleteInBatches(table: RetentionTable, where: SQL, label: string): Promise<number> {
-  let deleted = 0;
-
-  for (let batch = 0; batch < MAX_RETENTION_BATCHES; batch += 1) {
-    const result = await db.execute(retentionBatch(table, where));
-
-    deleted += result.count;
-    if (result.count < RETENTION_BATCH) return deleted;
-  }
-
-  // Reached only by a table gaining rows faster than this drains them. Worth a
-  // line of its own: the count below would otherwise look like a healthy night.
-  console.warn(
-    `[cleanup] ${label} hit the ${MAX_RETENTION_BATCHES}-batch ceiling at ${deleted} rows — ` +
-      `the backlog is outgrowing retention`,
-  );
-
-  return deleted;
-}
-
 export async function cleanup(_job: ClaimedJob): Promise<void> {
   const expiredSessions = await deleteExpiredSessions();
   const expiredCustomerSessions = await deleteExpiredCustomerSessions();
@@ -182,15 +100,38 @@ export async function cleanup(_job: ClaimedJob): Promise<void> {
     .delete(conversationPresence)
     .where(lt(conversationPresence.updatedAt, new Date(Date.now() - 60 * 60 * 1000)));
 
-  // Batched, unlike the four above: these are the two tables that grow without
-  // bound, so they are the two where one statement can outgrow the deadline.
-  const oldWebhooks = await deleteInBatches(webhookEvents, webhookRetentionFilter(), 'webhooks');
+  // One statement, deliberately, and measured rather than assumed — an earlier
+  // attempt at this fix batched it into 5,000-row deletes and was strictly
+  // worse.
+  //
+  // The cost here is not the deleting, it is *finding* the rows. No index
+  // serves this predicate: an OR needs every arm indexed before Postgres will
+  // build a BitmapOr, and only the third arm has one
+  // (`webhook_events_unprocessed_idx`, partial on `processed_at is null`). So
+  // the plan is a sequential scan of the whole table, and on 2026-09-25 that
+  // was `Seq Scan … Rows Removed by Filter: 332234` at 18,959 ms to find the
+  // first 5,000 of 27,976 matches in 436,200 rows.
+  //
+  // Batching pays that scan once *per batch* instead of once, so six batches
+  // cost six full scans. The bound that looks like it makes each statement
+  // cheap makes the job as a whole quadratic — see §6.68, which is the record
+  // of getting this wrong before getting it right.
+  //
+  // What actually keeps this inside its deadline is `DB_QUERY_TIMEOUT_MS` at
+  // 180,000 on `shipblu-nightly` alone, which is the per-service exception
+  // `lib/env.ts` describes. The table is at steady state — the oldest row is
+  // exactly the retention horizon — so the scan grows with daily volume rather
+  // than without bound. Indexing the other two arms is the real optimisation
+  // and is written up in §6.68 rather than done here: it is two partial indexes
+  // and a build lock on a 1.2 GB table, which is its own change with its own
+  // window (§6.64).
+  const oldWebhooks = await db.delete(webhookEvents).where(webhookRetentionFilter());
 
-  const oldJobs = await deleteInBatches(jobs, completedJobRetentionFilter(), 'jobs');
+  const oldJobs = await db.delete(jobs).where(completedJobRetentionFilter());
 
   console.log(
     `[cleanup] sessions=${expiredSessions} customer_sessions=${expiredCustomerSessions} ` +
       `contact_tokens=${expiredContactTokens} presence=${stalePresence.count} ` +
-      `webhooks=${oldWebhooks} jobs=${oldJobs}`,
+      `webhooks=${oldWebhooks.count} jobs=${oldJobs.count}`,
   );
 }
