@@ -20,12 +20,7 @@ export function emailProvider(): EmailProvider {
       if (!e.EMAIL_API_KEY) {
         throw new Error('EMAIL_PROVIDER=postmark requires EMAIL_API_KEY');
       }
-      cached = new PostmarkEmailProvider(e.EMAIL_API_KEY, e.EMAIL_WEBHOOK_SECRET, {
-        // The web service sets NODE_ENV=production in `render.yaml`, and
-        // `next dev` never does — the line between a deploy that lost its
-        // secret and a laptop that never had one.
-        requireWebhookSecret: e.NODE_ENV === 'production',
-      });
+      cached = new PostmarkEmailProvider(e.EMAIL_API_KEY, e.EMAIL_WEBHOOK_SECRET);
       break;
     }
     case 'mailgun': {
@@ -37,7 +32,14 @@ export function emailProvider(): EmailProvider {
     }
     case 'local':
     default:
-      cached = new LocalEmailProvider();
+      cached = new LocalEmailProvider({
+        // Every web service in `render.yaml` sets NODE_ENV=production, and
+        // `next dev` never does — the line between an endpoint anyone can post
+        // to and one on a laptop. `local` is also the schema default, so a
+        // deploy that lost EMAIL_PROVIDER lands here and must not take a
+        // forged post for a customer's email either.
+        acceptInbound: e.NODE_ENV !== 'production',
+      });
       break;
   }
 

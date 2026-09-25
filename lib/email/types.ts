@@ -102,16 +102,21 @@ export type SendResult = {
   accepted: boolean;
 };
 
+/** Whether an inbound delivery authenticated, and if not, why not. */
+export type InboundVerdict = { verified: true } | { verified: false; reason: string };
+
 export interface EmailProvider {
   readonly name: string;
 
   send(email: OutboundEmail): Promise<SendResult>;
 
   /**
-   * Verify the webhook came from the provider. Returning false means the payload
-   * is still stored (for forensics) but never processed into a ticket.
+   * Verify the webhook came from the provider. A refused payload is still stored
+   * (for forensics) but never processed into a ticket, and the reason is stored
+   * with it: a missing secret and a forged request both arrive as an unverified
+   * row, and only the reason tells them apart once the log line has aged out.
    */
-  verifySignature(rawBody: string, headers: Record<string, string>): boolean;
+  verifySignature(rawBody: string, headers: Record<string, string>): InboundVerdict;
 
   parseInbound(payload: unknown): Promise<ParsedInboundEmail>;
 }

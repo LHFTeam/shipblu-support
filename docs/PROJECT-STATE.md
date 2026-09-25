@@ -1054,14 +1054,6 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
 - **Unset config:** `EMAIL_API_KEY`, `EMAIL_FROM_ADDRESS`, `EMAIL_REPLY_DOMAIN`,
   `EMAIL_WEBHOOK_SECRET`, `WIDGET_ALLOWED_ORIGINS`, `WIDGET_IDENTITY_SECRET`.
 
-  **`EMAIL_WEBHOOK_SECRET` is no longer optional in production.** Unset, the
-  web service used to accept every inbound email as verified; it now refuses
-  every one with a 401. Set it on the web service, and as the Basic Auth
-  password in Postmark's inbound webhook URL, before that change deploys — or
-  inbound mail stops. Postmark retries a 401 for about ten hours, and a refused
-  delivery is stored under no id, so a secret set inside that window recovers
-  what arrived meanwhile.
-
   **The last two are what stands between the widget and the merchant
   dashboard.** Measured 2026-08-31: `https://shipblu-support.onrender.com/widget`
   answers `content-security-policy: frame-ancestors 'self';`, so
@@ -1071,6 +1063,20 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   softer half: without it the dashboard can still say who its visitor is and the
   agent still sees a name, an address and a phone — the claim just never gets to
   link the person to their shipping account.
+
+  **`EMAIL_WEBHOOK_SECRET` is required, not optional, from #177.** Unset, the
+  Postmark driver used to accept every inbound email as verified; it now
+  refuses every one with a 401, and stores the refusal with its reason in
+  `webhook_events.error`. It is listed as unset above, and on 2026-09-25 nothing
+  could say otherwise: Render's API does not show values, and its logs start
+  after the last inbound email (2026-09-03). So before that change deploys, set
+  it on the web service **and** as the password in Postmark's inbound webhook
+  URL — the two have to change together. Postmark retries a 401 for about ten
+  hours, so a secret set inside that window should let the retries through;
+  whether a retry already scheduled uses a URL changed after it was scheduled
+  has not been observed. Nothing replays a refused row by itself —
+  `process_webhook` skips unverified rows — so a delivery that exhausts its
+  retries needs replaying by hand.
 
   **`KB_PUBLIC_HOST` was on this list and should not have been. It is set, to
   `support.shipblu.com`, and that domain still serves Freshdesk.** Measured

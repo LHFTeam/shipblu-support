@@ -1,7 +1,13 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { normaliseMessageId } from '../threading';
-import type { EmailProvider, OutboundEmail, ParsedInboundEmail, SendResult } from '../types';
+import type {
+  EmailProvider,
+  InboundVerdict,
+  OutboundEmail,
+  ParsedInboundEmail,
+  SendResult,
+} from '../types';
 
 /**
  * Development driver. Writes outbound mail to `.mail-outbox/` instead of sending
@@ -13,7 +19,17 @@ import type { EmailProvider, OutboundEmail, ParsedInboundEmail, SendResult } fro
 export class LocalEmailProvider implements EmailProvider {
   readonly name = 'local';
 
-  constructor(private readonly outboxDir = path.join(process.cwd(), '.mail-outbox')) {}
+  constructor(
+    /**
+     * Whether an inbound post is taken as genuine. There is nothing to verify
+     * it against — no vendor, no secret — so the answer is where this runs: yes
+     * on a laptop, where the endpoint is not reachable from outside; no under
+     * NODE_ENV=production, where it is. Staging is both `local` and
+     * production, on a public URL, and was the case this is for.
+     */
+    private readonly options: { acceptInbound: boolean },
+    private readonly outboxDir = path.join(process.cwd(), '.mail-outbox'),
+  ) {}
 
   async send(email: OutboundEmail): Promise<SendResult> {
     await mkdir(this.outboxDir, { recursive: true });
@@ -41,9 +57,12 @@ export class LocalEmailProvider implements EmailProvider {
     return { providerMessageId: id, rfcMessageId: email.messageId, accepted: true };
   }
 
-  /** Nothing to verify locally; the endpoint is not reachable from outside. */
-  verifySignature(): boolean {
-    return true;
+  verifySignature(): InboundVerdict {
+    if (this.options.acceptInbound) return { verified: true };
+    return {
+      verified: false,
+      reason: 'EMAIL_PROVIDER=local accepts inbound mail only outside NODE_ENV=production',
+    };
   }
 
   /**

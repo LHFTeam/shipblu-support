@@ -4,6 +4,7 @@ import type {
   EmailAddress,
   EmailProvider,
   InboundAttachment,
+  InboundVerdict,
   OutboundEmail,
   ParsedInboundEmail,
   SendResult,
@@ -57,14 +58,6 @@ export class PostmarkEmailProvider implements EmailProvider {
      * is the password half of that.
      */
     private readonly webhookSecret: string | undefined,
-    private readonly options: {
-      /**
-       * Whether an unset secret refuses every delivery rather than accepting
-       * every one. The factory answers it from `NODE_ENV`, not this class — see
-       * `verifySignature`. Required, so no construction can inherit an answer.
-       */
-      requireWebhookSecret: boolean;
-    },
   ) {}
 
   async send(email: OutboundEmail): Promise<SendResult> {
@@ -130,35 +123,47 @@ export class PostmarkEmailProvider implements EmailProvider {
     return { providerMessageId: result.MessageID ?? null, rfcMessageId: null, accepted: true };
   }
 
-  verifySignature(_rawBody: string, headers: Record<string, string>): boolean {
-    // An unset secret used to disable the check everywhere, with a warning as
-    // the only sign. On a deployed service that is a misconfiguration rather
-    // than a choice: anyone who finds the URL can post mail that becomes a
-    // customer's ticket, and a log line nobody is reading does not stop it. So
-    // it refuses there, the answer the WhatsApp and Meta verifiers already give
-    // an empty app secret. A refused delivery is still stored, and Postmark
-    // retries a 401 for about ten hours, so setting the secret inside that
-    // window loses nothing. Outside production the check stays off, because a
-    // laptop running `next dev` has no Postmark to share a secret with.
+  verifySignature(_rawBody: string, headers: Record<string, string>): InboundVerdict {
+    // An unset secret used to disable the check, with a warning as the only
+    // sign — so a deploy that lost the variable took any POST to the URL for a
+    // customer's email. It refuses instead, in every environment, which is the
+    // answer the WhatsApp and Meta verifiers give an empty app secret. There is
+    // no environment where accepting is safe: this driver only ever receives
+    // mail at a URL Postmark can reach, which is a URL anyone can reach. The
+    // development convenience belongs to the `local` driver.
+    //
+    // A refused delivery is stored with this reason and answered 401, which
+    // Postmark retries for about ten hours. Setting the secret on the service
+    // and as the password in Postmark's inbound webhook URL inside that window
+    // should let the retries through — whether a retry already scheduled picks
+    // up a changed URL is not something we have observed.
     if (!this.webhookSecret) {
-      if (this.options.requireWebhookSecret) {
-        console.error('[email:postmark] EMAIL_WEBHOOK_SECRET is not set — refusing inbound mail');
-        return false;
-      }
-      console.warn('[email:postmark] EMAIL_WEBHOOK_SECRET is not set — inbound is unauthenticated');
-      return true;
+      console.error('[email:postmark] EMAIL_WEBHOOK_SECRET is not set — refusing inbound mail');
+      return {
+        verified: false,
+        reason: 'EMAIL_WEBHOOK_SECRET is not set; every delivery is refused',
+      };
     }
 
+    // The scheme is case-insensitive (RFC 7617 §2); an intermediary that
+    // lower-cases it must not turn every genuine delivery into a refusal.
     const auth = headers['authorization'] ?? headers['Authorization'];
-    if (!auth?.startsWith('Basic ')) return false;
+    const basic = auth ? /^basic +(.+)$/i.exec(auth) : null;
+    if (!basic) return { verified: false, reason: 'no Basic Auth credential on the request' };
 
-    const decoded = Buffer.from(auth.slice('Basic '.length), 'base64').toString('utf8');
-    const password = decoded.slice(decoded.indexOf(':') + 1);
+    // A credential is `user:password`. Without the colon there is no password
+    // half, and reading the whole token as one would accept the bare secret.
+    const decoded = Buffer.from(basic[1]!, 'base64').toString('utf8');
+    const colon = decoded.indexOf(':');
+    if (colon === -1) return { verified: false, reason: 'Basic Auth credential has no password' };
+    const password = decoded.slice(colon + 1);
 
     const a = Buffer.from(password);
     const b = Buffer.from(this.webhookSecret);
-    if (a.length !== b.length) return false;
-    return timingSafeEqual(a, b);
+    if (a.length !== b.length || !timingSafeEqual(a, b)) {
+      return { verified: false, reason: 'Basic Auth password did not match EMAIL_WEBHOOK_SECRET' };
+    }
+    return { verified: true };
   }
 
   async parseInbound(payload: unknown): Promise<ParsedInboundEmail> {
