@@ -21,6 +21,7 @@ import {
   sideConversations,
   ticketCategories,
   ticketRootCauses,
+  groups,
   ticketStatuses,
   whatsappTemplates,
 } from '@/db/schema';
@@ -29,6 +30,7 @@ import { refreshPrimary } from '@/lib/categorise/apply';
 import { CAUSE_REQUIRED_AREAS } from '@/lib/categorise/taxonomy';
 import { requestAssignmentSweep, setAccepting } from '@/lib/assignment/presence';
 import { requireAgent, requirePermission } from '@/lib/auth/guard';
+import { isUuid } from '@/lib/http/uuid';
 import { env } from '@/lib/env';
 import { can } from '@/lib/auth/permissions';
 import { canSeeChannel, readOnlyReason } from '@/lib/tickets/channel-policy';
@@ -115,6 +117,11 @@ function ok(): ActionState {
 }
 
 async function loadConversation(agent: SessionAgent, conversationId: string) {
+  // Every action on a ticket starts here with an id out of a form field. A
+  // malformed one is a ticket that does not exist, not a 22P02 thrown out of
+  // the action — which returns no state, so the agent saw a blank failure.
+  if (!isUuid(conversationId)) return null;
+
   const rows = await db
     .select({
       conversation: conversations,
@@ -865,6 +872,7 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
 
   switch (field) {
     case 'status': {
+      if (!isUuid(value)) return { error: 'Unknown status' };
       const statuses = await db
         .select({
           id: ticketStatuses.id,
@@ -930,6 +938,21 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
       if (!can(agent, 'ticket.assign')) return { error: 'You cannot reassign tickets' };
       const assigneeAgentId = value || null;
 
+      // The picker lists active agents only, but the id comes back as a form
+      // field and the picker is not the authority. The foreign key would prove
+      // the agent exists; it would not stop a ticket being handed to somebody
+      // who has left, where nobody will ever answer it.
+      if (assigneeAgentId) {
+        if (!isUuid(assigneeAgentId)) return { error: 'Unknown agent' };
+        const [assignee] = await db
+          .select({ isActive: agents.isActive })
+          .from(agents)
+          .where(eq(agents.id, assigneeAgentId))
+          .limit(1);
+        if (!assignee) return { error: 'Unknown agent' };
+        if (!assignee.isActive) return { error: 'That agent is deactivated' };
+      }
+
       await db.transaction(async (tx) => {
         await tx
           .update(conversations)
@@ -948,6 +971,18 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
 
     case 'group': {
       const groupId = value || null;
+
+      // Re-read rather than left to the foreign key, whose violation is a throw
+      // and so a blank failure in the console instead of a sentence.
+      if (groupId) {
+        if (!isUuid(groupId)) return { error: 'Unknown group' };
+        const [group] = await db
+          .select({ id: groups.id })
+          .from(groups)
+          .where(eq(groups.id, groupId))
+          .limit(1);
+        if (!group) return { error: 'Unknown group' };
+      }
 
       await db.transaction(async (tx) => {
         await tx.update(conversations).set({ groupId }).where(eq(conversations.id, conversationId));

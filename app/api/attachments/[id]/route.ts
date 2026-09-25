@@ -10,6 +10,7 @@ import {
 } from '@/db/schema';
 import { can } from '@/lib/auth/permissions';
 import { getSessionAgent } from '@/lib/auth/session';
+import { isUuid } from '@/lib/http/uuid';
 import { canSeeChannel } from '@/lib/tickets/channel-policy';
 import { signedUrl } from '@/lib/storage';
 
@@ -37,6 +38,9 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   if (!agent) return NextResponse.json({ error: 'unauthorised' }, { status: 401 });
 
   const { id } = await context.params;
+  // A malformed id is a link to nothing, not a server fault — Postgres would
+  // answer it with 22P02, which this route used to pass on as a 500.
+  if (!isUuid(id)) return NextResponse.json({ error: 'not found' }, { status: 404 });
 
   const rows = await db
     .select({
