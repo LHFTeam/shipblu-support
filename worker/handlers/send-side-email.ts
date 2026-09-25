@@ -4,6 +4,7 @@ import { agents, conversations, sideConversationMessages, sideConversations } fr
 import { env, replyDomain } from '@/lib/env';
 import { emailProvider } from '@/lib/email/providers';
 import { REPLY_ABOVE_MARKER } from '@/lib/email/quote-strip';
+import { textToHtml } from '@/lib/html/sanitize';
 import { replyToAddress } from '@/lib/email/reply-address';
 import { buildSideSubjectTag, formatMessageId } from '@/lib/email/threading';
 import type { OutboundEmail } from '@/lib/email/types';
@@ -98,7 +99,9 @@ export async function sendSideEmail(job: ClaimedJob): Promise<void> {
     .trimEnd();
 
   const htmlBody = [
-    row.message.bodyHtml ?? `<p>${escapeHtml(row.message.bodyText)}</p>`,
+    // A side message is written as text only, so its paragraphs come from the
+    // same textToHtml the ticket reply uses, rather than one <p> joined by <br>s.
+    row.message.bodyHtml ?? textToHtml(row.message.bodyText),
     // The marker doubles as the strip anchor for the hub's reply, so it has to
     // survive in the HTML part too — hidden from view, present in source.
     `<div style="color:#999;font-size:11px;margin-top:24px">${REPLY_ABOVE_MARKER}</div>`,

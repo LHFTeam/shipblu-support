@@ -20,6 +20,13 @@ describe('textToHtml', () => {
     expect(textToHtml('First paragraph.\r\n\r\nSecond paragraph,\r\nwith a line break.')).toBe(lf);
   });
 
+  it('treats a line of only spaces or tabs as the blank line it looks like', () => {
+    const blank = '<p>a</p>\n<p>b</p>';
+    expect(textToHtml('a\r\n \r\nb')).toBe(blank);
+    expect(textToHtml('a\n\t\nb')).toBe(blank);
+    expect(textToHtml('a\n \t \n\n b')).toBe(blank);
+  });
+
   it('leaves no carriage return behind for a lone CR either', () => {
     expect(textToHtml('one\rtwo')).toBe('<p>one<br>two</p>');
   });
