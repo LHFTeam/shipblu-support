@@ -100,6 +100,31 @@ export async function cleanup(_job: ClaimedJob): Promise<void> {
     .delete(conversationPresence)
     .where(lt(conversationPresence.updatedAt, new Date(Date.now() - 60 * 60 * 1000)));
 
+  // One statement, deliberately, and measured rather than assumed — an earlier
+  // attempt at this fix batched it into 5,000-row deletes and was strictly
+  // worse.
+  //
+  // The cost here is not the deleting, it is *finding* the rows. No index
+  // serves this predicate: an OR needs every arm indexed before Postgres will
+  // build a BitmapOr, and only the third arm has one
+  // (`webhook_events_unprocessed_idx`, partial on `processed_at is null`). So
+  // the plan is a sequential scan of the whole table, and on 2026-09-25 that
+  // was `Seq Scan … Rows Removed by Filter: 332234` at 18,959 ms to find the
+  // first 5,000 of 27,976 matches in 436,200 rows.
+  //
+  // Batching pays that scan once *per batch* instead of once, so six batches
+  // cost six full scans. The bound that looks like it makes each statement
+  // cheap makes the job as a whole quadratic — see §6.68, which is the record
+  // of getting this wrong before getting it right.
+  //
+  // What actually keeps this inside its deadline is `DB_QUERY_TIMEOUT_MS` at
+  // 180,000 on `shipblu-nightly` alone, which is the per-service exception
+  // `lib/env.ts` describes. The table is at steady state — the oldest row is
+  // exactly the retention horizon — so the scan grows with daily volume rather
+  // than without bound. Indexing the other two arms is the real optimisation
+  // and is written up in §6.68 rather than done here: it is two partial indexes
+  // and a build lock on a 1.2 GB table, which is its own change with its own
+  // window (§6.64).
   const oldWebhooks = await db.delete(webhookEvents).where(webhookRetentionFilter());
 
   const oldJobs = await db.delete(jobs).where(completedJobRetentionFilter());

@@ -3904,6 +3904,102 @@ null`, and argued it from write cost and 13 MB of disk. The read side turned
     that asserts what a service is configured to do should be read as a claim
     with a date on it, re-checked against `list_services` before it is acted on.
 
+68. **Two changes that were each sound shipped in one release and produced a
+    ratchet.** _2026-09-25, found by comparing `list_services` to `render.yaml`
+    — not by the comparison, but because `shipblu-nightly` was the only cron in
+    the listing with no `lastSuccessfulRunAt` at all._
+
+    `#153` gave every query a 30-second deadline. `#155` widened webhook
+    retention to three clauses. Both landed in `#159`, deployed 2026-09-20
+    23:38. The `cleanup` run that same night — on the old code, hours earlier —
+    took **25,483 ms**. The deadline it was about to be given was 30,000.
+
+    | Night | `cleanup` |                        |
+    | ----- | --------- | ---------------------- |
+    | 09-20 | 25,483 ms | ok, pre-deadline       |
+    | 09-21 | 27,249 ms | ok                     |
+    | 09-22 | 30,240 ms | ok                     |
+    | 09-23 | —         | **cancelled, `57014`** |
+    | 09-24 | 31,929 ms | ok                     |
+    | 09-25 | —         | **cancelled, `57014`** |
+
+    **The compounding is the part worth understanding.** Every night the delete
+    is cancelled, the rows it should have removed are still there to slow the
+    next attempt — so the table and the runtime climb together and the failure
+    gets likelier, not flatter. 402,172 rows on 09-20; 440,587 and 1,172 MB on
+    09-25. A bare `count(*)` on the table timed out at 60 s while this was being
+    diagnosed.
+
+    And the cron chains `cleanup && rollup_metrics`, so **a failed night
+    silently skips the rollup too**. Metrics survived only because the failures
+    were not consecutive and `rollup_metrics` recomputes three days back — which
+    stops being true the moment two land in a row, which the ratchet was making
+    likelier every night.
+
+    Neither PR could have caught this, and that is the lesson rather than an
+    excuse. `#153` measured the deadline against request paths, where 30 s is
+    already past the point a reader has left. `#155` measured retention against
+    correctness — which rows, not how long. The interaction lives in neither
+    diff, and nothing in CI can see it: Vitest runs no SQL, and the `database`
+    job runs `cleanup` against an empty schema where one statement and a
+    thousand are indistinguishable. **A deadline is a claim about every query's
+    duration, so adding one is a change to every long-running statement in the
+    system, whether or not the diff mentions them.**
+
+    **The fix is the deadline, and it took a wrong turn to establish that.**
+    `DB_QUERY_TIMEOUT_MS` is set to 180,000 on `shipblu-nightly` alone — the
+    per-service exception `lib/env.ts` already describes, on the one service
+    that is the case it describes. The first attempt was to batch the delete
+    into 5,000-row statements, and review caught that it is **strictly worse**
+    before it shipped.
+
+    The reason is worth keeping, because the batching looked obviously right:
+    **the cost is not the deleting, it is finding the rows.** No index serves
+    this predicate — an `OR` needs every arm indexed before Postgres will build
+    a `BitmapOr`, and only the third arm has one. So the plan is a sequential
+    scan of the whole table, and a bounded `LIMIT` does not bound a scan. On
+    2026-09-25:
+
+    ```
+    Seq Scan on webhook_events  (actual time=970.599..18946.837 rows=5000)
+      Rows Removed by Filter: 332234
+      Buffers: shared hit=13339 read=97073
+    Execution Time: 18959.439 ms
+    ```
+
+    18,959 ms to find the _first_ 5,000 of **27,976 matches in 436,200 rows**.
+    Batching pays that per batch, so six batches cost six full scans where one
+    statement cost one. The bound that appears to make each statement cheap
+    makes the job quadratic.
+
+    Two numbers settle what the problem actually was. Only **6% of the table is
+    deletable**, and the oldest row is **exactly the retention horizon** — so
+    retention keeps the table bounded whenever it runs, and this was never a
+    backlog that needed draining in pieces. It was one scan that outgrew one
+    deadline.
+
+    **Left open, deliberately: indexing the predicate.** Two partial indexes
+    would let the other two arms be served — `processed_at` where it is not
+    null, and `received_at` where `signature_verified` is false — and turn the
+    scan into a bitmap. That is the real optimisation, and it is a build lock on
+    a 1.2 GB table, which §6.64 is the lesson about. Its own change, its own
+    window. Not urgent: at 30-day retention and current volume the scan grows
+    with daily traffic rather than without bound, and 180 s is several times the
+    headroom needed.
+
+    **Also left, with reasons: the `&&`.** `cleanup && rollup_metrics` still
+    skips the rollup when cleanup fails. `;` is what the sibling cron uses and
+    the argument there is explicit — a snapshot's measurement cannot be taken
+    again once the hour has passed. A rollup's can: it rebuilds three days on
+    every run, so a skipped night self-heals on the next one. Swapping the
+    operator would trade a visible failure for a silent one, since the cron's
+    exit code would then be the rollup's alone. The reason it was ever a problem
+    was cleanup failing nightly, which is what the deadline fixes.
+
+    The deadline was raised before any of this was understood, because the next
+    run was hours away and any fix needed a deploy. That ordering was right even
+    though the fix it was buying time for turned out to be the wrong one.
+
 ## 7. Verification already done
 
 - **The knowledge-base role floor, against a real Postgres.** _2026-09-04._ The

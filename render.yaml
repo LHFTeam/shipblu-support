@@ -466,6 +466,33 @@ projects:
             envVars:
               - fromGroup: shipblu-shared
               - fromGroup: shipblu-support-production
+              # The per-service exception lib/env.ts describes for this variable,
+              # and the one service that is the case it describes: the 30-second
+              # default is calibrated for a request path, where "a page that has
+              # been waiting thirty seconds has already lost its reader". This
+              # is unattended maintenance with no reader at all, and retention
+              # legitimately scans two tables that grow without bound.
+              #
+              # Set on 2026-09-25 after the cleanup job was cancelled mid-delete
+              # twice in five nights (57014) — see docs/PROJECT-STATE.md §6.68.
+              # This *is* the fix rather than a stop-gap, which took a wrong
+              # turn to establish: batching the delete was tried first and is
+              # strictly worse, because the cost is a sequential scan to find
+              # the rows and batching pays it once per batch. The scan is ~19 s
+              # on a 436,200-row table at steady state; three minutes is real
+              # headroom against the growth, and indexing the predicate is the
+              # optimisation §6.68 leaves open.
+              #
+              # **It covers `rollup_metrics` too**, which is the second job on
+              # this cron and is not what the headroom was measured for. That is
+              # accepted rather than overlooked: the rollup is a delete-and-
+              # insert rebuild that runs in ~3 s, so a run that reaches even 30 s
+              # is already wrong in a way a tighter deadline would only truncate
+              # rather than diagnose. Below the `transaction_timeout = '5min'`
+              # on the postgres role deliberately, so which limit fired is
+              # legible.
+              - key: DB_QUERY_TIMEOUT_MS
+                value: '180000'
 
       # --------------------------------------------------------------- staging
       - name: Staging
