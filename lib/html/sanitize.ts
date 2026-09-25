@@ -159,7 +159,11 @@ export function textToHtml(text: string): string {
   const escape = (value: string) =>
     value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
+  // Line endings first. A browser submits a textarea's breaks as CRLF — the HTML
+  // spec normalises them for the form data — so `\n{2,}` below never matched an
+  // agent's blank line, and every console reply went out as one paragraph.
   return text
+    .replace(/\r\n?/g, '\n')
     .split(/\n{2,}/)
     .map((paragraph) => paragraph.trim())
     .filter(Boolean)

@@ -388,6 +388,15 @@ This is low priority, one provider per PR.
   provider has accepted a send means a retry, and a retry means a duplicate
   message to a customer.
 
+### 2.9 Replies never get paragraphs
+
+Found while verifying 2.2 end to end, not by the audit. A browser submits a
+textarea's line breaks as CRLF, and `textToHtml` (`lib/html/sanitize.ts`) split
+paragraphs on `/\n{2,}/`, which `\r\n\r\n` never matches. So every agent reply
+and every canned response saved from the admin textarea went out as one `<p>`
+joined by `<br>`s. The fix normalises line endings before splitting, with the
+first tests `sanitize.ts` has had.
+
 ## Stage 3 — shared primitives
 
 Each PR also switches every caller in its seam, because `dead-exports` requires
