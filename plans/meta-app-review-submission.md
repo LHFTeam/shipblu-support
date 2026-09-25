@@ -20,6 +20,45 @@ under it are amended to match; the
 the full reasoning, and it applies to the messaging pair as much as to the
 comment pair._
 
+## Result of the 2026-09-19 submission
+
+Submitted 2026-09-19 at 04:15 GMT+3. The review has come back **partly
+approved**. This is the outcome as the App Dashboard shows it. Meta's written
+feedback for the refusals has not been recorded here yet, and it is the first
+thing to read before resubmitting.
+
+| Outcome          | Items                                                                                                                                                                                                                                                                               |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Approved**     | `pages_messaging`, `pages_show_list`, `pages_manage_metadata`, `pages_read_engagement`, `pages_user_locale`, `pages_user_gender`, `instagram_basic`, `instagram_manage_messages`, `whatsapp_business_messaging`, `whatsapp_business_management`, Business Asset User Profile Access |
+| **Not approved** | `pages_read_user_content`, `pages_manage_engagement`, `instagram_manage_comments`                                                                                                                                                                                                   |
+| **Renewed**      | `public_profile`, `email`                                                                                                                                                                                                                                                           |
+
+Four things follow from it:
+
+- **Every refusal is a comment permission.** All three are the comment set,
+  and it is the one part of the submission whose screencast has to show a write
+  to a comment. As of the last check none had ever succeeded here (see the
+  `pages_manage_engagement` evidence below). Everything messaging-shaped was
+  approved. Why these three were refused is Meta's feedback to answer, not an
+  inference to make from this table. The resubmission is the three sections
+  written out below, so read the feedback against them.
+- **Human Agent is not in this list.** A feature request is not a permission.
+  Check whether it was part of this submission or is still pending on its own;
+  the 2026-09-06 refusal (§5.2) stands until the dashboard says otherwise.
+- **The approved Instagram pair is the Page connection's.** `instagram_basic`
+  and `instagram_manage_messages` are granted, but replies go out over the
+  direct connection while `INSTAGRAM_ACCESS_TOKEN` is set (the footnote under
+  the table below). An approval for one connection does not grant the other.
+  Run `npm run job -- check_meta_permissions` to see what each token now holds
+  before concluding that Instagram replies are covered.
+- **`email` was renewed** despite the "Remove" verdict below. It is harmless,
+  and the verdict only matters for the next submission.
+
+For `instagram_manage_comments` in particular, settle the Page-versus-direct
+question in [its section](#instagram_manage_comments-written-out) before
+resubmitting. Resubmitting it unchanged while the console acts over
+`graph.instagram.com` means filming the other connection's permission again.
+
 ## The list as it stands
 
 Eleven new requests, two renewals:
