@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { asc, eq, sql } from 'drizzle-orm';
+import { asc, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels, groups, whatsappAccounts, whatsappTemplates } from '@/db/schema';
 import { ChannelBadge } from '@/components/channel';
@@ -8,7 +8,7 @@ import { requirePermission } from '@/lib/auth/guard';
 import { env } from '@/lib/env';
 import { listFolderOptions } from '@/lib/kb/admin';
 import { offerableFaqFolders, parseWidgetConfig } from '@/lib/widget/config';
-import { ChannelForm, WebchatSettings } from './forms';
+import { ChannelEditor, ChannelForm, WebchatSettings } from './forms';
 import { NewWhatsAppAccount, WhatsAppAccountEditor, type WhatsAppAccountRow } from './waba-forms';
 
 export const dynamic = 'force-dynamic';
@@ -35,13 +35,17 @@ export default async function ChannelsPage() {
 
     db.select().from(whatsappAccounts).orderBy(asc(whatsappAccounts.name)),
 
+    // Approved and total, because they answer different questions. Approved is
+    // what an agent can actually pick; total is what the sync last read back
+    // from Meta, and zero of it is the difference between "connected" and
+    // "connected to something that is not this WABA".
     db
       .select({
         accountId: whatsappTemplates.whatsappAccountId,
+        approved: sql<number>`count(*) filter (where ${whatsappTemplates.status} = 'APPROVED')::int`,
         total: sql<number>`count(*)::int`,
       })
       .from(whatsappTemplates)
-      .where(eq(whatsappTemplates.status, 'APPROVED'))
       .groupBy(whatsappTemplates.whatsappAccountId),
 
     listFolderOptions(),
@@ -66,14 +70,15 @@ export default async function ChannelsPage() {
     .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0];
 
   const accountChoices = accountList.map((account) => ({ id: account.id, name: account.name }));
-  const templatesByAccount = new Map(templateCounts.map((row) => [row.accountId, row.total]));
+  const templatesByAccount = new Map(templateCounts.map((row) => [row.accountId, row]));
 
   const accounts: WhatsAppAccountRow[] = accountList.map((account) => ({
     ...account,
     numbers: channelList
       .filter((channel) => channel.whatsappAccountId === account.id)
       .map((channel) => channel.name),
-    templateCount: templatesByAccount.get(account.id) ?? 0,
+    templateCount: templatesByAccount.get(account.id)?.approved ?? 0,
+    templateTotal: templatesByAccount.get(account.id)?.total ?? 0,
   }));
 
   // The WABA the environment already names, offered as a starting value when no
@@ -149,7 +154,9 @@ export default async function ChannelsPage() {
                 {/* A number with no account sends with the default one's
                     credential. Fine while there is exactly one account, and a
                     real hazard once there are two — so it is only called out
-                    when there is something to be wrong about. */}
+                    when there is something to be wrong about. Edit, beside it,
+                    is what clears it: the badge used to name a problem the
+                    console had no way to fix. */}
                 {isWhatsApp && !account && accounts.length > 1 ? (
                   <Badge tone="warning">no business account</Badge>
                 ) : null}
@@ -164,6 +171,11 @@ export default async function ChannelsPage() {
                         ? 'the widget'
                         : (channel.config.address as string) || 'no address'}
                 </span>
+                <ChannelEditor
+                  channel={channel}
+                  groups={groupList}
+                  whatsappAccounts={accountChoices}
+                />
               </li>
             );
           })}

@@ -96,10 +96,10 @@ export function automatedReplyBlocked(
 export type AutomatedReply = {
   conversationId: string;
   channel: string;
-  /** The requester's address; only used on email, where there is nowhere else to send. */
+  /** The requester's address; used where the carrier is email and there is nowhere else to send. */
   requesterEmail: string | null;
   bodyText: string;
-  /** Ignored off email, which sends text. */
+  /** Ignored on any channel that does not send by email, which sends text. */
   bodyHtml: string | null;
   /** Shown on the timeline in place of an agent's name: `automation:Out of hours`. */
   actorLabel: string;
@@ -110,7 +110,14 @@ export type AutomatedReply = {
 
 /** The new message's id, for the caller's log and follow-up writes. */
 export async function deliverAutomatedReply(reply: AutomatedReply): Promise<string> {
-  const isEmail = reply.channel === 'email';
+  // Asked of the carrier rather than of the channel name, because `send_email`
+  // is what carries `portal` and anything unrecognised as well as `email` — and
+  // it is the carrier that decides whether an HTML part and a recipient are
+  // worth storing. Testing `channel === 'email'` stored a portal reply with no
+  // HTML body and no address, and the worker then rebuilt the body as one
+  // escaped paragraph with every line break in a three-paragraph message lost.
+  const job = carrierFor(reply.channel);
+  const isEmail = job === 'send_email';
   // Web chat has no carrier: the message is in the database, and the widget's
   // stream is already reading from it. Marking it pending would leave every
   // chat reply showing as unsent forever.
@@ -155,11 +162,7 @@ export async function deliverAutomatedReply(reply: AutomatedReply): Promise<stri
   });
 
   if (!isWebchat) {
-    await enqueue(
-      carrierFor(reply.channel),
-      { messageId },
-      { priority: 20, dedupeKey: `send:${messageId}` },
-    );
+    await enqueue(job, { messageId }, { priority: 20, dedupeKey: `send:${messageId}` });
   }
 
   return messageId;

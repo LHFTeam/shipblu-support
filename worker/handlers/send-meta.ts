@@ -9,7 +9,7 @@ import {
 } from '@/lib/meta/client';
 import { commentReplyTarget } from '@/lib/meta/comments';
 import { metaConnection } from '@/lib/meta/connection';
-import { explainMetaSendError } from '@/lib/meta/errors';
+import { explainMetaSendError, MetaSendRefusal } from '@/lib/meta/errors';
 import type { MetaPlatform } from '@/lib/meta/types';
 import { messagingTag, metaWindowState, type MetaSendAuthor } from '@/lib/meta/window';
 import type { ClaimedJob } from '@/lib/queue';
@@ -180,13 +180,7 @@ async function deliver(
   // is: thread control can be handed to another tool between an agent writing
   // and this job running.
   if (!target.thread.canSend) {
-    throw new MetaApiError(
-      target.thread.explanation ?? 'This thread cannot be answered.',
-      0,
-      null,
-      null,
-      false,
-    );
+    throw new MetaSendRefusal(target.thread.explanation ?? 'This thread cannot be answered.');
   }
 
   const window = metaWindowState(row.conversation.lastCustomerMessageAt);
@@ -201,16 +195,12 @@ async function deliver(
     // `MetaSendAuthor`. Refused rather than sent untagged, which Graph would
     // reject anyway, and refused permanently, because no retry makes a rule the
     // author.
-    throw new MetaApiError(
+    throw new MetaSendRefusal(
       window.needsHumanAgentTag
         ? 'An automated reply cannot go out more than 24 hours after the customer wrote: ' +
             'past that only the HUMAN_AGENT tag sends, and it may only be used for a message ' +
             'a person actually wrote.'
         : 'The 7-day messaging window has closed; only the customer can reopen this conversation.',
-      400,
-      null,
-      null,
-      false,
     );
   }
 

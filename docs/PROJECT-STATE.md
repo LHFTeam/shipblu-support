@@ -1636,6 +1636,22 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   nothing. `db/sql/004_bilingual_backfill.sql` moves the content anyway, because
   staging and any future environment will not be empty — see §6.60.
 
+- **`Merchant Care WABA` is connected to an id that holds no templates, and
+  nothing said so.** The row was added by hand on 2026-08-23 17:33, 33 minutes
+  after the hourly sync adopted the real one, and carries
+  `waba_id = 26784926584531240` — 17 digits, where the working account
+  (`128772296801141`) and every other WABA id here are 15. It has never appeared
+  as `entry[0].id` on any of the 131,690 WhatsApp webhooks received, owns no
+  channel, and has returned zero templates on every sync since.
+
+  The sync is not failing: `graph()` throws on any non-2xx and `last_sync_error`
+  is null, so Meta is answering **200 with an empty list**. That is the same
+  answer an empty WABA gives and the same answer an id that is not a WABA gives,
+  which is why this sat unnoticed. One call settles which:
+  `GET /{id}?fields=id,name` with the same token names the object. Until
+  somebody runs it, the console now at least says the account read back nothing
+  — see the `no templates` badge added with this note.
+
 - **`contacts.locale` is never written, so every contact reads `'en'`.** All
   **28,661** of them sit at the column default (re-counted 2026-09-20; it was
   6,244 when this was written, so the cost of the workaround is growing), and `lib/contacts/merge.ts` already
@@ -3999,6 +4015,36 @@ null`, and argued it from write cost and 13 MB of disk. The read side turned
     The deadline was raised before any of this was understood, because the next
     run was hours away and any fix needed a deploy. That ordering was right even
     though the fix it was buying time for turned out to be the wrong one.
+
+69. **A null `whatsapp_account_id` is invisible to every read and unreachable by
+    the sync that would repair it.** Rows that predate multi-WABA carry null, and
+    three separate filters then agree to ignore them:
+    `listApprovedTemplates(accountId)` matches on `= accountId`, so an agent's
+    template picker is simply empty; the upsert's conflict target is
+    `(whatsapp_account_id, name, language)` and a null never matches, so the next
+    sync inserts a second copy beside each orphan rather than updating it; and
+    `staleTemplateFilter` skips nulls too, so the orphan stays `APPROVED` for
+    ever. Nothing logs, and the console shows the account as synced.
+
+    The adoption in `ensureEnvironmentAccount` is the only thing that clears
+    them, and it used to run only on the call that _inserted_ the row — so
+    connecting `WHATSAPP_WABA_ID` by hand on the channels screen, which that
+    screen invites, took the insert path away and left every template orphaned.
+    It now runs on every call. That is safe because a null link can only mean
+    "configured before there were accounts": `saveChannel` refuses a WhatsApp
+    channel with no account once one exists, and a template is only ever written
+    by the sync, which always names one.
+
+70. **A form field that is not rendered submits nothing, and `text()` reads
+    nothing as `''`.** Ticking "send nothing" on an auto-response unmounts the
+    four body textareas, so saving wrote four empty strings over the Arabic,
+    English and holiday messages behind them — muting a rule for a week
+    destroyed its content, and un-ticking the box gave back four blank boxes
+    with no undo. The guard that would have caught it
+    (`!silent && !bodyAr && !bodyEn`) is skipped in exactly the case that does
+    the damage. A server action must write only the fields the form actually had
+    on screen; a conditionally rendered field means a conditional in the
+    `values` object too.
 
 ## 7. Verification already done
 

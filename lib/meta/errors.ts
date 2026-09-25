@@ -41,6 +41,25 @@ export type MetaSendContext = {
  */
 const UNSPECIFIED_CODES = new Set([1, 2]);
 
+/**
+ * A send this app refused itself, before any request was made.
+ *
+ * Its own type rather than a shape to recognise. The shape does not work in
+ * either direction: `lib/meta/client.ts` raises status 0 with a null code when
+ * `fetch` fails, which is the same shape a thread-control refusal has, and the
+ * 7-day refusal carries an ordinary-looking HTTP 400 that read as Graph having
+ * answered — so it printed `(Meta: code —, subcode —, HTTP 400)` under a
+ * sentence Meta never sent. A class is a fact about who raised it, which is the
+ * thing being asked.
+ */
+export class MetaSendRefusal extends MetaApiError {
+  constructor(message: string, status = 0) {
+    // Never transient: nothing about a refusal we made changes on a retry.
+    super(message, status, null, null, false);
+    this.name = 'MetaSendRefusal';
+  }
+}
+
 export function explainMetaSendError(error: MetaApiError, context: MetaSendContext): string {
   const base = error.userMessage ?? error.message;
 
@@ -54,7 +73,16 @@ export function explainMetaSendError(error: MetaApiError, context: MetaSendConte
     and running one through the guesses here would replace a sentence that says
     exactly what is wrong with one that speculates.
   */
-  if (!cameFromGraph(error)) return base;
+  if (error instanceof MetaSendRefusal) return base;
+
+  /*
+    The request never reached Graph at all — DNS, a dropped socket, a timeout.
+    Its message already names the cause, and there is no code, subcode or trace
+    id to print because nothing answered. Left before the branches below because
+    a null code otherwise reads as one of Meta's unspecified refusals and earns
+    a paragraph about the 24-hour window that has nothing to do with it.
+  */
+  if (error.status === 0) return base;
 
   // An expired token fails every send on every channel identically, so say that
   // rather than letting an agent read it as something they or the customer did.
@@ -625,7 +653,15 @@ export function explainMetaModerationError(
   return withReference(base, error, context.connection);
 }
 
-/** Graph answered. A status of 0 with no code means the request never got there. */
+/**
+ * Graph answered. A status of 0 with no code means the request never got there.
+ *
+ * Only the moderation path needs asking. The send path raises `MetaSendRefusal`
+ * for a refusal it made itself and tests for that type instead, because there
+ * the shape was ambiguous — a self-refusal and a dropped socket look alike.
+ * Nothing refuses a hide or a delete before the request, so here a status of 0
+ * can only be the socket.
+ */
 function cameFromGraph(error: MetaApiError): boolean {
   return error.status !== 0 || error.code !== null;
 }

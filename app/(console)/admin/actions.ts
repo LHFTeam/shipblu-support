@@ -240,8 +240,30 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
   await requirePermission('admin.channels');
 
   const id = String(formData.get('id') ?? '');
-  const type = String(formData.get('type') ?? '');
   const name = String(formData.get('name') ?? '').trim();
+
+  // On an edit the type is the stored row's, never the form's. Everything
+  // below rebuilds `config` and the account link from the type, so a request
+  // naming `email` for a WhatsApp channel's id would otherwise wipe its phone
+  // number id and its account, and its inbound traffic would route nowhere —
+  // and the same request could rewrite a `portal` or `api` row that no form
+  // edits. The form's field only says what to create.
+  let type = String(formData.get('type') ?? '');
+  if (id) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      return { error: 'That form is out of date — reload the page and try again' };
+    }
+
+    const existing = await db
+      .select({ type: channels.type })
+      .from(channels)
+      .where(eq(channels.id, id))
+      .limit(1);
+
+    if (!existing[0]) return { error: 'That channel no longer exists' };
+    type = existing[0].type;
+  }
+
   const defaultGroupId = String(formData.get('defaultGroupId') ?? '') || null;
   const phoneNumberId = String(formData.get('phoneNumberId') ?? '').trim();
   const address = String(formData.get('address') ?? '').trim();
@@ -249,7 +271,7 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
 
   if (!name) return { error: 'Give the channel a name' };
   if (!['email', 'whatsapp', 'webchat', 'facebook', 'instagram', 'whatsapp_bot'].includes(type)) {
-    return { error: 'Unknown channel type' };
+    return { error: id ? 'This channel is not edited here' : 'Unknown channel type' };
   }
 
   // The phone number id is what routes an inbound event to this channel, so a

@@ -33,7 +33,7 @@ import { env } from '@/lib/env';
 import { can } from '@/lib/auth/permissions';
 import { canSeeChannel, readOnlyReason } from '@/lib/tickets/channel-policy';
 import type { SessionAgent } from '@/lib/auth/session';
-import { htmlToText, sanitiseEmailHtml } from '@/lib/html/sanitize';
+import { htmlToText, sanitiseEmailHtml, textToHtml } from '@/lib/html/sanitize';
 import { enqueue } from '@/lib/queue';
 import { onAgentReply, onGroupChanged, onStatusChanged } from '@/lib/sla';
 import {
@@ -1141,20 +1141,6 @@ async function lastInboundChannelMessageId(conversationId: string): Promise<stri
     .limit(1);
 
   return rows[0]?.channelMessageId ?? null;
-}
-
-/**
- * The composer is plain text. Converting here rather than shipping a rich-text
- * editor keeps the sanitiser's job small — there is no agent-authored markup to
- * validate, only our own.
- */
-function textToHtml(text: string): string {
-  const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-  return escaped
-    .split(/\n{2,}/)
-    .map((paragraph) => `<p>${paragraph.replace(/\n/g, '<br>')}</p>`)
-    .join('\n');
 }
 
 // --- Shipments --------------------------------------------------------------

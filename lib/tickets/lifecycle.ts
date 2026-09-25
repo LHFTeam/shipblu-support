@@ -36,6 +36,15 @@ import { applySlaOnCreate, onCustomerReply } from '@/lib/sla';
  * describe the ticket the team will actually find in the morning: a rule that
  * moved this one into a group with its own calendar has moved which hours count
  * as closed, and answering before that ran would tell the customer we are open.
+ *
+ * It is also the only step handed the wall clock rather than `at`. Everything
+ * else here is measuring the customer's message and wants the moment it was
+ * sent; the acknowledgement is *being sent now* and has to say so — "we open on
+ * Sunday at 09:00" is counted from the instant it leaves, not from the header on
+ * the mail that prompted it. On email those are not the same instant and the
+ * difference is not ours: `receivedAt` is Postmark's `Date`, which is the
+ * sender's own header, so a customer whose clock reads 23:00 at 11:00 Cairo
+ * would otherwise be told the office is shut in the middle of a working morning.
  */
 export async function afterInboundMessage(
   conversationId: string,
@@ -46,14 +55,14 @@ export async function afterInboundMessage(
     await runAutomations('on_create', conversationId);
     await applySlaOnCreate(conversationId);
     await autoAssign(conversationId);
-    await maybeSendAutoResponse(conversationId, at);
+    await maybeSendAutoResponse(conversationId);
     return;
   }
 
   await onCustomerReply(conversationId, at);
   await runAutomations('on_update', conversationId);
   await autoAssign(conversationId);
-  await maybeSendAutoResponse(conversationId, at);
+  await maybeSendAutoResponse(conversationId);
 }
 
 /** An agent changed something in the console. */

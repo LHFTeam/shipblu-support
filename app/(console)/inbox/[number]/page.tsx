@@ -86,11 +86,6 @@ export default async function ConversationPage({
   // which is only the same thing once that domain serves this app.
   const kbOrigin = requestBaseUrl(await headers());
 
-  // Which business account this ticket's number belongs to, because that is
-  // what decides the templates the agent may pick — not the installation.
-  const whatsappAccountId =
-    conversation.channel === 'whatsapp' ? await accountIdForConversation(conversation.id) : null;
-
   const [statuses, agentList, groupList, fields, canned, templates, recipients, suggestions] =
     await Promise.all([
       listStatuses(),
@@ -100,8 +95,14 @@ export default async function ConversationPage({
       listCannedResponses(agent),
       // Only fetched for WhatsApp tickets: an email ticket has no use for them
       // and the table is synced hourly, so this is a needless query otherwise.
+      //
+      // Which business account this ticket's number belongs to is what decides
+      // the templates the agent may pick — not the installation — and asking
+      // costs three round trips of its own. Chained inside the batch rather than
+      // awaited above it: resolved first, it held the rest of the batch either
+      // side of it, on the page the console spends most of its time on.
       conversation.channel === 'whatsapp'
-        ? listApprovedTemplates(whatsappAccountId)
+        ? accountIdForConversation(conversation.id).then((id) => listApprovedTemplates(id))
         : Promise.resolve([]),
       // Same reasoning: an agent who cannot start one has no picker to fill.
       canSideConversation ? listSideConversationRecipients() : Promise.resolve([]),
