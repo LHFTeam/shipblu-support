@@ -18,10 +18,6 @@ yarn-error.log*
 .idea/
 
 coverage/
-playwright-report/
-test-results/
-blob-report/
-.playwright/
 
 # Local dev email driver output
 .mail-outbox/
