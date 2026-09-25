@@ -1054,6 +1054,14 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
 - **Unset config:** `EMAIL_API_KEY`, `EMAIL_FROM_ADDRESS`, `EMAIL_REPLY_DOMAIN`,
   `EMAIL_WEBHOOK_SECRET`, `WIDGET_ALLOWED_ORIGINS`, `WIDGET_IDENTITY_SECRET`.
 
+  **`EMAIL_WEBHOOK_SECRET` is no longer optional in production.** Unset, the
+  web service used to accept every inbound email as verified; it now refuses
+  every one with a 401. Set it on the web service, and as the Basic Auth
+  password in Postmark's inbound webhook URL, before that change deploys — or
+  inbound mail stops. Postmark retries a 401 for about ten hours, and a refused
+  delivery is stored under no id, so a secret set inside that window recovers
+  what arrived meanwhile.
+
   **The last two are what stands between the widget and the merchant
   dashboard.** Measured 2026-08-31: `https://shipblu-support.onrender.com/widget`
   answers `content-security-policy: frame-ancestors 'self';`, so

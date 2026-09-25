@@ -57,6 +57,14 @@ export class PostmarkEmailProvider implements EmailProvider {
      * is the password half of that.
      */
     private readonly webhookSecret: string | undefined,
+    private readonly options: {
+      /**
+       * Whether an unset secret refuses every delivery rather than accepting
+       * every one. The factory answers it from `NODE_ENV`, not this class — see
+       * `verifySignature`. Required, so no construction can inherit an answer.
+       */
+      requireWebhookSecret: boolean;
+    },
   ) {}
 
   async send(email: OutboundEmail): Promise<SendResult> {
@@ -123,9 +131,20 @@ export class PostmarkEmailProvider implements EmailProvider {
   }
 
   verifySignature(_rawBody: string, headers: Record<string, string>): boolean {
-    // No secret configured means the check is disabled; that is a deployment
-    // choice, so it is loud in logs rather than silently permissive.
+    // An unset secret used to disable the check everywhere, with a warning as
+    // the only sign. On a deployed service that is a misconfiguration rather
+    // than a choice: anyone who finds the URL can post mail that becomes a
+    // customer's ticket, and a log line nobody is reading does not stop it. So
+    // it refuses there, the answer the WhatsApp and Meta verifiers already give
+    // an empty app secret. A refused delivery is still stored, and Postmark
+    // retries a 401 for about ten hours, so setting the secret inside that
+    // window loses nothing. Outside production the check stays off, because a
+    // laptop running `next dev` has no Postmark to share a secret with.
     if (!this.webhookSecret) {
+      if (this.options.requireWebhookSecret) {
+        console.error('[email:postmark] EMAIL_WEBHOOK_SECRET is not set — refusing inbound mail');
+        return false;
+      }
       console.warn('[email:postmark] EMAIL_WEBHOOK_SECRET is not set — inbound is unauthenticated');
       return true;
     }

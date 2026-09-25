@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { PostmarkEmailProvider } from './postmark';
 
-const provider = new PostmarkEmailProvider('token', 'webhook-secret-value');
+const provider = new PostmarkEmailProvider('token', 'webhook-secret-value', {
+  requireWebhookSecret: true,
+});
 
 function basicAuth(password: string): Record<string, string> {
   return { authorization: `Basic ${Buffer.from(`user:${password}`).toString('base64')}` };
@@ -25,6 +27,32 @@ describe('PostmarkEmailProvider.verifySignature', () => {
     // timingSafeEqual throws on length mismatch, so this must be guarded.
     expect(() => provider.verifySignature('{}', basicAuth('short'))).not.toThrow();
     expect(provider.verifySignature('{}', basicAuth('short'))).toBe(false);
+  });
+});
+
+/**
+ * An unset secret used to mean "accept everything" everywhere, so a production
+ * deploy that lost the variable took forged mail for customer mail and said so
+ * only in a log line.
+ */
+describe('PostmarkEmailProvider.verifySignature without a secret', () => {
+  it('rejects every delivery where a secret is required', () => {
+    const strict = new PostmarkEmailProvider('token', undefined, { requireWebhookSecret: true });
+
+    expect(strict.verifySignature('{}', {})).toBe(false);
+    expect(strict.verifySignature('{}', basicAuth('anything'))).toBe(false);
+  });
+
+  it('treats an empty value as unset rather than as a secret nobody can match', () => {
+    const strict = new PostmarkEmailProvider('token', '', { requireWebhookSecret: true });
+
+    expect(strict.verifySignature('{}', basicAuth(''))).toBe(false);
+  });
+
+  it('still accepts unauthenticated deliveries where it is not required', () => {
+    const lax = new PostmarkEmailProvider('token', undefined, { requireWebhookSecret: false });
+
+    expect(lax.verifySignature('{}', {})).toBe(true);
   });
 });
 

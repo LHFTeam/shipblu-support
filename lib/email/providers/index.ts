@@ -20,7 +20,12 @@ export function emailProvider(): EmailProvider {
       if (!e.EMAIL_API_KEY) {
         throw new Error('EMAIL_PROVIDER=postmark requires EMAIL_API_KEY');
       }
-      cached = new PostmarkEmailProvider(e.EMAIL_API_KEY, e.EMAIL_WEBHOOK_SECRET);
+      cached = new PostmarkEmailProvider(e.EMAIL_API_KEY, e.EMAIL_WEBHOOK_SECRET, {
+        // The web service sets NODE_ENV=production in `render.yaml`, and
+        // `next dev` never does — the line between a deploy that lost its
+        // secret and a laptop that never had one.
+        requireWebhookSecret: e.NODE_ENV === 'production',
+      });
       break;
     }
     case 'mailgun': {
