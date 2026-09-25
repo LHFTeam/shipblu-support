@@ -105,12 +105,13 @@ conflict on all of them.
 | 2.1   | Email webhook dedupes before it verifies         | #168        | open    |
 | 2.2   | Portal agent replies bypass `carrierFor()`       | #169        | open    |
 | 2.3   | Contacts pages cannot scroll                     | #170        | open    |
-| 2.4   | `PermanentJobError`                              |             | pending |
+| 2.4   | `PermanentJobError`                              | #174        | open    |
 | 2.5   | Ids taken from `FormData`                        |             | pending |
 | 2.6   | KB admin search does not escape LIKE             |             | pending |
-| 2.7   | One `GRAPH_VERSION`                              |             | pending |
+| 2.7   | One `GRAPH_VERSION`                              | #175        | open    |
 | 2.8   | Fetch timeouts, one provider per PR              |             | pending |
 | 2.9   | Replies never get paragraphs (CRLF)              | #171        | open    |
+| 2.10  | Email webhook fails open without its secret      |             | pending |
 | 3     | Shared primitives (one row per PR as opened)     |             | pending |
 | 4.1   | Split `lib/tickets/queries.ts`                   |             | pending |
 | 4.2   | Shared ingest steps                              |             | pending |
@@ -381,6 +382,21 @@ It is declared four times:
 
 AGENTS.md treats it as one value. Move it to `lib/meta/graph.ts` and import it
 everywhere.
+
+### 2.10 The email webhook fails open without its secret
+
+Found by review of #168, not by the audit. When `EMAIL_WEBHOOK_SECRET` is unset,
+`PostmarkProvider.verifySignature` (`lib/email/providers/postmark.ts`) returns
+`true` with a warning, deliberately — its comment calls that a deployment choice.
+In that configuration none of #168's protection applies: a forged payload is
+stored as verified, under the `MessageID` it claims, and queued to become a
+ticket. WhatsApp fails closed in the same situation.
+
+`docs/PROJECT-STATE.md` §5.1 lists the key as unset. Read the web service's
+environment on Render before sizing this: if it is still unset, the production
+endpoint turns any POST into a ticket. The likely shape is to fail closed when
+`NODE_ENV === 'production'` and keep the development convenience, with a route
+test for each.
 
 ### 2.8 Fetch timeouts
 

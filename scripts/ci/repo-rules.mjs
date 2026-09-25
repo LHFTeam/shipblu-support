@@ -727,15 +727,18 @@ function checkServerActions() {
 
   scan(
     scannableSource.filter((f) => /\.tsx?$/.test(f)),
-    /['"]use server['"]/g,
-    (file, line, match, contents) => {
-      // `contents` has its comments blanked, so a directive written below a
-      // header comment still starts at the first non-whitespace character.
-      const isFileDirective = match.index === contents.length - contents.trimStart().length;
+    // Only where a directive can stand: first in the file, or first in a
+    // function body. The same words anywhere else are a string — a constant, a
+    // test naming the directive — and publish nothing. `contents` has its
+    // comments blanked, so a directive below a header comment still follows
+    // nothing but whitespace.
+    /(^\s*|\{\s*)(['"])use server\2/g,
+    (file, _line, match, contents) => {
+      const isFileDirective = !match[1].includes('{');
       if (isFileDirective && ACTION_FILE.test(file)) return;
       fail(
         rule,
-        `${file}:${line}`,
+        `${file}:${lineOf(contents, match.index + match[1].length)}`,
         isFileDirective
           ? "a 'use server' module must be named actions.ts or <domain>-actions.ts under app/ — every export of it is a public POST endpoint, and reviewers look for those in action files"
           : "an inline 'use server' publishes a POST endpoint from inside another file — move the action into an actions.ts beside it",
@@ -1280,7 +1283,9 @@ function checkClientBundleStaysOutOfTheDatabase() {
   const entries = scannableSource.filter(
     (file) => /\.tsx?$/.test(file) && directiveOf(file) === 'client',
   );
-  if (!requireAtLeast(rule, 'app/', entries.length, 20, "'use client' entry points")) return;
+  if (!requireAtLeast(rule, '(repository)', entries.length, 20, "'use client' entry points")) {
+    return;
+  }
 
   for (const entry of entries) {
     // Breadth-first, remembering how each module was reached: an error saying
@@ -1413,7 +1418,6 @@ function checkNoDeadExports() {
   const files = scannableSource.filter(
     (f) => /\.(ts|tsx|mts|mjs)$/.test(f) && !f.endsWith('.d.ts'),
   );
-  if (!requireAtLeast(rule, '(repository)', files.length, 200, 'source modules')) return;
 
   // What every module has pulled out of every other, by name.
   const importedFrom = new Map();
@@ -1436,6 +1440,12 @@ function checkNoDeadExports() {
     }
   }
 
+  // The floor goes on what VALUE_EXPORT selects, not on the file list: git will
+  // always hand back hundreds of files, and it is the export pattern that can
+  // go blind. Broken on purpose, it matched nothing and the check reported a
+  // clean tree — which is the one failure this guard exists for.
+  let examined = 0;
+
   for (const file of files) {
     if (opaque.has(file)) continue;
 
@@ -1446,6 +1456,7 @@ function checkNoDeadExports() {
     VALUE_EXPORT.lastIndex = 0;
     let match;
     while ((match = VALUE_EXPORT.exec(contents)) !== null) {
+      examined += 1;
       const name = match[1];
       if (importers.has(name) || frameworkOwns(file, name)) continue;
 
@@ -1468,6 +1479,8 @@ function checkNoDeadExports() {
       );
     }
   }
+
+  requireAtLeast(rule, '(repository)', examined, 300, 'value exports');
 }
 
 // ---------------------------------------------------------------------------
