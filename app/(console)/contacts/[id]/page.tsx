@@ -77,7 +77,7 @@ export default async function ContactPage({
   const editable = can(agent, 'contact.edit');
 
   return (
-    <div className="p-4 md:p-6">
+    <div className="app-scroll h-full overflow-y-auto p-4 md:p-6">
       <PageHeader
         title={contact.name ?? contact.email ?? contact.phone ?? 'Unnamed contact'}
         description={[contact.email, contact.phone].filter(Boolean).join(' · ') || undefined}

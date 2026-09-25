@@ -29,7 +29,7 @@ export default async function ContactsPage({
   const found = results.contacts.length + results.accounts.length + results.shipments.length;
 
   return (
-    <div className="p-4 md:p-6">
+    <div className="app-scroll h-full overflow-y-auto p-4 md:p-6">
       <PageHeader
         title="Contacts"
         description="People, shipping accounts and shipments. Search by name, email, phone, SBID or tracking number."
