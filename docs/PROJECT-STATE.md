@@ -518,11 +518,12 @@ declared all seven services as one flat list.
 | `shipblu-whatsapp-template-sync` | cron `0 * * * *`              | `crn-da1jgtg1ne8s73ciquk0` | `main`                       |
 | `shipblu-nightly`                | cron `0 0 * * *`              | `crn-da1jgtg1ne8s73ciqumg` | `main`                       |
 
-¹ `shipblu-sla-sweep` is **declared** to run three jobs,
-`sla_sweep && presence_sweep && assign_sweep` — but the running service drops
-the middle one, and has since before anyone measured it. See §6.66; the rest of
-this footnote describes the intent, which the repo still expresses correctly.
-It is chained the way `shipblu-nightly`
+¹ `shipblu-sla-sweep` runs **three** jobs,
+`sla_sweep && presence_sweep && assign_sweep`. For an unknown period up to
+2026-09-25 the running service dropped the middle one while the blueprint
+declared it; that is fixed and §6.66 is the record, including the method that
+found it — compare `list_services` to `render.yaml` rather than trusting either
+alone. It is chained the way `shipblu-nightly`
 chains cleanup and the rollup — same cadence, none of them long, and a second
 container booting every five minutes to run a query that usually returns nothing
 is not worth it. The order matters and the `&&` does too: the SLA sweep goes
@@ -3798,9 +3799,9 @@ null`, and argued it from write cost and 13 MB of disk. The read side turned
     read it serves before and after, because that is where the number nobody
     expected turns up.
 
-66. **A cron has been running two of its three jobs for as long as anyone has
-    looked, and `render.yaml` says otherwise.** _2026-09-21, found by reading
-    `list_services` against the file while deploying something else._
+66. ~~**A cron has been running two of its three jobs.**~~ **Fixed 2026-09-25;
+    the diagnosis below stands and is why the fix was safe.** _Found 2026-09-21
+    by reading `list_services` against the file while deploying something else._
     `render.yaml:400` declares `shipblu-sla-sweep` as
     `sla_sweep && presence_sweep && assign_sweep`. The running service
     (`crn-da1jgtg1ne8s73ciqup0`) is `sla_sweep && assign_sweep`. The other three
@@ -3837,6 +3838,49 @@ null`, and argued it from write cost and 13 MB of disk. The read side turned
     we meant; `list_services` is the only thing that reports the one that is
     running. Read the second before believing the first about anything
     operational — a cron's declared command included.
+
+    **How it was fixed, and why in two steps rather than one.** The start
+    command is not editable through the Render MCP tools — they expose create,
+    read, `trigger_deploy` and environment variables, and nothing that updates a
+    service. The one available path is `create_cron_job`, which is a delete and
+    a create rather than an edit, and losing this cron's run history is a worse
+    outcome than the drift. So the edit itself was made by hand in the
+    dashboard, and it now matches `render.yaml:400` character for character.
+
+    Before that, the backlog was spent deliberately: one `presence_sweep`
+    enqueued as a `jobs` row at 2026-09-25 00:02, which the worker claimed and
+    completed. It deleted **all 26 sessions** and parked **0 agents**. The shape
+    of the 09-21 prediction held exactly; only the count had moved, 32 → 26.
+
+    That ordering is the point. Restoring the command with the backlog still
+    there would have been the retroactive-timer trap `lib/presence/idle.ts` is
+    written against — the first run destroying every session at once, with no
+    countdown, because `changedAt` is null and grants no grace. Running it by
+    hand first spent that blast radius at a chosen moment: **0 sessions active,
+    0 in the 30-minute-to-2-hour band, the newest 17.5 hours idle**, so nobody
+    was mid-reply and nothing was owed a countdown. Seeding a `presence_policy`
+    row to buy the grace window was considered and rejected — it would have
+    written config nobody asked for to protect zero at-risk sessions.
+
+    Verified on the next scheduled run, 00:10:45 UTC, green, with the 00:05 run
+    on the old command directly above it in the same log:
+
+    ```
+    [job] sla_sweep ok in 257ms
+    [presence_sweep] parked=0 sessions_signed_out=0
+    [job] presence_sweep ok in 195ms
+    [job] assign_sweep ok in 805ms
+    ```
+
+    `assign_sweep` running _behind_ `presence_sweep` is the half worth checking
+    rather than assuming: these are chained with `&&`, so a sweep that threw
+    would have taken the run red and stopped assignment behind it.
+
+    One loose end left rather than acted on: **5 agents still hold
+    `is_accepting_tickets` with no session and `presence = 'offline'`.** That is
+    believed harmless because presence gates assignment eligibility, so an
+    offline agent is not picked regardless — but that path was not traced, and
+    this is recorded as an open question rather than as a fact.
 
 67. **A warning in this file about live infrastructure had drifted into saying
     the opposite of the truth, and still read as careful.** _2026-09-21, same
