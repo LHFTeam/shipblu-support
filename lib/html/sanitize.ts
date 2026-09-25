@@ -159,8 +159,15 @@ export function textToHtml(text: string): string {
   const escape = (value: string) =>
     value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
+  // Line endings first. A browser submits a textarea's breaks as CRLF — the HTML
+  // spec normalises them for the form data — so a split on newlines alone never
+  // matched an agent's blank line, and every console reply went out as one
+  // paragraph. And a line holding only spaces or tabs is blank to the reader —
+  // text pasted from WhatsApp, Word or another mail client carries them — so it
+  // separates paragraphs too.
   return text
-    .split(/\n{2,}/)
+    .replace(/\r\n?/g, '\n')
+    .split(/\n[ \t]*\n\s*/)
     .map((paragraph) => paragraph.trim())
     .filter(Boolean)
     .map((paragraph) => `<p>${escape(paragraph).replace(/\n/g, '<br>')}</p>`)

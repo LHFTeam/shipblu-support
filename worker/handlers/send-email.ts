@@ -4,6 +4,7 @@ import { agents, contacts, conversations, messages } from '@/db/schema';
 import { env, replyDomain } from '@/lib/env';
 import { emailProvider } from '@/lib/email/providers';
 import { REPLY_ABOVE_MARKER } from '@/lib/email/quote-strip';
+import { textToHtml } from '@/lib/html/sanitize';
 import { replyToAddress } from '@/lib/email/reply-address';
 import { buildReplySubject, formatMessageId } from '@/lib/email/threading';
 import type { OutboundEmail } from '@/lib/email/types';
@@ -66,7 +67,9 @@ export async function sendEmail(job: ClaimedJob): Promise<void> {
     .trimEnd();
 
   const htmlBody = [
-    row.message.bodyHtml ?? `<p>${escapeHtml(row.message.bodyText)}</p>`,
+    // A message written without an HTML part gets its paragraphs from the same
+    // textToHtml the writers use, rather than one <p> joined by <br>s.
+    row.message.bodyHtml ?? textToHtml(row.message.bodyText),
     // The marker doubles as the strip anchor for the customer's reply, so it
     // must survive in the HTML part too — hidden from view, present in source.
     `<div style="color:#999;font-size:11px;margin-top:24px">${REPLY_ABOVE_MARKER}</div>`,
@@ -148,13 +151,4 @@ function generatedMessageId(
   domain: string,
 ): string {
   return row.message.channelMessageId ?? `${row.message.id}@${domain}`;
-}
-
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/\n/g, '<br>');
 }
