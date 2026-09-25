@@ -16,13 +16,6 @@ export function formatDateTime(value: Date | string): string {
   }).format(new Date(value));
 }
 
-export function formatTime(value: Date | string): string {
-  return new Intl.DateTimeFormat('en-GB', {
-    timeStyle: 'short',
-    timeZone: TIMEZONE,
-  }).format(new Date(value));
-}
-
 /** "3m", "4h", "2d" — the inbox needs recency at a glance, not precision. */
 export function formatRelative(value: Date | string): string {
   const elapsed = Date.now() - new Date(value).getTime();

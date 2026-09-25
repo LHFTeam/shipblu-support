@@ -128,7 +128,7 @@ export default async function ChannelsPage() {
       <section>
         <PageHeader
           title="Channels"
-          description="Addresses and routing only. Access tokens and webhook secrets live in the environment, so a database dump never contains a usable credential."
+          description="Addresses and routing only. Access tokens and webhook secrets are hardcoded and live as server environment variables, so a database dump never contains a usable credential."
         />
 
         <ul className="mb-4 divide-y divide-[var(--border)] rounded-xl border border-[var(--border)] bg-[var(--surface)] text-sm">
@@ -159,7 +159,7 @@ export default async function ChannelsPage() {
                         account ? ` · ${account.name}` : ''
                       }`
                     : channel.type === 'facebook' || channel.type === 'instagram'
-                      ? 'configured in the environment'
+                      ? 'hardcoded in server environment variables'
                       : channel.type === 'webchat'
                         ? 'the widget'
                         : (channel.config.address as string) || 'no address'}

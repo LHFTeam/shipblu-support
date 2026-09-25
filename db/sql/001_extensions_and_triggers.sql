@@ -289,10 +289,14 @@ END $$;
 -- authorised query path so the stream can never leak a ticket to an agent who
 -- is not allowed to see it.
 --
--- `conversation_changed` remains for one zero-downtime compatibility window.
--- Old instances are still serving while this file is replayed and their client
--- bundle listens to that name. New code does not listen to it; removing it in a
--- later deploy cannot change application behaviour.
+-- There is deliberately no global topic. `conversation_changed` used to fire
+-- here on every trigger invocation, kept for one zero-downtime deploy window so
+-- that instances still serving the previous client bundle kept working. That
+-- window closed weeks and roughly ten deploys ago, and nothing has listened to
+-- the name since the §6.23 fan-out work replaced it with the per-channel and
+-- per-conversation topics above. It was removed on 2026-09-09 rather than left
+-- as a NOTIFY nobody receives on every message insert and every conversation
+-- update.
 -- --------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION notify_conversation_change() RETURNS trigger
 LANGUAGE plpgsql
@@ -395,8 +399,6 @@ BEGIN
     END IF;
   END IF;
 
-  -- Compatibility for the old app instance/client bundle during this deploy.
-  PERFORM pg_notify('conversation_changed', payload);
   RETURN NULL;
 END;
 $$;

@@ -1,4 +1,4 @@
-import { relations, sql } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import {
   type AnyPgColumn,
   bigserial,
@@ -244,6 +244,16 @@ export const conversations = pgTable(
     index('conversations_tags_idx').using('gin', t.tags),
     index('conversations_search_idx').using('gin', t.searchVector),
 
+    // The two foreign keys that are joined on by themselves rather than as part
+    // of an inbox filter. `conversations_inbox_idx` above leads on `status_id`,
+    // so it cannot drive a join keyed on the group alone — and the assignment
+    // sweep does exactly that, every five minutes: 5,821 runs at 24.1 ms is
+    // 140 s, the most expensive statement this application issues. That cost
+    // grows with the ticket count rather than with traffic, so it is the one
+    // figure here that gets worse on its own as the system goes live.
+    index('conversations_group_idx').on(t.groupId),
+    index('conversations_channel_id_idx').on(t.channelId),
+
     // Drives the SLA sweep: only rows with a live due date and no breach flag.
     index('conversations_sla_due_idx').on(t.resolutionDueAt),
     index('conversations_first_response_due_idx').on(t.firstResponseDueAt),
@@ -318,6 +328,15 @@ export const messages = pgTable(
     uniqueIndex('messages_external_idx').on(t.sourceSystem, t.externalId),
     index('messages_search_idx').using('gin', t.searchVector),
     index('messages_delivery_idx').on(t.deliveryStatus),
+
+    // Both authorship columns, joined from the agent and contact side rather
+    // than filtered within a conversation. Unindexed until now, on the table
+    // that grows fastest — which is also why they are worth the write cost
+    // here and the other 38 unindexed foreign keys the advisor lists are not:
+    // those serve admin screens, and 43 new indexes would tax every insert to
+    // speed up pages nobody opens.
+    index('messages_author_agent_idx').on(t.authorAgentId),
+    index('messages_author_contact_idx').on(t.authorContactId),
     // Volume-through-the-day on the dashboard filters on nothing else, and this
     // is the table that grows fastest.
     index('messages_created_idx').on(t.createdAt),
@@ -399,6 +418,10 @@ export const conversationEvents = pgTable(
     // that, so this is the plain date index `messages` already carries for the
     // same reason.
     index('conversation_events_created_idx').on(t.createdAt),
+    // Who acted, joined from the agent side. The agent productivity report
+    // counts a day of events per person, which neither the type nor the date
+    // index can narrow.
+    index('conversation_events_actor_idx').on(t.actorAgentId),
   ],
 );
 
@@ -441,33 +464,3 @@ export const conversationPresence = pgTable(
     index('conversation_presence_updated_idx').on(t.updatedAt),
   ],
 );
-
-export const conversationsRelations = relations(conversations, ({ one, many }) => ({
-  requester: one(contacts, {
-    fields: [conversations.requesterContactId],
-    references: [contacts.id],
-  }),
-  assignee: one(agents, { fields: [conversations.assigneeAgentId], references: [agents.id] }),
-  group: one(groups, { fields: [conversations.groupId], references: [groups.id] }),
-  status: one(ticketStatuses, {
-    fields: [conversations.statusId],
-    references: [ticketStatuses.id],
-  }),
-  messages: many(messages),
-  events: many(conversationEvents),
-  watchers: many(conversationWatchers),
-}));
-
-export const messagesRelations = relations(messages, ({ one, many }) => ({
-  conversation: one(conversations, {
-    fields: [messages.conversationId],
-    references: [conversations.id],
-  }),
-  authorAgent: one(agents, { fields: [messages.authorAgentId], references: [agents.id] }),
-  authorContact: one(contacts, { fields: [messages.authorContactId], references: [contacts.id] }),
-  attachments: many(attachments),
-}));
-
-export const attachmentsRelations = relations(attachments, ({ one }) => ({
-  message: one(messages, { fields: [attachments.messageId], references: [messages.id] }),
-}));

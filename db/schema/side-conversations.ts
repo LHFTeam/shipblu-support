@@ -1,4 +1,4 @@
-import { relations, sql } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import {
   bigserial,
   boolean,
@@ -283,42 +283,3 @@ export const sideConversationMessages = pgTable(
     index('side_conversation_messages_delivery_idx').on(t.deliveryStatus),
   ],
 );
-
-export const internalRecipientsRelations = relations(internalRecipients, ({ many }) => ({
-  sideConversations: many(sideConversations),
-}));
-
-export const sideConversationsRelations = relations(sideConversations, ({ one, many }) => ({
-  conversation: one(conversations, {
-    fields: [sideConversations.conversationId],
-    references: [conversations.id],
-  }),
-  anchorMessage: one(messages, {
-    fields: [sideConversations.anchorMessageId],
-    references: [messages.id],
-  }),
-  recipient: one(internalRecipients, {
-    fields: [sideConversations.recipientId],
-    references: [internalRecipients.id],
-  }),
-  location: one(locations, {
-    fields: [sideConversations.locationId],
-    references: [locations.id],
-  }),
-  createdBy: one(agents, {
-    fields: [sideConversations.createdByAgentId],
-    references: [agents.id],
-  }),
-  messages: many(sideConversationMessages),
-}));
-
-export const sideConversationMessagesRelations = relations(sideConversationMessages, ({ one }) => ({
-  sideConversation: one(sideConversations, {
-    fields: [sideConversationMessages.sideConversationId],
-    references: [sideConversations.id],
-  }),
-  authorAgent: one(agents, {
-    fields: [sideConversationMessages.authorAgentId],
-    references: [agents.id],
-  }),
-}));

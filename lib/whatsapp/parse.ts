@@ -58,17 +58,26 @@ export function parseWebhook(payload: unknown): NormalisedWebhook {
       // guessing between several would attach it to the wrong conversation.
       const soleContact = value.contacts?.length === 1 ? value.contacts[0]!.wa_id : null;
 
+      // Meta discontinued the `message_echoes` field, so this array no longer
+      // arrives and the app is no longer subscribed to it
+      // (`lib/meta/subscriptions.ts` records the evidence). Kept rather than
+      // deleted: it costs one `?? []`, it is the shape the stored archive was
+      // parsed with, and removing it would make a replayed historical delivery
+      // silently lose its echoes. The path below is the one that still fires.
       for (const echo of value.message_echoes ?? []) {
         const normalised = normaliseEcho(echo, phoneNumberId, soleContact);
         if (normalised) result.echoes.push(normalised);
       }
 
       for (const message of value.messages ?? []) {
-        // A message from our own number is an echo wherever it arrives. Meta
-        // delivers echoes under `message_echoes`, but treating `messages` as
-        // unconditionally inbound is what would file our own outbound as a
-        // customer message — inventing a contact for our own phone number and
-        // opening a ticket from ourselves.
+        // A message from our own number is an echo wherever it arrives, and
+        // this branch is load-bearing on its own terms rather than as a
+        // fallback for the array above. Treating `messages` as unconditionally
+        // inbound is what would file our own outbound as a customer message —
+        // inventing a contact for our own phone number and opening a ticket
+        // from ourselves. That stays true now that `message_echoes` is
+        // discontinued: the risk was never that Meta used the wrong array, it
+        // is that anything we send can come back under `messages`.
         if (businessNumber && digits(message.from) === businessNumber) {
           const normalised = normaliseEcho(message, phoneNumberId, soleContact);
           if (normalised) result.echoes.push(normalised);
@@ -312,13 +321,6 @@ export function parseTimestamp(timestamp: string | undefined): Date {
   const seconds = Number(timestamp);
   if (!Number.isFinite(seconds) || seconds <= 0) return new Date();
   return new Date(seconds * 1000);
-}
-
-/** Meta's own signal for whether this delivery was a status-only batch. */
-export function isStatusOnly(webhook: NormalisedWebhook): boolean {
-  return (
-    webhook.messages.length === 0 && webhook.echoes.length === 0 && webhook.statuses.length > 0
-  );
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

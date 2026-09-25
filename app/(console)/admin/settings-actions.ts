@@ -36,6 +36,7 @@ import {
   LOCATION_CODE_MAX,
 } from '@/lib/locations/format';
 import { parseFormElements } from '@/lib/forms/elements';
+import { forgetHoursCatalog } from '@/lib/hours/catalog';
 import { formsUsingField } from '@/lib/forms/queries';
 import { slugify } from '@/lib/kb/slug';
 import { parseCondition } from '@/lib/rules/conditions';
@@ -162,6 +163,10 @@ export async function saveGroup(_state: SettingsState, formData: FormData): Prom
   // A group's hours are the arithmetic behind every due date on its tickets, so
   // the SLA and reports pages are showing stale wording until they re-read.
   refresh('/admin/groups');
+  // The catalogue is memoised for thirty seconds and a due date is computed
+  // from it, so the process that took the edit drops its copy now rather than
+  // serving a stale schedule to the next SLA calculation.
+  forgetHoursCatalog();
   refresh('/admin/hours');
   return ok();
 }
@@ -186,6 +191,11 @@ export async function deleteGroup(
 
   await db.delete(groups).where(eq(groups.id, id));
   refresh('/admin/groups');
+  // Same reason as `saveGroup`, and the easier one to forget: the catalogue
+  // holds `groups.business_hours_id` as its override map, so a deleted group
+  // that carried a schedule keeps resolving to it for the rest of the TTL, and
+  // any due date computed in that window comes from a row that is gone.
+  forgetHoursCatalog();
   return ok();
 }
 
@@ -1022,6 +1032,10 @@ export async function saveBusinessHours(
     }
   });
 
+  // The catalogue is memoised for thirty seconds and a due date is computed
+  // from it, so the process that took the edit drops its copy now rather than
+  // serving a stale schedule to the next SLA calculation.
+  forgetHoursCatalog();
   refresh('/admin/hours');
   return ok();
 }
@@ -1116,6 +1130,10 @@ export async function saveHoliday(
     if (inserted.length === 0) return { error: taken };
   }
 
+  // The catalogue is memoised for thirty seconds and a due date is computed
+  // from it, so the process that took the edit drops its copy now rather than
+  // serving a stale schedule to the next SLA calculation.
+  forgetHoursCatalog();
   refresh('/admin/hours');
   return ok();
 }
@@ -1126,6 +1144,10 @@ export async function deleteHoliday(
 ): Promise<SettingsState> {
   await requirePermission('admin.sla');
   await db.delete(holidays).where(eq(holidays.id, text(formData, 'id')));
+  // The catalogue is memoised for thirty seconds and a due date is computed
+  // from it, so the process that took the edit drops its copy now rather than
+  // serving a stale schedule to the next SLA calculation.
+  forgetHoursCatalog();
   refresh('/admin/hours');
   return ok();
 }
@@ -1475,20 +1497,6 @@ export async function deleteAutomationRule(
 ): Promise<SettingsState> {
   await requirePermission('admin.automations');
   await db.delete(automationRules).where(eq(automationRules.id, text(formData, 'id')));
-  refresh('/admin/automations');
-  return ok();
-}
-
-export async function toggleAutomationRule(
-  _state: SettingsState,
-  formData: FormData,
-): Promise<SettingsState> {
-  await requirePermission('admin.automations');
-
-  const id = text(formData, 'id');
-  const active = formData.get('active') === 'true';
-
-  await db.update(automationRules).set({ isActive: active }).where(eq(automationRules.id, id));
   refresh('/admin/automations');
   return ok();
 }

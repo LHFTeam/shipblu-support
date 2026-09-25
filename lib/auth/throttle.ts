@@ -16,17 +16,55 @@ const MAX_ATTEMPTS = 10;
 type Bucket = { count: number; resetAt: number };
 const buckets = new Map<string, Bucket>();
 
+/**
+ * Drops every expired bucket, amortised over the calls that create them.
+ *
+ * `hit` only ever resets a key it sees *again*, and `clearLoginAttempts` only
+ * deletes on a successful sign-in — so a key that is never hit twice is never
+ * removed by either. That makes the map grow one entry per distinct address and
+ * per distinct source, forever, on endpoints an unauthenticated caller reaches:
+ * `/login` and the two that send mail to a typed address. An attacker spraying
+ * distinct addresses is then filling a Map rather than being throttled by it.
+ *
+ * Swept here rather than on a timer or in the `cleanup` job, because neither can
+ * reach this: the map is per-process heap, there is nothing to hang an interval
+ * on in a request-scoped web process, and a job runs in the worker. One pass
+ * every `SWEEP_EVERY` new keys is O(size) on a map that is small precisely
+ * because of the sweep.
+ */
+function sweepExpired(now: number): void {
+  for (const [key, bucket] of buckets) {
+    if (bucket.resetAt <= now) buckets.delete(key);
+  }
+}
+
+/** New keys between sweeps. Nothing depends on the exact number. */
+const SWEEP_EVERY = 256;
+let sinceSweep = 0;
+
 function hit(key: string, max: number = MAX_ATTEMPTS): boolean {
   const now = Date.now();
   const bucket = buckets.get(key);
 
   if (!bucket || bucket.resetAt <= now) {
+    // Counted on the branch that adds a key rather than on every call, so the
+    // sweep is paid for by the growth it exists to bound.
+    sinceSweep += 1;
+    if (sinceSweep >= SWEEP_EVERY) {
+      sinceSweep = 0;
+      sweepExpired(now);
+    }
     buckets.set(key, { count: 1, resetAt: now + WINDOW_MS });
     return true;
   }
 
   bucket.count += 1;
   return bucket.count <= max;
+}
+
+/** Exported for the test that proves the map does not grow without bound. */
+export function throttleBucketCount(): number {
+  return buckets.size;
 }
 
 export function allowLoginAttempt(email: string, ip: string | null): boolean {
@@ -66,12 +104,4 @@ export function allowEmailDispatch(email: string, ip: string | null): boolean {
 export function clearLoginAttempts(email: string, ip: string | null): void {
   buckets.delete(`email:${email}`);
   if (ip) buckets.delete(`ip:${ip}`);
-}
-
-/** Keeps the map from growing without bound on a long-lived instance. */
-export function pruneThrottleBuckets(): void {
-  const now = Date.now();
-  for (const [key, bucket] of buckets) {
-    if (bucket.resetAt <= now) buckets.delete(key);
-  }
 }

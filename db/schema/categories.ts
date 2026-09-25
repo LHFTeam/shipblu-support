@@ -1,4 +1,4 @@
-import { relations, sql } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import {
   boolean,
   doublePrecision,
@@ -148,22 +148,3 @@ export const conversationCategories = pgTable(
       .where(sql`${t.reviewState} = 'suggested'`),
   ],
 );
-
-export const conversationCategoriesRelations = relations(conversationCategories, ({ one }) => ({
-  conversation: one(conversations, {
-    fields: [conversationCategories.conversationId],
-    references: [conversations.id],
-  }),
-  category: one(ticketCategories, {
-    fields: [conversationCategories.categoryId],
-    references: [ticketCategories.id],
-  }),
-  detectedInMessage: one(messages, {
-    fields: [conversationCategories.detectedInMessageId],
-    references: [messages.id],
-  }),
-  reviewedByAgent: one(agents, {
-    fields: [conversationCategories.reviewedByAgentId],
-    references: [agents.id],
-  }),
-}));

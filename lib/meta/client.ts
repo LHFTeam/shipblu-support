@@ -62,8 +62,6 @@ export class MetaApiError extends Error {
  */
 const TRANSIENT_CODES = new Set([1, 2, 4, 17, 613, 201600, 201601]);
 
-/** Meta's own name for "this person can no longer be messaged". */
-export const OUTSIDE_WINDOW_CODE = 10;
 export const ACCESS_TOKEN_CODE = 190;
 
 /**

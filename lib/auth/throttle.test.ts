@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest';
-import { allowEmailDispatch, allowLoginAttempt, clearLoginAttempts } from './throttle';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  allowEmailDispatch,
+  allowLoginAttempt,
+  clearLoginAttempts,
+  throttleBucketCount,
+} from './throttle';
 
 /**
  * Buckets are module state shared across cases, so every test uses its own
@@ -50,5 +55,60 @@ describe('allowEmailDispatch', () => {
     }
     for (let i = 20; i < 60; i += 1) allowEmailDispatch(`spray-${i}@example.test`, '10.0.1.9');
     expect(allowEmailDispatch('spray-last@example.test', '10.0.1.9')).toBe(false);
+  });
+});
+
+/**
+ * The bound itself.
+ *
+ * These are the only cases here that move the clock, so they sit last and
+ * restore real timers afterwards: the cases above rely on nothing expiring
+ * while they run.
+ */
+describe('the bucket map', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('does not grow without bound as distinct addresses expire behind it', () => {
+    // The shape this exists for: one entry per distinct address, on an endpoint
+    // an unauthenticated caller reaches, never hit a second time. `hit` only
+    // resets a key it sees *again* and `clearLoginAttempts` only deletes on a
+    // successful sign-in, so before the sweep nothing removed a key that was
+    // used once — an attacker spraying addresses was filling memory rather than
+    // being throttled by it.
+    //
+    // Ten rounds of a thousand fresh addresses, each a full window after the
+    // last, so every earlier bucket is expired by the time the next round runs.
+    // Unswept that is 20,000 live entries; this asserts it stays near one
+    // round's worth.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-20T10:00:00Z'));
+    const start = throttleBucketCount();
+
+    for (let round = 0; round < 10; round += 1) {
+      for (let i = 0; i < 1_000; i += 1) {
+        allowLoginAttempt(`spray-${round}-${i}@example.test`, `203.0.113.${round}.${i}`);
+      }
+      vi.setSystemTime(new Date(Date.now() + 16 * 60 * 1000));
+    }
+
+    expect(throttleBucketCount() - start).toBeLessThan(4_000);
+  });
+
+  it('reaches the mail budget keys, which nothing else ever deleted', () => {
+    // `clearLoginAttempts` removes `email:`/`ip:` on a successful sign-in. The
+    // `mail:`/`mailip:` keys written for password resets and portal
+    // registration had no remover at all, so only the sweep reaches them.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-20T12:00:00Z'));
+    const start = throttleBucketCount();
+
+    for (let round = 0; round < 10; round += 1) {
+      for (let i = 0; i < 1_000; i += 1) {
+        allowEmailDispatch(`mail-${round}-${i}@example.test`, `192.0.2.${round}.${i}`);
+      }
+      vi.setSystemTime(new Date(Date.now() + 16 * 60 * 1000));
+    }
+
+    expect(throttleBucketCount() - start).toBeLessThan(4_000);
   });
 });

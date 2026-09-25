@@ -275,16 +275,3 @@ async function findCompanyByEmailDomain(email: string): Promise<string | null> {
 
   return rows[0]?.id ?? null;
 }
-
-/** Adds another channel identity to a known contact, e.g. after a merge. */
-export async function linkIdentity(contactId: string, input: ResolveInput): Promise<void> {
-  await db
-    .insert(contactIdentities)
-    .values({
-      contactId,
-      channel: input.channel,
-      identifier: normaliseIdentifier(input.channel, input.identifier),
-      displayName: input.displayName ?? null,
-    })
-    .onConflictDoNothing({ target: [contactIdentities.channel, contactIdentities.identifier] });
-}

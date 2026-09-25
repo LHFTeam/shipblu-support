@@ -12,6 +12,7 @@ import type {
 import { windowState } from '@/lib/whatsapp/window';
 import { isReadOnlyChannel } from './channel-policy';
 import { resolveContact } from './contacts';
+import { defaultOpenStatusId } from './statuses';
 
 /**
  * Inbound WhatsApp → conversation.
@@ -533,25 +534,6 @@ async function findLiveConversation(
   if (!row) return null;
   if (row.statusCategory === 'closed') return null;
   return row;
-}
-
-async function defaultOpenStatusId(tx: typeof db): Promise<string | null> {
-  const rows = await tx
-    .select({ id: ticketStatuses.id })
-    .from(ticketStatuses)
-    .where(and(eq(ticketStatuses.category, 'open'), eq(ticketStatuses.isDefault, true)))
-    .limit(1);
-
-  if (rows[0]) return rows[0].id;
-
-  const fallback = await tx
-    .select({ id: ticketStatuses.id })
-    .from(ticketStatuses)
-    .where(eq(ticketStatuses.category, 'open'))
-    .orderBy(ticketStatuses.position)
-    .limit(1);
-
-  return fallback[0]?.id ?? null;
 }
 
 export type ResolvedChannel = {

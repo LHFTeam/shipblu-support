@@ -39,9 +39,4 @@ export function emailProvider(): EmailProvider {
   return cached;
 }
 
-/** Tests swap drivers between cases. */
-export function resetEmailProviderCache(): void {
-  cached = null;
-}
-
 export { LocalEmailProvider, PostmarkEmailProvider };
