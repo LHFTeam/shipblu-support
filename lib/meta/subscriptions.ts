@@ -1,4 +1,5 @@
 import { env, metaAppSecret, metaVerifyToken } from '@/lib/env';
+import { GRAPH_BASE, INSTAGRAM_GRAPH_BASE } from './graph';
 
 /**
  * The app's own webhook field subscriptions.
@@ -35,12 +36,6 @@ import { env, metaAppSecret, metaVerifyToken } from '@/lib/env';
  * vocabulary.
  */
 
-const GRAPH_VERSION = 'v23.0';
-const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
-
-/** Instagram Login's host, for the third subscription — see the bottom of this file. */
-const INSTAGRAM_GRAPH_BASE = `https://graph.instagram.com/${GRAPH_VERSION}`;
-
 /** The Webhooks objects this app subscribes to, one per product. */
 export const WHATSAPP_OBJECT = 'whatsapp_business_account';
 export const INSTAGRAM_OBJECT = 'instagram';
@@ -62,10 +57,10 @@ export const PAGE_OBJECT = 'page';
  * gap a subscription can close. Attested by the team that owns this
  * integration, and corroborated three ways on 2026-09-21: the field is absent
  * from the `whatsapp_business_account` webhook reference for v23.0, which is
- * the version `GRAPH_VERSION` names; Graph refuses a write naming it with
- * `"An unknown error occurred"`, which is what it answers for a field it does
- * not know; and a run of this job against production read back twelve
- * subscribed fields with no trace of it.
+ * the version `GRAPH_VERSION` names (`lib/meta/graph.ts`); Graph refuses a
+ * write naming it with `"An unknown error occurred"`, which is what it answers
+ * for a field it does not know; and a run of this job against production read
+ * back twelve subscribed fields with no trace of it.
  *
  * Leaving it in cost more than a stale comment. The job is the only way this
  * repo writes a subscription, so a required field Graph rejects makes *every*

@@ -372,7 +372,8 @@ a nonexistent edge with `100 "Unsupported post request … does not exist, canno
 be loaded due to missing permissions, or does not support this operation"`, which
 is word for word what it says about a comment the customer deleted. When adding
 or changing one, read the node reference **for the version `GRAPH_VERSION`
-actually names** — an edge missing from it is a finding, not an omission by the
+actually names** (`lib/meta/graph.ts`, the one declaration every Graph client
+imports) — an edge missing from it is a finding, not an omission by the
 doc, and removal notices sit on a separate legacy page that a search for the
 working endpoint will not surface (§6.43).
 

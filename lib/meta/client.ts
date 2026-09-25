@@ -3,6 +3,7 @@ import { commentRequest, type CommentOperation } from './comments';
 import { CONNECTION_LABEL, type MetaConnection, metaConnection } from './connection';
 import { takeThreadControlRequest } from './handover';
 import { directMessageRequest } from './send';
+import { GRAPH_BASE, INSTAGRAM_GRAPH_BASE } from './graph';
 import type { MetaPlatform } from './types';
 
 /**
@@ -19,15 +20,6 @@ import type { MetaPlatform } from './types';
  * place that chooses. Everything else in this file names a platform and stays
  * out of it.
  */
-
-const GRAPH_VERSION = 'v23.0';
-const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
-
-/**
- * Instagram Login's own host. Same version, same paths, different origin and a
- * different credential — see `endpoint` below.
- */
-const INSTAGRAM_GRAPH_BASE = `https://graph.instagram.com/${GRAPH_VERSION}`;
 
 export class MetaApiError extends Error {
   constructor(
