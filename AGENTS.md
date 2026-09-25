@@ -204,8 +204,11 @@ hand-police them.
 taken and what the naive alternative would have broken. Match it. A comment
 restating the code is noise here. Same for commit messages.
 
-**Server actions** (`app/**/actions.ts`) start `'use server'` — CI checks the
-directive — and follow one shape: authorise (`requireAgent()` /
+**Server actions** (`app/**/actions.ts`, or a `<domain>-actions.ts` sibling)
+start `'use server'`, and `'use server'` appears nowhere else — not in `lib/`,
+not inline in a page — because every export of such a module is a public POST
+endpoint and reviewers look for those in action files. CI checks both
+directions. Actions follow one shape: authorise (`requireAgent()` /
 `requirePermission()` plus `can()`), write, `revalidatePath()`, return a state
 object with `error: string | null`. Never
 trust an id or address arriving in a `FormData` field — re-read the row

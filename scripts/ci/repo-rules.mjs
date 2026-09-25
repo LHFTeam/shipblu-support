@@ -415,6 +415,11 @@ function checkJobRegistry() {
     return;
   }
   const types = [...union[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+  if (
+    !requireAtLeast(rule, 'lib/queue/index.ts', types.length, 10, 'job types in the JobType union')
+  ) {
+    return;
+  }
 
   const handlersBlock = registry.match(
     /export const handlers: Partial<Record<JobType, JobHandler>> = \{([\s\S]*?)\n\};/,
@@ -425,6 +430,11 @@ function checkJobRegistry() {
   }
   // Both `cleanup,` (shorthand) and `sla_sweep: () => ...` are registrations.
   const registered = [...handlersBlock[1].matchAll(/^\s{2}([a-z_]+)\s*[:,]/gm)].map((m) => m[1]);
+  if (
+    !requireAtLeast(rule, 'worker/handlers/index.ts', registered.length, 10, 'registered handlers')
+  ) {
+    return;
+  }
 
   const plannedBlock = registry.match(/PLANNED_JOB_TYPES = new Set<JobType>\(\[([\s\S]*?)\]\)/);
   const planned = plannedBlock
@@ -647,16 +657,91 @@ function checkShipmentPayloadConfinement() {
 // ---------------------------------------------------------------------------
 // Source conventions that are one grep away from being enforced
 // ---------------------------------------------------------------------------
+
+/**
+ * Where a server action may live: `actions.ts`, or a `<domain>-actions.ts`
+ * sibling, anywhere under app/.
+ *
+ * The second spelling is not hypothetical. `admin/settings-actions.ts` has used
+ * it since it was written, and the first version of this check matched only
+ * `actions.ts`, so that file's directive was never checked. Deleting it was
+ * still caught, but only by accident: client-bundle fired because the admin
+ * forms that import the file then reached `db/schema`, and it said so in terms
+ * of the bundle rather than the directive. An action file no client form
+ * imports would have gone through clean. `plans/refactor-in-stages.md` splits
+ * the two large action files into more `*-actions.ts` siblings, which would
+ * have widened that gap one file at a time.
+ */
+const ACTION_FILE = /^app\/(?:.*\/)?(?:[a-z0-9-]+-)?actions\.ts$/;
+
+/**
+ * A guard for checks that pass by finding nothing.
+ *
+ * Most rules here select files or declarations with a pattern and then fail on
+ * what they find. When the codebase moves under the pattern — a file renamed,
+ * a declaration reshaped — the selection comes back empty and the rule reports
+ * success forever. env-parity has carried a floor like this since it was
+ * written; the others that select by pattern get the same one. The floors sit
+ * well below today's counts on purpose: they catch a parser that has stopped
+ * matching, not ordinary growth or pruning.
+ */
+function requireAtLeast(rule, where, count, floor, what) {
+  if (count >= floor) return true;
+  fail(
+    rule,
+    where,
+    `found only ${count} ${what} (expected at least ${floor}) — the pattern this check selects with is out of date with the code, so it is passing by checking nothing`,
+  );
+  return false;
+}
+
+/**
+ * Two directions, because either half alone leaves an endpoint nobody reviews.
+ *
+ * Every export of a `'use server'` module is published by Next as a POST
+ * endpoint anyone can call with any arguments. That is why AGENTS.md asks every
+ * action to authorise and to re-read ids rather than trust them — and a reviewer
+ * applies that scrutiny to files that look like actions. So:
+ *
+ * - an action file must carry the directive, or it is not what its name says;
+ * - a module that carries the directive must be named as an action file, and a
+ *   `'use server'` anywhere else — a lib/ helper, or one inlined into a page's
+ *   function body — fails, because it publishes endpoints from a file nobody
+ *   reads as a list of endpoints.
+ *
+ * `lib/automations/actions.ts` shares the name and is not a server action: it is
+ * the automation engine's rule actions. The first direction is scoped to app/ so
+ * it is left alone, and the second would catch it the day it grew a directive.
+ */
 function checkServerActions() {
   const rule = 'server-actions';
-  for (const file of tracked.filter((f) => /^app\/.*\/actions\.ts$/.test(f))) {
-    const first = read(file)
-      .split('\n')
-      .find((l) => l.trim() !== '');
-    if (!/^'use server';?$/.test(first?.trim() ?? '')) {
+
+  const actionFiles = tracked.filter((f) => ACTION_FILE.test(f));
+  if (!requireAtLeast(rule, 'app/', actionFiles.length, 5, 'server action files')) return;
+
+  for (const file of actionFiles) {
+    if (directiveOf(file) !== 'server') {
       fail(rule, file, "a server action file must start with 'use server'");
     }
   }
+
+  scan(
+    scannableSource.filter((f) => /\.tsx?$/.test(f)),
+    /['"]use server['"]/g,
+    (file, line, match, contents) => {
+      // `contents` has its comments blanked, so a directive written below a
+      // header comment still starts at the first non-whitespace character.
+      const isFileDirective = match.index === contents.length - contents.trimStart().length;
+      if (isFileDirective && ACTION_FILE.test(file)) return;
+      fail(
+        rule,
+        `${file}:${line}`,
+        isFileDirective
+          ? "a 'use server' module must be named actions.ts or <domain>-actions.ts under app/ — every export of it is a public POST endpoint, and reviewers look for those in action files"
+          : "an inline 'use server' publishes a POST endpoint from inside another file — move the action into an actions.ts beside it",
+      );
+    },
+  );
 }
 
 /**
@@ -1195,6 +1280,7 @@ function checkClientBundleStaysOutOfTheDatabase() {
   const entries = scannableSource.filter(
     (file) => /\.tsx?$/.test(file) && directiveOf(file) === 'client',
   );
+  if (!requireAtLeast(rule, 'app/', entries.length, 20, "'use client' entry points")) return;
 
   for (const entry of entries) {
     // Breadth-first, remembering how each module was reached: an error saying
@@ -1327,6 +1413,7 @@ function checkNoDeadExports() {
   const files = scannableSource.filter(
     (f) => /\.(ts|tsx|mts|mjs)$/.test(f) && !f.endsWith('.d.ts'),
   );
+  if (!requireAtLeast(rule, '(repository)', files.length, 200, 'source modules')) return;
 
   // What every module has pulled out of every other, by name.
   const importedFrom = new Map();

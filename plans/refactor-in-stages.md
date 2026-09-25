@@ -83,14 +83,17 @@ this plan answers them rather than setting them aside:
 
 ## Tracking
 
-Claim a row before starting it by adding the branch name, and update it when
-the PR opens and when it merges. If a row is claimed and its PR is open, do not
-start another PR on the same files.
+Claim a row before starting it, and update it when the PR opens and when it
+merges. If a row is claimed and its PR is open, do not start another PR on the
+same files. Keep each cell inside its column's current width — `this PR` or a PR
+number, and `open` or `merged` — so an update is a one-line diff: a longer value
+makes Prettier re-pad every row, and two sessions claiming different rows then
+conflict on all of them.
 
 | Stage | Item                                             | Branch / PR | Status  |
 | ----- | ------------------------------------------------ | ----------- | ------- |
-| 0.1   | Commit this plan                                 | this PR     | open    |
-| 0.2   | Harden `server-actions` and minimum-count guards |             | pending |
+| 0.1   | Commit this plan                                 | #166        | merged  |
+| 0.2   | Harden `server-actions` and minimum-count guards | this PR     | open    |
 | 0.3   | Split `repo-rules.mjs` into per-rule modules     |             | pending |
 | 0.4   | CI tidy-up                                       |             | pending |
 | 0.5   | Remove Playwright                                |             | pending |
