@@ -78,7 +78,21 @@ window.shipbluChat.setLocale('ar'); // language switch without a reload
 window.shipbluChat.open(); // e.g. from a "Contact support" menu item
 window.shipbluChat.close();
 window.shipbluChat.toggle();
+window.shipbluChat.compose('Tracking number: 1755021358719\n\n'); // open with a draft
 ```
+
+**`compose(text)` opens the panel with `text` already in the composer, and
+stops there.** It is for a page that knows what the conversation is about — the
+help centre's tracking page uses it so a recipient asking about a parcel does
+not have to copy the number across. The widget puts the text in the box,
+focuses it and waits: the visitor writes their own question under it and
+decides when it goes. Nothing is sent on their behalf, and nothing overwrites a
+message they have already started typing — a second call onto a non-empty
+composer only moves the caret.
+
+The text is capped at 1,000 characters and is a draft like any other, so keep
+it to the facts the agent needs first. Called before the frame exists, it waits
+for it; called on a panel that is already open, it lands immediately.
 
 **Call `clear()` when the user signs out.** The visitor's token lives in the
 widget's own storage, so it outlives the dashboard's session entirely: on a
@@ -142,6 +156,23 @@ place there earns it here; nothing has to be curated per surface, and a locale
 with nothing read yet simply shows no list. Set `locale` correctly and the
 questions arrive in the visitor's language — that is the only thing the host
 page controls here.
+
+## Who the launcher is not drawn for
+
+On the pages this app renders — the help centre, the customer portal, the
+tracking page — the launcher is left out entirely for a reader signed in to the
+agent console. That is a surface the team reads on too, and a chat an agent
+opens against their own queue is a contact and a conversation with nobody
+behind either, in the tables the reports are drawn from.
+`viewerIsTeamMember()` in `lib/widget/audience.ts` is the decision, taken on the
+server, per request.
+
+**A host page of your own gets no such filtering and should not expect any.**
+`embed.js` is one publicly cached response shared by every reader of every site
+carrying it, so it cannot answer differently for one of them. Nothing about
+`/widget` or `/api/widget/*` changes either: an agent who opens the chat from a
+dashboard gets a working chat, because a launcher opening an empty box is the
+worse of the two.
 
 ## What the agent sees
 

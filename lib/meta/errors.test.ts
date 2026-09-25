@@ -25,6 +25,71 @@ describe('explainMetaSendError', () => {
     expect(explained).toContain('Instagram');
   });
 
+  /*
+    The refusal production actually returns, read off message
+    308729d0-4a39-4af4-bdff-5cca1b1c017f on 2026-09-06: `10 / HTTP 403` with the
+    feature named in the message, not the unspecified 1/2 this branch was
+    originally written for. It fell through every branch and printed Meta's
+    sentence alone, which does not say that a role on the app is not the
+    exemption here — the thing that cost the hour.
+  */
+  it('explains the named Human Agent refusal, which is what Graph really returns', () => {
+    const named = new MetaApiError(
+      "To use 'Human Agent', your use of this endpoint must be reviewed and approved by " +
+        "Facebook. To submit this 'Human Agent' feature for review please read our " +
+        'documentation on reviewable features: https://developers.facebook.com/docs/apps/review.',
+      403,
+      10,
+      null,
+      false,
+      null,
+      'AGtVAa9LUPmavPjHJ07bX3x',
+    );
+
+    const explained = explainMetaSendError(named, {
+      platform: 'instagram',
+      connection: 'instagram_login',
+      sendKind: 'dm',
+      tag: 'HUMAN_AGENT',
+    });
+
+    expect(explained).toContain('App Review');
+    // The two halves Meta's own sentence leaves out: that Standard Access does
+    // not cover a feature, and which of the two connections' submissions this
+    // one belongs to.
+    expect(explained).toContain('Standard Access');
+    expect(explained).toContain('instagram_business_*');
+    expect(explained).toContain('trace AGtVAa9LUPmavPjHJ07bX3x');
+  });
+
+  /*
+    The row it is written onto is `varchar(2000)` and the send handler truncates
+    to fit. An explanation that overran would lose the reference line at the
+    bottom — the trace id Meta support asks for — and lose it silently.
+  */
+  it('leaves room for the reference under the longest explanation', () => {
+    const named = new MetaApiError(
+      "To use 'Human Agent', your use of this endpoint must be reviewed and approved by " +
+        "Facebook. To submit this 'Human Agent' feature for review please read our " +
+        'documentation on reviewable features: https://developers.facebook.com/docs/apps/review.',
+      403,
+      10,
+      null,
+      false,
+      null,
+      'AGtVAa9LUPmavPjHJ07bX3x',
+    );
+
+    const explained = explainMetaSendError(named, {
+      platform: 'instagram',
+      connection: 'instagram_login',
+      sendKind: 'dm',
+      tag: 'HUMAN_AGENT',
+    });
+
+    expect(explained.length).toBeLessThanOrEqual(2000);
+  });
+
   it('does not blame the human agent tag when the reply was inside 24 hours', () => {
     const explained = explainMetaSendError(refusal(1), {
       platform: 'instagram',

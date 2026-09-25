@@ -102,11 +102,6 @@ export async function getFormBySlug(slug: string): Promise<LoadedForm | null> {
   return load(rows[0]);
 }
 
-export async function getFormById(id: string): Promise<LoadedForm | null> {
-  const rows = await db.select().from(ticketForms).where(eq(ticketForms.id, id)).limit(1);
-  return load(rows[0]);
-}
-
 /**
  * The forms that place a given custom field, so deleting one can say what it
  * would break.

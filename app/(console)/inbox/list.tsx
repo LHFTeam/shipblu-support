@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, type UIEvent } from 'react';
 import { ChannelBadge, channelInfo } from '@/components/channel';
-import { SearchIcon } from '@/components/icons';
+import { BookIcon, SearchIcon } from '@/components/icons';
 import { Badge, Select } from '@/components/ui';
 import { formatRelative } from '@/lib/format';
 import type { InboxFilters, InboxRow } from '@/lib/tickets/queries';
@@ -33,6 +33,7 @@ export function InboxList({
   activeNumber,
   canSeeBot = false,
   canCreate = false,
+  canViewKb = false,
 }: {
   rows: InboxRow[];
   nextCursor: string | null;
@@ -40,6 +41,7 @@ export function InboxList({
   activeNumber?: number;
   canSeeBot?: boolean;
   canCreate?: boolean;
+  canViewKb?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -76,6 +78,33 @@ export function InboxList({
   return (
     <>
       <div className="flex shrink-0 flex-col gap-2 border-b border-[var(--border)] bg-[var(--surface)] p-2">
+        {/*
+          The knowledge base, named, on the screen an agent spends the day on.
+
+          The rail already links to it, but as an unlabelled icon whose name
+          appears on hover — which is no name at all on a phone, and on the
+          desktop is a thing you have to already suspect is there before you
+          point at it. Inside a ticket the composer's panel answers the same
+          need; this is the half of the console where that panel does not exist,
+          and looking something up meant guessing at an icon.
+
+          Its own line rather than a third control in either row below, because
+          both of those are measured against this column's width: the search
+          placeholder is trimmed to the pixel it has (see `SearchBox`) and the
+          filters are native selects, which clip their longest option rather
+          than wrap. One line of a column that scrolls anyway is the cheaper
+          side of that trade.
+        */}
+        {canViewKb ? (
+          <Link
+            href="/kb"
+            className="flex items-center gap-1.5 self-start rounded-md px-1.5 py-1 text-xs font-medium text-brand-600 hover:bg-[var(--muted)]"
+          >
+            <BookIcon size={15} />
+            Knowledge base
+          </Link>
+        ) : null}
+
         <div className="flex items-center gap-2">
           <div className="min-w-0 flex-1">
             <SearchBox initial={filters.q} onSearch={(value) => setParam('q', value)} />

@@ -1,4 +1,3 @@
-import { relations } from 'drizzle-orm';
 import {
   date,
   index,
@@ -281,65 +280,4 @@ export const conversationShippingAccounts = pgTable(
     primaryKey({ columns: [t.conversationId, t.shippingAccountId] }),
     index('conversation_shipping_accounts_account_idx').on(t.shippingAccountId, t.createdAt),
   ],
-);
-
-export const shippingAccountsRelations = relations(shippingAccounts, ({ one, many }) => ({
-  company: one(companies, {
-    fields: [shippingAccounts.companyId],
-    references: [companies.id],
-  }),
-  shipments: many(shipments),
-  contacts: many(contactShippingAccounts),
-}));
-
-export const contactShippingAccountsRelations = relations(contactShippingAccounts, ({ one }) => ({
-  contact: one(contacts, {
-    fields: [contactShippingAccounts.contactId],
-    references: [contacts.id],
-  }),
-  shippingAccount: one(shippingAccounts, {
-    fields: [contactShippingAccounts.shippingAccountId],
-    references: [shippingAccounts.id],
-  }),
-}));
-
-export const shipmentsRelations = relations(shipments, ({ one, many }) => ({
-  shippingAccount: one(shippingAccounts, {
-    fields: [shipments.shippingAccountId],
-    references: [shippingAccounts.id],
-  }),
-  shipper: one(contacts, {
-    fields: [shipments.shipperContactId],
-    references: [contacts.id],
-  }),
-  recipient: one(contacts, {
-    fields: [shipments.recipientContactId],
-    references: [contacts.id],
-  }),
-  conversations: many(conversationShipments),
-}));
-
-export const conversationShipmentsRelations = relations(conversationShipments, ({ one }) => ({
-  conversation: one(conversations, {
-    fields: [conversationShipments.conversationId],
-    references: [conversations.id],
-  }),
-  shipment: one(shipments, {
-    fields: [conversationShipments.shipmentId],
-    references: [shipments.id],
-  }),
-}));
-
-export const conversationShippingAccountsRelations = relations(
-  conversationShippingAccounts,
-  ({ one }) => ({
-    conversation: one(conversations, {
-      fields: [conversationShippingAccounts.conversationId],
-      references: [conversations.id],
-    }),
-    shippingAccount: one(shippingAccounts, {
-      fields: [conversationShippingAccounts.shippingAccountId],
-      references: [shippingAccounts.id],
-    }),
-  }),
 );

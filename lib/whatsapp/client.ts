@@ -231,20 +231,6 @@ export async function sendTemplate(
   return toSendResult(response);
 }
 
-/**
- * Marks the customer's message read, so the console's read receipts match what
- * the customer sees in WhatsApp. Best-effort: failing to tick a message blue is
- * never worth failing a job over.
- */
-export async function markRead(wamid: string, options: CallCredentials = {}): Promise<void> {
-  const { token, phoneNumberId } = credentials(options);
-  await graph(`${phoneNumberId}/messages`, {
-    method: 'POST',
-    token,
-    body: { messaging_product: 'whatsapp', status: 'read', message_id: wamid },
-  });
-}
-
 export type MediaMetadata = {
   url: string;
   mimeType: string | null;

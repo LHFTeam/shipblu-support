@@ -3,11 +3,14 @@ name: CI
 # Everything AGENTS.md used to ask an agent to run before pushing, plus the
 # checks it could only ask them to remember.
 #
-# The four-command pre-push loop (tsc, eslint, vitest, build) is the `verify`
-# job. `repo-rules` is the prose that a machine can check. `database` is the gap
+# The pre-push loop (tsc, eslint, format, vitest, knip, build) is the `verify`
+# job. `format` and `knip` are the two most likely to fail for a reason that has
+# nothing to do with the code under review, so read the job name before the log.
+#
+# `repo-rules` is the prose that a machine can check. `database` is the gap
 # AGENTS.md called out and could not close: the unit tests run without a
 # database, so no SQL was ever executed before a push — `backfill_meta_profiles`
-# shipped with all four checks green and died on its first real run with
+# shipped with every static check green and died on its first real run with
 # `operator does not exist: text = channel`. Here it runs against real Postgres.
 
 on:
@@ -51,6 +54,14 @@ jobs:
             run: npm run format:check
           - name: test
             run: npx vitest run
+          - name: knip
+            # Dependency hygiene only, named as a positive allowlist in
+            # knip.jsonc — which is also where the reasoning lives for why the
+            # unused-export categories and `files` are not gated. An unlisted
+            # dependency is the one that bites without warning: it resolves
+            # today through somebody else's transitive tree and stops the day
+            # that package tidies its own.
+            run: npm run knip
           - name: build
             # `npm run build` pins NODE_ENV=production deliberately. Several
             # failure modes here — React's export-condition resolution under the
@@ -157,6 +168,77 @@ jobs:
       - name: Replay is idempotent
         run: npm run db:migrate
 
+      # The bilingual backfill is the one file in db/sql whose whole job is rows
+      # that already exist, so replaying it against an empty database proves
+      # nothing about it. Seed the shape it exists for — content in the
+      # superseded column and the pair still at its default, which is what every
+      # row looked like the moment migration 0025 finished — then replay, and
+      # check both that it landed and that it landed in the right language.
+      #
+      # The second replay is the other half. A backfill that is not idempotent
+      # is worse than one that never ran: this file is re-applied after every
+      # deploy, so it would keep overwriting whatever the console had since
+      # written.
+      - name: The bilingual backfill moves a pre-split row, once
+        run: |
+          set -euo pipefail
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "
+            insert into business_hours (name, schedule) values ('CI', '{}'::jsonb);
+            insert into holidays (business_hours_id, date, name)
+              select id, date '2026-03-22', 'Eid al-Fitr' from business_hours limit 1;
+            insert into canned_responses (title, body_text, body_html) values
+              ('arabic', 'الشحنة في الطريق إليك', '<p>الشحنة في الطريق إليك</p>'),
+              ('english', 'Your parcel is on its way', '<p>Your parcel is on its way</p>'),
+              ('edited',  'superseded', '<p>superseded</p>');
+            -- Already migrated by hand: the backfill must leave it alone.
+            update canned_responses set body_text_en = 'kept', body_html_en = '<p>kept</p>'
+             where title = 'edited';
+          "
+
+          npm run db:migrate
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "
+            do \$\$
+            begin
+              if (select body_text_ar from canned_responses where title = 'arabic') = '' then
+                raise exception 'the Arabic response was not backfilled';
+              end if;
+              if (select body_text_en from canned_responses where title = 'arabic') <> '' then
+                raise exception 'the Arabic response was filed as English';
+              end if;
+              if (select body_text_en from canned_responses where title = 'english') = '' then
+                raise exception 'the English response was not backfilled';
+              end if;
+              if (select body_text_en from canned_responses where title = 'edited') <> 'kept' then
+                raise exception 'the backfill overwrote a row that had already been written';
+              end if;
+              if (select name_en from holidays where date = '2026-03-22') <> 'Eid al-Fitr' then
+                raise exception 'the holiday name was not backfilled';
+              end if;
+            end
+            \$\$;
+          "
+
+          # Change what it wrote, replay, and it must still be what we changed it
+          # to — the guard is "both sides blank", not "the legacy column exists".
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c \
+            "update canned_responses set body_text_ar = 'edited in the console' where title = 'arabic';"
+          npm run db:migrate
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "
+            do \$\$
+            begin
+              if (select body_text_ar from canned_responses where title = 'arabic')
+                 <> 'edited in the console' then
+                raise exception 'the replay overwrote an edit made after the backfill';
+              end if;
+            end
+            \$\$;
+          "
+
+          # Left empty for the steps below, which assume the database they were
+          # handed.
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c \
+            "delete from canned_responses; delete from holidays; delete from business_hours;"
+
       - name: Row level security invariants
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/ci/db-invariants.sql
 
@@ -175,6 +257,7 @@ jobs:
           for job in \
             cleanup \
             sla_sweep \
+            presence_sweep \
             assign_sweep \
             run_time_automations \
             snapshot_backlog \
@@ -182,9 +265,58 @@ jobs:
             sync_whatsapp_templates \
             "backfill_meta_profiles limit=1" \
             "backfill_shipment_links limit=1" \
-            "backfill_message_locations limit=1"
+            "backfill_message_locations limit=1" \
+            "normalise_kb_formatting dryRun=true" \
+            "backfill_categorise_ai dryRun=true limit=1"
           do
             echo "::group::npm run job -- $job"
             npm run job -- $job
             echo "::endgroup::"
           done
+
+      # Not in the loop above, because unlike those this one writes — so it can
+      # carry a real assertion rather than only proving its SQL plans. Run once
+      # it seeds the handbook into an empty knowledge base; run again it must
+      # find everything current and change nothing. That is the same shape as
+      # the db/sql replay above, and it is the property that lets the job be
+      # re-run to ship a content fix without reverting anybody's edits.
+      - name: The console handbook seeds idempotently
+        run: |
+          set -euo pipefail
+          npm run job -- seed_console_handbook
+          before=$(psql "$DATABASE_URL" -tAc "select count(*) from kb_articles")
+          npm run job -- seed_console_handbook overwrite=true | tee /tmp/second-run.log
+          after=$(psql "$DATABASE_URL" -tAc "select count(*) from kb_articles")
+          versions=$(psql "$DATABASE_URL" -tAc "select count(*) from kb_article_versions")
+
+          test "$before" = "$after" || {
+            echo "::error::second run changed the article count: $before -> $after"; exit 1; }
+          test "$versions" = "0" || {
+            echo "::error::second run rewrote $versions article(s) that were already current"; exit 1; }
+          # Anchored to the whole field: a bare `grep -q "0 rewritten"` also
+          # matches "10 rewritten", which is the run this is meant to catch.
+          grep -qE "articles [0-9]+ created, 0 rewritten," /tmp/second-run.log || {
+            echo "::error::second run reported a rewrite"; exit 1; }
+
+          # And the audience, which is the whole point of the folders: every one
+          # of them internal, and every role on the ladder addressed. A folder
+          # that lost its floor is how a supervisor article reaches every agent.
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "
+            do \$\$
+            declare wrong int;
+            begin
+              select count(*) into wrong from kb_folders
+                where external_id like 'handbook:folder:%'
+                  and (visibility <> 'agents_only' or min_role is null);
+              if wrong > 0 then
+                raise exception '% handbook folder(s) are not internal or carry no role floor', wrong;
+              end if;
+
+              select count(distinct min_role) into wrong from kb_folders
+                where external_id like 'handbook:folder:%';
+              if wrong <> 4 then
+                raise exception 'handbook folders cover % of the 4 roles', wrong;
+              end if;
+            end
+            \$\$;
+          "

@@ -15,6 +15,10 @@ export default function GlobalError({
     <html lang="en">
       <body
         style={{
+          /* This boundary replaces the root layout, globals.css included, so the
+             one line that pins the app to a light palette has to be repeated
+             here — the colours below are hard-coded light ones. */
+          colorScheme: 'light',
           fontFamily: 'ui-sans-serif, system-ui, sans-serif',
           display: 'flex',
           minHeight: '100vh',

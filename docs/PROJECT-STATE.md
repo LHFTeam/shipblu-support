@@ -5,7 +5,19 @@ it is designed; **this file is about the state of the work** — what is live,
 what is merely built, what is left, and the mistakes that have already cost us
 time. Read both. Do not re-derive settled decisions.
 
-Last updated: 2026-09-02, against `main` at `aec5d4f`.
+Last updated: 2026-09-21, against `main` at `d5d791f`. The figures in §1 and §5
+were re-measured against production on 2026-09-20; where a number here disagrees
+with an older paragraph elsewhere in the file, the older one has not been
+re-checked.
+
+**Production runs `d5d791f`, deployed 2026-09-21 13:17–13:22 UTC** — the six
+unsuspended services, web first for the migration. It served `510024c` for the
+thirteen hours before that and `b1d911a` for eleven days before _that_, while
+`main` ran ahead of it, which is the trap rather than the footnote: `autoDeploy`
+is `no` on every production service (§2), so a merge changes nothing that is
+running, and the gap is invisible because CI is green and the old code keeps
+serving. Check `/api/health`, which reports the commit, before concluding any
+change below is live.
 
 ---
 
@@ -155,6 +167,23 @@ new: a tracking number in, a status badge, a four-step progress line and the
 knowledge-base answers for that status out. `noindex` and `Disallow`, and rate
 limited per address, because every useful URL on it carries somebody's parcel
 number.
+
+**"Ask support about this shipment" opens the chat, not a sign-in wall.** The
+button led to `/{locale}/forms`, which redirects to `/portal/new` when no ticket
+form exists — and that calls `requireCustomer`. Production has **zero**
+`ticket_forms` rows (measured 2026-09-03), so every press by the people this
+page is written for — recipients, who have no ShipBlu account — ended at a login
+screen. It now calls a new `shipbluChat.compose(text)` on the embed snippet,
+which opens the widget with the parcel already in the composer and waits for the
+visitor to write their question: the chat mints a visitor token at the moment
+somebody chooses to talk, so it needs no account. The draft is built by
+`lib/shipments/support.ts` from the number and the status **as the badge already
+worded it** — never from `shipments.data`, so it cannot say more than the page
+said — and `lib/shipments/detect.ts` reads the number back out when the message
+is stored, linking the conversation to the shipment without an agent retyping
+it. The `/forms` link survives as the `href`: it is where the button goes with
+no JavaScript or a blocked snippet, and it is the right destination once an
+admin builds a form.
 
 **`.kb-shell` no longer carries the Freshdesk portal's hex.** It carries the
 design system's `tokens/colors.css`, so the swap reaches every page under
@@ -406,13 +435,27 @@ agent-bound complaints and a leading indicator of inbound volume. That is also
 why there is **no backfill job**: with the bot channel excluded there are 55
 conversations in the entire archive to categorise.
 
+And now **the chat launcher knows the difference between a customer and us.**
+The help centre answers on the console's own hostname, so every agent reading an
+article — which the knowledge panel inside the composer is built to make them do
+— had a blue chat button floating over it, one click from filing a webchat
+ticket into their own queue. `viewerIsTeamMember()` in `lib/widget/audience.ts`
+reads the session rather than the cookie, because a stale cookie hiding the
+launcher would take live chat away from a customer silently and for good, and
+the help layout leaves `ChatWidget` out for anyone the console recognises. Only
+on the pages we render: `embed.js` is cached publicly for five minutes, so a
+merchant's own site cannot be told this without either dropping that cache or
+letting a shared one hand a reader an answer about somebody else.
+
 **The bot channel is live, and everything else is not.** This is the single most
 important thing to understand about the current state, and the easiest to read
 backwards.
 
-`channels` holds exactly one row: `whatsapp_bot`. Through it, real traffic has
-been arriving since 2026-08-18 — **10,716 conversations as of 2026-08-26**, still
-around 1,500 a day. The database is not empty and the system is not idle.
+`channels` now holds six rows — one per channel the app can receive on. Through
+`whatsapp_bot`, real traffic has been arriving since 2026-08-18: **28,547
+conversations and 95,930 inbound messages as of 2026-09-20**, still around 1,500
+a day and now 99% of everything in the database. The database is not empty and
+the system is not idle.
 
 But that channel is **read-only observation by design**. Another service owns
 that number and holds the conversation; we receive a copy of both sides.
@@ -421,31 +464,30 @@ from "all channels" even for an admin, and keeps it out of the SLA sweep, the
 time-based automations and every reporting metric. Nobody on the team works
 those conversations. They are transcripts, not a queue.
 
-Every human channel put together holds **30 conversations** — 22 Facebook, 3
-email, 2 Instagram, 2 WhatsApp, 1 webchat. Email, WhatsApp and webchat are test
-traffic from 18–21 August, but **Facebook and Instagram are not any more**: 105
-inbound Messenger DMs and 4 Instagram ones from real people, the most recent
-today, all of them filed under bare numeric ids and none of them answered by
-anybody. That is not the channel being configured — no `channels` row exists for
-either — it is the app being connected to a page and an account that the public
-can already write to. There is still no human WhatsApp row and no `portal` row.
-A `webchat` row and an email mailbox row **do** now exist — measured 2026-08-31,
-"Web Chat" and "Support Mailbox", both active and both routed to a group — which
-is a correction to what this section said before. `sla_policies` is still empty, so the SLA
-cron sweeps nothing every 5 minutes. `automation_rules` holds exactly **one**
-rule as of 2026-08-28 — "Close resolved tickets after 3 days", seeded by
-`db/seed.ts` and inserted into production by hand (§6.30) — which is the first
-work the 15-minute sweep has ever had. `locations` is still empty, all sixteen
-of them.
+Every human channel put together holds **173 conversations** — 140 Facebook, 18
+Instagram, 6 WhatsApp, 5 webchat, 4 email. Email, WhatsApp and webchat are still
+test traffic from 18–21 August, but **Facebook and Instagram are not**: those 158
+threads are real people writing to a page and an account the public can already
+reach, filed under bare numeric ids and none of them answered by anybody.
+
+**The channel rows are no longer the gap.** All five human channels now have one
+— "Support Mailbox", "Facebook Page", "Instagram", "Web Chat", "WhatsApp
+Support" — every one active and routed to `Support`; `whatsapp_bot` alone carries
+no default group, which is right. There is still no `portal` row, so a ticket
+opened from the customer portal lands with no default group.
+
+`sla_policies` holds **4** rows and `automation_rules` **1** ("Close resolved
+tickets after 3 days", §6.30), so both crons finally have work. `locations` is
+**still empty, all sixteen of them** — the one register nobody has entered.
 
 So: **the system still cannot take a real human support ticket**, and the
 remaining work is mostly not code — it is configuration, live-provider
-verification, and cutover. The agent productivity report is the sharpest example
-of what that costs: on 2026-08-21 production held **3 agents, 1 assigned
-conversation and 7 agent-authored messages**, so every figure on that page will
-read as a near-empty row until the team is actually working in the product. That
-is an argument for having landed the capture early, not for reading the report
-yet. Treat "phase N is complete" as a statement about the
+verification, and cutover. But the team has started arriving: **11 agents** as of
+2026-09-20, up from 3, of whom 10 have signed in at least once, and 161
+conversations now carry an assignee. The capture tables the productivity report
+reads are filling accordingly — 5,203 backlog snapshots, 479 presence intervals
+and 215 `agent_metrics_daily` rows — so the report is no longer empty, which is
+the argument for having landed the capture early. Treat "phase N is complete" as a statement about the
 codebase, never about the product being usable by the support team. But do not
 read "not configured" as "no data": there is a real archive now, it is worth
 measuring things against, and §6.17 is what happens when you measure carelessly.
@@ -476,21 +518,41 @@ declared all seven services as one flat list.
 | `shipblu-whatsapp-template-sync` | cron `0 * * * *`              | `crn-da1jgtg1ne8s73ciquk0` | `main`                       |
 | `shipblu-nightly`                | cron `0 0 * * *`              | `crn-da1jgtg1ne8s73ciqumg` | `main`                       |
 
-¹ `shipblu-sla-sweep` runs **two** jobs, `sla_sweep && assign_sweep`, chained the
-way `shipblu-nightly` chains cleanup and the rollup — same cadence, neither long,
-and a second container booting every five minutes to run a query that usually
-returns nothing is not worth it. The order matters and the `&&` does too: the SLA
-sweep goes first so a ticket the assignment sweep is about to hand to somebody
-carries its breach flags when they open it, and a failure in the first half takes
-the run red rather than reporting success because the second half worked. So the
-service name understates what it does — grep `render.yaml` for `startCommand`
-rather than trusting a cron's name.
+¹ `shipblu-sla-sweep` runs **three** jobs,
+`sla_sweep && presence_sweep && assign_sweep`. For an unknown period up to
+2026-09-25 the running service dropped the middle one while the blueprint
+declared it; that is fixed and §6.66 is the record, including the method that
+found it — compare `list_services` to `render.yaml` rather than trusting either
+alone. It is chained the way `shipblu-nightly`
+chains cleanup and the rollup — same cadence, none of them long, and a second
+container booting every five minutes to run a query that usually returns nothing
+is not worth it. The order matters and the `&&` does too: the SLA sweep goes
+first so a ticket the assignment sweep is about to hand to somebody carries its
+breach flags when they open it, the presence sweep next so an agent who has
+walked away is out of the rota _before_ that hand-out rather than a round later,
+and a failure in any half takes the run red rather than reporting success
+because the rest worked. So the service name understates what it does — grep
+`render.yaml` for `startCommand` rather than trusting a cron's name.
 
-**Staging is currently suspended, and it is pinned to the feature branch
-`claude/shipblu-support-app-03p2we` rather than to a staging branch.** Both are
-deliberate-looking but neither is written down anywhere else, so: if you resume
-staging, check what branch you are actually about to deploy. Do not assume it
-tracks `main`.
+**No production service on Render deploys itself.** `autoDeploy` is `no` and
+`autoDeployTrigger` is `off` on all six of them, so merging to `main`
+changes nothing that is running — a deploy is triggered by hand, from the
+dashboard or the API, and until it is, `main` and production are different
+software. This is easy to miss precisely because it looks like nothing went
+wrong: the merge succeeds, CI is green, and the old code keeps serving. Check
+what a service is actually running before concluding a change is live, and
+before enqueueing a job whose handler only exists in the new code — the running
+worker would take it, find no handler, and kill it.
+
+**Staging is suspended, and the branch it would deploy is not the one this
+repo says.** `render.yaml` pins it to the feature branch
+`claude/shipblu-support-app-03p2we`; the running service says `main`, with
+`autoDeploy: yes` and `autoDeployTrigger: commit` — the only service in the
+project that deploys itself. So the warning this paragraph used to carry, "do
+not assume it tracks `main`", was exactly backwards: the live service does, and
+the blueprint is what is stale. Resuming staging therefore arms an automatic
+deploy of `main` on the next commit, against staging's own database. Read the
+service, not the file, before you resume it. See §6.67.
 
 ### Supabase — org `ihngokrzwjmgpogkecug`
 
@@ -724,6 +786,49 @@ or a log line, and §6.2 is a warning about what happens when it is not.
 
 In rough priority order. Nothing here is blocked by anything else.
 
+### 5.0 The queue in front of the queue
+
+Two things sit ahead of everything below, and neither is a feature.
+
+**Ten pull requests are open, and five of them are one change.** #151 and
+#153–#157 are all the 2026-09-08 web freeze; #157 is the integration branch that
+carries #153–#156 as four merges, and #151 is a second, independently written
+answer to the same problem — the duplicate-work failure §3 warns about, arriving
+exactly as described. They have not moved since 2026-09-09. **The defect they fix
+is still live in `main`**: `app/api/events/route.ts` wires its abort handler
+after seven sequential `LISTEN` awaits, and the `catch` beside it returns without
+`end()`, so a client that disconnects inside that window strands a
+`sessionSql()` connection opened with `idle_timeout: 0`. `transaction_timeout`
+reaps it five minutes later; that is the whole of the mitigation today.
+
+Nothing is stranded at this moment — 17 backends, none in the
+`state=active` + `wait_event=ClientRead` shape, checked 2026-09-20 — so this is a
+live defect rather than an active incident. Read `plans/web-freeze-2026-09-08.md`
+before touching any of it.
+
+**#151 is closed as superseded, and one idea in it is worth keeping.** Its
+readiness probe made `/api/health` verify a _completed private Server Component
+render_ on the same instance, rather than a pair of database probes. That is a
+real answer to the rule §8 already states — a 200 is not evidence a page renders
+— and the freeze is exactly the case that proves it: the health check went on
+reporting success while every console page hung. The rest of #151 (a second pool
+module with generation retirement and cooldown) is not worth carrying beside the
+deadline instrumentation that landed, and it can fail concurrent database work by
+its own description. Nobody has written the probe as a follow-up anywhere else,
+so it is written here.
+
+One figure makes #155 more urgent than its own description says: `webhook_events`
+is **402,172 rows and 1006 MB** as of 2026-09-20, against the 206,053 that PR
+measured eleven days earlier. Retention is the change that stops a table
+doubling every fortnight.
+
+~~**And `main` is not deployed.**~~ **Deployed 2026-09-20.** All seven services
+are on `6d9b7f3`; `/api/health` reports the commit and the new `pool` block from
+#153. The standing hazard is unchanged, though, and it is why this paragraph
+stays: `autoDeploy` is off everywhere, so the next merge is again not running
+until somebody triggers it — including the job whose handler a queued row will
+look for.
+
 ### 5.1 Configuration and cutover — the real remaining work
 
 The system cannot take a single real ticket until this is done, and none of it
@@ -770,10 +875,12 @@ is code:
   the Meta inboxes are answered here or not at all, so the channel rows, the
   agents and the groups below need to be in place first rather than after.
 
-- **Channel rows.** `channels` holds one row, `whatsapp_bot`, and it is the
-  observed bot number rather than anything the team answers (§1). Email
-  mailboxes, the _human_ WhatsApp business number, the Facebook page and
-  Instagram account, and a `webchat` channel each still need a row.
+- ~~**Channel rows.**~~ **Done, bar one.** All five human channels have a row as
+  of 2026-09-20 — "Support Mailbox", "Facebook Page", "Instagram", "Web Chat",
+  "WhatsApp Support" — active and routed to `Support`, and `whatsapp_bot` is
+  still the observed bot number the team does not answer (§1). **A `portal` row
+  is the one still missing**, so a ticket opened from the customer portal lands
+  with no default group and nothing routes it.
   A WhatsApp row now also needs a **business account** to point at — Settings →
   Channels, "WhatsApp business accounts". Nothing has to be done by hand for the
   existing setup: the hourly template sync turns `WHATSAPP_WABA_ID` into the
@@ -793,35 +900,70 @@ is code:
   carried `{"address": ""}` until then, written by `saveChannel`'s catch-all
   branch, which is why anything reading that column treats its shape as
   untrusted.
-- **Every bot transcript is one-sided, and the fix is one job away.** The app has
-  never been subscribed to `message_echoes`, so the archive holds what customers
-  said to the bot and nothing the bot said back — 10,007 inbound rows on
-  `whatsapp_bot` and **zero outbound**. The missing half is never delivered
-  rather than delivered and dropped, and its size is known exactly, because the
-  delivery statuses _do_ arrive: 14,828 distinct outbound wamids in the three
-  days to 2026-08-22 against 10,024 inbound messages, so roughly 60% of each
-  conversation is absent. The receiving code has been ready since the channel
-  landed — `lib/whatsapp/parse.ts`, `ingestWhatsAppEcho` — and has only ever seen
-  Meta's documentation sample replayed by hand, five payloads on the test number
-  `16505551111`. `META_APP_ID` is set, so all that is left is
-  `npm run job -- subscribe_meta_webhooks` — from a Render shell on
-  `shipblu-support-worker` once this is on `main`, because that is where the
-  credentials are and the job ships with this change rather than being deployed
-  already. It reads the fields Meta has now, adds what is missing, and refuses
-  to write a list that would drop `messages`.
-  Do not do this with a hand-written `curl`: the Graph call _replaces_ the field
-  list rather than adding to it, so naming only the new field unsubscribes
-  `messages` and stops inbound WhatsApp entirely, and Meta answers that with a 200.
-- **Agents.** Three accounts exist. The rest of the team needs inviting, and
-  `groups` (3 rows) needs its membership — which is now load-bearing rather than
+- **Every bot transcript is one-sided, and no subscription can fix it — Meta
+  discontinued the field.** The archive holds what customers said to the bot and
+  nothing the bot said back: **95,930 inbound rows on `whatsapp_bot` and zero
+  outbound**, against 0 of 395,391 stored deliveries carrying an echo of any
+  kind. The size of the hole is known exactly, because the delivery statuses
+  _do_ arrive: 14,828 distinct outbound wamids in the three days to 2026-08-22
+  against 10,024 inbound messages, so roughly 60% of each conversation is
+  absent, permanently.
+
+  **This entry said "the fix is one job away" for a month and it was wrong.**
+  Running the job on 2026-09-21 is what settled it. `message_echoes` was a real
+  WhatsApp field and Meta has since discontinued it; the team that owns this
+  integration confirmed that, and the run corroborates it three ways. Graph
+  refuses a subscription naming it with `"An unknown error occurred"` — what it
+  answers for a field it does not know. The field is absent from the
+  `whatsapp_business_account` webhook reference for v23.0, the version
+  `GRAPH_VERSION` names. And the job's own read-back listed twelve subscribed
+  fields with no trace of it.
+
+  **`smb_message_echoes` is not the alternative to reach for, and its silence is
+  the proof.** It is the surviving echo field — a business replying from the
+  WhatsApp Business app or a companion device — and it has been **subscribed on
+  this app the whole time**, across all 395,391 deliveries, without ever firing
+  once. That is the evidence that this number is not operated that way: it is
+  sent on through the Cloud API, where the sender already knows what it sent and
+  Meta offers no echo to a third-party app.
+
+  So the bot's half is **not reachable by webhook at all**, and the remaining
+  routes are outside this system: the service that operates the number hands the
+  transcripts over directly, or they stay missing. Anyone reaching for a
+  subscription change here is repeating a month of it.
+
+  Two things were kept rather than deleted, both deliberately.
+  `lib/whatsapp/parse.ts` still reads a `message_echoes` array — it costs one
+  `?? []` and it is the shape the stored archive was parsed with, so a replayed
+  historical delivery does not silently lose its echoes. And the branch beside
+  it that treats a message from our own number as an echo is load-bearing on its
+  own terms: without it our own outbound arriving under `messages` is filed as a
+  customer message, inventing a contact for our own phone number.
+
+  The general lesson is §6.43's, one product further out than the case recorded
+  there: **a removal notice sits somewhere a search for the working endpoint
+  never surfaces.** `message_echoes` still reads as current everywhere except
+  the reference that governs it, and the nearest thing to a check is the one
+  AGENTS.md already gives — read the node reference for the version
+  `GRAPH_VERSION` actually names, and treat a field missing from it as a
+  finding rather than as an omission by the doc.
+
+- **Agents.** **11 accounts exist** as of 2026-09-20 (1 account_admin, 4 admins,
+  2 supervisors, 4 agents), up from 3, and 10 of them have signed in at least
+  once. **Seven `send_agent_invite` jobs died on 2026-09-03** with `the token …
+cannot be unsealed — APP_SECRET may have been rotated`, so some of that
+  onboarding did not go out by email; check nobody is still waiting on one before
+  inviting the rest. `groups` (3 rows) still needs its membership — which is now load-bearing rather than
   decorative: auto-assignment only ever considers members of the ticket's group,
   so a group with an empty roster hands out nothing and says `no_group_members`
   on the timeline.
 - ~~**Assignment is configured but off.**~~ **Switched on for `Support` on
-  2026-09-02**, round robin, all three agents on the roster. Still `manual` on
-  `Customer Care` and `Merchant Care`, whose rosters are empty and which no
-  channel points at — they route nothing until somebody decides what belongs in
-  them.
+  2026-09-02**, round robin; 161 conversations now carry an assignee. **The
+  roster is still 3 of 11 agents**, though, which is the thing to fix next here —
+  eight of the people who now have accounts are in no group, and auto-assignment
+  only ever considers members of the ticket's group. `Customer Care` and
+  `Merchant Care` still have empty rosters and no channel points at them, so they
+  route nothing until somebody decides what belongs in them.
 
   Two things were in the way and are worth knowing about, because both made the
   feature look broken rather than unconfigured:
@@ -854,9 +996,10 @@ is code:
   settings overview carries the same check. No seed data was written: nobody has
   given us the real names, codes and addresses, and inventing them would put
   plausible-looking wrong codes in every environment.
-- **SLA policies and automation rules are both empty**, so the sweep and the
-  time-based cron currently run over nothing every 5 and 15 minutes. Whatever
-  Freshdesk enforces today needs transcribing.
+- ~~**SLA policies and automation rules are both empty.**~~ `sla_policies` holds
+  **4** rows and `automation_rules` **1** as of 2026-09-20, so neither cron runs
+  over nothing any more. Whatever else Freshdesk enforces today still needs
+  transcribing, and one automation rule is not a rule set.
 - **The side conversation picker's two registers.** One is now filled and one is
   not. `internal_recipients` has 3 rows, all of them teams — so the picker
   offers those three and nothing else. **Every hub is still missing**, because
@@ -894,6 +1037,16 @@ is code:
   path on `shipblu-support.onrender.com` answers 200; and Render's HTTP metrics
   broken down by host show **zero** requests reaching this service on
   `support.shipblu.com` over 48 hours. The DNS has never been pointed here.
+
+  **Still true on 2026-09-20, and still nobody's half-hour.** Re-measured the
+  same way: production's `/widget/embed.js` still emits
+  `https://support.shipblu.com`, that host still answers `302 → /support/home`
+  (Freshdesk's own path) at the root and still 404s
+  `/en/a/packaging-guidelines`. What has changed is only the blast radius, and
+  only for now — one CSAT survey has ever been created and `contact_tokens` is
+  empty, so almost nothing has been mailed a dead link _yet_. That is the reason
+  to unset the variable now rather than an argument for leaving it: the day the
+  portal opens is the day every verification and reset email starts carrying one.
 
   So every absolute URL built from `publicBaseUrl()` currently names a host that
   does not serve this app. That is the sitemap, `robots.txt`, every canonical
@@ -965,9 +1118,21 @@ is code:
   The variables live in the `shipblu-shared` group because the web service and
   the worker have to agree: the worker links on the pattern, the console searches
   on it, and a service that disagreed would link a ticket the search could never
-  find again. **After this deploys, run the backfill from `/admin/import`** — the
-  live path only ever sees new messages, so the 24 above stay unlinked until it
-  runs, and it has still never been run once (§6.20).
+  find again. ~~**After this deploys, run the backfill from `/admin/import`.**~~
+  **Detection is live and working**: 40 `conversation_shipments` rows exist as of
+  2026-09-20 and **38 of them were found by the detector** rather than typed by
+  an agent, which is the ratio the second `/admin/import` card was built to
+  report.
+
+  **What has no schedule is the re-read.** `sync_stale_shipments` still has no
+  cron entry in `render.yaml` (§1), only 17 `sync_shipment` jobs have ever run,
+  and **34 of the 40 shipments were last synced more than two days ago** — the
+  most recent sync anywhere is 2026-09-19. So the tracking page now reliably
+  finds a parcel and then answers about it from stale data, which is the failure
+  mode that invites an agent to repeat an old status to a customer as current.
+  Deciding the cadence is still a question about the platform's rate limits that
+  nobody has answered; picking any number and writing the cron is better than the
+  status quo.
 
 - **`/admin/import` now has a second card** whose figures answer whether the
   pattern is right: it splits links into those the detector found and those
@@ -994,7 +1159,13 @@ provider. Each is a round trip somebody has to actually watch:
   and proves nothing about `app.shipblu.com`, where the origin is one Render
   serves the header for.
 - **The KB on its custom domain**, including that Freshdesk's old article URLs
-  redirect. 174 `kb_redirects` rows exist and none has been followed in anger.
+  redirect. 174 `kb_redirects` rows exist and none has been followed in anger —
+  which was read as "nothing links to them" and was not: 29 links **inside the
+  articles** pointed at those legacy paths until 2026-09-03, and `support.
+shipblu.com` still serves Freshdesk, so each one took a reader out of this
+  help centre and into the old portal. They are now `/{locale}/a/{slug}`
+  (§6.50). The redirects still matter for inbound traffic; nothing we publish
+  depends on them any more.
 - **A WhatsApp template send outside the 24-hour window** — the one path the
   end-to-end test in §7 could not cover.
 - **A side conversation to a genuine forwarding list.** Everything below is
@@ -1006,17 +1177,104 @@ provider. Each is a round trip somebody has to actually watch:
   and have somebody on it reply. If all three are eaten the reply opens a new
   customer ticket instead, which is visible immediately: the mail lands in the
   inbox as a new ticket from a hub address rather than on the thread.
-- **Meta's Human Agent feature, which nothing has confirmed is approved.** A
+- **Meta's Human Agent feature is not approved. Confirmed 2026-09-06, and it is
+  the whole 24-hour-to-7-day path.** _Was a hypothesis; is now a reading._ A
   Facebook or Instagram reply sent more than 24 hours after the customer's last
-  message goes out tagged `HUMAN_AGENT`, and that tag requires the Human Agent
-  permission to be approved for the app. On 2026-08-20 one such send failed
-  eight times and died in the queue, and Graph's only account of why was "An
-  unknown error has occurred." #49 made that refusal explain itself and named
-  this as the likely cause, but **the diagnosis is a hypothesis and the
-  permission has never been checked** — nobody has looked at the app's review
-  status in the Meta dashboard. If it is not approved then every FB/IG reply
-  outside 24 hours fails, which on a support channel is most of them. Check the
-  dashboard before the channels are turned on, not after.
+  message goes out tagged `HUMAN_AGENT`, and Graph now refuses it by name:
+
+  > To use 'Human Agent', your use of this endpoint must be reviewed and
+  > approved by Facebook.
+
+  `code 10, HTTP 403, trace AGtVAa9LUPmavPjHJ07bX3x, via graph.instagram.com`,
+  on message `308729d0-4a39-4af4-bdff-5cca1b1c017f` — a deliberate test send
+  6d15h after the customer's last message, so inside the seven days and outside
+  the twenty-four hours. That closes the item this list carried since 2026-08-20
+  as "a hypothesis, and the permission has never been checked": the feature is
+  not approved, and until it is, every FB/IG reply between 24 hours and 7 days
+  fails this way while replies inside 24 hours keep working — on a support
+  channel that is most of them. What is missing is the approval on the
+  **Instagram Login** submission, the connection the send is routed over, whose
+  permissions are spelled `instagram_business_*`; an approval on the Page
+  connection is a different grant and does not reach that host.
+
+  **It also retires the request-shape candidate.** The 2026-08-20 refusal named
+  nothing, so the Messenger-shaped body — `messaging_type: MESSAGE_TAG` on an
+  Instagram send — was a live second explanation, and `lib/meta/send.ts` was
+  written to drop it. This refusal was produced by that same body, and Graph
+  still named the feature: it can only do that after parsing `tag`, so the
+  parameter was not stopping the request from being understood. `send.ts` stays
+  as it is — it is right on the documentation either way, which is the reason
+  given for it there — but it is not what was failing.
+
+  Two things that look like counter-evidence and are not, both of which cost
+  time on 2026-09-06:
+
+  - **A role on the app is not the exemption here.** It is for a _permission_;
+    Human Agent is a _feature_, and Meta's own note on Standard Access is "some
+    features might not work properly until your app has been granted Advanced
+    Access." The feature reference adds that it "requires successful completion
+    of the App Review process" and "is only available with business
+    verification". So testing from an account you own does not route around it.
+    One thing left to rule out before concluding it is _only_ the approval: the
+    Instagram messaging guide requires a tester to hold a role on the app **and**
+    on the Instagram professional account, and the account that sent the inbound
+    DM is a different identity from the Facebook user holding the app role.
+  - **The dashboard's call counter for the feature sits at 0, and must.** A call
+    stopped at the capability gate never reaches the feature, so it is never
+    counted against it — the same reading recorded for Business Asset User
+    Profile Access below. That zero is this refusal restated, not a second
+    fault.
+
+  Corroboration that the credential and the route are sound: an Instagram
+  private reply went out over the same host and the same token four days earlier
+  (`72584c00-93ba-42be-8d4c-de3bc149139a`, `sent`).
+
+  What Meta documents, read from the live pages rather than from memory: message
+  tags are written up on the **Messenger Platform** Send API
+  (`graph.facebook.com/<PAGE_ID>/messages`), and the Instagram API with Instagram
+  Login messaging guide documents only `recipient` and `message` — it describes
+  the human-agent case in prose and gives no parameter for it. The feature is
+  nonetheless listed for _both_ login types on the Instagram App Review page, and
+  the 403 proves `graph.instagram.com` reads the tag. So it is supported and
+  ungranted, not unsupported.
+
+  **Two things about the tag are settled in code and no longer need watching.**
+  It can only be put on a message a person wrote — `send_meta` reads
+  `messages.author_agent_id`, and all three automated senders stop at 24 hours
+  rather than seven days — so a scheduled canned response can no longer be
+  delivered to Meta as human-written work. And the request bodies for both
+  platforms are asserted in unit tests against the node references.
+
+  One residual hole, recorded rather than fixed because the failure direction is
+  safe: `messages.author_agent_id` is `ON DELETE SET NULL`, so if an agent is
+  deleted while a reply of theirs sits failed-but-retryable, the retry reads it
+  as automated and refuses it. That is a refusal, never a false claim of human
+  authorship — the right way round — but it is a real reply that will not go
+  out.
+
+- **A reaction does not reopen the messaging window in this system, and Meta says
+  it should.** `messaging_postbacks`, the referral field and `message_reactions`
+  are now subscribed and parsed, and `applyMetaInteraction` records all three on
+  the ticket timeline. A postback and a referral also move
+  `lastCustomerMessageAt`, so they reopen the 24-hour window as Meta's policy
+  describes. A reaction deliberately does not: that column is also what the
+  next-response SLA target is measured from, so a customer answering a reply with
+  a thumbs-up would be recorded as waiting for us and the agent measured late for
+  not answering it. Closing the gap properly needs a second column —
+  "when did the customer last interact" is a different question from "when did
+  they last ask us something", the same split as `agents.last_seen_at` against
+  `last_input_at` — and the window would read the later of the two. Until then a
+  thread whose only activity in seven days is a reaction is refused a reply, and
+  the customer has to write again.
+
+  A second, smaller consequence of the same design: a postback or a referral
+  counts as the customer having written, so it re-arms the automation engine's
+  `alreadyReplied` guard, which asks for an `auto_replied` event newer than
+  `last_customer_message_at`. A customer tapping through a button menu can
+  therefore be sent the same canned reply again with no message in between. That
+  follows from the decision that a button press _is_ contact — the guard is
+  documented as keying on "since the customer last wrote" — but it is worth
+  knowing before `messaging_postbacks` starts delivering.
 
   **There are six dead `send_meta` rows now, not one.** The Instagram
   HUMAN_AGENT one from 2026-08-20, and five Facebook DMs on 23–24 August that
@@ -1322,6 +1580,62 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
 
 ### 5.5 Loose ends
 
+- **The dead-letter queue has 57 rows in it and, until 2026-09-21, nobody had
+  read them.** `/api/health` reported `dead: 56` unchanged for eleven days; the
+  57th was added deliberately on 2026-09-21 and is the only one anybody has
+  acted on. Four populations, and they want different answers:
+
+  - **43 × `download_media`, all `Media download failed (500)`.** Outage-shaped
+    rather than systematic — they cluster on 2026-08-29/30 (36 of them) and
+    2026-09-09 (5), against 240 completed including one that succeeded today. But
+    a dead job is never cleaned up and the dedupe key is **spent for good**
+    (`download_media:<mediaId>`), so re-enqueuing does nothing and those 43
+    customer attachments are gone. If a customer photographing a damaged parcel
+    matters, the recovery path is a handler that keys differently, not a retry.
+  - **7 × `send_agent_invite`**, 2026-09-03 — see §5.1's agents entry.
+  - **6 × `send_meta`**, unchanged and already diagnosed in §5.2.
+  - **1 × `subscribe_meta_webhooks`**, 2026-09-21, and this one is a result
+    rather than a fault. It was enqueued on purpose to add `message_echoes`, and
+    its five identical refusals are the evidence that Meta has discontinued that
+    field — the §5.1 entry above is what it produced. It changed nothing in
+    production: the merge preserved `messages` on every attempt and inbound never
+    paused. Left in the table rather than deleted, because deleting the row would
+    throw away the only durable record of that run; `last_error` on it is the
+    Graph refusal itself.
+
+  The lesson worth keeping is the shape: nothing surfaces a dead job to a human.
+  The count is on `/api/health` and on `/admin`, and both are places you have to
+  already suspect something to look at. The eleven days of an unmoving `dead: 56`
+  is the demonstration — it took somebody querying the table for any of it to be
+  read, and three of the four populations are still unactioned.
+
+- **Three superseded columns are still in the schema, waiting for every service
+  to be on new code.** `holidays.name`, `canned_responses.body_html` and
+  `canned_responses.body_text` were replaced by `*_ar` / `*_en` pairs in
+  migration 0025, which adds and does not drop. The reason is the deploy shape,
+  not caution: `preDeployCommand: npm run db:migrate` is on the two **web**
+  services only, so the worker and the four crons carry on running old code
+  after a web deploy has migrated — and old code selects `holidays.name` inside
+  `loadHoursCatalog`, which is on the SLA sweep, assignment, the nightly rollup
+  and the widget's open/closed check. Dropping in the same release would have
+  taken all of that down for the length of the deploy window. Drop them once
+  the worker and crons are confirmed on a build that no longer reads them, and
+  take the two writers below out in the same commit.
+
+  **They are written, and the sentence that used to be here said they need not
+  be.** "The columns default to `''`, so nothing has to be written to them in
+  the meantime" is true of the rows that existed and false of every row created
+  since: a canned response added after the migration reached the still-old
+  worker as an empty body, which it sends. So `saveCannedResponse` and
+  `saveHoliday` fill the superseded column from whichever language was written,
+  Arabic first. A window where only one side is written is not an expand phase,
+  it is the contract phase arriving early for anything new.
+
+  Both tables were empty in production when 0025 was written and still were on
+  2026-09-05 (`select count(*)` on each), which is the only reason this cost
+  nothing. `db/sql/004_bilingual_backfill.sql` moves the content anyway, because
+  staging and any future environment will not be empty — see §6.60.
+
 - **`Merchant Care WABA` is connected to an id that holds no templates, and
   nothing said so.** The row was added by hand on 2026-08-23 17:33, 33 minutes
   after the hourly sync adopted the real one, and carries
@@ -1339,16 +1653,20 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   — see the `no templates` badge added with this note.
 
 - **`contacts.locale` is never written, so every contact reads `'en'`.** All
-  6,244 of them sit at the column default, and `lib/contacts/merge.ts` already
+  **28,661** of them sit at the column default (re-counted 2026-09-20; it was
+  6,244 when this was written, so the cost of the workaround is growing), and `lib/contacts/merge.ts` already
   documents why that is not the same as knowing: `'en'` means either "reads
   English" or "nobody has ever said". Anything that picks a language off it is
   answering an Arabic-first customer base in English — **CSAT surveys are doing
-  that today** (`worker/handlers/send-csat.ts` reads the column directly). The
-  out-of-hours reply works around it by reading the script of the customer's own
-  message (`preferredLocale()` in `lib/auto-response/resolve.ts`), which is a
-  workaround and not the fix. The fix is to set the column at ingest — the widget
-  and the portal both know the locale from the URL they were opened on, and a
-  WhatsApp or email contact can be read the same way the auto-response reads it.
+  that today** (`worker/handlers/send-csat.ts` reads the column directly). Two
+  senders work around it by reading the script of the customer's own message —
+  the out-of-hours reply and, since canned responses became bilingual, the
+  canned reply an automation rule sends — through `preferredLocale()` in
+  `lib/tickets/locale.ts`. That is a workaround and not the fix, and it is now
+  in one module precisely so the next sender does not invent a third answer. The
+  fix is to set the column at ingest — the widget and the portal both know the
+  locale from the URL they were opened on, and a WhatsApp or email contact can
+  be read the same way the auto-response reads it.
 - One imported article's detected language disagrees with its category. The
   importer counts and reports these rather than silently refiling them; someone
   who reads Arabic should look at it.
@@ -1465,6 +1783,18 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   months still starts at zero** and the ranking is only meaningful once some
   traffic has gone through it. The tooltip says so.
 
+  **A response is now two bodies, one per language, and the picker carries a
+  toggle beside it.** It opens on the language the customer is writing in — the
+  same `detectLocale` reading the knowledge panel beside it searches on — so an
+  agent answering an Arabic ticket reaches for the Arabic wording without
+  touching it. A response written in only one language stays in the list and
+  says so on its own option rather than disappearing, because the team writes
+  the Arabic first and hiding the rest would make the boilerplate look missing.
+  `send_reply` had to make the same choice with nobody to ask, and makes it per
+  ticket through `requesterLocale()` rather than at the rule — one rule serves
+  both halves of the queue. `usage_count` still counts replies rather than
+  languages: which language a response goes out in is not what the column ranks.
+
 - **The dead-scaffolding sweep, run rather than recommended.** §1 has said it is
   worth grepping for other columns nothing reads or writes; this is the answer as
   of `e5e2f8a`. Of 548 columns across 52 tables, five are referenced nowhere in
@@ -1522,7 +1852,21 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
     and sends a proper Terminate; it never closes mid-query.
 
   What triggers it inside Supavisor (or the Render↔Supabase network) is **not
-  established** — it cannot be instrumented from the app side.
+  established**.
+
+  **Revised 2026-09-09: the app can produce this signature on its own, and the
+  ruling-out above has a gap.** The 09-08 freeze stranded five connections that
+  the reaper then killed, and the web process was the cause —
+  `app/api/events/route.ts` wires its abort handler at L98, _after_ seven
+  sequential `LISTEN` round trips, so a client that disconnects inside that
+  window leaves a `sessionSql()` client (`idle_timeout: 0`) with no remaining
+  handle, and the `catch` at L68–73 omits `end()`. No pooler needed. The
+  aborted-render experiment above tested _aborting a render_; it did not test a
+  stalled event loop or an exhausted pool, which is what happened. That is a gap
+  in the experiment rather than a contradiction of it — but "it cannot be
+  instrumented from the app side" was wrong, and the instrumentation that is
+  actually missing is postgres.js's own queue depth. See
+  `plans/web-freeze-2026-09-08.md` and §62.
 
   So it is reaped rather than prevented: `transaction_timeout = '5min'` is set
   on the `postgres` role, which terminates any transaction spanning longer than
@@ -1539,6 +1883,105 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   from pg_stat_activity
   where xact_start < now() - interval '5 minutes' and pid <> pg_backend_pid();
   ```
+
+- **The sign-in throttle's bucket map is bounded now; for the whole of the
+  project's history it was not.** `lib/auth/throttle.ts` keys a bucket per email
+  and per source, for sign-in and for anything that sends mail to a typed
+  address. `hit()` only resets a key it sees _again_ and `clearLoginAttempts`
+  only deletes on a successful sign-in — and the `mail:` / `mailip:` keys had no
+  remover at all — so a key used once was never removed by anything.
+  `pruneThrottleBuckets()` was written for exactly this, carried the comment
+  "keeps the map from growing without bound on a long-lived instance", and had
+  no caller in the repo's history. So an attacker spraying distinct addresses at
+  `/login` was filling a Map rather than being throttled by one, on the endpoint
+  that is reachable without signing in.
+
+  Swept inside `hit()` instead, amortised: one O(size) pass per 256 _new_ keys,
+  counted on the branch that adds one, so the sweep is paid for by the growth it
+  bounds. Not a timer and not the `cleanup` job, because neither can reach this
+  — the map is per-process heap, a request-scoped web process has nothing to
+  hang an interval on, and a job runs in the worker. `throttleBucketCount()` is
+  exported only so a test can assert the bound: ten rounds of a thousand fresh
+  addresses a window apart settle under 4,000 entries, where the unswept version
+  holds 20,002.
+
+- **A side conversation marked done reopens when the hub actually answers, and
+  this is already right — an earlier draft of this entry said otherwise.**
+  `isSideConversationOpen` claimed in its own doc comment to be "used by the
+  reply action to refuse writing into a thread that is done". Nothing called it,
+  and the comment described a policy this system does not have: `ingestSideReply`
+  sets `state: 'open'` and clears `closed_at` when a reply arrives on a `done`
+  thread, guarded by `!automation.isAutomated` so an out-of-office does not
+  count. That is the better answer of the two — refusing would drop the thing an
+  agent was waiting for — and it matches what a customer's reply does to a
+  resolved ticket.
+
+  Recorded because the mistake is instructive twice over. The dead function's
+  comment sent one reader looking for a refusal that was never written, which is
+  §6.63's whole point; and this entry then repeated the claim as a known gap,
+  which would have sent the next session to "fix" working behaviour. A gap
+  asserted from a deleted function's comment is not a gap until the live path
+  has been read.
+
+- **An article can now be linked to its translation from the console, and that
+  is the first half of two.** `kb_articles.translation_group_id` is
+  `notNull().defaultRandom()`, so every article starts alone in a group of its
+  own, and the help centre's switcher renders whatever shares the group
+  (`translationsOf`). Until this branch nothing outside the Freshdesk importer
+  ever wrote the column: `linkTranslation` was the one code path that could and
+  had never been referenced from any `.tsx` file, so it was a live `'use server'`
+  endpoint with no caller. It is now wired to a **Translations** section in the
+  article sidebar, which lists what this article is already linked to and offers
+  every other article the reader may see in another language. Both sides are
+  re-checked server-side, and the candidate list goes through `readableByRole`
+  for a sharper reason than the other read models: an unfiltered dropdown would
+  leak the titles of admins-only runbooks to a supervisor.
+
+  **This costs nothing today and would have opened at the first natively
+  authored pair.** All 112 production articles came from Freshdesk, where the
+  importer sets the groups: 54 of the 58 groups are correct ar/en pairs, and the
+  four singletons are placeholder rows all titled "مقالة جديدة", not content
+  waiting to be linked (queried 2026-09-09). The gap was prospective, which is
+  why it was worth closing before `seed_console_handbook` and the editor start
+  producing native content.
+
+  **TODO — the second half, and two rough edges the first half leaves:**
+
+  1. **`saveArticle` should accept a group to join at creation.** Writing the
+     second language is currently a save followed by a separate link, and a
+     person can do the first and forget the second — which produces exactly the
+     unlinked pair this exists to prevent. "Add a translation" from an existing
+     article, carrying its group into the new row, is the workflow that cannot
+     be half-completed.
+  2. **There is no unlink.** A wrong link can be pointed somewhere else but not
+     undone back to "alone", because that means allocating a fresh
+     `translation_group_id` and nothing exposes that. Cheap to add next to the
+     picker; left out here to keep the restoration reviewable.
+  3. **Linking moves only this article, so a group it was already in is left
+     behind.** Right for two locales — "this is the Arabic of that" — and the
+     thing to revisit if a third is ever added, when the intent becomes "merge
+     these groups" rather than "point this one".
+
+- **`jobs` carries the high-water mark of its busiest week, and reclaiming it is
+  a manual step.** On 2026-09-09 the table held **1,150 live rows in 52 MB**, 30
+  MB of it indexes, `jobs_dedupe_idx` alone 15 MB — the one table the Supabase
+  advisor calls bloated. That is its shape rather than a fault: ~200,000 rows are
+  inserted and deleted every seven weeks, and vacuum makes space reusable
+  without shrinking the files.
+
+  `db/sql/005_storage_parameters.sql` lowers the autovacuum scale factors so the
+  churn is collected on absolute counts rather than on a fifth of a table that is
+  almost always tiny. That slows further bloat; it gives nothing back. Reclaiming
+  what is already there is:
+
+  ```sql
+  REINDEX INDEX CONCURRENTLY jobs_dedupe_idx;
+  ```
+
+  Run it by hand — `CONCURRENTLY` cannot go in `db/sql/`, because `db/migrate.ts`
+  sends each file as one `sql.unsafe(contents)` and therefore one implicit
+  transaction. Check the `pg_stat_activity` query above for a conflicting lock
+  first: this is the table the worker claims from every second.
 
 ---
 
@@ -2938,7 +3381,642 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     production. Same family as the `operator does not exist: text = channel`
     entry above.
 
-47. **A null `whatsapp_account_id` is invisible to every read and unreachable by
+47. **A rendered one-time link in `jobs.payload` is a live credential at rest.**
+    _2026-09-03, caught in review before it shipped._
+
+    The agent invitation was enqueued the way every other ticket-less email is,
+    with the composed body in the payload — so the activation URL sat in
+    plaintext in `jobs`. `cleanup` keeps a completed job for **7 days**, which is
+    the invite's entire TTL, and never deletes a `dead` one at all, so the link
+    outlives the invite it belongs to. `invites` goes to real trouble to prevent
+    exactly this: a SHA-256 for the lookup and an AES-GCM envelope for
+    redisplay, so that a database dump alone yields no usable token. Enqueueing
+    the rendered link handed it straight back one table over.
+
+    The fix that does **not** work is carrying the raw token in the payload
+    instead and rendering the body in the handler — the token _is_ the
+    credential, so that moves it without protecting it. `send_agent_invite`
+    carries the invite's **id** and rebuilds the link from the envelope, which is
+    the path the pending-invites screen already took.
+
+    So: anything with a one-time link in it either carries an id and rebuilds, or
+    accepts that the credential is readable for a week. `send_notification_email`
+    still takes bodies, and the portal's verification and reset links still go
+    through it — `password_resets` stores only a hash, so there is nothing to
+    rebuild from and closing it needs a column, not a handler.
+
+48. **`className` cannot override `FIELD_BASE`'s background, and fails
+    silently.** _2026-09-03, same review._
+
+    A read-only field was styled by passing `bg-[var(--muted)]` to `Input`
+    alongside `FIELD_BASE`'s own `bg-[var(--surface)]`. Both are single-class
+    utilities of equal specificity, so the winner is whichever Tailwind emits
+    **later in the stylesheet** — not whichever the class attribute lists last.
+    It emits `--surface` second (offsets 23493 vs 23672 in the built CSS), so the
+    override never applied and the field rendered exactly like an editable box,
+    on the one page whose whole point is that there is nothing to type in it.
+
+    The surviving classes made it look half-intentional: `cursor-default` and the
+    text colour do not conflict with anything, so the field was subtly different
+    and not obviously wrong.
+
+    `Input` now picks the background itself from the `readOnly` prop, so the two
+    are mutually exclusive and there is no conflict to lose. Keyed off the prop
+    rather than the `read-only:` variant deliberately: CSS `:read-only` also
+    matches every _disabled_ field. The general rule — do not pass a utility
+    through `className` that the component already sets; change the component.
+
+49. **A body `<h1>` in a knowledge-base article renders as plain paragraph
+    text.** _2026-09-03._ Tailwind's preflight resets every heading to
+    `font-size: inherit; font-weight: inherit`, and `.kb-article` in
+    `app/globals.css` deliberately styles `h2`–`h6` only — the article page
+    already renders the title as the page's `h1`. So the 128 body `h1`s the
+    Freshdesk import brought with it, across 44 of 112 articles, picked up
+    nothing at all: no size, no weight, no colour, not even the `margin-top:
+2em` that separates a section from the one above it, because that rule names
+    `h2`–`h6` too. Verified in the served stylesheet rather than inferred:
+    `h1,h2,h3,h4,h5,h6{font-size:inherit;font-weight:inherit}` and
+    `.kb-article h2,.kb-article h3,…` are both in
+    `/_next/static/chunks/04dkjnvi0lxh0.css`.
+
+    Every section heading in the step-by-step guides was one of these, so
+    "Order", "Customer Details" and "Packages" read as ordinary bullet text in
+    the middle of a list. `lib/kb/format.ts` maps them to `h2` and lifts them
+    out of the list item Freshdesk left them in.
+
+    The general shape is worth keeping in mind beyond headings: **the stylesheet
+    is the specification for what stored HTML may contain.** `.kb-article` says
+    what it styles, and anything outside that list is unstyled by construction
+    rather than by accident.
+
+50. **The classes a paste brings with it are live utilities in this app.**
+    _2026-09-03._ Three of the imported articles carry a chunk of ChatGPT's DOM,
+    `class="markdown prose dark:prose-invert"` and all — and because this app is
+    built with Tailwind, `flex`, `flex-col`, `items-end`, `gap-2`, `w-full`,
+    `text-base`, `text-lg` and `mx-auto` are real rules in the served CSS
+    (checked, one by one, in the built chunk). So a pasted wrapper turned part
+    of an article into a flex column with its content pushed to the inline end,
+    and a `text-lg` on a heading resized it. Froala's `fr-*`, Zoho's `zw-*` and
+    a WordPress theme's `fusion-text` were inert; these were not.
+
+    Two more from the same corpus, both invisible in an English spot check:
+    inline `color:rgb(0, 0, 0)` from a light-mode editor, on a help centre that
+    answered `prefers-color-scheme: dark` at the time — the app is light-only
+    now, and the colour is stripped for the plainer reason that the article's
+    text colour is the stylesheet's; and `dir="ltr"` with
+    `text-align:left`, which 25 of the Arabic articles carry, un-mirroring a
+    paragraph in the middle of a right-to-left page. `lib/kb/format.ts` strips
+    all of it, and the rule that catches the next one is in
+    `scripts/ci/repo-rules.mjs`: a write path that sanitises an article body and
+    does not normalise it fails the build.
+
+51. **`kb_articles.updated_at` is not an edit date — every page view moves
+    it.** _2026-09-03._ `recordArticleView` increments `view_count` on the
+    article row, and `touch_updated_at` fires on any update of a table with that
+    column, so a read writes the timestamp. The article page renders it as
+    "Updated <date>" under the title, which means a busy article tells every
+    customer it was revised today and a quiet one looks stale.
+
+    Two consequences. The line on the page is worth either sourcing from
+    somewhere else — `kb_article_versions` knows when the body actually changed
+    — or dropping. And nothing should reason about content freshness from this
+    column: 99 of the 112 articles read 2026-08-19, the import date, and the
+    handful that read later are the ones somebody happened to open.
+
+52. **`current_date` in a page query is the database's date, and the database is
+    UTC.** _2026-09-04._ `/reports/categories` filtered its rollups with
+    `day >= current_date - N`, which is a different day from the one
+    `rollup_metrics` bucketed them into for the first two hours of every Cairo
+    morning — the rollup uses the reporting zone, deliberately, so that an
+    evening shift does not land on tomorrow. Nothing catches this: the SQL is
+    valid, the numbers look plausible, and the window is only ever wrong by a day
+    at one edge. Every report now derives its window once, in the page, through
+    `rangeIn()` in `lib/reports/rollup.ts`, and no read query mentions
+    `current_date`. A live query comparing a `timestamptz` against that window
+    has to name the zone too — cast the date to `timestamp` and apply
+    `at time zone <reporting zone>`, not a bare `::date` comparison in UTC.
+
+53. **A console page with no scroll container is silently truncated, not
+    scrollable.** _2026-09-04._ The console shell is `h-dvh overflow-hidden` with
+    a `min-h-0 flex-1` content column, so a page that does not open its own
+    `app-scroll h-full overflow-y-auto` wrapper renders everything below the fold
+    where nobody can reach it — and with no padding either. `/reports/categories`
+    shipped that way and read as an unfinished page: half of it existed and could
+    not be seen. `/reports/agents` and `/inbox/new` have the wrapper; the admin
+    pages get it from `app/(console)/admin/layout.tsx`. A new page under
+    `(console)` outside `admin/` has to bring its own.
+
+54. **A range control over a rollup with no backfill looks broken.**
+    _2026-09-04._ 7, 30 and 90 days on `/reports/categories` answered
+    identically, which was reported as the buttons not working. They worked:
+    `rollup_metrics` recomputes three days a night, categorisation only started
+    on 2026-09-01, and there is no category backfill — the whole archive is three
+    days deep (verified: `category_metrics_daily` holds 8 rows over 3 days;
+    `root_cause_metrics_daily` is empty). A control whose effect is invisible has
+    to say so itself, so the page now prints the window it selected and, when the
+    figures begin after the window opens, says where they begin and why. Worth
+    remembering for the next report built on a young rollup.
+
+55. **The article page in the console required `kb.edit`, so no agent could
+    open an article.** _2026-09-04, writing the team handbook._ `/kb` needed
+    `kb.view`, which the agent baseline carries, and `/kb/[id]` needed
+    `kb.edit`, which starts at supervisor. An agent could therefore see every
+    title in the list, click one, and land back on the inbox with
+    `?error=forbidden`.
+
+    Survivable while the knowledge base was entirely customer-facing — an agent
+    could read any of it on the help centre like anybody else. Not survivable
+    the moment internal articles exist: an article addressed to agents that no
+    agent can open is not published, it is filed. The page now serves a
+    read-only render at `kb.view` and the editor at `kb.edit`; every write still
+    goes through `requirePermission` inside the actions, so nothing was widened
+    but reading.
+
+    And "nothing was widened but reading" turned out to be the sentence to
+    distrust: the read-only branch applied **no status gate**, so every agent
+    could now read the body of any draft. `agent-search.ts` states the opposite
+    rule for the composer — "no reviewer has agreed to its contents" — and it
+    holds more strongly where the whole body is on screen rather than a search
+    snippet. Readers get published articles and a notice for anything else.
+
+    Two general shapes, both worth keeping. A permission that gates a _route_
+    rather than the writes on it will eventually gate a reader it was never
+    meant to. And widening who may reach a page widens everything that page
+    renders, not only the part you were thinking about when you widened it.
+
+56. **`kb_categories` has no visibility column, so a category holding only
+    internal folders was still a public page.** _2026-09-04, reviewing the
+    handbook._ Visibility and the role floor are columns on `kb_articles` and
+    `kb_folders`; a category has neither. `getCategory` filtered the folders it
+    returned and then returned the category anyway, so
+    `GET /ar/c/handbook-console` answered 200 to a signed-out visitor with the
+    category's Arabic name as the `<title>` and its description as the meta
+    description. The fifteen articles were never reachable — every query that
+    could reach one threads a viewer — but the page around them was, and it was
+    indexable.
+
+    `getCategory` now answers null when nothing inside it is readable, which is
+    the cut `listCategories` already took for the front page ("an empty category
+    on a help centre reads as a broken page"). The general shape: a table with no
+    visibility axis inherits one only if every read of it derives the answer from
+    the children that do have one.
+
+57. **A client component importing one constant from a module that touches the
+    schema ships the whole schema.** _2026-09-04, reviewing the handbook._
+    `FLOOR_LABELS` — four strings — lived beside the SQL predicates in
+    `lib/kb/internal.ts`, which value-imports `@/db/schema`. Three `'use client'`
+    files imported it, and the first-load JS of `/kb/[id]`, `/kb/new` and
+    `/kb/structure` therefore carried every Drizzle table definition in the
+    repository: 579 KB per route, of which 87 KB was the schema. Nothing failed.
+    `tsc`, `eslint`, `vitest` and `next build` were all green, and the evidence
+    is only in `.next/diagnostics/route-bundle-stats.json`.
+
+    The labels moved to `lib/kb/floors.ts`, which imports the visibility enum as
+    a `type` and so is erased entirely; the three routes now load 484–492 KB with
+    no schema string in any chunk. `scripts/ci/repo-rules.mjs` walks the graph
+    out of every `'use client'` file and fails on a value import that reaches
+    `db/schema` or `db/client`. It stops at `'use server'` modules — a client
+    form importing its own actions file is a network boundary, not a dependency —
+    which is why the first version of the check reported 88 violations.
+
+    The trap generalises past the schema: the `node:fs` version of this mistake
+    fails the build, and every other version of it just makes the app slower.
+
+58. **`key={state.nonce}` on a form clears the fields, not the state that
+    renders them.** _2026-09-04, reviewing the handbook._ Every composer and
+    admin form in this app clears itself by remounting on the nonce the action
+    returns, which works because the inputs are uncontrolled — the DOM nodes are
+    new. A `useState` in the component that _declares_ the form is above that
+    boundary and survives, so anything driven by it silently carries over into
+    the next submission.
+
+    Twice, in the same review. `/kb/structure` kept "Agents only" selected after
+    adding an internal folder, so the next folder was created internal with an
+    empty name box. Worse, `ReplyForm` kept `usedId` — the canned response the
+    last reply used — in a hidden `cannedResponseId` field, so every subsequent
+    reply from the same open ticket incremented `usage_count` for a response it
+    did not contain, compounding with how many replies the agent sent.
+
+    The rule: state that a keyed form's submission depends on belongs _inside_
+    the keyed subtree, in a component of its own. State that is deliberately
+    sticky (`privately`, the side-conversation recipient, and the canned
+    picker's language toggle) belongs outside it — and all three are visible
+    controls, so what carries over is on screen rather than in a hidden field.
+    The toggle is the case that shows why the distinction is not about risk: it
+    _should_ survive a send, because an agent who has decided to answer an
+    Arabic ticket in English is answering the whole thread in English.
+
+59. **An `UPDATE` that changes nothing still moves `updated_at`.**
+    _2026-09-04, review of the handbook seed._ `touch_updated_at` is created
+    `BEFORE UPDATE` on every table with the column by a loop in
+    `db/sql/001_extensions_and_triggers.sql`, and it fires on the statement, not
+    on a diff. So an upsert re-asserting values a row already holds —
+    `set({folderId, visibility, position})` — writes the timestamp on every row
+    it visits while truthfully reporting "0 rewritten, 15 already current".
+
+    Two reasons that is worse than untidy. `/kb` orders by `updated_at desc`, so
+    a no-op re-run floats the whole seeded set to the top of the list; and §6.51
+    already records that this column is not an edit date, which is exactly the
+    confusion a job moving it for nothing deepens. An idempotent writer has to
+    compare before it writes, field by field.
+
+    The measurement matters as much as the fix. The job's own tally could not
+    have caught this — it was reporting the truth — and neither could
+    `updated_at > created_at`, because the statement resetting the fixtures
+    fires the same trigger. Diff every timestamp across the run.
+
+60. **Splitting a column into a bilingual pair is silent data loss until
+    something copies it across.** _2026-09-05, review of #137._ Migration 0025
+    added `canned_responses.body_{html,text}_{ar,en}` and
+    `holidays.name_{ar,en}` as `text NOT NULL DEFAULT ''` — the only shape an
+    `ADD COLUMN` on a live table can take — and the new read paths look at the
+    new columns only. Nothing copied the old ones. So every row that existed
+    before the migration read as having no body and no name at all:
+    `availableLocales` answers `[]`, the composer's picker lists a response and
+    inserts nothing when it is chosen, and `sendCannedReply` logs "references a
+    canned response with no body" and returns, so every automation rule that
+    replies stops replying. No error surfaces anywhere a person looks.
+
+    It reached `main` green because both tables are empty in production, which
+    is also why it cost nothing: the CI `database` job proves `db/sql` replays
+    idempotently against an _empty_ database, and a backfill is the one thing an
+    empty database cannot test. The fix is `db/sql/004_bilingual_backfill.sql`
+    plus a CI step that seeds a pre-split row before replaying — assert the
+    content moved, moved to the right language, and did not move again.
+
+    The second half is the same trap from the other end. `db/schema/config.ts`
+    keeps the superseded columns for one release because the worker and the four
+    crons deploy separately from the service that runs the migration and the old
+    code still selects them — but the new write path had stopped filling them,
+    so a row created after the migration was `''` to the old reader. An
+    expand/contract window only holds if both sides are written for its whole
+    length.
+
+61. **An App Review _feature_ is invisible to every check this system makes, and
+    a role on the app does not exempt it.** _2026-09-06, testing the human agent
+    tag on Instagram._ Two gates share one refusal code and almost one sentence,
+    and only one of them is a permission:
+
+    |                                         | permission                           | feature            |
+    | --------------------------------------- | ------------------------------------ | ------------------ |
+    | e.g.                                    | `instagram_business_manage_messages` | Human Agent        |
+    | granted to                              | the token                            | the app            |
+    | visible in `debug_token`                | yes, in `scopes`                     | **never**          |
+    | a role on the app covers it             | yes, at Standard Access              | **no**             |
+    | dashboard call counter before the grant | moves                                | **cannot leave 0** |
+
+    Every column of the right-hand side was assumed to read like the left one.
+    `check_meta_permissions` reports on `scopes`, so it printed "every capability
+    is granted" — truthfully — while the app was refused; the counter sitting at
+    0 was read as a second, separate fault when it is the same fact seen from the
+    dashboard; and "I have a role on the app" was taken as the exemption it is
+    for a permission. `FEATURES` in `lib/meta/capabilities.ts` now holds the ones
+    this system depends on and the job prints them as _not checked_, which is the
+    only honest thing it can say about a gate a token cannot describe.
+
+    **The diagnostic written for this refusal did not fire, for the third time in
+    the same file.** `humanAgentExplanation` had been keyed on codes 1 and 2 —
+    the shape of the 2026-08-20 failure, which is the shape Graph uses when it
+    declines to say anything. The real refusal is `10` _with the feature named in
+    the message_, so it fell through to Meta's own sentence and none of the
+    context above. §6.27 and §6.34 are the same mistake on `fetch_meta_profile`
+    and on comment moderation. The rule that keeps being relearned: **key a
+    refusal branch on something read out of a log, and when the log finally
+    arrives, go back and widen the branch** — a matcher built from the documented
+    shape is silent exactly when it is needed. It now matches the feature's name
+    rather than code 10 alone, because 10 is how Graph refuses an app on any
+    edge.
+
+62. **A query that times out is not evidence the query is slow, and "canceling
+    statement due to statement timeout" names the victim rather than the cause.**
+    _2026-09-08, over most of a day spent reading a 55-minute freeze as a
+    Supabase problem._ The app's only error line was a failed
+    `attachments ⋈ messages` select on one conversation. Run against production
+    unchanged, that statement is a three-index nested loop over a **192-row**
+    table for a ticket with **five messages**: `Execution Time: 0.399 ms`. It was
+    killed at the two-minute `statement_timeout`. It was not blocked on a lock
+    either — `log_lock_waits = on`, `deadlock_timeout = 1s`, and not one
+    lock-wait line in the window.
+
+    The two minutes were spent waiting for a **pool slot**, not in Postgres.
+    `db/client.ts` runs `max: 10` with no query timeout and no checkout timeout
+    anywhere in the repo, and postgres.js queues beyond `max` in memory,
+    uncapped and untimed: a query submitted when all ten slots are busy returns
+    a promise that settles when a slot frees and **never rejects**. So Postgres
+    logs nothing, CPU idles (0.1–0.3% throughout), and the one statement that
+    had reached a backend is the only thing that leaves a trace — pointing at
+    itself.
+
+    **The one-step test: look at the worker.** It shares the database, the
+    pooler and the network, and it was answering in 46–661 ms in the middle of
+    the freeze. If the worker is healthy while the web service is not, the
+    database is not the problem, and no amount of `pg_stat_statements` will say
+    so — its top entry here is a catalogue query Supabase Studio issues.
+
+    Two consequences worth carrying separately. `app/api/health/route.ts` awaits
+    `select 1` on the same exhausted pool and only catches _rejections_, so it
+    hangs instead of returning its 503 — which is why the instance was not
+    replaced for 50 minutes. And this shape is **chronic, not incidental**:
+    `destination stream closed early` appears on eight days between 08-26 and
+    09-08, across twelve instance ids, peaking at 26 collapses inside 900 ms on
+    09-03. Full reconstruction in `plans/web-freeze-2026-09-08.md`; §5 is revised
+    in light of it.
+
+63. **A doc comment naming its own callers is not evidence it has any, and a
+    dead function is cheapest to run and dearest to read.** _2026-09-09, found
+    while deleting dead exports rather than by debugging anything._ Twenty-seven
+    exported values had exactly one mention in the repo — their own declaration.
+    Four of them described the system's behaviour in the present tense and got
+    it wrong: `onInboundMessage` opened with "the single call every inbound path
+    makes" while no path made it (`lib/tickets/lifecycle.ts` inlines the same
+    branch); `isSideConversationOpen` said "used by the reply action to refuse
+    writing into a thread that is done", which nothing does; `allRuleKeys`
+    claimed the disabled-rules check and the structural tests used it, and
+    neither did; `resetEmailProviderCache` existed for tests that swap drivers,
+    and no test swaps drivers. Each reads as a description of the running system
+    and is a description of an intention.
+
+    Two further consequences of the same absence. `pruneThrottleBuckets`
+    promised a bound that was therefore never enforced (§5.5), and
+    `linkTranslation` was a `'use server'` export with no caller — a live POST
+    endpoint whose authorisation a review pass hardened without anyone noticing
+    nothing could reach it. **An unreferenced export in a `'use server'` file is
+    not inert the way an unreferenced function is; it is a published endpoint.**
+
+    **Two of the twenty-seven were wired up rather than deleted, and the check
+    does not care which.** `findRedirect` was live logic the legacy route had
+    copied inline, and `linkTranslation` was the only implementation of a
+    capability the help centre already renders the other half of (§5.5). That is
+    the right shape for this rule: "nothing references this" is a fact, and
+    whether the answer is a deletion or a caller is a judgement the check should
+    force someone to make rather than make for them.
+
+    **The first version of the check was itself the bug it was written about.**
+    It counted bare identifiers across the repo and called an export live if the
+    token turned up anywhere else, which is not the question. `lib/portal/tickets.ts`
+    still held a dead `contactName` and a dead `subjectFrom` that no module
+    imported, and the count waved both through — `contactName` because it is an
+    ordinary object key in three other files, `subjectFrom` because two ingest
+    modules happen to define their own. So the check certified a file clean while
+    the defect was still in it, which is worse than no check once §6.63 tells the
+    next session the scan is mechanical. It asks the module graph now: an export
+    is live when another module names it in an import or a re-export, and nothing
+    else counts. The resolver was already in the same file, doing this correctly
+    for the client-bundle rule, and is now shared rather than reimplemented — the
+    private-copy lesson again, in the file that enforces it.
+
+    `plans/query-optimisation-and-cleanup.md` had already scanned for these,
+    verified them by hand, confirmed three, and asked for the check to be made
+    mechanical so the next session would not redo the scan. The next session
+    redid the scan. The rule is now `dead-exports` in
+    `scripts/ci/repo-rules.mjs`, which finds all twenty-seven on `b1d911a` and
+    none on the branch that fixed them — because a scan a session performs is a
+    scan every later session performs.
+
+64. **A migration's lock estimate ages with the tables it locks, and #157's was
+    eleven days stale.** _2026-09-20, found by re-measuring before the deploy
+    rather than after it._ The declined finding on #157 costed migration 0026's
+    five non-concurrent `CREATE INDEX` and concluded "the builds are sub-second"
+    from `messages` at 44,705 rows / 39 MB and `conversations` at 13,817 / 3.9
+    MB. Both figures were right when written. By the deploy `messages` was 95,452
+    rows / 85 MB — and the **sixth** index, the partial rebuild on
+    `webhook_events`, had never been costed at all, on a table that had reached
+    **402,197 rows and 894 MB of heap**. A non-concurrent build holds a SHARE
+    lock for a full heap scan, and `webhook_events` is the table every inbound
+    webhook inserts into before returning 200.
+
+    What made it safe was timing rather than luck: checked immediately before
+    merging, inbound was **4 deliveries in ten minutes** against a 24-hour mean
+    of ~1,309/hour, because 23:40 UTC is 02:40 in Cairo. The deploy ran
+    23:38–23:41 and 46 webhooks landed in the following quarter hour with nothing
+    dropped. Run this migration's shape in the Cairo small hours, and re-read the
+    table sizes rather than the pull request's — `lock_timeout` bounds _acquiring_
+    the lock, never holding it, so a stale estimate does not fail loudly, it just
+    blocks writes for as long as the scan takes.
+
+65. **The index nobody had measured was costing an admin page nineteen seconds.**
+    _2026-09-20, measured either side of the same deploy._ `#155` replaced
+    `webhook_events_unprocessed_idx` — a full index on `(processed_at,
+received_at)` — with a partial one on `received_at where processed_at is
+null`, and argued it from write cost and 13 MB of disk. The read side turned
+    out to be the bigger half. `lib/reports/live.ts`'s `count(*)`/`min(received_at)`
+    under `where processed_at is null`, which is on an admin page:
+
+    |                | before        | after     |
+    | -------------- | ------------- | --------- |
+    | Execution time | **19,445 ms** | **86 ms** |
+    | Heap fetches   | 24,848        | 99        |
+    | Buffers        | 21,956        | 242       |
+
+    The leading column was non-null on ~98% of rows, so the index-only scan was
+    doing a heap fetch for nearly every one. Nobody had run an `EXPLAIN` on it;
+    the page was presumably just known to be slow. The lesson is the method —
+    when a rewrite is argued from write cost, `EXPLAIN (analyze, buffers)` the
+    read it serves before and after, because that is where the number nobody
+    expected turns up.
+
+66. ~~**A cron has been running two of its three jobs.**~~ **Fixed 2026-09-25;
+    the diagnosis below stands and is why the fix was safe.** _Found 2026-09-21
+    by reading `list_services` against the file while deploying something else._
+    `render.yaml:400` declares `shipblu-sla-sweep` as
+    `sla_sweep && presence_sweep && assign_sweep`. The running service
+    (`crn-da1jgtg1ne8s73ciqup0`) is `sla_sweep && assign_sweep`. The other three
+    crons match their blueprint entries character for character, so this is not
+    a sync that failed — it is one hand-edit to one service, and nothing records
+    who made it or why.
+
+    **`presence_sweep` therefore runs nowhere in production**, and has not for
+    at least as long as the dashboard has held that command. It is the
+    background half of the idle policy — the half that catches a slept laptop, a
+    dropped network, a console on an instance a deploy replaced, and a browser
+    closed without ever going idle.
+
+    What it does _not_ mean is that agents stay signed in. `getSessionAgent()`
+    enforces the sign-out on every page and every action, so an abandoned
+    session is already refused on its owner's next request. What accumulates is
+    the rows, and the rota: an abandoned console goes on reporting its owner as
+    available until somebody touches it.
+
+    Measured before proposing the fix, which is the useful half of this entry.
+    `presence_policy` holds **zero rows**, so `loadPresencePolicy()` returns
+    `UNSET` — `DEFAULT_POLICY` (away 10 min, sign-out 30) with `changedAt: null`.
+    That null matters: `signOutCutoff`'s grace period only protects a window
+    somebody _just enabled_, and there is nothing to grant a grace against here.
+    So the first run after this is fixed deletes **31 of 32 sessions** and parks
+    **0 agents** — zero because `shouldAutoAway` requires `presence = 'online'`
+    and only one agent is, and that one is inside the window.
+
+    **No check in this repo can catch this.** `job-registry` in
+    `scripts/ci/repo-rules.mjs` proves every `npm run job --` in `render.yaml`
+    names a real `JobType`; nothing compares `render.yaml` to the dashboard,
+    because CI has no Render credential and the blueprint is not authoritative
+    over a service somebody edited by hand. `render.yaml` describes the system
+    we meant; `list_services` is the only thing that reports the one that is
+    running. Read the second before believing the first about anything
+    operational — a cron's declared command included.
+
+    **How it was fixed, and why in two steps rather than one.** The start
+    command is not editable through the Render MCP tools — they expose create,
+    read, `trigger_deploy` and environment variables, and nothing that updates a
+    service. The one available path is `create_cron_job`, which is a delete and
+    a create rather than an edit, and losing this cron's run history is a worse
+    outcome than the drift. So the edit itself was made by hand in the
+    dashboard, and it now matches `render.yaml:400` character for character.
+
+    Before that, the backlog was spent deliberately: one `presence_sweep`
+    enqueued as a `jobs` row at 2026-09-25 00:02, which the worker claimed and
+    completed. It deleted **all 26 sessions** and parked **0 agents**. The shape
+    of the 09-21 prediction held exactly; only the count had moved, 32 → 26.
+
+    That ordering is the point. Restoring the command with the backlog still
+    there would have been the retroactive-timer trap `lib/presence/idle.ts` is
+    written against — the first run destroying every session at once, with no
+    countdown, because `changedAt` is null and grants no grace. Running it by
+    hand first spent that blast radius at a chosen moment: **0 sessions active,
+    0 in the 30-minute-to-2-hour band, the newest 17.5 hours idle**, so nobody
+    was mid-reply and nothing was owed a countdown. Seeding a `presence_policy`
+    row to buy the grace window was considered and rejected — it would have
+    written config nobody asked for to protect zero at-risk sessions.
+
+    Verified on the next scheduled run, 00:10:45 UTC, green, with the 00:05 run
+    on the old command directly above it in the same log:
+
+    ```
+    [job] sla_sweep ok in 257ms
+    [presence_sweep] parked=0 sessions_signed_out=0
+    [job] presence_sweep ok in 195ms
+    [job] assign_sweep ok in 805ms
+    ```
+
+    `assign_sweep` running _behind_ `presence_sweep` is the half worth checking
+    rather than assuming: these are chained with `&&`, so a sweep that threw
+    would have taken the run red and stopped assignment behind it.
+
+    One loose end left rather than acted on: **5 agents still hold
+    `is_accepting_tickets` with no session and `presence = 'offline'`.** That is
+    believed harmless because presence gates assignment eligibility, so an
+    offline agent is not picked regardless — but that path was not traced, and
+    this is recorded as an open question rather than as a fact.
+
+67. **A warning in this file about live infrastructure had drifted into saying
+    the opposite of the truth, and still read as careful.** _2026-09-21, same
+    pass._ §2 used to say staging "is pinned to the feature branch
+    `claude/shipblu-support-app-03p2we` rather than to a staging branch" and
+    told the reader not to assume it tracks `main`. `render.yaml:508` does say
+    that. The running service says `branch: main`, `autoDeploy: yes`,
+    `autoDeployTrigger: commit` — it is the **only service in the project that
+    deploys itself**, and the advice was backwards.
+
+    Inert today, because staging is suspended. The cost is banked rather than
+    paid: resuming it arms an automatic deploy of `main` on the next commit,
+    against staging's own Supabase project, at a moment when whoever resumed it
+    believed they were deploying an eleven-month-old feature branch.
+
+    The shape is worth more than the instance. A sentence about infrastructure
+    is true on the day it is written and silently expires afterwards, and a
+    confidently-worded one expires no more slowly — this one survived several
+    passes over this file precisely because it sounded like somebody had
+    checked. Both §2 paragraphs now name their source, and anything in this file
+    that asserts what a service is configured to do should be read as a claim
+    with a date on it, re-checked against `list_services` before it is acted on.
+
+68. **Two changes that were each sound shipped in one release and produced a
+    ratchet.** _2026-09-25, found by comparing `list_services` to `render.yaml`
+    — not by the comparison, but because `shipblu-nightly` was the only cron in
+    the listing with no `lastSuccessfulRunAt` at all._
+
+    `#153` gave every query a 30-second deadline. `#155` widened webhook
+    retention to three clauses. Both landed in `#159`, deployed 2026-09-20
+    23:38. The `cleanup` run that same night — on the old code, hours earlier —
+    took **25,483 ms**. The deadline it was about to be given was 30,000.
+
+    | Night | `cleanup` |                        |
+    | ----- | --------- | ---------------------- |
+    | 09-20 | 25,483 ms | ok, pre-deadline       |
+    | 09-21 | 27,249 ms | ok                     |
+    | 09-22 | 30,240 ms | ok                     |
+    | 09-23 | —         | **cancelled, `57014`** |
+    | 09-24 | 31,929 ms | ok                     |
+    | 09-25 | —         | **cancelled, `57014`** |
+
+    **The compounding is the part worth understanding.** Every night the delete
+    is cancelled, the rows it should have removed are still there to slow the
+    next attempt — so the table and the runtime climb together and the failure
+    gets likelier, not flatter. 402,172 rows on 09-20; 440,587 and 1,172 MB on
+    09-25. A bare `count(*)` on the table timed out at 60 s while this was being
+    diagnosed.
+
+    And the cron chains `cleanup && rollup_metrics`, so **a failed night
+    silently skips the rollup too**. Metrics survived only because the failures
+    were not consecutive and `rollup_metrics` recomputes three days back — which
+    stops being true the moment two land in a row, which the ratchet was making
+    likelier every night.
+
+    Neither PR could have caught this, and that is the lesson rather than an
+    excuse. `#153` measured the deadline against request paths, where 30 s is
+    already past the point a reader has left. `#155` measured retention against
+    correctness — which rows, not how long. The interaction lives in neither
+    diff, and nothing in CI can see it: Vitest runs no SQL, and the `database`
+    job runs `cleanup` against an empty schema where one statement and a
+    thousand are indistinguishable. **A deadline is a claim about every query's
+    duration, so adding one is a change to every long-running statement in the
+    system, whether or not the diff mentions them.**
+
+    **The fix is the deadline, and it took a wrong turn to establish that.**
+    `DB_QUERY_TIMEOUT_MS` is set to 180,000 on `shipblu-nightly` alone — the
+    per-service exception `lib/env.ts` already describes, on the one service
+    that is the case it describes. The first attempt was to batch the delete
+    into 5,000-row statements, and review caught that it is **strictly worse**
+    before it shipped.
+
+    The reason is worth keeping, because the batching looked obviously right:
+    **the cost is not the deleting, it is finding the rows.** No index serves
+    this predicate — an `OR` needs every arm indexed before Postgres will build
+    a `BitmapOr`, and only the third arm has one. So the plan is a sequential
+    scan of the whole table, and a bounded `LIMIT` does not bound a scan. On
+    2026-09-25:
+
+    ```
+    Seq Scan on webhook_events  (actual time=970.599..18946.837 rows=5000)
+      Rows Removed by Filter: 332234
+      Buffers: shared hit=13339 read=97073
+    Execution Time: 18959.439 ms
+    ```
+
+    18,959 ms to find the _first_ 5,000 of **27,976 matches in 436,200 rows**.
+    Batching pays that per batch, so six batches cost six full scans where one
+    statement cost one. The bound that appears to make each statement cheap
+    makes the job quadratic.
+
+    Two numbers settle what the problem actually was. Only **6% of the table is
+    deletable**, and the oldest row is **exactly the retention horizon** — so
+    retention keeps the table bounded whenever it runs, and this was never a
+    backlog that needed draining in pieces. It was one scan that outgrew one
+    deadline.
+
+    **Left open, deliberately: indexing the predicate.** Two partial indexes
+    would let the other two arms be served — `processed_at` where it is not
+    null, and `received_at` where `signature_verified` is false — and turn the
+    scan into a bitmap. That is the real optimisation, and it is a build lock on
+    a 1.2 GB table, which §6.64 is the lesson about. Its own change, its own
+    window. Not urgent: at 30-day retention and current volume the scan grows
+    with daily traffic rather than without bound, and 180 s is several times the
+    headroom needed.
+
+    **Also left, with reasons: the `&&`.** `cleanup && rollup_metrics` still
+    skips the rollup when cleanup fails. `;` is what the sibling cron uses and
+    the argument there is explicit — a snapshot's measurement cannot be taken
+    again once the hour has passed. A rollup's can: it rebuilds three days on
+    every run, so a skipped night self-heals on the next one. Swapping the
+    operator would trade a visible failure for a silent one, since the cron's
+    exit code would then be the rollup's alone. The reason it was ever a problem
+    was cleanup failing nightly, which is what the deadline fixes.
+
+    The deadline was raised before any of this was understood, because the next
+    run was hours away and any fix needed a deploy. That ordering was right even
+    though the fix it was buying time for turned out to be the wrong one.
+
+69. **A null `whatsapp_account_id` is invisible to every read and unreachable by
     the sync that would repair it.** Rows that predate multi-WABA carry null, and
     three separate filters then agree to ignore them:
     `listApprovedTemplates(accountId)` matches on `= accountId`, so an agent's
@@ -2957,7 +4035,7 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     channel with no account once one exists, and a template is only ever written
     by the sync, which always names one.
 
-48. **A form field that is not rendered submits nothing, and `text()` reads
+70. **A form field that is not rendered submits nothing, and `text()` reads
     nothing as `''`.** Ticking "send nothing" on an auto-response unmounts the
     four body textareas, so saving wrote four empty strings over the Arabic,
     English and holiday messages behind them — muting a rule for a week
@@ -2969,6 +4047,69 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     `values` object too.
 
 ## 7. Verification already done
+
+- **The knowledge-base role floor, against a real Postgres.** _2026-09-04._ The
+  predicate and the console handbook were exercised on a local Postgres 16 with
+  the migrations and `db/sql` applied, because `readableByRole` and
+  `effectiveFloor` are raw `sql` fragments used from pages and actions rather
+  than only from a job handler, and vitest executes no SQL.
+
+  Six article shapes — public; public carrying a floor; internal with no floor;
+  internal only through its folder (production's shape); internal with a floor
+  on the article; and article and folder disagreeing — read by each of the four
+  roles, through all four internal read models (`listArticlesForAdmin`,
+  `getArticleForEdit`, `searchForAgent`, `suggestForAgent`). 95 assertions, all
+  as intended: the floor is ignored on anything a customer can open, the folder
+  supplies it when the article does not, and the stricter of the two wins.
+
+  Then the handbook itself. Seeded into an empty database it wrote 5 folders and
+  15 articles; a second run and an `overwrite=true` run each reported everything
+  current and cut no `kb_article_versions` row. Editing an article's body by
+  hand made the next run report one drifted article and change nothing;
+  `overwrite=true` restored it and cut exactly one version row. On the seeded
+  data an agent sees 8 articles, a supervisor 11, an admin 14 and an account
+  admin 15 — and every customer-facing surface (`listCategories`,
+  `searchArticles`, `getArticle` by slug, `getCategory`, and the sitemap)
+  returns zero of them for both an anonymous reader and a signed-in one.
+
+  Re-run after review, on the merged state, with two additions. Every article's
+  `updated_at` was diffed across a run rather than trusted to the job's tally
+  (§6.59): a no-op run writes **no row at all**, and after one article was
+  deliberately misfiled to `visibility = 'public'` the next run repaired it and
+  moved that one row's timestamp and no other's. And each read model is now also
+  asserted to report the _effective_ level, not the column — the distinction
+  that decides whether the list badges an internal article and whether the
+  article page offers a help-centre link that would 404.
+
+- **The knowledge base's formatting standard, applied to production.**
+  _2026-09-03._ `normalise_kb_formatting` ran against the live database after
+  #133 deployed: 108 of 112 articles changed, 266,219 characters became 170,596,
+  and 29 cross-links stopped pointing at the Freshdesk portal. Per locale, which
+  is the breakdown that matters here — 54 of 54 English and 54 of 58 Arabic (the
+  four that did not change were one already-clean article and three of the
+  employee-handbook stubs).
+
+  Verified rather than assumed, in this order. The dry run's per-locale
+  character totals were compared against a reference computed locally from the
+  same 112 bodies and matched exactly on both sides — 134,072→89,386 and
+  132,147→81,210 — before anything was written. After the write, a fingerprint
+  over every row (`md5` of each body, keyed by `md5(locale || slug)`, aggregated
+  in a stable order) was computed on the database and independently from the
+  local reference: `0a5c001b77725ed91f117e56b551fd69` both times, so all 112
+  stored bodies are byte-identical to what was reviewed. Then all 108 public
+  article pages were fetched from the running app on full navigations — not RSC
+  prefetches, per trap 2 — and every one returned 200 with markup byte-identical
+  to the reference.
+
+  The way back is `kb_article_versions`, which held nothing before this and now
+  holds one row per changed article: each is that article's pre-cleanup body,
+  restorable from the console.
+
+  One finding fell out of the verification. **`packaging-guidelines` and its
+  Arabic translation contain no text at all** — five screenshots each, no words,
+  and no `alt` on any of them. Their `body_text` is empty, so they are findable
+  by title and by nothing else, and a screen reader gets nothing. Five other
+  articles link to that page for the detail it is supposed to carry.
 
 - **WhatsApp, end to end on production.** A synthetic webhook was enqueued; the
   job completed in 170 ms on the first attempt. The same `wamid` redelivered

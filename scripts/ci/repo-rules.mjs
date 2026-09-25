@@ -94,6 +94,95 @@ function scan(files, pattern, onMatch) {
   }
 }
 
+/**
+ * Where a specifier points, as a repo-relative path, or null for a package.
+ *
+ * Shared by the two checks that need to know what imports what. Both used to
+ * carry a private copy, which is the shape this file exists to stop.
+ */
+function resolveModule(spec, fromFile) {
+  const base = spec.startsWith('@/')
+    ? path.join(ROOT, spec.slice(2))
+    : spec.startsWith('.')
+      ? path.resolve(ROOT, path.dirname(fromFile), spec)
+      : null;
+  if (base === null) return null; // a package, not ours
+
+  for (const candidate of [
+    base,
+    `${base}.ts`,
+    `${base}.tsx`,
+    path.join(base, 'index.ts'),
+    path.join(base, 'index.tsx'),
+  ]) {
+    if (existsSync(candidate) && statSync(candidate).isFile()) {
+      return path.relative(ROOT, candidate);
+    }
+  }
+  return null;
+}
+
+/**
+ * Every edge out of a module: what it imports or re-exports, and under which
+ * names.
+ *
+ * `namespace` marks an edge that names nothing — `import * as`, `export * from`
+ * or a dynamic `import()`. A module on the far side of one cannot be checked
+ * for unused exports at all, because the importer never spells them out. That
+ * is how `db/schema` is covered without a special case: `db/schema/index.ts`
+ * re-exports each table file wholesale, and `db/client.ts` takes the barrel as
+ * a namespace.
+ *
+ * `typeOnly` is the `import type` form, which the bundler erases.
+ */
+function moduleEdges(file) {
+  const contents = stripComments(readFileSync(path.join(ROOT, file), 'utf8'));
+  const edges = [];
+
+  for (const match of contents.matchAll(/(?:^|\n)\s*(import|export)\s+([^;]*?)from\s*'([^']+)'/g)) {
+    const [, keyword, clause, spec] = match;
+    const trimmed = clause.trim();
+
+    if (/^\*/.test(trimmed)) {
+      edges.push({ kind: keyword, spec, names: [], namespace: true, typeOnly: false });
+      continue;
+    }
+
+    const typeOnly = /^type\s/.test(trimmed);
+    const names = [];
+    const braces = clause.match(/\{([^}]*)\}/);
+    if (braces) {
+      for (const part of braces[1].split(',')) {
+        const name = part.trim().replace(/^type\s+/, '');
+        if (name) names.push(name.split(/\s+as\s+/)[0].trim());
+      }
+    }
+    // A default or namespace binding sits outside the braces.
+    const outside = clause
+      .replace(/\{[^}]*\}/, '')
+      .replace(/^\s*type\s+/, '')
+      .split(',')[0]
+      .trim();
+    if (outside && /^[A-Za-z0-9_$]+$/.test(outside)) names.push('default');
+
+    edges.push({ kind: keyword, spec, names, namespace: false, typeOnly });
+  }
+
+  for (const match of contents.matchAll(/import\s*\(\s*'([^']+)'\s*\)/g)) {
+    edges.push({ kind: 'import', spec: match[1], names: [], namespace: true, typeOnly: false });
+  }
+
+  return edges;
+}
+
+/** The `'use client'` / `'use server'` directive a module declares, or null. */
+function directiveOf(file) {
+  const head = stripComments(readFileSync(path.join(ROOT, file), 'utf8')).trimStart();
+  if (/^['"]use client['"]/.test(head)) return 'client';
+  if (/^['"]use server['"]/.test(head)) return 'server';
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Environment variables: lib/env.ts and render.yaml describe the same system
 //
@@ -593,6 +682,53 @@ function checkSanitiserConfinement() {
 }
 
 /**
+ * An article body that is sanitised on write is also normalised on write.
+ *
+ * The two belong together and in that order: `sanitiseArticleHtml` is the
+ * security boundary and `normaliseArticleHtml` is the formatting standard the
+ * help centre's stylesheet assumes. A write path that sanitises and forgets to
+ * normalise stores an article carrying whatever the author's clipboard brought
+ * with it — four editors' classes, inline colours that override the article
+ * palette, and body `h1`s that render as plain text — and nothing downstream
+ * notices, because the page renders the row it is given.
+ *
+ * Checked as a pair rather than by asking for the call, because the ordering is
+ * the part that is easy to get wrong and impossible to see later.
+ */
+function checkArticleNormalisation() {
+  for (const file of scannableSource) {
+    if (file === 'lib/kb/format.ts' || file.endsWith('.test.ts')) continue;
+
+    const source = read(file);
+    if (!source.includes('sanitiseArticleHtml(')) continue;
+    if (file === 'lib/html/sanitize.ts') continue;
+
+    if (!source.includes('normaliseArticleHtml(')) {
+      fail(
+        'article-normalisation',
+        file,
+        'sanitises an article body but never normalises it — wrap the call as ' +
+          'normaliseArticleHtml(sanitiseArticleHtml(html)); lib/kb/format.ts says why',
+      );
+      continue;
+    }
+
+    for (const match of source.matchAll(/sanitiseArticleHtml\(([^)]*)\)/g)) {
+      const before = source.slice(0, match.index);
+      const wrapped = /normaliseArticleHtml\(\s*$/.test(before);
+      if (!wrapped) {
+        fail(
+          'article-normalisation',
+          `${file}:${before.split('\n').length}`,
+          'sanitises an article body outside normaliseArticleHtml(...) — normalising ' +
+            'first would hand the sanitiser markup this repo had already rewritten',
+        );
+      }
+    }
+  }
+}
+
+/**
  * ASCII slugify erases Arabic entirely, and Arabic is the default locale and the
  * front door. lib/kb/slug.ts is the one implementation that handles it.
  */
@@ -648,6 +784,70 @@ function checkNoDomTitleAttribute() {
       );
     },
   );
+}
+
+/**
+ * One palette. The app is light-only, everywhere, whatever the reader's
+ * operating system asks for.
+ *
+ * This is a check rather than a sentence because a dark theme comes back one
+ * utility at a time. A dark-variant colour appended to a class list is
+ * invisible in review — it is a colour nobody looking at the page can see — and
+ * the moment the first `@media (prefers-color-scheme: dark)` block returns,
+ * every one of them wakes up at once against tokens that were never re-stepped
+ * for a dark surface. Half a theme is worse than none: light text on the light
+ * `--surface` that is still what `:root` resolves to.
+ *
+ * Note the phrasing above: this file is scanned by Tailwind like any other, so
+ * spelling a complete variant class in a comment here — even to explain why it
+ * is banned — emits that utility into the served stylesheet.
+ *
+ * Three things, then. No media query answering the OS preference, no Tailwind
+ * `dark:` variant (which is that same media query spelled shorter), and the
+ * `color-scheme: light` that pins the surfaces the browser paints itself — a
+ * select's dropdown, the form-control chrome, the default scrollbar. That
+ * declaration is the only part a stylesheet cannot express by omission, so its
+ * absence is a failure rather than a preference.
+ *
+ * If a dark theme is ever wanted, it is a piece of work — re-step the tokens,
+ * decide whether the help centre follows the console, check the chart series
+ * against the new surfaces — and this rule comes out in that commit.
+ */
+function checkLightOnly() {
+  const rule = 'light-only';
+
+  // CSS comments carry the reasoning, including the words below. Blanked the
+  // same way stripComments blanks a JS comment, newlines kept so a line number
+  // still points somewhere.
+  const stripCss = (css) => css.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '));
+
+  for (const file of scannable.filter((f) => f.endsWith('.css'))) {
+    const css = stripCss(read(file));
+    for (const match of css.matchAll(/prefers-color-scheme/g)) {
+      fail(
+        rule,
+        `${file}:${lineOf(css, match.index)}`,
+        'the app is light-only — a dark block here re-enables half a theme against tokens stated for light surfaces',
+      );
+    }
+  }
+
+  scan(scannableSource, /(?:^|[\s'"`{(])dark:[a-z[]/g, (file, line) => {
+    fail(
+      rule,
+      `${file}:${line}`,
+      "Tailwind's dark: variant is prefers-color-scheme by another name — drop the override and keep the light value",
+    );
+  });
+
+  const globals = stripCss(read('app/globals.css'));
+  if (!/:root\s*\{[^}]*color-scheme:\s*light/.test(globals)) {
+    fail(
+      rule,
+      'app/globals.css',
+      'color-scheme: light is gone from :root — the browser paints its own controls and scrollbars dark again on a light page',
+    );
+  }
 }
 
 /**
@@ -966,6 +1166,224 @@ function checkAutomatedRepliesDoNotCountAsAgentReplies() {
 }
 
 // ---------------------------------------------------------------------------
+// The browser bundle: no client component reaches the database, however
+// indirectly
+//
+// AGENTS.md splits `lib/forms/files.ts` from `lib/forms/attachments.ts` by which
+// side of the wire runs it, and `lib/kb/floors.ts` from `lib/kb/internal.ts` for
+// the same reason. The first split had to be made because `node:fs` in the
+// browser bundle is a build error. The second had no such backstop: three
+// console components imported one label map from a module that value-imports
+// `@/db/schema`, and Next shipped the whole Drizzle schema — 87 KB of table
+// definitions no browser executes — in the first-load JS of `/kb/[id]`,
+// `/kb/new` and `/kb/structure`. Nothing failed. Only a bundle report showed it.
+//
+// So the graph is walked here rather than trusted to review. A `'use client'`
+// file is an entry point, and anything it can reach through a value import is
+// in the bundle; `import type` is erased by tsc and is followed by nobody.
+// ---------------------------------------------------------------------------
+function checkClientBundleStaysOutOfTheDatabase() {
+  const rule = 'client-bundle';
+
+  /** `@/x` is the repo root, and a relative specifier is relative to the file. */
+  /** The modules that must never be in a browser bundle, and why. */
+  const FORBIDDEN = [
+    ['db/schema', 'the Drizzle table definitions — 87 KB of SQL builders no browser runs'],
+    ['db/client', 'the database pool'],
+  ];
+
+  const entries = scannableSource.filter(
+    (file) => /\.tsx?$/.test(file) && directiveOf(file) === 'client',
+  );
+
+  for (const entry of entries) {
+    // Breadth-first, remembering how each module was reached: an error saying
+    // "editor.tsx → lib/kb/internal.ts → db/schema" is fixable, and "something
+    // in the console imports the schema" is not.
+    const seen = new Set([entry]);
+    const queue = [[entry]];
+
+    while (queue.length > 0) {
+      const trail = queue.shift();
+      const file = trail[trail.length - 1];
+
+      for (const edge of moduleEdges(file)) {
+        // Imports only, and value imports only: `import type` is erased, and a
+        // re-export is not something the entry pulls into its own bundle.
+        if (edge.kind !== 'import' || edge.typeOnly) continue;
+        const target = resolveModule(edge.spec, file);
+        if (target === null || seen.has(target)) continue;
+        seen.add(target);
+
+        // A `'use server'` module is a boundary rather than a dependency: Next
+        // replaces each export with a fetch to the server, so what it imports
+        // never reaches the browser. Every client form in this repo imports its
+        // own actions file, and following that edge would report the whole
+        // console.
+        if (directiveOf(target) === 'server') continue;
+
+        const forbidden = FORBIDDEN.find(([prefix]) => target.startsWith(prefix));
+        if (forbidden) {
+          fail(
+            rule,
+            `${entry}`,
+            `reaches ${forbidden[0]} — ${forbidden[1]} — via ${[...trail.slice(1), target].join(' → ') || target}; ` +
+              'split the client-safe half into its own module, as lib/kb/floors.ts is split from lib/kb/internal.ts',
+          );
+          continue;
+        }
+
+        queue.push([...trail, target]);
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Exports nothing imports
+//
+// AGENTS.md: "When you learn something durable ... prefer a check in
+// scripts/ci/repo-rules.mjs over a paragraph here."
+//
+// plans/query-optimisation-and-cleanup.md scanned for these by hand, found "a
+// crude scan suggested 40", verified them one at a time, and asked for the
+// check to be made mechanical so the next session would not redo the scan. It
+// was redone anyway, and turned up twenty-seven: nine unused icons, a server
+// action no form submits, and four functions whose doc comments described
+// callers that do not exist — `onInboundMessage` called itself "the single call
+// every inbound path makes" while no path made it.
+//
+// That last kind is why this is worth a check rather than a cleanup. Dead code
+// costs nothing to execute; a dead function with a confident comment costs the
+// next reader their afternoon, because it reads as the system's behaviour.
+//
+// **It asks the module graph, not the text.** The first version counted bare
+// identifiers across the repo and called an export live if the token appeared
+// anywhere else. That is not the question: `lib/portal/tickets.ts` exported a
+// dead `contactName` that no file imported, and the count exempted it because
+// `contactName` is an ordinary object key elsewhere — as `status`, `config`,
+// `preview` and `handler` would be. A check that certifies a file clean while
+// the defect is still in it is worse than no check, because §6.63 tells the
+// next session the scan is mechanical. So an export is live when some other
+// module names it in an `import` or a re-export, and nothing else counts.
+//
+// Values only — a function, const, class or enum. An exported *type* is not
+// checked: annotating a return with a named exported type is good practice
+// here, and the great majority of them are referenced only from the signature
+// they describe, so flagging those would push the codebase to un-export shapes
+// that callers legitimately need to name.
+// ---------------------------------------------------------------------------
+
+/**
+ * Names the framework imports by calling convention rather than by reference,
+ * each only in the kind of file the framework looks for it in.
+ *
+ * Scoping matters: `config`, `metadata` and `dynamic` are ordinary names for a
+ * lib-level constant, and exempting them everywhere would hide real dead code
+ * in exactly the modules this rule is most needed in.
+ */
+const ROUTE_HANDLERS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']);
+
+const SEGMENT_CONFIG = new Set([
+  'generateStaticParams',
+  'generateMetadata',
+  'generateViewport',
+  'metadata',
+  'viewport',
+  'dynamic',
+  'dynamicParams',
+  'revalidate',
+  'runtime',
+  'fetchCache',
+  'preferredRegion',
+  'maxDuration',
+  'experimental_ppr',
+]);
+
+/** Next's own file names for a route segment. */
+const SEGMENT_FILE =
+  /(^|\/)(page|layout|route|template|default|loading|error|not-found|global-error)\.tsx?$/;
+
+/** The entry points Next loads by path rather than by import. */
+const FRAMEWORK_ENTRY = new Map([
+  ['proxy.ts', new Set(['config', 'proxy', 'middleware'])],
+  ['middleware.ts', new Set(['config', 'middleware'])],
+  ['instrumentation.ts', new Set(['register', 'onRequestError'])],
+]);
+
+const VALUE_EXPORT =
+  /^export\s+(?:async\s+)?(?:function\*?|const|let|var|abstract\s+class|class|enum)\s+([A-Za-z0-9_$]+)/gm;
+
+function frameworkOwns(file, name) {
+  if (FRAMEWORK_ENTRY.get(file)?.has(name)) return true;
+  if (!file.startsWith('app/')) return false;
+  if (/(^|\/)route\.tsx?$/.test(file) && ROUTE_HANDLERS.has(name)) return true;
+  return SEGMENT_FILE.test(file) && SEGMENT_CONFIG.has(name);
+}
+
+function checkNoDeadExports() {
+  const rule = 'dead-exports';
+
+  const files = scannableSource.filter(
+    (f) => /\.(ts|tsx|mts|mjs)$/.test(f) && !f.endsWith('.d.ts'),
+  );
+
+  // What every module has pulled out of every other, by name.
+  const importedFrom = new Map();
+  const opaque = new Set();
+
+  for (const file of files) {
+    for (const edge of moduleEdges(file)) {
+      const target = resolveModule(edge.spec, file);
+      if (target === null) continue;
+
+      // Nothing can be said about a module reached without naming what it
+      // exports — a namespace import, a wholesale re-export, a dynamic import.
+      if (edge.namespace) {
+        opaque.add(target);
+        continue;
+      }
+
+      if (!importedFrom.has(target)) importedFrom.set(target, new Set());
+      for (const name of edge.names) importedFrom.get(target).add(name);
+    }
+  }
+
+  for (const file of files) {
+    if (opaque.has(file)) continue;
+
+    const contents = stripComments(readFileSync(path.join(ROOT, file), 'utf8'));
+    const importers = importedFrom.get(file) ?? new Set();
+    const isServerModule = directiveOf(file) === 'server';
+
+    VALUE_EXPORT.lastIndex = 0;
+    let match;
+    while ((match = VALUE_EXPORT.exec(contents)) !== null) {
+      const name = match[1];
+      if (importers.has(name) || frameworkOwns(file, name)) continue;
+
+      // Used in its own module and merely over-exported, which is a much
+      // smaller thing than being uncalled — except in a `'use server'` file,
+      // where an export is not a symbol at all: Next publishes each one as a
+      // POST endpoint, so one nothing imports is a live route with no caller
+      // and no page behind it. Nothing in this repo relies on that exemption
+      // today; it exists so the rule does not demand a refactor of every module
+      // that exports a helper it also uses.
+      const usedHere = (contents.match(new RegExp(`\\b${name}\\b`, 'g')) ?? []).length > 1;
+      if (usedHere && !isServerModule) continue;
+
+      fail(
+        rule,
+        `${file}:${lineOf(contents, match.index)}`,
+        isServerModule
+          ? `${name} is a server action nothing imports — Next still publishes it as a POST endpoint, so delete it or put it behind a form in the same commit`
+          : `${name} is exported and no module imports it — delete it, or if it is a capability worth keeping, wire it up in the same commit`,
+      );
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 
 const RULES = [
   ['env-parity', checkEnvParity],
@@ -976,14 +1394,18 @@ const RULES = [
   ['shipment-payload', checkShipmentPayloadConfinement],
   ['server-actions', checkServerActions],
   ['sanitiser', checkSanitiserConfinement],
+  ['article-normalisation', checkArticleNormalisation],
   ['slugify', checkSlugConfinement],
   ['dom-title', checkNoDomTitleAttribute],
+  ['light-only', checkLightOnly],
   ['framing', checkFramingHeaders],
   ['secrets', checkNoCommittedEnvFiles],
   ['agents-symlinks', checkInstructionSymlinks],
   ['generated-files', checkMigrationsNotHandEdited],
   ['form-system-keys', checkFormSystemKeys],
   ['automated-reply-boundary', checkAutomatedRepliesDoNotCountAsAgentReplies],
+  ['client-bundle', checkClientBundleStaysOutOfTheDatabase],
+  ['dead-exports', checkNoDeadExports],
 ];
 
 for (const [name, run] of RULES) {

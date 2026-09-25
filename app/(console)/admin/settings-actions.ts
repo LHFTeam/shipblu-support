@@ -36,6 +36,7 @@ import {
   LOCATION_CODE_MAX,
 } from '@/lib/locations/format';
 import { parseFormElements } from '@/lib/forms/elements';
+import { forgetHoursCatalog } from '@/lib/hours/catalog';
 import { formsUsingField } from '@/lib/forms/queries';
 import { slugify } from '@/lib/kb/slug';
 import { parseCondition } from '@/lib/rules/conditions';
@@ -43,6 +44,8 @@ import { parseOptionLines, type TicketFieldDef } from '@/lib/tickets/custom-fiel
 import { listAllTicketFields } from '@/lib/tickets/queries';
 import { PHRASE_GROUPS } from '@/lib/shipments/status';
 import { parseTokenEnvVar } from '@/lib/whatsapp/accounts';
+import { validatePolicy } from '@/lib/presence/idle';
+import { savePresencePolicy } from '@/lib/presence/policy';
 
 /**
  * Everything the admin screens write.
@@ -179,6 +182,10 @@ export async function saveGroup(_state: SettingsState, formData: FormData): Prom
   // A group's hours are the arithmetic behind every due date on its tickets, so
   // the SLA and reports pages are showing stale wording until they re-read.
   refresh('/admin/groups');
+  // The catalogue is memoised for thirty seconds and a due date is computed
+  // from it, so the process that took the edit drops its copy now rather than
+  // serving a stale schedule to the next SLA calculation.
+  forgetHoursCatalog();
   refresh('/admin/hours');
   return ok();
 }
@@ -203,7 +210,71 @@ export async function deleteGroup(
 
   await db.delete(groups).where(eq(groups.id, id));
   refresh('/admin/groups');
+  // Same reason as `saveGroup`, and the easier one to forget: the catalogue
+  // holds `groups.business_hours_id` as its override map, so a deleted group
+  // that carried a schedule keeps resolving to it for the rest of the TTL, and
+  // any due date computed in that window comes from a row that is gone.
+  forgetHoursCatalog();
   return ok();
+}
+
+// --- Presence policy ---------------------------------------------------------
+
+/**
+ * When the console decides somebody has stopped working.
+ *
+ * Under `admin.agents` rather than a permission of its own: it is a rule about
+ * the team, and it sits on the page that lists them.
+ *
+ * Blank means the timer is off, and that is the only way to turn one off — so
+ * an unreadable value has to be an error rather than a silent null, which is
+ * what `optionalMinutes` above would give. A typo quietly disabling the
+ * sign-out is exactly the failure this form must not have: nothing would look
+ * wrong afterwards, because "nobody was ever signed out" and "the timeout is
+ * working" look identical from the outside.
+ *
+ * Everything else about the numbers — whole, in range, and the sign-out no
+ * shorter than the away — is `validatePolicy`'s, so the form and the tests
+ * agree on the wording of each refusal.
+ */
+export async function savePresenceSettings(
+  _state: SettingsState,
+  formData: FormData,
+): Promise<SettingsState> {
+  const admin = await requirePermission('admin.agents');
+
+  const away = minutesOrOff(formData, 'autoAwayAfterMins');
+  const signout = minutesOrOff(formData, 'autoSignoutAfterMins');
+
+  if (away === 'not_a_number' || signout === 'not_a_number') {
+    return { error: 'Enter a number of minutes, or leave the box empty to turn it off.' };
+  }
+
+  const policy = { autoAwayAfterMins: away, autoSignoutAfterMins: signout };
+  const problem = validatePolicy(policy);
+  if (problem) return { error: problem };
+
+  await savePresencePolicy(policy, admin.id);
+
+  refresh('/admin/agents');
+  return ok();
+}
+
+/**
+ * Blank is "off", anything numeric is a window, and text is the admin's typo.
+ *
+ * Deliberately does *not* check that the number is whole or in range —
+ * `validatePolicy` owns both, and it has the wording for each. Checking here
+ * too made that function's "has to be a whole number of minutes" message
+ * unreachable from the only form that writes these, which is how a tested
+ * message ends up being one nobody can ever see.
+ */
+function minutesOrOff(formData: FormData, key: string): number | null | 'not_a_number' {
+  const raw = text(formData, key);
+  if (!raw) return null;
+
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : 'not_a_number';
 }
 
 // --- Locations --------------------------------------------------------------
@@ -750,18 +821,47 @@ export async function saveCannedResponse(
 
   const id = text(formData, 'id');
   const title = text(formData, 'title');
-  const bodyText = text(formData, 'bodyText');
+  const bodyTextAr = text(formData, 'bodyTextAr');
+  const bodyTextEn = text(formData, 'bodyTextEn');
   const folder = text(formData, 'folder') || null;
 
   if (!title) return { error: 'Give the response a title' };
-  if (!bodyText) return { error: 'Write the response' };
 
-  // Stored as both: email sends HTML, WhatsApp and the social channels send
-  // text, and deriving one from the other at send time would mean every channel
-  // guessing at line breaks.
-  const bodyHtml = textToHtml(bodyText);
+  // One language is a complete response; neither is a row nothing can send. The
+  // form asks for both and requires neither, so this is where the real rule is.
+  if (!bodyTextAr && !bodyTextEn) return { error: 'Write the response in at least one language' };
 
-  const values = { title, folder, bodyText, bodyHtml };
+  // Stored as both forms: email sends HTML, WhatsApp and the social channels
+  // send text, and deriving one from the other at send time would mean every
+  // channel guessing at line breaks. An unwritten language stays empty in both
+  // — `textToHtml('')` would otherwise leave markup that reads as a body.
+  const bodyHtmlAr = bodyTextAr ? textToHtml(bodyTextAr) : '';
+  const bodyHtmlEn = bodyTextEn ? textToHtml(bodyTextEn) : '';
+
+  const values = {
+    title,
+    folder,
+    bodyTextAr,
+    bodyHtmlAr,
+    bodyTextEn,
+    bodyHtmlEn,
+    /*
+      The superseded pair, written for as long as it still exists.
+
+      `db/schema/config.ts` keeps these columns through one release because the
+      worker and the four crons deploy separately from the service that runs the
+      migration, and the old `sendCannedReply` selects them. That only buys
+      anything if they still say something: a response created after the
+      migration and never written here is `''` to the old code, which sends a
+      customer an empty automated reply rather than falling back to anything.
+      Arabic first, for the reason `DEFAULT_LOCALE` is — a single body can only
+      answer one half of the queue, and this is the larger half.
+
+      Goes when the columns do; `docs/PROJECT-STATE.md` §5.5 carries the removal.
+    */
+    bodyText: bodyTextAr || bodyTextEn,
+    bodyHtml: bodyHtmlAr || bodyHtmlEn,
+  };
 
   if (id) {
     await db.update(cannedResponses).set(values).where(eq(cannedResponses.id, id));
@@ -984,26 +1084,108 @@ export async function saveBusinessHours(
     }
   });
 
+  // The catalogue is memoised for thirty seconds and a due date is computed
+  // from it, so the process that took the edit drops its copy now rather than
+  // serving a stale schedule to the next SLA calculation.
+  forgetHoursCatalog();
   refresh('/admin/hours');
   return ok();
 }
 
-export async function addHoliday(
+/**
+ * Add a holiday, or correct one that is already on the calendar.
+ *
+ * Editing exists because the name is now the part most likely to be wrong — it
+ * reaches a customer through `{{holiday}}`, and it is typed twice, in two
+ * scripts. Before this the only way to change it was to delete the row and add
+ * it again, which is not a repair anybody guesses at.
+ *
+ * A duplicate date is **refused rather than ignored.** The insert used to be
+ * `onConflictDoNothing()` followed by `ok()`, so retyping a date the calendar
+ * already had reported success and changed nothing — the one shape of failure
+ * this codebase calls worse than an error, and it landed on exactly the person
+ * trying to fix a name. The insert keeps the conflict clause so a race cannot
+ * raise instead, and an insert that touched no row is now the error message.
+ */
+export async function saveHoliday(
   _state: SettingsState,
   formData: FormData,
 ): Promise<SettingsState> {
   await requirePermission('admin.sla');
 
-  const businessHoursId = text(formData, 'businessHoursId');
+  const id = text(formData, 'id');
   const date = text(formData, 'date');
-  const name = text(formData, 'name');
+  const nameAr = text(formData, 'nameAr');
+  const nameEn = text(formData, 'nameEn');
 
-  if (!businessHoursId) return { error: 'Pick a schedule' };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { error: 'Pick a date' };
-  if (!name) return { error: 'Name the holiday' };
 
-  await db.insert(holidays).values({ businessHoursId, date, name }).onConflictDoNothing();
+  // One name is enough — `holidayName` falls back to whichever was written —
+  // but a holiday with neither leaves `{{holiday}}` empty in an out-of-hours
+  // message that only exists to say which day it is.
+  if (!nameAr && !nameEn) return { error: 'Name the holiday in at least one language' };
 
+  const taken = 'That schedule already has a holiday on that date';
+
+  /*
+    The superseded single name, written for as long as the column exists.
+
+    Same reason as `saveCannedResponse`: only the two web services run
+    `db:migrate`, and `loadHoursCatalog` on the still-old worker and crons
+    selects `holidays.name`. Leaving it at its default would mean a holiday added
+    today closes the office correctly on old code and interpolates nothing into
+    `{{holiday}}` — a message whose whole job is naming the day. Arabic first,
+    like the canned pair. Goes when the column does.
+  */
+  const name = nameAr || nameEn;
+
+  if (id) {
+    // The schedule comes from the stored row, never from the form: the hidden
+    // field is a claim by whoever posted it, and honouring it would let one
+    // move a holiday onto a calendar the page never showed.
+    const existing = await db
+      .select({ businessHoursId: holidays.businessHoursId })
+      .from(holidays)
+      .where(eq(holidays.id, id))
+      .limit(1);
+
+    const row = existing[0];
+    if (!row) return { error: 'That holiday has already been removed' };
+
+    // Moving a holiday onto a date its own calendar already uses. Checked
+    // rather than left to the unique index, which would surface as a 500.
+    const clash = await db
+      .select({ id: holidays.id })
+      .from(holidays)
+      .where(
+        and(
+          eq(holidays.businessHoursId, row.businessHoursId),
+          eq(holidays.date, date),
+          ne(holidays.id, id),
+        ),
+      )
+      .limit(1);
+
+    if (clash.length > 0) return { error: taken };
+
+    await db.update(holidays).set({ date, nameAr, nameEn, name }).where(eq(holidays.id, id));
+  } else {
+    const businessHoursId = text(formData, 'businessHoursId');
+    if (!businessHoursId) return { error: 'Pick a schedule' };
+
+    const inserted = await db
+      .insert(holidays)
+      .values({ businessHoursId, date, nameAr, nameEn, name })
+      .onConflictDoNothing()
+      .returning({ id: holidays.id });
+
+    if (inserted.length === 0) return { error: taken };
+  }
+
+  // The catalogue is memoised for thirty seconds and a due date is computed
+  // from it, so the process that took the edit drops its copy now rather than
+  // serving a stale schedule to the next SLA calculation.
+  forgetHoursCatalog();
   refresh('/admin/hours');
   return ok();
 }
@@ -1014,6 +1196,10 @@ export async function deleteHoliday(
 ): Promise<SettingsState> {
   await requirePermission('admin.sla');
   await db.delete(holidays).where(eq(holidays.id, text(formData, 'id')));
+  // The catalogue is memoised for thirty seconds and a due date is computed
+  // from it, so the process that took the edit drops its copy now rather than
+  // serving a stale schedule to the next SLA calculation.
+  forgetHoursCatalog();
   refresh('/admin/hours');
   return ok();
 }
@@ -1363,20 +1549,6 @@ export async function deleteAutomationRule(
 ): Promise<SettingsState> {
   await requirePermission('admin.automations');
   await db.delete(automationRules).where(eq(automationRules.id, text(formData, 'id')));
-  refresh('/admin/automations');
-  return ok();
-}
-
-export async function toggleAutomationRule(
-  _state: SettingsState,
-  formData: FormData,
-): Promise<SettingsState> {
-  await requirePermission('admin.automations');
-
-  const id = text(formData, 'id');
-  const active = formData.get('active') === 'true';
-
-  await db.update(automationRules).set({ isActive: active }).where(eq(automationRules.id, id));
   refresh('/admin/automations');
   return ok();
 }

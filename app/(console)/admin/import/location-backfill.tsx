@@ -71,7 +71,7 @@ export function LocationBackfillForm({
           </dl>
 
           {remaining > 0 ? (
-            <p className="mt-3 text-xs text-amber-700 dark:text-amber-400">
+            <p className="mt-3 text-xs text-amber-700">
               {remaining} message{remaining === 1 ? '' : 's'} still show the coordinates as text, so
               an agent has to copy them into a map by hand. Running this converts them.
             </p>

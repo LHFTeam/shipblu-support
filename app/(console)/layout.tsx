@@ -1,8 +1,11 @@
 import Link from 'next/link';
 import { ShipBluLogo } from '@/components/brand';
+import { AgentActivity } from '@/components/agent-activity';
 import { AgentPresence } from '@/components/agent-presence';
 import { requireAgent } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
+import { warningLeadMs } from '@/lib/presence/idle';
+import { loadPresencePolicy } from '@/lib/presence/policy';
 import { inboxCounts } from '@/lib/tickets/queries';
 import { initials } from '@/lib/format';
 import { AvailabilitySwitch } from './availability';
@@ -25,6 +28,10 @@ export const dynamic = 'force-dynamic';
 export default async function ConsoleLayout({ children }: { children: React.ReactNode }) {
   const agent = await requireAgent();
   const counts = await inboxCounts(agent);
+  // Memoised for thirty seconds inside the loader, so this costs nothing on
+  // most requests — and `requireAgent()` above has already consulted it to
+  // decide whether this session is still allowed to be here.
+  const policy = await loadPresencePolicy();
 
   const items: NavItem[] = [
     { href: '/inbox', label: 'Inbox', icon: 'inbox', badge: counts.all },
@@ -45,6 +52,16 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
   return (
     <div className="flex h-dvh overflow-hidden">
       <AgentPresence />
+      <AgentActivity
+        accepting={agent.isAcceptingTickets}
+        awayAfterMins={policy.autoAwayAfterMins}
+        signoutAfterMins={policy.autoSignoutAfterMins}
+        // The server's own measurement of this session, so the countdown in the
+        // browser runs to the same deadline `getSessionAgent()` enforces rather
+        // than to one up to a beat interval later.
+        sessionIdleForMs={agent.sessionIdleForMs}
+        warningLeadMs={warningLeadMs(policy)}
+      />
 
       <Rail
         items={items}

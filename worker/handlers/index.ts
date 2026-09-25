@@ -1,5 +1,6 @@
 import type { ClaimedJob, JobType } from '@/lib/queue';
 import { assignSweep } from './assign-sweep';
+import { backfillCategoriseAi } from './backfill-categorise-ai';
 import { backfillMessageLocations } from './backfill-message-locations';
 import { backfillMetaProfiles } from './backfill-meta-profiles';
 import { backfillShipmentLinks } from './backfill-shipment-links';
@@ -9,12 +10,16 @@ import { downloadMediaJob } from './download-media';
 import { fetchMetaProfile } from './fetch-meta-profile';
 import { importFreshdeskKb } from './import-freshdesk-kb';
 import { moderateMetaComment } from './moderate-meta-comment';
+import { normaliseKbFormatting } from './normalise-kb-formatting';
+import { presenceSweep } from './presence-sweep';
 import { processWebhook } from './process-webhook';
 import { rollupMetrics } from './rollup-metrics';
 import { runTimeAutomations } from './run-time-automations';
+import { seedConsoleHandbook } from './seed-console-handbook';
 import { sendCsat } from './send-csat';
 import { sendEmail } from './send-email';
 import { sendMeta } from './send-meta';
+import { sendAgentInvite } from './send-agent-invite';
 import { sendNotificationEmail } from './send-notification-email';
 import { sendSideEmail } from './send-side-email';
 import { sendWhatsApp } from './send-whatsapp';
@@ -38,6 +43,7 @@ export type JobHandler = (job: ClaimedJob) => Promise<void>;
  */
 export const handlers: Partial<Record<JobType, JobHandler>> = {
   assign_sweep: () => assignSweep(),
+  backfill_categorise_ai: (job) => backfillCategoriseAi(job),
   backfill_message_locations: (job) => backfillMessageLocations(job),
   backfill_meta_profiles: (job) => backfillMetaProfiles(job),
   backfill_shipment_links: (job) => backfillShipmentLinks(job),
@@ -48,12 +54,16 @@ export const handlers: Partial<Record<JobType, JobHandler>> = {
   fetch_meta_profile: fetchMetaProfile,
   import_freshdesk_kb: () => importFreshdeskKb(),
   moderate_meta_comment: moderateMetaComment,
+  normalise_kb_formatting: (job) => normaliseKbFormatting(job),
+  presence_sweep: () => presenceSweep(),
   process_webhook: processWebhook,
   rollup_metrics: (job) => rollupMetrics(job),
   run_time_automations: () => runTimeAutomations(),
+  seed_console_handbook: (job) => seedConsoleHandbook(job),
   send_csat: sendCsat,
   send_email: sendEmail,
   send_meta: sendMeta,
+  send_agent_invite: sendAgentInvite,
   send_notification_email: sendNotificationEmail,
   send_side_email: sendSideEmail,
   send_whatsapp: sendWhatsApp,

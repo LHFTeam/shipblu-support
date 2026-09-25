@@ -11,13 +11,15 @@ import {
   ticketStatuses,
 } from '@/db/schema';
 import { assignConversation } from '@/lib/assignment';
+import { textToHtml } from '@/lib/html/sanitize';
 import { scheduleSurvey } from '@/lib/csat';
+import { resolveLocale } from '@/lib/tickets/canned';
 import { readOnlyChannels } from '@/lib/tickets/channel-policy';
-import { deliverAutomatedReply } from '@/lib/tickets/outbound';
+import { requesterLocale } from '@/lib/tickets/locale';
+import { automatedReplyBlocked, deliverAutomatedReply } from '@/lib/tickets/outbound';
 import { matches } from '@/lib/rules/conditions';
 import { conversationFacts } from '@/lib/rules/facts';
 import { onGroupChanged, onStatusChanged } from '@/lib/sla';
-import { windowState } from '@/lib/whatsapp/window';
 import { parseActions, type Action } from './actions';
 
 /**
@@ -365,7 +367,12 @@ async function sendCannedReply(
   const conversation = ticket.conversation;
 
   const rows = await db
-    .select({ bodyHtml: cannedResponses.bodyHtml, bodyText: cannedResponses.bodyText })
+    .select({
+      bodyHtmlAr: cannedResponses.bodyHtmlAr,
+      bodyTextAr: cannedResponses.bodyTextAr,
+      bodyHtmlEn: cannedResponses.bodyHtmlEn,
+      bodyTextEn: cannedResponses.bodyTextEn,
+    })
     .from(cannedResponses)
     .where(eq(cannedResponses.id, cannedResponseId))
     .limit(1);
@@ -376,15 +383,16 @@ async function sendCannedReply(
     return;
   }
 
-  // WhatsApp outside the 24-hour window can only be reopened with an approved
-  // template, which an automation has no way to fill in. Skipping is the only
-  // honest option: attempting it would fail at Meta and leave a permanently
-  // failed message on the customer's timeline.
-  if (
-    conversation.channel === 'whatsapp' &&
-    !windowState(conversation.lastCustomerMessageAt).isOpen
-  ) {
-    console.warn(`[automations] "${ruleName}" skipped a reply: WhatsApp window closed`);
+  // A rule cannot reopen a closed messaging window on any of the three channels
+  // that have one, and skipping is the only honest option: attempting it would
+  // fail at Meta and leave a permanently failed message on the customer's
+  // timeline. This engine is the reason the guard has to exist at all — it runs
+  // from a cron every fifteen minutes, so a rule that chases silence reaches the
+  // customer days after they last wrote, which is exactly the far side of the
+  // window.
+  const blocked = automatedReplyBlocked(conversation);
+  if (blocked) {
+    console.warn(`[automations] "${ruleName}" skipped a reply: ${blocked}`);
     return;
   }
 
@@ -393,12 +401,46 @@ async function sendCannedReply(
     return;
   }
 
+  /*
+    Which language this response goes out in.
+
+    A rule names a response, not a language: the same rule fires for the Arabic
+    and the English half of the queue, and picking at author time would make an
+    admin choose one of their customers to answer wrongly. So it is decided per
+    ticket, off the requester, by the one function the out-of-hours
+    acknowledgement uses — two automated messages disagreeing about what
+    language somebody reads is the failure that would be hardest to notice.
+
+    Falling back to the language the response *was* written in, rather than
+    sending nothing: the alternative is a rule that silently stops firing for
+    half the queue on the day somebody adds a response in one language.
+  */
+  const locale = await requesterLocale(conversation.id);
+  const body = { ar: canned.bodyTextAr, en: canned.bodyTextEn };
+  const chosen = resolveLocale(body, locale);
+
+  if (!chosen) {
+    console.warn(`[automations] "${ruleName}" references a canned response with no body`);
+    return;
+  }
+
+  const bodyText = body[chosen];
+
+  // Derived from the text when the stored HTML is blank, rather than handed to
+  // the mailer as it is. `saveCannedResponse` writes the pair together so the
+  // two cannot drift through the console — but the language was chosen on the
+  // text alone, and a row whose text survived a backfill or a hand-written
+  // UPDATE and whose HTML did not would otherwise send a customer an empty
+  // email while the WhatsApp copy of the same reply read correctly.
+  const storedHtml = chosen === 'ar' ? canned.bodyHtmlAr : canned.bodyHtmlEn;
+  const bodyHtml = storedHtml.trim() ? storedHtml : textToHtml(bodyText);
+
   await deliverAutomatedReply({
     conversationId: conversation.id,
     channel: conversation.channel,
     requesterEmail: ticket.requesterEmail,
-    bodyText: canned.bodyText,
-    bodyHtml: canned.bodyHtml,
+    bodyText,
+    bodyHtml,
     actorLabel: `automation:${ruleName}`,
     eventType: 'auto_replied',
     meta: { automation: ruleName },

@@ -746,6 +746,20 @@ export function areaOf(key: string): string {
   return dot === -1 ? key : key.slice(0, dot);
 }
 
+/**
+ * What an area is called, for a report grouping on the stored `area` column.
+ *
+ * Falls back to the key, which is the same answer the category join in
+ * `lib/reports/category-queries.ts` gives: a rollup row keeps the area it was
+ * counted under, so a report drawn last quarter still renders after somebody
+ * tidies the taxonomy — it just renders the raw key rather than pretending the
+ * area no longer exists. Areas have no registry table and are never renamed by
+ * an admin, so this is the only place a label for one can come from.
+ */
+export function areaLabel(area: string): string {
+  return TAXONOMY.find((one) => one.area === area)?.labelEn ?? area;
+}
+
 export function categoryKeys(): readonly string[] {
   return allCategories().map((c) => c.key);
 }
@@ -779,11 +793,6 @@ export const CAUSE_REQUIRED_AREAS: readonly string[] = [
   'return',
   'payment',
 ];
-
-/** Whether a category key sits in one of those areas. */
-export function causeRequiredFor(categoryKey: string): boolean {
-  return CAUSE_REQUIRED_AREAS.includes(areaOf(categoryKey));
-}
 
 /**
  * The one category the detector treats as exclusive, named because three

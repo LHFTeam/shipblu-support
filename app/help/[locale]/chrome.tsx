@@ -246,50 +246,6 @@ export function CardGrid({ children }: { children: ReactNode }) {
 }
 
 /**
- * A card standing for a whole branch of the tree — a category or a folder.
- *
- * The heading is an `h2` because the band above it holds the page's only `h1`,
- * which is what lets a screen-reader user list the categories on the page and
- * jump to one.
- */
-export function NavCard({
-  href,
-  title,
-  description,
-  footer,
-  icon,
-  level: Heading = 'h2',
-}: {
-  href: string;
-  title: string;
-  description?: string | null;
-  footer?: ReactNode;
-  icon: ReactNode;
-  /** One step below whatever heading introduces the list this card is in. */
-  level?: 'h2' | 'h3';
-}) {
-  return (
-    <li>
-      <Link
-        href={href}
-        className="kb-panel flex h-full items-start gap-3.5 p-4 transition-[box-shadow,border-color] hover:border-[var(--kb-border-strong)] hover:shadow-lg"
-      >
-        <span className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-[var(--kb-band-soft)] text-[var(--kb-band-ink)]">
-          {icon}
-        </span>
-        <div className="min-w-0 flex-1">
-          <Heading className="font-semibold text-[var(--kb-heading)]">{title}</Heading>
-          {description ? (
-            <p className="mt-1 line-clamp-2 text-sm text-[var(--kb-muted)]">{description}</p>
-          ) : null}
-          {footer ? <p className="mt-1.5 text-xs text-[var(--kb-muted)]">{footer}</p> : null}
-        </div>
-      </Link>
-    </li>
-  );
-}
-
-/**
  * One article in a list.
  *
  * The document icon is not decoration: in a list that mixes folders and

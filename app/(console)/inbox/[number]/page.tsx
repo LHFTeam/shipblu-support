@@ -68,6 +68,10 @@ export default async function ConversationPage({
     from `contacts.locale` — that column is written by nothing and reads 'en'
     for all six thousand contacts, so trusting it would search the English
     articles for every Arabic ticket in the system.
+
+    It is also what the composer's canned-response picker starts on, and it is
+    handed over separately from the panel: the two are the same question asked
+    once, and an agent without `kb.view` still needs the answer.
   */
   const lastInbound = [...conversation.messages]
     .reverse()
@@ -106,7 +110,7 @@ export default async function ConversationPage({
       // and `suggestForAgent` returns nothing for fewer than two terms — so a
       // ticket with nothing to go on costs no query and renders no panel
       // furniture, the same way the help centre's blocks remove themselves.
-      terms.length ? suggestForAgent(kbOrigin, kbLocale, terms) : Promise.resolve([]),
+      terms.length ? suggestForAgent(kbOrigin, agent.role, kbLocale, terms) : Promise.resolve([]),
     ]);
 
   return (
@@ -122,6 +126,7 @@ export default async function ConversationPage({
         groups={groupList}
         fields={fields}
         canned={canned}
+        customerLocale={kbLocale}
         knowledge={wantsKnowledge ? { suggestions, locale: kbLocale } : null}
         templates={templates}
         recipients={recipients}

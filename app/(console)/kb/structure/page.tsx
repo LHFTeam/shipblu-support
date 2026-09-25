@@ -1,6 +1,8 @@
 import Link from 'next/link';
+import { Badge } from '@/components/ui';
 import { requirePermission } from '@/lib/auth/guard';
-import { listCategoriesForAdmin, listFolderOptions } from '@/lib/kb/admin';
+import { listCategoriesForAdmin, listFolderOptions, type FolderOption } from '@/lib/kb/admin';
+import { FLOOR_LABELS, folderFloor } from '@/lib/kb/floors';
 import { CategoryForm, FolderForm } from './forms';
 
 export const dynamic = 'force-dynamic';
@@ -46,7 +48,9 @@ export default async function StructurePage() {
         <h2 className="mb-1 text-lg font-semibold">Folders</h2>
         <p className="mb-3 text-sm opacity-60">
           Every article lives in a folder. A folder marked anything other than public hides all of
-          its articles from the help centre, whatever the articles themselves say.
+          its articles from the help centre, whatever the articles themselves say. An internal
+          folder can go further and name the most junior role on the team that may read it, which
+          then holds for every article inside.
         </p>
 
         <ul className="mb-4 divide-y divide-[var(--border)] rounded-lg border border-[var(--border)] text-sm">
@@ -60,6 +64,9 @@ export default async function StructurePage() {
                 ›
               </span>
               <span className="font-medium">{folder.name}</span>
+              {folder.visibility !== 'public' ? (
+                <Badge tone="warning">{audience(folder)}</Badge>
+              ) : null}
               <span className="ms-auto text-xs opacity-50">{folder.categoryLocale}</span>
             </li>
           ))}
@@ -69,4 +76,18 @@ export default async function StructurePage() {
       </section>
     </div>
   );
+}
+
+/**
+ * Who this folder is for, in one badge.
+ *
+ * The floor rather than the level where there is one — "agents only" and
+ * "supervisors and up" are different audiences — but only where the floor is
+ * the thing in force. `folderFloor` is null on anything a customer can open, so
+ * a `logged_in` folder still carrying a stray `min_role` reads as "signed-in
+ * customers" instead of claiming an audience nothing enforces.
+ */
+function audience(folder: FolderOption): string {
+  const floor = folderFloor(folder);
+  return floor ? FLOOR_LABELS[floor] : folder.visibility.replace('_', ' ');
 }

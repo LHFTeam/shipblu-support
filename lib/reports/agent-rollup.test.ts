@@ -45,7 +45,7 @@ describe('shiftWindow', () => {
   });
 
   it('is null on a holiday', () => {
-    const hours = schedule({ holidays: [{ date: THURSDAY, name: 'Test holiday' }] });
+    const hours = schedule({ holidays: [{ date: THURSDAY, nameEn: 'Test holiday' }] });
     expect(shiftWindow([hours], on(THURSDAY))).toBeNull();
   });
 

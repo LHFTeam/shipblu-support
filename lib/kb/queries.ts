@@ -259,6 +259,20 @@ export type CategoryDetail = {
   folders: FolderSummary[];
 };
 
+/**
+ * One category and the folders inside it that this viewer may open.
+ *
+ * Null when none of them are, which is what makes the page 404 rather than
+ * render — the same cut `listCategories` takes for the front page, and for a
+ * second reason as well as "an empty category reads as a broken page". A
+ * category has no visibility column of its own, so the only thing keeping an
+ * internal one off the public help centre is this: the console's handbook lives
+ * in a category whose every folder is `agents_only`, and served as a 200 that
+ * page published the category's Arabic name as its `<title>` and its
+ * description as the meta description, to anybody who guessed the slug and to
+ * anything that crawled it. The articles were never reachable; the page around
+ * them was.
+ */
 export async function getCategory(
   viewer: KbViewer,
   locale: Locale,
@@ -293,6 +307,8 @@ export async function getCategory(
     .orderBy(asc(kbFolders.position), asc(kbFolders.name));
 
   const visible = folders.filter((folder) => folder.articleCount > 0);
+  if (visible.length === 0) return null;
+
   const previews = await folderPreviews(
     viewer,
     visible.map((folder) => folder.id),
@@ -591,9 +607,10 @@ export async function searchArticles(
 /**
  * Resolves a legacy Freshdesk path.
  *
- * Looked up on 404 rather than on every request: after cutover almost all
- * traffic uses the new URLs, and putting this in the hot path would add a query
- * to every page load to serve a shrinking minority.
+ * Reached only for a path the proxy already recognised as a Freshdesk URL,
+ * which is why this is not in the hot path: after cutover almost all traffic
+ * uses the new URLs, and looking every request up here would add a query to
+ * every page load to serve a shrinking minority.
  */
 export async function findRedirect(fromPath: string): Promise<string | null> {
   const rows = await db

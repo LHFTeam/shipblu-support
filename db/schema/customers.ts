@@ -1,4 +1,3 @@
-import { relations } from 'drizzle-orm';
 import {
   type AnyPgColumn,
   boolean,
@@ -338,24 +337,3 @@ export const contactTokens = pgTable(
     index('contact_tokens_expires_idx').on(t.expiresAt),
   ],
 );
-
-export const companiesRelations = relations(companies, ({ many }) => ({
-  contacts: many(contacts),
-}));
-
-export const contactsRelations = relations(contacts, ({ one, many }) => ({
-  company: one(companies, { fields: [contacts.companyId], references: [companies.id] }),
-  identities: many(contactIdentities),
-}));
-
-export const contactIdentitiesRelations = relations(contactIdentities, ({ one, many }) => ({
-  contact: one(contacts, { fields: [contactIdentities.contactId], references: [contacts.id] }),
-  sessions: many(contactSessions),
-}));
-
-export const contactSessionsRelations = relations(contactSessions, ({ one }) => ({
-  identity: one(contactIdentities, {
-    fields: [contactSessions.identityId],
-    references: [contactIdentities.id],
-  }),
-}));

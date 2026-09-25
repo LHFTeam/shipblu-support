@@ -96,6 +96,51 @@ export function clampSpans(spans: Span[], from: number, to: number): Span[] {
   return clipped;
 }
 
+/**
+ * `from`, with every part of `remove` taken out of it.
+ *
+ * Exists because a stitch is right for one question and wrong for another over
+ * the same rows. Presence is stitched so that a tab closing and reopening reads
+ * as one shift rather than forty — but the *accepting* half of those rows also
+ * changes when somebody is deliberately taken out of the rota, and stitching
+ * across that gap reports the minutes they were unavailable as available. The
+ * idle timer makes that gap several times a day per agent, so it is no longer
+ * the rounding error it was when only a manual switch could produce one.
+ *
+ * So the accepting total is the stitched timeline *minus* the intervals that
+ * actually say "not accepting": flapping is still healed, and a real park is
+ * still excluded. Answering it by not stitching at all would be the other
+ * error, quietly shortening every agent's day by a few seconds per reconnect.
+ *
+ * A removal falling inside a span splits it, which is why this returns a list
+ * rather than adjusting ends in place.
+ */
+export function subtractSpans(from: Span[], remove: Span[]): Span[] {
+  if (remove.length === 0) return from.map((span) => ({ ...span }));
+
+  const cuts = mergeSpans(remove);
+  const kept: Span[] = [];
+
+  for (const span of from) {
+    let start = span.start;
+
+    for (const cut of cuts) {
+      if (cut.end <= start) continue;
+      // `cuts` is sorted, so the first cut starting at or after the end of this
+      // span means nothing later can touch it either.
+      if (cut.start >= span.end) break;
+
+      if (cut.start > start) kept.push({ start, end: cut.start });
+      start = Math.max(start, cut.end);
+      if (start >= span.end) break;
+    }
+
+    if (start < span.end) kept.push({ start, end: span.end });
+  }
+
+  return kept;
+}
+
 export function totalSeconds(spans: Span[]): number {
   return Math.round(spans.reduce((running, span) => running + (span.end - span.start), 0) / 1000);
 }

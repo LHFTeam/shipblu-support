@@ -7,6 +7,7 @@ export type JobType =
   | 'send_email'
   | 'send_side_email'
   | 'send_notification_email'
+  | 'send_agent_invite'
   | 'send_whatsapp'
   | 'send_meta'
   | 'moderate_meta_comment'
@@ -20,6 +21,7 @@ export type JobType =
   | 'test_comment_permission'
   | 'sla_sweep'
   | 'assign_sweep'
+  | 'presence_sweep'
   | 'run_time_automations'
   | 'send_csat'
   | 'rollup_metrics'
@@ -28,6 +30,9 @@ export type JobType =
   | 'backfill_shipment_links'
   | 'backfill_message_locations'
   | 'backfill_meta_profiles'
+  | 'backfill_categorise_ai'
+  | 'normalise_kb_formatting'
+  | 'seed_console_handbook'
   | 'cleanup';
 
 export type EnqueueOptions = {

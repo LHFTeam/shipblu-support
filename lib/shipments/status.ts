@@ -67,7 +67,6 @@ export type StatusTone =
  * progress bar that ends in "delivered" says the parcel is still coming.
  */
 export const TRACKING_STEPS = ['pickedUp', 'inTransit', 'outForDelivery', 'delivered'] as const;
-export type TrackingStep = (typeof TRACKING_STEPS)[number];
 
 /**
  * The steps a parcel walks on its way *back* to the merchant.
@@ -86,7 +85,6 @@ export type TrackingStep = (typeof TRACKING_STEPS)[number];
  * `returned`.
  */
 export const RETURN_STEPS = ['returningToSender', 'onTheWay', 'outForReturn', 'returned'] as const;
-export type ReturnStep = (typeof RETURN_STEPS)[number];
 
 export type StageDisplay = {
   stage: ShipmentStage;

@@ -223,3 +223,64 @@ export function requiredScopes(connection: MetaConnection = 'facebook_page'): st
     ),
   ].sort();
 }
+
+/**
+ * The gates that are **features** rather than permissions.
+ *
+ * Kept apart from `CAPABILITIES` because nothing above can check them and
+ * pretending otherwise is the failure this exists to stop. A feature never
+ * appears in `scopes` or `granular_scopes` — it is a property of the app, not of
+ * the token — so `debug_token` returns a clean, complete list while the app is
+ * refused, and `check_meta_permissions` prints "every capability is granted"
+ * truthfully and unhelpfully. That is exactly how the Human Agent refusal read
+ * from the inside on 2026-09-06.
+ *
+ * Two more things separate a feature from a permission, and both were assumed
+ * the other way round first:
+ *
+ *   - **A role on the app is not the exemption it is for a permission.** Meta's
+ *     own note on Standard Access: "some features might not work properly until
+ *     your app has been granted Advanced Access."
+ *   - **The dashboard's usage counter cannot move before the grant.** A call
+ *     refused at the capability gate never reaches the feature, so it is never
+ *     counted against it. A zero there is the refusal restated, not a second
+ *     fault — the same reading §5.2 records for Business Asset User Profile
+ *     Access.
+ *
+ * So this table is printed rather than diagnosed, and says so.
+ */
+export type Feature = {
+  /** Meta's own name for it in the App Dashboard, so a search finds the row. */
+  name: string;
+  connection: MetaConnection;
+  /** What stops working while it is ungranted. */
+  symptom: string;
+  /** How Graph refuses it, where that has been read out of production. */
+  refusal?: string;
+};
+
+export const FEATURES: readonly Feature[] = [
+  {
+    name: 'Human Agent',
+    connection: 'instagram_login',
+    symptom:
+      'every Instagram reply between 24 hours and 7 days after the customer wrote is refused; ' +
+      'replies inside 24 hours still send',
+    refusal:
+      "code 10, HTTP 403, \"To use 'Human Agent', your use of this endpoint must be reviewed " +
+      'and approved by Facebook.\" — observed 2026-09-06',
+  },
+  {
+    name: 'Human Agent',
+    connection: 'facebook_page',
+    symptom:
+      'every Messenger reply between 24 hours and 7 days after the customer wrote is refused; ' +
+      'replies inside 24 hours still send',
+  },
+  {
+    name: 'Business Asset User Profile Access',
+    connection: 'facebook_page',
+    symptom: "a Facebook or Instagram customer's name and picture never resolve",
+    refusal: '(#3) Application does not have the capability to make this API call. — §5.2',
+  },
+];

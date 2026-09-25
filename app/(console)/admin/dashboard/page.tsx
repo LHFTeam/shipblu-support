@@ -128,7 +128,7 @@ export default async function DashboardPage({
             <p className="mt-3">
               <Link
                 href="/inbox?status=unresolved"
-                className="text-xs text-brand-600 hover:underline dark:text-brand-300"
+                className="text-xs text-brand-600 hover:underline"
               >
                 Open the inbox →
               </Link>
@@ -398,10 +398,7 @@ export default async function DashboardPage({
 
             <p className="mt-2 text-xs text-[var(--muted-foreground)]">
               Cuts by agent, group and channel live in{' '}
-              <Link
-                href={`/reports?days=${days}`}
-                className="text-brand-600 hover:underline dark:text-brand-300"
-              >
+              <Link href={`/reports?days=${days}`} className="text-brand-600 hover:underline">
                 Reports
               </Link>
               .
@@ -414,6 +411,18 @@ export default async function DashboardPage({
       <Section
         title="Who is holding what"
         hint="Live, and only the tickets still open. An agent with an empty queue is listed too — an empty column and a missing row look the same otherwise."
+        actions={
+          /* The control lives on one page rather than two. This table is a
+             wallboard — it answers who is loaded; setting somebody's
+             availability is a decision, and it belongs with the reason for
+             making it. */
+          <Link
+            href="/reports/team"
+            className="rounded-md border border-[var(--border)] px-2.5 py-1 text-xs hover:bg-[var(--muted)]"
+          >
+            Set availability
+          </Link>
+        }
       >
         {agentRows.length === 0 ? (
           <EmptyState title="No active agents" hint="Invite the team from Settings → Agents." />

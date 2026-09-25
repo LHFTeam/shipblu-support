@@ -41,6 +41,7 @@ import { readOnlyReason } from '@/lib/tickets/channel-policy';
 import type { PickerEntry } from '@/lib/side-conversations/queries';
 import { CommentModeration } from './comment-moderation';
 import { ProfileRefresh } from './profile-refresh';
+import type { CannedLocale } from '@/lib/tickets/canned';
 import { Composer, type KnowledgeContext } from './composer';
 import { SideConversationCard, SideConversationsField } from './side-conversations';
 
@@ -77,7 +78,7 @@ function ReadOnlyNotice({ reason, oneSided }: { reason: string; oneSided: boolea
         much more alarming thing than a delivery setting being off.
       */}
       {oneSided ? (
-        <p className="mt-2 flex items-start gap-2 text-xs text-amber-700 dark:text-amber-400">
+        <p className="mt-2 flex items-start gap-2 text-xs text-amber-700">
           <span aria-hidden="true" className="mt-0.5">
             ⚠
           </span>
@@ -110,6 +111,7 @@ export function ConversationView({
   recipients,
   fields,
   canned,
+  customerLocale,
   knowledge,
   canSideConversation,
   canModerateComments,
@@ -131,6 +133,8 @@ export function ConversationView({
   recipients: PickerEntry[];
   /** Reusable replies, already scoped to this agent's own and their groups'. */
   canned: CannedResponseOption[];
+  /** The language the customer writes in, which the canned picker starts on. */
+  customerLocale: CannedLocale;
   /** Null when the agent lacks `kb.view`, or on a channel with no composer. */
   knowledge: KnowledgeContext | null;
   canSideConversation: boolean;
@@ -171,6 +175,7 @@ export function ConversationView({
             templates={templates}
             recipients={recipients}
             canned={canned}
+            customerLocale={customerLocale}
             knowledge={knowledge}
             canSideConversation={canSideConversation}
           />
@@ -608,7 +613,7 @@ function DeliveryState({ message }: { message: ConversationDetail['messages'][nu
     return (
       // A delivery error explains itself in paragraphs — what Meta said, and
       // what it means — so it is wrapped rather than run together into one line.
-      <p className="mt-1.5 whitespace-pre-wrap text-xs text-red-600 dark:text-red-400">
+      <p className="mt-1.5 whitespace-pre-wrap text-xs text-red-600">
         Not delivered — {message.deliveryError ?? 'unknown error'}
       </p>
     );
@@ -827,6 +832,14 @@ function describeEvent(type: string, data: Record<string, unknown>): string {
         ? `looked the customer up at Meta: ${String(name)}`
         : 'looked the customer up at Meta, which had no name for them';
     }
+    /*
+     * Worth a line of its own rather than being inferred from the reply that
+     * follows it. Thread control moves silently and in both directions, so
+     * "why could nobody answer this for two days, and what changed?" is a
+     * question the timeline can only answer if the moment it changed is on it.
+     */
+    case 'thread_control_taken':
+      return 'took thread control from the app that owned this conversation';
     case 'profile_refresh_refused':
       return data.permission === true
         ? 'asked Meta for the customer\u2019s profile and was refused — the app may not hold Business Asset User Profile Access'
@@ -850,6 +863,27 @@ function describeEvent(type: string, data: Record<string, unknown>): string {
         ? `identified the visitor as ${who}`
         : `identified the visitor as ${who} \u2014 the dashboard's word, not verified`;
     }
+    /*
+     * The customer touching the thread without writing in it, and the reason
+     * these are on the timeline at all: without them a window that reopened —
+     * or a customer who answered with a thumbs-up and then said nothing — is an
+     * unexplained gap. The default below would print "meta postback" and drop
+     * the payload, which is the button's name and the whole content of the
+     * event.
+     */
+    // `||` and not `??`: `data` is jsonb read back untyped, and an empty string
+    // is exactly what the fallback is for — `??` would let one through and end
+    // the sentence mid-word. `parse.ts` builds these summaries with `||` chains
+    // for the same reason.
+    case 'meta_postback':
+      return `tapped ${String(data.summary || 'a button')}`;
+    case 'meta_referral':
+      return `arrived from ${String(data.summary || 'a link')}`;
+    case 'meta_reaction':
+      // Said in a way that does not read as a question waiting for an answer,
+      // because it is not one: a reaction deliberately moves neither the
+      // messaging window nor the next-response clock.
+      return `reacted with ${String(data.summary || 'a reaction')}`;
     case 'comment_hidden':
       return 'hid the comment on the post';
     case 'comment_unhidden':
@@ -1826,7 +1860,7 @@ function RefreshShipmentButton({
         </span>
       </div>
 
-      {error ? <p className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</p> : null}
+      {error ? <p className="mt-1 text-xs text-red-600">{error}</p> : null}
     </div>
   );
 }
@@ -1886,7 +1920,7 @@ function LinkInput({
         aria-label={placeholder}
         className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-xs outline-none focus:border-brand-500"
       />
-      {error ? <p className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</p> : null}
+      {error ? <p className="mt-1 text-xs text-red-600">{error}</p> : null}
     </div>
   );
 }

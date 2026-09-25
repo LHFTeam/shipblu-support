@@ -61,20 +61,55 @@ export function Button({
  * phone" turns out to mean.
  */
 const FIELD_BASE =
-  'w-full rounded-md border border-[var(--border)] bg-[var(--surface)] text-base sm:text-sm outline-none transition-colors focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 disabled:opacity-60';
+  'w-full rounded-md border border-[var(--border)] text-base sm:text-sm outline-none transition-colors focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 disabled:opacity-60';
+
+/**
+ * Held apart from `FIELD_BASE` so `Input` can swap it, which a caller cannot.
+ *
+ * Passing `bg-[var(--muted)]` through `className` looks like it should win and
+ * does not: both are single-class background utilities of equal specificity, so
+ * the winner is whichever Tailwind emits later in the stylesheet — and it emits
+ * `--surface` after `--muted`, whatever order the class attribute lists them
+ * in. A read-only field styled from the call site therefore rendered exactly
+ * like an editable one, which is the opposite of the point.
+ */
+const FIELD_SURFACE = 'bg-[var(--surface)]';
 
 export function Input({ className = '', ...props }: ComponentProps<'input'>) {
-  return <input {...props} className={`${FIELD_BASE} px-3 py-2 ${className}`} />;
+  /*
+   * A read-only field is not a disabled one — it stays focusable, announced and
+   * copyable, which is what a prefilled identity on the invite-activation page
+   * needs. It just must not look like a box somebody is expected to type in.
+   *
+   * Keyed off the prop rather than the `read-only:` variant because CSS
+   * `:read-only` also matches every *disabled* field, and dimming those was not
+   * asked for here.
+   */
+  const surface = props.readOnly
+    ? 'bg-[var(--muted)] text-[var(--muted-foreground)] cursor-default'
+    : FIELD_SURFACE;
+
+  return <input {...props} className={`${FIELD_BASE} ${surface} px-3 py-2 ${className}`} />;
 }
 
 export function Textarea({ className = '', ...props }: ComponentProps<'textarea'>) {
-  return <textarea {...props} className={`${FIELD_BASE} resize-y px-3 py-2 ${className}`} />;
+  return (
+    <textarea
+      {...props}
+      className={`${FIELD_BASE} ${FIELD_SURFACE} resize-y px-3 py-2 ${className}`}
+    />
+  );
 }
 
 export function Select({ className = '', ...props }: ComponentProps<'select'>) {
   // Taller on a phone, where 1.5 of padding around 14px text is a 34px tap
   // target sat next to a 42px input in the same row.
-  return <select {...props} className={`${FIELD_BASE} px-2 py-2 sm:py-1.5 ${className}`} />;
+  return (
+    <select
+      {...props}
+      className={`${FIELD_BASE} ${FIELD_SURFACE} px-2 py-2 sm:py-1.5 ${className}`}
+    />
+  );
 }
 
 export function Label({ children, htmlFor }: { children: ReactNode; htmlFor?: string }) {
@@ -163,14 +198,14 @@ export function Badge({
 }) {
   const styles = {
     neutral: 'bg-[var(--muted)] text-[var(--muted-foreground)]',
-    brand: 'bg-brand-500/15 text-brand-700 dark:text-brand-300',
-    open: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
-    pending: 'bg-amber-500/15 text-amber-700 dark:text-amber-300',
-    resolved: 'bg-blue-500/15 text-blue-700 dark:text-blue-300',
+    brand: 'bg-brand-500/15 text-brand-700',
+    open: 'bg-emerald-500/15 text-emerald-700',
+    pending: 'bg-amber-500/15 text-amber-700',
+    resolved: 'bg-blue-500/15 text-blue-700',
     closed: 'bg-[var(--muted)] text-[var(--muted-foreground)]',
-    warning: 'bg-amber-500/15 text-amber-700 dark:text-amber-300',
-    danger: 'bg-red-500/15 text-red-700 dark:text-red-300',
-    success: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
+    warning: 'bg-amber-500/15 text-amber-700',
+    danger: 'bg-red-500/15 text-red-700',
+    success: 'bg-emerald-500/15 text-emerald-700',
   }[tone];
 
   return (
@@ -185,10 +220,7 @@ export function Badge({
 export function ErrorText({ children }: { children: ReactNode }) {
   if (!children) return null;
   return (
-    <p
-      role="alert"
-      className="rounded-md bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-300"
-    >
+    <p role="alert" className="rounded-md bg-red-500/10 px-3 py-2 text-sm text-red-700">
       {children}
     </p>
   );
@@ -197,9 +229,7 @@ export function ErrorText({ children }: { children: ReactNode }) {
 export function SuccessText({ children }: { children: ReactNode }) {
   if (!children) return null;
   return (
-    <p className="rounded-md bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300">
-      {children}
-    </p>
+    <p className="rounded-md bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700">{children}</p>
   );
 }
 

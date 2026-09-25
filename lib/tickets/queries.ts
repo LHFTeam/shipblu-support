@@ -34,6 +34,7 @@ import { configuredAccountId } from '@/lib/meta/client';
 import { metaConnection } from '@/lib/meta/connection';
 import { metaThreadStateFromMessage, type MetaThreadState } from '@/lib/meta/thread';
 import type { CustomFieldValues, TicketFieldDef } from './custom-fields';
+import { threadControlTakenAt } from './meta-thread';
 import {
   FILTERABLE_CHANNELS,
   hiddenChannels,
@@ -582,51 +583,53 @@ export async function getConversation(
     .limit(1);
   const unverifiedSubmitter = unverified.length > 0;
 
-  const [timeline, files, events, shipments, accounts, sides, categories] = await Promise.all([
-    db
-      .select({
-        message: messages,
-        agentName: agents.name,
-        contactName: contacts.name,
-      })
-      .from(messages)
-      .leftJoin(agents, eq(agents.id, messages.authorAgentId))
-      .leftJoin(contacts, eq(contacts.id, messages.authorContactId))
-      .where(eq(messages.conversationId, row.conversation.id))
-      .orderBy(asc(messages.createdAt)),
+  const [timeline, files, events, shipments, accounts, sides, categories, controlTakenAt] =
+    await Promise.all([
+      db
+        .select({
+          message: messages,
+          agentName: agents.name,
+          contactName: contacts.name,
+        })
+        .from(messages)
+        .leftJoin(agents, eq(agents.id, messages.authorAgentId))
+        .leftJoin(contacts, eq(contacts.id, messages.authorContactId))
+        .where(eq(messages.conversationId, row.conversation.id))
+        .orderBy(asc(messages.createdAt)),
 
-    db
-      .select({
-        id: attachments.id,
-        messageId: attachments.messageId,
-        filename: attachments.filename,
-        contentType: attachments.contentType,
-        sizeBytes: attachments.sizeBytes,
-      })
-      .from(attachments)
-      .innerJoin(messages, eq(messages.id, attachments.messageId))
-      .where(eq(messages.conversationId, row.conversation.id)),
+      db
+        .select({
+          id: attachments.id,
+          messageId: attachments.messageId,
+          filename: attachments.filename,
+          contentType: attachments.contentType,
+          sizeBytes: attachments.sizeBytes,
+        })
+        .from(attachments)
+        .innerJoin(messages, eq(messages.id, attachments.messageId))
+        .where(eq(messages.conversationId, row.conversation.id)),
 
-    db
-      .select({
-        id: conversationEvents.id,
-        type: conversationEvents.type,
-        actorName: agents.name,
-        actorLabel: conversationEvents.actorLabel,
-        data: conversationEvents.data,
-        createdAt: conversationEvents.createdAt,
-      })
-      .from(conversationEvents)
-      .leftJoin(agents, eq(agents.id, conversationEvents.actorAgentId))
-      .where(eq(conversationEvents.conversationId, row.conversation.id))
-      .orderBy(desc(conversationEvents.createdAt))
-      .limit(50),
+      db
+        .select({
+          id: conversationEvents.id,
+          type: conversationEvents.type,
+          actorName: agents.name,
+          actorLabel: conversationEvents.actorLabel,
+          data: conversationEvents.data,
+          createdAt: conversationEvents.createdAt,
+        })
+        .from(conversationEvents)
+        .leftJoin(agents, eq(agents.id, conversationEvents.actorAgentId))
+        .where(eq(conversationEvents.conversationId, row.conversation.id))
+        .orderBy(desc(conversationEvents.createdAt))
+        .limit(50),
 
-    shipmentsForConversation(row.conversation.id, row.conversation.requesterContactId),
-    shippingAccountsForConversation(row.conversation.id),
-    sideConversationsForConversation(row.conversation.id),
-    categoriesForConversation(row.conversation.id),
-  ]);
+      shipmentsForConversation(row.conversation.id, row.conversation.requesterContactId),
+      shippingAccountsForConversation(row.conversation.id),
+      sideConversationsForConversation(row.conversation.id),
+      categoriesForConversation(row.conversation.id),
+      threadControlTakenAt(row.conversation.id),
+    ]);
 
   const filesByMessage = new Map<string, ConversationDetail['messages'][number]['attachments']>();
   for (const file of files) {
@@ -667,6 +670,11 @@ export async function getConversation(
       connection: metaConnection(platform),
       configuredAccountId: configuredAccountId(platform),
       lastInboundMeta: (lastInbound?.message.meta ?? null) as Record<string, unknown> | null,
+      // The one part not taken off the loaded timeline, because the events list
+      // above is capped at fifty and this is the fact whose absence silently
+      // re-refuses every reply on the ticket.
+      lastInboundAt: lastInbound?.message.createdAt ?? null,
+      controlTakenAt,
     });
   }
 
@@ -829,7 +837,11 @@ export async function listCannedResponses(agent: SessionAgent) {
       id: cannedResponses.id,
       title: cannedResponses.title,
       folder: cannedResponses.folder,
-      bodyText: cannedResponses.bodyText,
+      // Both languages, because the choice between them is the agent's and it
+      // is made after the list has rendered. Fetching the picked one on demand
+      // would put a round trip inside a dropdown's onChange.
+      bodyTextAr: cannedResponses.bodyTextAr,
+      bodyTextEn: cannedResponses.bodyTextEn,
     })
     .from(cannedResponses)
     .where(

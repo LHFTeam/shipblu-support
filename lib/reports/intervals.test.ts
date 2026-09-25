@@ -6,6 +6,7 @@ import {
   lastEnd,
   longestSeconds,
   mergeSpans,
+  subtractSpans,
   toSpan,
   totalSeconds,
   type Span,
@@ -142,5 +143,64 @@ describe('firstStart and lastEnd', () => {
   it('are null for an agent who never appeared', () => {
     expect(firstStart([])).toBeNull();
     expect(lastEnd([])).toBeNull();
+  });
+});
+
+describe('subtractSpans', () => {
+  it('returns the original when there is nothing to remove', () => {
+    expect(subtractSpans([span('09:00', '17:00')], [])).toEqual([span('09:00', '17:00')]);
+  });
+
+  it('splits a span around a removal inside it', () => {
+    // The case the accepting total needs: an agent parked mid-shift and back
+    // ten minutes later is two stretches of available time, not one.
+    expect(subtractSpans([span('09:00', '17:00')], [span('12:00', '12:10')])).toEqual([
+      span('09:00', '12:00'),
+      span('12:10', '17:00'),
+    ]);
+  });
+
+  it('trims an overlap at either end', () => {
+    expect(subtractSpans([span('09:00', '17:00')], [span('08:00', '09:30')])).toEqual([
+      span('09:30', '17:00'),
+    ]);
+    expect(subtractSpans([span('09:00', '17:00')], [span('16:30', '18:00')])).toEqual([
+      span('09:00', '16:30'),
+    ]);
+  });
+
+  it('drops a span that is removed entirely', () => {
+    expect(subtractSpans([span('09:00', '10:00')], [span('08:00', '11:00')])).toEqual([]);
+  });
+
+  it('ignores removals that do not touch anything', () => {
+    expect(subtractSpans([span('09:00', '10:00')], [span('14:00', '15:00')])).toEqual([
+      span('09:00', '10:00'),
+    ]);
+  });
+
+  it('handles several removals from several spans', () => {
+    expect(
+      subtractSpans(
+        [span('09:00', '12:00'), span('13:00', '17:00')],
+        [span('10:00', '10:30'), span('11:00', '13:30'), span('16:00', '16:15')],
+      ),
+    ).toEqual([
+      span('09:00', '10:00'),
+      span('10:30', '11:00'),
+      span('13:30', '16:00'),
+      span('16:15', '17:00'),
+    ]);
+  });
+
+  it('is the difference between welding a park and measuring it', () => {
+    // The regression this exists for, in the shape the rollup meets it: two
+    // accepting stretches a minute apart because the idle timer parked somebody
+    // at 09:10 and they came back at 09:11. Stitching alone reports the minute
+    // as available; subtracting the not-accepting interval does not.
+    const stitched = mergeSpans([span('08:00', '09:10'), span('09:11', '17:00')], 2 * 60_000);
+    expect(totalSeconds(stitched)).toBe(9 * 3600);
+
+    expect(totalSeconds(subtractSpans(stitched, [span('09:10', '09:11')]))).toBe(9 * 3600 - 60);
   });
 });

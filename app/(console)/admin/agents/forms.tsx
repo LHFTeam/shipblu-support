@@ -2,12 +2,110 @@
 
 import { useActionState, useState } from 'react';
 import { useFormStatus } from 'react-dom';
-import { Badge, Button, ErrorText, Input, Label, Select } from '@/components/ui';
+import {
+  Badge,
+  Button,
+  ErrorText,
+  Field,
+  Input,
+  Label,
+  Select,
+  SuccessText,
+} from '@/components/ui';
 import { InfoTip, Tooltip } from '@/components/tooltip';
 import { formatRelative } from '@/lib/format';
 import { createInvite, setAgentActive, setAgentCapacity, type AdminState } from '../actions';
+import { savePresenceSettings } from '../settings-actions';
+import type { SettingsState } from '../settings-actions';
 
 const INITIAL: AdminState = { error: null };
+const SETTINGS_INITIAL: SettingsState = { error: null };
+
+/**
+ * The two idle windows, and the only place they are set.
+ *
+ * On the Agents page rather than a settings page of its own because it is a
+ * rule about these people, read next to the list it governs — an admin
+ * wondering why somebody shows as away should find the answer on the screen
+ * where they noticed it.
+ *
+ * Both boxes are emptied to turn a timer off, which is why the hint says so
+ * rather than leaving an admin to guess whether 0 means "immediately" or
+ * "never".
+ */
+export function IdlePolicyForm({
+  autoAwayAfterMins,
+  autoSignoutAfterMins,
+}: {
+  autoAwayAfterMins: number | null;
+  autoSignoutAfterMins: number | null;
+}) {
+  const [state, action] = useActionState(savePresenceSettings, SETTINGS_INITIAL);
+
+  return (
+    <form
+      action={action}
+      className="flex flex-col gap-3 rounded-lg border border-[var(--border)] p-4"
+    >
+      <div className="flex flex-col gap-3 sm:flex-row">
+        <Field
+          className="sm:w-56"
+          label="Stop routing work after"
+          hint="Minutes without a key or a click. Empty to turn it off."
+          explain={
+            <>
+              An agent who stops using the console is marked <b>away</b> and gets no new tickets,
+              exactly as if they had switched themselves off. The difference is that this one undoes
+              itself: the moment they touch the keyboard they are back in the rota. It measures
+              input, not the connection &mdash; a console left open on an empty desk stays connected
+              all day.
+            </>
+          }
+        >
+          <Input
+            name="autoAwayAfterMins"
+            type="number"
+            min={1}
+            max={1440}
+            step={1}
+            defaultValue={autoAwayAfterMins ?? ''}
+            placeholder="off"
+          />
+        </Field>
+
+        <Field
+          className="sm:w-56"
+          label="Sign out after"
+          hint="Minutes without a key or a click. Empty to turn it off."
+          explain={
+            <>
+              The session is destroyed and the agent signs in again. They get a countdown first,
+              because an unsent reply lives only in the browser. This cannot be shorter than the
+              away window &mdash; signing somebody out before ever marking them away would mean
+              nobody is ever seen as away. It applies per browser, so the machine being typed on
+              stays signed in while one left at home does not.
+            </>
+          }
+        >
+          <Input
+            name="autoSignoutAfterMins"
+            type="number"
+            min={1}
+            max={1440}
+            step={1}
+            defaultValue={autoSignoutAfterMins ?? ''}
+            placeholder="off"
+          />
+        </Field>
+      </div>
+
+      <ErrorText>{state.error}</ErrorText>
+      {state.ok ? <SuccessText>Saved.</SuccessText> : null}
+
+      <SubmitButton className="self-start" idle="Save" busy="Saving…" />
+    </form>
+  );
+}
 
 export function InviteForm() {
   const [state, action] = useActionState(createInvite, INITIAL);
@@ -20,13 +118,23 @@ export function InviteForm() {
       {/* Stacked on a phone: three fields sharing one row leaves an email box
           about eleven characters wide. */}
       <div className="flex flex-col gap-3 sm:flex-row">
+        {/* `autoComplete="off"` on both: an email-plus-name pair is an address
+            form as far as Chrome and Safari are concerned, so they offer the
+            signed-in admin's own details — into a form that is entirely about
+            somebody else. Getting that wrong here does not just misaddress the
+            invite, it puts the wrong person's name in the greeting and on the
+            new agent record. */}
         <div className="sm:flex-1">
           <Label htmlFor="email">Email</Label>
-          <Input id="email" name="email" type="email" required />
+          <Input id="email" name="email" type="email" required autoComplete="off" />
         </div>
         <div className="sm:flex-1">
-          <Label htmlFor="name">Name (optional)</Label>
-          <Input id="name" name="name" />
+          <Label htmlFor="name">Name</Label>
+          {/* Required, because this is the name the invitee is greeted by in
+              the invitation email and reads back on the activation page. The
+              admin knows who they are inviting; the invitee should not have to
+              tell us who they are. */}
+          <Input id="name" name="name" required autoComplete="off" maxLength={120} />
         </div>
         <div className="sm:w-40">
           <Label htmlFor="role">Role</Label>
@@ -42,9 +150,35 @@ export function InviteForm() {
 
       {state.inviteUrl ? (
         <div className="rounded-md bg-[var(--muted)] p-3 text-sm">
-          <p className="mb-1.5 text-xs font-medium opacity-70">
-            Send this link to the new agent. It expires in 7 days and remains under Pending invites
-            until it is accepted.
+          {/* Which of the two happened is the part an admin has to read. The
+              link is shown either way, so without this sentence a successful
+              send and a send that never left look identical — and the second
+              one needs them to go and paste the link somewhere.
+
+              "On its way", not "emailed": all this action did was queue a job.
+              The worker still has to run and the provider still has to accept
+              the recipient, so claiming it was delivered would recreate the
+              silent failure the message exists to rule out.
+
+              Coloured with a token rather than dimmed with `opacity-70`,
+              because opacity composites the whole element — a child cannot
+              exceed its parent's, so the `opacity-100` that used to be on the
+              address was a no-op and the one word worth reading back for a
+              typo was as faint as the rest of the sentence. */}
+          <p className="mb-1.5 text-xs font-medium text-[var(--muted-foreground)]">
+            {state.inviteQueuedFor ? (
+              <>
+                The invitation is on its way to{' '}
+                <span className="break-all text-[var(--foreground)]">{state.inviteQueuedFor}</span>.
+                The same link is below if you need to send it another way.
+              </>
+            ) : (
+              <>
+                No invitation email went out, so send this link to the new agent yourself. (The
+                server log says why — usually no sending address is configured yet.)
+              </>
+            )}{' '}
+            It expires in 7 days and remains under Pending invites until it is accepted.
           </p>
           <CopyInviteLink
             key={state.inviteUrl}
@@ -81,7 +215,7 @@ function CopyInviteLink({ inviteUrl, label }: { inviteUrl: string; label: string
       <code className="min-w-0 flex-1 truncate text-xs">{inviteUrl}</code>
       <span
         aria-live="polite"
-        className={`shrink-0 text-xs font-medium ${copyState === 'failed' ? 'text-red-600 dark:text-red-300' : 'text-brand-700 dark:text-brand-300'}`}
+        className={`shrink-0 text-xs font-medium ${copyState === 'failed' ? 'text-red-600' : 'text-brand-700'}`}
       >
         {copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Could not copy' : 'Copy'}
       </span>

@@ -11,7 +11,7 @@ import { commentReplyTarget } from '@/lib/meta/comments';
 import { metaConnection } from '@/lib/meta/connection';
 import { explainMetaSendError, MetaSendRefusal } from '@/lib/meta/errors';
 import type { MetaPlatform } from '@/lib/meta/types';
-import { messagingTag, metaWindowState } from '@/lib/meta/window';
+import { messagingTag, metaWindowState, type MetaSendAuthor } from '@/lib/meta/window';
 import type { ClaimedJob } from '@/lib/queue';
 import { metaReplyTarget } from '@/lib/tickets/meta-thread';
 
@@ -74,8 +74,15 @@ export async function sendMeta(job: ClaimedJob): Promise<void> {
   // it — `endpoint()` in the client asks the same function.
   const connection = metaConnection(platform);
 
+  // Who this message is from, in the only terms Meta's tagging cares about.
+  // Read off the row rather than passed in the payload: `HUMAN_AGENT` is a claim
+  // that a person wrote this, and the column recording that person is the only
+  // thing that can substantiate it. A flag on the job would be a second copy of
+  // the fact, set by whichever caller remembered to.
+  const author: MetaSendAuthor = row.message.authorAgentId ? 'human' : 'automated';
+
   try {
-    const externalId = await deliver(sendKind, platform, row, meta);
+    const externalId = await deliver(sendKind, platform, row, meta, author);
 
     await db
       .update(messages)
@@ -101,7 +108,7 @@ export async function sendMeta(job: ClaimedJob): Promise<void> {
             sendKind,
             tag:
               sendKind === 'dm'
-                ? messagingTag(metaWindowState(row.conversation.lastCustomerMessageAt))
+                ? messagingTag(metaWindowState(row.conversation.lastCustomerMessageAt), author)
                 : null,
           })
         : message;
@@ -127,6 +134,7 @@ async function deliver(
   platform: MetaPlatform,
   row: { message: typeof messages.$inferSelect; conversation: typeof conversations.$inferSelect },
   meta: SendMeta,
+  author: MetaSendAuthor,
 ): Promise<string | null> {
   const text = row.message.bodyText;
 
@@ -176,13 +184,23 @@ async function deliver(
   }
 
   const window = metaWindowState(row.conversation.lastCustomerMessageAt);
-  const tag = messagingTag(window);
+  const tag = messagingTag(window, author);
 
   if (!tag) {
-    // Checked here as well as in the console, because the seven days can lapse
-    // between an agent writing and the job running.
+    // Two ways to arrive here, and they are not the same failure. The seven days
+    // lapsing is about the customer, and is checked here as well as in the
+    // console because they can lapse between an agent writing and this job
+    // running. An automated message past 24 hours is about us: the only thing
+    // that would carry it is `HUMAN_AGENT`, and nothing wrote it by hand — see
+    // `MetaSendAuthor`. Refused rather than sent untagged, which Graph would
+    // reject anyway, and refused permanently, because no retry makes a rule the
+    // author.
     throw new MetaSendRefusal(
-      'The 7-day messaging window has closed; only the customer can reopen this conversation.',
+      window.needsHumanAgentTag
+        ? 'An automated reply cannot go out more than 24 hours after the customer wrote: ' +
+            'past that only the HUMAN_AGENT tag sends, and it may only be used for a message ' +
+            'a person actually wrote.'
+        : 'The 7-day messaging window has closed; only the customer can reopen this conversation.',
     );
   }
 

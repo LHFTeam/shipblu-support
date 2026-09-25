@@ -155,7 +155,7 @@ export function Rail({ items, brand }: { items: NavItem[]; brand: ReactNode }) {
               href={item.href}
               aria-current={active ? 'page' : undefined}
               className={`flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-medium ${
-                active ? 'text-brand-600 dark:text-brand-300' : 'text-[var(--muted-foreground)]'
+                active ? 'text-brand-600' : 'text-[var(--muted-foreground)]'
               }`}
             >
               <span className="relative">

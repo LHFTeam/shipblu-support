@@ -39,6 +39,7 @@ export async function GET() {
     identify: identify,
     clear: clear,
     setLocale: setLocale,
+    compose: compose,
     open: function () { toggle(true); },
     close: function () { toggle(false); },
     toggle: function () { toggle(); }
@@ -101,6 +102,20 @@ export async function GET() {
   var clearPending = false;
 
   /*
+   * Text a host page wants sitting in the composer, held until there is a
+   * document to hand it to.
+   *
+   * \`frameLoaded\` is a weaker fact than \`frameReady\` and has to be: the widget
+   * opens on its questions and mints no token until somebody chooses to talk,
+   * so \`ready\` — which needs a token — never arrives for a panel that has only
+   * ever been looked at. \`hello\`, which the frame posts as soon as it mounts,
+   * is what says a document exists. Re-pointing \`src\` starts a new one, so it
+   * goes back to false there.
+   */
+  var composePending = null;
+  var frameLoaded = false;
+
+  /*
    * The two layouts, and which one a viewport gets.
    *
    * Narrow *or* short: a phone held sideways is 844x390, which is roomy across
@@ -119,7 +134,6 @@ export async function GET() {
     'bottom:20px',
     'width:56px',
     'height:56px',
-    'border-radius:28px',
     'border:0',
     'background:#0b6bcb',
     'color:#fff',
@@ -134,41 +148,54 @@ export async function GET() {
   ].join(';');
 
   /*
-   * The launcher's face.
+   * The launcher's face: a speech bubble with two lines of text in it.
    *
-   * An <img> rather than the 💬 emoji this used to be. An emoji is drawn by
-   * whatever font the visitor's own device supplies, so the button was Apple's
-   * blue speech bubble on an iPhone, Segoe's outline on Windows and something
-   * else again on Android — three products, none of them ShipBlu, on the one
-   * control that is supposed to say whose support this is.
+   * Not the 💬 emoji this started as. An emoji is drawn by whatever font the
+   * visitor's own device supplies, so the button was Apple's blue speech bubble
+   * on an iPhone, Segoe's outline on Windows and something else again on
+   * Android — three products, none of them ShipBlu, on the one control that is
+   * supposed to say whose support this is.
    *
-   * Served from /widget/ rather than anywhere else under public/, and that is
-   * load-bearing rather than tidy: \`/widget\` is already the one prefix
-   * \`proxy.ts\` lets through without a session *and* leaves unrewritten on the
-   * help-centre hostname. An asset one directory to the side would redirect a
-   * visitor on a merchant's site to /login, and 404 under /help on the custom
-   * domain.
+   * And marked up rather than fetched, which the \`<img>\` it replaces could not
+   * be. That request went out cross-origin from the merchant's page, so a
+   * strict \`img-src\` on their side blocked it and a bad network dropped it —
+   * and the launcher then fell back to the very emoji the mark exists to avoid.
+   * An element in the document is subject to no \`img-src\` policy and makes no
+   * request, so the face cannot fail to arrive and there is no fallback left to
+   * need. That was the only thing under \`public/\`, which is now gone with it.
+   *
+   * One path, wound so that \`evenodd\` cuts the two lines out as holes rather
+   * than painting them in a second copy of the button's blue. Restyle the
+   * button and the glyph follows it; a hard-coded #0b6bcb in here would go on
+   * showing the old colour in two slots nobody would think to look at.
    */
-  var markFailed = false;
-  var mark = document.createElement('img');
-  mark.src = BASE + '/widget/logomark-white.png';
-  mark.alt = '';
-  // The mark is wider than it is tall, so height follows width rather than
-  // being set: a host page's own \`img\` rules cannot squash it. And
+  var SVG_NS = 'http://www.w3.org/2000/svg';
+  var mark = document.createElementNS(SVG_NS, 'svg');
+  // Both dimensions, in the viewBox's own 3:2. Width alone leaves the height to
+  // SVG2's intrinsic sizing, which an older browser answers with 150px — and
+  // this file is the one thing on the page that has to render on all of them.
+  mark.setAttribute('viewBox', '0 0 24 16');
+  mark.setAttribute('width', '24');
+  mark.setAttribute('height', '16');
+  // The button already carries the label; the glyph would only repeat it. And
+  // \`focusable\` because legacy Edge makes an <svg> a tab stop otherwise, which
+  // would put a stop with nothing in it inside the button.
+  mark.setAttribute('aria-hidden', 'true');
+  mark.setAttribute('focusable', 'false');
   // \`pointer-events\` off, so every click lands on the button, never on its
   // contents.
-  mark.style.cssText = 'width:30px;height:auto;display:block;pointer-events:none';
+  mark.style.cssText = 'display:block;pointer-events:none';
 
-  /*
-   * The mark is the only thing in the button, so a request that fails leaves a
-   * blank blue disc with no hint that it opens anything. The emoji is the worse
-   * mark and the better fallback: it needs nothing from the network, which is
-   * the one thing that has just gone wrong.
-   */
-  mark.addEventListener('error', function () {
-    markFailed = true;
-    paintLauncher();
-  });
+  var markPath = document.createElementNS(SVG_NS, 'path');
+  markPath.setAttribute('fill', '#fff');
+  markPath.setAttribute('fill-rule', 'evenodd');
+  markPath.setAttribute(
+    'd',
+    'M4.5,0H19.5A4.5,4.5 0 0 1 24,4.5V11.5A4.5,4.5 0 0 1 19.5,16H4.5A4.5,4.5 0 0 1 0,11.5V4.5A4.5,4.5 0 0 1 4.5,0Z' +
+      'M5.2,4.9H18.8A1.2,1.2 0 0 1 18.8,7.3H5.2A1.2,1.2 0 0 1 5.2,4.9Z' +
+      'M5.2,8.7H13.8A1.2,1.2 0 0 1 13.8,11.1H5.2A1.2,1.2 0 0 1 5.2,8.7Z'
+  );
+  mark.appendChild(markPath);
 
   var closeGlyph = document.createElement('span');
   closeGlyph.textContent = '✕';
@@ -198,9 +225,7 @@ export async function GET() {
    */
   function paintLauncher() {
     while (launcher.firstChild) launcher.removeChild(launcher.firstChild);
-    if (open) launcher.appendChild(closeGlyph);
-    else if (markFailed) launcher.appendChild(document.createTextNode('💬'));
-    else launcher.appendChild(mark);
+    launcher.appendChild(open ? closeGlyph : mark);
     launcher.appendChild(badge);
   }
 
@@ -240,6 +265,14 @@ export async function GET() {
    * here too: the reader's eye ends on the other side in Arabic, and a chat
    * button pinned bottom-right of an Arabic page reads as something the site
    * forgot to translate.
+   *
+   * The launcher's own corners are direction-dependent for the same reason, so
+   * they are set here rather than in the style attribute. It is ShipBlu's
+   * speech bubble rather than a disc: three rounded corners and one drawn
+   * almost square, which is the tail. The tail points inwards — bottom-left
+   * against a button parked bottom-right, and mirrored in Arabic — because a
+   * tail aimed at the corner of the viewport points at nothing, and the shape
+   * stops reading as a bubble at all.
    */
   function applyPlacement() {
     var rtl = locale === 'ar';
@@ -247,6 +280,7 @@ export async function GET() {
 
     launcher.style.left = rtl ? '20px' : '';
     launcher.style.right = rtl ? '' : '20px';
+    launcher.style.borderRadius = rtl ? '24px 24px 6px 24px' : '24px 24px 24px 6px';
     badge.style.left = rtl ? '-2px' : '';
     badge.style.right = rtl ? '' : '-2px';
     // Nothing to return to on a full screen, and the panel carries its own
@@ -343,7 +377,12 @@ export async function GET() {
       // frame, which would throw away a half-typed message every time this
       // runs.
       var src = frameSrc();
-      if (iframe.src !== src) iframe.src = src;
+      if (iframe.src !== src) {
+        iframe.src = src;
+        // A new document, which has been told nothing. Anything waiting to be
+        // handed over is handed to that one instead, on its \`hello\`.
+        frameLoaded = false;
+      }
     }
 
     applyPlacement();
@@ -392,6 +431,40 @@ export async function GET() {
   }
 
   /**
+   * Open the chat with something already written in the composer.
+   *
+   * For a host page with a subject of its own — the tracking page's "ask
+   * support about this shipment", where the parcel number belongs in the
+   * message and the visitor should not have to copy it across. It is a draft
+   * and nothing more: the widget puts the text in the box, focuses it and
+   * waits, so the visitor writes their own question under it and decides when
+   * it goes. Nothing is sent on their behalf.
+   *
+   * Held rather than posted when the frame is not up yet. \`toggle(true)\` builds
+   * it, and a frame that is still loading has no listener — so the text waits
+   * for the \`hello\` that says a document exists, exactly as \`clear()\` waits
+   * for \`ready\`.
+   */
+  function compose(text) {
+    composePending = typeof text === 'string' ? text : '';
+    toggle(true);
+    flushCompose();
+  }
+
+  function flushCompose() {
+    if (composePending === null || !iframe || !frameLoaded) return;
+
+    iframe.contentWindow.postMessage(
+      { source: 'shipblu-host', type: 'compose', text: composePending },
+      BASE
+    );
+    // Once only. The frame says \`hello\` again whenever it remounts, and
+    // re-delivering the draft then would overwrite whatever the visitor has
+    // typed since.
+    composePending = null;
+  }
+
+  /**
    * Told to us by a host page that knows who is signed in.
    *
    * The signature is optional and is what separates a claim from a fact — see
@@ -422,6 +495,10 @@ export async function GET() {
   function clear() {
     identity = null;
     signature = null;
+    // The draft goes with them. A pending compose belongs to whoever was
+    // reading the page that asked for it, and handing it to the next person at
+    // this browser is the leak \`clear()\` exists to prevent.
+    composePending = null;
 
     if (iframe && frameReady) {
       iframe.contentWindow.postMessage({ source: 'shipblu-host', type: 'clear' }, BASE);
@@ -454,6 +531,7 @@ export async function GET() {
 
     iframe = document.createElement('iframe');
     iframe.id = 'shipblu-chat-frame';
+    frameLoaded = false;
     iframe.src = frameSrc();
     iframe.setAttribute('allow', 'clipboard-write');
     // Everything except its size and position, which \`applyPlacement\` owns —
@@ -548,6 +626,7 @@ export async function GET() {
      */
     if (data.type === 'ready') {
       frameReady = true;
+      frameLoaded = true;
 
       if (clearPending) {
         clearPending = false;
@@ -556,6 +635,7 @@ export async function GET() {
       }
 
       pushIdentity();
+      flushCompose();
     }
 
     /*
@@ -570,12 +650,19 @@ export async function GET() {
      * assuming it is visible, a hidden panel silently swallows the unread badge.
      */
     if (data.type === 'hello') {
+      frameLoaded = true;
+
       if (iframe && iframe.contentWindow) {
         iframe.contentWindow.postMessage(
           { source: 'shipblu-host', type: open ? 'opened' : 'closed' },
           BASE
         );
       }
+
+      // After the visibility answer, so the panel knows it is on screen before
+      // it is given something to say — the draft arriving first would land in a
+      // thread the widget still believes nobody is looking at.
+      flushCompose();
       return;
     }
 

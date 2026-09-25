@@ -83,14 +83,14 @@ npx prettier --write AGENTS.md         # one file
 
 | Job          | What it runs                                                          |
 | ------------ | --------------------------------------------------------------------- |
-| `verify`     | `tsc`, `eslint`, `format:check`, `vitest`, `build` — one job each     |
+| `verify`     | `tsc`, `eslint`, `format:check`, `vitest`, `knip`, `build` — one each |
 | `repo-rules` | `scripts/ci/repo-rules.mjs`, and migration drift against `db/schema/` |
 | `database`   | migrations, `db/sql/` and every DB-only job handler, on real Postgres |
 
 Run the same thing locally when you want the answer sooner:
 
 ```bash
-npx tsc --noEmit && npx eslint . && npx vitest run && npm run build
+npx tsc --noEmit && npx eslint . && npx vitest run && npm run knip && npm run build
 node scripts/ci/repo-rules.mjs
 ```
 
@@ -107,6 +107,38 @@ this file now live — the env-var catalogue, the job registry, the `db/sql`
 rules, the confinement of the delivery payload, and the rest. Each check carries
 the reason it exists. If one of them is wrong, change it there and say why in
 the same commit; do not add your call site to an exemption list.
+
+`knip` gates **dependency hygiene and nothing else** — `dependencies`,
+`devDependencies`, `optionalPeerDependencies`, `unlisted`, `unresolved` and
+`binaries`, named as a positive `include` allowlist in `knip.jsonc` so a knip
+minor that adds a default-on category cannot silently widen a blocking job.
+
+Its unused-_export_ categories are excluded, and `files` with them. Run bare it
+reports ~110 exports, which is not a backlog: it mixes genuinely dead code with
+functions used inside their own module (drop the `export`, not the function) and
+with exports whose only consumer is `repo-rules.mjs` reading them by regex —
+deleting `handlers` on knip's word would break the job-registry check. `files`
+is excluded for a different reason: no `entry`/`project` is declared, so the
+`worker/` tree is reachable only through the `worker` script in `package.json`,
+and landing a module one commit before importing it would fail a check whose
+message talks about dead files. `npm run knip:exports` is the hand-run and
+covers exactly the complement of the gated list — all eleven of knip's other
+issue types, which is checked against its `ISSUE_TYPES` rather than assumed; `knip.jsonc` carries the
+reasoning, including which two categories the first attempt got wrong.
+
+**A dead value export is gated all the same, by `repo-rules.mjs` rather than by
+knip.** The two arrived from opposite directions in the same fortnight and are
+complementary rather than duplicates, so do not delete either as redundant: knip
+answers "is this dependency real", `dead-exports` answers "does anything import
+this". The second asks the module graph — an export is live when another module
+names it in an `import` or a re-export — so it separates the three cases above
+instead of conflating them, and it carries the framework-convention exemptions
+(`GET`, `metadata`, `dynamic`) that make knip's bare number ~110 in the first
+place. It checks **values only**; an exported _type_ is deliberately out of
+scope, because most are referenced only from the signature they name and
+flagging them would push the codebase to un-export shapes callers need. So
+`knip:exports` is what still covers the type half — not, as it read before this
+check existed, the whole of unused exports.
 
 Three things CI still cannot check, so they remain yours:
 
@@ -136,6 +168,14 @@ proxy.ts         Next 16 middleware: host routing + the signed-out redirect
 
 Put logic in `lib/`, not in route files. A page or action authorises, calls into
 `lib/`, and revalidates.
+
+**A page under `(console)` outside `admin/` brings its own scroll container.**
+The shell is `h-dvh overflow-hidden` so the inbox can own the full height and
+manage its own panes, which means a page that does not open an
+`app-scroll h-full overflow-y-auto p-6` wrapper is not merely unpadded — every
+row below the fold is rendered where nobody can scroll to it, and the page reads
+as half-finished rather than as broken (§6.53). `admin/layout.tsx` supplies one
+for everything beneath it; nothing else does.
 
 ## Do not edit
 
@@ -285,18 +325,74 @@ already cost a customer channel:
   says nothing about a reply sent with the Instagram account's own token.
 - **A Meta doc example proves nothing until you check which host its URL names.**
   The two connections differ in the host, the token, the ids _and_ the field
-  vocabulary — §6.35.
+  vocabulary — §6.35. The referral webhook field is the smallest instance:
+  Instagram spells it `messaging_referral` and the Page `messaging_referrals`,
+  and Graph rejects the whole field list rather than the one bad name.
+- **An App Review _feature_ is not a permission, and nothing here can check
+  one.** A feature — Human Agent, Business Asset User Profile Access — is
+  granted to the _app_, appears in no token's `scopes`, and is **not** covered by
+  a role on the app the way a permission is at Standard Access. So
+  `check_meta_permissions` reporting every capability granted says nothing about
+  it, and the App Dashboard's usage counter for one cannot leave zero before the
+  grant: a call stopped at the capability gate is never counted against the
+  feature it was stopped by. `FEATURES` in `lib/meta/capabilities.ts` lists the
+  ones this system depends on so the job can name what it did not check — §6.61.
 
-Graph request shapes are written down in `lib/meta/comments.ts` rather than built
-inline, and asserted there against Meta's reference, because **a wrong shape is
-invisible in the response**: Graph refuses a nonexistent edge with `100
-"Unsupported post request … does not exist, cannot be loaded due to missing
-permissions, or does not support this operation"`, which is word for word what it
-says about a comment the customer deleted. When adding or changing one, read the
-node reference **for the version `GRAPH_VERSION` actually names** — an edge
-missing from it is a finding, not an omission by the doc, and removal notices sit
-on a separate legacy page that a search for the working endpoint will not surface
-(§6.43).
+**`HUMAN_AGENT` may only be put on a message a person actually wrote.** The tag
+is Meta's Human Agent feature and its allowed usage is a human agent answering
+inside seven days; putting it on something the software composed is a false
+statement about work nobody did, and the feature reference is explicit that
+unapproved usage risks messaging restrictions on the app. So `messagingTag(state,
+author)` takes the author as a required argument, `send_meta` derives it from
+`messages.author_agent_id` rather than from the job payload — the column
+recording the person is the only thing that can substantiate the claim — and
+`automatedReplyBlocked` in `lib/tickets/outbound.ts` stops **all three** automated
+senders — the automation engine, the out-of-hours acknowledgement and the CSAT
+survey — at **24 hours** on `facebook` and `instagram`, not at seven days. The
+seven days belong to a human. It is shared with WhatsApp's template rule because
+a guard only some of the senders apply is not a guard, and it refuses before the
+row is written: delivery refuses it too, but by then the customer's timeline
+carries a reply that permanently failed. Route a new automated sender through it
+and through `carrierFor`, which is the same lesson twice — `send_csat` kept
+private copies of both and so surveyed Facebook tickets by email.
+
+Two things it must be given rather than guess. **A Meta comment ticket has no
+messaging window**: it is answered on the comment edge, which `send_meta` reaches
+before it consults the clock, so the guard takes the ticket's `external_id` and
+never blocks one. And **the clock is the real one** — the ingest lifecycle hands
+a message's own `sentAt` down as its timestamp, and that is exactly
+`lastCustomerMessageAt`, so passing it as `now` compares a value with itself and
+reports every window open. That is precisely the replayed backlog the guard is
+for.
+
+Graph request shapes are written down in `lib/meta/comments.ts` and
+`lib/meta/send.ts` rather than built inline, and asserted there against Meta's
+reference, because **a wrong shape is invisible in the response**: Graph refuses
+a nonexistent edge with `100 "Unsupported post request … does not exist, cannot
+be loaded due to missing permissions, or does not support this operation"`, which
+is word for word what it says about a comment the customer deleted. When adding
+or changing one, read the node reference **for the version `GRAPH_VERSION`
+actually names** — an edge missing from it is a finding, not an omission by the
+doc, and removal notices sit on a separate legacy page that a search for the
+working endpoint will not surface (§6.43).
+
+The direct-message body splits on the **platform**, which is the one place it is
+not the connection: `messaging_type` is documented for Messenger and appears in
+neither Instagram send reference — not the `graph.facebook.com` one nor the
+`graph.instagram.com` one. Both list `recipient`, `message`, `sender_action`,
+`payload` and `reply_to`, and describe the human agent case as tagging the
+response. Branching on the connection instead would leave the Page-borne half of
+Instagram sending a Messenger body into an Instagram inbox.
+
+**Only the tagged Instagram body drops it; the in-window one keeps it**, and that
+asymmetry is a statement about evidence, not about Meta. The tagged path has
+never once succeeded, so moving it toward the documentation costs nothing. The
+in-window path is the channel's live traffic and works today with
+`messaging_type: RESPONSE` on it — and with `INSTAGRAM_ACCESS_TOKEN` unset it
+goes out over the Page connection to `graph.facebook.com`, where the parameter is
+documented as part of every send. Do not tidy the two halves into consistency
+without a live round trip: the risk is every in-window Instagram reply, to fix a
+send that has never worked.
 
 A WhatsApp business account's access token is read
 directly from `process.env`, for a different reason: its variable's _name_ is a
@@ -312,6 +408,19 @@ overflow. Reach for a `Field` hint when the explanation should always be on
 screen, and `InfoTip` when it should be one gesture away. Never `title=` on a DOM
 element — it never appears on a phone, which is where the console is read, and
 CI rejects it.
+
+**One palette, light.** The console, the help centre and the widget render the
+same colours whatever the reader's operating system asks for. So: no
+`@media (prefers-color-scheme: dark)`, no Tailwind `dark:` variant — it is that
+media query spelled shorter — and `color-scheme: light` stays on `:root`, which
+is the half a stylesheet cannot express by omission (it is what the browser
+paints a select's dropdown, the form-control chrome and the default scrollbar
+from). CI checks all three. The rule is mechanical because the failure is: a
+`dark:` utility appended to a class list is a colour nobody reviewing the page
+can see, and a returning dark block wakes every one of them at once against
+tokens stated for light surfaces. A real dark theme is a piece of work —
+re-step the tokens, decide whether the help centre follows the console, re-check
+the chart series — and `light-only` comes out in that commit.
 
 **Ticket forms.** A form is a row in `ticket_forms` whose layout is one jsonb
 document, parsed on every read by `parseFormElements` against the fields that
@@ -350,7 +459,12 @@ the missing endpoint was avoiding. `next.config.ts` sets `serverActions.bodySize
 `MAX_FORM_TOTAL_BYTES` so the limit a customer meets is the one that can explain
 itself. `lib/forms/files.ts` is client-safe and `lib/forms/attachments.ts` is
 not — the same split `custom-fields.ts` makes, here because the shared file put
-`node:fs` in the browser bundle.
+`node:fs` in the browser bundle. That split is now checked: CI walks the import
+graph out of every `'use client'` file and fails a value import that reaches
+`db/schema` or `db/client`, stopping at `'use server'` modules, which are a
+boundary rather than a dependency. Only the `node:fs` case fails a build on its
+own; one constant imported from a module that touches the schema ships the whole
+schema and nothing complains (§6.57).
 
 A form's slug can be Arabic, so anything putting one into a server `redirect()`
 goes through `formPath` / `encodeSlugParam`. Next hands the path straight to
@@ -398,11 +512,152 @@ rule that contributed rather than from how many did, so a pile of single
 keywords is held below the auto band however many of them agree.
 See `plans/ticket-categorisation.md`.
 
+**The one AI provider, and the one thing it is allowed to touch.**
+`lib/typesafe/` calls TypeSafe's System One endpoint and `lib/categorise-ai/`
+asks it the categorisation question — the repo's first and only model call. It is
+a **shadow**: every answer lands in `ai_category_runs` and nothing else, so no
+rollup, no review queue and no primary ladder can see it. That separation is not
+caution to be tidied away later. `conversation_categories.confidence` is an
+evidence grade, hand-assigned and combined by noisy-OR, and three screens explain
+it as one; TypeSafe returns a probability. One column holding both would be
+undetectable from the outside. Anything wanting to promote a result argues for it
+in its own change.
+
+Four rules hold, and the module is inert until somebody starts it — presence of
+`TYPESAFE_API_KEY` is the flag, the `instagramLoginConfigured()` device, and the
+key lives in `shipblu-support-production` rather than the shared group because the
+job sends real customer text to a third party:
+
+- **The option list comes from `ticket_categories`, never from `TAXONOMY`.** A
+  retired category leaves the rules path at once; if it did not leave the model's
+  choices at the same moment the two would answer over different vocabularies and
+  every disagreement between them would be an artefact.
+- **`meta.unclassified` is always offered, and the instructions name it.** Given
+  55 options and no way out, a model asked about "؟" names something, and a forced
+  guess is the over-detection `plans/ticket-categorisation.md` warns about.
+- **The rules baseline is computed in the same call**, from `detectCategories` —
+  not read back from `conversation_categories`, whose rows agents have since
+  confirmed, rejected and added. The first measures the detector; the second
+  measures the team.
+- **Nothing retries inside the provider.** Backoff is the queue's, per
+  `lib/email/providers/postmark.ts`, which is also why `@typesafe-ai/sdk` is not
+  used: it retries internally and brings an error taxonomy where the only thing a
+  handler reads is `isTransient`.
+
+The job is hand-run and on no cron — a shadow run is an experiment with a label
+on it. `dryRun=true` builds every request, calls nothing and writes nothing, which
+is why it can sit in CI's `database` job loop and put the selection and report
+queries in front of real Postgres. See `plans/categorisation-through-typesafe.md`.
+
+**Knowledge base article formatting.** `lib/kb/format.ts` is the standard, and
+it is code rather than prose because it is enforced: `normaliseArticleHtml`
+runs on every write, wrapped round the sanitiser as
+`normaliseArticleHtml(sanitiseArticleHtml(html))` — sanitise first, always, and
+CI checks the pair. An article body is plain semantic tags: no `class`, no
+`style`, no per-element `dir` (the help-centre shell sets it once), no `div` or
+`span`, and **no `h1`** — the article page owns the page's only `h1` and
+`.kb-article` dresses `h2`–`h6`, so a body `h1` renders as paragraph text
+(§6.49). `br` is a line break inside a paragraph, never spacing between blocks.
+Read the module's header before adding a rule: it carries the evidence for each
+one, all of it from the imported corpus, and the two invariants that make a
+regex pass over markup safe — it only ever runs on sanitize-html's own output,
+and it never touches a text node. Applying it to what is already stored is
+`normalise_kb_formatting`, which is idempotent and cuts a `kb_article_versions`
+row per article so the pass is undoable from the console.
+
+**Who on the team may read an internal article.** `kb_visibility` answers
+whether a _customer_ may (`lib/kb/visibility.ts`); `min_role` on `kb_articles`
+and `kb_folders` answers which of _us_ may, and the two are separate axes on
+purpose. `agents_only` already means "no customer, ever", whoever is signed in —
+a `supervisors_only` beside it would put a role branch inside the predicate that
+keeps internal runbooks out of Google, and would make every exhaustive switch
+over `kb_visibility` answer a question it was not asked.
+
+`lib/kb/internal.ts` owns the rule, and three things about it are load-bearing:
+
+- **The floor is read only where the content is internal.** A floor on something
+  a customer can open is not a boundary, it is a console hiding from an agent
+  what a stranger can read. The folder counts too — production's internal
+  articles are marked `public` on the row and are internal only through their
+  folder — so an article's floor is the stricter of its own and its folder's,
+  and null on anything public.
+- **`readableByRole(role)` takes the role as a required argument**, the same
+  device `articleVisibleTo` uses for its viewer: there is no zero-argument
+  version to call by accident, so a new internal read model cannot forget the
+  rule without failing to compile. Every one applies it — `admin.ts` for the
+  console list and the editor, `agent-search.ts` for the composer panel — and so
+  do the five console actions that reach an article by an id out of a
+  `FormData` field, because `kb.edit` is supervisor and up, which is exactly the
+  population an admins-only article is kept from.
+- **The seniority ladder is generated, never retyped.** `agent_role` happens to
+  be declared most-senior-first, so `least()` and `<=` would work by accident
+  today and silently re-grade every article the day a role is inserted into the
+  middle of the enum. The CASE arms come from `ROLES_BY_SENIORITY` in
+  `lib/auth/permissions.ts`, and compare as text so no `agent_role` operator is
+  needed — the `operator does not exist: text = channel` shape under
+  [Tests](#tests).
+- **The pure half lives in `lib/kb/floors.ts`** — the labels a control shows,
+  and `floorFor`/`folderFloor`, the twins of `effectiveFloor` for rows already in
+  hand. Split by which side of the wire runs it, like `lib/forms/files.ts`, and
+  the twins answer null wherever the SQL does, the most junior role included:
+  "every agent" and "no floor set" are the same audience, and a twin that
+  disagreed would badge a row the list beside it reports as unrestricted.
+
+A floor is written only where the content is internal, and both writers decide
+that server-side: `saveArticle` reads the target folder rather than trusting the
+form, because the editor renders the control only for an internal article — so a
+submission with no `minRole` field is a form that never offered one, not somebody
+clearing a floor, and clearing it there would drop the floor off every article
+that is internal through its folder. Neither may accept a folder above the
+caller, for the same reason the five id-in-`FormData` actions may not accept an
+article above them.
+
+The team's own handbook is the content this exists for: `lib/kb/handbook.ts`
+holds it, `seed_console_handbook` puts it in the database idempotently, and the
+`database` CI job runs that job twice and asserts the second run changes
+nothing. Its floors are on the folders rather than on the articles, so an
+article added to one later inherits the right audience instead of needing
+somebody to remember. Ship a content fix by re-running with `overwrite=true`,
+which cuts a `kb_article_versions` row for what it replaces; without it the job
+reports what drifted and leaves it alone, because these articles are meant to be
+edited in the console.
+
 **Bilingual and RTL.** Arabic is the default locale and the front door; every
 public URL keeps an explicit locale segment. Use `direction()` from
 `lib/kb/locale.ts` and never assume LTR. Slugify through `lib/kb/slug.ts` —
 ASCII slugify erases Arabic entirely — and decode dynamic route params with
 `decodeSlugParam()`, because Next hands them over still percent-encoded.
+
+**Anything a customer reads is a `*_ar` / `*_en` pair, and either side covers
+the other.** Auto-response bodies, ticket field labels, form names, canned
+responses and holiday names all take that shape: both columns `not null default
+''`, the write path requiring one of the two rather than both, and the read path
+falling back to whichever was filled in. A team that writes only Arabic gets a
+complete configuration, and nothing renders a hole where a translation was
+never typed. The trap it closes is the half-localised message: a body chosen for
+an Arabic reader that interpolates a name only stored in English is translated
+everywhere except the one word the sentence is about.
+
+Two different questions decide the language, and they are not the same module.
+**Anything that writes to a customer unattended goes through
+`lib/tickets/locale.ts`** — the out-of-hours acknowledgement and an automation's
+canned reply both call `requesterLocale()`, which picks the most recent inbound
+`reply` carrying text and hands it to `preferredLocale()`. Each of those
+narrowings is a way the answer went wrong: the last inbound row of _any_ kind
+includes the English `system` notice we write when a form attachment fails, and
+a media message carries no text at all. A sender that reads the language off a
+message it already happens to be holding is how the two came to disagree, so do
+not reintroduce that shortcut — one indexed query is the price of the invariant.
+
+The console's pickers are deliberately outside this. They open on
+`detectLocale()` from `lib/kb/language.ts`, the value the inbox page already
+computed to search the knowledge base, so the knowledge panel and the canned
+picker beside it cannot disagree. The two detectors differ at the margins —
+`detectLocale` calls text Arabic from a fifth of its letters, `preferredLocale`
+from a majority — and that is the right way round: one is a default an agent
+overrules with a click, the other has already been sent. Do not trust
+`contacts.locale` alone in either; nothing writes it, so all 6,000 contacts
+read as 'en'.
 
 **Time.** Cairo observes DST again. Build test instants from wall-clock with
 luxon and let the timezone database convert; never hand-convert fixtures. SLA
@@ -419,6 +674,55 @@ pushes occupancy above 100%, where it stops meaning anything. An interval's end
 is `coalesce(ended_at, last_beat_at)`, so a stream that died without signing off
 contributes the time it can account for rather than every hour since.
 
+**A connection is not a person.** `agents.last_seen_at` is refreshed every 25
+seconds for as long as a console tab is open, so anything asking "is somebody
+working?" that reads it answers yes for an empty desk. Only `agents.last_input_at`
+— a key, a pointer, a scroll, reported by `components/agent-activity.tsx` — moves
+when a human does, and it is what both idle timers in `presence_policy` are
+measured from. Four rules hold there, and each closes something that is invisible
+once it is wrong:
+
+- **Nothing on the request path may write `last_input_at` or
+  `sessions.last_activity_at`.** A prefetch, a poll or the presence keepalive
+  refreshing either one makes every timer unreachable while leaving the columns
+  looking healthy — and "nobody was ever signed out" is indistinguishable from
+  "the timeout works" from the outside.
+- **Why the switch went off is a fact, not a boolean.** `accepting_off_reason`
+  separates the agent's own away, a supervisor's, and the timer's, because only
+  the last may be undone by the next keypress. Without it, returning from lunch
+  resurrects an away somebody set deliberately.
+- **The browser reports, the server decides.** The idle report from
+  `/api/presence/activity` buys promptness, not trust: `applyIdleAway` re-checks
+  the window against the column the same endpoint is the only writer of. The
+  sign-out is enforced in `getSessionAgent()`, which is the one path every page
+  and action already takes, and swept in the background for the console nobody
+  closed.
+- **One clock, two windows, and the sign-out is never shorter than the away.**
+  Two idle detectors would eventually disagree about the same agent; a sign-out
+  that fires first makes the away state unreachable. `lib/presence/idle.ts` is
+  the single copy of every one of these decisions and the only part with tests,
+  because the sweep, the endpoint and the browser all have to answer identically.
+- **The away timer measures the person; the sign-out measures the session, and
+  the browser must not measure it for itself.** The console reports at most once
+  a minute, so `sessions.last_activity_at` is routinely a whole beat behind the
+  last key — and the countdown before a sign-out is itself only a minute long. A
+  browser counting from its own last keypress therefore warns up to a minute
+  after the deadline it is warning about: "Stay signed in" posts to a session
+  `getSessionAgent()` has already deleted, and the unsent reply the countdown
+  exists to protect goes with it. So `AgentActivity` anchors on
+  `SessionAgent.sessionIdleForMs` — a duration, not an instant, because the two
+  machines' clocks need not agree — and moves it only on a beat the server
+  accepted. `idleTick` takes both clocks and is where which one answers which
+  question is stated and tested.
+- **Switching a timer on must not act retroactively.** Nothing beats while the
+  windows are off, so the moment an admin enables the sign-out every session in
+  the table is already older than it — the first sweep would destroy the lot,
+  with no countdown, because the consoles rendered before the change do not know
+  a countdown exists. `signOutCutoff` therefore measures from the later of the
+  session's activity and `presence_policy.updated_at`. The away timer needs no
+  such grace, and that asymmetry is the point: being parked is undone by a
+  keypress, being signed out throws away an unsent reply.
+
 **A snapshot cannot be recomputed.** Anything of the form "how much was open at
 time T" has to be sampled at the time — `conversations` carries only current
 state, so counting it during a rebuild writes today's answer onto an old date.
@@ -426,6 +730,25 @@ state, so counting it during a rebuild writes today's answer onto an old date.
 rollup reads it rather than owning it: `rollup_metrics` rebuilds by delete and
 insert, and would otherwise destroy the only copy. Hourly rather than at
 midnight because Render's cron schedules are UTC and Cairo's offset moves.
+
+**A report's window comes from `rangeIn()`, never from `current_date`.** The
+rollups bucket a day in the reporting zone so an evening shift does not land on
+tomorrow; `current_date` is the _database's_ date, and the database is UTC. A
+query that mixes the two is wrong by a day at one edge for the first two hours
+of every Cairo morning, and looks entirely correct while it is. So the page
+resolves the window once, through `rangeIn(zone, days)` in `lib/reports/rollup.ts`,
+and hands the two `YYYY-MM-DD` strings to every query it runs — which also means
+the dates printed in the header are provably the dates the figures were selected
+on. A live query comparing a `timestamptz` against that window names the zone
+too (`::timestamp at time zone <zone>`), rather than casting a date in UTC.
+
+**Say what the window holds, not just what it asked for.** A range control over
+a young rollup is indistinguishable from a broken one: `rollup_metrics`
+recomputes three days a night and several rollups have no backfill, so every
+window wider than the history returns the same rows and the buttons look dead.
+`/reports/categories` was reported as exactly that bug. A report with a range
+control therefore prints the window it selected and, when the figures start
+after the window opens, says where they start and why (§6.54).
 
 ## Tests
 
@@ -453,6 +776,16 @@ against the real database before it is pushed — `execute_sql` on the productio
 project answers it in one call, and reading the row count back is also how you
 learn the predicate selects what you meant.
 
+**A bare `Date` interpolated into a `sql` template is the same class of trap.**
+postgres.js gets it as an untyped parameter, assumes text and throws
+`ERR_INVALID_ARG_TYPE`; drizzle maps a Date only when a typed operator tells it
+the column, and a template never does. Interpolate `at.toISOString()` behind an
+explicit `::timestamptz`. `interactionWindowSet` and `staleTemplateFilter` are
+both exported purely so a test can read `toSQL().params` back and assert no raw
+Date survives — do that for any new fragment holding an instant. An `EXPLAIN` of
+the statement typed out by hand does **not** catch this: the literal is a literal
+there, and the bug is in what drizzle binds.
+
 One shape in particular: **`any(...)` in a raw fragment is only correct when
 what is inside the parentheses is an array _column_.**
 
@@ -467,7 +800,12 @@ identically, which is why this is not a CI check: telling them apart needs the
 type of the interpolated expression, not its spelling. Use `inArray()` for a
 list of values (§6.46).
 
-Playwright (`npm run test:e2e`) exists but is not part of the pre-push loop.
+Playwright is a declared dependency and `npm run test:e2e` is a declared script,
+but **there are no specs and no config**: nothing is tracked under any
+`playwright.config.*` and there is no `*.spec.ts` in the repo, so the command
+cannot currently run. `knip` reports the dependency as used because the binary
+appears in a script, which is worth knowing before treating a green dependency
+check as evidence that every dev dependency is earning its place.
 
 ## Tool use and live infrastructure
 

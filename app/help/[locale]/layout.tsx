@@ -4,6 +4,7 @@ import type { Metadata } from 'next';
 import { ShipBluLogo } from '@/components/brand';
 import { DEFAULT_LOCALE, direction, isLocale, LOCALES, LOCALE_NAMES, t } from '@/lib/kb/locale';
 import { publicBaseUrl } from '@/lib/kb/site';
+import { viewerIsTeamMember } from '@/lib/widget/audience';
 import { AccountNav } from './account-nav';
 import { ChatWidget } from './chat';
 import { Container } from './chrome';
@@ -34,6 +35,8 @@ export default async function KbLayout({
 }) {
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
+
+  const isTeamMember = await viewerIsTeamMember();
 
   return (
     <div
@@ -67,19 +70,17 @@ export default async function KbLayout({
             aria-label={t(locale, 'mainNavLabel')}
             className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm sm:ms-auto"
           >
-            <Link
-              href={`/${locale}`}
-              className="hidden font-medium text-[var(--kb-heading)] underline-offset-4 hover:underline sm:inline"
-            >
-              {t(locale, 'knowledgeBase')}
-            </Link>
-
             {/*
               Tracking sits in the header rather than only on the front page,
               because the visitor who wants it most is the one who arrived on an
               article from a search engine and still does not know where their
-              parcel is. Shown at every width, unlike the link above it: on a
-              phone it is the more likely of the two.
+              parcel is.
+
+              It is the only plain link here, and deliberately so: a
+              "Knowledge base" link used to sit beside it, pointing at the same
+              front page the logo immediately to its left already goes to. Two
+              controls a thumb-width apart with one destination is not a second
+              way in — it reads as a nav whose page is missing.
             */}
             <Link
               href={`/${locale}/track`}
@@ -146,8 +147,15 @@ export default async function KbLayout({
         body, as it does on any other host page. In the layout rather than on
         one page because a visitor who cannot find an answer gives up wherever
         they happen to be — most often on a search that returned nothing.
+
+        Not for a signed-in team member. The launcher is a customer's way in,
+        and this is a surface the team reads on too — see `viewerIsTeamMember`.
+        Left out rather than hidden with CSS: the snippet is then never
+        fetched, `chatWidget()` stays null, and the tracking page's "Ask
+        support" falls back to the form link it already carries as its `href`,
+        which is exactly what that fallback is there for.
       */}
-      <ChatWidget locale={locale} />
+      {isTeamMember ? null : <ChatWidget locale={locale} />}
     </div>
   );
 }

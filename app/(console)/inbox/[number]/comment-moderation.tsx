@@ -134,7 +134,5 @@ function ModerationSubmit({ label, danger }: { label: string; danger: boolean })
  * and an agent needs it while they decide what to do next, not for four seconds.
  */
 function ModerationError({ children }: { children: string }) {
-  return (
-    <span className="text-xs text-red-600 dark:text-red-400">Meta refused it: {children}</span>
-  );
+  return <span className="text-xs text-red-600">Meta refused it: {children}</span>;
 }

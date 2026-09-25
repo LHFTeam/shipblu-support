@@ -76,7 +76,7 @@ function Outcome({ children, failed }: { children: string; failed: boolean }) {
   return (
     <p
       className={`mt-1 basis-full whitespace-pre-line text-xs ${
-        failed ? 'text-red-600 dark:text-red-400' : 'text-[var(--muted-foreground)]'
+        failed ? 'text-red-600' : 'text-[var(--muted-foreground)]'
       }`}
     >
       {plain(children)}

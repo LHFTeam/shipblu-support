@@ -204,10 +204,17 @@ export function Sparkline({
 }
 
 /**
- * One ratio against a limit — SLA attainment, and nothing else on this page.
+ * One ratio against a limit — SLA attainment, or a share of a total.
  *
  * The track is the fill's own hue at low opacity rather than grey, so the state
  * reads across the whole bar and not only in the filled part.
+ *
+ * `neutral` exists because the other three tones are a judgement, and a column
+ * of shares is not one: a category holding 67% of the queue is neither good nor
+ * bad, and drawing it in the same green as a met SLA target says it is. So a bar
+ * that only expresses magnitude takes the series colour the charts already use
+ * for "this is a quantity", and the traffic-light tones stay reserved for the
+ * figures that really are a verdict.
  */
 export function Meter({
   value,
@@ -216,13 +223,14 @@ export function Meter({
 }: {
   /** 0–100, or null when there is nothing to measure. */
   value: number | null;
-  tone?: 'good' | 'warning' | 'critical';
+  tone?: 'good' | 'warning' | 'critical' | 'neutral';
   label: string;
 }) {
   const color = {
     good: 'var(--color-positive)',
     warning: 'var(--color-caution)',
     critical: 'var(--color-critical)',
+    neutral: 'var(--series-1)',
   }[tone];
 
   return (

@@ -1,5 +1,4 @@
 import { headers } from 'next/headers';
-import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { PackageSearchIcon } from '@/components/icons';
@@ -17,9 +16,11 @@ import {
   stageDisplay,
   statusLabel,
 } from '@/lib/shipments/status';
+import { shipmentChatPrefill } from '@/lib/shipments/support';
 import { ArticleList, ArticleRow, PageBody, PageHeader, Panel } from '../chrome';
 import { TrackForm } from './form';
 import { deliveryStepLabels, LastUpdate, StatusBadge, Stepper, Timeline } from './result';
+import { AskSupport } from './support';
 
 export const dynamic = 'force-dynamic';
 
@@ -267,6 +268,17 @@ async function Lookup({ locale, canonical }: { locale: Locale; canonical: string
 
   const subject = `${t(locale, 'trackTitle')}: ${canonical}`;
 
+  /*
+   * The chat's opening draft, built here because this is where the status has
+   * already been worded — the message says what the badge says, in the language
+   * the page is being read in, and cannot say more.
+   */
+  const prefill = shipmentChatPrefill({
+    locale,
+    trackingNumber: canonical,
+    statusLabel: status?.label ?? null,
+  });
+
   return (
     <>
       <Panel className="p-6">
@@ -361,29 +373,46 @@ async function Lookup({ locale, canonical }: { locale: Locale; canonical: string
         ) : null}
 
         {/*
-          Both routes carry the number in the subject: it is what an agent needs
-          first, and it is what `lib/shipments/detect.ts` reads — so a ticket
-          raised from this page links itself to the shipment the customer was
-          looking at without anybody typing the number a second time.
+          Every route carries the number: it is what an agent needs first, and it
+          is what `lib/shipments/detect.ts` reads — so a ticket raised from this
+          page links itself to the shipment the customer was looking at without
+          anybody typing the number a second time. The chat carries it in the
+          draft, the mailbox in the subject line.
 
-          The email link is here for the visitor the portal cannot serve. Raising
-          a ticket needs an account; a recipient who has never signed in to
-          ShipBlu — which is most of the people who reach this page — would meet
-          a sign-in wall on the one action the page is for.
+          Support is the chat, and that is the change this button needed. It used
+          to lead to `/forms`, which redirects to `/portal/new` where no form has
+          been built — and that asks for an account. A recipient who has never
+          signed in to ShipBlu is most of the people who reach this page, so the
+          one action the page exists for answered them with a sign-in wall. The
+          chat needs no account: `talkToAgent` mints a visitor token at the
+          moment somebody chooses to talk. The `/forms` link is still the `href`,
+          because it is where this goes with no JavaScript, and it is the right
+          destination once an admin has built a form.
+
+          The email link stays for the visitor the widget cannot serve — a
+          blocked snippet, or somebody who would rather have a copy of what they
+          sent.
         */}
-        <div className="mt-6 flex flex-wrap gap-3 border-t border-[var(--kb-border)] pt-5">
-          <Link
-            href={`/${locale}/forms?subject=${encodeURIComponent(subject)}`}
-            className="rounded-md bg-[var(--button-primary)] px-3.5 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--button-primary-hover)]"
-          >
-            {t(locale, 'trackAskSupport')}
-          </Link>
-          <a
-            href={`mailto:support@shipblu.com?subject=${encodeURIComponent(subject)}`}
-            className="rounded-md border border-[var(--kb-border-strong)] px-3.5 py-2 text-sm font-semibold text-[var(--kb-heading)] transition-colors hover:bg-[var(--kb-surface-2)]"
-          >
-            {t(locale, 'email')}
-          </a>
+        <div className="mt-6 border-t border-[var(--kb-border)] pt-5">
+          <div className="flex flex-wrap gap-3">
+            <AskSupport
+              href={`/${locale}/forms?subject=${encodeURIComponent(subject)}`}
+              prefill={prefill}
+              className="rounded-md bg-[var(--button-primary)] px-3.5 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--button-primary-hover)]"
+            >
+              {t(locale, 'trackAskSupport')}
+            </AskSupport>
+            <a
+              href={`mailto:support@shipblu.com?subject=${encodeURIComponent(subject)}`}
+              className="rounded-md border border-[var(--kb-border-strong)] px-3.5 py-2 text-sm font-semibold text-[var(--kb-heading)] transition-colors hover:bg-[var(--kb-surface-2)]"
+            >
+              {t(locale, 'email')}
+            </a>
+          </div>
+          {/* Said before the click rather than after it: a button that opens a
+              panel in the corner instead of a page is worth one line of warning,
+              and it is also the line that promises the number travels with it. */}
+          <p className="mt-3 text-xs text-[var(--kb-muted)]">{t(locale, 'trackAskSupportHint')}</p>
         </div>
       </Panel>
 

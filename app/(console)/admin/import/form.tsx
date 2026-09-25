@@ -99,7 +99,7 @@ export function ImportForm({
           </dl>
 
           {counts.articles_en === 0 || counts.articles_ar === 0 ? (
-            <p className="mt-3 text-xs text-amber-700 dark:text-amber-400">
+            <p className="mt-3 text-xs text-amber-700">
               One language has nothing in it. If Freshdesk does hold articles in it, the run log on
               the worker names which language codes were found and which were not.
             </p>
@@ -143,7 +143,7 @@ export function ImportForm({
                 </div>
 
                 {run.lastError ? (
-                  <pre className="mt-1.5 overflow-x-auto whitespace-pre-wrap rounded bg-red-500/10 p-2 text-xs text-red-700 dark:text-red-300">
+                  <pre className="mt-1.5 overflow-x-auto whitespace-pre-wrap rounded bg-red-500/10 p-2 text-xs text-red-700">
                     {run.lastError.split('\n').slice(0, 6).join('\n')}
                   </pre>
                 ) : null}

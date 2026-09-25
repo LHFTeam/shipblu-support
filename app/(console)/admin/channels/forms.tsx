@@ -117,14 +117,18 @@ export function ChannelEditor({
   const [open, setOpen] = useState(false);
 
   const type = editableType(channel.type);
-  if (!type) return null;
+  // Web chat is edited by `WebchatSettings` below the list, and must not be
+  // edited here: `saveChannel` rebuilds a webchat row's config from the
+  // `faqFolder_*` fields, and this form has none, so saving the name from here
+  // would silently clear the folders the widget lists.
+  if (!type || type === 'webchat') return null;
 
   if (!open) {
     return (
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="text-xs text-brand-600 hover:underline dark:text-brand-300"
+        className="text-xs text-brand-600 hover:underline"
       >
         Edit
       </button>

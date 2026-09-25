@@ -1,4 +1,10 @@
-import { formatOpening, nextOpeningAt, type Holiday, type HoursConfig } from '@/lib/hours';
+import {
+  formatOpening,
+  holidayName,
+  nextOpeningAt,
+  type Holiday,
+  type HoursConfig,
+} from '@/lib/hours';
 
 /**
  * Choosing the out-of-hours message: which rule applies, which body it sends,
@@ -63,35 +69,6 @@ export function pickRule(
   return best;
 }
 
-/**
- * Which language to answer in.
- *
- * `contacts.locale` is `not null default 'en'`, so 'en' means either "this
- * person reads English" or "nobody has ever said" — the distinction
- * `lib/contacts/merge.ts` already draws, and nothing in the product sets the
- * column, so today every one of the 6,000-odd contacts reads as the second.
- * Taking it at face value would answer an Arabic-first customer base in English
- * on every channel, which is the failure this project calls silent success: a
- * message goes out, a count goes up, and it is wrong in one direction only.
- *
- * So an explicitly Arabic contact is honoured, and everybody else is read from
- * the script of what they actually wrote. Counting letters rather than looking
- * for the first Arabic character is what keeps "SB123456 فين شحنتي" Arabic and
- * "my order to شبرا" English — an address or a name in the other alphabet is
- * not a change of language.
- */
-export function preferredLocale(contactLocale: string, sample: string | null): 'ar' | 'en' {
-  if (contactLocale === 'ar') return 'ar';
-  if (!sample) return 'en';
-
-  const arabic = sample.match(
-    /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/g,
-  );
-  const latin = sample.match(/[A-Za-z]/g);
-
-  return (arabic?.length ?? 0) > (latin?.length ?? 0) ? 'ar' : 'en';
-}
-
 export type MessageContext = {
   locale: string;
   /** The holiday the ticket arrived on, if it arrived on one. */
@@ -148,7 +125,10 @@ export function substitute(
 
   const values: Record<string, string | null> = {
     next_opening: opening ? formatOpening(opening, hours.timezone, context.locale) : null,
-    holiday: context.holiday?.name ?? null,
+    // In the language the rest of the message is written in. A body chosen for
+    // an Arabic reader that names the day "Eid al-Fitr" in Latin script is a
+    // message translated everywhere except its one proper noun.
+    holiday: holidayName(context.holiday, context.locale),
     ticket_number: String(context.ticketNumber),
     customer_name: context.customerName,
   };
@@ -190,7 +170,10 @@ export const PLACEHOLDERS = [
     token: '{{next_opening}}',
     describes: 'when the office opens next, in the customer’s language',
   },
-  { token: '{{holiday}}', describes: 'the name of the holiday, on a holiday' },
+  {
+    token: '{{holiday}}',
+    describes: 'the name of the holiday, in the customer’s language, on a holiday',
+  },
   { token: '{{ticket_number}}', describes: 'the ticket number' },
   { token: '{{customer_name}}', describes: 'the customer’s name, blank if we do not know it' },
 ] as const;

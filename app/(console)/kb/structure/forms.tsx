@@ -1,8 +1,9 @@
 'use client';
 
-import { useActionState } from 'react';
+import { useActionState, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Button, ErrorText, Input, Label, Select } from '@/components/ui';
+import { FLOOR_LABELS, SELECTABLE_FLOORS } from '@/lib/kb/floors';
 import { createCategory, createFolder, type KbState } from '../actions';
 
 const INITIAL: KbState = { error: null };
@@ -72,18 +73,71 @@ export function FolderForm({
         </Select>
       </div>
 
+      <AudienceFields />
+
+      <SubmitButton idle="Add folder" busy="Adding…" />
+      <ErrorText>{state.error}</ErrorText>
+    </form>
+  );
+}
+
+/**
+ * Visibility, and the floor that only means anything beside it.
+ *
+ * Its own component so that the `key` on the form above resets it. React state
+ * belongs to the component that declares it, and this one declared in
+ * `FolderForm` outlived the remount that clears every other field — so the
+ * folder created after an internal one was silently internal too, with the name
+ * box empty and the picker still reading "Agents only".
+ */
+function AudienceFields() {
+  const [visibility, setVisibility] = useState('public');
+
+  return (
+    <>
       <div className="w-44">
         <Label htmlFor="folderVisibility">Visibility</Label>
-        <Select id="folderVisibility" name="visibility" defaultValue="public">
+        <Select
+          id="folderVisibility"
+          name="visibility"
+          value={visibility}
+          onChange={(event) => setVisibility(event.target.value)}
+        >
           <option value="public">Public</option>
           <option value="agents_only">Agents only</option>
           <option value="logged_in">Signed-in customers</option>
         </Select>
       </div>
 
-      <SubmitButton idle="Add folder" busy="Adding…" />
-      <ErrorText>{state.error}</ErrorText>
-    </form>
+      {/*
+        A floor on the folder is the one worth setting: it holds for every
+        article filed here afterwards, including one an author left on the
+        default. Offered only for an internal folder, because the read rule only
+        reads it there — and the action drops it for the same reason, so a floor
+        chosen here and then switched away from is not stored.
+      */}
+      {visibility === 'agents_only' ? (
+        <div className="w-52">
+          <Label htmlFor="folderMinRole">Who on the team</Label>
+          <Select id="folderMinRole" name="minRole" defaultValue="">
+            <option value="">Everyone on the team</option>
+            {/*
+              `SELECTABLE_FLOORS`, the same list the article editor offers and
+              the same one `parseMinRole` accepts. Listing every role instead put
+              "Agents and up" on this picker: a value the action refuses outright
+              — `agent` is a floor every read model reports as none — so choosing
+              the first thing under the default answered "Unknown minimum role"
+              and created no folder at all.
+            */}
+            {SELECTABLE_FLOORS.map((role) => (
+              <option key={role} value={role}>
+                {FLOOR_LABELS[role]}
+              </option>
+            ))}
+          </Select>
+        </div>
+      ) : null}
+    </>
   );
 }
 

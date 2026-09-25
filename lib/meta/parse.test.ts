@@ -412,3 +412,165 @@ describe('parseMetaWebhook', () => {
     expect(parse(messengerPayload()).messages[0]?.sentAt.getUTCFullYear()).toBe(2025);
   });
 });
+
+describe('window-opening interactions', () => {
+  /**
+   * Every one of these used to fall off the end of `readMessagingEvent`, which
+   * returned on any event without a `message`. Meta's messaging policy counts
+   * all three alongside a message as things that open the standard 24-hour
+   * window, so dropping them meant a customer who tapped a button existed to
+   * this system only if they also typed.
+   */
+
+  /** A messaging event that is not a message. */
+  function interactionPayload(event: Record<string, unknown>) {
+    return {
+      object: 'page',
+      entry: [
+        {
+          id: '111222333',
+          time: 1_755_000_000_000,
+          messaging: [
+            {
+              sender: { id: 'psid-1' },
+              recipient: { id: '111222333' },
+              timestamp: 1_755_000_000_000,
+              ...event,
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  it('reads a Get Started postback as opening the window', () => {
+    const parsed = parse(
+      interactionPayload({
+        postback: { mid: 'm_p', title: 'Get Started', payload: 'GET_STARTED' },
+      }),
+    );
+
+    expect(parsed.messages).toHaveLength(0);
+    expect(parsed.interactions).toHaveLength(1);
+    expect(parsed.interactions[0]).toMatchObject({
+      kind: 'postback',
+      from: 'psid-1',
+      opensWindow: true,
+      summary: 'Get Started',
+    });
+  });
+
+  it('reads a referral, and names how the customer arrived', () => {
+    const parsed = parse(
+      interactionPayload({
+        referral: { ref: 'tracking-help', source: 'SHORTLINK', type: 'OPEN_THREAD' },
+      }),
+    );
+
+    expect(parsed.interactions[0]).toMatchObject({ kind: 'referral', opensWindow: true });
+    expect(parsed.interactions[0]?.summary).toContain('tracking-help');
+  });
+
+  it('counts one interaction when an ad click also presses Get Started', () => {
+    // Meta nests the referral inside the postback for somebody arriving from an
+    // ad and pressing the button in the same motion. It is one act by one
+    // customer, so two rows on the timeline would be a lie about what they did.
+    const parsed = parse(
+      interactionPayload({
+        postback: { mid: 'm_p', payload: 'GET_STARTED', referral: { ad_id: '6045' } },
+      }),
+    );
+
+    expect(parsed.interactions).toHaveLength(1);
+    expect(parsed.interactions[0]?.kind).toBe('postback');
+  });
+
+  it('keeps the postback payload, which the title cannot stand in for', () => {
+    // Two menu branches can carry the same title, so "which branch did they
+    // take" is answerable only from the payload — and the event is the only
+    // record of it.
+    const parsed = parse(
+      interactionPayload({ postback: { title: 'Track my order', payload: 'TRACK_ORDER_V2' } }),
+    );
+
+    expect(parsed.interactions[0]).toMatchObject({
+      summary: 'Track my order',
+      payload: 'TRACK_ORDER_V2',
+    });
+  });
+
+  it('reads a reaction, but does not let it open the window', () => {
+    // The one place the three part company: a reaction also moves the
+    // next-response SLA target, and a customer answering our reply with a
+    // thumbs-up has been served rather than left waiting.
+    const parsed = parse(
+      interactionPayload({ reaction: { mid: 'm_abc', action: 'react', emoji: '\u{1F44D}' } }),
+    );
+
+    expect(parsed.interactions[0]).toMatchObject({
+      kind: 'reaction',
+      opensWindow: false,
+      summary: '\u{1F44D}',
+    });
+  });
+
+  it('ignores a reaction being taken back', () => {
+    const parsed = parse(interactionPayload({ reaction: { mid: 'm_abc', action: 'unreact' } }));
+
+    expect(parsed.interactions).toHaveLength(0);
+  });
+
+  it('files a message carrying a referral as a message, not an interaction', () => {
+    // The ordering that matters: somebody arriving from an ad and typing
+    // straight away sends one event with both. Read as an interaction, their
+    // actual question would never be filed.
+    const parsed = parse(messengerPayload({ referral: { ref: 'promo' } }));
+
+    expect(parsed.messages).toHaveLength(1);
+    expect(parsed.messages[0]?.text).toBe('Where is my shipment?');
+    expect(parsed.interactions).toHaveLength(0);
+  });
+
+  it('carries the connection and the standby flag, as messages do', () => {
+    const parsed = parseMetaWebhook(
+      {
+        object: 'instagram',
+        entry: [
+          {
+            id: '999',
+            standby: [
+              {
+                sender: { id: 'igsid-1' },
+                recipient: { id: '999' },
+                timestamp: 1_755_000_000_000,
+                postback: { title: 'Track my order', payload: 'TRACK' },
+              },
+            ],
+          },
+        ],
+      },
+      'instagram_login',
+    );
+
+    expect(parsed.interactions[0]).toMatchObject({
+      platform: 'instagram',
+      connection: 'instagram_login',
+      standby: true,
+    });
+  });
+
+  it('ignores an interaction from nobody', () => {
+    const parsed = parse(
+      interactionPayload({ sender: undefined, postback: { payload: 'GET_STARTED' } }),
+    );
+
+    expect(parsed.interactions).toHaveLength(0);
+  });
+
+  it('still reads receipts, which are also messageless events', () => {
+    const parsed = parse(interactionPayload({ delivery: { mids: ['m_abc'], watermark: 1 } }));
+
+    expect(parsed.receipts).toHaveLength(1);
+    expect(parsed.interactions).toHaveLength(0);
+  });
+});

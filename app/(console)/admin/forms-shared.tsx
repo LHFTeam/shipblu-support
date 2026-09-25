@@ -188,9 +188,7 @@ export function DangerAction({
         </Button>
       )}
       {state.error ? (
-        <span className="max-w-xs text-end text-xs text-red-600 dark:text-red-400">
-          {state.error}
-        </span>
+        <span className="max-w-xs text-end text-xs text-red-600">{state.error}</span>
       ) : null}
     </form>
   );

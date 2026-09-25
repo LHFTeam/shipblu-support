@@ -86,6 +86,7 @@ ungrouped:
         #   CATEGORISE_DISABLED_RULES   rule keys to stop applying
         #   CATEGORISE_AUTO_MIN         confidence at which a category auto-applies
         #   CATEGORISE_RECORD_MIN       confidence below which nothing is written
+        #   DB_QUERY_TIMEOUT_MS         query deadline (default 30000)
         #
         # Shared rather than per-environment because both halves of one system
         # have to agree on the answer: the web service applies the pattern when
@@ -190,6 +191,20 @@ projects:
               #   KB_NOTICE_AR             service notice, Arabic
               #   KB_NOTICE_HREF           optional "read the update" link
               #   KB_NOTICE_TONE           info | warning | danger
+              #
+              #   TYPESAFE_API_KEY         TypeSafe System One, read only by the
+              #                            shadow categorisation job. Unset means
+              #                            that job says so and does nothing,
+              #                            which is its resting state: nothing on
+              #                            a request path reads this.
+              #   TYPESAFE_MODEL           pins a run to one Jev version instead
+              #                            of the moving `jev-latest` alias.
+              #
+              # Here rather than in shipblu-shared for a reason that is not the
+              # Meta one: the job sends real customer message text to a third
+              # party. A key staging could inherit is a key a stray run there
+              # could copy this archive out with, and the run is hand-started, so
+              # nothing else would stop it.
               #
               # The notice keys are dashboard-owned rather than declared here
               # because their whole point is that ops can put a delay warning in
@@ -365,6 +380,15 @@ projects:
           # is about to hand to somebody carries its breach flags when they open
           # it. `&&` rather than `;` — if the SLA sweep dies the run should go
           # red rather than reporting success because the second half worked.
+          #
+          # The presence sweep goes between them for the same reason, one step
+          # earlier in the chain: it is what takes an agent who has walked away
+          # out of the rota, so running it after the assignment sweep would hand
+          # this round's tickets to somebody it is about to mark away. It is the
+          # backstop rather than the mechanism — the console reports its own
+          # idleness within seconds — so five-minute granularity only shows when
+          # a browser could not report at all: a slept laptop, a frozen tab, an
+          # instance replaced by a deploy.
           - type: cron
             name: shipblu-sla-sweep
             runtime: node
@@ -373,7 +397,7 @@ projects:
             branch: main
             schedule: '*/5 * * * *' # SLA breaches need minute-ish resolution
             buildCommand: npm ci --include=dev
-            startCommand: npm run job -- sla_sweep && npm run job -- assign_sweep
+            startCommand: npm run job -- sla_sweep && npm run job -- presence_sweep && npm run job -- assign_sweep
             envVars:
               - fromGroup: shipblu-shared
               - fromGroup: shipblu-support-production
@@ -442,6 +466,33 @@ projects:
             envVars:
               - fromGroup: shipblu-shared
               - fromGroup: shipblu-support-production
+              # The per-service exception lib/env.ts describes for this variable,
+              # and the one service that is the case it describes: the 30-second
+              # default is calibrated for a request path, where "a page that has
+              # been waiting thirty seconds has already lost its reader". This
+              # is unattended maintenance with no reader at all, and retention
+              # legitimately scans two tables that grow without bound.
+              #
+              # Set on 2026-09-25 after the cleanup job was cancelled mid-delete
+              # twice in five nights (57014) — see docs/PROJECT-STATE.md §6.68.
+              # This *is* the fix rather than a stop-gap, which took a wrong
+              # turn to establish: batching the delete was tried first and is
+              # strictly worse, because the cost is a sequential scan to find
+              # the rows and batching pays it once per batch. The scan is ~19 s
+              # on a 436,200-row table at steady state; three minutes is real
+              # headroom against the growth, and indexing the predicate is the
+              # optimisation §6.68 leaves open.
+              #
+              # **It covers `rollup_metrics` too**, which is the second job on
+              # this cron and is not what the headroom was measured for. That is
+              # accepted rather than overlooked: the rollup is a delete-and-
+              # insert rebuild that runs in ~3 s, so a run that reaches even 30 s
+              # is already wrong in a way a tighter deadline would only truncate
+              # rather than diagnose. Below the `transaction_timeout = '5min'`
+              # on the postgres role deliberately, so which limit fired is
+              # legible.
+              - key: DB_QUERY_TIMEOUT_MS
+                value: '180000'
 
       # --------------------------------------------------------------- staging
       - name: Staging

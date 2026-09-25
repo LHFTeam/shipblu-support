@@ -5,14 +5,16 @@ import { requirePermission } from '@/lib/auth/guard';
 import { unsealInviteToken } from '@/lib/auth/invite-token';
 import { appUrl, env } from '@/lib/env';
 import { formatDateTime } from '@/lib/format';
-import { AgentRow, InviteForm, PendingInviteLink } from './forms';
+import { loadPresencePolicy } from '@/lib/presence/policy';
+import { AgentRow, IdlePolicyForm, InviteForm, PendingInviteLink } from './forms';
 
 export const dynamic = 'force-dynamic';
 
 export default async function AgentsPage() {
   const admin = await requirePermission('admin.agents');
 
-  const [agentList, openInvites] = await Promise.all([
+  const [policy, agentList, openInvites] = await Promise.all([
+    loadPresencePolicy(),
     db
       .select({
         id: agents.id,
@@ -88,6 +90,22 @@ export default async function AgentsPage() {
             <AgentRow key={agent.id} agent={agent} isSelf={agent.id === admin.id} />
           ))}
         </ul>
+      </section>
+
+      <section>
+        <h2 className="mb-1 text-lg font-semibold">Idle agents</h2>
+        {/* Above the invite form because it governs the list directly above it,
+            and because "why is she away when she is clearly here?" is asked
+            about that list rather than about anything else on this page. */}
+        <p className="mb-3 text-sm text-[var(--muted-foreground)]">
+          Measured from the last key or click in the console, not from being connected — a console
+          left open on an empty desk stays connected all day. Supervisors can set anyone&rsquo;s
+          availability by hand under Reports → Team availability.
+        </p>
+        <IdlePolicyForm
+          autoAwayAfterMins={policy.autoAwayAfterMins}
+          autoSignoutAfterMins={policy.autoSignoutAfterMins}
+        />
       </section>
 
       <section>

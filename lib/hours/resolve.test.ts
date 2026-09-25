@@ -38,13 +38,13 @@ function catalog(): HoursCatalog {
   built.schedules.set('default-schedule', {
     schedule: CAIRO,
     timezone: 'Africa/Cairo',
-    holidays: [{ date: '2026-08-17', name: 'Company day' }],
+    holidays: [{ date: '2026-08-17', nameEn: 'Company day' }],
   } satisfies HoursConfig);
 
   built.schedules.set('weekend-schedule', {
     schedule: WEEKEND,
     timezone: 'Asia/Dubai',
-    holidays: [{ date: '2026-08-22', name: 'Weekend team day' }],
+    holidays: [{ date: '2026-08-22', nameEn: 'Weekend team day' }],
   } satisfies HoursConfig);
 
   built.defaultId = 'default-schedule';
@@ -80,10 +80,10 @@ describe('groupHours', () => {
     // The holiday list travels with the schedule, which is the whole reason a
     // group override is one setting and not three.
     expect(groupHours(catalog(), 'weekend-group')?.holidays).toEqual([
-      { date: '2026-08-22', name: 'Weekend team day' },
+      { date: '2026-08-22', nameEn: 'Weekend team day' },
     ]);
     expect(groupHours(catalog(), 'cairo-group')?.holidays).toEqual([
-      { date: '2026-08-17', name: 'Company day' },
+      { date: '2026-08-17', nameEn: 'Company day' },
     ]);
   });
 

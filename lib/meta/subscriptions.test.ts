@@ -35,24 +35,46 @@ const subscription = (fields: string[], overrides: Partial<GraphSubscription> = 
 
 describe('planFieldSubscription', () => {
   it('adds the missing field and keeps the one already there', () => {
+    // An explicit want-list rather than REQUIRED_WHATSAPP_FIELDS, because that
+    // constant no longer adds anything to a healthy subscription — see the test
+    // below. What is covered here is the merge itself, which every object's
+    // write goes through, so it has to keep working whether or not WhatsApp
+    // currently wants a second field. `account_alerts` is a real field on this
+    // object; the case is not worth writing against an invented name, which is
+    // how a subscription list came to carry a field Graph rejects.
+    const plan = planFieldSubscription(subscription(['messages']), ['messages', 'account_alerts']);
+
+    expect(plan.adding).toEqual(['account_alerts']);
+    expect(plan.merged).toEqual(['messages', 'account_alerts']);
+  });
+
+  it('asks WhatsApp for nothing it is not already subscribed to', () => {
+    // The state since Meta discontinued `message_echoes`: the required list is
+    // `messages` alone, so a healthy subscription needs no write at all. This
+    // asserts the constant rather than the merge, and it is here so that adding
+    // a field back to it is a decision somebody makes against a failing test
+    // rather than one that rides along in a diff.
     const plan = planFieldSubscription(subscription(['messages']), REQUIRED_WHATSAPP_FIELDS);
 
-    expect(plan.adding).toEqual(['message_echoes']);
-    expect(plan.merged).toEqual(['messages', 'message_echoes']);
+    expect(plan.adding).toEqual([]);
+    expect(plan.merged).toEqual(['messages']);
   });
 
   it('keeps fields nothing in this repo asks for', () => {
     // The dashboard has fields this code never reads — template approvals, phone
     // number quality. They are somebody's alerting and the write must not
-    // silently cancel them.
+    // silently cancel them. Driven with a want-list that genuinely adds
+    // something, because a merge that adds nothing preserves the rest trivially
+    // and would pass even if the preserving half were deleted.
     const plan = planFieldSubscription(
       subscription(['messages', 'message_template_status_update', 'phone_number_quality_update']),
-      REQUIRED_WHATSAPP_FIELDS,
+      ['messages', 'account_alerts'],
     );
 
     expect(plan.merged).toContain('message_template_status_update');
     expect(plan.merged).toContain('phone_number_quality_update');
-    expect(plan.merged).toContain('message_echoes');
+    expect(plan.merged).toContain('messages');
+    expect(plan.merged).toContain('account_alerts');
   });
 
   it('is a no-op once everything is subscribed', () => {
@@ -98,13 +120,15 @@ describe('planFieldSubscription', () => {
     ).toThrow(GraphSubscriptionError);
   });
 
-  it('still adds echoes to a subscription that has somehow lost messages', () => {
+  it('restores messages to a subscription that has somehow lost it', () => {
     // Not a case to "fix" by dropping the write: the merge restores `messages`
     // because it is in REQUIRED_WHATSAPP_FIELDS, which is why that constant
-    // lists a field nothing was expected to be missing.
+    // lists a field nothing was expected to be missing. That is now the
+    // constant's whole job, and this is the test that says so.
     const plan = planFieldSubscription(subscription([]), REQUIRED_WHATSAPP_FIELDS);
 
-    expect(plan.merged).toEqual(['messages', 'message_echoes']);
+    expect(plan.adding).toEqual(['messages']);
+    expect(plan.merged).toEqual(['messages']);
   });
 });
 
@@ -120,8 +144,24 @@ describe('the Instagram object', () => {
       REQUIRED_INSTAGRAM_FIELDS,
     );
 
-    expect(plan.adding).toEqual(['comments']);
-    expect(plan.merged).toEqual(['messages', 'comments']);
+    expect(plan.adding).toEqual([
+      'comments',
+      'messaging_postbacks',
+      'messaging_referral',
+      'message_reactions',
+    ]);
+    // Spelled out rather than compared against the constant under test: the
+    // Instagram vocabulary takes `messaging_referral` and the Page's takes
+    // `messaging_referrals`, and an assertion built from the same array would
+    // pass with either typed into either list — while Graph rejects the whole
+    // write over the one character.
+    expect(plan.merged).toEqual([
+      'messages',
+      'comments',
+      'messaging_postbacks',
+      'messaging_referral',
+      'message_reactions',
+    ]);
   });
 
   it('refuses to write a list that would drop the messaging fields', () => {
@@ -184,8 +224,14 @@ describe('planInstagramLoginSubscription', () => {
       REQUIRED_INSTAGRAM_FIELDS,
     );
 
-    expect(plan.adding).toEqual(['comments']);
-    expect(plan.merged).toEqual(['messages', 'mentions', 'comments']);
+    expect(plan.adding).toEqual([
+      'comments',
+      'messaging_postbacks',
+      'messaging_referral',
+      'message_reactions',
+    ]);
+    expect(plan.merged.slice(0, 2)).toEqual(['messages', 'mentions']);
+    expect(plan.merged).toContain('mentions');
   });
 
   it('reports an account with no subscription at all', () => {
@@ -200,13 +246,19 @@ describe('planInstagramLoginSubscription', () => {
 
     expect(plan.subscribed).toBe(false);
     expect(plan.current).toEqual([]);
-    expect(plan.merged).toEqual(['messages', 'comments']);
+    expect(plan.merged).toEqual([
+      'messages',
+      'comments',
+      'messaging_postbacks',
+      'messaging_referral',
+      'message_reactions',
+    ]);
   });
 
-  it('is a no-op once both fields are subscribed', () => {
+  it('is a no-op once every field is subscribed', () => {
     const plan = planInstagramLoginSubscription(
       IG_ACCOUNT,
-      ['messages', 'comments'],
+      ['messages', 'comments', 'messaging_postbacks', 'messaging_referral', 'message_reactions'],
       REQUIRED_INSTAGRAM_FIELDS,
     );
 
@@ -234,11 +286,12 @@ describe('planPageSubscription', () => {
       REQUIRED_PAGE_FIELDS,
     );
 
-    expect(plan.adding).toEqual(['feed']);
-    expect(plan.merged).toEqual(['messages', 'messaging_postbacks', 'feed']);
-    // The field nothing asked for survives. Writing only what this codebase
-    // knows about would silently unsubscribe whatever else the Page carries.
-    expect(plan.merged).toContain('messaging_postbacks');
+    expect(plan.adding).toEqual(['feed', 'messaging_referrals', 'message_reactions']);
+    expect(plan.merged.slice(0, 2)).toEqual(['messages', 'messaging_postbacks']);
+    // The field already installed survives, and is not added twice. Writing only
+    // what this codebase knows about would silently unsubscribe whatever else
+    // the Page carries.
+    expect(plan.merged.filter((field) => field === 'messaging_postbacks')).toHaveLength(1);
   });
 
   it('reports an app that is not installed on the Page at all', () => {
@@ -252,23 +305,45 @@ describe('planPageSubscription', () => {
 
     expect(plan.installed).toBe(false);
     expect(plan.current).toEqual([]);
-    expect(plan.merged).toEqual(['messages', 'feed']);
+    expect(plan.merged).toEqual([
+      'messages',
+      'feed',
+      'messaging_postbacks',
+      'messaging_referrals',
+      'message_reactions',
+    ]);
   });
 
   it('distinguishes installed-with-nothing from not installed', () => {
     const plan = planPageSubscription(PAGE, [], REQUIRED_PAGE_FIELDS);
 
     expect(plan.installed).toBe(true);
-    expect(plan.merged).toEqual(['messages', 'feed']);
+    expect(plan.merged).toEqual([
+      'messages',
+      'feed',
+      'messaging_postbacks',
+      'messaging_referrals',
+      'message_reactions',
+    ]);
   });
 
-  it('is a no-op once both fields are on the Page', () => {
+  it('is a no-op once every field is on the Page', () => {
     // Re-running this job is the normal way to check it, so "nothing to add"
     // has to be reachable rather than a write that reorders the list.
-    const plan = planPageSubscription(PAGE, ['messages', 'feed'], REQUIRED_PAGE_FIELDS);
+    const plan = planPageSubscription(
+      PAGE,
+      ['messages', 'feed', 'messaging_postbacks', 'messaging_referrals', 'message_reactions'],
+      REQUIRED_PAGE_FIELDS,
+    );
 
     expect(plan.adding).toEqual([]);
-    expect(plan.merged).toEqual(['messages', 'feed']);
+    expect(plan.merged).toEqual([
+      'messages',
+      'feed',
+      'messaging_postbacks',
+      'messaging_referrals',
+      'message_reactions',
+    ]);
   });
 
   it('carries the page id through to the write', () => {

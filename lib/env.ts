@@ -292,6 +292,23 @@ const schema = z.object({
   FRESHDESK_DOMAIN: z.string().optional(),
   FRESHDESK_API_KEY: z.string().optional(),
 
+  /**
+   * TypeSafe's System One API, read by the shadow categorisation run in
+   * `lib/categorise-ai/` and by nothing else.
+   *
+   * Unset is the resting state rather than a misconfiguration. Presence of the
+   * key is what enables the job — the device `instagramLoginConfigured()` uses —
+   * so this ships inert and stays inert until somebody deliberately starts a
+   * measurement. No page and no action reads either value; the only reader is a
+   * hand-run job, which is why a missing key here can never fail a request.
+   *
+   * `TYPESAFE_MODEL` pins a run to one Jev version. Left unset the request asks
+   * for the `jev-latest` alias, and every row records the version the *response*
+   * named, so even an unpinned run stays attributable afterwards.
+   */
+  TYPESAFE_API_KEY: z.string().optional(),
+  TYPESAFE_MODEL: z.string().optional(),
+
   /** Worker tuning. */
   /**
    * `true` prints every inbound webhook delivery — headers and raw body — before
@@ -316,6 +333,29 @@ const schema = z.object({
    * which is where that strictness belongs.
    */
   LOG_ALL_INCOMING_WEBHOOKS: z.string().optional(),
+
+  /**
+   * How long any one query may wait for a pool slot plus execution, before
+   * `db/client.ts` cancels it.
+   *
+   * There is no library setting for this — postgres.js queues past `max` with no
+   * deadline and a promise that never rejects — so the number is ours to choose,
+   * and it is chosen against two facts rather than as a round figure. The
+   * slowest statement this system issues on purpose is the nightly rollup at
+   * roughly three seconds, so thirty leaves an order of magnitude of headroom
+   * for a maintenance query nobody wants to see fail. And a page that has been
+   * waiting thirty seconds has already lost its reader, so the only thing a
+   * longer ceiling buys is the 40-minute queue of §62.
+   *
+   * Declared in `shipblu-shared` and left at its default: it is a property of
+   * the driver rather than of an environment, and both halves of the system are
+   * better off agreeing on it than differing by accident. A service that
+   * genuinely needs longer — a backfill may, a request never does — sets it at
+   * the service level, which Render gives precedence over the group, and that is
+   * the deliberate per-service exception AGENTS.md describes rather than the
+   * normal way to configure this.
+   */
+  DB_QUERY_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
 
   WORKER_CONCURRENCY: z.coerce.number().int().positive().default(5),
   WORKER_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(1000),

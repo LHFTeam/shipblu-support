@@ -176,9 +176,9 @@ export function WhatsAppAccountEditor({ account }: { account: WhatsAppAccountRow
         </p>
 
         {account.lastSyncError ? (
-          <p className="mt-1 text-xs text-red-600 dark:text-red-400">{account.lastSyncError}</p>
+          <p className="mt-1 text-xs text-red-600">{account.lastSyncError}</p>
         ) : account.lastSyncedAt && account.templateTotal === 0 ? (
-          <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+          <p className="mt-1 text-xs text-amber-600">
             Meta answered and returned no templates at all. Check that {account.wabaId} is the
             WhatsApp Business Account ID from WhatsApp Manager — an id that is not a WABA, or one
             belonging to a business this token cannot manage, answers exactly the same way an empty

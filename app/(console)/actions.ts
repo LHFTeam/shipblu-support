@@ -2,8 +2,10 @@
 
 import { revalidatePath } from 'next/cache';
 import { and, desc, eq, sql } from 'drizzle-orm';
+import { z } from 'zod';
 import { db } from '@/db/client';
 import {
+  agents,
   cannedResponses,
   contactIdentities,
   contacts,
@@ -26,7 +28,7 @@ import { assignConversation } from '@/lib/assignment';
 import { refreshPrimary } from '@/lib/categorise/apply';
 import { CAUSE_REQUIRED_AREAS } from '@/lib/categorise/taxonomy';
 import { requestAssignmentSweep, setAccepting } from '@/lib/assignment/presence';
-import { requireAgent } from '@/lib/auth/guard';
+import { requireAgent, requirePermission } from '@/lib/auth/guard';
 import { env } from '@/lib/env';
 import { can } from '@/lib/auth/permissions';
 import { canSeeChannel, readOnlyReason } from '@/lib/tickets/channel-policy';
@@ -53,8 +55,10 @@ import {
   requested as requestModeration,
 } from '@/lib/meta/moderation';
 import { describeProfileRefresh, refreshChannelProfile } from '@/lib/meta/profile-refresh';
+import { MetaApiError, takeThreadControl } from '@/lib/meta/client';
+import { explainTakeControlError } from '@/lib/meta/errors';
 import { metaWindowState } from '@/lib/meta/window';
-import { metaReplyTarget } from '@/lib/tickets/meta-thread';
+import { metaReplyTarget, THREAD_CONTROL_TAKEN } from '@/lib/tickets/meta-thread';
 import {
   attachShipment,
   attachShippingAccount,
@@ -631,6 +635,105 @@ export async function refreshRequesterProfile(
   return result.kind === 'applied' || result.kind === 'skipped'
     ? { ...ok(), message: described }
     : { error: described };
+}
+
+/**
+ * Takes thread control of a Messenger or Instagram conversation another app owns.
+ *
+ * The second control in this codebase to call a provider from an action rather
+ * than through the queue, and it qualifies under the same narrow exception
+ * `refreshRequesterProfile` documents above: an agent presses it and *waits*,
+ * and the entire output is Meta's answer. Queueing it would put the one sentence
+ * they need — very often "this app is not the primary receiver", which no retry
+ * will change — into a worker log they cannot read.
+ *
+ * It is also the answer to a refusal this console could previously only
+ * describe. A ticket arriving in the handover protocol's `standby` array is
+ * readable and unanswerable, and every remedy `lib/meta/thread.ts` could offer
+ * was in somebody else's software. This is the one the protocol actually exposes.
+ *
+ * Gated on `ticket.reply` rather than a key of its own. Taking control is not a
+ * separate capability an agent might be trusted with independently — it is the
+ * precondition for replying on this channel, it is undone by the other tool
+ * taking the thread back, and it changes nothing a customer can see. A key
+ * nobody would ever grant apart from `ticket.reply` is a key that only makes
+ * the permission screen longer.
+ */
+export async function claimThreadControl(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const agent = await requireAgent();
+  if (!can(agent, 'ticket.reply')) {
+    return { error: 'You do not have permission to reply to tickets' };
+  }
+
+  const row = await loadConversation(agent, String(formData.get('conversationId') ?? ''));
+  if (!row) return { error: 'Ticket not found' };
+
+  const readOnly = refuseIfReadOnly(row.conversation.channel);
+  if (readOnly) return readOnly;
+
+  const channel = row.conversation.channel;
+  if (channel !== 'facebook' && channel !== 'instagram') {
+    return { error: 'Only Facebook and Instagram conversations have thread control' };
+  }
+
+  // The recipient and the verdict both come from here rather than from the
+  // form: a page-scoped id in a FormData field is an argument to a Graph call,
+  // and re-reading is also what makes the check below describe the ticket as it
+  // is now rather than as the page rendered it.
+  const { recipientId, thread } = await metaReplyTarget(row.conversation.id, channel);
+
+  if (thread.reason !== 'standby') {
+    // Includes the case the button exists for having already succeeded. Saying
+    // so is better than taking control of a thread we hold: the call would
+    // succeed and the agent would learn nothing about why the composer was
+    // shut.
+    return {
+      error: thread.canSend
+        ? 'This ticket is already answerable from here — reload the page.'
+        : (thread.explanation ??
+          'This ticket cannot be answered from here, and not because of thread control.'),
+    };
+  }
+
+  if (!recipientId) {
+    return { error: 'This ticket has no inbound message, so there is no thread to take.' };
+  }
+
+  try {
+    await takeThreadControl({ platform: channel, recipientId });
+  } catch (error) {
+    if (error instanceof MetaApiError) return { error: explainTakeControlError(error, channel) };
+    throw error;
+  }
+
+  /*
+    The event is what actually reopens the composer, and it has to be written
+    for that to happen.
+
+    `standby` on the customer's last message is a permanent fact about that
+    message, so nothing here rewrites it — `metaThreadStateFromMessage` compares
+    the two timestamps instead and takes the newer. Which means a successful
+    Graph call whose event failed to insert would leave the ticket looking
+    exactly as refused as before, and this is the ordering that makes that the
+    only failure mode rather than the reverse.
+  */
+  await db.insert(conversationEvents).values({
+    conversationId: row.conversation.id,
+    type: THREAD_CONTROL_TAKEN,
+    actorAgentId: agent.id,
+  });
+
+  refresh(row.conversation.number);
+
+  return {
+    ...ok(),
+    message:
+      'Thread control taken — you can reply now. The other tool has been told, and it can ' +
+      'take the thread back at any time.',
+  };
 }
 
 /**
@@ -1583,6 +1686,8 @@ async function quotedAnchorMessage(
   return quoteAnchor(message.contactName, message.bodyText, message.createdAt);
 }
 
+export type AvailabilityState = { error: string | null; accepting?: boolean };
+
 /**
  * The agent's own availability switch.
  *
@@ -1594,9 +1699,9 @@ async function quotedAnchorMessage(
  * five-minute tick.
  */
 export async function setAcceptingTickets(
-  _state: { error: string | null; accepting?: boolean },
+  _state: AvailabilityState,
   formData: FormData,
-): Promise<{ error: string | null; accepting?: boolean }> {
+): Promise<AvailabilityState> {
   const agent = await requireAgent();
   const accepting = formData.get('accepting') === 'true';
 
@@ -1604,11 +1709,69 @@ export async function setAcceptingTickets(
   // marks the boundary between available and merely present, and that boundary
   // has to land in the presence history or "available time" in the productivity
   // report counts an agent who spent the afternoon in a meeting as working it.
-  await setAccepting(agent.id, accepting);
+  //
+  // `self` is what stops the idle machinery undoing this. An agent who turns
+  // themselves off before a meeting keeps the tab open and keeps moving the
+  // mouse; if this were recorded as idleness, the first keypress would put them
+  // back in the rota (see `availabilityReasonEnum`).
+  await setAccepting(agent.id, accepting, 'self');
 
   if (accepting) await requestAssignmentSweep();
 
   revalidatePath('/inbox');
+  return { error: null, accepting };
+}
+
+/**
+ * Somebody else's availability, set by a supervisor or an admin.
+ *
+ * The queue-covering counterpart to the switch above: an agent who has walked
+ * away with tickets routing to them, or one whose switch is still off an hour
+ * after the meeting ended while the queue backs up.
+ *
+ * Recorded as `supervisor`, which is what makes it survive the agent returning
+ * to their keyboard — an automatic away is undone by input, a decision is not.
+ * It is not a lock: the agent's own switch still works, and an agent who
+ * disagrees can turn it back. That is deliberate, and the alternative is worse
+ * — an agent silently unable to take work with nothing on screen to say why.
+ *
+ * The id arrives in a form field, so the row is re-read here rather than
+ * trusted: the target has to be a real, active agent before anything is
+ * written.
+ */
+export async function setAgentAvailability(
+  _state: AvailabilityState,
+  formData: FormData,
+): Promise<AvailabilityState> {
+  await requirePermission('agent.availability');
+
+  const accepting = formData.get('accepting') === 'true';
+
+  // Shape-checked before it reaches the query. A uuid column compared against
+  // "banana" is a Postgres error (22P02), not an empty result, so without this
+  // a mistyped id is a 500 rather than "no such agent".
+  const agentId = z.uuid().safeParse(formData.get('agentId'));
+  if (!agentId.success) return { error: 'That agent could not be found.' };
+
+  const rows = await db
+    .select({ id: agents.id, name: agents.name, isActive: agents.isActive })
+    .from(agents)
+    .where(eq(agents.id, agentId.data))
+    .limit(1);
+
+  const target = rows[0];
+  if (!target) return { error: 'That agent could not be found.' };
+
+  // A deactivated agent is already excluded from every queue. Writing an
+  // availability onto them would leave a value nobody can see or undo, because
+  // they never appear on this page again.
+  if (!target.isActive) return { error: `${target.name} is deactivated.` };
+
+  await setAccepting(target.id, accepting, 'supervisor');
+
+  if (accepting) await requestAssignmentSweep();
+
+  revalidatePath('/reports/team');
   return { error: null, accepting };
 }
 
