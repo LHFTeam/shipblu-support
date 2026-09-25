@@ -63,31 +63,36 @@ resubmitting. Resubmitting it unchanged while the console acts over
 
 ## The list as it stands
 
-Eleven new requests, two renewals:
+Eleven new requests and two renewals were staged. The two rows marked ² are
+additions this file recommends, not part of that list:
 
-| Requested                            | Called by                                                  | Verdict    |
-| ------------------------------------ | ---------------------------------------------------------- | ---------- |
-| Human Agent                          | `lib/meta/window.ts`, `sendDirectMessage`                  | **Keep**   |
-| Business Asset User Profile Access   | `fetchProfile`, `lib/meta/profile-refresh.ts`              | **Keep**   |
-| `pages_messaging`                    | `sendDirectMessage`, the `page` webhook                    | **Keep**   |
-| `whatsapp_business_messaging`        | `lib/whatsapp/client.ts` — five endpoints                  | **Keep**   |
-| `instagram_basic`                    | the Instagram profile read, on the Page token              | **Keep**   |
-| `instagram_manage_messages`          | Instagram DMs delivered over the Page connection           | **Keep**   |
-| `instagram_business_basic`           | the direct connection's token, `graph.instagram.com`       | **Add**²   |
-| `instagram_business_manage_messages` | `sendDirectMessage` for Instagram DMs, today               | **Add**²   |
-| `pages_user_locale`                  | `fetchProfile` extended → `contact_identities`             | **Keep**   |
-| `pages_user_gender`                  | `fetchProfile` extended → `contacts.gender`                | **Keep**   |
-| `pages_manage_metadata`              | receiving Page webhooks                                    | **Keep**¹  |
-| Page Public Content Access           | nothing                                                    | **Remove** |
-| `whatsapp_business_manage_events`    | nothing                                                    | **Remove** |
-| `public_profile` (renewal)           | nothing — mandatory for every app, cannot be removed       | Keep       |
-| `email` (renewal)                    | nothing — agent auth is a password, `lib/auth/password.ts` | **Remove** |
+| Requested                            | Called by                                                   | Verdict    |
+| ------------------------------------ | ----------------------------------------------------------- | ---------- |
+| Human Agent                          | `lib/meta/window.ts`, `sendDirectMessage`                   | **Keep**   |
+| Business Asset User Profile Access   | `fetchProfile`, `lib/meta/profile-refresh.ts`               | **Keep**   |
+| `pages_messaging`                    | `sendDirectMessage`, the `page` webhook                     | **Keep**   |
+| `whatsapp_business_messaging`        | `lib/whatsapp/client.ts` — five endpoints                   | **Keep**   |
+| `instagram_basic`                    | the Instagram profile read, when it goes over the Page      | **Keep**   |
+| `instagram_manage_messages`          | Instagram DMs delivered over the Page connection            | **Keep**   |
+| `instagram_business_basic`           | the Instagram profile read, today, on `graph.instagram.com` | **Add**²   |
+| `instagram_business_manage_messages` | `sendDirectMessage` for Instagram DMs, today                | **Add**²   |
+| `pages_user_locale`                  | `fetchProfile` extended → `contact_identities`              | **Keep**   |
+| `pages_user_gender`                  | `fetchProfile` extended → `contacts.gender`                 | **Keep**   |
+| `pages_manage_metadata`              | receiving Page webhooks                                     | **Keep**¹  |
+| Page Public Content Access           | nothing                                                     | **Remove** |
+| `whatsapp_business_manage_events`    | nothing                                                     | **Remove** |
+| `public_profile` (renewal)           | nothing — mandatory for every app, cannot be removed        | Keep       |
+| `email` (renewal)                    | nothing — agent auth is a password, `lib/auth/password.ts`  | **Remove** |
 
 ¹ The app performs this one now: `subscribe_meta_webhooks object=page` writes
 `POST /{page-id}/subscribed_apps` as well as the app-level subscription, so
 there is a real call to point at rather than a dashboard action.
 
-² Not on the staged list. See below.
+² Not on the staged list. While `INSTAGRAM_ACCESS_TOKEN` is set, every
+Instagram call goes out over the direct connection: replies, profile reads and
+comment actions (`endpoint()` in `lib/meta/client.ts`). Those calls exercise the
+`instagram_business_*` names, not the Page pair above them. The evidence is in the
+paragraph below.
 
 **The Instagram rows were written for one connection, and there are two.**
 `instagram_basic` and `instagram_manage_messages` are the **Page-connected**
@@ -1041,11 +1046,12 @@ them.
 
 Outbound: a ShipBlu support agent types a reply in our console and the app
 delivers it to that customer. Every conversation starts with the customer
-messaging us; we send no marketing, broadcasts or promotional content. Two
-automatic messages exist - an acknowledgement when a customer writes while our
-office is closed, and a short satisfaction survey after a ticket is resolved -
-and both are sent only inside the 24-hour window that follows the customer's
-own message. When a customer comments publicly with something that should not
+messaging us; we send no marketing, broadcasts or promotional content. Three
+kinds of automatic message exist - an acknowledgement when a customer writes
+while our office is closed, a standard reply that a ShipBlu supervisor has set
+up for a particular kind of request, and a short satisfaction survey after a
+ticket is resolved - and all three are sent only inside the 24-hour window that
+follows the customer's own message. When a customer comments publicly with something that should not
 stay public, such as an address or phone number, an agent can send them one
 private reply to move the conversation into Messenger.
 
@@ -1103,9 +1109,10 @@ to look at. Our own echoed messages are discarded rather than filed as the
 customer's.
 
 Outbound, a ShipBlu support agent's reply is delivered to the person who wrote
-to us. The only automatic messages are an out-of-hours acknowledgement and a
-post-resolution satisfaction survey, both sent only inside the 24-hour window
-after the customer's own message. We send no bulk or promotional Direct
+to us. The only automatic messages are an out-of-hours acknowledgement, a
+standard reply that our support team has set up for a particular kind of
+request, and a post-resolution satisfaction survey, all sent only inside the
+24-hour window after the customer's own message. We send no bulk or promotional Direct
 messages.
 
 Without this permission the Instagram inbox goes back to being answered by hand
