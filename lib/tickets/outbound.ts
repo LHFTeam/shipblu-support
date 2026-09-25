@@ -188,3 +188,18 @@ export function carrierFor(channel: string): 'send_whatsapp' | 'send_meta' | 'se
   if (channel === 'facebook' || channel === 'instagram') return 'send_meta';
   return 'send_email';
 }
+
+/**
+ * Whether a message on this channel is written as an email: with an HTML part
+ * and the recipient's address on the row, for `send_email` to carry.
+ *
+ * Asked of the carrier for the reason `deliverAutomatedReply` gives: `portal`
+ * rides `send_email` too, and a sender testing `channel === 'email'` wrote an
+ * agent's portal reply and a portal CSAT survey with neither part. The worker
+ * then fell back to the contact's address at send time and rebuilt the body
+ * from plain text. Web chat is the one channel `carrierFor` answers for that
+ * nothing carries — writing its row is its delivery — so it takes neither.
+ */
+export function sendsByEmail(channel: string): boolean {
+  return channel !== 'webchat' && carrierFor(channel) === 'send_email';
+}

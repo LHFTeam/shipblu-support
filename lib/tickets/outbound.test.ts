@@ -18,7 +18,7 @@ vi.mock('@/db/client', () => ({
 
 vi.mock('@/lib/queue', () => ({ enqueue: mocks.enqueue }));
 
-import { automatedReplyBlocked, carrierFor, deliverAutomatedReply } from './outbound';
+import { automatedReplyBlocked, carrierFor, deliverAutomatedReply, sendsByEmail } from './outbound';
 
 describe('deliverAutomatedReply', () => {
   beforeEach(() => {
@@ -178,6 +178,22 @@ describe('carrierFor', () => {
     expect(carrierFor('whatsapp')).toBe('send_whatsapp');
     expect(carrierFor('email')).toBe('send_email');
     expect(carrierFor('portal')).toBe('send_email');
+  });
+});
+
+describe('sendsByEmail', () => {
+  it('writes a portal message as an email, as it writes an email one', () => {
+    // The check an agent's reply and the CSAT survey each made as
+    // `channel === 'email'`, which stored a portal message with no HTML part
+    // and no recipient although `send_email` is what carries it.
+    expect(sendsByEmail('email')).toBe(true);
+    expect(sendsByEmail('portal')).toBe(true);
+  });
+
+  it('writes nothing as an email for a channel another carrier takes, or none does', () => {
+    for (const channel of ['whatsapp', 'facebook', 'instagram', 'webchat']) {
+      expect(sendsByEmail(channel)).toBe(false);
+    }
   });
 });
 
