@@ -107,12 +107,12 @@ conflict on all of them.
 | 2.3   | Contacts pages cannot scroll                     | #170        | merged  |
 | 2.4   | `PermanentJobError`                              | #174        | merged  |
 | 2.5   | Ids taken from `FormData`                        |             | pending |
-| 2.6   | KB admin search does not escape LIKE             | #176        | open    |
+| 2.6   | KB admin search does not escape LIKE             | #176        | merged  |
 | 2.7   | One `GRAPH_VERSION`                              | #175        | merged  |
 | 2.8   | Fetch timeouts, one provider per PR              |             | pending |
 | 2.9   | Replies never get paragraphs (CRLF)              | #171        | merged  |
-| 2.10  | Email webhook fails open without its secret      | #177        | open    |
-| 2.11  | Staging's `local` email webhook accepts anything |             | pending |
+| 2.10  | Email webhook fails open without its secret      | #177        | merged  |
+| 2.11  | Staging's `local` email webhook accepts anything | #177        | merged  |
 | 3     | Shared primitives (one row per PR as opened)     |             | pending |
 | 4.1   | Split `lib/tickets/queries.ts`                   |             | pending |
 | 4.2   | Shared ingest steps                              |             | pending |
