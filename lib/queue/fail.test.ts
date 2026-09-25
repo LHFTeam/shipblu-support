@@ -64,8 +64,9 @@ describe('failJob', () => {
   /**
    * The case the handlers' own comments described and the queue did not
    * implement: `send_notification_email` said a malformed payload fails "rather
-   * than burning five attempts", and then threw an Error the queue retried five
-   * times over most of an hour.
+   * than burning five attempts", and then threw an Error the queue spent all
+   * five attempts on — four retries, about five minutes of backoff
+   * (10 + 40 + 90 + 160 s).
    */
   it('marks a permanent failure dead on its first attempt, keeping the reason', async () => {
     await failJob(job(1), new PermanentJobError('invalid payload — to: expected email'));

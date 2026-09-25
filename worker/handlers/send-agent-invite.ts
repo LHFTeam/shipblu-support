@@ -72,14 +72,18 @@ export async function sendAgentInvite(job: ClaimedJob): Promise<void> {
   // is written in the same statement as the row, and a token sealed under a
   // rotated APP_SECRET can never be recovered. Throwing is right — the admin
   // still holds the link the action returned, and a dead job is the only thing
-  // that will tell anybody this happened.
+  // that will tell anybody this happened — and throwing them as permanent sends
+  // the job there on its first attempt instead of after four retries that
+  // cannot change the row.
   if (!invite.tokenCiphertext) {
-    throw new Error(`send_agent_invite: ${payload.data.inviteId} has no retained token`);
+    throw new PermanentJobError(
+      `send_agent_invite: ${payload.data.inviteId} has no retained token`,
+    );
   }
 
   const token = unsealInviteToken(invite.tokenCiphertext, env().APP_SECRET);
   if (!token) {
-    throw new Error(
+    throw new PermanentJobError(
       `send_agent_invite: the token for ${payload.data.inviteId} cannot be unsealed — APP_SECRET may have been rotated`,
     );
   }
