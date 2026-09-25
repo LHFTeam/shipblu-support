@@ -4,6 +4,7 @@ import { conversationEvents, conversations, messages } from '@/db/schema';
 import { rootCommentId } from '@/lib/meta/comments';
 import { metaWindowState } from '@/lib/meta/window';
 import { enqueue } from '@/lib/queue';
+import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
 import { windowState as whatsappWindowState } from '@/lib/whatsapp/window';
 
 /**
@@ -187,4 +188,42 @@ export function carrierFor(channel: string): 'send_whatsapp' | 'send_meta' | 'se
   if (channel === 'whatsapp') return 'send_whatsapp';
   if (channel === 'facebook' || channel === 'instagram') return 'send_meta';
   return 'send_email';
+}
+
+/**
+ * Whether a message on this channel is written as an email: with an HTML part
+ * and the recipient's address on the row, for `send_email` to carry.
+ *
+ * Asked of the carrier for the reason `deliverAutomatedReply` gives: `portal`
+ * rides `send_email` too, and a sender testing `channel === 'email'` wrote an
+ * agent's portal reply and a portal CSAT survey with neither part. The worker
+ * then fell back to the contact's address at send time and rebuilt the body
+ * from plain text.
+ *
+ * `carrierFor` sends anything it does not recognise to `send_email`, so two
+ * kinds of channel are excluded by name rather than by carrier. Web chat has no
+ * carrier at all — writing its row is its delivery. A read-only channel
+ * (`whatsapp_bot`) is never written to by us, and the senders refuse it before
+ * they ask; answering "email" for it would only be true by accident. `api` does
+ * go out by email, and is written as email.
+ */
+export function sendsByEmail(channel: string): boolean {
+  return (
+    channel !== 'webchat' && !isReadOnlyChannel(channel) && carrierFor(channel) === 'send_email'
+  );
+}
+
+/**
+ * Whether an automated message on this ticket would be queued for an email
+ * carrier with nowhere to send it.
+ *
+ * The CSAT survey and the out-of-hours acknowledgement both skip that case, and
+ * both used to ask it as `channel === 'email' && !address` — so a portal ticket
+ * whose contact has no primary address passed, was queued to `send_email`, and
+ * failed "has no recipient" on every retry until the job died, leaving a
+ * permanently failed message on the customer's timeline. One question, asked
+ * one way, by every sender that needs it.
+ */
+export function lacksEmailRecipient(channel: string, address: string | null): boolean {
+  return sendsByEmail(channel) && !address;
 }

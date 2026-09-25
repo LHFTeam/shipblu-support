@@ -18,7 +18,13 @@ vi.mock('@/db/client', () => ({
 
 vi.mock('@/lib/queue', () => ({ enqueue: mocks.enqueue }));
 
-import { automatedReplyBlocked, carrierFor, deliverAutomatedReply } from './outbound';
+import {
+  automatedReplyBlocked,
+  carrierFor,
+  deliverAutomatedReply,
+  lacksEmailRecipient,
+  sendsByEmail,
+} from './outbound';
 
 describe('deliverAutomatedReply', () => {
   beforeEach(() => {
@@ -178,6 +184,44 @@ describe('carrierFor', () => {
     expect(carrierFor('whatsapp')).toBe('send_whatsapp');
     expect(carrierFor('email')).toBe('send_email');
     expect(carrierFor('portal')).toBe('send_email');
+  });
+});
+
+describe('sendsByEmail', () => {
+  it('writes a portal message as an email, as it writes an email one', () => {
+    // The check an agent's reply and the CSAT survey each made as
+    // `channel === 'email'`, which stored a portal message with no HTML part
+    // and no recipient although `send_email` is what carries it.
+    expect(sendsByEmail('email')).toBe(true);
+    expect(sendsByEmail('portal')).toBe(true);
+  });
+
+  it('writes nothing as an email for a channel another carrier takes, or none does', () => {
+    for (const channel of ['whatsapp', 'facebook', 'instagram', 'webchat']) {
+      expect(sendsByEmail(channel)).toBe(false);
+    }
+  });
+
+  // `carrierFor` sends anything it does not recognise to `send_email`, so these
+  // two are pinned rather than left to whatever that fallback happens to say.
+  it('writes an api message as an email, and nothing on the read-only bot channel', () => {
+    expect(sendsByEmail('api')).toBe(true);
+    expect(sendsByEmail('whatsapp_bot')).toBe(false);
+  });
+});
+
+describe('lacksEmailRecipient', () => {
+  it('stops an automated message to a portal contact with no address', () => {
+    // The out-of-hours acknowledgement asked `channel === 'email'` here, so this
+    // ticket passed, was queued to `send_email`, and failed on every retry.
+    expect(lacksEmailRecipient('portal', null)).toBe(true);
+    expect(lacksEmailRecipient('email', null)).toBe(true);
+  });
+
+  it('lets through a ticket with an address, or one no email carries', () => {
+    expect(lacksEmailRecipient('portal', 'customer@example.com')).toBe(false);
+    expect(lacksEmailRecipient('whatsapp', null)).toBe(false);
+    expect(lacksEmailRecipient('webchat', null)).toBe(false);
   });
 });
 

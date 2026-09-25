@@ -32,6 +32,7 @@ import { requireAgent, requirePermission } from '@/lib/auth/guard';
 import { env } from '@/lib/env';
 import { can } from '@/lib/auth/permissions';
 import { canSeeChannel, readOnlyReason } from '@/lib/tickets/channel-policy';
+import { carrierFor, sendsByEmail } from '@/lib/tickets/outbound';
 import type { SessionAgent } from '@/lib/auth/session';
 import { htmlToText, sanitiseEmailHtml, textToHtml } from '@/lib/html/sanitize';
 import { enqueue } from '@/lib/queue';
@@ -317,7 +318,8 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
     }
   }
 
-  const isEmail = conversation.channel === 'email';
+  // A portal ticket's reply goes out by email too, so it is written as one.
+  const isEmail = sendsByEmail(conversation.channel);
   const isWebchat = conversation.channel === 'webchat';
   const html = isEmail ? sanitiseEmailHtml(textToHtml(body)) : null;
 
@@ -370,7 +372,7 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
 
   if (!isWebchat) {
     await enqueue(
-      conversation.channel === 'whatsapp' ? 'send_whatsapp' : isMeta ? 'send_meta' : 'send_email',
+      carrierFor(conversation.channel),
       { messageId },
       // dedupeKey on the message id: a double-submit or a retried action can
       // never queue the same reply twice.

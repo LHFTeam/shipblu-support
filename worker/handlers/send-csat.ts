@@ -3,7 +3,12 @@ import { db } from '@/db/client';
 import { contacts, conversations, messages, ticketStatuses } from '@/db/schema';
 import { createSurvey, recentlySurveyed } from '@/lib/csat';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
-import { automatedReplyBlocked, carrierFor } from '@/lib/tickets/outbound';
+import {
+  automatedReplyBlocked,
+  carrierFor,
+  lacksEmailRecipient,
+  sendsByEmail,
+} from '@/lib/tickets/outbound';
 import { enqueue, type ClaimedJob } from '@/lib/queue';
 
 /**
@@ -85,10 +90,14 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
     return;
   }
 
-  const isEmail = ticket.channel === 'email';
+  // A portal ticket is surveyed by email too, so its survey is written as one —
+  // with the linked HTML body and the address — and skipped, like an email
+  // ticket's, when there is no address to send it to rather than failing in the
+  // worker five times.
+  const isEmail = sendsByEmail(ticket.channel);
   const isWebchat = ticket.channel === 'webchat';
 
-  if (isEmail && !ticket.contactEmail) {
+  if (lacksEmailRecipient(ticket.channel, ticket.contactEmail)) {
     console.log(`[send_csat] #${ticket.number} has no email address to survey`);
     return;
   }
