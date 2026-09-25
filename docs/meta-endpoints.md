@@ -63,22 +63,22 @@ request that reaches logs and error messages.
 ## 2. Messenger and Instagram — `lib/meta/client.ts`
 
 Eight Graph calls and one plain download. The eight route through the single
-`graph()` helper at `lib/meta/client.ts:172`, which chooses the host and token
-via `endpoint()` (`lib/meta/client.ts:110`) and normalises failures into
+`graph()` helper at `lib/meta/client.ts:170`, which chooses the host and token
+via `endpoint()` (`lib/meta/client.ts:108`) and normalises failures into
 `MetaApiError`; the ninth (§2.8) is a bare `fetch` of a URL Meta already handed
 us.
 
-| #   | Graph request                                             | What it does                        | Called from                                                                         |
-| --- | --------------------------------------------------------- | ----------------------------------- | ----------------------------------------------------------------------------------- |
-| 1   | `POST /{account-id}/messages`                             | Send a direct message               | `worker/handlers/send-meta.ts:217`                                                  |
-| 2   | `POST /{page-id}/take_thread_control`                     | Take a thread back from another app | `app/(console)/actions.ts:706`                                                      |
-| 3   | `POST /{comment-id}/comments` (FB) · `/replies` (IG)      | Public reply under a comment        | `worker/handlers/send-meta.ts:152`, `worker/handlers/test-comment-permission.ts:64` |
-| 4   | `POST /{account-id}/messages` with `recipient.comment_id` | Private reply to a commenter        | `worker/handlers/send-meta.ts:164`                                                  |
-| 5   | `POST /{comment-id}?is_hidden=` (FB) · `?hide=` (IG)      | Hide / unhide a comment             | `worker/handlers/moderate-meta-comment.ts:87`                                       |
-| 6   | `DELETE /{comment-id}`                                    | Delete a comment                    | `worker/handlers/moderate-meta-comment.ts:85`, `test-comment-permission.ts:91`      |
-| 7   | `GET /me/published_posts?limit=1&fields=id`               | The Page's newest own post          | `worker/handlers/test-comment-permission.ts:110`                                    |
-| 8   | `GET /{user-id}?fields=…`                                 | Customer's name, handle, picture    | `lib/meta/profile-refresh.ts:115`                                                   |
-| 9   | `GET <CDN url>` (no credential)                           | Download an attachment or avatar    | `lib/meta/profile-refresh.ts:216`, `worker/handlers/download-media.ts:184`          |
+| #   | Graph request                                             | What it does                        | Called from                                                                                    |
+| --- | --------------------------------------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------- |
+| 1   | `POST /{account-id}/messages`                             | Send a direct message               | `worker/handlers/send-meta.ts:217`                                                             |
+| 2   | `POST /{page-id}/take_thread_control`                     | Take a thread back from another app | `app/(console)/actions.ts:706`                                                                 |
+| 3   | `POST /{comment-id}/comments` (FB) · `/replies` (IG)      | Public reply under a comment        | `worker/handlers/send-meta.ts:152`, `worker/handlers/test-comment-permission.ts:64`            |
+| 4   | `POST /{account-id}/messages` with `recipient.comment_id` | Private reply to a commenter        | `worker/handlers/send-meta.ts:164`                                                             |
+| 5   | `POST /{comment-id}?is_hidden=` (FB) · `?hide=` (IG)      | Hide / unhide a comment             | `worker/handlers/moderate-meta-comment.ts:87`                                                  |
+| 6   | `DELETE /{comment-id}`                                    | Delete a comment                    | `worker/handlers/moderate-meta-comment.ts:85`, `worker/handlers/test-comment-permission.ts:91` |
+| 7   | `GET /me/published_posts?limit=1&fields=id`               | The Page's newest own post          | `worker/handlers/test-comment-permission.ts:110`                                               |
+| 8   | `GET /{user-id}?fields=…`                                 | Customer's name, handle, picture    | `lib/meta/profile-refresh.ts:115`                                                              |
+| 9   | `GET <CDN url>` (no credential)                           | Download an attachment or avatar    | `lib/meta/profile-refresh.ts:216`, `worker/handlers/download-media.ts:184`                     |
 
 The request _shapes_ for 1–6 are not built inline. They live in three pure
 modules — `lib/meta/send.ts`, `lib/meta/comments.ts`, `lib/meta/handover.ts` —
@@ -238,7 +238,7 @@ forever.
 
 ### 2.8 Attachment and avatar downloads
 
-Not Graph. `downloadAttachment()` (`lib/meta/client.ts:696`) fetches a URL Meta
+Not Graph. `downloadAttachment()` (`lib/meta/client.ts:694`) fetches a URL Meta
 already handed us in the webhook payload (`lib/meta/parse.ts:258`) or in a
 profile's `profile_pic`, with **no credential** — the link is signed and
 short-lived, which is why media is copied by a job rather than lazily when an
@@ -276,7 +276,7 @@ different host, with a different credential and, for the Page, a different field
 vocabulary.
 
 **Every one of these writes replaces the field list rather than adding to it.**
-A request naming only `message_echoes` silently unsubscribes `messages`, and
+A request naming only `account_alerts` silently unsubscribes `messages`, and
 Meta reports that as success. So `mergeFields()` is the safety-critical part of
 the job, is shared by all three levels, and throws rather than producing a list
 that drops a field. The Page and Instagram POSTs are not _documented_ as
@@ -297,7 +297,7 @@ shell prompt against production:
 
 | Object                      | Fields                                                                                   |
 | --------------------------- | ---------------------------------------------------------------------------------------- |
-| `whatsapp_business_account` | `messages`, `message_echoes`                                                             |
+| `whatsapp_business_account` | `messages`                                                                               |
 | `instagram`                 | `messages`, `comments`, `messaging_postbacks`, `messaging_referral`, `message_reactions` |
 | `page`                      | `messages`, `feed`, `messaging_postbacks`, `messaging_referrals`, `message_reactions`    |
 
@@ -351,7 +351,6 @@ product is this?" flag.
 | ----------------------------------------------------- | -------------------------------------- | ------------------------------------------------ |
 | `POST /{phone-number-id}/messages` (`type: text`)     | Free-form reply, inside the 24h window | `worker/handlers/send-whatsapp.ts:86`            |
 | `POST /{phone-number-id}/messages` (`type: template`) | The only thing that sends outside it   | `worker/handlers/send-whatsapp.ts:157`           |
-| `POST /{phone-number-id}/messages` (`status: read`)   | Mark the customer's message read       | **no caller today** — `markRead` is unused       |
 | `GET /{media-id}`                                     | Resolve a media id to a download URL   | `worker/handlers/download-media.ts:86`           |
 | `GET <media url>` (bearer token required)             | Download the bytes                     | `worker/handlers/download-media.ts:87`           |
 | `GET /{waba-id}/message_templates?limit=100`          | List a business account's templates    | `worker/handlers/sync-whatsapp-templates.ts:113` |
@@ -413,17 +412,18 @@ the traffic (`docs/PROJECT-STATE.md` §6.26, §6.29).
 Recorded so the next reader does not have to re-derive the reason, or "fix"
 something by adding one back.
 
-| Not used                                    | Why                                                                                                                                 |
-| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /me/permissions`                       | Needs a _user_ token; this deployment sends with a Page one, where `/me` is the Page and the edge does not exist                    |
-| `POST /{comment-id}/private_replies`        | Removed after Graph API v3.2; the app addresses v23.0, so it can only ever be refused                                               |
-| `POST /{page-id}/request_thread_control`    | The secondary receiver's call, answered by whoever runs the _other_ tool rather than by Meta                                        |
-| `live_comments`, `mentions` webhook fields  | Nothing ingests them, and an unread field is a `webhook_events` row and a job per event, forever                                    |
-| `smb_message_echoes`                        | Looks like `message_echoes` and is not — it covers replies from the WhatsApp Business app, which is not how this number is operated |
-| `messaging_type` on a tagged Instagram send | Absent from both Instagram send references; see §2.1 for why only the tagged half drops it                                          |
-| `pages_user_timezone` / `timezone` field    | A third permission to justify to App Review for a column no screen shows                                                            |
-| The Facebook SDK                            | A handful of endpoints do not justify the SDK's surface or its transitive dependencies (`lib/whatsapp/client.ts`)                   |
-| `markRead` (`lib/whatsapp/client.ts:239`)   | Written and exported, imported by nothing — read receipts are not wired up                                                          |
+| Not used                                    | Why                                                                                                                    |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `GET /me/permissions`                       | Needs a _user_ token; this deployment sends with a Page one, where `/me` is the Page and the edge does not exist       |
+| `POST /{comment-id}/private_replies`        | Removed after Graph API v3.2; the app addresses v23.0, so it can only ever be refused                                  |
+| `POST /{page-id}/request_thread_control`    | The secondary receiver's call, answered by whoever runs the _other_ tool rather than by Meta                           |
+| `live_comments`, `mentions` webhook fields  | Nothing ingests them, and an unread field is a `webhook_events` row and a job per event, forever                       |
+| `message_echoes` (WhatsApp)                 | Discontinued by Meta: absent from the v23.0 reference and refused on write, so requiring it failed every subscribe run |
+| `smb_message_echoes` as a fix for that      | Already subscribed, and 0 of 395,391 deliveries carry it — this number is not operated from the WhatsApp Business app  |
+| `messaging_type` on a tagged Instagram send | Absent from both Instagram send references; see §2.1 for why only the tagged half drops it                             |
+| `pages_user_timezone` / `timezone` field    | A third permission to justify to App Review for a column no screen shows                                               |
+| The Facebook SDK                            | A handful of endpoints do not justify the SDK's surface or its transitive dependencies (`lib/whatsapp/client.ts`)      |
+| Read receipts (`status: read`)              | Never wired up; the unused `markRead` helper has since been deleted from `lib/whatsapp/client.ts`                      |
 
 ## 8. What each call needs, and what currently gates one
 

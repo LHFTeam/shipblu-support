@@ -10,35 +10,60 @@ The first version of this file recommended the `instagram_business_*` family;
 that move reverses it, and the list below is the one that matches the live
 connection._
 
+_Corrected 2026-09-25: the premise of that update did not survive. The account
+is connected **both ways at once** — `docs/PROJECT-STATE.md` §6 settles it as
+"Both sets are needed now" — and `INSTAGRAM_ACCESS_TOKEN` is set, so every
+Instagram send goes out over the direct connection (the 2026-09-06 Human Agent
+refusal came back `via graph.instagram.com`, §5.2). The table and the paragraph
+under it are amended to match; the
+[`instagram_manage_comments`](#instagram_manage_comments-written-out) section has
+the full reasoning, and it applies to the messaging pair as much as to the
+comment pair._
+
 ## The list as it stands
 
 Eleven new requests, two renewals:
 
-| Requested                          | Called by                                                  | Verdict    |
-| ---------------------------------- | ---------------------------------------------------------- | ---------- |
-| Human Agent                        | `lib/meta/window.ts`, `sendDirectMessage`                  | **Keep**   |
-| Business Asset User Profile Access | `fetchProfile`, `lib/meta/profile-refresh.ts`              | **Keep**   |
-| `pages_messaging`                  | `sendDirectMessage`, the `page` webhook                    | **Keep**   |
-| `whatsapp_business_messaging`      | `lib/whatsapp/client.ts` — five endpoints                  | **Keep**   |
-| `instagram_basic`                  | the Instagram profile read, on the Page token              | **Keep**   |
-| `instagram_manage_messages`        | `sendDirectMessage` for Instagram DMs                      | **Keep**   |
-| `pages_user_locale`                | `fetchProfile` extended → `contact_identities`             | **Keep**   |
-| `pages_user_gender`                | `fetchProfile` extended → `contacts.gender`                | **Keep**   |
-| `pages_manage_metadata`            | receiving Page webhooks                                    | **Keep**¹  |
-| Page Public Content Access         | nothing                                                    | **Remove** |
-| `whatsapp_business_manage_events`  | nothing                                                    | **Remove** |
-| `public_profile` (renewal)         | nothing — mandatory for every app, cannot be removed       | Keep       |
-| `email` (renewal)                  | nothing — agent auth is a password, `lib/auth/password.ts` | **Remove** |
+| Requested                            | Called by                                                  | Verdict    |
+| ------------------------------------ | ---------------------------------------------------------- | ---------- |
+| Human Agent                          | `lib/meta/window.ts`, `sendDirectMessage`                  | **Keep**   |
+| Business Asset User Profile Access   | `fetchProfile`, `lib/meta/profile-refresh.ts`              | **Keep**   |
+| `pages_messaging`                    | `sendDirectMessage`, the `page` webhook                    | **Keep**   |
+| `whatsapp_business_messaging`        | `lib/whatsapp/client.ts` — five endpoints                  | **Keep**   |
+| `instagram_basic`                    | the Instagram profile read, on the Page token              | **Keep**   |
+| `instagram_manage_messages`          | Instagram DMs delivered over the Page connection           | **Keep**   |
+| `instagram_business_basic`           | the direct connection's token, `graph.instagram.com`       | **Add**²   |
+| `instagram_business_manage_messages` | `sendDirectMessage` for Instagram DMs, today               | **Add**²   |
+| `pages_user_locale`                  | `fetchProfile` extended → `contact_identities`             | **Keep**   |
+| `pages_user_gender`                  | `fetchProfile` extended → `contacts.gender`                | **Keep**   |
+| `pages_manage_metadata`              | receiving Page webhooks                                    | **Keep**¹  |
+| Page Public Content Access           | nothing                                                    | **Remove** |
+| `whatsapp_business_manage_events`    | nothing                                                    | **Remove** |
+| `public_profile` (renewal)           | nothing — mandatory for every app, cannot be removed       | Keep       |
+| `email` (renewal)                    | nothing — agent auth is a password, `lib/auth/password.ts` | **Remove** |
 
 ¹ The app performs this one now: `subscribe_meta_webhooks object=page` writes
 `POST /{page-id}/subscribed_apps` as well as the app-level subscription, so
 there is a real call to point at rather than a dashboard action.
 
-The Instagram pair is now right. `instagram_basic` and `instagram_manage_messages`
-are the **Page-connected** family, and the account is back on that setup, so
-they match the live connection and `instagram_business_manage_messages` — which
-an earlier version of this file argued for — correctly came off the list.
-`user_messenger_contact` coming off is also right: every send in this system
+² Not on the staged list. See below.
+
+**The Instagram rows were written for one connection, and there are two.**
+`instagram_basic` and `instagram_manage_messages` are the **Page-connected**
+family, and they are still needed: Instagram deliveries arrive over the Page
+connection as well as the direct one (`webhook_events.connection` records which).
+But `metaConnection()` in `lib/meta/connection.ts` sends every Instagram reply
+over the **direct** connection whenever `INSTAGRAM_ACCESS_TOKEN` is set, and it
+is set. So the permission a screencast of an agent answering an Instagram DM
+actually exercises today is `instagram_business_manage_messages`. An earlier
+version of this paragraph said that one "correctly came off the list". It came
+off on the strength of the §6.29 reading, which §6 has since retracted. Whether
+to add the direct pair or to film over the Page is the same three-way decision
+the `instagram_manage_comments` section sets out, and it should be made once,
+for both pairs. `check_meta_permissions` reports the two sets separately, and it
+is the place to confirm what each token actually holds.
+
+`user_messenger_contact` coming off is still right: every send in this system
 answers an inbound message.
 
 ## Why the two removals
@@ -53,8 +78,9 @@ which is a different request and is missing (below).
 **`whatsapp_business_manage_events` has no call site.** It logs commerce events
 (purchase, add-to-cart, leads) against a WhatsApp Business Account for ads
 targeting and reporting. This is a helpdesk. `lib/whatsapp/client.ts` calls five
-endpoints — send text, send template, mark read, media lookup, media download —
-and none of them is an event log.
+endpoints — send text, send template, media lookup, media download, template
+listing — and none of them is an event log. (Mark-read was a sixth on paper; it
+never had a caller and has since been deleted.)
 
 `email` is harmless but unused: agents sign in with a password, and no Facebook
 Login flow exists in `app/(auth)/`. `public_profile` is mandatory on every app
@@ -88,9 +114,13 @@ would have produced a submission that still could not moderate a comment:
   Meta's guidance for a dependency is to submit it and name the main permission
   in the use-case description.
 
-`instagram_manage_comments` is the right name now that the account is back on
-its Facebook Page; `instagram_business_manage_comments` is the Instagram Login
-family's and would be the wrong one to ask for.
+`instagram_manage_comments` is the Page connection's name and
+`instagram_business_manage_comments` the Instagram Login family's. An earlier
+version of this paragraph called the second "the wrong one to ask for", on the
+premise that the account was back on its Page alone. It is on both, and
+Instagram comment actions go out over the direct connection today, so read
+[the section written out below](#instagram_manage_comments-written-out) before
+choosing.
 
 **And it gates receiving the webhook at all, not just acting on one — which is
 the part that bites.** Meta lists it among the prerequisites for the `comments`
@@ -913,6 +943,302 @@ URL names (§6.35).
   comment the customer wrote, once, within Meta's seven-day limit.
 - Anything about a Facebook Login or a consent screen. There is none.
 
+## The items already on the list, written out
+
+The five sections above cover the permissions the list is missing. This one
+covers the items it already has: the two features, `pages_messaging`,
+`pages_manage_metadata`, `instagram_manage_messages`,
+`whatsapp_business_messaging`, and the two profile fields. The text started in
+#88, which was closed in favour of this file, and every claim in it has been
+re-checked against `main`. Where #88's version said something `main` no longer
+supports, the correction is stated rather than silently made, so the next
+reviser does not put it back:
+
+- **Not every Meta send is a person typing.** The out-of-hours acknowledgement,
+  an automation's canned reply and the CSAT survey all send on Messenger and
+  Instagram. They are held to 24 hours by `automatedReplyBlocked`
+  (`lib/tickets/outbound.ts`), and only a message with an `author_agent_id` may
+  carry `HUMAN_AGENT`. #88 said the app sends nothing automated on these
+  channels, and a reviewer who sees one acknowledgement would catch that.
+- **There is no `POST /{comment-id}/private_replies`.** That edge was removed
+  after v3.2. The private reply is `POST /{account-id}/messages` with
+  `recipient.comment_id` (`lib/meta/comments.ts`).
+- **The Page subscription carries no delivery or read receipts.** The fields are
+  `messages`, `feed`, `messaging_postbacks`, `messaging_referrals` and
+  `message_reactions` (`lib/meta/subscriptions.ts`).
+- **The reported locale does not choose the language we write in.** It is
+  stored on `contact_identities.profile_locale` and deliberately never copied
+  into `contacts.locale`. Unattended senders read the language off what the
+  customer wrote, through `lib/tickets/locale.ts`. The #88 answer described the
+  reverse.
+- **Gender is stored and shown to agents.** It is kept on `contacts.gender` and
+  displayed on the contact page. It is not used to inflect any template, and
+  nothing automated reads it. #88 said the opposite on both counts.
+
+Each block stands alone, because a reviewer reads them one at a time and in no
+particular order.
+
+### `pages_messaging` — paste into "How will your app use this permission?"
+
+```
+ShipBlu Support is an internal customer-support helpdesk built and operated by
+ShipBlu, a last-mile delivery company in Egypt, and used solely by ShipBlu's own
+support agents to answer ShipBlu's own customers. It is not offered to any other
+business and no other business can connect to it.
+
+The ShipBlu Facebook Page is one of our customer support channels, and
+pages_messaging is what makes it work in both directions.
+
+Inbound: when a customer sends our Page a message, it is delivered to our
+webhook, which verifies Meta's signature, stores the payload and returns
+immediately; a background worker then turns it into a support ticket. A
+customer's messages thread onto one open ticket rather than opening a new one
+each time, and any photo they send - usually of a parcel, a damaged box or an
+address - is stored with the ticket so the agent can see the problem. Our own
+echoed replies are ignored, so they are never filed as if the customer wrote
+them.
+
+Outbound: a ShipBlu support agent types a reply in our console and the app
+delivers it to that customer. Every conversation starts with the customer
+messaging us; we send no marketing, broadcasts or promotional content. Two
+automatic messages exist - an acknowledgement when a customer writes while our
+office is closed, and a short satisfaction survey after a ticket is resolved -
+and both are sent only inside the 24-hour window that follows the customer's
+own message. When a customer comments publicly with something that should not
+stay public, such as an address or phone number, an agent can send them one
+private reply to move the conversation into Messenger.
+
+Without this permission messages sent to our Page reach nobody, and nothing an
+agent writes can be delivered.
+```
+
+### `pages_manage_metadata` — paste into "How will your app use this permission?"
+
+```
+ShipBlu Support is an internal customer-support helpdesk built and operated by
+ShipBlu, a last-mile delivery company in Egypt, and used solely by ShipBlu's own
+support agents to answer ShipBlu's own customers.
+
+We use pages_manage_metadata for one thing: subscribing our app to the webhooks
+of ShipBlu's own Facebook Page, and keeping that subscription correct. The app
+subscribes the Page to the fields our support pipeline consumes - messages,
+messaging_postbacks, messaging_referrals and message_reactions for Messenger,
+and feed for customers' comments on our posts.
+
+It reads the current subscription before writing, because a subscription write
+replaces the whole field list: a careless write would silently unsubscribe
+customer messages while reporting success. Our job reads the live list, merges
+in what is needed, and refuses to write any list that drops a field already
+subscribed. It is run by a ShipBlu administrator as a maintenance task, not on
+customer traffic.
+
+Every part of the Facebook channel depends on these webhooks arriving: the
+ticket, its routing to the right team, its service-level clock and the agent's
+reply. The app does not use this permission to change any Page setting a person
+would notice. It does not post to, rename, restyle or reconfigure the Page.
+```
+
+### `instagram_manage_messages` — paste into "How will your app use this permission?"
+
+Read the top table's footnote first: the direct connection answers Instagram
+DMs today, so a reel filmed as the console runs now demonstrates
+`instagram_business_manage_messages`. The text below serves either name, the same
+way the `instagram_manage_comments` text does.
+
+```
+ShipBlu Support is an internal customer-support helpdesk built and operated by
+ShipBlu, a last-mile delivery company in Egypt, and used solely by ShipBlu's own
+support agents to answer ShipBlu's own customers.
+
+ShipBlu's Instagram professional account is a support channel in exactly the way
+our Facebook Page is, and many of our customers reach a delivery company there
+first. We use this permission to read and answer that Direct inbox from the same
+console our agents answer every other channel in.
+
+Inbound Direct messages are delivered to our webhook and become support tickets.
+Each person's messages thread onto one open ticket, and any photo or story reply
+they send is stored with it, so an agent reading "look at this" has something
+to look at. Our own echoed messages are discarded rather than filed as the
+customer's.
+
+Outbound, a ShipBlu support agent's reply is delivered to the person who wrote
+to us. The only automatic messages are an out-of-hours acknowledgement and a
+post-resolution satisfaction survey, both sent only inside the 24-hour window
+after the customer's own message. We send no bulk or promotional Direct
+messages.
+
+Without this permission the Instagram inbox goes back to being answered by hand
+on a phone, outside our ticketing system, its reporting and its service levels.
+```
+
+### `whatsapp_business_messaging` — paste into "How will your app use this permission?"
+
+```
+ShipBlu Support is an internal customer-support helpdesk built and operated by
+ShipBlu, a last-mile delivery company in Egypt, and used solely by ShipBlu's own
+support agents to answer ShipBlu's own customers.
+
+WhatsApp is where most of our customers expect to reach a business, and this
+permission is what the channel rests on.
+
+Inbound: our WhatsApp Business Account is subscribed to the messages field.
+Every customer message, and every delivery status for a message we sent,
+arrives at our webhook, is signature-verified, stored, and turned into a ticket
+by a background worker. Photos and documents are retrieved through the media
+endpoints and stored with the ticket, because customers photograph parcels,
+waybills and damage constantly. A shared location is kept as coordinates, since
+"the courier can't find me" is answered by a location.
+
+Outbound: inside the 24-hour customer service window an agent's reply is sent
+as free-form text. Outside it the app offers only the message templates
+approved for our WhatsApp Business Account, and the console shows the agent
+which of the two states the conversation is in before they write. We also read
+our own approved template list so that the console can offer it.
+
+Delivery statuses tell an agent whether their answer actually arrived. Without
+this permission nothing can be received from or sent to a WhatsApp customer.
+```
+
+### Human Agent — paste into the feature's use-case field
+
+The request stands, and it is the one item on the list with a production refusal
+already on record: `code 10, HTTP 403` naming the feature, 2026-09-06, via
+`graph.instagram.com` (§5.2). That refusal came over the direct connection, so
+confirm in the dashboard that the feature request covers the Instagram Login
+side as well as the Page. `FEATURES` in `lib/meta/capabilities.ts` lists both.
+
+```
+ShipBlu Support is an internal customer-support helpdesk built and operated by
+ShipBlu, a last-mile delivery company in Egypt, and used solely by ShipBlu's own
+support agents to answer ShipBlu's own customers.
+
+In parcel support, a real person answering more than 24 hours after the
+customer wrote is the normal case, not an edge case. A customer messages us at
+9pm asking where their delivery is. Answering honestly often means waiting on
+something outside the support team - the courier's next scan, the hub's
+account of what happened, a merchant confirming a new address - and that answer
+frequently arrives the next day. The agent then writes to the customer, by
+hand, in reply to the question the customer asked.
+
+The app is built around the rule the feature describes. It tracks each
+Messenger and Instagram conversation's window from the customer's last message
+and shows the agent how long they have left. Inside 24 hours a reply is sent as
+a normal response. Between 24 hours and 7 days it is sent with the HUMAN_AGENT
+tag. After 7 days the app refuses to send and tells the agent why.
+
+The tag is attached only to a message a signed-in support agent wrote: the app
+decides it from the author recorded on the message, not from anything a job or
+automation supplies. Our automatic messages - the out-of-hours acknowledgement,
+automation replies and the satisfaction survey - are stopped at 24 hours on
+these channels and can never carry the tag.
+
+Without this feature, most researched follow-ups, the ones that took a day to
+establish, cannot be delivered.
+```
+
+### Business Asset User Profile Access — the two answers
+
+For "How will this app use Business Asset User Profile Access?":
+
+```
+ShipBlu Support is an internal customer-support helpdesk built and operated by
+ShipBlu, a last-mile delivery company in Egypt, and used solely by ShipBlu's own
+support agents to answer ShipBlu's own customers.
+
+This feature puts a customer's name on their support ticket. When a person
+messages ShipBlu's Facebook Page or Instagram account, the webhook gives us a
+page-scoped ID and nothing else. The app then reads that one person's profile:
+their name, their Instagram username where they have one, and their profile
+picture. On Messenger it also reads their locale and gender, where the
+separate permissions for those are granted. It does this when the person first
+writes in, and an agent can ask for a refresh from the ticket. We do not
+request ids_for_business, and we read nothing about anyone who has not
+messaged us.
+
+Three things depend on it. An agent sees a person's name rather than a string
+of digits. An agent can greet the customer by name, which in Arabic support is
+what separates a person from an automated reply. And the name helps an agent
+recognise the same person across channels, when a social identity carries no
+email or phone number to match on.
+
+The lookup is best-effort: the ticket is created and answered whether or not
+the profile can be read.
+```
+
+For "Review the policies … and tell us how you intend to use it":
+
+```
+We have reviewed the Business Asset User Profile Access reference, the Meta
+Platform Terms and the Developer Policies. Our use is inside the documented
+allowed usage - reading user fields for people engaging with our own business
+assets - and deliberately narrower than it permits.
+
+Whose data: only people who have messaged ShipBlu's own Facebook Page or
+Instagram professional account, read when that message becomes a support
+ticket. ShipBlu Support is our in-house helpdesk and serves no other business.
+
+What for: one purpose, identifying the customer to the ShipBlu support agent
+handling their ticket. The picture is the avatar beside their name in the
+inbox; the locale and gender, where granted, are shown on their contact record.
+
+What we will not do: we do not use this data for advertising, targeting,
+audience building or measurement. We do not sell, licence or disclose it to any
+third party, and no third party processes it except our hosting providers. We
+do not combine it with data from outside sources.
+
+Storage and access: stored in our own Postgres database in the EU
+(Frankfurt, eu-central-1); the picture is copied into our own private storage
+in the same region and served to agents only through short-lived signed links.
+Both are reachable only by signed-in ShipBlu support agents; there is no public
+page or external API that exposes them. Raw webhook payloads are deleted
+automatically 30 days after processing. We delete a person's stored profile data
+on request.
+```
+
+### `pages_user_locale` — paste into "How will your app use this permission?"
+
+The honest use is smaller than the one #88 described, and the text says only
+what the console does.
+
+```
+ShipBlu Support is an internal customer-support helpdesk built and operated by
+ShipBlu, a last-mile delivery company in Egypt, and used solely by ShipBlu's own
+support agents to answer ShipBlu's own customers.
+
+Our customers write to us in Arabic and in English, and very often in Arabic
+typed in Latin letters, which says little about which language they would
+rather be answered in. When a person messages our Facebook Page, the app reads
+the locale on their profile once, alongside their name, and shows it on their
+contact record in our console, beside the Messenger identity that reported it.
+A support agent uses it as one more signal when choosing which language to
+answer in.
+
+We deliberately do not let it switch the language of any automatic message:
+those follow the language the customer actually wrote in, because a Facebook
+interface setting is not the same as the language someone wants support in.
+It is not used for targeting, segmentation, advertising or analytics.
+```
+
+### `pages_user_gender` — paste into "How will your app use this permission?"
+
+```
+ShipBlu Support is an internal customer-support helpdesk built and operated by
+ShipBlu, a last-mile delivery company in Egypt, and used solely by ShipBlu's own
+support agents to answer ShipBlu's own customers.
+
+Most of our customers are answered in Arabic, and Arabic grammar is gendered in
+a way English is not: "did you receive it?" is worded differently to a man and
+to a woman, and there is no neutral form in everyday use. When a person
+messages our Facebook Page, the app reads the gender on their profile once,
+alongside their name, stores it on their contact record, and shows it to the
+support agent answering them, so that the agent can address the customer
+correctly.
+
+It is shown only to ShipBlu support agents. It is not used for targeting,
+segmentation, advertising, analytics, reporting or routing, and no automatic
+message reads it.
+```
+
 ## The order to work in
 
 1. Make the seven calls in the table above, with a Page token held by an app
@@ -927,7 +1253,10 @@ URL names (§6.35).
    `pages_read_engagement` and `instagram_manage_comments` to the submission.
    All five are written out above, form field by form field — read the Instagram
    one's first subsection before submitting it, because which of the two
-   Instagram comment permissions this should be is a live question.
+   Instagram comment permissions this should be is a live question, and the same
+   decision settles the messaging pair in the top table. The items already on
+   the list have their answers in
+   [the section after it](#the-items-already-on-the-list-written-out).
 4. Drop **Page Public Content Access** and **`whatsapp_business_manage_events`**;
    neither has a call site to film.
 5. Settle the Facebook-login beat in the reviewer notes before recording.
