@@ -16,6 +16,7 @@ import type { ConversationChannel } from '@/lib/tickets/channel-policy';
 import { normaliseSbid, normaliseTrackingNumber } from './format';
 import { deriveRequesterRole, type RequesterRole } from './roles';
 import { returnsForShipments } from './lookup';
+import { containing } from '@/lib/search/like';
 
 /**
  * Reading shipments, shipping accounts and what is attached to them.
@@ -549,7 +550,7 @@ export async function searchContacts(query: string, limit = 20) {
   const q = query.trim();
   if (!q) return { contacts: [], accounts: [], shipments: [] };
 
-  const pattern = `%${q.replace(/[\\%_]/g, '\\$&')}%`;
+  const pattern = containing(q);
   // A query with no alphanumerics normalises to '' and would become a bare '%%'
   // — every shipment in the account, presented as a search result.
   const canonical = normaliseTrackingNumber(q);

@@ -13,6 +13,7 @@ import {
   type MergedCounts,
 } from '@/db/schema';
 import { DEFAULT_CONTACT_LOCALE as DEFAULT_LOCALE } from './locale';
+import { containing } from '@/lib/search/like';
 
 /**
  * Merging two contacts.
@@ -479,7 +480,7 @@ export async function searchMergeCandidates(
   const q = query.trim();
   if (!q) return [];
 
-  const pattern = `%${q.replace(/[\\%_]/g, '\\$&')}%`;
+  const pattern = containing(q);
 
   return db
     .select({ ...CANDIDATE_COLUMNS })
