@@ -7,7 +7,7 @@
  */
 
 import { detectShipmentRefs, shipmentPatterns } from '@/lib/shipments/detect';
-import { normaliseSbid, normaliseTrackingNumber } from '@/lib/shipments/format';
+import { couldBeReference, normaliseSbid, normaliseTrackingNumber } from '@/lib/shipments/format';
 import { containing } from '@/lib/search/like';
 
 export type SearchTerm = {
@@ -69,7 +69,7 @@ export function parseSearchTerm(query: string): SearchTerm {
   const trackingRest = stripPrefix(raw, TRACKING_PREFIXES);
   if (trackingRest !== null) {
     const trackingNumber = normaliseTrackingNumber(trackingRest);
-    if (trackingNumber) {
+    if (couldBeReference(trackingNumber)) {
       return { ...textTerm(trackingRest), trackingNumber, sbid: null, scope: 'tracking' };
     }
     return textTerm(trackingRest);
@@ -78,7 +78,7 @@ export function parseSearchTerm(query: string): SearchTerm {
   const sbidRest = stripPrefix(raw, SBID_PREFIXES);
   if (sbidRest !== null) {
     const sbid = normaliseSbid(sbidRest);
-    if (sbid) {
+    if (couldBeReference(sbid)) {
       return { ...textTerm(sbidRest), trackingNumber: null, sbid, scope: 'sbid' };
     }
     return textTerm(sbidRest);
@@ -123,7 +123,7 @@ function textTerm(query: string): SearchTerm {
     number,
     // Only when the punctuation actually got in the way: for a query that is
     // already bare digits the free-text pattern covers the phone column too.
-    phonePattern: looksLikePhone && digits !== q ? `%${digits}%` : null,
+    phonePattern: looksLikePhone && digits !== q ? containing(digits) : null,
     trackingNumber: null,
     sbid: null,
     scope: 'any',

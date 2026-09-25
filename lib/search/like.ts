@@ -3,7 +3,7 @@
  * called "100%" or a subject with an underscore would otherwise search for
  * something other than what was typed.
  */
-export function escapeLike(value: string): string {
+function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, '\\$&');
 }
 
