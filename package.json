@@ -23,7 +23,6 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test",
     "db:seed": "tsx db/seed.ts"
   },
   "dependencies": {
@@ -40,7 +39,6 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "@playwright/test": "1.62.1",
     "@tailwindcss/postcss": "4.3.3",
     "@types/html-to-text": "9.0.4",
     "@types/luxon": "3.7.4",

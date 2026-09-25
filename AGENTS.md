@@ -805,12 +805,15 @@ identically, which is why this is not a CI check: telling them apart needs the
 type of the interpolated expression, not its spelling. Use `inArray()` for a
 list of values (§6.46).
 
-Playwright is a declared dependency and `npm run test:e2e` is a declared script,
-but **there are no specs and no config**: nothing is tracked under any
-`playwright.config.*` and there is no `*.spec.ts` in the repo, so the command
-cannot currently run. `knip` reports the dependency as used because the binary
-appears in a script, which is worth knowing before treating a green dependency
-check as evidence that every dev dependency is earning its place.
+There is no browser test suite. Playwright was declared — a dependency and a
+`test:e2e` script — with no config and not one spec, and was removed rather than
+kept as a promise (`plans/refactor-in-stages.md`, 0.5). It comes back in the PR
+that adds its first spec. `npm ci` still installs it, as an optional peer of
+`next` that the lockfile already held and npm does not prune — that is not a
+dependency of ours, and nothing here imports it. One lesson from it outlives
+it: `knip` counts a dev dependency as used whenever its binary appears in a
+`package.json` script, so a green dependency check is not evidence that every
+dev dependency is earning its place.
 
 ## Tool use and live infrastructure
 

@@ -5,13 +5,7 @@ import nextTypescript from 'eslint-config-next/typescript';
 // no FlatCompat shim (which breaks under ESLint 10).
 const config = [
   {
-    ignores: [
-      'node_modules/**',
-      '.next/**',
-      'db/migrations/**',
-      'playwright-report/**',
-      'test-results/**',
-    ],
+    ignores: ['node_modules/**', '.next/**', 'db/migrations/**'],
   },
   ...nextCoreWebVitals,
   ...nextTypescript,
