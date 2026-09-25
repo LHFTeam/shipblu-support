@@ -107,11 +107,12 @@ conflict on all of them.
 | 2.3   | Contacts pages cannot scroll                     | #170        | open    |
 | 2.4   | `PermanentJobError`                              | #174        | open    |
 | 2.5   | Ids taken from `FormData`                        |             | pending |
-| 2.6   | KB admin search does not escape LIKE             |             | pending |
+| 2.6   | KB admin search does not escape LIKE             | #176        | open    |
 | 2.7   | One `GRAPH_VERSION`                              | #175        | open    |
 | 2.8   | Fetch timeouts, one provider per PR              |             | pending |
 | 2.9   | Replies never get paragraphs (CRLF)              | #171        | open    |
-| 2.10  | Email webhook fails open without its secret      |             | pending |
+| 2.10  | Email webhook fails open without its secret      | #177        | open    |
+| 2.11  | Staging's `local` email webhook accepts anything |             | pending |
 | 3     | Shared primitives (one row per PR as opened)     |             | pending |
 | 4.1   | Split `lib/tickets/queries.ts`                   |             | pending |
 | 4.2   | Shared ingest steps                              |             | pending |
@@ -397,6 +398,21 @@ environment on Render before sizing this: if it is still unset, the production
 endpoint turns any POST into a ticket. The likely shape is to fail closed when
 `NODE_ENV === 'production'` and keep the development convenience, with a route
 test for each.
+
+Done as #177, stacked on #168, because a late-set secret recovers the refused
+deliveries only when a refused delivery is stored under no id. Render could not
+answer whether the secret is set: its API does not expose values, and its log
+retention starts after the last inbound email (2026-09-03). So #177 names setting
+the secret as a deploy prerequisite rather than assuming either way.
+
+### 2.11 Staging's `local` email webhook accepts anything
+
+Found while doing 2.10. Staging runs `EMAIL_PROVIDER=local`, whose
+`verifySignature` returns `true` on the grounds that "the endpoint is not
+reachable from outside" — which is not true of a Render service. Staging is
+suspended and sends nothing real, so this is low priority; the likely fix is for
+the factory to refuse `local` under `NODE_ENV=production` for inbound, the same
+line #177 draws.
 
 ### 2.8 Fetch timeouts
 
