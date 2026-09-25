@@ -108,6 +108,14 @@ export async function POST(request: Request, context: { params: Promise<{ provid
   // what recover a real email once a misconfigured secret is fixed. A forger's
   // retries cost only an evidence row each, under a null id that can collide
   // with nothing.
+  //
+  // The price is paid in storage during a misconfiguration. Each of those ten
+  // retries is its own row now, where the index used to swallow them, and
+  // Postmark's inbound JSON carries attachments inline as base64 — so one email
+  // with a 10 MB attachment can leave about 110 MB of evidence behind while the
+  // secret is wrong. `cleanup` expires unverified rows on their own clock
+  // (UNVERIFIED_WEBHOOK_DAYS); a jump in `webhook_events` during an incident is
+  // this, not a leak.
   if (!signatureVerified) {
     console.warn(`[webhook:${provider.name}] stored unverified payload ${inserted[0]?.id}`);
     return NextResponse.json({ error: 'signature verification failed' }, { status: 401 });
