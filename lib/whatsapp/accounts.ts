@@ -1,4 +1,5 @@
-import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, eq, exists, inArray, isNull } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { db } from '@/db/client';
 import { channels, whatsappAccounts, whatsappTemplates } from '@/db/schema';
 import { env } from '@/lib/env';
@@ -259,7 +260,16 @@ export async function ensureEnvironmentAccount(): Promise<WhatsAppAccount | null
   const account = (await accountForWabaId(wabaId)) ?? (await insertEnvironmentAccount(wabaId));
   if (!account) return null;
 
-  await adoptUnassigned(account);
+  // Best-effort, and never allowed to stop the sync. This runs ahead of the
+  // sync's per-account try/catch, so anything it throws — a second worker's
+  // copy landing between the delete and the adoption below is the one known
+  // way — would otherwise fail every account for the hour and record no
+  // `lastSyncError`. Whatever it misses, the next run picks up.
+  try {
+    await adoptUnassigned(account);
+  } catch (error) {
+    console.error(`[whatsapp] adopting unassigned rows for ${account.name} failed`, error);
+  }
 
   return account;
 }
@@ -343,7 +353,7 @@ function freeName(taken: Set<string>, wabaId: string): string {
 /**
  * Point every row that predates multi-WABA at this account.
  *
- * Both writes match only `IS NULL`, so the second and every later call is a
+ * Every write matches only `IS NULL`, so the second and every later call is a
  * no-op that touches nothing — which is what makes running this on every sync
  * cheap enough to be the simple thing to do.
  */
@@ -362,16 +372,50 @@ async function adoptUnassigned(account: WhatsAppAccount): Promise<void> {
   // (account, name, language), and a null account matches nothing, so a sync
   // would insert a second copy beside each orphan and leave the orphan
   // APPROVED for ever — `staleTemplateFilter` skips null accounts too.
+  //
+  // Which is also why the orphans that already have a copy are deleted first
+  // rather than adopted. Running this on every sync means it now runs after
+  // syncs that went ahead without it — the case it exists for: an admin
+  // connected the WABA by hand, the hourly sync inserted a fresh copy of each
+  // template under the account, and the orphans sat beside them. Adopting such
+  // an orphan collides with its copy on `(account, name, language)`, and this
+  // runs before the sync's per-account try/catch, so the 23505 would stop every
+  // account syncing, hourly, with no `lastSyncError` to say why. The copy is
+  // the one the sync has kept current; the orphan is what it replaced, and
+  // nothing references a template row by id.
+  const copy = alias(whatsappTemplates, 'copy');
+  const superseded = await db
+    .delete(whatsappTemplates)
+    .where(
+      and(
+        isNull(whatsappTemplates.whatsappAccountId),
+        exists(
+          db
+            .select({ id: copy.id })
+            .from(copy)
+            .where(
+              and(
+                eq(copy.whatsappAccountId, account.id),
+                eq(copy.name, whatsappTemplates.name),
+                eq(copy.language, whatsappTemplates.language),
+              ),
+            ),
+        ),
+      ),
+    )
+    .returning({ id: whatsappTemplates.id });
+
   const templateRows = await db
     .update(whatsappTemplates)
     .set({ whatsappAccountId: account.id })
     .where(isNull(whatsappTemplates.whatsappAccountId))
     .returning({ id: whatsappTemplates.id });
 
-  if (channelRows.length || templateRows.length) {
+  if (channelRows.length || templateRows.length || superseded.length) {
     console.log(
       `[whatsapp] ${account.name} adopted ${channelRows.length} unassigned channel(s) and ` +
-        `${templateRows.length} unassigned template(s)`,
+        `${templateRows.length} unassigned template(s), and removed ${superseded.length} ` +
+        `unassigned template(s) the sync had already replaced`,
     );
   }
 }

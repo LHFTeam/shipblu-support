@@ -247,6 +247,31 @@ describe('substitute', () => {
     );
   });
 
+  // A value that is missing on a line of its own takes the line with it, or
+  // WhatsApp and Meta receive a run of blank lines. The admin's own blank line
+  // between the paragraphs survives.
+  it('drops a line that held only an empty placeholder', () => {
+    const text = substitute(
+      ['We are closed today.', '{{holiday}}', '', 'We reply {{next_opening}}.'].join('\n'),
+      HOURS,
+      { ...context, holiday: null },
+      thursdayEvening,
+    );
+
+    expect(text).toBe(['We are closed today.', '', 'We reply Sunday at 09:00.'].join('\n'));
+  });
+
+  it('keeps a line whose placeholder has a value, and one with other text on it', () => {
+    const text = substitute(
+      ['Hi {{customer_name}}', '{{ticket_number}}', 'Name: {{customer_name}}'].join('\n'),
+      HOURS,
+      { ...context, customerName: null },
+      thursdayEvening,
+    );
+
+    expect(text).toBe(['Hi', String(context.ticketNumber), 'Name:'].join('\n'));
+  });
+
   it('closes a gap between two words without touching the rest of the line', () => {
     const text = substitute(
       'Hello  {{customer_name}}  — ticket  #{{ticket_number}}',

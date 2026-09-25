@@ -146,7 +146,31 @@ export function substitute(
     indented list or a column aligned with spaces came out flattened, on every
     send, with nothing in the editor to show that it had happened.
   */
+  /*
+    A line holding nothing but placeholders that all came back empty goes with
+    them, newline included. Closing the gap inside the line is not enough there:
+    "{{holiday}}" on its own line between two paragraphs would leave the line
+    blank, and the customer would receive a run of empty lines on WhatsApp and
+    Meta, where nothing turns the text into HTML to hide it. Scoped to those
+    lines for the same reason as the rest of this function: a blank line the
+    admin typed stays where it is.
+  */
+  const emptyLine = (line: string): boolean => {
+    const tokens = [...line.matchAll(/\{\{\s*([a-z_]+)\s*\}\}/gi)];
+    if (!tokens.length) return false;
+    if (line.replace(/\{\{\s*[a-z_]+\s*\}\}/gi, '').trim()) return false;
+
+    // `undefined` is an unknown placeholder, which is left in place as a typo.
+    return tokens.every((token) => {
+      const value = values[token[1]!.toLowerCase()];
+      return value !== undefined && !value;
+    });
+  };
+
   return body
+    .split('\n')
+    .filter((line) => !emptyLine(line))
+    .join('\n')
     .replace(
       /([ \t]*)\{\{\s*([a-z_]+)\s*\}\}([ \t]*)([,.!؟?])?/gi,
       (match, before: string, name: string, after: string, punctuation?: string) => {
