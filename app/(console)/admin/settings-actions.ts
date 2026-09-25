@@ -97,6 +97,14 @@ function uuidField(formData: FormData, key: string): string | null | undefined {
   return UUID.test(value) ? value : undefined;
 }
 
+/**
+ * What a save answers when the row it names cannot exist. Every save and delete
+ * below takes the row's `id` from the form, and passing it straight to a query
+ * turned a malformed one into a 22P02 thrown out of the action — a blank crash
+ * where the form promises a sentence. An empty id on a save still means "create".
+ */
+const GONE = 'That no longer exists — reload the page and try again';
+
 function int(formData: FormData, key: string, fallback = 0): number {
   const value = Number(formData.get(key));
   return Number.isFinite(value) ? Math.trunc(value) : fallback;
@@ -115,7 +123,8 @@ function optionalMinutes(formData: FormData, key: string): number | null {
 export async function saveGroup(_state: SettingsState, formData: FormData): Promise<SettingsState> {
   await requirePermission('admin.groups');
 
-  const id = text(formData, 'id');
+  const id = uuidField(formData, 'id');
+  if (id === undefined) return { error: GONE };
   const name = text(formData, 'name');
   const description = text(formData, 'description') || null;
 
@@ -195,7 +204,8 @@ export async function deleteGroup(
   formData: FormData,
 ): Promise<SettingsState> {
   await requirePermission('admin.groups');
-  const id = text(formData, 'id');
+  const id = uuidField(formData, 'id');
+  if (!id) return { error: 'Nothing to delete' };
 
   // Tickets keep a group id; deleting one out from under them would leave the
   // inbox filtering on a group nobody can name.
@@ -295,7 +305,8 @@ export async function saveLocation(
 ): Promise<SettingsState> {
   await requirePermission('admin.locations');
 
-  const id = text(formData, 'id');
+  const id = uuidField(formData, 'id');
+  if (id === undefined) return { error: GONE };
   const name = text(formData, 'name');
   const code = normaliseLocationCode(text(formData, 'code'));
   const email = normaliseEmail(text(formData, 'email'));
@@ -355,8 +366,10 @@ export async function deleteLocation(
   formData: FormData,
 ): Promise<SettingsState> {
   await requirePermission('admin.locations');
+  const id = uuidField(formData, 'id');
+  if (!id) return { error: 'Nothing to delete' };
 
-  await db.delete(locations).where(eq(locations.id, text(formData, 'id')));
+  await db.delete(locations).where(eq(locations.id, id));
   refresh('/admin/locations');
   return ok();
 }
@@ -369,7 +382,8 @@ export async function saveStatus(
 ): Promise<SettingsState> {
   await requirePermission('admin.fields');
 
-  const id = text(formData, 'id');
+  const id = uuidField(formData, 'id');
+  if (id === undefined) return { error: GONE };
   const name = text(formData, 'name');
   const category = text(formData, 'category');
   const stopsSlaClock = formData.get('stopsSlaClock') === 'on';
@@ -423,7 +437,8 @@ export async function deleteStatus(
   formData: FormData,
 ): Promise<SettingsState> {
   await requirePermission('admin.fields');
-  const id = text(formData, 'id');
+  const id = uuidField(formData, 'id');
+  if (!id) return { error: 'Nothing to delete' };
 
   const rows = await db
     .select({ isSystem: ticketStatuses.isSystem })
@@ -464,7 +479,8 @@ const FIELD_TYPES = [
 export async function saveField(_state: SettingsState, formData: FormData): Promise<SettingsState> {
   await requirePermission('admin.fields');
 
-  const id = text(formData, 'id');
+  const id = uuidField(formData, 'id');
+  if (id === undefined) return { error: GONE };
   const key = text(formData, 'key');
   const label = text(formData, 'label');
   const type = text(formData, 'type');
@@ -594,11 +610,13 @@ export async function deleteField(
   formData: FormData,
 ): Promise<SettingsState> {
   await requirePermission('admin.fields');
+  const id = uuidField(formData, 'id');
+  if (!id) return { error: 'Nothing to delete' };
 
   const rows = await db
     .select({ key: ticketFields.key })
     .from(ticketFields)
-    .where(eq(ticketFields.id, text(formData, 'id')))
+    .where(eq(ticketFields.id, id))
     .limit(1);
 
   const key = rows[0]?.key;
@@ -616,7 +634,7 @@ export async function deleteField(
     };
   }
 
-  await db.delete(ticketFields).where(eq(ticketFields.id, text(formData, 'id')));
+  await db.delete(ticketFields).where(eq(ticketFields.id, id));
   refresh('/admin/fields');
   return ok();
 }
@@ -668,7 +686,8 @@ export async function saveTicketForm(
 ): Promise<SettingsState> {
   await requirePermission('admin.forms');
 
-  const id = text(formData, 'id');
+  const id = uuidField(formData, 'id');
+  if (id === undefined) return { error: GONE };
   const nameEn = text(formData, 'nameEn');
   const nameAr = text(formData, 'nameAr');
 
@@ -791,7 +810,8 @@ export async function deleteTicketForm(
 ): Promise<SettingsState> {
   await requirePermission('admin.forms');
 
-  const id = text(formData, 'id');
+  const id = uuidField(formData, 'id');
+  if (!id) return { error: 'Nothing to delete' };
 
   const used = await db
     .select({ id: conversations.id })
@@ -819,7 +839,8 @@ export async function saveCannedResponse(
 ): Promise<SettingsState> {
   await requirePermission('admin.fields');
 
-  const id = text(formData, 'id');
+  const id = uuidField(formData, 'id');
+  if (id === undefined) return { error: GONE };
   const title = text(formData, 'title');
   const bodyTextAr = text(formData, 'bodyTextAr');
   const bodyTextEn = text(formData, 'bodyTextEn');
@@ -878,7 +899,9 @@ export async function deleteCannedResponse(
   formData: FormData,
 ): Promise<SettingsState> {
   await requirePermission('admin.fields');
-  await db.delete(cannedResponses).where(eq(cannedResponses.id, text(formData, 'id')));
+  const id = uuidField(formData, 'id');
+  if (!id) return { error: 'Nothing to delete' };
+  await db.delete(cannedResponses).where(eq(cannedResponses.id, id));
   refresh('/admin/canned');
   return ok();
 }
@@ -1017,7 +1040,9 @@ export async function deleteAutoResponse(
   formData: FormData,
 ): Promise<SettingsState> {
   await requirePermission('admin.automations');
-  await db.delete(autoResponses).where(eq(autoResponses.id, text(formData, 'id')));
+  const id = uuidField(formData, 'id');
+  if (!id) return { error: 'Nothing to delete' };
+  await db.delete(autoResponses).where(eq(autoResponses.id, id));
   refresh('/admin/auto-responses');
   return ok();
 }
@@ -1032,7 +1057,8 @@ export async function saveBusinessHours(
 ): Promise<SettingsState> {
   await requirePermission('admin.sla');
 
-  const id = text(formData, 'id');
+  const id = uuidField(formData, 'id');
+  if (id === undefined) return { error: GONE };
   const name = text(formData, 'name');
   const timezone = text(formData, 'timezone') || 'Africa/Cairo';
 
@@ -1113,7 +1139,8 @@ export async function saveHoliday(
 ): Promise<SettingsState> {
   await requirePermission('admin.sla');
 
-  const id = text(formData, 'id');
+  const id = uuidField(formData, 'id');
+  if (id === undefined) return { error: GONE };
   const date = text(formData, 'date');
   const nameAr = text(formData, 'nameAr');
   const nameEn = text(formData, 'nameEn');
@@ -1195,7 +1222,9 @@ export async function deleteHoliday(
   formData: FormData,
 ): Promise<SettingsState> {
   await requirePermission('admin.sla');
-  await db.delete(holidays).where(eq(holidays.id, text(formData, 'id')));
+  const id = uuidField(formData, 'id');
+  if (!id) return { error: 'Nothing to delete' };
+  await db.delete(holidays).where(eq(holidays.id, id));
   // The catalogue is memoised for thirty seconds and a due date is computed
   // from it, so the process that took the edit drops its copy now rather than
   // serving a stale schedule to the next SLA calculation.
@@ -1231,7 +1260,8 @@ export async function saveSlaPolicy(
 ): Promise<SettingsState> {
   await requirePermission('admin.sla');
 
-  const id = text(formData, 'id');
+  const id = uuidField(formData, 'id');
+  if (id === undefined) return { error: GONE };
   const name = text(formData, 'name');
   const description = text(formData, 'description') || null;
   const position = int(formData, 'position');
@@ -1330,7 +1360,8 @@ export async function deleteSlaPolicy(
   formData: FormData,
 ): Promise<SettingsState> {
   await requirePermission('admin.sla');
-  const id = text(formData, 'id');
+  const id = uuidField(formData, 'id');
+  if (!id) return { error: 'Nothing to delete' };
 
   // Tickets point at the policy for reporting; the column nulls out on delete,
   // which would quietly rewrite history. Deactivating keeps the record.
@@ -1375,7 +1406,8 @@ export async function deleteSlaPolicy(
 export async function saveSkill(_state: SettingsState, formData: FormData): Promise<SettingsState> {
   await requirePermission('admin.skills');
 
-  const id = text(formData, 'id');
+  const id = uuidField(formData, 'id');
+  if (id === undefined) return { error: GONE };
   const name = text(formData, 'name');
   const description = text(formData, 'description') || null;
   const position = int(formData, 'position');
@@ -1467,7 +1499,7 @@ export async function deleteSkill(
   formData: FormData,
 ): Promise<SettingsState> {
   await requirePermission('admin.skills');
-  const id = text(formData, 'id');
+  const id = uuidField(formData, 'id');
   if (!id) return { error: 'Nothing to delete' };
 
   await db.delete(skills).where(eq(skills.id, id));
@@ -1483,7 +1515,8 @@ export async function saveAutomationRule(
 ): Promise<SettingsState> {
   await requirePermission('admin.automations');
 
-  const id = text(formData, 'id');
+  const id = uuidField(formData, 'id');
+  if (id === undefined) return { error: GONE };
   const name = text(formData, 'name');
   const trigger = text(formData, 'trigger');
   const position = int(formData, 'position');
@@ -1548,7 +1581,9 @@ export async function deleteAutomationRule(
   formData: FormData,
 ): Promise<SettingsState> {
   await requirePermission('admin.automations');
-  await db.delete(automationRules).where(eq(automationRules.id, text(formData, 'id')));
+  const id = uuidField(formData, 'id');
+  if (!id) return { error: 'Nothing to delete' };
+  await db.delete(automationRules).where(eq(automationRules.id, id));
   refresh('/admin/automations');
   return ok();
 }
@@ -1575,7 +1610,8 @@ export async function saveInternalRecipient(
 ): Promise<SettingsState> {
   await requirePermission('admin.channels');
 
-  const id = String(formData.get('id') ?? '');
+  const id = uuidField(formData, 'id');
+  if (id === undefined) return { error: GONE };
   const name = String(formData.get('name') ?? '').trim();
   // Lowercased on write, because the unique index and every lookup compare the
   // canonical form — the same discipline contact_identities needs.
@@ -1633,7 +1669,8 @@ export async function deleteInternalRecipient(
 ): Promise<SettingsState> {
   await requirePermission('admin.channels');
 
-  const id = String(formData.get('id') ?? '');
+  const id = uuidField(formData, 'id');
+  if (!id) return { error: 'Nothing to delete' };
 
   const inUse = await db
     .select({ id: sideConversations.id })
@@ -1678,7 +1715,8 @@ export async function saveWhatsAppAccount(
 ): Promise<SettingsState> {
   await requirePermission('admin.channels');
 
-  const id = text(formData, 'id');
+  const id = uuidField(formData, 'id');
+  if (id === undefined) return { error: GONE };
   const name = text(formData, 'name');
   const wabaId = text(formData, 'wabaId');
   const isDefault = formData.get('isDefault') === 'on';
@@ -1757,7 +1795,8 @@ export async function deleteWhatsAppAccount(
 ): Promise<SettingsState> {
   await requirePermission('admin.channels');
 
-  const id = String(formData.get('id') ?? '');
+  const id = uuidField(formData, 'id');
+  if (!id) return { error: 'Nothing to delete' };
 
   const numbers = await db
     .select({ name: channels.name })
