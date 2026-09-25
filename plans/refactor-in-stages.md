@@ -93,23 +93,24 @@ conflict on all of them.
 | Stage | Item                                             | Branch / PR | Status  |
 | ----- | ------------------------------------------------ | ----------- | ------- |
 | 0.1   | Commit this plan                                 | #166        | merged  |
-| 0.2   | Harden `server-actions` and minimum-count guards | this PR     | open    |
+| 0.2   | Harden `server-actions` and minimum-count guards | #167        | open    |
 | 0.3   | Split `repo-rules.mjs` into per-rule modules     |             | pending |
 | 0.4   | CI tidy-up                                       |             | pending |
-| 0.5   | Remove Playwright                                |             | pending |
+| 0.5   | Remove Playwright                                | #173        | open    |
 | 1.1   | `lib/testing/` fixtures                          |             | pending |
 | 1.2   | Database test tier                               |             | pending |
 | 1.3   | Characterise the seven ingest entry points       |             | pending |
 | 1.4   | Webhook route tests                              |             | pending |
 | 1.5   | DB test for the admin overview's raw SQL         |             | pending |
-| 2.1   | Email webhook dedupes before it verifies         |             | pending |
-| 2.2   | Portal agent replies bypass `carrierFor()`       |             | pending |
-| 2.3   | Contacts pages cannot scroll                     |             | pending |
+| 2.1   | Email webhook dedupes before it verifies         | #168        | open    |
+| 2.2   | Portal agent replies bypass `carrierFor()`       | #169        | open    |
+| 2.3   | Contacts pages cannot scroll                     | #170        | open    |
 | 2.4   | `PermanentJobError`                              |             | pending |
 | 2.5   | Ids taken from `FormData`                        |             | pending |
 | 2.6   | KB admin search does not escape LIKE             |             | pending |
 | 2.7   | One `GRAPH_VERSION`                              |             | pending |
 | 2.8   | Fetch timeouts, one provider per PR              |             | pending |
+| 2.9   | Replies never get paragraphs (CRLF)              | #171        | open    |
 | 3     | Shared primitives (one row per PR as opened)     |             | pending |
 | 4.1   | Split `lib/tickets/queries.ts`                   |             | pending |
 | 4.2   | Shared ingest steps                              |             | pending |
