@@ -14,11 +14,12 @@ would be stale within the week. Where a call is known to be refused by a gate
 rather than by a bug, §8 names the gate and cites the file that holds the
 evidence.
 
-Every Graph path below addresses **v23.0**. The version is declared four times
-— `lib/meta/client.ts`, `lib/meta/subscriptions.ts`, `lib/whatsapp/client.ts`
-and `worker/handlers/check-meta-permissions.ts` — because each is a separate
-client with its own credential and error handling; they are not a shared
-constant today, so a version bump is four edits.
+Every Graph path below addresses **v23.0**, declared once in
+`lib/meta/graph.ts` beside the two hosts it is addressed on. The four clients —
+`lib/meta/client.ts`, `lib/meta/subscriptions.ts`, `lib/whatsapp/client.ts` and
+`worker/handlers/check-meta-permissions.ts` — stay separate, each with its own
+credential and error handling, and import the address from there, so a version
+bump is one edit and cannot land on some of them only.
 
 ## Contents
 

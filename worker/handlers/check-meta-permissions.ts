@@ -1,6 +1,7 @@
 import { env, metaAppSecret } from '@/lib/env';
 import { FEATURES, diagnoseCapabilities, requiredScopes } from '@/lib/meta/capabilities';
 import { CONNECTION_LABEL, instagramLoginConfigured } from '@/lib/meta/connection';
+import { GRAPH_BASE, INSTAGRAM_GRAPH_BASE } from '@/lib/meta/graph';
 
 /**
  * What the live Meta token actually carries, and which capability each gap stops.
@@ -36,10 +37,6 @@ import { CONNECTION_LABEL, instagramLoginConfigured } from '@/lib/meta/connectio
  * Instagram outages this system has had were a credential in the wrong place,
  * and both would have been answered by it in one line.
  */
-
-const GRAPH_VERSION = 'v23.0';
-const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
-const INSTAGRAM_GRAPH_BASE = `https://graph.instagram.com/${GRAPH_VERSION}`;
 
 type DebugToken = {
   type?: string;

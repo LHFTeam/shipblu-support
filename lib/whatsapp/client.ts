@@ -1,4 +1,5 @@
 import { env } from '@/lib/env';
+import { GRAPH_BASE } from '@/lib/meta/graph';
 import { ACCESS_TOKEN_CODE } from './errors';
 import type { WhatsAppTemplateComponent } from './templates';
 
@@ -10,9 +11,6 @@ import type { WhatsAppTemplateComponent } from './templates';
  * that. Errors are normalised into `WhatsAppApiError` so the worker can decide
  * between "retry" and "this will never work".
  */
-
-const GRAPH_VERSION = 'v23.0';
-const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
 
 export class WhatsAppApiError extends Error {
   constructor(
