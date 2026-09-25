@@ -64,4 +64,12 @@ describe('every other hostname', () => {
     expect(visit('https://shipblu-support.onrender.com/widget').status).not.toBe(307);
     expect(visit('https://shipblu-support.onrender.com/inbox').status).toBe(307);
   });
+
+  it('lets the health check reach the render probe over the loopback', () => {
+    // `/probe` is rendered by /api/health, which carries no session. A 307 here
+    // would send the check to /login, whose HTML is a 200 as well, so only the
+    // missing marker would say anything was wrong.
+    expect(visit('http://127.0.0.1:10000/probe').status).not.toBe(307);
+    expect(rewrittenTo(visit('http://127.0.0.1:10000/probe'))).toBeNull();
+  });
 });

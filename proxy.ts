@@ -24,6 +24,12 @@ const PUBLIC_PREFIXES = [
   '/invite',
   '/api/webhooks',
   '/api/health',
+  // The page `/api/health` renders to prove that rendering works, fetched over
+  // the loopback with no session. Left to the cookie check below it would
+  // answer 307 to /login, whose HTML is a perfectly good 200. The page refuses
+  // any request without the health check's token, so being public here
+  // exposes nothing (`lib/health/probe.ts`).
+  '/probe',
   '/api/auth',
   '/api/kb',
   // The widget page and every endpoint it calls. Both halves are needed: the
