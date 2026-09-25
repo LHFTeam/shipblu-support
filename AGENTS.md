@@ -175,7 +175,9 @@ manage its own panes, which means a page that does not open an
 `app-scroll h-full overflow-y-auto p-6` wrapper is not merely unpadded — every
 row below the fold is rendered where nobody can scroll to it, and the page reads
 as half-finished rather than as broken (§6.53). `admin/layout.tsx` supplies one
-for everything beneath it; nothing else does.
+for everything beneath it; nothing else does. CI checks it (`console-scroll`):
+every other console page either says `overflow-y-auto` or renders
+`<InboxShell>`, which owns its panes.
 
 ## Do not edit
 
