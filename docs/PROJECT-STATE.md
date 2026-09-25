@@ -819,8 +819,10 @@ its own description.
 ~~Nobody has written the probe as a follow-up anywhere else.~~ **Written
 2026-09-25**, carrying #79's `/probe` page forward (#79 was closed as superseded
 the same day). `/api/health` now renders `app/probe/page.tsx` over the loopback,
-alongside `select 1` and inside the same five-second budget, and it passes only
-on the page's marker text. The page answers only a request carrying an HMAC of
+alongside `select 1` and inside the same five-second window, so it adds no time
+to the check. (The queue count that follows still has five seconds of its own,
+so the worst case for the whole check is about ten, as it was before.) It
+passes only on the page's marker text. The page answers only a request carrying an HMAC of
 `APP_SECRET`, and 404s any other request before touching the database, so being
 public in `proxy.ts` exposes nothing. It bounds its own `select 1` with the same
 cancellable probe, because the health check aborting its fetch does not stop

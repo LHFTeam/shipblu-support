@@ -11,8 +11,10 @@ import { env } from '@/lib/env';
  * configurable and a five-second constant is only "well under" it by
  * convention — `probeTimeout()` keeps the ordering true by construction.
  *
- * One budget for every part of `/api/health`, which runs them side by side
- * rather than one after another, so the check as a whole answers inside it.
+ * Each part of `/api/health` gets its own window of this length, not one
+ * shared window. `select 1` and the page render run side by side, so together
+ * they cost one window. The queue count runs after them and gets a second, so
+ * the worst case for the whole check is about twice this.
  */
 const PROBE_TIMEOUT_MS = 5_000;
 

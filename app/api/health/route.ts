@@ -17,8 +17,10 @@ export const dynamic = 'force-dynamic';
  *
  * And it renders a page, because a route handler answering says nothing about
  * whether a Server Component can (`renderProbe`, `app/probe/page.tsx`). The
- * render runs beside `select 1` rather than after it, so the two share one
- * budget and the check answers inside it either way. When the database is down
+ * render runs beside `select 1` rather than after it, so adding it costs no
+ * time: the pair answers inside one probe window either way. The queue count
+ * after them has a window of its own, so the whole check can take up to about
+ * two windows; that was already so before the render. When the database is down
  * both fail together, on every instance at once, and restarting then changes
  * nothing — that was already true of `select 1`, and this adds no new way for
  * the check to fail on a healthy instance.
