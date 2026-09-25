@@ -77,12 +77,17 @@ export async function POST(request: Request, context: { params: Promise<{ provid
 
   const signatureVerified = provider.verifySignature(rawBody, authHeaders);
 
+  // An unverified payload is stored as evidence but never under a delivery id,
+  // as on the WhatsApp and Meta endpoints. Stored under the id it claims, it
+  // would let anyone who learns a MessageID post an unsigned payload naming it,
+  // take the slot in the unique index first, and have the genuine delivery
+  // dropped as a duplicate.
   const inserted = await db
     .insert(webhookEvents)
     .values({
       provider: provider.name,
       channel: 'email',
-      providerEventId: extractProviderEventId(payload),
+      providerEventId: signatureVerified ? extractProviderEventId(payload) : null,
       payload,
       headers,
       signatureVerified,
@@ -92,6 +97,22 @@ export async function POST(request: Request, context: { params: Promise<{ provid
     })
     .returning({ id: webhookEvents.id });
 
+  // Refused before the duplicate check, never after it. Postmark retries any
+  // answer but a 200 or a 403, ten times over about ten hours, so with a wrong
+  // EMAIL_WEBHOOK_SECRET its retry must hear the same refusal as the first
+  // attempt: a 200 `duplicate` here would mark the message delivered, and the
+  // email would be lost even after the secret was corrected.
+  //
+  // 401 rather than the 403 the WhatsApp and Meta endpoints answer, for the
+  // same reason: a 403 tells Postmark to stop retrying, and those retries are
+  // what recover a real email once a misconfigured secret is fixed. A forger's
+  // retries cost only an evidence row each, under a null id that can collide
+  // with nothing.
+  if (!signatureVerified) {
+    console.warn(`[webhook:${provider.name}] stored unverified payload ${inserted[0]?.id}`);
+    return NextResponse.json({ error: 'signature verification failed' }, { status: 401 });
+  }
+
   // Conflict means we already have this delivery; acknowledge so the provider
   // stops retrying, but do not queue it a second time.
   if (inserted.length === 0) {
@@ -99,11 +120,6 @@ export async function POST(request: Request, context: { params: Promise<{ provid
   }
 
   const eventId = inserted[0]!.id;
-
-  if (!signatureVerified) {
-    console.warn(`[webhook:${provider.name}] stored unverified payload ${eventId}`);
-    return NextResponse.json({ error: 'signature verification failed' }, { status: 401 });
-  }
 
   await enqueue(
     'process_webhook',
