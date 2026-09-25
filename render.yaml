@@ -466,6 +466,22 @@ projects:
             envVars:
               - fromGroup: shipblu-shared
               - fromGroup: shipblu-support-production
+              # The per-service exception lib/env.ts describes for this variable,
+              # and the one service that is the case it describes: the 30-second
+              # default is calibrated for a request path, where "a page that has
+              # been waiting thirty seconds has already lost its reader". This
+              # is unattended maintenance with no reader at all, and retention
+              # legitimately scans two tables that grow without bound.
+              #
+              # Set on 2026-09-25 after the cleanup job was cancelled mid-delete
+              # twice in five nights (57014) — see docs/PROJECT-STATE.md §6.68.
+              # Batching the delete is the actual fix and landed with this
+              # comment; this stays as the backstop for the night a batch is
+              # slow anyway, because the failure it prevents is silent and
+              # compounding. Below the `transaction_timeout = '5min'` on the
+              # postgres role deliberately, so which limit fired is legible.
+              - key: DB_QUERY_TIMEOUT_MS
+                value: '180000'
 
       # --------------------------------------------------------------- staging
       - name: Staging
