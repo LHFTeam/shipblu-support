@@ -83,30 +83,36 @@ this plan answers them rather than setting them aside:
 
 ## Tracking
 
-Claim a row before starting it by adding the branch name, and update it when
-the PR opens and when it merges. If a row is claimed and its PR is open, do not
-start another PR on the same files.
+Claim a row before starting it, and update it when the PR opens and when it
+merges. If a row is claimed and its PR is open, do not start another PR on the
+same files. Keep each cell inside its column's current width — `this PR` or a PR
+number, and `open` or `merged` — so an update is a one-line diff: a longer value
+makes Prettier re-pad every row, and two sessions claiming different rows then
+conflict on all of them.
 
 | Stage | Item                                             | Branch / PR | Status  |
 | ----- | ------------------------------------------------ | ----------- | ------- |
-| 0.1   | Commit this plan                                 | this PR     | open    |
-| 0.2   | Harden `server-actions` and minimum-count guards |             | pending |
+| 0.1   | Commit this plan                                 | #166        | merged  |
+| 0.2   | Harden `server-actions` and minimum-count guards | #167        | open    |
 | 0.3   | Split `repo-rules.mjs` into per-rule modules     |             | pending |
 | 0.4   | CI tidy-up                                       |             | pending |
-| 0.5   | Remove Playwright                                |             | pending |
+| 0.5   | Remove Playwright                                | #173        | open    |
 | 1.1   | `lib/testing/` fixtures                          |             | pending |
 | 1.2   | Database test tier                               |             | pending |
 | 1.3   | Characterise the seven ingest entry points       |             | pending |
 | 1.4   | Webhook route tests                              |             | pending |
 | 1.5   | DB test for the admin overview's raw SQL         |             | pending |
-| 2.1   | Email webhook dedupes before it verifies         |             | pending |
-| 2.2   | Portal agent replies bypass `carrierFor()`       |             | pending |
-| 2.3   | Contacts pages cannot scroll                     |             | pending |
-| 2.4   | `PermanentJobError`                              |             | pending |
+| 2.1   | Email webhook dedupes before it verifies         | #168        | open    |
+| 2.2   | Portal agent replies bypass `carrierFor()`       | #169        | open    |
+| 2.3   | Contacts pages cannot scroll                     | #170        | open    |
+| 2.4   | `PermanentJobError`                              | #174        | open    |
 | 2.5   | Ids taken from `FormData`                        |             | pending |
-| 2.6   | KB admin search does not escape LIKE             |             | pending |
-| 2.7   | One `GRAPH_VERSION`                              |             | pending |
+| 2.6   | KB admin search does not escape LIKE             | #176        | open    |
+| 2.7   | One `GRAPH_VERSION`                              | #175        | open    |
 | 2.8   | Fetch timeouts, one provider per PR              |             | pending |
+| 2.9   | Replies never get paragraphs (CRLF)              | #171        | open    |
+| 2.10  | Email webhook fails open without its secret      | #177        | open    |
+| 2.11  | Staging's `local` email webhook accepts anything |             | pending |
 | 3     | Shared primitives (one row per PR as opened)     |             | pending |
 | 4.1   | Split `lib/tickets/queries.ts`                   |             | pending |
 | 4.2   | Shared ingest steps                              |             | pending |
@@ -377,6 +383,36 @@ It is declared four times:
 
 AGENTS.md treats it as one value. Move it to `lib/meta/graph.ts` and import it
 everywhere.
+
+### 2.10 The email webhook fails open without its secret
+
+Found by review of #168, not by the audit. When `EMAIL_WEBHOOK_SECRET` is unset,
+`PostmarkProvider.verifySignature` (`lib/email/providers/postmark.ts`) returns
+`true` with a warning, deliberately — its comment calls that a deployment choice.
+In that configuration none of #168's protection applies: a forged payload is
+stored as verified, under the `MessageID` it claims, and queued to become a
+ticket. WhatsApp fails closed in the same situation.
+
+`docs/PROJECT-STATE.md` §5.1 lists the key as unset. Read the web service's
+environment on Render before sizing this: if it is still unset, the production
+endpoint turns any POST into a ticket. The likely shape is to fail closed when
+`NODE_ENV === 'production'` and keep the development convenience, with a route
+test for each.
+
+Done as #177, stacked on #168, because a late-set secret recovers the refused
+deliveries only when a refused delivery is stored under no id. Render could not
+answer whether the secret is set: its API does not expose values, and its log
+retention starts after the last inbound email (2026-09-03). So #177 names setting
+the secret as a deploy prerequisite rather than assuming either way.
+
+### 2.11 Staging's `local` email webhook accepts anything
+
+Found while doing 2.10. Staging runs `EMAIL_PROVIDER=local`, whose
+`verifySignature` returns `true` on the grounds that "the endpoint is not
+reachable from outside" — which is not true of a Render service. Staging is
+suspended and sends nothing real, so this is low priority; the likely fix is for
+the factory to refuse `local` under `NODE_ENV=production` for inbound, the same
+line #177 draws.
 
 ### 2.8 Fetch timeouts
 
