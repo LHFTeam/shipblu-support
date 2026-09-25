@@ -302,9 +302,16 @@ then dropped as a duplicate.
 
 - **Fix:** store the id only when verified, as WhatsApp
   (`app/api/webhooks/whatsapp/route.ts:85-93`) and Meta already do.
-- **Status code:** the route answers 401 where the other two answer 403.
-  Changing that is a separate commit, made after reading Postmark's retry
-  semantics for each status.
+- **Status code: 401 stays, and that was decided, not deferred.** Postmark's
+  inbound-webhook reference retries anything but a 200 ten times over about
+  ten hours, and stops on a 403. Those retries are what recover a genuine email
+  once a misconfigured `EMAIL_WEBHOOK_SECRET` is corrected, so the email route
+  deliberately differs from the other two. The route's comment says so.
+- **A second consequence of the same ordering.** With a wrong secret,
+  Postmark's retry hit the unique index and was answered `200 duplicate`, so
+  Postmark marked the message delivered and the email was lost even after the
+  secret was fixed. Refusing an unverified delivery before the duplicate check
+  closes that too.
 
 ### 2.2 Portal agent replies bypass `carrierFor()`
 
