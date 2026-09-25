@@ -544,15 +544,14 @@ what a service is actually running before concluding a change is live, and
 before enqueueing a job whose handler only exists in the new code — the running
 worker would take it, find no handler, and kill it.
 
-**Staging is suspended, and the branch it would deploy is not the one this
-repo says.** `render.yaml` pins it to the feature branch
-`claude/shipblu-support-app-03p2we`; the running service says `main`, with
-`autoDeploy: yes` and `autoDeployTrigger: commit` — the only service in the
-project that deploys itself. So the warning this paragraph used to carry, "do
-not assume it tracks `main`", was exactly backwards: the live service does, and
-the blueprint is what is stale. Resuming staging therefore arms an automatic
-deploy of `main` on the next commit, against staging's own database. Read the
-service, not the file, before you resume it. See §6.67.
+**Staging is suspended, tracks `main`, and deploys itself.** The running
+service says `branch: main` and `autoDeployTrigger: commit` — the only service
+in the project that deploys itself — and `render.yaml` now says the same (it
+used to pin a deleted feature branch, which failed every Blueprint sync:
+§6.67, §6.76). Resuming staging therefore arms an automatic deploy of `main` on
+the next commit, against staging's own database. **Do not resume it yet:** it
+links `shipblu-shared`, which today holds the real Meta credentials,
+`TYPESAFE_API_KEY` and `EMAIL_PROVIDER` — see the notes in `render.yaml`.
 
 ### Supabase — org `ihngokrzwjmgpogkecug`
 
@@ -4165,6 +4164,41 @@ null`, and argued it from write cost and 13 MB of disk. The read side turned
     its data directory under the scratchpad dies with "could not stat data
     directory". Keep a local database's data directory somewhere the `postgres`
     user can traverse on its own, or verify against CI's `database` job instead.
+
+76. **The Blueprint had not synced in weeks, and the error named the one
+    service nobody runs.** _2026-09-25._ Every sync failed with
+    `projects[0].environments[1].services[0].branch: branch
+claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
+    feature branch that had been deleted. One unresolvable field fails the
+    whole sync, so none of the six production services had been reconciled
+    against `render.yaml` either, and the file drifted unchecked. §6.67 had
+    already recorded that the running staging service tracks `main`; nothing
+    acted on it because staging was suspended and the failure looked local to
+    it.
+
+    The drift found when the file was re-read against the dashboard was worse
+    than the error. The blueprint generated `APP_SECRET` into `shipblu-shared`,
+    where it does not live — it is in `shipblu-support-production` — so the
+    first successful sync would have minted a second reply-signing key beside
+    the real one, in two groups linked by the same services with no documented
+    tiebreak. It set `EMAIL_PROVIDER=postmark` into production while the live
+    copy is in shared. It put the Freshdesk credentials on the web service,
+    though the importer is a queued job and the dashboard (correctly) has them
+    on the worker. And the Meta credentials and `TYPESAFE_API_KEY` it placed in
+    production so staging could not inherit them are all in `shipblu-shared`,
+    which staging links.
+
+    Fixed by making `render.yaml` describe rather than assert: staging on
+    `main`, every group key listed as a comment with `envVars: []`, the service
+    keys moved to where the dashboard has them, and `autoDeployTrigger` written
+    out to match (quoted `'off'`: bare `off` is YAML 1.1 for `false`). Left for
+    the dashboard, recorded in the file: `KB_PUBLIC_HOST`,
+    `SUPABASE_STORAGE_BUCKET`, `APP_URL` and `EMAIL_PROVIDER` each set in two
+    places; the Meta and TypeSafe keys to move out of shared before staging is
+    resumed; `EMAIL_WEBHOOK_SECRET` set nowhere, so inbound mail is accepted
+    unauthenticated. The lesson is the one §6.67 already taught, from the other
+    side: a Blueprint that cannot sync is not documentation, it is a list of
+    changes queued to land all at once on the day somebody fixes the branch.
 
 ## 7. Verification already done
 

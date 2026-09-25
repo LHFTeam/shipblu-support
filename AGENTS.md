@@ -540,8 +540,9 @@ in its own change.
 
 Four rules hold, and the module is inert until somebody starts it — presence of
 `TYPESAFE_API_KEY` is the flag, the `instagramLoginConfigured()` device, and the
-key lives in `shipblu-support-production` rather than the shared group because the
-job sends real customer text to a third party:
+key belongs in `shipblu-support-production` rather than the shared group because
+the job sends real customer text to a third party. (It is in `shipblu-shared` in
+the dashboard today, which staging links — `render.yaml` records the move owed.)
 
 - **The option list comes from `ticket_categories`, never from `TAXONOMY`.** A
   retired category leaves the rules path at once; if it did not leave the model's
@@ -840,8 +841,9 @@ any **write** — `apply_migration`, write SQL, `update_environment_variables`,
   value now, which rows match, what does the service run today.
 - **Confirm you are pointed at the right target.** Production and staging are
   separate Supabase projects and separate Render services; `docs/PROJECT-STATE.md`
-  §2 has the ids. Staging is suspended and pinned to a feature branch rather
-  than to `main` — check what you are about to deploy.
+  §2 has the ids. Staging is suspended, tracks `main` and deploys itself on
+  commit — and today it inherits production's Meta credentials through
+  `shipblu-shared`, so do not resume it (`render.yaml` has the details).
 - **Know the blast radius.** How many rows does the `WHERE` clause match — run
   it as a `SELECT` first. What breaks if this env var is wrong on the other
   service. Which tables does this migration lock, and is anything holding a
