@@ -888,12 +888,21 @@ function checkNoDomTitleAttribute() {
  * that renders `<InboxShell>` is handing the height to the one component that
  * lays out its own panes — the inbox list and the ticket view scroll inside
  * those. Anything else must say `overflow-y-auto` itself.
+ *
+ * What it checks is presence in the file, not a wrapper on every rendered
+ * branch. A page whose success branch carries the wrapper passes even if an
+ * early return does not — `/inbox/new` returns a bare `p-6` for its two
+ * "not configured" states, which is fine only because each is a single short
+ * message. An early return must stay that short or carry the wrapper too;
+ * following each branch would need a JSX parser, and a regex that pretended to
+ * would be worse than one that says what it does not see.
  */
 function checkConsolePagesScroll() {
   const rule = 'console-scroll';
 
   const pages = scannable.filter(
-    (f) => /^app\/\(console\)\/.*page\.tsx$/.test(f) && !f.startsWith('app/(console)/admin/'),
+    (f) =>
+      /^app\/\(console\)\/(?:.*\/)?page\.tsx$/.test(f) && !f.startsWith('app/(console)/admin/'),
   );
   if (!requireAtLeast(rule, 'app/(console)/', pages.length, 8, 'console pages outside admin/')) {
     return;
