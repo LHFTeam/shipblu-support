@@ -42,9 +42,11 @@ Four things follow from it:
   approved. Why these three were refused is Meta's feedback to answer, not an
   inference to make from this table. The resubmission is the three sections
   written out below, so read the feedback against them.
-- **Human Agent is not in this list.** A feature request is not a permission.
-  Check whether it was part of this submission or is still pending on its own;
-  the 2026-09-06 refusal (§5.2) stands until the dashboard says otherwise.
+- **Human Agent is not in this list, and it is being resubmitted with the three
+  comment permissions.** A feature is not a permission, and it is granted to
+  the app rather than to a token. The 2026-09-06 refusal (§5.2) stands until the
+  dashboard says otherwise. Its section below now carries
+  [the screencast plan](#human-agent--the-screencast) it lacked.
 - **The approved Instagram pair is the Page connection's.** `instagram_basic`
   and `instagram_manage_messages` are granted, but replies go out over the
   direct connection while `INSTAGRAM_ACCESS_TOKEN` is set (the footnote under
@@ -1174,6 +1176,65 @@ these channels and can never carry the tag.
 Without this feature, most researched follow-ups, the ones that took a day to
 establish, cannot be delivered.
 ```
+
+### Human Agent — the screencast
+
+What the reviewer has to see is a person answering between 24 hours and 7 days
+after the customer wrote. Three facts decide how that can be filmed, and none
+of them are obvious from the dashboard:
+
+- **Film it on Instagram, not Messenger.** Freshworks still holds thread control
+  on the Page (`docs/PROJECT-STATE.md` §5.1), so every Messenger send is refused
+  before the tag is even read. The direct Instagram connection is outside the
+  Page's handover protocol and can send today. That is also the connection the
+  09-06 refusal came back on, so it is the connection the feature request has
+  to cover. Check in the dashboard that the request is filed against the
+  Instagram product as well as Messenger; `FEATURES` lists one entry per
+  connection because Meta treats them separately.
+- **The role-holder exemption does not apply.** It covers permissions at
+  Standard Access; a feature is gated before the call is counted
+  (`lib/meta/capabilities.ts`, the note above `FEATURES`). So unlike the comment
+  permissions there is no test call that makes a tagged send succeed before
+  approval. The reel cannot end on a delivered tagged reply, and it must not
+  end on a refused one either.
+- **The conversation has to be over a day old before you start recording**, and
+  it has to be from a real Instagram account messaging ShipBlu's. Have a
+  role-holder send the message at least 25 hours before the recording, and make
+  sure they send nothing else in between. A reply from us leaves the window
+  where it is; another message from them restarts it, and the conversation is
+  back inside 24 hours.
+
+So the reel shows the product behaviour the feature exists for, and the
+reviewer note says plainly where it has to stop:
+
+```
+1. A customer's Instagram message, received more than 24 hours ago, open in
+   the ShipBlu Support console. Above the composer: "Outside the 24-hour
+   window — replies go out tagged as a human agent (… left)".
+2. A ShipBlu support agent, signed in under their own name, types the reply by
+   hand.
+3. For contrast: a conversation more than 7 days old, where the console says
+   "The 7-day window has closed. Only the customer can reopen this
+   conversation." and does not send.
+```
+
+And in the reviewer notes:
+
+```
+Human Agent is the feature this submission requests, so a tagged reply cannot
+be delivered until it is approved: before approval the Instagram API refuses
+it with "To use 'Human Agent', your use of this endpoint must be reviewed and
+approved by Facebook." The screencast therefore shows everything up to the
+send: the window state, a named agent writing the reply by hand, and the two
+places the app refuses to send (after 7 days, and for any automated message
+after 24 hours). The tag is chosen from the author recorded on the message, so
+no automation, template or bulk path can attach it.
+```
+
+The two quoted lines are `describeWindow` in `lib/meta/window.ts`, word for
+word. If either changes, update the shot list with it. The automated-sender cut-off at
+24 hours has nothing to film, which is why it is in the note rather than the
+reel.
 
 ### Business Asset User Profile Access — the two answers
 
