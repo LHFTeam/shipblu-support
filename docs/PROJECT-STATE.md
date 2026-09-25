@@ -814,8 +814,41 @@ real answer to the rule §8 already states — a 200 is not evidence a page rend
 reporting success while every console page hung. The rest of #151 (a second pool
 module with generation retirement and cooldown) is not worth carrying beside the
 deadline instrumentation that landed, and it can fail concurrent database work by
-its own description. Nobody has written the probe as a follow-up anywhere else,
-so it is written here.
+its own description.
+
+~~Nobody has written the probe as a follow-up anywhere else.~~ **Written
+2026-09-25**, carrying #79's `/probe` page forward (#79 was closed as superseded
+the same day). `/api/health` now renders `app/probe/page.tsx` over the loopback,
+alongside `select 1` and inside the same five-second budget, and it passes only
+on the page's marker text. The page answers only a request carrying an HMAC of
+`APP_SECRET`, and 404s any other request before touching the database, so being
+public in `proxy.ts` exposes nothing. It bounds its own `select 1` with the same
+cancellable probe, because the health check aborting its fetch does not stop
+the render. Measured against a local Postgres 16 on a production build:
+
+- healthy, the check answers 200 with `renderMs` beside `dbLatencyMs`;
+- with Postgres frozen (`SIGSTOP`), it answers 503 in 5.0 s and the render gives
+  up at the same moment rather than queueing;
+- once Postgres resumes, the next poll is 200 again.
+
+**The same run confirmed #79's other claim: one web process holds two pools.**
+`db/client.ts` is bundled once for route handlers and once for pages (Turbopack
+puts them in `chunks/` and `chunks/ssr/`), and each copy makes its own
+postgres.js pool on first use. A temporary log line in `getSql()` fired twice in
+one process, once for `/api/health` and once for the first page render. Every
+page shares the second pool; nothing made a third. Three consequences:
+
+- An instance can hold `2 × POOL_MAX` = 20 connections to Supavisor, not 10.
+  Anything that sizes the pooler per instance should count both.
+- `poolPressure()` in `/api/health` describes the **route-handler** pool only.
+  The pool that saturated on 09-08 was the one pages use, and it is not in that
+  block. The render probe is what now covers it, by failing rather than by
+  reporting a number.
+- Sharing one pool through `globalThis` in production, as #79 did, is not the
+  one-line fix it looks like. `instrumented` in `db/client.ts` is a module-local
+  `WeakSet`, so each copy would wrap the shared pool again: two deadline timers
+  per query, and pressure counters split across the copies. Fix the wrapping
+  first, or share the instrumented client rather than the raw pool.
 
 One figure makes #155 more urgent than its own description says: `webhook_events`
 is **402,172 rows and 1006 MB** as of 2026-09-20, against the 206,053 that PR
