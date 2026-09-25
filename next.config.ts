@@ -63,6 +63,21 @@ const nextConfig: NextConfig = {
   // Support tickets contain customer PII; never leak details through error pages.
   poweredByHeader: false,
 
+  /**
+   * Keep `next dev` from writing into AGENTS.md.
+   *
+   * When it detects an AI coding agent — which is how most work on this repo is
+   * done — Next 16.3 appends a managed "agent rules" block to AGENTS.md on
+   * every start, and the block instructs the agent to commit it. AGENTS.md is
+   * this repo's curated instructions, and CLAUDE.md and the Copilot file are
+   * symlinks to it, so every session that ran the dev server was left with a
+   * dirty tree whose easiest resolution was committing text nobody here wrote.
+   * The block points at the version-matched docs in
+   * `node_modules/next/dist/docs/`; if that pointer is wanted, it belongs in
+   * AGENTS.md in the team's own words.
+   */
+  agentRules: false,
+
   async headers() {
     return [
       {
