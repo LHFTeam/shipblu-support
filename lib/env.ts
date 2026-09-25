@@ -168,8 +168,9 @@ const schema = z.object({
   /**
    * Password half of the Basic Auth credential on the inbound webhook URL.
    * Postmark does not sign inbound payloads, so this is the whole of the
-   * authentication — an unset value leaves the endpoint open, which the driver
-   * warns about loudly rather than failing closed on.
+   * authentication — and without it the Postmark driver refuses every inbound
+   * delivery rather than accepting them all. Optional here only because the
+   * services that never receive mail do not need it.
    */
   EMAIL_WEBHOOK_SECRET: z.string().optional(),
   /** Envelope sender, e.g. support@shipblu.com */

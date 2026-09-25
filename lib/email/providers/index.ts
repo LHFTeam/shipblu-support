@@ -32,7 +32,14 @@ export function emailProvider(): EmailProvider {
     }
     case 'local':
     default:
-      cached = new LocalEmailProvider();
+      cached = new LocalEmailProvider({
+        // Every web service in `render.yaml` sets NODE_ENV=production, and
+        // `next dev` never does — the line between an endpoint anyone can post
+        // to and one on a laptop. `local` is also the schema default, so a
+        // deploy that lost EMAIL_PROVIDER lands here and must not take a
+        // forged post for a customer's email either.
+        acceptInbound: e.NODE_ENV !== 'production',
+      });
       break;
   }
 

@@ -34,7 +34,11 @@ vi.mock('@/lib/queue', () => ({ enqueue }));
 
 let verified = true;
 vi.mock('@/lib/email/providers', () => ({
-  emailProvider: () => ({ name: 'postmark', verifySignature: () => verified }),
+  emailProvider: () => ({
+    name: 'postmark',
+    verifySignature: () =>
+      verified ? { verified: true } : { verified: false, reason: 'did not match' },
+  }),
 }));
 
 vi.mock('@/lib/webhooks/log', () => ({ logIncomingWebhook: () => {} }));
@@ -67,6 +71,7 @@ describe('POST /api/webhooks/email/[provider]', () => {
     expect(response.status).toBe(200);
     expect(writes[0]?.providerEventId).toBe(MESSAGE_ID);
     expect(writes[0]?.signatureVerified).toBe(true);
+    expect(writes[0]?.error).toBeNull();
     expect(enqueue).toHaveBeenCalledTimes(1);
   });
 
@@ -92,6 +97,7 @@ describe('POST /api/webhooks/email/[provider]', () => {
 
     expect(writes[0]?.providerEventId).toBeNull();
     expect(writes[0]?.signatureVerified).toBe(false);
+    expect(writes[0]?.error).toBe('did not match');
     expect(response.status).toBe(401);
     expect(enqueue).not.toHaveBeenCalled();
   });

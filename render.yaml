@@ -304,6 +304,8 @@ projects:
               # Only the web service receives inbound webhooks, so the Basic
               # Auth password Postmark presents lives here rather than in the
               # group — a secret with one consumer belongs on its one consumer.
+              # Required: without it the Postmark driver refuses every inbound
+              # email rather than accepting every one.
               - key: EMAIL_WEBHOOK_SECRET
                 sync: false
               # Freshdesk credentials are read only by the knowledge base

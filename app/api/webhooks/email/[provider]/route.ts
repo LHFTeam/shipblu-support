@@ -75,7 +75,8 @@ export async function POST(request: Request, context: { params: Promise<{ provid
     authHeaders[key.toLowerCase()] = value;
   });
 
-  const signatureVerified = provider.verifySignature(rawBody, authHeaders);
+  const verdict = provider.verifySignature(rawBody, authHeaders);
+  const signatureVerified = verdict.verified;
 
   // An unverified payload is stored as evidence but never under a delivery id,
   // as on the WhatsApp and Meta endpoints. Stored under the id it claims, it
@@ -91,6 +92,10 @@ export async function POST(request: Request, context: { params: Promise<{ provid
       payload,
       headers,
       signatureVerified,
+      // Why it was refused, on the row: a missing secret and a forgery both
+      // arrive as unverified, and the console line that tells them apart is
+      // gone once Render's log retention passes it.
+      error: verdict.verified ? null : verdict.reason,
     })
     .onConflictDoNothing({
       target: [webhookEvents.provider, webhookEvents.providerEventId],

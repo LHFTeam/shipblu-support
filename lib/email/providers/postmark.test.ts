@@ -1,30 +1,91 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PostmarkEmailProvider } from './postmark';
 
 const provider = new PostmarkEmailProvider('token', 'webhook-secret-value');
 
-function basicAuth(password: string): Record<string, string> {
-  return { authorization: `Basic ${Buffer.from(`user:${password}`).toString('base64')}` };
+function basicAuth(password: string, user = 'user'): Record<string, string> {
+  return { authorization: `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}` };
 }
+
+const refused = (reason: RegExp) => ({ verified: false, reason: expect.stringMatching(reason) });
+
+beforeEach(() => {
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+});
 
 describe('PostmarkEmailProvider.verifySignature', () => {
   it('accepts the configured secret', () => {
-    expect(provider.verifySignature('{}', basicAuth('webhook-secret-value'))).toBe(true);
+    expect(provider.verifySignature('{}', basicAuth('webhook-secret-value'))).toEqual({
+      verified: true,
+    });
   });
 
-  it('rejects a wrong secret', () => {
-    expect(provider.verifySignature('{}', basicAuth('wrong-secret-value'))).toBe(false);
+  it('rejects a wrong secret, and says so', () => {
+    expect(provider.verifySignature('{}', basicAuth('wrong-secret-value'))).toEqual(
+      refused(/did not match EMAIL_WEBHOOK_SECRET/),
+    );
   });
 
   it('rejects a missing or malformed header', () => {
-    expect(provider.verifySignature('{}', {})).toBe(false);
-    expect(provider.verifySignature('{}', { authorization: 'Bearer abc' })).toBe(false);
+    expect(provider.verifySignature('{}', {})).toEqual(refused(/no Basic Auth/));
+    expect(provider.verifySignature('{}', { authorization: 'Bearer abc' })).toEqual(
+      refused(/no Basic Auth/),
+    );
   });
 
   it('rejects a secret of a different length without throwing', () => {
     // timingSafeEqual throws on length mismatch, so this must be guarded.
     expect(() => provider.verifySignature('{}', basicAuth('short'))).not.toThrow();
-    expect(provider.verifySignature('{}', basicAuth('short'))).toBe(false);
+    expect(provider.verifySignature('{}', basicAuth('short')).verified).toBe(false);
+  });
+
+  /**
+   * A credential is `user:password`. Reading everything after `indexOf(':') + 1`
+   * treated a token with no colon as all password, so the bare secret, encoded
+   * on its own, authenticated.
+   */
+  it('rejects a credential with no password half, even when it is the secret itself', () => {
+    const bare = {
+      authorization: `Basic ${Buffer.from('webhook-secret-value').toString('base64')}`,
+    };
+    expect(provider.verifySignature('{}', bare)).toEqual(refused(/has no password/));
+  });
+
+  it('reads the scheme case-insensitively, as RFC 7617 says it is', () => {
+    const lower = {
+      authorization: basicAuth('webhook-secret-value').authorization!.replace('Basic', 'basic'),
+    };
+    expect(provider.verifySignature('{}', lower)).toEqual({ verified: true });
+  });
+});
+
+/**
+ * An unset secret used to mean "accept everything", with a warning, so a
+ * deploy that lost the variable took forged mail for customer mail and said so
+ * only in a log line. It now refuses everywhere — the answer WhatsApp and Meta
+ * give an empty app secret — and says why on the row it stores.
+ */
+describe('PostmarkEmailProvider.verifySignature without a secret', () => {
+  it('refuses every delivery, whatever it presents', () => {
+    const unset = new PostmarkEmailProvider('token', undefined);
+
+    expect(unset.verifySignature('{}', {})).toEqual(refused(/EMAIL_WEBHOOK_SECRET is not set/));
+    expect(unset.verifySignature('{}', basicAuth('anything'))).toEqual(
+      refused(/EMAIL_WEBHOOK_SECRET is not set/),
+    );
+  });
+
+  /**
+   * An empty secret is one anyone can match: `user:` decodes to an empty
+   * password, and two zero-length buffers compare equal. So a blank value on
+   * Render has to count as unset, not as a secret.
+   */
+  it('treats an empty value as unset, because an empty password would match it', () => {
+    const blank = new PostmarkEmailProvider('token', '');
+
+    expect(blank.verifySignature('{}', basicAuth(''))).toEqual(
+      refused(/EMAIL_WEBHOOK_SECRET is not set/),
+    );
   });
 });
 

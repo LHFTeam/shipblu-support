@@ -1052,7 +1052,7 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   re-run it if the parser ever learns to read a shape it currently skips. §7 has
   the figures.
 - **Unset config:** `EMAIL_API_KEY`, `EMAIL_FROM_ADDRESS`, `EMAIL_REPLY_DOMAIN`,
-  `EMAIL_WEBHOOK_SECRET`, `WIDGET_ALLOWED_ORIGINS`, `WIDGET_IDENTITY_SECRET`.
+  `WIDGET_ALLOWED_ORIGINS`, `WIDGET_IDENTITY_SECRET`.
 
   **The last two are what stands between the widget and the merchant
   dashboard.** Measured 2026-08-31: `https://shipblu-support.onrender.com/widget`
@@ -1063,6 +1063,22 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   softer half: without it the dashboard can still say who its visitor is and the
   agent still sees a name, an address and a phone — the claim just never gets to
   link the person to their shipping account.
+
+  **`EMAIL_WEBHOOK_SECRET` is required, not optional, from #177, and was set on
+  the web service on 2026-09-25.** Unset, the Postmark driver used to accept
+  every inbound email as verified; it now refuses every one with a 401 and
+  stores the refusal with its reason in `webhook_events.error`. The value was on
+  this list until the owner set it; Render's API does not show values, so the
+  confirmation is theirs, not a reading. It has two halves that must agree: the
+  variable on the service, and the Basic Auth password in Postmark's inbound
+  webhook URL. The running service picks the variable up on its next deploy —
+  Render recorded no environment-triggered deploy or restart after the 13:22
+  UTC deploy that day. If the two halves ever disagree, Postmark retries each
+  401 for about ten hours, and correcting both inside that window should let the
+  retries through; whether a retry already scheduled uses a URL changed after
+  it was scheduled has not been observed. Nothing replays a refused row by
+  itself — `process_webhook` skips unverified rows — so a delivery that exhausts
+  its retries needs replaying by hand.
 
   **`KB_PUBLIC_HOST` was on this list and should not have been. It is set, to
   `support.shipblu.com`, and that domain still serves Freshdesk.** Measured
