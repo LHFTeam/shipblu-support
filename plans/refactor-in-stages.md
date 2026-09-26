@@ -120,6 +120,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 3.2   | Email helpers: `buildReferences`, escaper name   | #198        | merged  |
 | 3.3   | Shared constants: `TEAM_TIME_ZONE`               | #199        | merged  |
 | 3.4   | Shared constants: proxy regex from `LOCALES`     | #200        | merged  |
+| 3.5   | Constant-time compares through `safeEqual`       | #219        | open    |
 | 4.1   | Split `lib/tickets/queries.ts`                   |             | pending |
 | 4.2   | Shared ingest steps                              |             | pending |
 | 4.3   | Meta Graph transport                             |             | pending |
