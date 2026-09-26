@@ -621,7 +621,12 @@ stay explicit at the call site:
 - the side-conversation token is resolved before `resolveContact`;
 - `whatsapp_bot` skips `afterInboundMessage`;
 - Meta comment threads;
-- the `greatest()` in `interactionWindowSet`.
+- the `greatest()` in `interactionWindowSet`;
+- whether a message reopens at all, and what it records. Email leaves a resolved
+  ticket, the customer clock and the next-response timer alone for an
+  autoresponder (#227), and the widget records `visitor_replied` where every
+  other path says `customer_replied`. So `reopenResolved` takes the actor and
+  the reason, and each caller keeps its own decision about whether to call it.
 
 ### 4.3 The Meta Graph transport
 
