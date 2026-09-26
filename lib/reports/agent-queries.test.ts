@@ -14,11 +14,12 @@ import {
   resolvedPerHour,
 } from './agent-queries';
 import { rangeIn } from './rollup';
+import { cairo } from '@/lib/testing/time';
 
 const CAIRO = 'Africa/Cairo';
 
 function at(time: string, day = '2026-08-20'): Date {
-  return DateTime.fromISO(`${day}T${time}`, { zone: CAIRO }).toJSDate();
+  return cairo(`${day}T${time}`);
 }
 
 describe('occupancy', () => {

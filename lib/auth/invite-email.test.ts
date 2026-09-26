@@ -1,16 +1,11 @@
-import { DateTime } from 'luxon';
 import { describe, expect, it } from 'vitest';
+import { cairo } from '@/lib/testing/time';
 import { formatDateTime } from '@/lib/format';
 import { inviteEmail } from './invite-email';
 
 // Not `URL` — that shadows the global constructor for the whole module, so the
 // next case that wants to parse the link gets a TypeError instead.
 const INVITE_URL = 'https://support.shipblu.com/invite/JqL0-9_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789';
-
-/** Cairo wall-clock in, so the timezone database does the conversion. */
-function cairo(iso: string): Date {
-  return DateTime.fromISO(iso, { zone: 'Africa/Cairo' }).toJSDate();
-}
 
 const EXPIRES = cairo('2026-09-10T14:30');
 

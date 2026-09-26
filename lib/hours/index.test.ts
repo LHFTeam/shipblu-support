@@ -1,5 +1,5 @@
-import { DateTime } from 'luxon';
 import { describe, expect, it } from 'vitest';
+import { cairo as at, inCairo } from '@/lib/testing/time';
 import type { WeeklySchedule } from '@/db/schema/config';
 import {
   addBusinessMinutes,
@@ -23,27 +23,6 @@ const CAIRO: WeeklySchedule = {
 };
 
 const config: HoursConfig = { schedule: CAIRO, timezone: 'Africa/Cairo' };
-
-/**
- * Builds an instant from Cairo wall-clock time.
- *
- * Deliberately not hand-converted to UTC in the test. Egypt reinstated summer
- * time in 2023, so Cairo is UTC+2 in winter and UTC+3 in summer — writing the
- * offsets by hand is how a test ends up asserting the wrong thing and passing
- * against a bug. Letting the timezone database do it means these read as the
- * team's own hours.
- */
-function at(iso: string): Date {
-  const dt = DateTime.fromISO(iso, { zone: 'Africa/Cairo' });
-  if (!dt.isValid) throw new Error(`bad test date: ${iso}`);
-  return dt.toJSDate();
-}
-
-/** The inverse, for asserting on a returned instant in Cairo terms. */
-function inCairo(date: Date | null | undefined): string | null {
-  if (!date) return null;
-  return DateTime.fromJSDate(date, { zone: 'Africa/Cairo' }).toFormat("yyyy-MM-dd'T'HH:mm");
-}
 
 // 2026-08-17 is a Monday; 2026-08-21 a Friday; 2026-08-23 a Sunday.
 
@@ -302,9 +281,7 @@ describe('holidayName', () => {
 
     // 00:30 Cairo on the holiday is 22:30 UTC the day before: the date that
     // decides this is the local one, or a holiday starts two hours late.
-    const justAfterMidnight = DateTime.fromISO('2026-03-22T00:30', {
-      zone: 'Africa/Cairo',
-    }).toJSDate();
+    const justAfterMidnight = at('2026-03-22T00:30');
 
     expect(holidayName(holidayOn(config, justAfterMidnight), 'ar')).toBe('عيد الفطر');
   });

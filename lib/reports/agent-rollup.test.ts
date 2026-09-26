@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { DateTime } from 'luxon';
 import type { HoursConfig } from '@/lib/hours';
+import { cairo, inCairo } from '@/lib/testing/time';
 import { attributeReopen, emptyDay, shiftWindow, withActivity } from './agent-rollup';
 
 const CAIRO = 'Africa/Cairo';
@@ -22,7 +22,7 @@ function schedule(overrides: Partial<HoursConfig> = {}): HoursConfig {
 }
 
 function on(day: string): Date {
-  return DateTime.fromISO(`${day}T00:00`, { zone: CAIRO }).toJSDate();
+  return cairo(`${day}T00:00`);
 }
 
 /** 2026-08-20 is a Thursday; 2026-08-21 a Friday, which this schedule is shut. */
@@ -34,8 +34,8 @@ describe('shiftWindow', () => {
     const shift = shiftWindow([schedule()], on(THURSDAY));
 
     expect(shift).not.toBeNull();
-    expect(DateTime.fromJSDate(shift!.start, { zone: CAIRO }).toFormat('HH:mm')).toBe('09:00');
-    expect(DateTime.fromJSDate(shift!.end, { zone: CAIRO }).toFormat('HH:mm')).toBe('17:00');
+    expect(inCairo(shift!.start)).toBe(`${THURSDAY}T09:00`);
+    expect(inCairo(shift!.end)).toBe(`${THURSDAY}T17:00`);
   });
 
   it('is null on a day the schedule is closed', () => {
@@ -61,8 +61,8 @@ describe('shiftWindow', () => {
     });
 
     const shift = shiftWindow([split], on(THURSDAY));
-    expect(DateTime.fromJSDate(shift!.start, { zone: CAIRO }).toFormat('HH:mm')).toBe('09:00');
-    expect(DateTime.fromJSDate(shift!.end, { zone: CAIRO }).toFormat('HH:mm')).toBe('18:00');
+    expect(inCairo(shift!.start)).toBe(`${THURSDAY}T09:00`);
+    expect(inCairo(shift!.end)).toBe(`${THURSDAY}T18:00`);
   });
 
   it('takes the earliest opening when an agent is in several groups', () => {
@@ -73,7 +73,7 @@ describe('shiftWindow', () => {
     });
 
     const shift = shiftWindow([schedule(), early], on(THURSDAY));
-    expect(DateTime.fromJSDate(shift!.start, { zone: CAIRO }).toFormat('HH:mm')).toBe('08:00');
+    expect(inCairo(shift!.start)).toBe(`${THURSDAY}T08:00`);
   });
 
   it('ignores a group with no schedule at all', () => {
