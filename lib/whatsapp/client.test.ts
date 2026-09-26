@@ -1,7 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetEnvCache } from '@/lib/env';
 import { STALLED_AFTER_MS } from '@/lib/queue';
-import { WhatsAppApiError, downloadMedia, getMediaUrl, listTemplates, sendText } from './client';
+import { graphTimeout } from '@/lib/meta/graph';
+import {
+  WhatsAppApiError,
+  downloadMedia,
+  getMediaUrl,
+  listTemplates,
+  mediaTimeout,
+  sendText,
+} from './client';
 import { ACCESS_TOKEN_CODE } from './errors';
 
 /**
@@ -222,8 +230,30 @@ describe('WhatsApp deadlines', () => {
     expect(timeout).toHaveBeenCalledWith(expected);
   });
 
+  /**
+   * Computed from the deadlines the calls actually get, so raising the largest
+   * size or the per-MB allowance fails here rather than in a reclaimed job.
+   */
   it('leaves the storage upload after the largest download half the reclaim window', () => {
-    expect(110_000).toBeLessThanOrEqual(STALLED_AFTER_MS / 2);
+    const lookupAndDownload = graphTimeout('GET') + mediaTimeout(null);
+
+    expect(mediaTimeout(null)).toBe(mediaTimeout(100 * 1024 * 1024));
+    expect(lookupAndDownload).toBeLessThanOrEqual(STALLED_AFTER_MS / 2);
+  });
+
+  it('releases the connection a refused download holds', async () => {
+    const cancel = vi.fn(() => Promise.resolve());
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        const response = new Response('denied', { status: 403 });
+        Object.defineProperty(response, 'body', { value: { cancel } });
+        return response;
+      }),
+    );
+
+    await expect(downloadMedia('https://lookaside.fbsbx.com/1')).rejects.toThrow(/\(403\)/);
+    expect(cancel).toHaveBeenCalledOnce();
   });
 
   /**

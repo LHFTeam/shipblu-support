@@ -363,10 +363,15 @@ const LARGEST_MEDIA_BYTES = 100 * 1024 * 1024;
  * when the job died; scaled rather than simply raised, because a small image
  * that stalls should still be noticed in a minute. A size Meta did not report
  * gets the largest file's budget, the one guess that cannot fail a real file.
- * The largest is 110 seconds, and with the storage upload that follows it —
- * sized the same way — the job stays well inside `STALLED_AFTER_MS`.
+ *
+ * The largest is 110 seconds, so the lookup and the download together leave at
+ * least half of `STALLED_AFTER_MS` to the storage upload that follows. That
+ * upload is bounded by `uploadObject`, not here, and only once `lib/storage`
+ * carries its own deadline (row 2.8's storage PR, sized by this same rule): a
+ * `fetch` with no signal waits five minutes, the whole window, and a job
+ * reclaimed mid-upload runs twice and writes a second attachment row.
  */
-function mediaTimeout(sizeBytes: number | null | undefined): number {
+export function mediaTimeout(sizeBytes: number | null | undefined): number {
   const bytes = sizeBytes ?? LARGEST_MEDIA_BYTES;
   return 60_000 + Math.ceil(bytes / (2 * 1024 * 1024)) * 1000;
 }
@@ -390,6 +395,10 @@ export async function downloadMedia(
   );
 
   if (!response.ok) {
+    // Nothing reads a refusal's body, and one left unread holds the connection
+    // until it is collected. Released here, and its failure ignored: the
+    // status is the answer.
+    await response.body?.cancel().catch(() => {});
     throw new WhatsAppApiError(
       `Media download failed (${response.status})`,
       response.status,
