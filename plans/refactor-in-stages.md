@@ -114,10 +114,10 @@ conflict on all of them.
 | 2.10  | Email webhook fails open without its secret      | #177        | merged  |
 | 2.11  | Staging's `local` email webhook accepts anything | #177        | merged  |
 | 3     | Shared primitives (one row per PR as opened)     |             | pending |
-| 3.1   | Queue helper: `hasActiveJob(type)`               | #197        | open    |
-| 3.2   | Email helpers: `buildReferences`, escaper name   | #198        | open    |
-| 3.3   | Shared constants: `TEAM_TIME_ZONE`               | #199        | open    |
-| 3.4   | Shared constants: proxy regex from `LOCALES`     | #200        | open    |
+| 3.1   | Queue helper: `hasActiveJob(type)`               | #197        | merged  |
+| 3.2   | Email helpers: `buildReferences`, escaper name   | #198        | merged  |
+| 3.3   | Shared constants: `TEAM_TIME_ZONE`               | #199        | merged  |
+| 3.4   | Shared constants: proxy regex from `LOCALES`     | #200        | merged  |
 | 4.1   | Split `lib/tickets/queries.ts`                   |             | pending |
 | 4.2   | Shared ingest steps                              |             | pending |
 | 4.3   | Meta Graph transport                             |             | pending |
