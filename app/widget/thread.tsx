@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Locale } from '@/lib/kb/locale';
 import { parseVisitorDetails } from '@/lib/widget/contact';
 import type { WidgetCopy } from './copy';
-import type { ArticleLink, Message } from './types';
+import type { ArticleLink, Message } from '@/lib/widget/types';
 
 /**
  * The conversation itself.

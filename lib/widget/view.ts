@@ -8,7 +8,7 @@
  * who is hardest to reproduce by hand — who hits it.
  */
 
-export type { WidgetView } from '@/app/widget/types';
+export type { WidgetView } from './types';
 
 /**
  * Home unless there is a conversation to come back to.
