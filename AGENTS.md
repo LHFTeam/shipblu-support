@@ -102,11 +102,13 @@ deliberately; if a build fails with
 `Cannot read properties of null (reading 'useContext')`, check the environment,
 not the React version.
 
-`scripts/ci/repo-rules.mjs` is where the conventions that used to be prose in
-this file now live — the env-var catalogue, the job registry, the `db/sql`
-rules, the confinement of the delivery payload, and the rest. Each check carries
-the reason it exists. If one of them is wrong, change it there and say why in
-the same commit; do not add your call site to an exemption list.
+`scripts/ci/repo-rules.mjs` runs the conventions that used to be prose in this
+file — the env-var catalogue, the job registry, the `db/sql` rules, the
+confinement of the delivery payload, and the rest. Each lives in its own module
+under `scripts/ci/rules/`, named as the violation labels it, and carries the
+reason it exists; what they share is `scripts/ci/lib.mjs`. If one of them is
+wrong, change it there and say why in the same commit; do not add your call site
+to an exemption list.
 
 `knip` gates **dependency hygiene and nothing else** — `dependencies`,
 `devDependencies`, `optionalPeerDependencies`, `unlisted`, `unresolved` and
@@ -916,5 +918,6 @@ that changed, a trap that cost you an hour — update this file or
 Edit `AGENTS.md`; CI fails if either becomes a copy.
 
 If what you learned is mechanical — a shape two files have to share, a name that
-has to match — prefer a check in `scripts/ci/repo-rules.mjs` over a paragraph
-here. A rule in prose is enforced by whoever last read the prose.
+has to match — prefer a check in `scripts/ci/rules/`, registered in
+`scripts/ci/repo-rules.mjs`, over a paragraph here. A rule in prose is enforced
+by whoever last read the prose.
