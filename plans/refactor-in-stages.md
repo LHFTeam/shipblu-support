@@ -117,6 +117,7 @@ conflict on all of them.
 | 3.1   | Queue helper: `hasActiveJob(type)`               | #197        | open    |
 | 3.2   | Email helpers: `buildReferences`, escaper name   | #198        | open    |
 | 3.3   | Shared constants: `TEAM_TIME_ZONE`               | #199        | open    |
+| 3.4   | Shared constants: proxy regex from `LOCALES`     | #200        | open    |
 | 4.1   | Split `lib/tickets/queries.ts`                   |             | pending |
 | 4.2   | Shared ingest steps                              |             | pending |
 | 4.3   | Meta Graph transport                             |             | pending |
