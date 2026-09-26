@@ -129,7 +129,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 3.10  | HTTP helpers: `readJsonBody`                     | #230            | open    |
 | 3.11  | Vocabulary: priorities, categories, roles        | #231            | open    |
 | 4.1   | Split `lib/tickets/queries.ts`                   | #224            | open    |
-| 4.2   | Shared ingest steps                              |                 | pending |
+| 4.2   | Shared ingest steps                              | #232            | open    |
 | 4.3   | Meta Graph transport                             | #228            | open    |
 | 4.4   | Worker: typed payloads, backfill, KB import      |                 | pending |
 | ⛳    | Gate: check in with the requester                |                 | pending |
