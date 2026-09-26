@@ -98,7 +98,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 0.3   | Split `repo-rules.mjs` into per-rule modules     | #191–#192   | merged  |
 | 0.4   | CI tidy-up                                       | #193–#195   | merged  |
 | 0.5   | Remove Playwright                                | #173        | merged  |
-| 1.1   | `lib/testing/` fixtures                          |             | pending |
+| 1.1   | `lib/testing/` fixtures                          | #208        | open    |
 | 1.2   | Database test tier                               |             | pending |
 | 1.3   | Characterise the seven ingest entry points       |             | pending |
 | 1.4   | Webhook route tests                              | #196        | merged  |
@@ -114,7 +114,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 2.9   | Replies never get paragraphs (CRLF)              | #171        | merged  |
 | 2.10  | Email webhook fails open without its secret      | #177        | merged  |
 | 2.11  | Staging's `local` email webhook accepts anything | #177        | merged  |
-| 0–2   | Follow-ups to the reviews of #187–#196           | #203, #205  | open    |
+| 0–2   | Follow-ups to the reviews of #187–#196           | #203, #205  | merged  |
 | 3     | Shared primitives (one row per PR as opened)     |             | open    |
 | 3.1   | Queue helper: `hasActiveJob(type)`               | #197        | merged  |
 | 3.2   | Email helpers: `buildReferences`, escaper name   | #198        | merged  |
