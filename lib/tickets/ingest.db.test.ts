@@ -10,6 +10,7 @@ import {
   jobs,
   messages,
   sideConversationMessages,
+  slaPolicies,
   sideConversations,
   ticketStatuses,
 } from '@/db/schema';
@@ -25,10 +26,10 @@ import { ingestInboundEmail } from './ingest';
  * a refactor is the refactor changing behaviour — decide whether that was meant
  * before touching the expectation.
  *
- * Against the seeded baseline only: no email channel, no SLA policy, no
- * auto-response. So a new ticket has no channel or group, and nothing lands in
- * `jobs` — the lifecycle's enqueues all wait on configuration this database
- * does not have. The categoriser is the one consumer that always writes.
+ * Against the seeded baseline only: no email channel, no SLA policy (the one
+ * test about the SLA clock adds its own), no auto-response. So a new ticket has
+ * no channel or group, and nothing lands in `jobs` — the lifecycle's enqueues
+ * all wait on configuration this database does not have. The categoriser is the one consumer that always writes.
  */
 
 withCleanDatabase();
@@ -73,6 +74,7 @@ async function conversation(id: string) {
       resolvedByAgentId: conversations.resolvedByAgentId,
       lastMessageAt: conversations.lastMessageAt,
       lastCustomerMessageAt: conversations.lastCustomerMessageAt,
+      nextResponseDueAt: conversations.nextResponseDueAt,
     })
     .from(conversations)
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
@@ -146,6 +148,8 @@ describe('ingestInboundEmail', () => {
       resolvedByAgentId: null,
       lastMessageAt: RECEIVED,
       lastCustomerMessageAt: RECEIVED,
+      // No SLA policy in the baseline, so no clock.
+      nextResponseDueAt: null,
     });
 
     expect(await messagesOf(result.conversationId)).toMatchObject([
@@ -179,11 +183,10 @@ describe('ingestInboundEmail', () => {
     expect((await conversation(result.conversationId)).isSpam).toBe(true);
   });
 
-  // Recorded, not endorsed: the insert's comment says "a bounce or
-  // autoresponder is filed but kept out of the working queue", but `isSpam` is
-  // set from `isBounce` alone. An out-of-office opens a normal, open ticket in
-  // the queue; only the verdict on the message says it was automated.
-  it('files an RFC 3834 auto-reply on the working queue, unlike a bounce', async () => {
+  // Kept out of the working queue as a bounce is: only an autoresponder writes
+  // `Auto-Submitted: auto-replied`, and a ticket nobody needs to answer is noise
+  // an agent has to open and close.
+  it('files an RFC 3834 auto-reply off the working queue, as it does a bounce', async () => {
     const result = await ingested(
       email({
         subject: 'Automatic reply: Where is my parcel?',
@@ -199,7 +202,7 @@ describe('ingestInboundEmail', () => {
     expect(await conversation(result.conversationId)).toMatchObject({
       subject: 'Automatic reply: Where is my parcel?',
       status: 'Open',
-      isSpam: false,
+      isSpam: true,
     });
     expect(await messagesOf(result.conversationId)).toMatchObject([
       {
@@ -207,9 +210,24 @@ describe('ingestInboundEmail', () => {
           automationReason: 'auto_submitted:auto-replied',
           isAutomated: true,
           isBounce: false,
+          isAutoReply: true,
         },
       },
     ]);
+  });
+
+  // The weaker signals stop our own auto-response and nothing else: a person can
+  // sit behind a mailing list or a notifications@ address.
+  it('leaves automated mail that is not an auto-reply on the working queue', async () => {
+    const result = await ingested(
+      email({
+        from: { address: 'notifications@customer.example' },
+        headers: { 'auto-submitted': 'auto-generated', 'list-id': '<ops.customer.example>' },
+      }),
+    );
+
+    expect(result.automationReason).toBe('auto_submitted:auto-generated');
+    expect((await conversation(result.conversationId)).isSpam).toBe(false);
   });
 
   // An empty subject and one that is nothing but reply prefixes both strip to
@@ -462,6 +480,90 @@ describe('ingestInboundEmail', () => {
           data: { reason: 'customer_replied', resolvedBy: agent?.id },
         },
       ]);
+    });
+
+    // The out-of-office answering an agent's closing reply is the common case:
+    // it threads, it is stored, and it neither reopens the ticket nor counts a
+    // reopen against whoever resolved it.
+    it('stores an auto-reply on a resolved ticket and leaves it resolved', async () => {
+      const first = await ingested(email());
+      const resolvedAt = new Date('2026-09-20T10:30:00Z');
+      await setStatus(first.conversationId, 'Resolved', { resolvedAt });
+
+      const reply = await ingested(
+        email({
+          messageId: 'ooo@customer.example',
+          references: ['first@customer.example'],
+          subject: 'Automatic reply: Where is my parcel?',
+          textBody: 'I am out of the office until Sunday.',
+          headers: { 'auto-submitted': 'auto-replied' },
+          receivedAt: later,
+        }),
+      );
+
+      expect(reply).toMatchObject({
+        conversationId: first.conversationId,
+        createdConversation: false,
+      });
+      expect(await conversation(first.conversationId)).toMatchObject({
+        status: 'Resolved',
+        reopenCount: 0,
+        resolvedAt,
+        lastMessageAt: later,
+        // The customer last wrote before the ticket was resolved.
+        lastCustomerMessageAt: RECEIVED,
+      });
+      expect((await eventsOf(first.conversationId)).map((e) => e.type)).not.toContain('reopened');
+      expect((await messagesOf(first.conversationId)).map((m) => m.channelMessageId)).toEqual([
+        'first@customer.example',
+        'ooo@customer.example',
+      ]);
+    });
+
+    // An agent who had answered would otherwise owe a reply to a mail server.
+    // The human reply after it is the control: the same setup does move the
+    // clock, so the first assertion is not passing for want of a policy.
+    it('does not restart the next-response clock on an auto-reply', async () => {
+      const first = await ingested(email());
+      const target = { firstResponseMins: 60, nextResponseMins: 60, resolutionMins: 1440 };
+      const [policy] = await db
+        .insert(slaPolicies)
+        .values({
+          name: 'every hour',
+          hoursSource: 'round_the_clock',
+          targets: { low: target, medium: target, high: target, urgent: target },
+        })
+        .returning({ id: slaPolicies.id });
+      await db
+        .update(conversations)
+        .set({ slaPolicyId: policy?.id, firstRespondedAt: new Date('2026-09-20T10:15:00Z') })
+        .where(eq(conversations.id, first.conversationId));
+
+      await ingested(
+        email({
+          messageId: 'ooo@customer.example',
+          references: ['first@customer.example'],
+          headers: { 'x-autoreply': 'yes' },
+          receivedAt: later,
+        }),
+      );
+      expect(await conversation(first.conversationId)).toMatchObject({
+        nextResponseDueAt: null,
+        lastCustomerMessageAt: RECEIVED,
+      });
+
+      const human = new Date('2026-09-20T12:00:00Z');
+      await ingested(
+        email({
+          messageId: 'second@customer.example',
+          references: ['first@customer.example'],
+          receivedAt: human,
+        }),
+      );
+      expect(await conversation(first.conversationId)).toMatchObject({
+        nextResponseDueAt: new Date('2026-09-20T13:00:00Z'),
+        lastCustomerMessageAt: human,
+      });
     });
 
     // Recorded, not endorsed: only `resolved` reopens, so a reply to a closed

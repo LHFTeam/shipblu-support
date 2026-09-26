@@ -24,6 +24,7 @@ describe('classifyAutomation', () => {
     expect(v).toEqual({
       isAutomated: false,
       isBounce: false,
+      isAutoReply: false,
       shouldAutoReply: true,
       reason: null,
     });
@@ -107,6 +108,73 @@ describe('classifyAutomation', () => {
     for (const c of cases) {
       expect(classifyAutomation(email(c)).shouldAutoReply).toBe(false);
     }
+  });
+});
+
+describe('classifyAutomation: isAutoReply', () => {
+  // Ingest keeps an auto-reply from reopening a ticket or joining the queue, so
+  // a wrong yes hides a real customer. Only the signals that mean "an
+  // autoresponder wrote this" count.
+  it.each([
+    ['Auto-Submitted: auto-replied', { 'auto-submitted': 'auto-replied' }],
+    ['Auto-Submitted in capitals', { 'auto-submitted': ' Auto-Replied ' }],
+    ['X-Autoreply', { 'x-autoreply': 'yes' }],
+    ['X-Autorespond', { 'x-autorespond': '1' }],
+    ['Precedence: auto_reply', { precedence: 'auto_reply' }],
+    // The chain stops at auto-generated; the vendor header beside it still counts.
+    [
+      'X-Autoreply behind Auto-Submitted: auto-generated',
+      {
+        'auto-submitted': 'auto-generated',
+        'x-autoreply': 'yes',
+      },
+    ],
+  ])('is an auto-reply on %s', (_label, headers) => {
+    const v = classifyAutomation(email({ headers }));
+    expect(v.isAutoReply).toBe(true);
+    expect(v.isAutomated).toBe(true);
+  });
+
+  // Each of these is automated — our autoresponder stays quiet — but none says
+  // an autoresponder wrote the mail, and a person can be behind every one.
+  it.each([
+    ['Auto-Submitted: auto-generated', email({ headers: { 'auto-submitted': 'auto-generated' } })],
+    ['X-Auto-Response-Suppress', email({ headers: { 'x-auto-response-suppress': 'All' } })],
+    ['Precedence: bulk', email({ headers: { precedence: 'bulk' } })],
+    ['a mailing list', email({ headers: { 'list-id': '<x.list.example>' } })],
+    ['a no-reply sender', email({ from: { address: 'no-reply@vendor.com' } })],
+  ])('is automated but not an auto-reply on %s', (_label, mail) => {
+    const v = classifyAutomation(mail);
+    expect(v.isAutomated).toBe(true);
+    expect(v.isAutoReply).toBe(false);
+  });
+
+  // The chain ignores an empty vendor header, so the flag must too. Otherwise the
+  // mail is an auto-reply that still allows our acknowledgement: ingest keeps it
+  // from reopening a resolved ticket, and the acknowledgement then answers it.
+  it.each([['X-Autoreply'], ['X-Autorespond']])(
+    'ignores an empty %s, as the chain does',
+    (name) => {
+      const v = classifyAutomation(email({ headers: { [name.toLowerCase()]: '' } }));
+      expect(v).toMatchObject({ isAutomated: false, isAutoReply: false, shouldAutoReply: true });
+    },
+  );
+
+  it('is not an auto-reply on Auto-Submitted: no, or on an ordinary email', () => {
+    expect(classifyAutomation(email({ headers: { 'auto-submitted': 'no' } })).isAutoReply).toBe(
+      false,
+    );
+    expect(classifyAutomation(email()).isAutoReply).toBe(false);
+  });
+
+  // A bounce is the automated mail an agent does need to see, so it keeps its
+  // own handling even when it also carries an autoresponder header.
+  it('never calls a bounce an auto-reply', () => {
+    const v = classifyAutomation(
+      email({ headers: { 'return-path': '<>', 'auto-submitted': 'auto-replied' } }),
+    );
+    expect(v.isBounce).toBe(true);
+    expect(v.isAutoReply).toBe(false);
   });
 });
 

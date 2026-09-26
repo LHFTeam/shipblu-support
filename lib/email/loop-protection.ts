@@ -19,6 +19,12 @@ export type AutomationVerdict = {
   isAutomated: boolean;
   /** A delivery failure report. */
   isBounce: boolean;
+  /**
+   * An autoresponder answering a person — out of office, "we got your mail" —
+   * on a signal that exists for nothing else. Narrower than `isAutomated` on
+   * purpose; see `isAutoReplyHeader`.
+   */
+  isAutoReply: boolean;
   /** False whenever isAutomated or isBounce is true. Never override this. */
   shouldAutoReply: boolean;
   /** Which signal fired, recorded on the message for diagnosis. */
@@ -38,6 +44,29 @@ const AUTOMATED_LOCAL_PARTS = [
   'notification',
 ];
 
+/**
+ * The headers that say "an autoresponder wrote this", and nothing broader.
+ *
+ * `isAutomated` answers "must we not auto-reply?", where a wrong yes costs
+ * nothing, so it also takes mailing lists, `X-Auto-Response-Suppress` (a
+ * request not to be answered, not a statement of who wrote the mail) and
+ * guesses from a `no-reply@` sender. Ingest uses `isAutoReply` to keep a
+ * message from reopening a ticket or joining the working queue, where a wrong
+ * yes hides a real customer — so it takes only the RFC 3834 value for an
+ * autoresponder and the two vendor headers that mean the same. An
+ * autoresponder that sets none of them is missed, and lands as it did before.
+ */
+function isAutoReplyHeader(email: ParsedInboundEmail): boolean {
+  return (
+    header(email, 'auto-submitted')?.trim().toLowerCase() === 'auto-replied' ||
+    // Truthy, not merely present: the chain below reads these the same way, so
+    // an empty `X-Autoreply:` is neither automated nor an auto-reply.
+    Boolean(header(email, 'x-autoreply')) ||
+    Boolean(header(email, 'x-autorespond')) ||
+    header(email, 'precedence')?.trim().toLowerCase() === 'auto_reply'
+  );
+}
+
 /** Precedence values that mark bulk or automated mail. */
 const BULK_PRECEDENCE = ['bulk', 'junk', 'list', 'auto_reply'];
 
@@ -46,6 +75,15 @@ function header(email: ParsedInboundEmail, name: string): string | undefined {
 }
 
 export function classifyAutomation(email: ParsedInboundEmail): AutomationVerdict {
+  // Read apart from the chain below, which stops at the first signal: an
+  // `Auto-Submitted: auto-generated` with `X-Autoreply` beside it is still an
+  // autoresponder. A bounce is never one — it is kept as the failure it
+  // reports, which is the one automated mail an agent needs to see. And an
+  // auto-reply is always automated: ingest skips the reopen for one, and the
+  // acknowledgement code assumes it never runs on a resolved ticket, so an
+  // auto-reply that still allowed `shouldAutoReply` would answer a finished one.
+  const autoReply = isAutoReplyHeader(email);
+
   const verdict = (
     reason: string | null,
     flags: { automated?: boolean; bounce?: boolean } = {},
@@ -55,6 +93,7 @@ export function classifyAutomation(email: ParsedInboundEmail): AutomationVerdict
     return {
       isAutomated,
       isBounce,
+      isAutoReply: autoReply && isAutomated && !isBounce,
       shouldAutoReply: !isAutomated && !isBounce,
       reason,
     };

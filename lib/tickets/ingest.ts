@@ -131,8 +131,11 @@ export async function ingestInboundEmail(email: ParsedInboundEmail): Promise<Ing
       conversationNumber = existingConversation.number;
 
       // A reply to a resolved ticket reopens it — otherwise a customer's
-      // follow-up disappears from every agent's open queue.
-      if (existingConversation.statusCategory === 'resolved') {
+      // follow-up disappears from every agent's open queue. An autoresponder
+      // does not: the out-of-office answering the agent's closing reply would
+      // put a finished ticket back in the queue and count a reopen against
+      // whoever resolved it. It is still stored below, on the timeline.
+      if (existingConversation.statusCategory === 'resolved' && !automation.isAutoReply) {
         const reopenTo = await defaultOpenStatusId(tx);
         if (reopenTo) {
           // `resolvedByAgentId` is deliberately not cleared here, so it survives
@@ -176,7 +179,7 @@ export async function ingestInboundEmail(email: ParsedInboundEmail): Promise<Ing
           requesterContactId: contactId,
           groupId: emailChannel?.defaultGroupId ?? null,
           // A bounce or autoresponder is filed but kept out of the working queue.
-          isSpam: automation.isBounce,
+          isSpam: automation.isBounce || automation.isAutoReply,
           lastMessageAt: email.receivedAt,
           lastCustomerMessageAt: email.receivedAt,
         })
@@ -208,6 +211,7 @@ export async function ingestInboundEmail(email: ParsedInboundEmail): Promise<Ing
           automationReason: automation.reason,
           isAutomated: automation.isAutomated,
           isBounce: automation.isBounce,
+          isAutoReply: automation.isAutoReply,
           strippedBy: body.strippedBy,
           spfPass: email.spfPass,
           spamScore: email.spamScore,
@@ -218,9 +222,17 @@ export async function ingestInboundEmail(email: ParsedInboundEmail): Promise<Ing
 
     const messageId = insertedMessage[0]!.id;
 
+    // An autoresponder is not the customer writing, so on a ticket that already
+    // exists it does not move the time the customer last wrote — only the time
+    // anything last arrived. A new ticket from one keeps the insert's value: it
+    // is filed as spam, which the reports and the portal leave out.
     await tx
       .update(conversations)
-      .set({ lastMessageAt: email.receivedAt, lastCustomerMessageAt: email.receivedAt })
+      .set(
+        automation.isAutoReply
+          ? { lastMessageAt: email.receivedAt }
+          : { lastMessageAt: email.receivedAt, lastCustomerMessageAt: email.receivedAt },
+      )
       .where(eq(conversations.id, conversationId));
 
     return { conversationId, conversationNumber, messageId, createdConversation };
@@ -238,7 +250,9 @@ export async function ingestInboundEmail(email: ParsedInboundEmail): Promise<Ing
     direction: 'inbound',
   });
 
-  await afterInboundMessage(result.conversationId, result.createdConversation, email.receivedAt);
+  await afterInboundMessage(result.conversationId, result.createdConversation, email.receivedAt, {
+    autoReply: automation.isAutoReply,
+  });
 
   return {
     ...result,

@@ -50,6 +50,7 @@ export async function afterInboundMessage(
   conversationId: string,
   createdConversation: boolean,
   at: Date = new Date(),
+  options: { autoReply?: boolean } = {},
 ): Promise<void> {
   if (createdConversation) {
     await runAutomations('on_create', conversationId);
@@ -59,7 +60,10 @@ export async function afterInboundMessage(
     return;
   }
 
-  await onCustomerReply(conversationId, at);
+  // An out-of-office asks nothing of the team, so it does not restart the
+  // next-response clock: an agent who had answered would otherwise owe a reply
+  // to the customer's mail server, and breach on it.
+  if (!options.autoReply) await onCustomerReply(conversationId, at);
   await runAutomations('on_update', conversationId);
   await autoAssign(conversationId);
   await maybeSendAutoResponse(conversationId);
