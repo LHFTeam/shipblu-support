@@ -18,6 +18,7 @@ import { resetEnvCache } from '@/lib/env';
  */
 
 const writes: Record<string, unknown>[] = [];
+const conflictTargets: unknown[] = [];
 let conflict = false;
 
 vi.mock('@/db/client', () => ({
@@ -26,9 +27,10 @@ vi.mock('@/db/client', () => ({
       values: (values: Record<string, unknown>) => {
         writes.push(values);
         return {
-          onConflictDoNothing: () => ({
-            returning: async () => (conflict ? [] : [{ id: 'event-1' }]),
-          }),
+          onConflictDoNothing: ({ target }: { target: unknown }) => {
+            conflictTargets.push(target);
+            return { returning: async () => (conflict ? [] : [{ id: 'event-1' }]) };
+          },
         };
       },
     }),
@@ -40,6 +42,8 @@ vi.mock('@/lib/queue', () => ({ enqueue }));
 vi.mock('@/lib/webhooks/log', () => ({ logIncomingWebhook: () => {} }));
 
 const { GET, POST } = await import('./route');
+const { webhookEvents } = await import('@/db/schema');
+const { resetVerifyingSecretNotice } = await import('@/lib/meta/signing');
 
 const PAGE_SECRET = 'page-app-secret';
 const INSTAGRAM_SECRET = 'instagram-login-secret';
@@ -61,6 +65,7 @@ function deliver(payload: unknown, secret: string | null) {
   const headers: Record<string, string> = {
     'content-type': 'application/json',
     authorization: 'Bearer private',
+    cookie: 'session=private',
   };
   if (secret) headers['x-hub-signature-256'] = sign(body, secret);
   return POST(
@@ -80,8 +85,12 @@ beforeEach(() => {
   delete process.env.META_INSTAGRAM_APP_SECRET;
   resetEnvCache();
   writes.length = 0;
+  conflictTargets.length = 0;
   conflict = false;
   enqueue.mockClear();
+  // The once-per-secret notice is module state; without this, which test
+  // logged first would decide what the others see.
+  resetVerifyingSecretNotice();
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   vi.spyOn(console, 'log').mockImplementation(() => {});
 });
@@ -105,6 +114,20 @@ describe('the subscription handshake', () => {
     expect(accepted.status).toBe(200);
     expect(await accepted.text()).toBe('42');
     expect((await handshake('guess')).status).toBe(403);
+  });
+
+  it('says it is not configured rather than refusing, when there is no token', async () => {
+    delete process.env.META_VERIFY_TOKEN;
+    resetEnvCache();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const response = await GET(
+      new Request(
+        'https://support.example/api/webhooks/meta?hub.mode=subscribe&hub.verify_token=verify-me&hub.challenge=42',
+      ),
+    );
+
+    expect(response.status).toBe(500);
   });
 });
 
@@ -138,10 +161,12 @@ describe('a signed delivery', () => {
           channel,
           connection,
           providerEventId: `${connection}|m:m_1`,
+          payload: message(object),
           signatureVerified: true,
           error: null,
         }),
       ]);
+      expect(conflictTargets).toEqual([[webhookEvents.provider, webhookEvents.providerEventId]]);
       expect(enqueue).toHaveBeenCalledWith(
         'process_webhook',
         { webhookEventId: 'event-1' },
@@ -160,6 +185,28 @@ describe('a signed delivery', () => {
     expect(writes[0]).toMatchObject({ connection: 'instagram_login', signatureVerified: true });
   });
 
+  it('tries the legacy name too when both are set to different values', async () => {
+    process.env.META_INSTAGRAM_APP_SECRET = 'legacy-instagram-secret';
+    resetEnvCache();
+
+    await deliver(message('instagram'), 'legacy-instagram-secret');
+
+    expect(writes[0]).toMatchObject({ connection: 'instagram_login', signatureVerified: true });
+  });
+
+  /**
+   * The signature covers the bytes Meta sent, which are not what
+   * `JSON.stringify` would produce from the parsed object.
+   */
+  it('verifies the bytes as sent, not the payload re-serialised', async () => {
+    const raw = '{ "entry": [], "object": "page" }';
+
+    const response = await deliver(raw, PAGE_SECRET);
+
+    expect(response.status).toBe(200);
+    expect(writes[0]).toMatchObject({ signatureVerified: true, payload: JSON.parse(raw) });
+  });
+
   it('does not accept the Instagram secret on a Page delivery', async () => {
     const response = await deliver(message('page'), INSTAGRAM_SECRET);
 
@@ -176,6 +223,7 @@ describe('a signed delivery', () => {
     const headers = writes[0]!.headers as Record<string, string>;
     expect(headers['x-hub-signature-256']).toMatch(/^sha256=/);
     expect(headers).not.toHaveProperty('authorization');
+    expect(headers).not.toHaveProperty('cookie');
   });
 
   it('answers a redelivery 200, so Meta stops, and queues nothing', async () => {

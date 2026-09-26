@@ -15,6 +15,7 @@ import { resetEnvCache } from '@/lib/env';
  */
 
 const writes: Record<string, unknown>[] = [];
+const conflictTargets: unknown[] = [];
 let conflict = false;
 
 vi.mock('@/db/client', () => ({
@@ -23,9 +24,10 @@ vi.mock('@/db/client', () => ({
       values: (values: Record<string, unknown>) => {
         writes.push(values);
         return {
-          onConflictDoNothing: () => ({
-            returning: async () => (conflict ? [] : [{ id: 'event-1' }]),
-          }),
+          onConflictDoNothing: ({ target }: { target: unknown }) => {
+            conflictTargets.push(target);
+            return { returning: async () => (conflict ? [] : [{ id: 'event-1' }]) };
+          },
         };
       },
     }),
@@ -37,10 +39,13 @@ vi.mock('@/lib/queue', () => ({ enqueue }));
 vi.mock('@/lib/webhooks/log', () => ({ logIncomingWebhook: () => {} }));
 
 const { GET, POST } = await import('./route');
+const { webhookEvents } = await import('@/db/schema');
 
 const SECRET = 'whatsapp-app-secret';
 const ORIGINAL_ENV = process.env;
 
+// Out of order within a kind, and with an echo, so the id has to be sorted and
+// has to count all three kinds.
 const BATCH = {
   object: 'whatsapp_business_account',
   entry: [
@@ -48,7 +53,8 @@ const BATCH = {
       changes: [
         {
           value: {
-            messages: [{ id: 'wamid.B' }],
+            messages: [{ id: 'wamid.Z' }, { id: 'wamid.M' }],
+            message_echoes: [{ id: 'wamid.E' }],
             statuses: [{ id: 'wamid.A', status: 'delivered' }],
           },
         },
@@ -68,6 +74,7 @@ function deliver(
   const body = typeof payload === 'string' ? payload : JSON.stringify(payload);
   const headers: Record<string, string> = {
     'content-type': 'application/json',
+    authorization: 'Bearer private',
     cookie: 'session=private',
   };
   if (signature) headers['x-hub-signature-256'] = signature;
@@ -127,7 +134,7 @@ describe('the subscription handshake', () => {
 });
 
 describe('a signed delivery', () => {
-  it('is stored under an id built from every wamid in the batch, and queued', async () => {
+  it('is stored whole, under an id built from every wamid in the batch, and queued', async () => {
     const response = await deliver();
 
     expect(response.status).toBe(200);
@@ -135,10 +142,13 @@ describe('a signed delivery', () => {
     expect(writes).toEqual([
       expect.objectContaining({
         provider: 'whatsapp',
-        providerEventId: 'm:wamid.B|s:wamid.A:delivered',
+        channel: 'whatsapp',
+        providerEventId: 'e:wamid.E|m:wamid.M|m:wamid.Z|s:wamid.A:delivered',
+        payload: BATCH,
         signatureVerified: true,
       }),
     ]);
+    expect(conflictTargets).toEqual([[webhookEvents.provider, webhookEvents.providerEventId]]);
     expect(enqueue).toHaveBeenCalledWith(
       'process_webhook',
       { webhookEventId: 'event-1' },
@@ -152,6 +162,21 @@ describe('a signed delivery', () => {
     const headers = writes[0]!.headers as Record<string, string>;
     expect(headers['x-hub-signature-256']).toMatch(/^sha256=/);
     expect(headers).not.toHaveProperty('cookie');
+    expect(headers).not.toHaveProperty('authorization');
+  });
+
+  /**
+   * The signature covers the bytes Meta sent, which are not what
+   * `JSON.stringify` would produce from the parsed object. A route verifying a
+   * re-serialised body would refuse every real delivery.
+   */
+  it('verifies the bytes as sent, not the payload re-serialised', async () => {
+    const raw = '{ "entry": [], "object": "whatsapp_business_account" }';
+
+    const response = await deliver(raw, sign(raw));
+
+    expect(response.status).toBe(200);
+    expect(writes[0]).toMatchObject({ signatureVerified: true, payload: JSON.parse(raw) });
   });
 
   it('stores an empty batch under no id, so it cannot collide', async () => {
