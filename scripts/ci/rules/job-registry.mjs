@@ -1,4 +1,4 @@
-import { fail, read, requireAtLeast } from '../lib.mjs';
+import { fail, jobTypes, read, requireAtLeast } from '../lib.mjs';
 
 // ---------------------------------------------------------------------------
 // The job registry
@@ -17,15 +17,13 @@ import { fail, read, requireAtLeast } from '../lib.mjs';
 // ---------------------------------------------------------------------------
 export function checkJobRegistry() {
   const rule = 'job-registry';
-  const queue = read('lib/queue/index.ts');
   const registry = read('worker/handlers/index.ts');
 
-  const union = queue.match(/export type JobType =([\s\S]*?);/);
-  if (!union) {
+  const types = jobTypes();
+  if (!types) {
     fail(rule, 'lib/queue/index.ts', 'could not find the JobType union');
     return;
   }
-  const types = [...union[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
   if (
     !requireAtLeast(rule, 'lib/queue/index.ts', types.length, 10, 'job types in the JobType union')
   ) {

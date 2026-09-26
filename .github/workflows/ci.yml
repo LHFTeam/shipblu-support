@@ -221,28 +221,20 @@ jobs:
       # `operator does not exist: text = channel` is raised. That is the class of
       # failure this job exists for.
       #
-      # Only jobs that need neither network nor credentials are listed.
-      # check_meta_permissions and import_freshdesk_kb are deliberately absent:
-      # both fail on a missing credential before reaching any SQL.
+      # Which jobs, and why each of the others is left out, is
+      # scripts/ci/db-jobs.txt; the `db-jobs` rule holds it to the JobType
+      # union, so a new job type cannot be missed here without failing CI.
       - name: Job handlers execute their SQL
         run: |
           set -euo pipefail
-          for job in \
-            cleanup \
-            sla_sweep \
-            presence_sweep \
-            assign_sweep \
-            run_time_automations \
-            snapshot_backlog \
-            rollup_metrics \
-            sync_whatsapp_templates \
-            "backfill_meta_profiles limit=1" \
-            "backfill_shipment_links limit=1" \
-            "backfill_message_locations limit=1" \
-            "normalise_kb_formatting dryRun=true" \
-            "backfill_categorise_ai dryRun=true limit=1"
-          do
+          mapfile -t jobs < <(sed -n 's/^run: //p' scripts/ci/db-jobs.txt)
+          # `set -e` does not see a failure inside `< <(...)`: a missing list
+          # would run nothing and pass. repo-rules catches that too, but this
+          # step should not be the one that goes green.
+          [ "${#jobs[@]}" -gt 0 ] || { echo "no jobs read from scripts/ci/db-jobs.txt"; exit 1; }
+          for job in "${jobs[@]}"; do
             echo "::group::npm run job -- $job"
+            # Unquoted on purpose: a line's key=value arguments are separate words.
             npm run job -- $job
             echo "::endgroup::"
           done

@@ -23,6 +23,7 @@ import { fail, failures } from './lib.mjs';
 import { checkEnvParity } from './rules/env-parity.mjs';
 import { checkRenderGroups } from './rules/render-groups.mjs';
 import { checkJobRegistry } from './rules/job-registry.mjs';
+import { checkDbJobs } from './rules/db-jobs.mjs';
 import { checkPostMigrationSql } from './rules/db-sql.mjs';
 import { checkNoForceRls } from './rules/force-rls.mjs';
 import { checkShipmentPayloadConfinement } from './rules/shipment-payload.mjs';
@@ -50,6 +51,7 @@ const RULES = [
   ['env-parity', checkEnvParity],
   ['render-groups', checkRenderGroups],
   ['job-registry', checkJobRegistry],
+  ['db-jobs', checkDbJobs],
   // ---------------------------------------------------------------------------
   // SQL that Drizzle does not write
   //
