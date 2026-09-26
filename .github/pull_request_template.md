@@ -21,7 +21,7 @@ against. Say plainly what you could NOT verify (a live provider, a real
 forwarding list, an origin that is not localhost).
 -->
 
-- [ ] `npx tsc --noEmit && npx eslint . && npx vitest run && npm run build`
+- [ ] `npm run typecheck && npm run lint && npm run test && npm run build`
 - [ ] A test covers this where the bug would actually hide, or there is nothing
       to test and the description says why
 

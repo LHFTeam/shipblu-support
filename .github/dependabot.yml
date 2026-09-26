@@ -1,0 +1,12 @@
+# Keeps the actions pinned in .github/workflows current, one grouped pull
+# request a week. GitHub Actions only, as row 0.4 of plans/refactor-in-stages.md
+# scopes it: automating npm updates is a separate decision.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
