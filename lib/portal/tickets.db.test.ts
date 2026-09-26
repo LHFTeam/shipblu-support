@@ -2,11 +2,13 @@ import { asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import {
+  agents,
   contacts,
   conversationEvents,
   conversations,
   groups,
   messages,
+  ticketForms,
   ticketStatuses,
 } from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
@@ -46,6 +48,8 @@ async function conversation(id: string) {
       customFields: conversations.customFields,
       requesterContactId: conversations.requesterContactId,
       reopenCount: conversations.reopenCount,
+      resolvedAt: conversations.resolvedAt,
+      resolvedByAgentId: conversations.resolvedByAgentId,
       lastMessageAt: conversations.lastMessageAt,
       lastCustomerMessageAt: conversations.lastCustomerMessageAt,
     })
@@ -64,7 +68,7 @@ async function messagesOf(conversationId: string) {
     .orderBy(asc(messages.createdAt));
 }
 
-async function setStatus(conversationId: string, name: string) {
+async function setStatus(conversationId: string, name: string, extra = {}) {
   const [status] = await db
     .select({ id: ticketStatuses.id })
     .from(ticketStatuses)
@@ -72,8 +76,22 @@ async function setStatus(conversationId: string, name: string) {
   if (!status) throw new Error(`no status ${name}`);
   await db
     .update(conversations)
-    .set({ statusId: status.id })
+    .set({ statusId: status.id, ...extra })
     .where(eq(conversations.id, conversationId));
+}
+
+/** Resolves a ticket the way an agent does: status, time and who. */
+async function resolveAsAgent(conversationId: string): Promise<string> {
+  const [agent] = await db
+    .insert(agents)
+    .values({ name: 'Omar', email: 'omar@shipblu.test' })
+    .returning({ id: agents.id });
+  if (!agent) throw new Error('no agent');
+  await setStatus(conversationId, 'Resolved', {
+    resolvedAt: new Date('2026-09-20T10:30:00Z'),
+    resolvedByAgentId: agent.id,
+  });
+  return agent.id;
 }
 
 describe('createTicket', () => {
@@ -116,9 +134,11 @@ describe('createTicket', () => {
       deliveryStatus: 'delivered',
     });
 
+    // One clock for the whole write: the message and both conversation stamps.
     const at = message?.createdAt.getTime() ?? 0;
     expect(at).toBeGreaterThanOrEqual(before);
     expect(at).toBeLessThanOrEqual(after);
+    expect(message?.deliveredAt?.getTime()).toBe(at);
     expect(ticket.lastMessageAt?.getTime()).toBe(at);
     expect(ticket.lastCustomerMessageAt?.getTime()).toBe(at);
 
@@ -132,10 +152,15 @@ describe('createTicket', () => {
   it('takes what a form presets', async () => {
     const contactId = await customer();
     const [group] = await db.insert(groups).values({ name: 'Claims' }).returning({ id: groups.id });
+    const [form] = await db
+      .insert(ticketForms)
+      .values({ slug: 'claims' })
+      .returning({ id: ticketForms.id });
 
     const created = await createTicket(contactId, {
       subject: 'Claim',
       body: 'Please refund.',
+      formId: form?.id,
       groupId: group?.id,
       priority: 'high',
       type: 'claim',
@@ -144,6 +169,7 @@ describe('createTicket', () => {
     });
 
     expect(await conversation(created.conversationId)).toMatchObject({
+      formId: form?.id,
       groupId: group?.id,
       priority: 'high',
       type: 'claim',
@@ -171,23 +197,25 @@ describe('appendReply', () => {
     );
   });
 
-  it('reopens a resolved ticket', async () => {
+  it('reopens a resolved ticket, naming who resolved it', async () => {
     const contactId = await customer();
     const created = await createTicket(contactId, { subject: 'Parcel damaged', body: 'Crushed.' });
-    await setStatus(created.conversationId, 'Resolved');
+    const resolver = await resolveAsAgent(created.conversationId);
 
     expect(await appendReply(contactId, created.number, 'Not fixed.')).toEqual({ ok: true });
 
     expect(await conversation(created.conversationId)).toMatchObject({
       status: 'Open',
       reopenCount: 1,
+      resolvedAt: null,
+      resolvedByAgentId: resolver,
     });
     const reopened = await db
       .select({ actorLabel: conversationEvents.actorLabel, data: conversationEvents.data })
       .from(conversationEvents)
       .where(eq(conversationEvents.type, 'reopened'));
     expect(reopened).toEqual([
-      { actorLabel: 'portal', data: { reason: 'customer_replied', resolvedBy: null } },
+      { actorLabel: 'portal', data: { reason: 'customer_replied', resolvedBy: resolver } },
     ]);
   });
 

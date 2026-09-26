@@ -1,7 +1,14 @@
 import { asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
-import { contacts, conversationEvents, conversations, messages, ticketStatuses } from '@/db/schema';
+import {
+  agents,
+  contacts,
+  conversationEvents,
+  conversations,
+  messages,
+  ticketStatuses,
+} from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { appendVisitorMessage } from './conversation';
 
@@ -32,6 +39,8 @@ async function conversation(id: string) {
       status: ticketStatuses.name,
       requesterContactId: conversations.requesterContactId,
       reopenCount: conversations.reopenCount,
+      resolvedAt: conversations.resolvedAt,
+      resolvedByAgentId: conversations.resolvedByAgentId,
       lastMessageAt: conversations.lastMessageAt,
       lastCustomerMessageAt: conversations.lastCustomerMessageAt,
     })
@@ -50,7 +59,7 @@ async function messagesOf(conversationId: string) {
     .orderBy(asc(messages.createdAt));
 }
 
-async function setStatus(conversationId: string, name: string) {
+async function setStatus(conversationId: string, name: string, extra = {}) {
   const [status] = await db
     .select({ id: ticketStatuses.id })
     .from(ticketStatuses)
@@ -58,8 +67,22 @@ async function setStatus(conversationId: string, name: string) {
   if (!status) throw new Error(`no status ${name}`);
   await db
     .update(conversations)
-    .set({ statusId: status.id })
+    .set({ statusId: status.id, ...extra })
     .where(eq(conversations.id, conversationId));
+}
+
+/** Resolves a ticket the way an agent does: status, time and who. */
+async function resolveAsAgent(conversationId: string): Promise<string> {
+  const [agent] = await db
+    .insert(agents)
+    .values({ name: 'Omar', email: 'omar@shipblu.test' })
+    .returning({ id: agents.id });
+  if (!agent) throw new Error('no agent');
+  await setStatus(conversationId, 'Resolved', {
+    resolvedAt: new Date('2026-09-20T10:30:00Z'),
+    resolvedByAgentId: agent.id,
+  });
+  return agent.id;
 }
 
 describe('appendVisitorMessage', () => {
@@ -139,13 +162,16 @@ describe('appendVisitorMessage', () => {
   it('reopens a resolved chat, with its own reason on the event', async () => {
     const contactId = await visitor();
     const first = await appendVisitorMessage(contactId, 'Hello');
-    await setStatus(first.conversationId, 'Resolved');
+    const resolver = await resolveAsAgent(first.conversationId);
 
     await appendVisitorMessage(contactId, 'One more thing');
 
     expect(await conversation(first.conversationId)).toMatchObject({
       status: 'Open',
       reopenCount: 1,
+      resolvedAt: null,
+      // Left for the event to read, as the email path leaves it.
+      resolvedByAgentId: resolver,
     });
     const reopened = await db
       .select({ actorLabel: conversationEvents.actorLabel, data: conversationEvents.data })
@@ -153,7 +179,7 @@ describe('appendVisitorMessage', () => {
       .where(eq(conversationEvents.type, 'reopened'));
     // `visitor_replied`, where every other path says `customer_replied`.
     expect(reopened).toEqual([
-      { actorLabel: 'webchat', data: { reason: 'visitor_replied', resolvedBy: null } },
+      { actorLabel: 'webchat', data: { reason: 'visitor_replied', resolvedBy: resolver } },
     ]);
   });
 
