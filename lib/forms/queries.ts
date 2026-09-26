@@ -2,7 +2,7 @@ import { and, asc, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { ticketForms } from '@/db/schema';
 import type { TicketFieldDef } from '@/lib/tickets/custom-fields';
-import { listTicketFields } from '@/lib/tickets/queries';
+import { listTicketFields } from '@/lib/tickets/lookups';
 import { parseFormElements, type FormElement } from './elements';
 import { formName } from './naming';
 

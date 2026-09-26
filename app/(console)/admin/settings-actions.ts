@@ -41,7 +41,7 @@ import { formsUsingField } from '@/lib/forms/queries';
 import { slugify } from '@/lib/kb/slug';
 import { parseCondition } from '@/lib/rules/conditions';
 import { parseOptionLines, type TicketFieldDef } from '@/lib/tickets/custom-fields';
-import { listAllTicketFields } from '@/lib/tickets/queries';
+import { listAllTicketFields } from '@/lib/tickets/lookups';
 import { PHRASE_GROUPS } from '@/lib/shipments/status';
 import { parseTokenEnvVar } from '@/lib/whatsapp/accounts';
 import { validatePolicy } from '@/lib/presence/idle';

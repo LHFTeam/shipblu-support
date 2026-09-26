@@ -1,5 +1,6 @@
 import { getSessionAgent } from '@/lib/auth/session';
-import { listInbox, parseFilters, parseInboxCursor } from '@/lib/tickets/queries';
+import { listInbox } from '@/lib/tickets/inbox';
+import { parseFilters, parseInboxCursor } from '@/lib/tickets/inbox-filters';
 
 export const dynamic = 'force-dynamic';
 

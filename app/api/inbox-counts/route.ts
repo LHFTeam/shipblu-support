@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSessionAgent } from '@/lib/auth/session';
-import { inboxCounts } from '@/lib/tickets/queries';
+import { inboxCounts } from '@/lib/tickets/inbox';
 
 export const dynamic = 'force-dynamic';
 

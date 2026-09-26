@@ -10,7 +10,7 @@ import {
   getShippingAccountBySbid,
   shipmentsForSbid,
 } from '@/lib/shipments/queries';
-import { scopeForAgent } from '@/lib/tickets/queries';
+import { scopeForAgent } from '@/lib/tickets/visibility';
 import { ConversationTable } from '../../conversation-table';
 import { SyncBadge } from '../../page';
 

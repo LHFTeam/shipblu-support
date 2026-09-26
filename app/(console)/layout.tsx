@@ -6,7 +6,7 @@ import { requireAgent } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
 import { warningLeadMs } from '@/lib/presence/idle';
 import { loadPresencePolicy } from '@/lib/presence/policy';
-import { inboxCounts } from '@/lib/tickets/queries';
+import { inboxCounts } from '@/lib/tickets/inbox';
 import { initials } from '@/lib/format';
 import { AvailabilitySwitch } from './availability';
 import { Rail, type NavItem } from './nav';

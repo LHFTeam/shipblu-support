@@ -10,15 +10,15 @@ import { seedTerms } from '@/lib/kb/seed';
 import { requestBaseUrl } from '@/lib/kb/site';
 import { categoryOptions, rootCauseOptions } from '@/lib/categorise/queries';
 import { listSideConversationRecipients } from '@/lib/side-conversations/queries';
+import { getConversation } from '@/lib/tickets/conversation';
 import {
-  getConversation,
   listActiveAgents,
   listApprovedTemplates,
   listCannedResponses,
   listGroups,
   listStatuses,
   listTicketFields,
-} from '@/lib/tickets/queries';
+} from '@/lib/tickets/lookups';
 import { readOnlyReason } from '@/lib/tickets/channel-policy';
 import { accountIdForConversation } from '@/lib/whatsapp/conversation';
 import { InboxShell } from '../shell';

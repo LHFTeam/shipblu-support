@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { InboxFilters, InboxRow } from './queries';
+import type { InboxRow } from './inbox';
+import type { InboxFilters } from './inbox-filters';
 import {
   forgetInboxPosition,
   inboxSignature,

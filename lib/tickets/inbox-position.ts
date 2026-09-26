@@ -1,4 +1,5 @@
-import type { InboxFilters, InboxRow } from './queries';
+import type { InboxRow } from './inbox';
+import type { InboxFilters } from './inbox-filters';
 
 /**
  * Where the agent had got to in the inbox, kept across one navigation.

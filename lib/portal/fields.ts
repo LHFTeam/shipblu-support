@@ -1,4 +1,4 @@
-import { listTicketFields } from '@/lib/tickets/queries';
+import { listTicketFields } from '@/lib/tickets/lookups';
 import type { TicketFieldDef } from '@/lib/tickets/custom-fields';
 
 /**

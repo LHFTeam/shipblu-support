@@ -1,7 +1,8 @@
 import { requireAgent } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
 import { LiveUpdates } from '@/components/live-updates';
-import { listInbox, parseFilters } from '@/lib/tickets/queries';
+import { listInbox } from '@/lib/tickets/inbox';
+import { parseFilters } from '@/lib/tickets/inbox-filters';
 import { InboxList } from './list';
 
 /**

@@ -9,7 +9,7 @@ import {
   ticketStatuses,
 } from '@/db/schema';
 import type { SessionAgent } from '@/lib/auth/session';
-import { conversationVisibility } from '@/lib/tickets/queries';
+import { conversationVisibility } from '@/lib/tickets/visibility';
 import type { ConversationSummary } from '@/lib/shipments/queries';
 
 /**

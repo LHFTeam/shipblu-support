@@ -7,7 +7,8 @@ import { ChannelBadge, channelInfo } from '@/components/channel';
 import { BookIcon, SearchIcon } from '@/components/icons';
 import { Badge, Select } from '@/components/ui';
 import { formatRelative } from '@/lib/format';
-import type { InboxFilters, InboxRow } from '@/lib/tickets/queries';
+import type { InboxRow } from '@/lib/tickets/inbox';
+import type { InboxFilters } from '@/lib/tickets/inbox-filters';
 import { FILTERABLE_CHANNELS, isRestrictedChannel } from '@/lib/tickets/channel-policy';
 import {
   inboxSignature,

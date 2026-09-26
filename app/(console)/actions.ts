@@ -85,7 +85,7 @@ import {
 import { lastSideMessageId, loadSideConversation } from '@/lib/side-conversations/queries';
 import { isBlank, listLabels, missingRequired } from '@/lib/tickets/custom-fields';
 import { parseFieldValue } from '@/lib/tickets/custom-fields-parse';
-import { getTicketField, listTicketFields } from '@/lib/tickets/queries';
+import { getTicketField, listTicketFields } from '@/lib/tickets/lookups';
 import { accountIdForConversation } from '@/lib/whatsapp/conversation';
 import { windowState } from '@/lib/whatsapp/window';
 
