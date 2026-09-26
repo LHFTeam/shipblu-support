@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { stubFetch } from '@/lib/testing/fetch';
 import { withTestEnv } from '@/lib/testing/env';
 import {
   downloadAttachment,
@@ -25,10 +26,6 @@ import { normaliseGender } from './profile';
  */
 
 withTestEnv({ META_PAGE_ACCESS_TOKEN: 'token' });
-
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
 
 describe('profileFields', () => {
   it('asks for the picture on both platforms', () => {
@@ -105,11 +102,10 @@ describe('fetchProfile', () => {
   /** Graph's answers, in order, one per call. */
   function respondInTurn(...responses: [number, unknown][]) {
     let call = 0;
-    const fetchMock = vi.fn(async () => {
+    const fetchMock = stubFetch(async () => {
       const [status, body] = responses[Math.min(call++, responses.length - 1)]!;
       return new Response(JSON.stringify(body), { status });
     });
-    vi.stubGlobal('fetch', fetchMock);
     return fetchMock;
   }
 
@@ -343,10 +339,7 @@ describe('downloadAttachment size cap', () => {
         controller.close();
       },
     });
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => new Response(body, { status: 200, headers })),
-    );
+    stubFetch(async () => new Response(body, { status: 200, headers }));
   }
 
   it('rejects on the declared length without reading the body', async () => {

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setTestEnv, withTestEnv } from '@/lib/testing/env';
+import { stubFetch } from '@/lib/testing/fetch';
 import { removeObjects, signedUrl, uploadObject } from './index';
 
 /**
@@ -10,8 +11,6 @@ import { removeObjects, signedUrl, uploadObject } from './index';
  * request open instead.
  */
 
-const ORIGINAL_FETCH = globalThis.fetch;
-
 withTestEnv({
   SUPABASE_URL: 'https://project.supabase.co',
   SUPABASE_SERVICE_ROLE_KEY: 'service-role',
@@ -19,32 +18,33 @@ withTestEnv({
 
 beforeEach(() => {
   // Answers like `fetch` does: a signal that has fired rejects with its reason.
-  globalThis.fetch = (async (_url: string | URL, init?: RequestInit) => {
+  stubFetch(async (_url: string | URL, init?: RequestInit) => {
     if (init?.signal?.aborted) throw init.signal.reason;
     return new Response(JSON.stringify({ signedURL: '/object/sign/attachments/x?token=t' }), {
       status: 200,
     });
-  }) as typeof fetch;
+  });
 });
 
 afterEach(() => {
-  globalThis.fetch = ORIGINAL_FETCH;
   vi.restoreAllMocks();
 });
 
 /** The status line arrives; the body is still coming when the deadline passes. */
 function stallBody(status: number) {
-  globalThis.fetch = (async () =>
-    new Response(
-      new ReadableStream({
-        start(controller) {
-          controller.error(
-            new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
-          );
-        },
-      }),
-      { status },
-    )) as typeof fetch;
+  stubFetch(
+    async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.error(
+              new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
+            );
+          },
+        }),
+        { status },
+      ),
+  );
 }
 
 function timeOutEveryRequest() {

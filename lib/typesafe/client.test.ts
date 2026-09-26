@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { stubFetch } from '@/lib/testing/fetch';
 import { setTestEnv, withTestEnv } from '@/lib/testing/env';
 import {
   TypeSafeApiError,
@@ -48,16 +49,6 @@ const REQUEST: SystemOneRequest = {
 };
 
 withTestEnv({ TYPESAFE_API_KEY: 'test-key' });
-
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
-
-function stubFetch(handler: (url: string, init?: RequestInit) => Response | Promise<Response>) {
-  const mock = vi.fn(async (url: string | URL, init?: RequestInit) => handler(String(url), init));
-  vi.stubGlobal('fetch', mock);
-  return mock;
-}
 
 function answered(body: unknown) {
   return Response.json(body);
@@ -123,12 +114,9 @@ describe('systemOne', () => {
   });
 
   it('treats an unreachable provider as transient', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => {
-        throw new Error('socket hang up');
-      }),
-    );
+    stubFetch(async () => {
+      throw new Error('socket hang up');
+    });
 
     await expect(systemOne(REQUEST, { baseUrl: BASE })).rejects.toMatchObject({
       isTransient: true,
