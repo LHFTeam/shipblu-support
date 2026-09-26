@@ -6,6 +6,7 @@ import type { ClaimedJob } from '@/lib/queue';
 import { ingestInboundEmail } from '@/lib/tickets/ingest';
 import { processMetaWebhook } from './process-meta-webhook';
 import { processWhatsAppWebhook } from './process-whatsapp-webhook';
+import { errorMessage } from '@/lib/errors';
 
 /**
  * Processes a stored webhook payload into a ticket.
@@ -106,7 +107,7 @@ export async function processWebhook(job: ClaimedJob): Promise<void> {
     // inspecting the event rather than only in the job's last_error.
     await db
       .update(webhookEvents)
-      .set({ error: error instanceof Error ? error.message : String(error) })
+      .set({ error: errorMessage(error) })
       .where(eq(webhookEvents.id, webhookEventId));
     throw error;
   }

@@ -47,6 +47,7 @@ import { parseTokenEnvVar } from '@/lib/whatsapp/accounts';
 import { validatePolicy } from '@/lib/presence/idle';
 import { savePresencePolicy } from '@/lib/presence/policy';
 import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
+import { errorMessage } from '@/lib/errors';
 
 /**
  * Everything the admin screens write.
@@ -1650,7 +1651,7 @@ export async function saveInternalRecipient(
     // Both name and email are unique. Two entries for one hub is worse than it
     // sounds: the picker shows the same words twice and an agent has no way to
     // tell which is the address anyone reads.
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorMessage(error);
     if (message.includes('internal_recipients_email_idx')) {
       return { error: 'Another recipient already uses that address' };
     }

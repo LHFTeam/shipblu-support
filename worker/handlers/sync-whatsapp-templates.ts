@@ -10,6 +10,7 @@ import {
 } from '@/lib/whatsapp/accounts';
 import { listTemplates, WhatsAppApiError } from '@/lib/whatsapp/client';
 import { explainAuthError } from '@/lib/whatsapp/errors';
+import { errorMessage } from '@/lib/errors';
 
 /**
  * Rows this run did not refresh: templates deleted in Meta stop being returned.
@@ -97,7 +98,7 @@ export async function syncWhatsAppTemplates(): Promise<void> {
     try {
       await syncAccount(account);
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
+      const reason = errorMessage(error);
       const explained =
         error instanceof WhatsAppApiError ? explainAuthError(error.code, error.message) : reason;
 

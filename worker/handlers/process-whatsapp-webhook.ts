@@ -7,6 +7,7 @@ import {
   ingestWhatsAppMessage,
 } from '@/lib/tickets/ingest-whatsapp';
 import { parseWebhook } from '@/lib/whatsapp/parse';
+import { errorMessage } from '@/lib/errors';
 
 /**
  * Turns a stored Meta webhook payload into conversations and delivery updates.
@@ -41,7 +42,7 @@ export async function processWhatsAppWebhook(event: {
           `(${result.duplicate ? 'duplicate' : result.createdConversation ? 'new' : 'appended'})`,
       );
     } catch (error) {
-      failures.push(`${message.wamid}: ${error instanceof Error ? error.message : String(error)}`);
+      failures.push(`${message.wamid}: ${errorMessage(error)}`);
     }
   }
 
@@ -58,9 +59,7 @@ export async function processWhatsAppWebhook(event: {
           `(${result.duplicate ? 'duplicate' : result.createdConversation ? 'new' : 'appended'})`,
       );
     } catch (error) {
-      failures.push(
-        `echo ${echo.wamid}: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      failures.push(`echo ${echo.wamid}: ${errorMessage(error)}`);
     }
   }
 
@@ -68,9 +67,7 @@ export async function processWhatsAppWebhook(event: {
     try {
       if (await applyWhatsAppStatus(status)) statusUpdates += 1;
     } catch (error) {
-      failures.push(
-        `status ${status.wamid}: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      failures.push(`status ${status.wamid}: ${errorMessage(error)}`);
     }
   }
 

@@ -6,6 +6,7 @@ import { takeThreadControlRequest } from './handover';
 import { directMessageRequest } from './send';
 import { GRAPH_BASE, graphTimeout, INSTAGRAM_GRAPH_BASE } from './graph';
 import type { MetaPlatform } from './types';
+import { errorMessage } from '@/lib/errors';
 
 /**
  * Graph API client for Messenger and Instagram.
@@ -213,13 +214,7 @@ async function graph<T>(
   const unanswered = (error: unknown) =>
     isTimeout(error)
       ? new MetaTimeoutError('Graph API', timeoutMs)
-      : new MetaApiError(
-          `Graph API unreachable: ${error instanceof Error ? error.message : String(error)}`,
-          0,
-          null,
-          null,
-          true,
-        );
+      : new MetaApiError(`Graph API unreachable: ${errorMessage(error)}`, 0, null, null, true);
 
   let response: Response;
   try {

@@ -23,6 +23,7 @@ import { normaliseArticleHtml } from '@/lib/kb/format';
 import { detectCategoryLocale, detectLocale, looksUntranslated } from '@/lib/kb/language';
 import { LOCALES, LOCALE_NAMES, type Locale } from '@/lib/kb/locale';
 import { slugify, uniqueSlug } from '@/lib/kb/slug';
+import { errorMessage } from '@/lib/errors';
 
 /**
  * Imports the Freshdesk knowledge base, in every language it is published in.
@@ -626,5 +627,5 @@ async function writeRedirects(freshdeskId: number, articleId: string): Promise<v
 }
 
 function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return errorMessage(error);
 }
