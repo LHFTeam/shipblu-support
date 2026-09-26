@@ -32,6 +32,10 @@ import { resetEnvCache } from '@/lib/env';
 
 type Values = Record<string, string | undefined>;
 
+// How many `withTestEnv` scopes are active for the running test. A count, not a
+// flag, because a nested call's hooks run inside the outer one's.
+let activeScopes = 0;
+
 /**
  * Every test in the enclosing scope — the file, or the `describe` it is called
  * in — starts from the two required variables plus `values`, and whatever it
@@ -42,6 +46,7 @@ export function withTestEnv(values: Values = {}): void {
   let saved: NodeJS.ProcessEnv;
 
   beforeEach(() => {
+    activeScopes++;
     saved = process.env;
     process.env = { NODE_ENV: 'test' } as NodeJS.ProcessEnv;
     setTestEnv({
@@ -54,6 +59,7 @@ export function withTestEnv(values: Values = {}): void {
   afterEach(() => {
     process.env = saved;
     resetEnvCache();
+    activeScopes--;
   });
 }
 
@@ -61,8 +67,15 @@ export function withTestEnv(values: Values = {}): void {
  * Changes the current test's environment, and resets `env()`'s cache so the
  * next read sees it. `undefined` removes a variable, which is how a test asks
  * what happens when one is not configured.
+ *
+ * Refuses outside a `withTestEnv` scope. There the writes would land on the real
+ * `process.env` with nothing to put them back, and every later test in the file
+ * would inherit them without a word.
  */
 export function setTestEnv(values: Values): void {
+  if (activeScopes === 0) {
+    throw new Error('setTestEnv() outside withTestEnv(): nothing would restore these values');
+  }
   for (const [name, value] of Object.entries(values)) {
     if (value === undefined) delete process.env[name];
     else process.env[name] = value;
