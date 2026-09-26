@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '@/db/client';
@@ -25,6 +26,8 @@ import {
   ticketStatuses,
   whatsappTemplates,
 } from '@/db/schema';
+import { purgeConversation, type PurgeRefusal } from '@/lib/admin/purge';
+import { hiddenScopeRefusal } from '@/lib/admin/purge-visibility';
 import { assignConversation } from '@/lib/assignment';
 import { refreshPrimary } from '@/lib/categorise/apply';
 import { CAUSE_REQUIRED_AREAS } from '@/lib/categorise/taxonomy';
@@ -2070,4 +2073,65 @@ export async function setRootCause(_state: ActionState, formData: FormData): Pro
 
   refresh(row.conversation.number);
   return ok();
+}
+
+const PURGE_ERRORS: Record<PurgeRefusal, string> = {
+  not_found: 'That ticket no longer exists — somebody may have deleted it already',
+  confirmation_mismatch: 'That is not the ticket number. Type it exactly as shown.',
+};
+
+/**
+ * Destroys a ticket and everything on it.
+ *
+ * The one action in the console with no undo, so it is gated three ways rather
+ * than one: `ticket.purge` (admin only, and not inherited from
+ * `ticket.view.all`), the channel visibility rule every other ticket action
+ * applies, and a typed confirmation of the ticket number that
+ * `purgeConversation()` re-derives from the locked row inside its own
+ * transaction. The form field is never the authority on what is being deleted —
+ * it only has to agree with what the database says.
+ *
+ * `loadConversation()` is reused deliberately: an admin who cannot see the bot
+ * channel must not be able to delete a ticket on it, and that rule already lives
+ * in one place. It only covers the ticket on screen, though, and the purge also
+ * takes every ticket merged into it — so `hiddenScopeRefusal()` asks the same
+ * question of those.
+ */
+export async function purgeTicket(_state: ActionState, formData: FormData): Promise<ActionState> {
+  const agent = await requireAgent();
+  if (!can(agent, 'ticket.purge')) {
+    return { error: 'You do not have permission to delete tickets' };
+  }
+
+  const conversationId = String(formData.get('conversationId') ?? '');
+  if (!isUuid(conversationId)) return { error: 'No ticket to delete' };
+
+  const loaded = await loadConversation(agent, conversationId);
+  if (!loaded) return { error: PURGE_ERRORS.not_found };
+
+  const hidden = await hiddenScopeRefusal(agent, { conversationId });
+  if (hidden) return { error: hidden };
+
+  const result = await purgeConversation({
+    conversationId,
+    confirmation: String(formData.get('confirmation') ?? ''),
+    agent: { id: agent.id, name: agent.name },
+  });
+
+  if (!result.ok) return { error: PURGE_ERRORS[result.reason] };
+
+  // Other agents' inboxes stay stale until they navigate — the notify trigger is
+  // INSERT/UPDATE only, so a delete raises no event, and adding one would mean a
+  // DELETE trigger whose payload names a row nobody can read.
+  revalidatePath('/inbox');
+  revalidatePath('/contacts');
+  revalidatePath('/admin/categories/review');
+
+  // The redirect happens here, not in the panel. A server action that
+  // revalidates makes Next re-render the route the form was posted from in the
+  // same response, and that route is this ticket — whose row is now gone, so
+  // its page calls notFound() and the 404 replaces the tree before any client
+  // effect could navigate away. A redirect from the action makes the response
+  // carry the inbox instead. It throws, so it stays last and outside any try.
+  redirect('/inbox');
 }

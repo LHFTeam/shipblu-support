@@ -5,7 +5,7 @@ import { isTimeout, sizedTimeout } from '@/lib/http/deadline';
 /**
  * Supabase Storage via its REST API rather than the JS SDK.
  *
- * The SDK pulls in a large dependency tree for what is, for our purposes, two
+ * The SDK pulls in a large dependency tree for what is, for our purposes, three
  * HTTP calls. Attachments are written mostly by the worker and read through
  * signed URLs — but a customer's form upload writes from inside their request,
  * and every signed URL is minted inside an agent's, so both calls carry a
@@ -185,4 +185,70 @@ export async function signedUrl(path: string, expiresInSeconds = 300): Promise<s
   if (!body.signedURL) throw new Error('Storage sign returned no URL');
 
   return `${url}/storage/v1${body.signedURL}`;
+}
+
+/**
+ * How many object keys go in one delete call.
+ *
+ * The API allows up to 1,000 keys, but a ticket with a
+ * hundred attachments and a customer with a hundred tickets are both possible,
+ * and one unbounded request that fails takes every key with it. Chunking means a
+ * failure costs one batch.
+ */
+const REMOVE_BATCH = 100;
+
+/** Deletion sends only keys, and the agent is waiting on the completed purge. */
+const REMOVE_TIMEOUT_MS = 10_000;
+
+/**
+ * Deletes objects by exact key, and reports which ones it could not.
+ *
+ * **Never throws.** The only caller is the purge, which has already committed
+ * its transaction by the time it gets here — the rows that named these objects
+ * are gone, so there is nothing left to roll back to and raising would turn a
+ * finished delete into a failed one in the agent's face. Unreachable bytes in a
+ * private bucket are a cost; a ticket that appears not to have been deleted is a
+ * correctness problem. So the failures come back as data and the caller records
+ * them.
+ *
+ * Absent keys are not failures: Storage returns success for a key it does not
+ * hold, which is what makes a retried purge safe.
+ */
+export async function removeObjects(paths: string[]): Promise<{ failed: string[] }> {
+  const keys = [...new Set(paths.filter((path) => path.trim() !== ''))];
+  if (keys.length === 0) return { failed: [] };
+
+  let settings: ReturnType<typeof config>;
+  try {
+    settings = config();
+  } catch {
+    // Missing or invalid storage settings cannot undo the committed database
+    // deletion either. Keep every key so the audit can record what remains.
+    return { failed: keys };
+  }
+  const { url, key, bucket } = settings;
+  const failed: string[] = [];
+
+  for (let start = 0; start < keys.length; start += REMOVE_BATCH) {
+    const batch = keys.slice(start, start + REMOVE_BATCH);
+    try {
+      const response = await storageRequest(
+        `delete of ${batch.length} objects`,
+        `${url}/storage/v1/object/${bucket}`,
+        {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prefixes: batch }),
+        },
+        REMOVE_TIMEOUT_MS,
+      );
+      if (!response.ok) failed.push(...batch);
+    } catch {
+      // A network error or timeout is the same outcome as a rejection, and for
+      // the same reason must not escape or prevent the next batch from running.
+      failed.push(...batch);
+    }
+  }
+
+  return { failed };
 }

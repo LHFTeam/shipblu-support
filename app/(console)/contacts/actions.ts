@@ -1,11 +1,15 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
 import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { contacts, shipments } from '@/db/schema';
 import { requireAgent } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
+import { purgeContact, type PurgeRefusal } from '@/lib/admin/purge';
+import { hiddenScopeRefusal } from '@/lib/admin/purge-visibility';
+import { isUuid } from '@/lib/http/uuid';
 import { mergeContacts, type MergeRefusal } from '@/lib/contacts/merge';
 import { normaliseSbid, normaliseTrackingNumber } from '@/lib/shipments/format';
 import { syncShipment } from '@/lib/shipments/sync';
@@ -277,4 +281,62 @@ export async function refreshShipmentDetail(
     case 'skipped':
       return { error: null };
   }
+}
+
+const PURGE_ERRORS: Record<PurgeRefusal, string> = {
+  not_found: 'That contact no longer exists — somebody may have deleted it already',
+  confirmation_mismatch: 'That does not match. Type it exactly as shown above.',
+};
+
+/**
+ * Destroys a customer and every ticket they ever raised.
+ *
+ * The widest single action in the console, and the only one that deletes rows
+ * belonging to a table an agent was not looking at — so it takes `contact.purge`
+ * (admin only) and a typed confirmation, which `purgeContact()` re-derives from
+ * the locked contact row rather than trusting anything in this form. What the
+ * page showed as the blast radius and what the transaction actually finds can
+ * differ if a ticket arrived in between, which is exactly why the counts written
+ * to the audit trail are the transaction's own, not the preview's.
+ *
+ * It also applies the channel rule `purgeTicket` gets from `loadConversation()`,
+ * and needs it more: the contact page lists this person's tickets through the
+ * agent's own visibility filter, so without `hiddenScopeRefusal()` an admin
+ * without `ticket.view.bot` would destroy bot transcripts they were never shown.
+ */
+export async function purgeContactRecord(
+  _state: ContactActionState,
+  formData: FormData,
+): Promise<ContactActionState> {
+  const agent = await requireAgent();
+  if (!can(agent, 'contact.purge')) {
+    return { error: 'You do not have permission to delete contacts' };
+  }
+
+  const contactId = String(formData.get('contactId') ?? '');
+  if (!isUuid(contactId)) return { error: 'No contact to delete' };
+
+  const hidden = await hiddenScopeRefusal(agent, { contactId });
+  if (hidden) return { error: hidden };
+
+  const result = await purgeContact({
+    contactId,
+    confirmation: String(formData.get('confirmation') ?? ''),
+    agent: { id: agent.id, name: agent.name },
+  });
+
+  if (!result.ok) return { error: PURGE_ERRORS[result.reason] };
+
+  // The inbox loses every ticket this person raised, and any shipment page that
+  // named them now shows an unset party.
+  revalidatePath('/contacts');
+  revalidatePath('/inbox');
+  revalidatePath('/admin/categories/review');
+  revalidatePath('/contacts/shipments');
+
+  // Redirected from the action rather than by the panel, for the reason
+  // `purgeTicket` gives: a revalidating action re-renders the page it was posted
+  // from, this contact's page no longer resolves, and its notFound() would land
+  // before a client-side navigation could run. Last, because it throws.
+  redirect('/contacts');
 }

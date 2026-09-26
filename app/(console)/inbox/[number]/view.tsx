@@ -28,6 +28,7 @@ import { formatRemaining, windowState } from '@/lib/whatsapp/window';
 import {
   linkShipment,
   linkShippingAccount,
+  purgeTicket,
   refreshShipment,
   unlinkShipment,
   unlinkShippingAccount,
@@ -38,6 +39,8 @@ import {
   removeCategory,
   setRootCause,
 } from '../../actions';
+import { PurgePanel } from '../../purge-panel';
+import type { PurgePreview } from '@/lib/admin/purge-summary';
 import { readOnlyReason } from '@/lib/tickets/channel-policy';
 import type { PickerEntry } from '@/lib/side-conversations/queries';
 import { CommentModeration } from './comment-moderation';
@@ -121,6 +124,8 @@ export function ConversationView({
   canCategorise,
   categoryOptions,
   rootCauses,
+  purgePreview,
+  purgeRefusal,
   currentAgentId,
 }: {
   conversation: ConversationDetail;
@@ -150,6 +155,10 @@ export function ConversationView({
   /** The active taxonomy, for the picker. Empty until the seed has run. */
   categoryOptions: CategoryOption[];
   rootCauses: RootCauseOption[];
+  /** Non-null only for an admin holding `ticket.purge`; see the sidebar. */
+  purgePreview: PurgePreview | null;
+  /** Why that admin still may not purge it; see `hiddenScopeRefusal()`. */
+  purgeRefusal: string | null;
   currentAgentId: string;
 }) {
   return (
@@ -193,6 +202,8 @@ export function ConversationView({
         canCategorise={canCategorise}
         categoryOptions={categoryOptions}
         rootCauses={rootCauses}
+        purgePreview={purgePreview}
+        purgeRefusal={purgeRefusal}
         currentAgentId={currentAgentId}
       />
     </div>
@@ -644,6 +655,8 @@ function Sidebar({
   canCategorise,
   categoryOptions,
   rootCauses,
+  purgePreview,
+  purgeRefusal,
   currentAgentId,
 }: {
   conversation: ConversationDetail;
@@ -655,6 +668,8 @@ function Sidebar({
   canCategorise: boolean;
   categoryOptions: CategoryOption[];
   rootCauses: RootCauseOption[];
+  purgePreview: PurgePreview | null;
+  purgeRefusal: string | null;
   currentAgentId: string;
 }) {
   return (
@@ -750,6 +765,23 @@ function Sidebar({
           ) : null}
         </ol>
       </div>
+
+      {/* Last, and only for an admin. Below the activity log rather than beside
+          Status, because a control that deletes the page it is on should not sit
+          in the same reach as the one that closes the ticket. */}
+      {purgePreview ? (
+        <div className="mt-5 border-t border-[var(--border)] pt-3">
+          <h2 className="mb-2 text-xs font-medium opacity-70">Danger zone</h2>
+          <PurgePanel
+            preview={purgePreview}
+            action={purgeTicket}
+            idField="conversationId"
+            noun="ticket"
+            confirmationHint="the ticket number"
+            refusal={purgeRefusal}
+          />
+        </div>
+      ) : null}
     </aside>
   );
 }

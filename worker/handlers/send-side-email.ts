@@ -10,6 +10,7 @@ import { textToEscapedHtml } from '@/lib/email/html';
 import { buildReferences, buildSideSubjectTag, formatMessageId } from '@/lib/email/threading';
 import type { OutboundEmail } from '@/lib/email/types';
 import type { ClaimedJob } from '@/lib/queue';
+import { subjectGone } from './subject-gone';
 import {
   buildSideReplySubject,
   buildSideSubject,
@@ -52,7 +53,7 @@ export async function sendSideEmail(job: ClaimedJob): Promise<void> {
     .limit(1);
 
   const row = rows[0];
-  if (!row) throw new Error(`side conversation message ${messageId} not found`);
+  if (!row) throw subjectGone('send_side_email', `side conversation message ${messageId}`);
 
   // Already delivered: a retry after a partial failure must not send twice.
   if (row.message.deliveryStatus !== 'pending' && row.message.deliveryStatus !== 'failed') {

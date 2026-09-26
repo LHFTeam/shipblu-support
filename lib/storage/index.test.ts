@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetEnvCache } from '@/lib/env';
-import { signedUrl, uploadObject } from './index';
+import { removeObjects, signedUrl, uploadObject } from './index';
 
 /**
  * Storage is called from worker jobs — where a request with no deadline of its
@@ -128,5 +128,93 @@ describe('signedUrl', () => {
     await expect(signedUrl('conversations/c/m.pdf')).rejects.toThrow(
       'Storage sign of conversations/c/m.pdf did not answer in 10s',
     );
+  });
+});
+
+describe('removeObjects', () => {
+  const paths = Array.from({ length: 101 }, (_, i) => `conversations/c/${i}.pdf`);
+
+  it('deletes each exact key once in bounded batches, ignoring empty keys', async () => {
+    const request = vi.spyOn(globalThis, 'fetch');
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    const exactKey = 'conversations/c/a file.pdf ';
+
+    await expect(removeObjects([...paths, paths[0]!, '', '  ', exactKey])).resolves.toEqual({
+      failed: [],
+    });
+
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request).toHaveBeenNthCalledWith(
+      1,
+      'https://project.supabase.co/storage/v1/object/attachments',
+      expect.objectContaining({
+        method: 'DELETE',
+        headers: { Authorization: 'Bearer service-role', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prefixes: paths.slice(0, 100) }),
+        signal: expect.any(AbortSignal),
+      }),
+    );
+    expect(request).toHaveBeenNthCalledWith(
+      2,
+      'https://project.supabase.co/storage/v1/object/attachments',
+      expect.objectContaining({ body: JSON.stringify({ prefixes: [paths[100], exactKey] }) }),
+    );
+    expect(timeout.mock.calls).toEqual([[10_000], [10_000]]);
+  });
+
+  it.each(['API refusal', 'network error'])(
+    'records an %s and still attempts later batches',
+    async (failure) => {
+      const request = vi.spyOn(globalThis, 'fetch');
+      if (failure === 'API refusal') {
+        request.mockResolvedValueOnce(new Response('unavailable', { status: 503 }));
+      } else {
+        request.mockRejectedValueOnce(new Error('connection reset'));
+      }
+
+      await expect(removeObjects(paths)).resolves.toEqual({ failed: paths.slice(0, 100) });
+      expect(request).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it('records timed-out keys and still attempts later batches', async () => {
+    const request = vi.spyOn(globalThis, 'fetch');
+    vi.spyOn(AbortSignal, 'timeout').mockReturnValueOnce(
+      AbortSignal.abort(new DOMException('The operation timed out.', 'TimeoutError')),
+    );
+
+    await expect(removeObjects(paths)).resolves.toEqual({ failed: paths.slice(0, 100) });
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it('accepts a successful delete without waiting for its response body', async () => {
+    stallBody(200);
+
+    await expect(removeObjects(paths)).resolves.toEqual({ failed: [] });
+  });
+
+  it.each([
+    ['missing URL', 'SUPABASE_URL', undefined],
+    ['missing key', 'SUPABASE_SERVICE_ROLE_KEY', undefined],
+    ['invalid URL', 'SUPABASE_URL', 'not a URL'],
+  ])('reports all keys when configuration has a %s', async (_what, name, value) => {
+    if (value === undefined) delete process.env[name!];
+    else process.env[name!] = value;
+    resetEnvCache();
+    const request = vi.spyOn(globalThis, 'fetch');
+
+    await expect(removeObjects([paths[0]!, paths[0]!, '', paths[1]!])).resolves.toEqual({
+      failed: paths.slice(0, 2),
+    });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('returns immediately for empty keys without requiring storage configuration', async () => {
+    process.env = {} as NodeJS.ProcessEnv;
+    resetEnvCache();
+    const request = vi.spyOn(globalThis, 'fetch');
+
+    await expect(removeObjects(['', '  '])).resolves.toEqual({ failed: [] });
+    expect(request).not.toHaveBeenCalled();
   });
 });

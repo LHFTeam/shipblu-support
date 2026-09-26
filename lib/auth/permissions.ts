@@ -67,6 +67,18 @@ export const PERMISSIONS = [
    */
   'ticket.close',
   'ticket.delete',
+  /**
+   * Destroying a ticket outright — the row, its messages, its attachments, its
+   * timeline and its side conversations, with nothing left to restore from.
+   *
+   * Separate from `ticket.delete`, and above it, because they are different
+   * verbs that happen to share a word. `conversations.deleted_at` exists and
+   * every query already filters on it, so `ticket.delete` has a well-defined
+   * meaning waiting for it: hide this from the inbox, and put it back if that
+   * was wrong. This one has no way back — which is why it is admin-only while
+   * `ticket.delete` sits at supervisor.
+   */
+  'ticket.purge',
   'ticket.merge',
   /**
    * Adding, confirming or rejecting a category on a ticket.
@@ -107,6 +119,19 @@ export const PERMISSIONS = [
    */
   'contact.merge',
   'contact.delete',
+  /**
+   * Destroying a customer outright: the contact, every address and number it
+   * answers on, its portal sign-in, and **every ticket it ever raised** —
+   * because `conversations.requester_contact_id` is `on delete restrict` and a
+   * ticket with no requester is not a thing this schema can hold.
+   *
+   * The widest blast radius any single click in the console has, which is the
+   * whole reason it is its own key rather than a stronger reading of
+   * `contact.delete`. Somebody who should be able to retire a duplicate record
+   * is not automatically somebody who should be able to erase a customer's
+   * entire history with us in one action.
+   */
+  'contact.purge',
   'kb.view',
   'kb.edit',
   'kb.publish',
@@ -214,6 +239,11 @@ const ADMIN: Permission[] = [
   // supervisor can be given it without being promoted.
   'ticket.view.bot',
   'contact.delete',
+  // The two irreversible ones. Admin and no lower, and deliberately not on
+  // SUPERVISOR even though `ticket.delete` is: everything else a supervisor can
+  // do to a ticket can be undone by somebody who disagrees with them.
+  'ticket.purge',
+  'contact.purge',
   'admin.agents',
   'admin.groups',
   'admin.locations',

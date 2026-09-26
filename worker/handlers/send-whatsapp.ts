@@ -2,6 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { contactIdentities, conversations, messages } from '@/db/schema';
 import type { ClaimedJob } from '@/lib/queue';
+import { subjectGone } from './subject-gone';
 import { credentialsForPhoneNumberId } from '@/lib/whatsapp/accounts';
 import { sendingNumberFor } from '@/lib/whatsapp/conversation';
 import { WhatsAppApiError, sendTemplate, sendText } from '@/lib/whatsapp/client';
@@ -42,7 +43,7 @@ export async function sendWhatsApp(job: ClaimedJob): Promise<void> {
     .limit(1);
 
   const row = rows[0];
-  if (!row) throw new Error(`message ${messageId} not found`);
+  if (!row) throw subjectGone('send_whatsapp', `message ${messageId}`);
 
   // A retry after a partial failure must not send the customer a second copy.
   if (row.message.deliveryStatus !== 'pending' && row.message.deliveryStatus !== 'failed') {

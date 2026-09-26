@@ -87,3 +87,30 @@ describe('admin.locations', () => {
     expect(can({ role: 'admin', permissions: {} }, 'admin.locations')).toBe(true);
   });
 });
+
+describe('the purge permissions', () => {
+  it('stops at admin, even though ticket.delete does not', () => {
+    // The distinction the two keys exist to draw: a supervisor may hide a
+    // ticket, because somebody who disagrees can put it back. Destroying it is
+    // admin-only precisely because nobody can.
+    expect(can({ role: 'supervisor', permissions: {} }, 'ticket.delete')).toBe(true);
+    expect(can({ role: 'supervisor', permissions: {} }, 'ticket.purge')).toBe(false);
+    expect(can({ role: 'admin', permissions: {} }, 'ticket.purge')).toBe(true);
+  });
+
+  it('keeps contact.purge above contact.merge', () => {
+    // A supervisor's answer to a duplicate is a merge, which keeps the history.
+    expect(can({ role: 'supervisor', permissions: {} }, 'contact.merge')).toBe(true);
+    expect(can({ role: 'supervisor', permissions: {} }, 'contact.purge')).toBe(false);
+    expect(can({ role: 'admin', permissions: {} }, 'contact.purge')).toBe(true);
+  });
+
+  it('can be revoked from a single admin without demoting them', () => {
+    expect(can({ role: 'admin', permissions: { 'contact.purge': false } }, 'contact.purge')).toBe(
+      false,
+    );
+    expect(can({ role: 'admin', permissions: { 'contact.purge': false } }, 'admin.agents')).toBe(
+      true,
+    );
+  });
+});

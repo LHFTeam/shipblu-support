@@ -2,10 +2,11 @@ import { and, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { attachments, messages } from '@/db/schema';
 import type { ClaimedJob } from '@/lib/queue';
-import { buildAttachmentPath, uploadObject } from '@/lib/storage';
+import { buildAttachmentPath, removeObjects, uploadObject } from '@/lib/storage';
 import { downloadAttachment, MetaApiError } from '@/lib/meta/client';
 import { credentialsForPhoneNumberId } from '@/lib/whatsapp/accounts';
 import { WhatsAppApiError, downloadMedia, getMediaUrl } from '@/lib/whatsapp/client';
+import { subjectGone } from './subject-gone';
 
 /**
  * Copies a WhatsApp media file into Supabase Storage.
@@ -61,8 +62,10 @@ export async function downloadMediaJob(job: ClaimedJob): Promise<void> {
     .where(eq(messages.id, messageId))
     .limit(1);
 
+  // Checked before anything is fetched or stored: an upload for a message that
+  // is already gone writes an object no row will ever name.
   const message = rows[0];
-  if (!message) throw new Error(`message ${messageId} not found`);
+  if (!message) throw subjectGone('download_media', `message ${messageId}`);
 
   const meta = message.meta as { media?: Record<string, unknown>; phoneNumberId?: unknown };
   if (meta.media?.downloaded === true) {
@@ -118,6 +121,8 @@ export async function downloadMediaJob(job: ClaimedJob): Promise<void> {
   const stored = await uploadObject(path, content, contentType);
 
   await db.transaction(async (tx) => {
+    await lockMessageOrDiscard(tx, messageId, stored.path);
+
     await tx.insert(attachments).values({
       messageId,
       storagePath: stored.path,
@@ -165,7 +170,7 @@ async function downloadMetaAttachment(job: ClaimedJob, messageId: string): Promi
     .limit(1);
 
   const message = rows[0];
-  if (!message) throw new Error(`message ${messageId} not found`);
+  if (!message) throw subjectGone('download_media', `message ${messageId}`);
 
   // Already stored: the attachment row is the record, so a re-run is a no-op
   // rather than a second copy of the same photo.
@@ -199,17 +204,54 @@ async function downloadMetaAttachment(job: ClaimedJob, messageId: string): Promi
   const path = buildAttachmentPath(message.conversationId, `${messageId}-${index}`, filename);
   const stored = await uploadObject(path, content, contentType);
 
-  await db.insert(attachments).values({
-    messageId,
-    storagePath: stored.path,
-    filename,
-    contentType,
-    sizeBytes: stored.sizeBytes,
-    checksum: stored.checksum,
-    // Doubles as the idempotency key for the check above.
-    contentId: `meta:${index}`,
-    isInline: false,
+  await db.transaction(async (tx) => {
+    await lockMessageOrDiscard(tx, messageId, stored.path);
+
+    await tx.insert(attachments).values({
+      messageId,
+      storagePath: stored.path,
+      filename,
+      contentType,
+      sizeBytes: stored.sizeBytes,
+      checksum: stored.checksum,
+      // Doubles as the idempotency key for the check above.
+      contentId: `meta:${index}`,
+      isInline: false,
+    });
   });
 
   console.log(`[download_media] meta ${index} → ${stored.path} (${stored.sizeBytes} bytes)`);
+}
+
+/**
+ * Re-reads the message under a lock once its bytes are stored, and removes the
+ * object again if the message went while they were being fetched.
+ *
+ * The check at the top of the job is not enough on its own. A download can take
+ * seconds, and an admin purge in that window deletes the message and its
+ * conversation; the attachment insert would then fail its foreign key, the job
+ * would retry, and the object just uploaded would sit in the bucket with no row
+ * naming it — invisible to the purge, which found its keys through those rows.
+ *
+ * The lock settles the race either way round. `for share` conflicts with the
+ * delete a purge's cascade performs, so a purge that has not committed yet
+ * waits for this transaction and then finds the attachment row, and its key,
+ * like any other. A purge that already committed leaves nothing to lock, and
+ * then this job is the only thing that knows the object exists.
+ */
+async function lockMessageOrDiscard(tx: typeof db, messageId: string, path: string): Promise<void> {
+  const locked = await tx
+    .select({ id: messages.id })
+    .from(messages)
+    .where(eq(messages.id, messageId))
+    .limit(1)
+    .for('share');
+
+  if (locked[0]) return;
+
+  const { failed } = await removeObjects([path]);
+  if (failed.length > 0) {
+    console.error(`[download_media] ${path} is orphaned: its message went mid-download`);
+  }
+  throw subjectGone('download_media', `message ${messageId}`);
 }

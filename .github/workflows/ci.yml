@@ -226,6 +226,12 @@ jobs:
       - name: Row level security invariants
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/ci/db-invariants.sql
 
+      # Exercise the application's cleanup query with regular and side-message
+      # jobs. The test always rolls its fixtures back and opens only this
+      # explicitly supplied disposable database, never the app's default URL.
+      - name: Purges preserve unrelated queued work
+        run: TEST_DATABASE_URL="$DATABASE_URL" npx vitest run lib/admin/purge-jobs.db.test.ts lib/admin/purge-integration.db.test.ts
+
       # The jobs whose whole body is SQL, run against the schema that was just
       # built. Their predicates match nothing on an empty database, which is
       # fine — Postgres still plans every statement, and planning is where
