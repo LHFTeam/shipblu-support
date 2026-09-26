@@ -637,6 +637,22 @@ stay explicit at the call site:
 - The request shapes in `lib/meta/comments.ts` and `lib/meta/send.ts` are
   untouched.
 
+**Narrowed in #228.** The three wrappers in `subscriptions.ts` now share one
+private `request()`, with the same messages as before. They do not use the
+client's `graph()`, because that would change three behaviours the code
+records as deliberate:
+
+- `graph()` puts the token in the query string. The app token contains the app
+  secret, so this module puts it in a header (`docs/meta-endpoints.md` §1).
+- `graph()` treats a 2xx write whose body was lost as success. This module
+  fails it, because a person re-runs the job and subscribing twice is safe.
+- `graph()` throws `MetaApiError` and logs a warning. This job's output is its
+  error, so the explanation of a refusal stays in the error.
+
+With no second caller, the move into `lib/meta/graph.ts` is not done either.
+That module holds only what the four Graph clients share, and the transport
+stays with the one client that uses it.
+
 ### 4.4 Worker
 
 - **Typed payloads.**
