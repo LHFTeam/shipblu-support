@@ -124,7 +124,9 @@ export async function sendWhatsApp(job: ClaimedJob): Promise<void> {
       })
       .where(eq(conversations.id, row.conversation.id));
 
-    console.log(`[send_whatsapp] ${messageId} sent as ${result.wamid}`);
+    console.log(
+      `[send_whatsapp] ${messageId} sent as ${result.wamid ?? 'an unknown wamid: Meta accepted it and its answer was lost'}`,
+    );
   } catch (error) {
     await markFailed(
       messageId,
