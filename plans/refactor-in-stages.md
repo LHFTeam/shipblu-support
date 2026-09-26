@@ -100,7 +100,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 0.5   | Remove Playwright                                | #173        | merged  |
 | 1.1   | `lib/testing/` fixtures                          | #208        | open    |
 | 1.2   | Database test tier                               | #212        | open    |
-| 1.3   | Characterise the seven ingest entry points       | #215        | open    |
+| 1.3   | Characterise the seven ingest entry points       | #215–#218   | open    |
 | 1.4   | Webhook route tests                              | #196        | merged  |
 | 1.5   | DB test for the admin overview's raw SQL         | #214        | open    |
 | 2.1   | Email webhook dedupes before it verifies         | #168        | merged  |
