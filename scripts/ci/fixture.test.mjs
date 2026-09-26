@@ -71,6 +71,30 @@ describe('runRule with an entry that does not name the rule module export', () =
   });
 });
 
+describe('runRule with a check that throws', () => {
+  it('records the failure CI records instead of rejecting', async () => {
+    const table = async () => ({
+      RULES: [
+        [
+          'breaks',
+          () => {
+            throw new Error('the file changed shape');
+          },
+        ],
+      ],
+    });
+
+    await expect(runRule('breaks', {}, { loadTable: table })).resolves.toEqual([
+      {
+        rule: 'breaks',
+        where: '(check itself)',
+        message:
+          'the check threw, which usually means the file it reads changed shape: the file changed shape',
+      },
+    ]);
+  });
+});
+
 describe('runRule under an inherited GIT_DIR', () => {
   const git = (cwd, ...args) =>
     execFileSync('git', args, { cwd, encoding: 'utf8', env: isolatedGitEnv() });

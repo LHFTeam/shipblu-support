@@ -28,6 +28,28 @@ export function fail(rule, where, message) {
   failures.push({ rule, where, message });
 }
 
+/**
+ * Runs one check, recording a throw as a violation of that rule instead of
+ * letting it escape.
+ *
+ * A check that throws has usually been outrun by the file it reads, and one
+ * broken parser should not hide every other rule's findings behind a stack
+ * trace. `repo-rules.mjs` and the rule fixture both run checks through this,
+ * so a rule that throws is reported the same way in a test as in CI — rather
+ * than as a rejected promise the test would have to know to expect.
+ */
+export function runCheck(name, run) {
+  try {
+    run();
+  } catch (error) {
+    fail(
+      name,
+      '(check itself)',
+      `the check threw, which usually means the file it reads changed shape: ${error.message}`,
+    );
+  }
+}
+
 export function read(rel) {
   return readFileSync(path.join(ROOT, rel), 'utf8');
 }

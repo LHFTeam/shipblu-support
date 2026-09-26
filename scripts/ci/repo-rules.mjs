@@ -19,20 +19,10 @@
  * nobody remembers gets deleted the first time it is inconvenient.
  */
 
-import { fail, failures } from './lib.mjs';
+import { failures, runCheck } from './lib.mjs';
 import { RULES } from './rules.mjs';
 
-for (const [name, run] of RULES) {
-  try {
-    run();
-  } catch (error) {
-    fail(
-      name,
-      '(check itself)',
-      `the check threw, which usually means the file it reads changed shape: ${error.message}`,
-    );
-  }
-}
+for (const [name, run] of RULES) runCheck(name, run);
 
 if (failures.length === 0) {
   console.log(`repo rules: ${RULES.length} checks, no violations.`);

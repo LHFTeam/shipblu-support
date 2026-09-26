@@ -40,9 +40,11 @@ export async function runRule(rule, files, { loadTable = () => import('./rules.m
     vi.resetModules();
     vi.stubEnv('REPO_RULES_ROOT', root);
     const { RULES } = await loadTable();
-    const { failures } = await import('./lib.mjs');
+    const { failures, runCheck } = await import('./lib.mjs');
 
-    registeredCheck(rule, RULES)();
+    // Through the runner's own wrapper, so a check that throws is the
+    // "(check itself)" failure CI would print, not a rejection.
+    runCheck(rule, registeredCheck(rule, RULES));
     return failures.map(({ rule: name, where, message }) => ({ rule: name, where, message }));
   } finally {
     vi.unstubAllEnvs();
