@@ -766,7 +766,7 @@ they are worth reading when something looks strange. Keep writing them that way.
 ## 4. Before every push
 
 ```bash
-npx tsc --noEmit && npx eslint . && npx vitest run && npm run build
+npm run typecheck && npm run lint && npm run test && npm run build
 ```
 
 All four are clean on `main`. `npm run build` is not optional: several failures

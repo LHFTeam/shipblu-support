@@ -18,14 +18,24 @@ on:
   push:
     branches: [main]
 
-# A force-push or a follow-up commit makes the previous run's answer irrelevant.
-# Main is exempt: its runs are the record of what was merged.
+# A force-push or a follow-up commit makes the previous run's answer irrelevant,
+# so a branch's older run is cancelled. Main is exempt: its runs are the record
+# of what was merged, so each push to main gets a group of its own. Sharing one
+# group did not cancel a running main build, but a group holds a single pending
+# run and GitHub cancels it when another arrives — so a quick run of merges left
+# the middle ones reading "cancelled", with no result at all.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
+
+# Every action is pinned to a commit, with the release it was in a comment
+# beside it. A tag is a pointer its owner can move, and whatever it points at
+# runs with this workflow's token and the repository's code; a commit cannot be
+# moved. Dependabot (.github/dependabot.yml) proposes the next release as a
+# reviewable diff, which is the only way a pin changes.
 
 env:
   # Node 22, matching the `engines` pin in package.json (>=22 <23).
@@ -46,14 +56,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # The same npm scripts a contributor runs, so what passes locally and
+          # what passes here cannot drift apart — `lint` carries
+          # --max-warnings=0, which a bare `npx eslint .` would not.
           - name: typecheck
-            run: npx tsc --noEmit
+            run: npm run typecheck
           - name: lint
-            run: npx eslint .
+            run: npm run lint
           - name: format
             run: npm run format:check
           - name: test
-            run: npx vitest run
+            run: npm run test
           - name: knip
             # Dependency hygiene only, named as a positive allowlist in
             # knip.jsonc — which is also where the reasoning lives for why the
@@ -71,8 +84,8 @@ jobs:
             # (reading 'useContext')" is the environment, not the React version.
             run: npm run build
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -86,12 +99,12 @@ jobs:
     name: repo rules
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           # The migrations-are-append-only check diffs against the base branch,
           # which needs more than the default single commit.
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -150,8 +163,8 @@ jobs:
       APP_SECRET: ci-placeholder-secret-at-least-32-characters-long
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm

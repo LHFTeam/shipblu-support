@@ -87,10 +87,12 @@ npx prettier --write AGENTS.md         # one file
 | `repo-rules` | `scripts/ci/repo-rules.mjs`, and migration drift against `db/schema/` |
 | `database`   | migrations, `db/sql/` and every DB-only job handler, on real Postgres |
 
-Run the same thing locally when you want the answer sooner:
+Run the same thing locally when you want the answer sooner — the `verify` job
+calls these same npm scripts, so `npm run lint` fails on a warning here as it
+does there:
 
 ```bash
-npx tsc --noEmit && npx eslint . && npx vitest run && npm run knip && npm run build
+npm run typecheck && npm run lint && npm run test && npm run knip && npm run build
 node scripts/ci/repo-rules.mjs
 ```
 
