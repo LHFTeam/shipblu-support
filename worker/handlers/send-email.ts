@@ -9,6 +9,7 @@ import { replyToAddress } from '@/lib/email/reply-address';
 import { buildReferences, buildReplySubject, formatMessageId } from '@/lib/email/threading';
 import type { OutboundEmail } from '@/lib/email/types';
 import type { ClaimedJob } from '@/lib/queue';
+import { subjectGone } from './subject-gone';
 
 /**
  * Sends an agent's reply.
@@ -38,7 +39,7 @@ export async function sendEmail(job: ClaimedJob): Promise<void> {
     .limit(1);
 
   const row = rows[0];
-  if (!row) throw new Error(`message ${messageId} not found`);
+  if (!row) throw subjectGone('send_email', `message ${messageId}`);
 
   // Already delivered: a retry after a partial failure must not send twice.
   if (row.message.deliveryStatus !== 'pending' && row.message.deliveryStatus !== 'failed') {

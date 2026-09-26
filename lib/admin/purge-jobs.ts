@@ -14,8 +14,33 @@ import type { JobType } from '@/lib/queue';
  *
  * Run inside the purge transaction, while the message rows still exist. SQL
  * subqueries keep a large contact purge from materialising every message id.
- * Processing jobs belong to the worker already holding them, and completed or
- * dead jobs are history, so only pending and failed work is removed.
+ *
+ * Only `pending` work is removed. `failJob()` puts a job that will retry back to
+ * `pending` and one that will not to `dead`; nothing in `lib/queue` ever writes
+ * the enum's `failed`, so matching it only made the filter look wider than it
+ * is. Completed and dead jobs are history. A `processing` job belongs to the
+ * worker already holding it — deleting its row would not stop the handler, and
+ * would only let `completeJob()` update nothing — so those are left to fail on
+ * their own: every handler scoped here re-reads its subject by id and ends for
+ * good when it is gone (`worker/handlers/subject-gone.ts`; `send_csat` and
+ * `fetch_meta_profile` return quietly), and `download_media` re-checks under a
+ * lock before it keeps an object it stored.
+ *
+ * Two kinds of pending work name this purge's subject and are deliberately not
+ * matched, because nothing in their payload can tie them to it safely:
+ *
+ * - `send_notification_email` carries a finished email — `to`, subject and
+ *   bodies — and no contact or conversation id. Matching on the address would
+ *   be matching on a value another contact may share or later be given. What
+ *   it sends is a portal link, and the portal tokens behind it cascade with the
+ *   contact, so the link it delivers is already dead.
+ * - `process_webhook` carries only a `webhook_events` id, and who the delivery
+ *   is about is inside the provider's raw payload, in a different shape per
+ *   channel. Parsing it here would re-implement three ingest parsers inside a
+ *   delete, and a wrong guess would silently drop a real customer's message.
+ *   A delivery still pending for this contact will, when it runs, file a new
+ *   contact and ticket for them — which is the same thing a message arriving
+ *   one minute after the purge would do. `RETAINED` says so.
  */
 export async function purgeJobs(
   tx: typeof db,
@@ -83,5 +108,5 @@ export async function purgeJobs(
   }
 
   if (scopes.length === 0) return;
-  await tx.delete(jobs).where(and(inArray(jobs.status, ['pending', 'failed']), or(...scopes)));
+  await tx.delete(jobs).where(and(eq(jobs.status, 'pending'), or(...scopes)));
 }

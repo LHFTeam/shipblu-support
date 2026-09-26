@@ -13,6 +13,7 @@ import {
   settled,
 } from '@/lib/meta/moderation';
 import type { ClaimedJob } from '@/lib/queue';
+import { subjectGone } from './subject-gone';
 
 /**
  * Hides, unhides or deletes a public comment at Meta.
@@ -58,7 +59,7 @@ export async function moderateMetaComment(job: ClaimedJob): Promise<void> {
     .limit(1);
 
   const row = rows[0];
-  if (!row) throw new Error(`message ${messageId} not found`);
+  if (!row) throw subjectGone('moderate_meta_comment', `message ${messageId}`);
 
   const comment = moderatableComment(row.meta);
   if (!comment) throw new Error(`message ${messageId} is not a Meta comment`);

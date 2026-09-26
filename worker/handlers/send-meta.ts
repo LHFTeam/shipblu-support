@@ -13,6 +13,7 @@ import { explainMetaSendError, MetaSendRefusal } from '@/lib/meta/errors';
 import type { MetaPlatform } from '@/lib/meta/types';
 import { messagingTag, metaWindowState, type MetaSendAuthor } from '@/lib/meta/window';
 import type { ClaimedJob } from '@/lib/queue';
+import { subjectGone } from './subject-gone';
 import { metaReplyTarget } from '@/lib/tickets/meta-thread';
 
 /**
@@ -52,7 +53,7 @@ export async function sendMeta(job: ClaimedJob): Promise<void> {
     .limit(1);
 
   const row = rows[0];
-  if (!row) throw new Error(`message ${messageId} not found`);
+  if (!row) throw subjectGone('send_meta', `message ${messageId}`);
 
   // A retry after a partial failure must not send the customer a second copy.
   if (row.message.deliveryStatus !== 'pending' && row.message.deliveryStatus !== 'failed') {

@@ -145,7 +145,7 @@ describe.skipIf(!databaseUrl)('purgeJobs against Postgres', () => {
     }
   }
 
-  it('removes only pending or failed work in the supplied purge scope', async () => {
+  it('removes only pending work in the supplied purge scope', async () => {
     await fixture(async (tx, target, unrelated, merged) => {
       const specs: JobSpec[] = [];
       const expected: string[] = [];
@@ -155,10 +155,12 @@ describe.skipIf(!databaseUrl)('purgeJobs against Postgres', () => {
         ['merged', merged],
       ] as const) {
         for (const subject of subjects(scope)) {
-          for (const status of ['pending', 'failed', 'processing', 'completed', 'dead'] as const) {
+          // Every status the queue actually writes; `failed` is in the enum but
+          // nothing sets it.
+          for (const status of ['pending', 'processing', 'completed', 'dead'] as const) {
             const label = `${name}/${subject.type}/${status}`;
             specs.push({ label, status, ...subject });
-            if (name === 'unrelated' || (status !== 'pending' && status !== 'failed')) {
+            if (name === 'unrelated' || status !== 'pending') {
               expected.push(label);
             }
           }
