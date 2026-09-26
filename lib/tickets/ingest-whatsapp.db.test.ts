@@ -2,6 +2,7 @@ import { asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import {
+  agents,
   channels,
   contactIdentities,
   contacts,
@@ -79,6 +80,8 @@ async function conversation(id: string) {
       status: ticketStatuses.name,
       requesterContactId: conversations.requesterContactId,
       reopenCount: conversations.reopenCount,
+      resolvedAt: conversations.resolvedAt,
+      resolvedByAgentId: conversations.resolvedByAgentId,
       slaPolicyId: conversations.slaPolicyId,
       lastMessageAt: conversations.lastMessageAt,
       lastCustomerMessageAt: conversations.lastCustomerMessageAt,
@@ -107,7 +110,7 @@ async function eventTypes(conversationId: string) {
   return rows.map((row) => row.type);
 }
 
-async function setStatus(conversationId: string, name: string) {
+async function setStatus(conversationId: string, name: string, extra = {}) {
   const [status] = await db
     .select({ id: ticketStatuses.id })
     .from(ticketStatuses)
@@ -115,8 +118,17 @@ async function setStatus(conversationId: string, name: string) {
   if (!status) throw new Error(`no status ${name}`);
   await db
     .update(conversations)
-    .set({ statusId: status.id })
+    .set({ statusId: status.id, ...extra })
     .where(eq(conversations.id, conversationId));
+}
+
+async function agentId(): Promise<string> {
+  const [agent] = await db
+    .insert(agents)
+    .values({ name: 'Omar', email: 'omar@shipblu.test' })
+    .returning({ id: agents.id });
+  if (!agent) throw new Error('no agent');
+  return agent.id;
 }
 
 async function botChannelId(): Promise<string> {
@@ -152,6 +164,8 @@ describe('ingestWhatsAppMessage', () => {
       status: 'Open',
       requesterContactId: contact?.id,
       reopenCount: 0,
+      resolvedAt: null,
+      resolvedByAgentId: null,
       slaPolicyId: null,
       lastMessageAt: SENT,
       lastCustomerMessageAt: SENT,
@@ -195,9 +209,13 @@ describe('ingestWhatsAppMessage', () => {
     });
   });
 
-  it('reopens a resolved conversation, with a reopened event', async () => {
+  it('reopens a resolved conversation, and records who had resolved it', async () => {
     const first = await ingestWhatsAppMessage(inbound());
-    await setStatus(first.conversationId, 'Resolved');
+    const resolver = await agentId();
+    await setStatus(first.conversationId, 'Resolved', {
+      resolvedAt: new Date('2026-09-20T10:30:00Z'),
+      resolvedByAgentId: resolver,
+    });
 
     const second = await ingestWhatsAppMessage(
       inbound({ wamid: 'wamid.second', text: 'Still not here', sentAt: LATER }),
@@ -207,6 +225,9 @@ describe('ingestWhatsAppMessage', () => {
     expect(await conversation(first.conversationId)).toMatchObject({
       status: 'Open',
       reopenCount: 1,
+      resolvedAt: null,
+      // Left for the event to read, as the email path leaves it.
+      resolvedByAgentId: resolver,
     });
     const [reopened] = await db
       .select({ actorLabel: conversationEvents.actorLabel, data: conversationEvents.data })
@@ -214,7 +235,7 @@ describe('ingestWhatsAppMessage', () => {
       .where(eq(conversationEvents.type, 'reopened'));
     expect(reopened).toEqual({
       actorLabel: 'inbound_whatsapp',
-      data: { reason: 'customer_replied', resolvedBy: null },
+      data: { reason: 'customer_replied', resolvedBy: resolver },
     });
   });
 
@@ -379,6 +400,30 @@ describe('ingestWhatsAppEcho', () => {
       conversationId: opened.conversationId,
       createdConversation: false,
     });
+  });
+
+  // The bot answering is not the customer writing: it appends, reopens nothing,
+  // and moves only the conversation's last activity.
+  it('appends to a resolved bot conversation without reopening it', async () => {
+    const asked = await ingestWhatsAppMessage(inbound({ phoneNumberId: BOT_NUMBER }));
+    await setStatus(asked.conversationId, 'Resolved');
+    const before = await conversation(asked.conversationId);
+
+    const answered = await ingestWhatsAppEcho(echo({ sentAt: LATER }));
+
+    expect(answered).toMatchObject({
+      conversationId: asked.conversationId,
+      createdConversation: false,
+      duplicate: false,
+    });
+    expect(await messagesOf(asked.conversationId)).toHaveLength(2);
+    expect(await conversation(asked.conversationId)).toMatchObject({
+      status: 'Resolved',
+      reopenCount: 0,
+      lastMessageAt: LATER,
+      lastCustomerMessageAt: before.lastCustomerMessageAt,
+    });
+    expect(await eventTypes(asked.conversationId)).not.toContain('reopened');
   });
 
   it('writes nothing the second time an echo’s wamid arrives', async () => {
