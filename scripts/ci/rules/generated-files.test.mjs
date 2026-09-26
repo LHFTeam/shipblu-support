@@ -52,6 +52,26 @@ describe('generated-files', () => {
     expect(found).toEqual([]);
   });
 
+  // The checkout is what creates origin/<base>. A base named but missing used to
+  // return quietly, so a checkout change that stopped fetching it would have let
+  // a rewritten migration merge under a green run.
+  it('fails, rather than passing, when the base branch was never fetched', async () => {
+    vi.stubEnv('GITHUB_BASE_REF', 'main');
+    const found = await runRule('generated-files', base, {
+      prepare: ({ git, write }) => {
+        git('commit', '-qm', 'base');
+        write(MIGRATION, 'create table b ();\n');
+        git('commit', '-qam', 'change');
+      },
+    });
+    expect(found).toEqual([
+      expect.objectContaining({
+        where: 'db/migrations',
+        message: expect.stringMatching(/could not diff against origin\/main .* fetch-depth: 0/),
+      }),
+    ]);
+  });
+
   it('fails a rewritten journal entry', async () => {
     vi.stubEnv('GITHUB_BASE_REF', 'main');
     const found = await runRule('generated-files', base, {
