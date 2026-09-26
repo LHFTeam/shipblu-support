@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetEnvCache } from '@/lib/env';
 import { STALLED_AFTER_MS } from '@/lib/queue';
+import { sizedTimeout } from '@/lib/http/deadline';
 import { GRAPH_BASE, graphTimeout } from '@/lib/meta/graph';
 import {
   WhatsAppApiError,
@@ -231,14 +232,18 @@ describe('WhatsApp deadlines', () => {
   });
 
   /**
-   * Computed from the deadlines the calls actually get, so raising the largest
-   * size or the per-MB allowance fails here rather than in a reclaimed job.
+   * The whole media job, computed from the deadlines its calls actually get:
+   * the lookup, the largest download, and `uploadObject`'s upload of the same
+   * bytes. Raising the largest size or the per-MB allowance, or lowering the
+   * reclaim window, fails here rather than in a job reclaimed mid-upload that
+   * writes a second attachment row.
    */
-  it('leaves the storage upload after the largest download half the reclaim window', () => {
-    const lookupAndDownload = graphTimeout('GET') + mediaTimeout(null);
+  it('fits the lookup, the largest download and its upload inside the reclaim window', () => {
+    const largest = 100 * 1024 * 1024;
+    const job = graphTimeout('GET') + mediaTimeout(null) + sizedTimeout(largest);
 
-    expect(mediaTimeout(null)).toBe(mediaTimeout(100 * 1024 * 1024));
-    expect(lookupAndDownload).toBeLessThanOrEqual(STALLED_AFTER_MS / 2);
+    expect(mediaTimeout(null)).toBe(mediaTimeout(largest));
+    expect(job).toBeLessThanOrEqual(STALLED_AFTER_MS);
   });
 
   it('releases the connection a refused download holds', async () => {

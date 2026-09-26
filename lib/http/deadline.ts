@@ -32,8 +32,10 @@ export function isTimeout(error: unknown): boolean {
  * should still be noticed in a minute. 110 seconds at 100 MB.
  *
  * One formula for the download and the upload of the same file, because both
- * halves have to fit inside the queue's reclaim window together; the WhatsApp
- * client's test computes that sum from the real functions.
+ * halves have to fit inside the queue's reclaim window together. The WhatsApp
+ * client's test adds the whole job up from the real functions — lookup,
+ * largest download, and this upload of the same bytes — against
+ * `STALLED_AFTER_MS`.
  */
 export function sizedTimeout(bytes: number): number {
   return 60_000 + Math.ceil(bytes / (2 * 1024 * 1024)) * 1000;

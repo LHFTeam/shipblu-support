@@ -2,9 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { isTimeout, sizedTimeout } from './deadline';
 
 describe('isTimeout', () => {
+  // The real signal, left to fire, rather than a DOMException built to match:
+  // if a Node or undici upgrade changes what the deadline rejects with, every
+  // client's timeout message would quietly fall back to "unreachable", and a
+  // hand-built exception would keep this passing while it did.
   it('recognises the rejection AbortSignal.timeout() produces', async () => {
-    const signal = AbortSignal.abort(new DOMException('The operation timed out.', 'TimeoutError'));
+    const signal = AbortSignal.timeout(1);
+    await new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
+
     expect(isTimeout(signal.reason)).toBe(true);
+    await expect(fetch('http://127.0.0.1:9', { signal })).rejects.toSatisfy(isTimeout);
   });
 
   // An abort somebody asked for, and a network failure, are not a deadline, and
