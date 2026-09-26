@@ -95,7 +95,7 @@ conflict on all of them.
 | 0.1   | Commit this plan                                 | #166        | merged  |
 | 0.2   | Harden `server-actions` and minimum-count guards | #167        | merged  |
 | 0.3   | Split `repo-rules.mjs` into per-rule modules     | #191–#192   | open    |
-| 0.4   | CI tidy-up                                       |             | pending |
+| 0.4   | CI tidy-up                                       | #193        | open    |
 | 0.5   | Remove Playwright                                | #173        | merged  |
 | 1.1   | `lib/testing/` fixtures                          |             | pending |
 | 1.2   | Database test tier                               |             | pending |
