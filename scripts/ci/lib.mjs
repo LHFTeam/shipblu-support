@@ -9,7 +9,16 @@ import { fileURLToPath } from 'node:url';
  * helpers. `repo-rules.mjs` runs the rules and prints what `fail` recorded.
  */
 
-export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+/**
+ * The repository the rules read: this one, or the one `REPO_RULES_ROOT` names.
+ *
+ * The override exists for the rules' own tests, which build a small git
+ * repository per case and point the rules at it. Nothing else sets it, and CI
+ * runs the rules against the checkout exactly as before.
+ */
+export const ROOT = process.env.REPO_RULES_ROOT
+  ? path.resolve(process.env.REPO_RULES_ROOT)
+  : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 export const failures = [];
 
