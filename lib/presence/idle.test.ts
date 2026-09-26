@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DateTime } from 'luxon';
+import { cairo } from '@/lib/testing/time';
 import {
   DEFAULT_POLICY,
   idleForMs,
@@ -17,7 +17,7 @@ import {
 
 /** Wall-clock Cairo, so a fixture reads as the shift it describes. */
 function at(time: string, day = '2026-09-03'): Date {
-  return DateTime.fromISO(`${day}T${time}`, { zone: 'Africa/Cairo' }).toJSDate();
+  return cairo(`${day}T${time}`);
 }
 
 const POLICY: PresencePolicy = { autoAwayAfterMins: 10, autoSignoutAfterMins: 30 };

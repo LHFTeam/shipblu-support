@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DateTime } from 'luxon';
+import { cairo } from '@/lib/testing/time';
 import type { HoursConfig } from '@/lib/hours';
 import { pickBody, pickRule, substitute, type AutoResponseRule } from './resolve';
 
@@ -11,8 +11,6 @@ import { pickBody, pickRule, substitute, type AutoResponseRule } from './resolve
  * database rather than written as UTC by hand — Cairo observes DST again, so a
  * fixture written as "07:00 UTC is 09:00 in Cairo" is right for half the year.
  */
-
-const cairo = (iso: string): Date => DateTime.fromISO(iso, { zone: 'Africa/Cairo' }).toJSDate();
 
 const HOURS: HoursConfig = {
   timezone: 'Africa/Cairo',

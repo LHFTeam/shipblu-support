@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { cairo } from '@/lib/testing/time';
 import { DateTime } from 'luxon';
 import {
   clampSpans,
@@ -14,7 +15,7 @@ import {
 
 /** Wall-clock Cairo to an instant, so fixtures read as the shift they describe. */
 function at(time: string, day = '2026-08-20'): Date {
-  return DateTime.fromISO(`${day}T${time}`, { zone: 'Africa/Cairo' }).toJSDate();
+  return cairo(`${day}T${time}`);
 }
 
 function span(from: string, to: string, day?: string): Span {

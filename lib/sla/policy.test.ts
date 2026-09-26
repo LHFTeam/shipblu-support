@@ -1,5 +1,5 @@
-import { DateTime } from 'luxon';
 import { describe, expect, it } from 'vitest';
+import { cairo as at, inCairo } from '@/lib/testing/time';
 import type { SlaTargets, WeeklySchedule } from '@/db/schema/config';
 import type { HoursConfig } from '@/lib/hours';
 import { emptyCatalog, ticketHours, type HoursCatalog } from '@/lib/hours/resolve';
@@ -51,15 +51,6 @@ function policy(overrides: Partial<LoadedPolicy> = {}): LoadedPolicy {
  * what decides it.
  */
 const CAIRO_HOURS: HoursConfig = { schedule: CAIRO, timezone: 'Africa/Cairo' };
-
-function at(iso: string): Date {
-  return DateTime.fromISO(iso, { zone: 'Africa/Cairo' }).toJSDate();
-}
-
-function inCairo(date: Date | null): string | null {
-  if (!date) return null;
-  return DateTime.fromJSDate(date, { zone: 'Africa/Cairo' }).toFormat("yyyy-MM-dd'T'HH:mm");
-}
 
 const facts: Facts = { priority: 'urgent', channel: 'whatsapp', 'group.id': 'shipping' };
 
