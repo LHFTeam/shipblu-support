@@ -1,4 +1,5 @@
 import { publicBaseUrl } from '@/lib/kb/site';
+import { HOST_SAYS, SOURCE, WIDGET_SAYS } from '@/lib/widget/protocol';
 
 export const dynamic = 'force-dynamic';
 
@@ -44,6 +45,12 @@ export async function GET() {
     close: function () { toggle(false); },
     toggle: function () { toggle(); }
   };
+
+  // The names the frame and this script speak to each other, from
+  // lib/widget/protocol.ts.
+  var SOURCE = ${JSON.stringify(SOURCE)};
+  var WIDGET_SAYS = ${JSON.stringify(WIDGET_SAYS)};
+  var HOST_SAYS = ${JSON.stringify(HOST_SAYS)};
 
   var script = document.currentScript;
 
@@ -455,7 +462,7 @@ export async function GET() {
     if (composePending === null || !iframe || !frameLoaded) return;
 
     iframe.contentWindow.postMessage(
-      { source: 'shipblu-host', type: 'compose', text: composePending },
+      { source: SOURCE.host, type: HOST_SAYS.compose, text: composePending },
       BASE
     );
     // Once only. The frame says \`hello\` again whenever it remounts, and
@@ -501,7 +508,7 @@ export async function GET() {
     composePending = null;
 
     if (iframe && frameReady) {
-      iframe.contentWindow.postMessage({ source: 'shipblu-host', type: 'clear' }, BASE);
+      iframe.contentWindow.postMessage({ source: SOURCE.host, type: HOST_SAYS.clear }, BASE);
     } else {
       clearPending = true;
     }
@@ -513,7 +520,7 @@ export async function GET() {
     if (!identity || !iframe || !frameReady) return;
 
     iframe.contentWindow.postMessage(
-      { source: 'shipblu-host', type: 'identify', identity: identity, signature: signature },
+      { source: SOURCE.host, type: HOST_SAYS.identify, identity: identity, signature: signature },
       BASE
     );
   }
@@ -577,7 +584,7 @@ export async function GET() {
     // look away.
     if (open) badge.style.display = 'none';
     frame.contentWindow.postMessage(
-      { source: 'shipblu-host', type: open ? 'opened' : 'closed' },
+      { source: SOURCE.host, type: open ? HOST_SAYS.opened : HOST_SAYS.closed },
       BASE
     );
   }
@@ -617,20 +624,20 @@ export async function GET() {
     if (event.origin !== BASE) return;
 
     var data = event.data;
-    if (!data || data.source !== 'shipblu-widget') return;
+    if (!data || data.source !== SOURCE.widget) return;
 
     /*
      * The frame has a session and can be told things. Sent again after the
      * widget starts a fresh one, which is why the identity is pushed rather
      * than assumed to have survived.
      */
-    if (data.type === 'ready') {
+    if (data.type === WIDGET_SAYS.ready) {
       frameReady = true;
       frameLoaded = true;
 
       if (clearPending) {
         clearPending = false;
-        iframe.contentWindow.postMessage({ source: 'shipblu-host', type: 'clear' }, BASE);
+        iframe.contentWindow.postMessage({ source: SOURCE.host, type: HOST_SAYS.clear }, BASE);
         return;
       }
 
@@ -649,12 +656,12 @@ export async function GET() {
      * and \`setLocale\` re-points \`src\` and starts a new document. Left
      * assuming it is visible, a hidden panel silently swallows the unread badge.
      */
-    if (data.type === 'hello') {
+    if (data.type === WIDGET_SAYS.hello) {
       frameLoaded = true;
 
       if (iframe && iframe.contentWindow) {
         iframe.contentWindow.postMessage(
-          { source: 'shipblu-host', type: open ? 'opened' : 'closed' },
+          { source: SOURCE.host, type: open ? HOST_SAYS.opened : HOST_SAYS.closed },
           BASE
         );
       }
@@ -666,13 +673,13 @@ export async function GET() {
       return;
     }
 
-    if (data.type === 'unread') {
+    if (data.type === WIDGET_SAYS.unread) {
       var count = Number(data.count) || 0;
       badge.textContent = count > 9 ? '9+' : String(count);
       badge.style.display = count > 0 && !open ? 'flex' : 'none';
     }
 
-    if (data.type === 'close') toggle(false);
+    if (data.type === WIDGET_SAYS.close) toggle(false);
   });
 
   function mount() {
