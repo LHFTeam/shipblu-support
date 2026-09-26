@@ -1,14 +1,21 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { stubFetch } from '@/lib/testing/fetch';
-import { withTestEnv } from '@/lib/testing/env';
+import { setTestEnv, withTestEnv } from '@/lib/testing/env';
+import { GRAPH_BASE, INSTAGRAM_GRAPH_BASE } from './graph';
 import {
+  applyFieldSubscription,
+  applyInstagramLoginSubscription,
+  applyPageSubscription,
   type GraphSubscription,
   GraphSubscriptionError,
   INSTAGRAM_OBJECT,
+  PAGE_OBJECT,
   planFieldSubscription,
   planInstagramLoginSubscription,
   planPageSubscription,
+  readInstagramLoginSubscription,
   readPageSubscription,
+  readSubscription,
   REQUIRED_INSTAGRAM_FIELDS,
   REQUIRED_PAGE_FIELDS,
   REQUIRED_WHATSAPP_FIELDS,
@@ -384,5 +391,207 @@ describe('a Graph answer that stops arriving', () => {
 
     await expect(failure).rejects.toBeInstanceOf(GraphSubscriptionError);
     await expect(failure).rejects.toThrow('Graph API did not answer in 15s');
+  });
+});
+
+/**
+ * The three requests this module makes, as they go out and as they fail.
+ *
+ * Each level has its own node, its own credential and its own sentence for a
+ * refusal, because Graph's own sentence rarely says which of those was wrong.
+ * What they share is how the credential travels — a header, never the query
+ * string, because the app token contains the app secret verbatim — and how a
+ * refusal becomes a `GraphSubscriptionError`. These pin both before the three
+ * copies of that code become one.
+ */
+describe('the Graph requests behind each level', () => {
+  withTestEnv({
+    META_APP_ID: '123',
+    META_APP_SECRET: 'app-secret',
+    META_VERIFY_TOKEN: 'verify-me',
+    META_PAGE_ACCESS_TOKEN: 'page-token',
+    INSTAGRAM_ACCESS_TOKEN: 'instagram-token',
+  });
+
+  const LEVELS = [
+    {
+      level: 'the app level',
+      read: () => readSubscription(INSTAGRAM_OBJECT),
+      write: () =>
+        applyFieldSubscription({
+          object: INSTAGRAM_OBJECT,
+          callbackUrl: 'https://support.shipblu.com/api/webhooks/meta',
+          current: ['messages'],
+          merged: ['messages', 'comments'],
+          adding: ['comments'],
+        }),
+      node: `${GRAPH_BASE}/123/subscriptions`,
+      writes: {
+        object: INSTAGRAM_OBJECT,
+        callback_url: 'https://support.shipblu.com/api/webhooks/meta',
+        fields: 'messages,comments',
+        verify_token: 'verify-me',
+        include_values: 'true',
+      },
+      bearer: '123|app-secret',
+      host: 'Graph API',
+      explains: null,
+      unset: 'META_APP_SECRET',
+    },
+    {
+      level: 'the Page',
+      read: () => readPageSubscription('456'),
+      write: () =>
+        applyPageSubscription({
+          pageId: '456',
+          installed: true,
+          current: ['messages'],
+          merged: ['messages', 'feed'],
+          adding: ['feed'],
+        }),
+      node: `${GRAPH_BASE}/456/subscribed_apps`,
+      writes: { subscribed_fields: 'messages,feed' },
+      bearer: 'page-token',
+      host: 'Graph API',
+      explains: 'This call needs a Page token whose person can MANAGE the Page',
+      unset: 'META_PAGE_ACCESS_TOKEN',
+    },
+    {
+      level: 'the direct Instagram connection',
+      read: () => readInstagramLoginSubscription('789'),
+      write: () =>
+        applyInstagramLoginSubscription({
+          accountId: '789',
+          subscribed: true,
+          current: ['messages'],
+          merged: ['messages', 'comments'],
+          adding: ['comments'],
+        }),
+      node: `${INSTAGRAM_GRAPH_BASE}/789/subscribed_apps`,
+      writes: { subscribed_fields: 'messages,comments' },
+      bearer: 'instagram-token',
+      host: 'graph.instagram.com',
+      explains: 'This call is addressed to graph.instagram.com and authenticated with',
+      unset: 'INSTAGRAM_ACCESS_TOKEN',
+    },
+  ];
+
+  describe.each(LEVELS)('$level', (level) => {
+    it('reads its node with the credential in a header, not the URL', async () => {
+      const fetch = stubFetch(() => Response.json({ data: [] }));
+
+      await level.read();
+
+      const [url, init] = fetch.mock.calls[0]!;
+      const sent = new URL(String(url));
+      expect(`${sent.origin}${sent.pathname}`).toBe(level.node);
+      expect(init?.method).toBe('GET');
+      expect([...sent.searchParams]).toEqual([]);
+      expect(new Headers(init?.headers).get('Authorization')).toBe(`Bearer ${level.bearer}`);
+    });
+
+    it('writes the merged field list as the query of one POST', async () => {
+      const fetch = stubFetch(() => Response.json({ success: true }));
+
+      await level.write();
+
+      expect(fetch).toHaveBeenCalledOnce();
+      const [url, init] = fetch.mock.calls[0]!;
+      const sent = new URL(String(url));
+      expect(`${sent.origin}${sent.pathname}`).toBe(level.node);
+      expect(init?.method).toBe('POST');
+      expect(init?.body).toBeUndefined();
+      expect(Object.fromEntries(sent.searchParams)).toEqual(level.writes);
+      expect(sent.searchParams.has('access_token')).toBe(false);
+      expect(new Headers(init?.headers).get('Authorization')).toBe(`Bearer ${level.bearer}`);
+    });
+
+    it("reports a refusal with Graph's own sentence, code and trace id", async () => {
+      stubFetch(() =>
+        Response.json(
+          { error: { message: 'Invalid parameter', code: 100, fbtrace_id: 'trace-1' } },
+          { status: 400 },
+        ),
+      );
+
+      const error = await level.read().catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(GraphSubscriptionError);
+      expect(error).toMatchObject({ status: 400, code: 100, traceId: 'trace-1' });
+      const message = (error as Error).message;
+      if (level.explains === null) {
+        expect(message).toBe('Invalid parameter');
+      } else {
+        expect(message.startsWith(`Invalid parameter\n\n${level.explains}`)).toBe(true);
+      }
+    });
+
+    it('names the status when the refusal is not JSON', async () => {
+      stubFetch(() => new Response('<html>Bad Gateway</html>', { status: 502 }));
+
+      const error = await level.read().catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(GraphSubscriptionError);
+      expect(error).toMatchObject({ status: 502, code: null, traceId: null });
+      expect((error as Error).message.split('\n')[0]).toBe('HTTP 502');
+    });
+
+    it('names the host it could not reach', async () => {
+      stubFetch(() => {
+        throw new TypeError('fetch failed');
+      });
+
+      const failure = level.read();
+
+      await expect(failure).rejects.toBeInstanceOf(GraphSubscriptionError);
+      await expect(failure).rejects.toThrow(`${level.host} unreachable: fetch failed`);
+    });
+
+    it('refuses before sending anything when its credential is not set', async () => {
+      setTestEnv({ [level.unset]: undefined });
+      const fetch = stubFetch(() => Response.json({ data: [] }));
+
+      await expect(level.read()).rejects.toThrow(level.unset);
+      expect(fetch).not.toHaveBeenCalled();
+    });
+  });
+
+  it('picks this app out of every subscription the app level reports', async () => {
+    stubFetch(() =>
+      Response.json({
+        data: [
+          { object: PAGE_OBJECT, callback_url: 'https://a', active: true, fields: [] },
+          { object: INSTAGRAM_OBJECT, callback_url: 'https://b', active: true, fields: [] },
+        ],
+      }),
+    );
+
+    expect((await readSubscription(INSTAGRAM_OBJECT))?.callback_url).toBe('https://b');
+  });
+
+  it('picks this app out of every app installed on the Page', async () => {
+    stubFetch(() =>
+      Response.json({
+        data: [
+          { id: '999', subscribed_fields: ['feed'] },
+          { id: '123', subscribed_fields: ['messages'] },
+        ],
+      }),
+    );
+
+    expect(await readPageSubscription('456')).toEqual(['messages']);
+  });
+
+  it('unions every entry the direct connection reports', async () => {
+    stubFetch(() =>
+      Response.json({
+        data: [
+          { subscribed_fields: ['messages'] },
+          { subscribed_fields: ['comments', 'messages'] },
+        ],
+      }),
+    );
+
+    expect(await readInstagramLoginSubscription('789')).toEqual(['messages', 'comments']);
   });
 });
