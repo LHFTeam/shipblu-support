@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resetEnvCache } from '@/lib/env';
 import {
   type GraphSubscription,
   GraphSubscriptionError,
@@ -6,6 +7,7 @@ import {
   planFieldSubscription,
   planInstagramLoginSubscription,
   planPageSubscription,
+  readPageSubscription,
   REQUIRED_INSTAGRAM_FIELDS,
   REQUIRED_PAGE_FIELDS,
   REQUIRED_WHATSAPP_FIELDS,
@@ -348,5 +350,55 @@ describe('planPageSubscription', () => {
 
   it('carries the page id through to the write', () => {
     expect(planPageSubscription(PAGE, [], REQUIRED_PAGE_FIELDS).pageId).toBe(PAGE);
+  });
+});
+
+/**
+ * The deadline governs reading the body as well as waiting for the status. A
+ * deadline passing mid-body rejected with the signal's own reason — "The
+ * operation was aborted due to timeout", naming no host — rather than the
+ * error every caller here reports.
+ */
+describe('a Graph answer that stops arriving', () => {
+  const ORIGINAL_ENV = process.env;
+
+  beforeEach(() => {
+    process.env = {
+      ...ORIGINAL_ENV,
+      DATABASE_URL: 'postgres://localhost/test',
+      APP_SECRET: 'x'.repeat(32),
+      META_APP_ID: '123',
+      META_PAGE_ACCESS_TOKEN: 'token',
+    };
+    resetEnvCache();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.error(
+                  new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
+                );
+              },
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    process.env = ORIGINAL_ENV;
+    resetEnvCache();
+  });
+
+  it('fails as a subscription error that says the deadline passed', async () => {
+    const failure = readPageSubscription('456');
+
+    await expect(failure).rejects.toBeInstanceOf(GraphSubscriptionError);
+    await expect(failure).rejects.toThrow('Graph API did not answer in 15s');
   });
 });

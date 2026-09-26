@@ -190,6 +190,39 @@ export class GraphSubscriptionError extends Error {
 }
 
 /**
+ * One request and the body it answers with, under one deadline.
+ *
+ * A deadline because every caller runs in a job, and the worker claims nothing
+ * new until its whole batch is done — see `graphTimeout`. The body is read
+ * inside it because the signal governs the read too, and a deadline passing
+ * mid-body rejects with the signal's own reason, which names no host. None of
+ * these calls is a message to a customer, so a write whose answer was lost is
+ * simply failed and run again: subscribing twice is the same subscription.
+ */
+async function exchange(
+  host: string,
+  url: URL,
+  method: 'GET' | 'POST',
+  token: string,
+): Promise<{ response: Response; text: string }> {
+  const timeoutMs = graphTimeout(method);
+  try {
+    const response = await fetch(url, {
+      method,
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    return { response, text: await response.text() };
+  } catch (error) {
+    throw new GraphSubscriptionError(
+      error instanceof DOMException && error.name === 'TimeoutError'
+        ? `${host} did not answer in ${timeoutMs / 1000}s`
+        : `${host} unreachable: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+/**
  * `{app-id}|{app-secret}`, Meta's app access token, and the app id it is built
  * from.
  *
@@ -233,26 +266,11 @@ async function graph<T>(init: {
     url.searchParams.set(key, value);
   }
 
-  let response: Response;
-  try {
-    // The token goes in the header, not in the query string as the other two
-    // Graph clients do. An app access token contains the app secret verbatim,
-    // and a URL is the part of a request that ends up in logs and error
-    // messages.
-    response = await fetch(url, {
-      method: init.method,
-      headers: { Authorization: `Bearer ${token}` },
-      // A deadline, because this runs in a job and one request that never
-      // answered stopped the whole queue — see `graphTimeout`.
-      signal: AbortSignal.timeout(graphTimeout(init.method)),
-    });
-  } catch (error) {
-    throw new GraphSubscriptionError(
-      `Graph API unreachable: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-
-  const text = await response.text();
+  // The token goes in the header, not in the query string as the other two
+  // Graph clients do. An app access token contains the app secret verbatim,
+  // and a URL is the part of a request that ends up in logs and error
+  // messages.
+  const { response, text } = await exchange('Graph API', url, init.method, token);
   let body: unknown;
   try {
     body = JSON.parse(text);
@@ -436,22 +454,7 @@ async function pageGraph<T>(
     url.searchParams.set(key, value);
   }
 
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      method: init.method,
-      headers: { Authorization: `Bearer ${token}` },
-      // A deadline, because this runs in a job and one request that never
-      // answered stopped the whole queue — see `graphTimeout`.
-      signal: AbortSignal.timeout(graphTimeout(init.method)),
-    });
-  } catch (error) {
-    throw new GraphSubscriptionError(
-      `Graph API unreachable: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-
-  const text = await response.text();
+  const { response, text } = await exchange('Graph API', url, init.method, token);
   let body: unknown;
   try {
     body = JSON.parse(text);
@@ -584,24 +587,9 @@ async function instagramGraph<T>(
     url.searchParams.set(key, value);
   }
 
-  let response: Response;
-  try {
-    // Header rather than query string, as everywhere else here: a URL is the
-    // part of a request that ends up in logs and error messages.
-    response = await fetch(url, {
-      method: init.method,
-      headers: { Authorization: `Bearer ${token}` },
-      // A deadline, because this runs in a job and one request that never
-      // answered stopped the whole queue — see `graphTimeout`.
-      signal: AbortSignal.timeout(graphTimeout(init.method)),
-    });
-  } catch (error) {
-    throw new GraphSubscriptionError(
-      `graph.instagram.com unreachable: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-
-  const text = await response.text();
+  // Header rather than query string, as everywhere else here: a URL is the
+  // part of a request that ends up in logs and error messages.
+  const { response, text } = await exchange('graph.instagram.com', url, init.method, token);
   let body: unknown;
   try {
     body = JSON.parse(text);

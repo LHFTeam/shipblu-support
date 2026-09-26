@@ -44,6 +44,28 @@ export class MetaApiError extends Error {
 }
 
 /**
+ * A request whose deadline passed before Graph's answer arrived.
+ *
+ * Retried like any request that did not answer, and its own type because one
+ * caller must not retry it: a timeout says nothing about whether Meta acted on
+ * the request, and `privateReplyToComment` is the send where acting twice is
+ * refused rather than duplicated.
+ */
+class MetaTimeoutError extends MetaApiError {
+  constructor(
+    what: string,
+    readonly timeoutMs: number,
+  ) {
+    super(`${what} did not answer in ${timeoutMs / 1000}s`, 0, null, null, true);
+    this.name = 'MetaTimeoutError';
+  }
+}
+
+function isTimeout(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'TimeoutError';
+}
+
+/**
  * Codes worth retrying. Everything else fails identically on every attempt, so
  * retrying only delays the agent finding out.
  *
@@ -189,25 +211,64 @@ async function graph<T>(
   }
 
   const timeoutMs = graphTimeout(init.method);
+  // A network failure is always worth retrying; it says nothing about whether
+  // the request was valid. A deadline that passed is one, and says so.
+  const unanswered = (error: unknown) =>
+    isTimeout(error)
+      ? new MetaTimeoutError('Graph API', timeoutMs)
+      : new MetaApiError(
+          `Graph API unreachable: ${error instanceof Error ? error.message : String(error)}`,
+          0,
+          null,
+          null,
+          true,
+        );
+
   let response: Response;
   try {
     response = await fetch(url, {
       method: init.method,
       headers: init.body ? { 'Content-Type': 'application/json' } : undefined,
       body: init.body ? JSON.stringify(init.body) : undefined,
+      // Governs reading the body below as well as waiting for the status.
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
-    // A network failure is always worth retrying; it says nothing about whether
-    // the request was valid. A deadline that passed is one, and says so.
-    const reason =
-      error instanceof DOMException && error.name === 'TimeoutError'
-        ? `did not answer in ${timeoutMs / 1000}s`
-        : `unreachable: ${error instanceof Error ? error.message : String(error)}`;
-    throw new MetaApiError(`Graph API ${reason}`, 0, null, null, true);
+    throw unanswered(error);
   }
 
-  const text = await response.text();
+  let text: string;
+  try {
+    text = await response.text();
+  } catch (error) {
+    /*
+      The status arrived and the body did not: the deadline passed mid-read, or
+      the connection dropped. On a write the status line is already Graph's
+      answer — a 2xx says the message went — and retrying it is how a customer
+      is sent the same reply twice. What is lost is only the receipt, which is
+      what an empty 2xx body gives already and every caller reads as "no id".
+      A refusal keeps its status, which says Meta did not act, and is retried
+      to learn the reason; a read is retried as a request that did not answer.
+    */
+    if (response.ok && init.method !== 'GET') {
+      console.warn(
+        `[meta] ${platform} via ${connection} ${init.method} ${url.host}/${path} was accepted ` +
+          `with ${response.status}, but its body never arrived: ${unanswered(error).message}`,
+      );
+      return null as T;
+    }
+    if (!response.ok) {
+      throw new MetaApiError(
+        `Graph API refused with ${response.status}, and its reason never arrived ` +
+          `(${unanswered(error).message})`,
+        response.status,
+        null,
+        null,
+        true,
+      );
+    }
+    throw unanswered(error);
+  }
   let parsed: unknown = null;
   try {
     parsed = text ? JSON.parse(text) : null;
@@ -425,10 +486,34 @@ export async function privateReplyToComment(input: {
   // The messages endpoint on both platforms — see `commentRequest` — so both
   // answer in the send API's shape, `message_id` and a `recipient_id`, rather
   // than with a comment node's `id`.
-  const result = await comment<{ message_id?: string }>(input.platform, input.commentId, {
-    kind: 'private_reply',
-    message: input.message,
-  });
+  let result: { message_id?: string } | null;
+  try {
+    result = await comment<{ message_id?: string }>(input.platform, input.commentId, {
+      kind: 'private_reply',
+      message: input.message,
+    });
+  } catch (error) {
+    /*
+      Final, although every other timeout is retried. Meta may have delivered
+      the reply before its answer was lost, and then the retry is refused for
+      the one-reply rule in the same shape as a deleted comment — so the agent
+      would be told the comment is probably gone, about a reply the customer
+      has. Whether to send again is theirs to decide, with the conversation
+      open; the sentence says what to check.
+    */
+    if (error instanceof MetaTimeoutError) {
+      throw new MetaApiError(
+        `Meta did not answer this private reply within ${error.timeoutMs / 1000}s, so it may ` +
+          `have been delivered. A comment allows only one private reply, so it was not sent ` +
+          `again: check the customer's messages before answering another way.`,
+        0,
+        null,
+        null,
+        false,
+      );
+    }
+    throw error;
+  }
 
   return result?.message_id ?? null;
 }
@@ -674,6 +759,13 @@ export class MetaContentTooLargeError extends Error {
 }
 
 /**
+ * A minute for one attachment, headers and bytes together: room for a large file
+ * over a CDN link, and a deadline all the same, because this runs in a job and
+ * the worker claims nothing new until its whole batch is done.
+ */
+const MEDIA_TIMEOUT_MS = 60_000;
+
+/**
  * Downloads an attachment Meta has given us a URL for.
  *
  * `maxBytes` is enforced **while reading**, not after. Checking the length of a
@@ -683,16 +775,25 @@ export class MetaContentTooLargeError extends Error {
  * "too large" afterwards. The declared `Content-Length` is rejected up front
  * where there is one, and the stream is aborted mid-read where there is not.
  */
-/** See `downloadAttachment`. */
-const MEDIA_TIMEOUT_MS = 60_000;
-
 export async function downloadAttachment(
   url: string,
   options: { maxBytes?: number } = {},
 ): Promise<{ content: Buffer; contentType: string }> {
-  // A minute, like a storage upload: room for a large file, and a deadline all
-  // the same, because this runs in a job and one that never answered stopped the
-  // queue. It bounds the read below as well as the headers.
+  try {
+    return await readAttachment(url, options);
+  } catch (error) {
+    // The deadline passing mid-read rejects the body with the signal's own
+    // reason, which names no call. Said here once for the fetch and all three
+    // reads, so the message row says which step of a download stalled.
+    if (isTimeout(error)) throw new MetaTimeoutError('Attachment download', MEDIA_TIMEOUT_MS);
+    throw error;
+  }
+}
+
+async function readAttachment(
+  url: string,
+  options: { maxBytes?: number },
+): Promise<{ content: Buffer; contentType: string }> {
   const response = await fetch(url, { signal: AbortSignal.timeout(MEDIA_TIMEOUT_MS) });
   if (!response.ok) {
     throw new MetaApiError(

@@ -73,17 +73,13 @@ export async function checkMetaPermissions(): Promise<void> {
 
   // The app token goes in the header, not the query string: it contains the app
   // secret verbatim and a URL is the part of a request that reaches logs.
-  const response = await fetch(url, {
-    headers: { Authorization: `Bearer ${appId}|${appSecret}` },
-    signal: AbortSignal.timeout(graphTimeout('GET')),
-  });
+  const { ok, status, body } = await readGraph<{ data?: DebugToken; error?: unknown }>(
+    url,
+    `${appId}|${appSecret}`,
+  );
 
-  const body = (await response.json().catch(() => null)) as { data?: DebugToken; error?: unknown };
-
-  if (!response.ok || !body?.data) {
-    throw new Error(
-      `debug_token failed (HTTP ${response.status}): ${JSON.stringify(body?.error ?? body)}`,
-    );
+  if (!ok || !body?.data) {
+    throw new Error(`debug_token failed (HTTP ${status}): ${JSON.stringify(body?.error ?? body)}`);
   }
 
   const data = body.data;
@@ -199,6 +195,47 @@ function reportFeatures(): void {
 }
 
 /**
+ * A GET to Graph with the read deadline, and the JSON it answered with.
+ *
+ * The body is read as text and parsed separately because the two failures mean
+ * opposite things here. A body that is not JSON is an answer — Meta's edge
+ * sometimes serves an HTML page — and is reported as one, with the status. A
+ * body that never arrived is not, and swallowing it into the same null reported
+ * a working token as refused with HTTP 200: this job's whole value is that what
+ * it prints is true, and that sentence sends somebody to rotate a credential.
+ */
+async function readGraph<T>(
+  url: URL,
+  token: string,
+): Promise<{ ok: boolean; status: number; body: T | null }> {
+  const timeoutMs = graphTimeout('GET');
+  let response: Response;
+  let text: string;
+  try {
+    // Header rather than query string: a URL is the part of a request that ends
+    // up in logs, and both tokens read here are live credentials.
+    response = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    text = await response.text();
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'TimeoutError') {
+      throw new Error(`${url.host}${url.pathname} did not answer in ${timeoutMs / 1000}s`);
+    }
+    throw error;
+  }
+
+  let body: T | null = null;
+  try {
+    body = JSON.parse(text) as T;
+  } catch {
+    // Not JSON: left null, and the caller reports the status it came with.
+  }
+  return { ok: response.ok, status: response.status, body };
+}
+
+/**
  * The direct Instagram connection, as far as its own host will describe it.
  *
  * Three things are checked and each has already been the whole cause of an
@@ -234,17 +271,10 @@ async function checkInstagramLogin(): Promise<void> {
   let status = 0;
 
   try {
-    // Header rather than query string: a URL is the part of a request that ends
-    // up in logs, and this one is a live credential.
-    const response = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(graphTimeout('GET')),
-    });
-    status = response.status;
-    body = (await response.json().catch(() => null)) as InstagramMe | null;
+    ({ status, body } = await readGraph<InstagramMe>(url, token));
   } catch (error) {
     console.error(
-      `[meta:permissions] graph.instagram.com unreachable: ` +
+      `[meta:permissions] could not check the direct Instagram connection: ` +
         `${error instanceof Error ? error.message : String(error)}`,
     );
     return;

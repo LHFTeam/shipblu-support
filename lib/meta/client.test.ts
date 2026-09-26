@@ -5,6 +5,7 @@ import {
   downloadAttachment,
   latestPagePostId,
   MetaApiError,
+  privateReplyToComment,
   replyToComment,
   sendDirectMessage,
 } from './client';
@@ -183,9 +184,10 @@ describe('which connection a call goes out over', () => {
 });
 
 /**
- * Every Graph call runs in a job or a page, and none had a deadline: in a job,
- * one that never answered stopped the whole queue, because the worker awaits a
- * batch before it claims the next.
+ * Every Graph call runs in a job or a page, and none had a deadline of its own:
+ * `fetch` gives up only after five minutes without a response, and in a job
+ * that held every queued job behind it, because the worker awaits a batch
+ * before it claims the next.
  */
 describe('Graph deadlines', () => {
   /** Answers like `fetch` does: a signal that has fired rejects with its reason. */
@@ -246,5 +248,157 @@ describe('Graph deadlines', () => {
     await expect(failure).rejects.toBeInstanceOf(MetaApiError);
     await expect(failure).rejects.toMatchObject({ isTransient: true });
     await expect(failure).rejects.toThrow(/did not answer in 15s/);
+  });
+});
+
+/**
+ * The signal governs reading the body as well as waiting for the status, so a
+ * deadline can pass after Graph has answered and before its answer has arrived.
+ * The body then rejects with the signal's own reason, which named no call and
+ * was not a `MetaApiError` — and on a send Meta had accepted, a retry.
+ */
+describe('a deadline that passes while the body is arriving', () => {
+  /** The status line arrives; the body is still coming when the deadline passes. */
+  function stallBody(status = 200) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.error(
+                  new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
+                );
+              },
+            }),
+            { status },
+          ),
+      ),
+    );
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('treats a send Meta accepted as sent, rather than sending it again', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stallBody(200);
+
+    await expect(
+      sendDirectMessage({
+        platform: 'facebook',
+        recipientId: 'psid-1',
+        text: 'hi',
+        tag: 'RESPONSE',
+      }),
+    ).resolves.toEqual({ messageId: null, recipientId: null });
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/accepted with 200/));
+  });
+
+  it('retries a read, and says the deadline passed', async () => {
+    stallBody(200);
+
+    const failure = latestPagePostId();
+
+    await expect(failure).rejects.toBeInstanceOf(MetaApiError);
+    await expect(failure).rejects.toMatchObject({ isTransient: true });
+    await expect(failure).rejects.toThrow('Graph API did not answer in 15s');
+  });
+
+  it('retries a refusal whose reason never arrived, keeping its status', async () => {
+    stallBody(400);
+
+    const failure = sendDirectMessage({
+      platform: 'facebook',
+      recipientId: 'psid-1',
+      text: 'hi',
+      tag: 'RESPONSE',
+    });
+
+    await expect(failure).rejects.toMatchObject({ isTransient: true, status: 400 });
+    await expect(failure).rejects.toThrow(
+      'Graph API refused with 400, and its reason never arrived (Graph API did not answer in 90s)',
+    );
+  });
+
+  it.each([
+    ['whole', {}],
+    ['streamed against a limit', { maxBytes: 1024 }],
+  ])('names an attachment download read %s', async (_how, options) => {
+    stallBody(200);
+
+    const failure = downloadAttachment('https://lookaside.fbsbx.com/media/1', options);
+
+    await expect(failure).rejects.toMatchObject({ isTransient: true });
+    await expect(failure).rejects.toThrow('Attachment download did not answer in 60s');
+  });
+});
+
+/**
+ * Meta allows one private reply per comment, ever. A retry after a timeout is
+ * refused if the first attempt arrived, in the same shape as a deleted comment,
+ * so the agent was told the comment was probably gone about a reply the
+ * customer had.
+ */
+describe('a private reply that timed out', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('is final, and says it may have been delivered', async () => {
+    vi.spyOn(AbortSignal, 'timeout').mockReturnValue(
+      AbortSignal.abort(new DOMException('The operation timed out.', 'TimeoutError')),
+    );
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string | URL, init?: RequestInit) => {
+        if (init?.signal?.aborted) throw init.signal.reason;
+        return new Response('{}', { status: 200 });
+      }),
+    );
+
+    const failure = privateReplyToComment({
+      platform: 'facebook',
+      commentId: '123_456',
+      message: 'We have sent you a message',
+    });
+
+    await expect(failure).rejects.toBeInstanceOf(MetaApiError);
+    await expect(failure).rejects.toMatchObject({ isTransient: false, status: 0 });
+    await expect(failure).rejects.toThrow(/may have been delivered/);
+  });
+
+  it('keeps every other failure as it was', async () => {
+    respondWith(500, null);
+
+    await expect(
+      privateReplyToComment({ platform: 'facebook', commentId: '123_456', message: 'hi' }),
+    ).rejects.toMatchObject({ isTransient: true, status: 500 });
+  });
+
+  /** A refusal says Meta did not act, so nothing was delivered and a retry is safe. */
+  it('retries a refusal whose reason never arrived', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.error(
+                  new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
+                );
+              },
+            }),
+            { status: 400 },
+          ),
+      ),
+    );
+
+    await expect(
+      privateReplyToComment({ platform: 'facebook', commentId: '123_456', message: 'hi' }),
+    ).rejects.toMatchObject({ isTransient: true, status: 400 });
   });
 });
