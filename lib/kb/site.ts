@@ -18,7 +18,7 @@ export function publicBaseUrl(): string {
 /**
  * Typed on the one method it uses, so a server component can pass
  * `await headers()` and a route handler can pass `request.headers`. Copied from
- * `clientIpFrom` in `./rate-limit.ts` for the same reason it exists there: the
+ * `clientIpFrom` in `lib/http/rate-limit.ts` for the same reason it exists there: the
  * two ways of reading a request drift apart the moment one of them is inlined.
  */
 type HeaderSource = { get(name: string): string | null };

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { hashToken } from '@/lib/auth/tokens';
-import { allow, clientIp } from '@/lib/kb/rate-limit';
+import { allow, clientIp } from '@/lib/http/rate-limit';
 import { applyVisitorIdentity, recordIdentityOnConversation } from '@/lib/widget/identify';
 import { identitySigningEnabled, parseIdentity, verifyIdentity } from '@/lib/widget/identity';
 import { findLiveConversation, resolveVisitor } from '@/lib/widget/session';

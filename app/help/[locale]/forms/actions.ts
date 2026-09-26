@@ -6,7 +6,7 @@ import { getSessionCustomer } from '@/lib/auth/customer-session';
 import { formPath } from '@/lib/forms/naming';
 import { getFormBySlug } from '@/lib/forms/queries';
 import { submitForm } from '@/lib/forms/submit';
-import { allow, clientIpFrom } from '@/lib/kb/rate-limit';
+import { allow, clientIpFrom } from '@/lib/http/rate-limit';
 import { DEFAULT_LOCALE, isLocale, type Locale, type StringKey } from '@/lib/kb/locale';
 
 /**

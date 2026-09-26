@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { DEFAULT_LOCALE, isLocale } from '@/lib/kb/locale';
 import { getArticle } from '@/lib/kb/queries';
-import { allow, clientIp } from '@/lib/kb/rate-limit';
+import { allow, clientIp } from '@/lib/http/rate-limit';
 import { requestBaseUrl } from '@/lib/kb/site';
 import { ANONYMOUS } from '@/lib/kb/visibility';
 

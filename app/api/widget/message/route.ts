@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { allow, clientIp } from '@/lib/kb/rate-limit';
+import { allow, clientIp } from '@/lib/http/rate-limit';
 import { appendVisitorMessage, listMessages } from '@/lib/widget/conversation';
 import { resolveVisitor } from '@/lib/widget/session';
 
