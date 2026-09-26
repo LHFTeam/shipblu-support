@@ -10,6 +10,7 @@ import type {
   ParsedInboundEmail,
   SendResult,
 } from '../types';
+import { errorMessage } from '@/lib/errors';
 
 /**
  * Postmark driver — the reference implementation of EmailProvider.
@@ -138,7 +139,7 @@ export class PostmarkEmailProvider implements EmailProvider {
       // nothing reads.
       console.warn(
         `[postmark] send accepted with ${response.status}, but its body never arrived: ` +
-          `${error instanceof Error ? error.message : String(error)}`,
+          `${errorMessage(error)}`,
       );
       text = null;
     }

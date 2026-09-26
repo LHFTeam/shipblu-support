@@ -1,6 +1,7 @@
 import { env, metaAppSecret, metaVerifyToken } from '@/lib/env';
 import { isTimeout } from '@/lib/http/deadline';
 import { GRAPH_BASE, graphTimeout, INSTAGRAM_GRAPH_BASE } from './graph';
+import { errorMessage } from '@/lib/errors';
 
 /**
  * The app's own webhook field subscriptions.
@@ -218,7 +219,7 @@ async function exchange(
     throw new GraphSubscriptionError(
       isTimeout(error)
         ? `${host} did not answer in ${timeoutMs / 1000}s`
-        : `${host} unreachable: ${error instanceof Error ? error.message : String(error)}`,
+        : `${host} unreachable: ${errorMessage(error)}`,
     );
   }
 }

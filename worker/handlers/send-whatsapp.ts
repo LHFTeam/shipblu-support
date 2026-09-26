@@ -8,6 +8,7 @@ import { sendingNumberFor } from '@/lib/whatsapp/conversation';
 import { WhatsAppApiError, sendTemplate, sendText } from '@/lib/whatsapp/client';
 import type { WhatsAppTemplateComponent } from '@/lib/whatsapp/templates';
 import { windowState } from '@/lib/whatsapp/window';
+import { errorMessage } from '@/lib/errors';
 
 /**
  * Delivers an agent's WhatsApp reply.
@@ -136,11 +137,7 @@ export async function sendWhatsApp(job: ClaimedJob): Promise<void> {
       `[send_whatsapp] ${messageId} sent as ${result.wamid ?? 'an unknown wamid: Meta accepted it and its answer was lost'}`,
     );
   } catch (error) {
-    await markFailed(
-      messageId,
-      row.message.meta,
-      error instanceof Error ? error.message : String(error),
-    );
+    await markFailed(messageId, row.message.meta, errorMessage(error));
 
     // Only retry what a retry could fix. A rejected template or an invalid
     // number fails identically every time, and retrying it four more times just

@@ -3,6 +3,7 @@ import { db } from '@/db/client';
 import { conversations, messages } from '@/db/schema';
 import type { ClaimedJob } from '@/lib/queue';
 import { parseCoordinates, readSharedLocation } from '@/lib/tickets/shared-location';
+import { errorMessage } from '@/lib/errors';
 
 /**
  * Recovers the pins already sitting in the archive.
@@ -148,7 +149,7 @@ export async function backfillMessageLocations(job: ClaimedJob): Promise<void> {
       } catch (error) {
         // One bad row must not end the run. The rest of the archive is still
         // worth repairing, and the job fails at the end with the list.
-        failures.push(`${message.id}: ${error instanceof Error ? error.message : String(error)}`);
+        failures.push(`${message.id}: ${errorMessage(error)}`);
       }
     }
   }

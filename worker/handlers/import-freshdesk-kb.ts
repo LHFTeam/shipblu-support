@@ -23,6 +23,7 @@ import { normaliseArticleHtml } from '@/lib/kb/format';
 import { detectCategoryLocale, detectLocale, looksUntranslated } from '@/lib/kb/language';
 import { LOCALES, LOCALE_NAMES, type Locale } from '@/lib/kb/locale';
 import { slugify, uniqueSlug } from '@/lib/kb/slug';
+import { errorMessage } from '@/lib/errors';
 
 /**
  * Imports the Freshdesk knowledge base, in every language it is published in.
@@ -95,7 +96,7 @@ export async function importFreshdeskKb(): Promise<void> {
   */
   const record = (what: string, error: unknown) => {
     if (error instanceof FreshdeskError && error.status === 0) throw error;
-    failures.push(`${what}: ${message(error)}`);
+    failures.push(`${what}: ${errorMessage(error)}`);
   };
   let categoryCount = 0;
   let folderCount = 0;
@@ -623,8 +624,4 @@ async function writeRedirects(freshdeskId: number, articleId: string): Promise<v
       .values({ fromPath, articleId })
       .onConflictDoUpdate({ target: kbRedirects.fromPath, set: { articleId } });
   }
-}
-
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

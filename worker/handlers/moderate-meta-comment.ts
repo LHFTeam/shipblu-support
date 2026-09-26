@@ -14,6 +14,7 @@ import {
 } from '@/lib/meta/moderation';
 import type { ClaimedJob } from '@/lib/queue';
 import { subjectGone } from './subject-gone';
+import { errorMessage } from '@/lib/errors';
 
 /**
  * Hides, unhides or deletes a public comment at Meta.
@@ -92,7 +93,7 @@ export async function moderateMetaComment(job: ClaimedJob): Promise<void> {
       });
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorMessage(error);
 
     // The same treatment a refused send gets: Graph's own sentence, plus what we
     // know about the request it was refusing. "Unsupported post request" alone

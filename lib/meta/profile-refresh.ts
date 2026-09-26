@@ -14,6 +14,7 @@ import { normaliseGender } from '@/lib/meta/profile';
 import type { MetaPlatform } from '@/lib/meta/types';
 import { buildAvatarPath, isStorableAvatarType, uploadObject } from '@/lib/storage';
 import { applyChannelProfile } from '@/lib/tickets/contacts';
+import { errorMessage } from '@/lib/errors';
 
 /**
  * Putting a name and a face on a Facebook or Instagram customer.
@@ -226,7 +227,7 @@ async function storeAvatar(
 
     console.warn(
       `[profile_refresh] ${contactId} avatar download failed, keeping the name: ` +
-        `${error instanceof Error ? error.message : String(error)}`,
+        `${errorMessage(error)}`,
     );
     // Keeps whatever was already on file rather than blanking a working picture
     // because one refresh could not reach the CDN.
@@ -243,10 +244,7 @@ async function storeAvatar(
     return { path: stored.path, retryable: false };
   } catch (error) {
     // Our own storage being unavailable is the most retryable failure here.
-    console.warn(
-      `[profile_refresh] ${contactId} avatar upload failed: ` +
-        `${error instanceof Error ? error.message : String(error)}`,
-    );
+    console.warn(`[profile_refresh] ${contactId} avatar upload failed: ${errorMessage(error)}`);
     return { path: existingPath, retryable: true };
   }
 }

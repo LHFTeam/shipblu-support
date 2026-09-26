@@ -1,5 +1,6 @@
 import { env } from '@/lib/env';
 import { isTimeout } from '@/lib/http/deadline';
+import { errorMessage } from '@/lib/errors';
 
 /**
  * Freshdesk Solutions API client.
@@ -101,7 +102,7 @@ async function request(path: string): Promise<{ response: Response; text: string
     throw new FreshdeskError(
       isTimeout(error)
         ? `Freshdesk ${path} did not answer in ${TIMEOUT_MS / 1000}s`
-        : `Freshdesk ${path} unreachable: ${error instanceof Error ? error.message : String(error)}`,
+        : `Freshdesk ${path} unreachable: ${errorMessage(error)}`,
       0,
       true,
     );

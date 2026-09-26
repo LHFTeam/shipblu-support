@@ -3,6 +3,7 @@ import { isTimeout, sizedTimeout } from '@/lib/http/deadline';
 import { GRAPH_BASE, graphTimeout } from '@/lib/meta/graph';
 import { ACCESS_TOKEN_CODE } from './errors';
 import type { WhatsAppTemplateComponent } from './templates';
+import { errorMessage } from '@/lib/errors';
 
 /**
  * Meta Cloud API client.
@@ -131,7 +132,7 @@ function credentials(override?: CallCredentials | null) {
 function unanswered(what: string, error: unknown, timeoutMs: number): WhatsAppApiError {
   const reason = isTimeout(error)
     ? `did not answer in ${timeoutMs / 1000}s`
-    : `unreachable: ${error instanceof Error ? error.message : String(error)}`;
+    : `unreachable: ${errorMessage(error)}`;
   return new WhatsAppApiError(`${what} ${reason}`, 0, null, null, true);
 }
 

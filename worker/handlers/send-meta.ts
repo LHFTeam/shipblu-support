@@ -15,6 +15,7 @@ import { messagingTag, metaWindowState, type MetaSendAuthor } from '@/lib/meta/w
 import type { ClaimedJob } from '@/lib/queue';
 import { subjectGone } from './subject-gone';
 import { metaReplyTarget } from '@/lib/tickets/meta-thread';
+import { errorMessage } from '@/lib/errors';
 
 /**
  * Delivers an agent's Facebook or Instagram reply.
@@ -96,7 +97,7 @@ export async function sendMeta(job: ClaimedJob): Promise<void> {
 
     console.log(`[send_meta] ${messageId} sent as ${sendKind} on ${platform} via ${connection}`);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorMessage(error);
 
     // Meta answers a refused send with a sentence that names no rule — most of
     // the time "An unknown error has occurred." — so what the timeline shows is

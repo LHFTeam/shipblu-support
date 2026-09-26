@@ -3,6 +3,7 @@ import { isTimeout } from '@/lib/http/deadline';
 import { FEATURES, diagnoseCapabilities, requiredScopes } from '@/lib/meta/capabilities';
 import { CONNECTION_LABEL, instagramLoginConfigured } from '@/lib/meta/connection';
 import { GRAPH_BASE, graphTimeout, INSTAGRAM_GRAPH_BASE } from '@/lib/meta/graph';
+import { errorMessage } from '@/lib/errors';
 
 /**
  * What the live Meta token actually carries, and which capability each gap stops.
@@ -276,7 +277,7 @@ async function checkInstagramLogin(): Promise<void> {
   } catch (error) {
     console.error(
       `[meta:permissions] could not check the direct Instagram connection: ` +
-        `${error instanceof Error ? error.message : String(error)}`,
+        `${errorMessage(error)}`,
     );
     return;
   }

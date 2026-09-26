@@ -1,3 +1,5 @@
+import { errorMessage } from '@/lib/errors';
+
 /**
  * Print every inbound webhook delivery, verbatim, when `LOG_ALL_INCOMING_WEBHOOKS`
  * is `true`.
@@ -135,8 +137,7 @@ export function logIncomingWebhook(delivery: IncomingWebhook): void {
     console.log(describeIncomingWebhook(delivery).join('\n'));
   } catch (error) {
     console.warn(
-      `[webhook:all] could not log the ${delivery.source} delivery: ` +
-        `${error instanceof Error ? error.message : String(error)}`,
+      `[webhook:all] could not log the ${delivery.source} delivery: ${errorMessage(error)}`,
     );
   }
 }

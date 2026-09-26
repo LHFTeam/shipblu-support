@@ -16,6 +16,7 @@ import {
   buildSideSubject,
   sideConversationFooter,
 } from '@/lib/side-conversations/format';
+import { errorMessage } from '@/lib/errors';
 
 /**
  * Sends an agent's question — or their follow-up — to a hub or another internal
@@ -161,7 +162,7 @@ export async function sendSideEmail(job: ClaimedJob): Promise<void> {
       .update(sideConversationMessages)
       .set({
         deliveryStatus: 'failed',
-        deliveryError: error instanceof Error ? error.message : String(error),
+        deliveryError: errorMessage(error),
       })
       .where(eq(sideConversationMessages.id, messageId));
 

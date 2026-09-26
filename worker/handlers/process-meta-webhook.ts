@@ -9,6 +9,7 @@ import {
   ingestMetaComment,
   ingestMetaMessage,
 } from '@/lib/tickets/ingest-meta';
+import { errorMessage } from '@/lib/errors';
 
 /**
  * Turns a stored Facebook or Instagram payload into conversations.
@@ -48,7 +49,7 @@ export async function processMetaWebhook(event: {
           `(${result.duplicate ? 'duplicate' : result.createdConversation ? 'new' : 'appended'})`,
       );
     } catch (error) {
-      failures.push(`${message.mid}: ${error instanceof Error ? error.message : String(error)}`);
+      failures.push(`${message.mid}: ${errorMessage(error)}`);
     }
   }
 
@@ -61,9 +62,7 @@ export async function processMetaWebhook(event: {
           `(${result.duplicate ? 'duplicate' : result.createdConversation ? 'new' : 'appended'})`,
       );
     } catch (error) {
-      failures.push(
-        `comment ${comment.commentId}: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      failures.push(`comment ${comment.commentId}: ${errorMessage(error)}`);
     }
   }
 
@@ -77,9 +76,7 @@ export async function processMetaWebhook(event: {
           `(${interaction.summary}) → ${applied ? 'recorded' : 'no live ticket'}`,
       );
     } catch (error) {
-      failures.push(
-        `${interaction.kind}: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      failures.push(`${interaction.kind}: ${errorMessage(error)}`);
     }
   }
 
@@ -87,7 +84,7 @@ export async function processMetaWebhook(event: {
     try {
       receipts += await applyMetaReceipt(receipt);
     } catch (error) {
-      failures.push(`receipt: ${error instanceof Error ? error.message : String(error)}`);
+      failures.push(`receipt: ${errorMessage(error)}`);
     }
   }
 

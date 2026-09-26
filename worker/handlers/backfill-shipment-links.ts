@@ -4,6 +4,7 @@ import { conversations, messages } from '@/db/schema';
 import type { ClaimedJob } from '@/lib/queue';
 import { detectShipmentRefs, shipmentPatterns } from '@/lib/shipments/detect';
 import { isLinkableMessage, linkShipmentsFromMessage } from '@/lib/shipments/links';
+import { errorMessage } from '@/lib/errors';
 
 /**
  * Finds the tracking numbers and SBIDs already sitting in the archive.
@@ -141,7 +142,7 @@ export async function backfillShipmentLinks(job: ClaimedJob): Promise<void> {
       } catch (error) {
         // One bad message must not end the run; the rest of the archive is
         // still worth linking, and the run fails at the end with the list.
-        failures.push(`${message.id}: ${error instanceof Error ? error.message : String(error)}`);
+        failures.push(`${message.id}: ${errorMessage(error)}`);
       }
     }
   }

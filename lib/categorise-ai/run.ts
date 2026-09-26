@@ -5,6 +5,7 @@ import { bandFor, detectCategories } from '@/lib/categorise/detect';
 import { TypeSafeApiError, choiceAnswer, systemOne } from '@/lib/typesafe/client';
 import { predictionFrom } from './map';
 import { CATEGORY_QUESTION, categorisationRequest, type CategoryOption } from './request';
+import { errorMessage } from '@/lib/errors';
 
 /**
  * One message, asked of TypeSafe and recorded beside what the rules said.
@@ -108,7 +109,7 @@ export async function runOne(
       probabilities: {},
       inputTokens: null,
       latencyMs: Date.now() - startedAt,
-      error: error instanceof Error ? error.message : String(error),
+      error: errorMessage(error),
       rules,
     });
 

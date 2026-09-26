@@ -10,6 +10,7 @@ import { buildReferences, buildReplySubject, formatMessageId } from '@/lib/email
 import type { OutboundEmail } from '@/lib/email/types';
 import type { ClaimedJob } from '@/lib/queue';
 import { subjectGone } from './subject-gone';
+import { errorMessage } from '@/lib/errors';
 
 /**
  * Sends an agent's reply.
@@ -121,7 +122,7 @@ export async function sendEmail(job: ClaimedJob): Promise<void> {
       .update(messages)
       .set({
         deliveryStatus: 'failed',
-        deliveryError: error instanceof Error ? error.message : String(error),
+        deliveryError: errorMessage(error),
       })
       .where(eq(messages.id, messageId));
 
