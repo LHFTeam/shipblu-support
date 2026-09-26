@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
-import { agentSkills, agents, channels, groups, skills, slaPolicies } from '@/db/schema';
+import {
+  agentSkills,
+  agents,
+  automationRules,
+  cannedResponses,
+  channels,
+  groups,
+  locations,
+  skills,
+  slaPolicies,
+} from '@/db/schema';
 import { SEEDED_RULES } from '@/lib/automations/defaults';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { configurationCounts } from './overview';
@@ -11,7 +21,7 @@ import { configurationCounts } from './overview';
  * a number. `count(*)` is a bigint, which postgres.js hands over as a string,
  * and the page's `=== 0` tests are strict: without the `::int`, an empty SLA
  * table would read as "no default policy" rather than "none".
- * The other two pin the filters, which are where the page's advice comes from.
+ * The others pin the filters, which are where the page's advice comes from.
  */
 
 withCleanDatabase();
@@ -68,14 +78,39 @@ describe('configurationCounts', () => {
       .values({ type: 'email', name: 'retired mailbox', config: {}, isActive: false });
     await db.insert(groups).values({ name: 'Returns', assignmentStrategy: 'round_robin' });
 
+    // A paused rule is not automation anybody is getting. Canned responses and
+    // locations have no switch in the count, so one of each must read as one —
+    // a query that answered 0 whatever the table held would pass the baseline.
+    await db
+      .insert(automationRules)
+      .values({ name: 'paused', trigger: 'on_create', isActive: false });
+    await db.insert(cannedResponses).values({ title: 'Where is my order', bodyTextEn: 'Soon.' });
+    await db
+      .insert(locations)
+      .values({ name: 'Cairo hub', code: 'CAI-1', email: 'cai-1@shipblu.test' });
+
     expect(await configurationCounts()).toMatchObject({
       agents: 1,
       policies: 2,
       defaultPolicy: 1,
+      rules: SEEDED_RULES.length,
+      canned: 1,
       channels: 1,
+      locations: 1,
       routingGroups: 1,
       allGroups: 2,
     });
+  });
+
+  // The page warns when there is no default policy. A default somebody switched
+  // off stamps no ticket, so on its own it must read as none — beside an active
+  // one, as above, it could not show whether `is_active` is in the filter.
+  it('reads a switched-off default policy as no default at all', async () => {
+    await db
+      .insert(slaPolicies)
+      .values({ name: 'old default', targets: TARGETS, isDefault: true, isActive: false });
+
+    expect(await configurationCounts()).toMatchObject({ policies: 0, defaultPolicy: 0 });
   });
 
   it('calls a skill orphaned when no active agent holds it, and ignores a switched-off one', async () => {
