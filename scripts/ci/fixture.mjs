@@ -25,17 +25,30 @@ import { isolatedGitEnv } from './git-env.mjs';
  * `loadTable` stands in for `import('./rules.mjs')` only so a test can register
  * an entry the real table does not have. It is called inside the reset, so
  * whatever it imports sees the fixture too.
+ *
+ * `prepare` is for a rule that reads history rather than the tree — commits, a
+ * base ref. It runs after the files are staged and is handed `git`, bound to
+ * the fixture with the same isolation and an identity to commit under, and
+ * `write`, which puts a file into the fixture's working tree.
  */
-export async function runRule(rule, files, { loadTable = () => import('./rules.mjs') } = {}) {
+export async function runRule(
+  rule,
+  files,
+  { loadTable = () => import('./rules.mjs'), prepare } = {},
+) {
   const root = mkdtempSync(path.join(tmpdir(), 'repo-rules-'));
   try {
-    for (const [file, contents] of Object.entries(files)) {
+    const write = (file, contents) => {
       mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
       writeFileSync(path.join(root, file), contents);
-    }
+    };
+    for (const [file, contents] of Object.entries(files)) write(file, contents);
     const env = isolatedGitEnv();
-    execFileSync('git', ['init', '-q'], { cwd: root, env });
-    execFileSync('git', ['add', '-A'], { cwd: root, env });
+    const git = (...args) =>
+      execFileSync('git', [...IDENTITY, ...args], { cwd: root, env, encoding: 'utf8' });
+    git('init', '-q');
+    git('add', '-A');
+    await prepare?.({ git, write });
 
     vi.resetModules();
     vi.stubEnv('REPO_RULES_ROOT', root);
@@ -51,6 +64,17 @@ export async function runRule(rule, files, { loadTable = () => import('./rules.m
     rmSync(root, { recursive: true, force: true });
   }
 }
+
+// Commits in a fixture must not depend on whoever runs the tests having an
+// identity configured, or on their signing setup.
+const IDENTITY = [
+  '-c',
+  'user.name=repo-rules fixture',
+  '-c',
+  'user.email=fixture@example.invalid',
+  '-c',
+  'commit.gpgsign=false',
+];
 
 /**
  * The function CI runs for `rule`: the one the RULES table pairs with its name.

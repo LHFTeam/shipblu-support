@@ -55,21 +55,31 @@ export function read(rel) {
 }
 
 /**
+ * Runs git against the repository the rules read, and answers its stdout.
+ *
+ * Every rule that asks git anything goes through here rather than calling
+ * `execFileSync('git', …)` itself. Against a fixture, git is kept off any
+ * repository an inherited GIT_DIR names (`git-env.mjs`): git honours that over
+ * `cwd`, so a test run from a hook would otherwise list the real index, or diff
+ * the real history, and report on a repository it never built. Isolating only
+ * the file list and not the diff was how `generated-files` came to read
+ * another repository's history while every other rule read the fixture. The
+ * real run inherits its environment untouched, exactly as it always has.
+ */
+export function git(args) {
+  return execFileSync('git', args, {
+    cwd: ROOT,
+    encoding: 'utf8',
+    env: process.env.REPO_RULES_ROOT ? isolatedGitEnv() : process.env,
+  });
+}
+
+/**
  * Every file git actually tracks, which is the right population for these rules:
  * a build artefact or a local .env sitting in the working tree is not the
  * repository's problem, and node_modules would swamp every scan in `rules/`.
- *
- * Against a fixture, git is kept off any repository an inherited GIT_DIR names
- * (`git-env.mjs`), or a test run from a hook lists the real index instead. The
- * real run inherits its environment untouched, exactly as it always has.
  */
-export const tracked = execFileSync('git', ['ls-files', '-z'], {
-  cwd: ROOT,
-  encoding: 'utf8',
-  env: process.env.REPO_RULES_ROOT ? isolatedGitEnv() : process.env,
-})
-  .split('\0')
-  .filter(Boolean);
+export const tracked = git(['ls-files', '-z']).split('\0').filter(Boolean);
 
 const trackedSource = tracked.filter((f) => /\.(ts|tsx|mts|mjs)$/.test(f));
 

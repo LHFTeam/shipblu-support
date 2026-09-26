@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -92,6 +92,20 @@ describe('runRule with a check that throws', () => {
           'the check threw, which usually means the file it reads changed shape: the file changed shape',
       },
     ]);
+  });
+});
+
+describe('rule modules', () => {
+  it('ask git through lib.mjs, never by shelling out themselves', () => {
+    // A rule calling execFileSync('git', …) directly inherits GIT_DIR, which is
+    // how generated-files read another repository's history under a hook while
+    // every rule beside it read the fixture. lib.mjs's git() is the one place
+    // that decides the environment.
+    const dir = new URL('./rules/', import.meta.url);
+    const offenders = readdirSync(dir)
+      .filter((file) => file.endsWith('.mjs') && !file.endsWith('.test.mjs'))
+      .filter((file) => /node:child_process/.test(readFileSync(new URL(file, dir), 'utf8')));
+    expect(offenders).toEqual([]);
   });
 });
 

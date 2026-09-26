@@ -9,8 +9,9 @@
  * directories are dropped for the same reason: they point git at another
  * repository's storage.
  *
- * Shared by the fixture that builds the repository and by `lib.mjs`, which
- * lists it, so the two cannot be pointed at different repositories.
+ * Shared by the fixture that builds the repository and by `git()` in
+ * `lib.mjs`, which every rule asks git through — the file list and a rule's
+ * diff alike — so none of them can be pointed at a different repository.
  */
 const REPOSITORY_VARIABLES = [
   'GIT_DIR',
