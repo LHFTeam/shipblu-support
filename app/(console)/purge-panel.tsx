@@ -110,7 +110,9 @@ export function PurgePanel({
 
       {preview.ticketNumbers.length > 0 ? (
         <p className="mt-2 text-xs text-[var(--muted-foreground)]">
-          Tickets going with it:{' '}
+          {/* The total up front: the list stops at twelve, and "and 40 more" at
+              the end of a line is the number most likely to go unread. */}
+          Tickets going with it ({preview.ticketNumbers.length}):{' '}
           <span className="font-medium">
             {preview.ticketNumbers
               .slice(0, 12)
@@ -148,7 +150,6 @@ export function PurgePanel({
           onChange={(event) => setTyped(event.target.value)}
           autoComplete="off"
           disabled={pending}
-          aria-label={`Type ${confirmationHint} to confirm deletion`}
           className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-base outline-none sm:text-xs focus:border-[var(--color-critical)]"
         />
 
