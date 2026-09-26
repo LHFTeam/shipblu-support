@@ -195,57 +195,17 @@ jobs:
       - name: The bilingual backfill moves a pre-split row, once
         run: |
           set -euo pipefail
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "
-            insert into business_hours (name, schedule) values ('CI', '{}'::jsonb);
-            insert into holidays (business_hours_id, date, name)
-              select id, date '2026-03-22', 'Eid al-Fitr' from business_hours limit 1;
-            insert into canned_responses (title, body_text, body_html) values
-              ('arabic', 'الشحنة في الطريق إليك', '<p>الشحنة في الطريق إليك</p>'),
-              ('english', 'Your parcel is on its way', '<p>Your parcel is on its way</p>'),
-              ('edited',  'superseded', '<p>superseded</p>');
-            -- Already migrated by hand: the backfill must leave it alone.
-            update canned_responses set body_text_en = 'kept', body_html_en = '<p>kept</p>'
-             where title = 'edited';
-          "
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/ci/bilingual-backfill-seed.sql
 
           npm run db:migrate
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "
-            do \$\$
-            begin
-              if (select body_text_ar from canned_responses where title = 'arabic') = '' then
-                raise exception 'the Arabic response was not backfilled';
-              end if;
-              if (select body_text_en from canned_responses where title = 'arabic') <> '' then
-                raise exception 'the Arabic response was filed as English';
-              end if;
-              if (select body_text_en from canned_responses where title = 'english') = '' then
-                raise exception 'the English response was not backfilled';
-              end if;
-              if (select body_text_en from canned_responses where title = 'edited') <> 'kept' then
-                raise exception 'the backfill overwrote a row that had already been written';
-              end if;
-              if (select name_en from holidays where date = '2026-03-22') <> 'Eid al-Fitr' then
-                raise exception 'the holiday name was not backfilled';
-              end if;
-            end
-            \$\$;
-          "
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/ci/bilingual-backfill-landed.sql
 
           # Change what it wrote, replay, and it must still be what we changed it
           # to — the guard is "both sides blank", not "the legacy column exists".
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c \
             "update canned_responses set body_text_ar = 'edited in the console' where title = 'arabic';"
           npm run db:migrate
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "
-            do \$\$
-            begin
-              if (select body_text_ar from canned_responses where title = 'arabic')
-                 <> 'edited in the console' then
-                raise exception 'the replay overwrote an edit made after the backfill';
-              end if;
-            end
-            \$\$;
-          "
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/ci/bilingual-backfill-kept-edit.sql
 
           # Left empty for the steps below, which assume the database they were
           # handed.
@@ -314,22 +274,4 @@ jobs:
           # And the audience, which is the whole point of the folders: every one
           # of them internal, and every role on the ladder addressed. A folder
           # that lost its floor is how a supervisor article reaches every agent.
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "
-            do \$\$
-            declare wrong int;
-            begin
-              select count(*) into wrong from kb_folders
-                where external_id like 'handbook:folder:%'
-                  and (visibility <> 'agents_only' or min_role is null);
-              if wrong > 0 then
-                raise exception '% handbook folder(s) are not internal or carry no role floor', wrong;
-              end if;
-
-              select count(distinct min_role) into wrong from kb_folders
-                where external_id like 'handbook:folder:%';
-              if wrong <> 4 then
-                raise exception 'handbook folders cover % of the 4 roles', wrong;
-              end if;
-            end
-            \$\$;
-          "
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/ci/handbook-audience.sql
