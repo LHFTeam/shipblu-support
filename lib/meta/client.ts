@@ -3,7 +3,7 @@ import { commentRequest, type CommentOperation } from './comments';
 import { CONNECTION_LABEL, type MetaConnection, metaConnection } from './connection';
 import { takeThreadControlRequest } from './handover';
 import { directMessageRequest } from './send';
-import { GRAPH_BASE, INSTAGRAM_GRAPH_BASE } from './graph';
+import { GRAPH_BASE, graphTimeout, INSTAGRAM_GRAPH_BASE } from './graph';
 import type { MetaPlatform } from './types';
 
 /**
@@ -188,23 +188,23 @@ async function graph<T>(
     url.searchParams.set(key, value);
   }
 
+  const timeoutMs = graphTimeout(init.method);
   let response: Response;
   try {
     response = await fetch(url, {
       method: init.method,
       headers: init.body ? { 'Content-Type': 'application/json' } : undefined,
       body: init.body ? JSON.stringify(init.body) : undefined,
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
     // A network failure is always worth retrying; it says nothing about whether
-    // the request was valid.
-    throw new MetaApiError(
-      `Graph API unreachable: ${error instanceof Error ? error.message : String(error)}`,
-      0,
-      null,
-      null,
-      true,
-    );
+    // the request was valid. A deadline that passed is one, and says so.
+    const reason =
+      error instanceof DOMException && error.name === 'TimeoutError'
+        ? `did not answer in ${timeoutMs / 1000}s`
+        : `unreachable: ${error instanceof Error ? error.message : String(error)}`;
+    throw new MetaApiError(`Graph API ${reason}`, 0, null, null, true);
   }
 
   const text = await response.text();
@@ -683,11 +683,17 @@ export class MetaContentTooLargeError extends Error {
  * "too large" afterwards. The declared `Content-Length` is rejected up front
  * where there is one, and the stream is aborted mid-read where there is not.
  */
+/** See `downloadAttachment`. */
+const MEDIA_TIMEOUT_MS = 60_000;
+
 export async function downloadAttachment(
   url: string,
   options: { maxBytes?: number } = {},
 ): Promise<{ content: Buffer; contentType: string }> {
-  const response = await fetch(url);
+  // A minute, like a storage upload: room for a large file, and a deadline all
+  // the same, because this runs in a job and one that never answered stopped the
+  // queue. It bounds the read below as well as the headers.
+  const response = await fetch(url, { signal: AbortSignal.timeout(MEDIA_TIMEOUT_MS) });
   if (!response.ok) {
     throw new MetaApiError(
       `attachment download failed with ${response.status}`,

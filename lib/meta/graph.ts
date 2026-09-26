@@ -23,3 +23,23 @@ export const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
  * different credential — see `endpoint` in `lib/meta/client.ts`.
  */
 export const INSTAGRAM_GRAPH_BASE = `https://graph.instagram.com/${GRAPH_VERSION}`;
+
+/** A lookup, which a job or a person is waiting on. */
+const READ_TIMEOUT_MS = 15_000;
+
+/**
+ * A write, which for Graph is usually a message to a customer.
+ *
+ * The deadline sits in a window with two edges. Below about a minute, a send
+ * Meta was still accepting is given up on and retried — a duplicate message.
+ * Past `STALLED_AFTER_MS`, a worker restarted while the send hangs has the job
+ * reclaimed and run again — the same duplicate by another route. And there has
+ * to be one: the worker awaits a whole batch before it claims the next, so a
+ * request that never answers stops every queued job.
+ */
+const WRITE_TIMEOUT_MS = 90_000;
+
+/** How long a Graph call of this method may take before the caller gives up. */
+export function graphTimeout(method: 'GET' | 'POST' | 'DELETE'): number {
+  return method === 'GET' ? READ_TIMEOUT_MS : WRITE_TIMEOUT_MS;
+}

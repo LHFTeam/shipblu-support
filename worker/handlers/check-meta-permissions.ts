@@ -1,7 +1,7 @@
 import { env, metaAppSecret } from '@/lib/env';
 import { FEATURES, diagnoseCapabilities, requiredScopes } from '@/lib/meta/capabilities';
 import { CONNECTION_LABEL, instagramLoginConfigured } from '@/lib/meta/connection';
-import { GRAPH_BASE, INSTAGRAM_GRAPH_BASE } from '@/lib/meta/graph';
+import { GRAPH_BASE, graphTimeout, INSTAGRAM_GRAPH_BASE } from '@/lib/meta/graph';
 
 /**
  * What the live Meta token actually carries, and which capability each gap stops.
@@ -75,6 +75,7 @@ export async function checkMetaPermissions(): Promise<void> {
   // secret verbatim and a URL is the part of a request that reaches logs.
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${appId}|${appSecret}` },
+    signal: AbortSignal.timeout(graphTimeout('GET')),
   });
 
   const body = (await response.json().catch(() => null)) as { data?: DebugToken; error?: unknown };
@@ -235,7 +236,10 @@ async function checkInstagramLogin(): Promise<void> {
   try {
     // Header rather than query string: a URL is the part of a request that ends
     // up in logs, and this one is a live credential.
-    const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(graphTimeout('GET')),
+    });
     status = response.status;
     body = (await response.json().catch(() => null)) as InstagramMe | null;
   } catch (error) {

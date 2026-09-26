@@ -249,7 +249,14 @@ export async function failJob(job: ClaimedJob, error: unknown): Promise<void> {
  * deploy leaves rows stuck in 'processing' with no one holding the lock; without
  * this they would never run again.
  */
-export async function reclaimStalledJobs(olderThanMs = 5 * 60 * 1000): Promise<number> {
+/**
+ * How long a job may hold its lock before the queue assumes its worker died and
+ * runs it again. Anything a job waits on — an outbound request above all — has
+ * to give up well inside this, or a job that is merely slow is run twice.
+ */
+export const STALLED_AFTER_MS = 5 * 60 * 1000;
+
+export async function reclaimStalledJobs(olderThanMs = STALLED_AFTER_MS): Promise<number> {
   const cutoff = new Date(Date.now() - olderThanMs);
 
   const reclaimed = await db

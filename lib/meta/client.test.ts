@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetEnvCache } from '@/lib/env';
-import { ACCESS_TOKEN_CODE, MetaApiError, replyToComment, sendDirectMessage } from './client';
+import {
+  ACCESS_TOKEN_CODE,
+  downloadAttachment,
+  latestPagePostId,
+  MetaApiError,
+  replyToComment,
+  sendDirectMessage,
+} from './client';
 
 /**
  * As in the WhatsApp client, `isTransient` decides whether a handler retries or
@@ -172,5 +179,72 @@ describe('which connection a call goes out over', () => {
 
     expect(url().host).toBe('graph.instagram.com');
     expect(url().pathname).toContain('18618316756031483/replies');
+  });
+});
+
+/**
+ * Every Graph call runs in a job or a page, and none had a deadline: in a job,
+ * one that never answered stopped the whole queue, because the worker awaits a
+ * batch before it claims the next.
+ */
+describe('Graph deadlines', () => {
+  /** Answers like `fetch` does: a signal that has fired rejects with its reason. */
+  function serveUnlessAborted(body: unknown = { data: [] }) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string | URL, init?: RequestInit) => {
+        if (init?.signal?.aborted) throw init.signal.reason;
+        return new Response(JSON.stringify(body), { status: 200 });
+      }),
+    );
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('gives a read fifteen seconds', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    serveUnlessAborted();
+
+    await latestPagePostId();
+
+    expect(timeout).toHaveBeenCalledWith(15_000);
+  });
+
+  it('gives a send the longer write deadline', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    serveUnlessAborted({ message_id: 'm.1' });
+
+    await sendDirectMessage({
+      platform: 'facebook',
+      recipientId: 'psid-1',
+      text: 'hello',
+      tag: 'RESPONSE',
+    });
+
+    expect(timeout).toHaveBeenCalledWith(90_000);
+  });
+
+  it('gives a media download a minute', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    serveUnlessAborted();
+
+    await downloadAttachment('https://lookaside.fbsbx.com/media/1');
+
+    expect(timeout).toHaveBeenCalledWith(60_000);
+  });
+
+  it('turns a deadline that passed into a retryable error that says so', async () => {
+    vi.spyOn(AbortSignal, 'timeout').mockReturnValue(
+      AbortSignal.abort(new DOMException('The operation timed out.', 'TimeoutError')),
+    );
+    serveUnlessAborted();
+
+    const failure = latestPagePostId();
+
+    await expect(failure).rejects.toBeInstanceOf(MetaApiError);
+    await expect(failure).rejects.toMatchObject({ isTransient: true });
+    await expect(failure).rejects.toThrow(/did not answer in 15s/);
   });
 });

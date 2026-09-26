@@ -1,5 +1,5 @@
 import { env, metaAppSecret, metaVerifyToken } from '@/lib/env';
-import { GRAPH_BASE, INSTAGRAM_GRAPH_BASE } from './graph';
+import { GRAPH_BASE, graphTimeout, INSTAGRAM_GRAPH_BASE } from './graph';
 
 /**
  * The app's own webhook field subscriptions.
@@ -242,6 +242,9 @@ async function graph<T>(init: {
     response = await fetch(url, {
       method: init.method,
       headers: { Authorization: `Bearer ${token}` },
+      // A deadline, because this runs in a job and one request that never
+      // answered stopped the whole queue — see `graphTimeout`.
+      signal: AbortSignal.timeout(graphTimeout(init.method)),
     });
   } catch (error) {
     throw new GraphSubscriptionError(
@@ -438,6 +441,9 @@ async function pageGraph<T>(
     response = await fetch(url, {
       method: init.method,
       headers: { Authorization: `Bearer ${token}` },
+      // A deadline, because this runs in a job and one request that never
+      // answered stopped the whole queue — see `graphTimeout`.
+      signal: AbortSignal.timeout(graphTimeout(init.method)),
     });
   } catch (error) {
     throw new GraphSubscriptionError(
@@ -585,6 +591,9 @@ async function instagramGraph<T>(
     response = await fetch(url, {
       method: init.method,
       headers: { Authorization: `Bearer ${token}` },
+      // A deadline, because this runs in a job and one request that never
+      // answered stopped the whole queue — see `graphTimeout`.
+      signal: AbortSignal.timeout(graphTimeout(init.method)),
     });
   } catch (error) {
     throw new GraphSubscriptionError(
