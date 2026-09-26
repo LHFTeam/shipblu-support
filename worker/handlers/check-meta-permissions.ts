@@ -1,4 +1,5 @@
 import { env, metaAppSecret } from '@/lib/env';
+import { isTimeout } from '@/lib/http/deadline';
 import { FEATURES, diagnoseCapabilities, requiredScopes } from '@/lib/meta/capabilities';
 import { CONNECTION_LABEL, instagramLoginConfigured } from '@/lib/meta/connection';
 import { GRAPH_BASE, graphTimeout, INSTAGRAM_GRAPH_BASE } from '@/lib/meta/graph';
@@ -220,7 +221,7 @@ async function readGraph<T>(
     });
     text = await response.text();
   } catch (error) {
-    if (error instanceof DOMException && error.name === 'TimeoutError') {
+    if (isTimeout(error)) {
       throw new Error(`${url.host}${url.pathname} did not answer in ${timeoutMs / 1000}s`);
     }
     throw error;

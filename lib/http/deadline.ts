@@ -38,3 +38,23 @@ export function isTimeout(error: unknown): boolean {
 export function sizedTimeout(bytes: number): number {
   return 60_000 + Math.ceil(bytes / (2 * 1024 * 1024)) * 1000;
 }
+
+/** A lookup, which a job or a person is waiting on. */
+export const READ_TIMEOUT_MS = 15_000;
+
+/**
+ * A write, which is usually a message to a customer — a Graph send, or an email
+ * through Postmark.
+ *
+ * The deadline sits in a window with two edges. Below about a minute, a send
+ * the provider was still accepting is given up on and retried — a duplicate
+ * message. Past `STALLED_AFTER_MS`, the job can be reclaimed while the send is
+ * still waiting — by a deploy's new worker, which cannot tell a slow job from an
+ * orphaned one — and run again: the same duplicate by another route.
+ *
+ * And there has to be one. The worker claims nothing new until every job in its
+ * batch is done, and `fetch` with no signal gives up only after five minutes
+ * without a response — never, on a body that keeps trickling in — so one slow
+ * request held every queued job behind it for the length of the reclaim window.
+ */
+export const WRITE_TIMEOUT_MS = 90_000;
