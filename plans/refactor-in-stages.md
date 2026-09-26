@@ -114,6 +114,7 @@ conflict on all of them.
 | 2.10  | Email webhook fails open without its secret      | #177        | merged  |
 | 2.11  | Staging's `local` email webhook accepts anything | #177        | merged  |
 | 3     | Shared primitives (one row per PR as opened)     |             | pending |
+| 3.1   | Queue helper: `hasActiveJob(type)`               | #197        | open    |
 | 4.1   | Split `lib/tickets/queries.ts`                   |             | pending |
 | 4.2   | Shared ingest steps                              |             | pending |
 | 4.3   | Meta Graph transport                             |             | pending |
