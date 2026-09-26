@@ -16,6 +16,7 @@ import {
   sideConversations,
   ticketStatuses,
 } from '@/db/schema';
+import { refuseUnlessDisposable } from '@/lib/testing/db';
 import { previewConversationPurge, purgeContact, purgeConversation } from './purge';
 
 const mocks = vi.hoisted(() => ({
@@ -39,7 +40,11 @@ vi.mock('@/db/client', () => ({
 }));
 vi.mock('@/lib/storage', () => ({ removeObjects: mocks.removeObjects }));
 
-// Never use DATABASE_URL or load dotenv: only CI's explicit disposable database.
+// Only the tier's own database, never the app's DATABASE_URL or dotenv. The
+// rows are rolled back rather than truncated, but the file is refused on the
+// same terms as every other `*.db.test.ts`: a `skipIf` on the variable reported
+// this suite as skipped — green — in a run that had forgotten the database,
+// while the files on `withCleanDatabase` beside it failed.
 const databaseUrl = process.env.TEST_DATABASE_URL;
 
 async function seedScope(tx: typeof db, statusId: string) {
@@ -113,11 +118,12 @@ async function seedScope(tx: typeof db, statusId: string) {
   };
 }
 
-describe.skipIf(!databaseUrl)('purge entry points against Postgres', () => {
+describe('purge entry points against Postgres', () => {
   let client: ReturnType<typeof postgres>;
   let database: typeof db;
 
   beforeAll(() => {
+    refuseUnlessDisposable(process.env.DATABASE_URL, databaseUrl);
     client = postgres(databaseUrl!, { max: 1, prepare: false });
     database = drizzle(client, { schema });
   });

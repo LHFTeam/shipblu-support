@@ -226,12 +226,6 @@ jobs:
       - name: Row level security invariants
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/ci/db-invariants.sql
 
-      # Exercise the application's cleanup query with regular and side-message
-      # jobs. The test always rolls its fixtures back and opens only this
-      # explicitly supplied disposable database, never the app's default URL.
-      - name: Purges preserve unrelated queued work
-        run: TEST_DATABASE_URL="$DATABASE_URL" npx vitest run lib/admin/purge-jobs.db.test.ts lib/admin/purge-integration.db.test.ts
-
       # The jobs whose whole body is SQL, run against the schema that was just
       # built. Their predicates match nothing on an empty database, which is
       # fine — Postgres still plans every statement, and planning is where
@@ -284,3 +278,21 @@ jobs:
           # of them internal, and every role on the ladder addressed. A folder
           # that lost its floor is how a supervisor article reaches every agent.
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/ci/handbook-audience.sql
+
+      # `npm run db:seed` is a hand-run script that no deploy runs (§6.30 of
+      # docs/PROJECT-STATE.md), so this is the one place it is exercised before
+      # somebody needs it.
+      - name: The baseline seed runs
+        run: npm run db:seed
+
+      # The database tier: every `*.db.test.ts`, which the unit config leaves
+      # out. Last, because most of it starts each test by truncating every
+      # table, and the steps above assert on rows they wrote. That includes the
+      # purge tests (lib/admin/purge-*.db.test.ts), which had a step of their
+      # own here until the tier existed; they roll their fixtures back instead
+      # of truncating, and run the same either way. Its own variable rather
+      # than DATABASE_URL: vitest.db.config.mts says why.
+      - name: Database tests
+        run: npm run test:db
+        env:
+          TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
