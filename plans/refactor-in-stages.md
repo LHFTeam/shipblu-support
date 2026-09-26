@@ -122,6 +122,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 3.4   | Shared constants: proxy regex from `LOCALES`     | #200        | merged  |
 | 3.5   | Constant-time compares through `safeEqual`       | #219        | open    |
 | 3.6   | Widget: shared shapes move to `lib/widget`       | #220        | open    |
+| 3.7   | Widget: one declaration of the postMessage names | #221        | open    |
 | 4.1   | Split `lib/tickets/queries.ts`                   |             | pending |
 | 4.2   | Shared ingest steps                              |             | pending |
 | 4.3   | Meta Graph transport                             |             | pending |
