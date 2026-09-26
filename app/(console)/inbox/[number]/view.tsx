@@ -23,6 +23,7 @@ import {
 import type { CategoryOption, RootCauseOption } from '@/lib/categorise/queries';
 import { describeRequesterRole } from '@/lib/shipments/roles';
 import { humaniseStatus, returnStepLabel, stageDisplay } from '@/lib/shipments/status';
+import { lostReceiptNote } from '@/lib/whatsapp/receipts';
 import { formatRemaining, windowState } from '@/lib/whatsapp/window';
 import {
   linkShipment,
@@ -617,6 +618,13 @@ function DeliveryState({ message }: { message: ConversationDetail['messages'][nu
         Not delivered — {message.deliveryError ?? 'unknown error'}
       </p>
     );
+  }
+
+  // Replaces the bare "sent" rather than sitting under it: that word alone is
+  // what reads as confirmed, and here it never will be.
+  const lostReceipt = lostReceiptNote(message);
+  if (lostReceipt) {
+    return <p className="mt-1.5 text-xs text-amber-700">{lostReceipt}</p>;
   }
 
   return (
