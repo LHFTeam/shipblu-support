@@ -108,7 +108,9 @@ confinement of the delivery payload, and the rest. Each lives in its own module
 under `scripts/ci/rules/`, named as the violation labels it, and carries the
 reason it exists; what they share is `scripts/ci/lib.mjs`. If one of them is
 wrong, change it there and say why in the same commit; do not add your call site
-to an exemption list.
+to an exemption list. A rule with a `<name>.test.mjs` beside it is tested against
+a small git repository built per case (`scripts/ci/fixture.mjs`); a change to
+what it accepts or refuses changes a case there too.
 
 `knip` gates **dependency hygiene and nothing else** — `dependencies`,
 `devDependencies`, `optionalPeerDependencies`, `unlisted`, `unresolved` and
