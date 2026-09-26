@@ -11,12 +11,8 @@
  * admin was never shown and has no permission to read. A delete is the one place
  * where "you may not see it" has to mean "you may not remove it" as well.
  *
- * The scope is rebuilt here rather than borrowed from `lib/admin/purge.ts`
- * because that module's walk lives inside its transaction and is not exported;
- * the rule is the same one — tickets merged into the subject, followed
- * backwards and bounded, and contact tombstones one hop deep, as `contactScope`
- * does. If the two ever disagree it is in the direction of this check reaching
- * less than the purge, so keep them in step.
+ * The scope comes from `purgeScopeConversationIds()` in `./purge`, the walk the
+ * purge itself makes, so this check asks about exactly the tickets that would go.
  *
  * It runs outside the purge's transaction, so a merge landing between this read
  * and the delete is not covered. That window is a second or two wide and needs
@@ -27,11 +23,12 @@
  * executes, so it is kept to drizzle builders over `inArray` — no raw fragment,
  * no cast, no enum comparison typed out by hand.
  */
-import { eq, inArray } from 'drizzle-orm';
+import { inArray } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { contacts, conversations } from '@/db/schema';
+import { conversations } from '@/db/schema';
 import type { SessionAgent } from '@/lib/auth/session';
 import { canSeeChannel, hiddenChannels } from '@/lib/tickets/channel-policy';
+import { purgeScopeConversationIds } from './purge';
 
 export type PurgeScope = { conversationId: string } | { contactId: string };
 
@@ -44,42 +41,6 @@ export type PurgeScope = { conversationId: string } | { contactId: string };
  */
 export function unseenChannels(agent: SessionAgent, channels: readonly string[]): string[] {
   return [...new Set(channels)].filter((channel) => !canSeeChannel(agent, channel));
-}
-
-/** Same walk and the same bound as `withMergedInto()` in `./purge`. */
-async function withMergedInto(ids: string[]): Promise<string[]> {
-  const all = new Set(ids);
-  let frontier = ids;
-
-  for (let hop = 0; hop < 8 && frontier.length > 0; hop += 1) {
-    const rows = await db
-      .select({ id: conversations.id })
-      .from(conversations)
-      .where(inArray(conversations.mergedIntoId, frontier));
-
-    frontier = rows.map((row) => row.id).filter((id) => !all.has(id));
-    for (const id of frontier) all.add(id);
-  }
-
-  return [...all];
-}
-
-async function conversationIdsIn(scope: PurgeScope): Promise<string[]> {
-  if ('conversationId' in scope) return withMergedInto([scope.conversationId]);
-
-  const merged = await db
-    .select({ id: contacts.id })
-    .from(contacts)
-    .where(eq(contacts.mergedIntoContactId, scope.contactId));
-
-  const owned = await db
-    .select({ id: conversations.id })
-    .from(conversations)
-    .where(
-      inArray(conversations.requesterContactId, [scope.contactId, ...merged.map((row) => row.id)]),
-    );
-
-  return withMergedInto(owned.map((row) => row.id));
 }
 
 /**
@@ -98,7 +59,7 @@ export async function hiddenScopeRefusal(
   // admin unless an override removed `ticket.view.bot`.
   if (hiddenChannels(agent).length === 0) return null;
 
-  const ids = await conversationIdsIn(scope);
+  const ids = await purgeScopeConversationIds(scope);
   if (ids.length === 0) return null;
 
   const rows = await db

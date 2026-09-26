@@ -101,6 +101,24 @@ async function withMergedInto(
 }
 
 /**
+ * Every ticket a purge of this subject would destroy, by id.
+ *
+ * The same walk the purge itself makes — a ticket and everything merged into
+ * it, or every ticket a contact and the contacts folded into them raised, plus
+ * what was merged into those — exported so the channel-visibility check in
+ * `./purge-visibility` asks about exactly the rows this module will delete,
+ * rather than keeping a second copy of the walk that could drift from it.
+ */
+export async function purgeScopeConversationIds(
+  scope: { conversationId: string } | { contactId: string },
+): Promise<string[]> {
+  if ('conversationId' in scope) {
+    return (await withMergedInto(db, [scope.conversationId])).ids;
+  }
+  return (await contactScope(db, scope.contactId)).ids;
+}
+
+/**
  * Reads the cascade without firing it.
  *
  * Counted with subqueries rather than by pulling ids back, so a contact with

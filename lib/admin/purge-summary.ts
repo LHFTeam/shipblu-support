@@ -68,6 +68,7 @@ export const RETAINED = [
   'messages they wrote on other customers’ tickets, kept there without an author',
   'the deletion record, which keeps their name and contact details or the ticket’s subject — so this is not a data-erasure tool',
   'incoming messages already queued when you delete, which can create the customer again',
+  'notification emails already queued to them, which still send, though the portal link inside no longer works',
 ] as const;
 
 export type PurgeRefusal = 'not_found' | 'confirmation_mismatch';
