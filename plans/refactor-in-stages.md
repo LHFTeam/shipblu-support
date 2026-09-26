@@ -100,7 +100,7 @@ conflict on all of them.
 | 1.1   | `lib/testing/` fixtures                          |             | pending |
 | 1.2   | Database test tier                               |             | pending |
 | 1.3   | Characterise the seven ingest entry points       |             | pending |
-| 1.4   | Webhook route tests                              |             | pending |
+| 1.4   | Webhook route tests                              | #196        | open    |
 | 1.5   | DB test for the admin overview's raw SQL         |             | pending |
 | 2.1   | Email webhook dedupes before it verifies         | #168        | merged  |
 | 2.2   | Portal agent replies bypass `carrierFor()`       | #169        | merged  |
