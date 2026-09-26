@@ -12,11 +12,11 @@ export const dynamic = 'force-dynamic';
 /**
  * Resolves a Freshdesk URL to its new home.
  *
- * The proxy cannot do this itself — it runs on the Edge runtime with no
- * database — so it rewrites here and this does the lookup. Two strategies, in
- * order: an explicit `kb_redirects` row (which the importer writes, and which
- * an admin can add by hand), then the article's Freshdesk id recorded in
- * `external_id` at import.
+ * The proxy does not do this itself — it stays out of the database, for the
+ * reason its header gives — so it rewrites here and this does the lookup. Two
+ * strategies, in order: an explicit `kb_redirects` row (which the importer
+ * writes, and which an admin can add by hand), then the article's Freshdesk id
+ * recorded in `external_id` at import.
  *
  * The second is what makes this work without a redirect row per article: the
  * importer already stores every article's Freshdesk id, so the mapping exists
