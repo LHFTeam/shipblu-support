@@ -4103,9 +4103,11 @@ null`, and argued it from write cost and 13 MB of disk. The read side turned
     `CLAUDE.md` and the Copilot file are symlinks to that file, so every session
     that ran the dev server was left with a dirty tree whose easiest resolution
     was committing text nobody here wrote. `agentRules: false` in
-    `next.config.ts` turns it off (#172); the reasoning is beside it. If a
-    session's tree shows AGENTS.md modified after `npm run dev`, that setting
-    has been lost.
+    `next.config.ts` turns it off (#172); the reasoning is beside it, and the
+    `next-agent-rules` repo rule fails a pull request that drops the setting,
+    including a Next upgrade that removes the option. If a session's tree still
+    shows AGENTS.md modified after `npm run dev`, Next has found another way to
+    write it.
 
 72. **A browser submits a textarea's line breaks as CRLF, so a split on `\n`
     never sees a blank line.** _2026-09-25._ The HTML spec normalises a
@@ -4128,10 +4130,12 @@ null`, and argued it from write cost and 13 MB of disk. The read side turned
     rejects `text()`, `json()` or a stream reader with the signal's own
     `DOMException`, which names no call and is not the client's error type. A
     body read outside the client's error handling therefore escapes it — and on
-    a send the provider had already accepted, that became a retry and a second
-    copy to the customer. Row 2.8 of `plans/refactor-in-stages.md` gives every
-    outbound call in a job path a deadline and reads each body inside it
-    (#184–#188).
+    a send the provider had already accepted, that becomes a retry and a second
+    copy to the customer. Nothing on `main` ever did this, because nothing there
+    passed a signal: it was caught in review of the first commits of row 2.8 of
+    `plans/refactor-in-stages.md`, before any of them merged. That row, open at
+    the time of writing as #184–#188, gives every outbound call in a job path a
+    deadline and reads each body inside it.
 
 74. **A run of merges to `main` shows cancelled CI runs, and they are not
     failures.** _2026-09-25._ `ci.yml` puts every run for a ref in one
@@ -4149,12 +4153,11 @@ null`, and argued it from write cost and 13 MB of disk. The read side turned
     because its own command line contains the pattern, so a one-line "stop the
     dev server and restart it" kills itself before the restart. Kill by pid — a
     pid file, or `pgrep -x` on the process name — rather than by `-f`. And the
-    session's
-    scratchpad parent, `/tmp/claude-0`, loses its `o+x` bit within seconds of
-    being given it, so a Postgres started as the `postgres` user with its data
-    directory under the scratchpad dies with "could not stat data directory".
-    Keep a local database's data directory somewhere the `postgres` user can
-    traverse on its own, or verify against CI's `database` job instead.
+    session's scratchpad parent, `/tmp/claude-0`, loses its `o+x` bit within
+    seconds of being given it, so a Postgres started as the `postgres` user with
+    its data directory under the scratchpad dies with "could not stat data
+    directory". Keep a local database's data directory somewhere the `postgres`
+    user can traverse on its own, or verify against CI's `database` job instead.
 
 ## 7. Verification already done
 
