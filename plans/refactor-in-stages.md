@@ -98,11 +98,12 @@ and two sessions claiming different rows then conflict on all of them.
 | 0.3   | Split `repo-rules.mjs` into per-rule modules     | #191–#192       | merged  |
 | 0.4   | CI tidy-up                                       | #193–#195       | merged  |
 | 0.5   | Remove Playwright                                | #173            | merged  |
-| 1.1   | `lib/testing/` fixtures                          | #208, #210–#211 | open    |
-| 1.2   | Database test tier                               | #212            | open    |
-| 1.3   | Characterise the seven ingest entry points       | #215–#218       | open    |
+| 1.1   | `lib/testing/` fixtures                          | #208, #210–#211 | merged  |
+| 1.2   | Database test tier                               | #212–#213       | merged  |
+| 1.3   | Characterise the seven ingest entry points       | #215–#218       | merged  |
 | 1.4   | Webhook route tests                              | #196            | merged  |
-| 1.5   | DB test for the admin overview's raw SQL         | #214            | open    |
+| 1.5   | DB test for the admin overview's raw SQL         | #214            | merged  |
+| 1.x   | Test gaps the 1.1 reviews found                  | #225–#226       | merged  |
 | 2.1   | Email webhook dedupes before it verifies         | #168            | merged  |
 | 2.2   | Portal agent replies bypass `carrierFor()`       | #169            | merged  |
 | 2.3   | Contacts pages cannot scroll                     | #170            | merged  |
@@ -120,13 +121,16 @@ and two sessions claiming different rows then conflict on all of them.
 | 3.2   | Email helpers: `buildReferences`, escaper name   | #198            | merged  |
 | 3.3   | Shared constants: `TEAM_TIME_ZONE`               | #199            | merged  |
 | 3.4   | Shared constants: proxy regex from `LOCALES`     | #200            | merged  |
-| 3.5   | Constant-time compares through `safeEqual`       | #219            | open    |
-| 3.6   | Widget: shared shapes move to `lib/widget`       | #220            | open    |
-| 3.7   | Widget: one declaration of the postMessage names | #221            | open    |
-| 3.8   | `errorMessage()` for caught values               | #222            | open    |
-| 4.1   | Split `lib/tickets/queries.ts`                   |                 | pending |
-| 4.2   | Shared ingest steps                              |                 | pending |
-| 4.3   | Meta Graph transport                             |                 | pending |
+| 3.5   | Constant-time compares through `safeEqual`       | #219            | merged  |
+| 3.6   | Widget: shared shapes move to `lib/widget`       | #220            | merged  |
+| 3.7   | Widget: one declaration of the postMessage names | #221            | merged  |
+| 3.8   | `errorMessage()` for caught values               | #222            | merged  |
+| 3.9   | HTTP helpers: rate limiter moves to `lib/http`   | #229            | merged  |
+| 3.10  | HTTP helpers: `readJsonBody`                     | #230            | merged  |
+| 3.11  | Vocabulary: priorities, categories, roles        | #231            | merged  |
+| 4.1   | Split `lib/tickets/queries.ts`                   | #224            | merged  |
+| 4.2   | Shared ingest steps                              | #232            | open    |
+| 4.3   | Meta Graph transport                             | #228            | merged  |
 | 4.4   | Worker: typed payloads, backfill, KB import      |                 | pending |
 | ⛳    | Gate: check in with the requester                |                 | pending |
 | 5.x   | Server side of `app/`                            |                 | pending |
@@ -620,7 +624,12 @@ stay explicit at the call site:
 - the side-conversation token is resolved before `resolveContact`;
 - `whatsapp_bot` skips `afterInboundMessage`;
 - Meta comment threads;
-- the `greatest()` in `interactionWindowSet`.
+- the `greatest()` in `interactionWindowSet`;
+- whether a message reopens at all, and what it records. Email leaves a resolved
+  ticket, the customer clock and the next-response timer alone for an
+  autoresponder (#227), and the widget records `visitor_replied` where every
+  other path says `customer_replied`. So `reopenResolved` takes the actor and
+  the reason, and each caller keeps its own decision about whether to call it.
 
 ### 4.3 The Meta Graph transport
 
@@ -630,6 +639,22 @@ stay explicit at the call site:
   private wrappers.
 - The request shapes in `lib/meta/comments.ts` and `lib/meta/send.ts` are
   untouched.
+
+**Narrowed in #228.** The three wrappers in `subscriptions.ts` now share one
+private `request()`, with the same messages as before. They do not use the
+client's `graph()`, because that would change three behaviours the code
+records as deliberate:
+
+- `graph()` puts the token in the query string. The app token contains the app
+  secret, so this module puts it in a header (`docs/meta-endpoints.md` §1).
+- `graph()` treats a 2xx write whose body was lost as success. This module
+  fails it, because a person re-runs the job and subscribing twice is safe.
+- `graph()` throws `MetaApiError` and logs a warning. This job's output is its
+  error, so the explanation of a refusal stays in the error.
+
+With no second caller, the move into `lib/meta/graph.ts` is not done either.
+That module holds only what the four Graph clients share, and the transport
+stays with the one client that uses it.
 
 ### 4.4 Worker
 
