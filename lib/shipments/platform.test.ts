@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { stubFetch } from '@/lib/testing/fetch';
 import {
   fetchCurrentEstimatedDate,
   fetchDeliveryOrder,
@@ -227,16 +228,6 @@ describe('mapDeliveryOrder', () => {
 describe('fetchDeliveryOrder', () => {
   const BASE = 'https://platform.test';
 
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  function stubFetch(handler: (url: string) => Response | Promise<Response>) {
-    const mock = vi.fn(async (url: string | URL) => handler(String(url)));
-    vi.stubGlobal('fetch', mock);
-    return mock;
-  }
-
   it('asks the delivery-order endpoint, and sends no pin', async () => {
     const mock = stubFetch(() => Response.json(deliveryOrderPayload()));
 
@@ -284,12 +275,9 @@ describe('fetchDeliveryOrder', () => {
   });
 
   it('treats an unreachable platform as transient, and never as not-found', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => {
-        throw new Error('socket hang up');
-      }),
-    );
+    stubFetch(async () => {
+      throw new Error('socket hang up');
+    });
 
     // The distinction that matters: a timeout must never be allowed to stamp
     // `not_found` on a parcel that exists.
@@ -344,16 +332,6 @@ describe('fetchDeliveryOrder', () => {
  */
 describe('fetchCurrentEstimatedDate', () => {
   const BASE = 'https://platform.test';
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  function stubFetch(handler: (url: string) => Response | Promise<Response>) {
-    const mock = vi.fn(async (url: string | URL) => handler(String(url)));
-    vi.stubGlobal('fetch', mock);
-    return mock;
-  }
 
   it('asks the orders endpoint by numeric id', async () => {
     const mock = stubFetch(() =>
@@ -428,12 +406,9 @@ describe('fetchCurrentEstimatedDate', () => {
   });
 
   it('treats an unreachable platform as transient', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => {
-        throw new Error('socket hang up');
-      }),
-    );
+    stubFetch(async () => {
+      throw new Error('socket hang up');
+    });
 
     await expect(fetchCurrentEstimatedDate('3150567', { baseUrl: BASE })).rejects.toMatchObject({
       isTransient: true,

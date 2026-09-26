@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { respondWithGraphError, stubFetch } from '@/lib/testing/fetch';
 import { setTestEnv, withTestEnv } from '@/lib/testing/env';
 import {
   ACCESS_TOKEN_CODE,
@@ -14,18 +15,6 @@ import {
  * As in the WhatsApp client, `isTransient` decides whether a handler retries or
  * consumes the job, so a misclassified failure is silently discarded work.
  */
-
-function respondWith(status: number, code: number | null, message = 'nope') {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(
-      async () =>
-        new Response(JSON.stringify({ error: { message, ...(code === null ? {} : { code }) } }), {
-          status,
-        }),
-    ),
-  );
-}
 
 async function classify(): Promise<MetaApiError> {
   try {
@@ -44,13 +33,13 @@ async function classify(): Promise<MetaApiError> {
 
 withTestEnv({ META_PAGE_ACCESS_TOKEN: 'token', FACEBOOK_PAGE_ID: '456' });
 
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
-
 describe('Meta error classification', () => {
   it('retries an expired or revoked page token', async () => {
-    respondWith(401, ACCESS_TOKEN_CODE, 'Error validating access token: Session has expired');
+    respondWithGraphError(
+      401,
+      ACCESS_TOKEN_CODE,
+      'Error validating access token: Session has expired',
+    );
 
     const error = await classify();
     expect(error.code).toBe(ACCESS_TOKEN_CODE);
@@ -58,27 +47,24 @@ describe('Meta error classification', () => {
   });
 
   it('retries rate limits and platform blips', async () => {
-    respondWith(400, 613, 'Calls to this api have exceeded the rate limit');
+    respondWithGraphError(400, 613, 'Calls to this api have exceeded the rate limit');
     expect((await classify()).isTransient).toBe(true);
 
-    respondWith(503, null, 'Service unavailable');
+    respondWithGraphError(503, null, 'Service unavailable');
     expect((await classify()).isTransient).toBe(true);
   });
 
   it('does not retry a failure that describes the request itself', async () => {
     // 10 is "this person can no longer be messaged" — a property of the
     // conversation, not of our credentials, and true on every attempt.
-    respondWith(400, 10, 'This message is sent outside of allowed window');
+    respondWithGraphError(400, 10, 'This message is sent outside of allowed window');
     expect((await classify()).isTransient).toBe(false);
   });
 
   it('treats an unreachable Graph API as transient', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => {
-        throw new Error('ECONNRESET');
-      }),
-    );
+    stubFetch(async () => {
+      throw new Error('ECONNRESET');
+    });
 
     const error = await classify();
     expect(error.status).toBe(0);
@@ -94,10 +80,9 @@ describe('which connection a call goes out over', () => {
    * names neither.
    */
   function captureUrl(): { url: () => URL } {
-    const fetchMock = vi.fn(
+    const fetchMock = stubFetch(
       async (_url: URL | string) => new Response(JSON.stringify({ id: 'ok' }), { status: 200 }),
     );
-    vi.stubGlobal('fetch', fetchMock);
     return { url: () => new URL(String(fetchMock.mock.calls[0]![0])) };
   }
 
@@ -176,13 +161,10 @@ describe('which connection a call goes out over', () => {
 describe('Graph deadlines', () => {
   /** Answers like `fetch` does: a signal that has fired rejects with its reason. */
   function serveUnlessAborted(body: unknown = { data: [] }) {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (_url: string | URL, init?: RequestInit) => {
-        if (init?.signal?.aborted) throw init.signal.reason;
-        return new Response(JSON.stringify(body), { status: 200 });
-      }),
-    );
+    stubFetch(async (_url: string | URL, init?: RequestInit) => {
+      if (init?.signal?.aborted) throw init.signal.reason;
+      return new Response(JSON.stringify(body), { status: 200 });
+    });
   }
 
   afterEach(() => {
@@ -244,21 +226,18 @@ describe('Graph deadlines', () => {
 describe('a deadline that passes while the body is arriving', () => {
   /** The status line arrives; the body is still coming when the deadline passes. */
   function stallBody(status = 200) {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(
-        async () =>
-          new Response(
-            new ReadableStream({
-              start(controller) {
-                controller.error(
-                  new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
-                );
-              },
-            }),
-            { status },
-          ),
-      ),
+    stubFetch(
+      async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.error(
+                new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
+              );
+            },
+          }),
+          { status },
+        ),
     );
   }
 
@@ -335,13 +314,10 @@ describe('a private reply that timed out', () => {
     vi.spyOn(AbortSignal, 'timeout').mockReturnValue(
       AbortSignal.abort(new DOMException('The operation timed out.', 'TimeoutError')),
     );
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (_url: string | URL, init?: RequestInit) => {
-        if (init?.signal?.aborted) throw init.signal.reason;
-        return new Response('{}', { status: 200 });
-      }),
-    );
+    stubFetch(async (_url: string | URL, init?: RequestInit) => {
+      if (init?.signal?.aborted) throw init.signal.reason;
+      return new Response('{}', { status: 200 });
+    });
 
     const failure = privateReplyToComment({
       platform: 'facebook',
@@ -355,7 +331,7 @@ describe('a private reply that timed out', () => {
   });
 
   it('keeps every other failure as it was', async () => {
-    respondWith(500, null);
+    respondWithGraphError(500, null);
 
     await expect(
       privateReplyToComment({ platform: 'facebook', commentId: '123_456', message: 'hi' }),
@@ -364,21 +340,18 @@ describe('a private reply that timed out', () => {
 
   /** A refusal says Meta did not act, so nothing was delivered and a retry is safe. */
   it('retries a refusal whose reason never arrived', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(
-        async () =>
-          new Response(
-            new ReadableStream({
-              start(controller) {
-                controller.error(
-                  new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
-                );
-              },
-            }),
-            { status: 400 },
-          ),
-      ),
+    stubFetch(
+      async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.error(
+                new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
+              );
+            },
+          }),
+          { status: 400 },
+        ),
     );
 
     await expect(

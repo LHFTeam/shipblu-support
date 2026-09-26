@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { stubFetch } from '@/lib/testing/fetch';
 import { withTestEnv } from '@/lib/testing/env';
 import {
   discoverLanguageCode,
@@ -36,26 +37,20 @@ describe('mapStatus', () => {
 });
 
 describe('discoverLanguageCode', () => {
-  const ORIGINAL_FETCH = globalThis.fetch;
-
   withTestEnv({ FRESHDESK_DOMAIN: 'shipblu.freshdesk.com', FRESHDESK_API_KEY: 'key' });
-
-  afterEach(() => {
-    globalThis.fetch = ORIGINAL_FETCH;
-  });
 
   /** Serves 200 for the listed paths and 404 for everything else. */
   function serve(found: string[]): string[] {
     const asked: string[] = [];
 
-    globalThis.fetch = (async (url: string | URL) => {
+    stubFetch(async (url: string | URL) => {
       const path = new URL(String(url)).pathname.replace('/api/v2', '');
       asked.push(path);
 
       return found.includes(path)
         ? new Response(JSON.stringify({ id: 1, name: 'x' }), { status: 200 })
         : new Response('not found', { status: 404 });
-    }) as typeof fetch;
+    });
 
     return asked;
   }
@@ -123,21 +118,18 @@ describe('discoverLanguageCode', () => {
  * waits before it gives up.
  */
 describe('a Freshdesk request', () => {
-  const ORIGINAL_FETCH = globalThis.fetch;
-
   withTestEnv({ FRESHDESK_DOMAIN: 'shipblu.freshdesk.com', FRESHDESK_API_KEY: 'key' });
 
   afterEach(() => {
-    globalThis.fetch = ORIGINAL_FETCH;
     vi.restoreAllMocks();
   });
 
   /** Answers like `fetch` does: a signal that has fired rejects with its reason. */
   function serveUnlessAborted(): void {
-    globalThis.fetch = (async (_url: string | URL, init?: RequestInit) => {
+    stubFetch(async (_url: string | URL, init?: RequestInit) => {
       if (init?.signal?.aborted) throw init.signal.reason;
       return new Response(JSON.stringify({ id: 1, name: 'x' }), { status: 200 });
-    }) as typeof fetch;
+    });
   }
 
   it('carries a deadline', async () => {
@@ -168,9 +160,9 @@ describe('a Freshdesk request', () => {
    * importer could not tell from an item's own failure.
    */
   it('that cannot reach Freshdesk fails as a Freshdesk error that never got an answer', async () => {
-    globalThis.fetch = (async () => {
+    stubFetch(async () => {
       throw new TypeError('fetch failed');
-    }) as typeof fetch;
+    });
 
     const failure = getTranslatedCategory(1, 'ar');
 
@@ -185,17 +177,19 @@ describe('a Freshdesk request', () => {
    * `FreshdeskError` and names no path.
    */
   it('says the same when the deadline passes while the answer is arriving', async () => {
-    globalThis.fetch = (async () =>
-      new Response(
-        new ReadableStream({
-          start(controller) {
-            controller.error(
-              new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
-            );
-          },
-        }),
-        { status: 200 },
-      )) as typeof fetch;
+    stubFetch(
+      async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.error(
+                new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
+              );
+            },
+          }),
+          { status: 200 },
+        ),
+    );
 
     const failure = getTranslatedCategory(1, 'ar');
 

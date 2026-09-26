@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { stubFetch } from '@/lib/testing/fetch';
 import { STALLED_AFTER_MS } from '@/lib/queue';
 import { PostmarkEmailProvider } from './postmark';
 
@@ -210,23 +211,14 @@ describe('PostmarkEmailProvider.send', () => {
 
   async function capture(response: unknown) {
     const calls: { url: string; body: Record<string, unknown> }[] = [];
-    const original = globalThis.fetch;
 
-    globalThis.fetch = (async (url: string, init: { body: string }) => {
-      calls.push({ url: String(url), body: JSON.parse(init.body) as Record<string, unknown> });
-      return {
-        ok: true,
-        json: async () => response,
-        text: async () => JSON.stringify(response),
-      };
-    }) as unknown as typeof fetch;
+    stubFetch(async (url, init) => {
+      calls.push({ url, body: JSON.parse(String(init?.body)) as Record<string, unknown> });
+      return Response.json(response);
+    });
 
-    try {
-      const result = await provider.send(email);
-      return { result, sent: calls[0]!.body };
-    } finally {
-      globalThis.fetch = original;
-    }
+    const result = await provider.send(email);
+    return { result, sent: calls[0]!.body };
   }
 
   it('reports the Postmark UUID as a provider id, never as an RFC message id', async () => {
@@ -250,18 +242,12 @@ describe('PostmarkEmailProvider.send', () => {
   });
 
   it('throws on a provider error so the queue retries with backoff', async () => {
-    const original = globalThis.fetch;
-    globalThis.fetch = (async () => ({
-      ok: false,
-      status: 422,
-      text: async () => '{"ErrorCode":300,"Message":"Invalid \'From\' address"}',
-    })) as unknown as typeof fetch;
+    stubFetch(
+      async () =>
+        new Response('{"ErrorCode":300,"Message":"Invalid \'From\' address"}', { status: 422 }),
+    );
 
-    try {
-      await expect(provider.send(email)).rejects.toThrow(/422/);
-    } finally {
-      globalThis.fetch = original;
-    }
+    await expect(provider.send(email)).rejects.toThrow(/422/);
   });
 });
 
@@ -284,18 +270,16 @@ describe('PostmarkEmailProvider.send deadline', () => {
     htmlBody: '<p>On its way.</p>',
     messageId: 'our-generated-id@shipblu.com',
   };
-  const original = globalThis.fetch;
 
   beforeEach(() => {
     // Answers like `fetch` does: a signal that has fired rejects with its reason.
-    globalThis.fetch = (async (_url: string | URL, init?: RequestInit) => {
+    stubFetch(async (_url: string | URL, init?: RequestInit) => {
       if (init?.signal?.aborted) throw init.signal.reason;
       return new Response(JSON.stringify({ MessageID: 'pm-1' }), { status: 200 });
-    }) as typeof fetch;
+    });
   });
 
   afterEach(() => {
-    globalThis.fetch = original;
     vi.restoreAllMocks();
   });
 
@@ -319,17 +303,19 @@ describe('PostmarkEmailProvider.send deadline', () => {
 
   /** The status line arrives; the body is still coming when the deadline passes. */
   function stallBody(status: number) {
-    globalThis.fetch = (async () =>
-      new Response(
-        new ReadableStream({
-          start(controller) {
-            controller.error(
-              new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
-            );
-          },
-        }),
-        { status },
-      )) as typeof fetch;
+    stubFetch(
+      async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.error(
+                new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
+              );
+            },
+          }),
+          { status },
+        ),
+    );
   }
 
   /**
@@ -358,7 +344,7 @@ describe('PostmarkEmailProvider.send deadline', () => {
   });
 
   it('keeps an accepted send whose body is not the JSON it expected', async () => {
-    globalThis.fetch = (async () => new Response('OK', { status: 200 })) as typeof fetch;
+    stubFetch(async () => new Response('OK', { status: 200 }));
 
     await expect(provider.send(email)).resolves.toMatchObject({
       providerMessageId: null,

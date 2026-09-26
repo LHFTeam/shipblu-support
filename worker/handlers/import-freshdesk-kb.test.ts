@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { stubFetch } from '@/lib/testing/fetch';
 import { withTestEnv } from '@/lib/testing/env';
 
 /**
@@ -42,13 +43,9 @@ beforeEach(() => {
     { id: 12, category_id: 1, name: 'Payments' },
   ]);
   listArticles.mockReset();
-  vi.stubGlobal('fetch', () => {
+  stubFetch(() => {
     throw new Error('a test reached the network');
   });
-});
-
-afterEach(() => {
-  vi.unstubAllGlobals();
 });
 
 describe('importFreshdeskKb reading the tree', () => {

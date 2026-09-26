@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { respondWithGraphError, stubFetch } from '@/lib/testing/fetch';
 import { setTestEnv, withTestEnv } from '@/lib/testing/env';
 import { STALLED_AFTER_MS } from '@/lib/queue';
 import { sizedTimeout } from '@/lib/http/deadline';
@@ -19,18 +20,6 @@ import { ACCESS_TOKEN_CODE } from './errors';
  * and its work discarded, so these cases are about which failures survive.
  */
 
-function respondWith(status: number, code: number | null, message = 'nope') {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(
-      async () =>
-        new Response(JSON.stringify({ error: { message, ...(code === null ? {} : { code }) } }), {
-          status,
-        }),
-    ),
-  );
-}
-
 async function classify(): Promise<WhatsAppApiError> {
   try {
     await getMediaUrl('media-1');
@@ -43,18 +32,13 @@ async function classify(): Promise<WhatsAppApiError> {
 
 withTestEnv({ META_PAGE_ACCESS_TOKEN: 'token', WHATSAPP_PHONE_NUMBER_ID: '123' });
 
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
-
 describe('WhatsApp credentials', () => {
   it('authorises with the shared Meta page token', async () => {
     // The substantive half of collapsing the two credential sets: WhatsApp now
     // sends with the same token Messenger and Instagram do. Asserting on the
     // header rather than on the absence of the old variable is what proves the
     // wiring, since a missing token would also just throw.
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ url: 'https://cdn' })));
-    vi.stubGlobal('fetch', fetchMock);
+    const fetchMock = stubFetch(async () => new Response(JSON.stringify({ url: 'https://cdn' })));
 
     setTestEnv({ META_PAGE_ACCESS_TOKEN: 'page-token-abc' });
 
@@ -78,10 +62,9 @@ describe('WhatsApp credentials', () => {
    * that reads like a deleted resource rather than the wrong credential.
    */
   it('uses the token and number it is given rather than the environment', async () => {
-    const fetchMock = vi.fn(
+    const fetchMock = stubFetch(
       async () => new Response(JSON.stringify({ messages: [{ id: 'wamid.1' }] })),
     );
-    vi.stubGlobal('fetch', fetchMock);
 
     await sendText('20100', 'hello', { token: 'saudi-token', phoneNumberId: '999' });
 
@@ -91,8 +74,7 @@ describe('WhatsApp credentials', () => {
   });
 
   it('lists the templates of the business account it is given', async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data: [] })));
-    vi.stubGlobal('fetch', fetchMock);
+    const fetchMock = stubFetch(async () => new Response(JSON.stringify({ data: [] })));
 
     await listTemplates({ wabaId: '777', token: 'saudi-token' });
 
@@ -104,10 +86,7 @@ describe('WhatsApp credentials', () => {
   /** Media is addressed by id, so it must not need a number configured. */
   it('downloads media with no phone number id set at all', async () => {
     setTestEnv({ WHATSAPP_PHONE_NUMBER_ID: undefined });
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => new Response(JSON.stringify({ url: 'https://cdn' }))),
-    );
+    stubFetch(async () => new Response(JSON.stringify({ url: 'https://cdn' })));
 
     await expect(getMediaUrl('media-1', { token: 'saudi-token' })).resolves.toMatchObject({
       url: 'https://cdn',
@@ -120,7 +99,11 @@ describe('WhatsApp error classification', () => {
     // The token is rotated by a human, and every attempt before that fails. The
     // job must still be retried so it lands in 'dead' and stays replayable —
     // treating it as permanent threw away media Meta keeps for 30 days.
-    respondWith(401, ACCESS_TOKEN_CODE, 'Error validating access token: Session has expired');
+    respondWithGraphError(
+      401,
+      ACCESS_TOKEN_CODE,
+      'Error validating access token: Session has expired',
+    );
 
     const error = await classify();
     expect(error.code).toBe(ACCESS_TOKEN_CODE);
@@ -128,31 +111,32 @@ describe('WhatsApp error classification', () => {
   });
 
   it('retries rate limits and platform blips', async () => {
-    respondWith(400, 4, 'Application request limit reached');
+    respondWithGraphError(400, 4, 'Application request limit reached');
     expect((await classify()).isTransient).toBe(true);
 
-    respondWith(500, null, 'Internal error');
+    respondWithGraphError(500, null, 'Internal error');
     expect((await classify()).isTransient).toBe(true);
 
-    respondWith(429, null, 'Too many requests');
+    respondWithGraphError(429, null, 'Too many requests');
     expect((await classify()).isTransient).toBe(true);
   });
 
   it('does not retry a failure that describes the request itself', async () => {
     // 131047 is the re-engagement rejection and 132001 an unknown template:
     // both fail identically on every attempt, so the agent should see them now.
-    respondWith(400, 131047, 'Message failed to send because more than 24 hours have passed');
+    respondWithGraphError(
+      400,
+      131047,
+      'Message failed to send because more than 24 hours have passed',
+    );
     expect((await classify()).isTransient).toBe(false);
 
-    respondWith(400, 132001, 'Template name does not exist');
+    respondWithGraphError(400, 132001, 'Template name does not exist');
     expect((await classify()).isTransient).toBe(false);
   });
 
   it('keeps the raw body when Meta answers with a non-JSON error page', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => new Response('<html>Bad Gateway</html>', { status: 502 })),
-    );
+    stubFetch(async () => new Response('<html>Bad Gateway</html>', { status: 502 }));
 
     const error = await classify();
     expect(error.code).toBeNull();
@@ -170,13 +154,10 @@ describe('WhatsApp error classification', () => {
 describe('WhatsApp deadlines', () => {
   /** Answers like `fetch` does: a signal that has fired rejects with its reason. */
   function serveUnlessAborted(body: unknown) {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (_url: string | URL, init?: RequestInit) => {
-        if (init?.signal?.aborted) throw init.signal.reason;
-        return new Response(JSON.stringify(body), { status: 200 });
-      }),
-    );
+    stubFetch(async (_url: string | URL, init?: RequestInit) => {
+      if (init?.signal?.aborted) throw init.signal.reason;
+      return new Response(JSON.stringify(body), { status: 200 });
+    });
   }
 
   afterEach(() => {
@@ -238,14 +219,11 @@ describe('WhatsApp deadlines', () => {
 
   it('releases the connection a refused download holds', async () => {
     const cancel = vi.fn(() => Promise.resolve());
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => {
-        const response = new Response('denied', { status: 403 });
-        Object.defineProperty(response, 'body', { value: { cancel } });
-        return response;
-      }),
-    );
+    stubFetch(async () => {
+      const response = new Response('denied', { status: 403 });
+      Object.defineProperty(response, 'body', { value: { cancel } });
+      return response;
+    });
 
     await expect(downloadMedia('https://lookaside.fbsbx.com/1')).rejects.toThrow(/\(403\)/);
     expect(cancel).toHaveBeenCalledOnce();
@@ -278,21 +256,18 @@ describe('WhatsApp deadlines', () => {
 describe('a deadline that passes while the body is arriving', () => {
   /** The status line arrives; the body is still coming when the deadline passes. */
   function stallBody(status = 200) {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(
-        async () =>
-          new Response(
-            new ReadableStream({
-              start(controller) {
-                controller.error(
-                  new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
-                );
-              },
-            }),
-            { status },
-          ),
-      ),
+    stubFetch(
+      async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.error(
+                new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
+              );
+            },
+          }),
+          { status },
+        ),
     );
   }
 
@@ -353,10 +328,7 @@ describe('a deadline that passes while the body is arriving', () => {
  */
 describe('a 2xx whose complete body is not a Graph answer', () => {
   function answer(body: string) {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => new Response(body, { status: 200 })),
-    );
+    stubFetch(async () => new Response(body, { status: 200 }));
   }
 
   afterEach(() => {
@@ -406,10 +378,7 @@ describe('a 2xx whose complete body is not a Graph answer', () => {
       JSON.stringify({ data: [{ name: 'a' }], paging: { next: `${GRAPH_BASE}/waba/page2` } }),
       '',
     ];
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => new Response(pages.shift() ?? '', { status: 200 })),
-    );
+    stubFetch(async () => new Response(pages.shift() ?? '', { status: 200 }));
 
     await expect(listTemplates({ wabaId: 'waba' })).rejects.toThrow(/an empty body/);
   });
