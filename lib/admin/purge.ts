@@ -302,6 +302,27 @@ async function settlePendingObjects(
   }
 }
 
+/**
+ * The ticket numbers of every conversation a purge takes, in order.
+ *
+ * Read from the final scope rather than from whatever the caller started with:
+ * `withMergedInto` adds the tombstone tickets merged into the target — raised by
+ * somebody else, for a contact purge — and a panel that lists fewer numbers than
+ * the count beside it says is a panel nobody trusts twice. A ticket purge is not
+ * exempt: "1 ticket" beside a count of three conversations, with no word of
+ * which, is exactly the surprise the preview exists to prevent.
+ */
+async function ticketNumbersFor(tx: typeof db, conversationIds: string[]): Promise<number[]> {
+  if (conversationIds.length === 0) return [];
+
+  const rows = await tx
+    .select({ number: conversations.number })
+    .from(conversations)
+    .where(inArray(conversations.id, conversationIds));
+
+  return rows.map((row) => row.number).sort((a, b) => a - b);
+}
+
 /** How a ticket is named once its row is gone. */
 function conversationSummary(row: {
   number: number;
@@ -331,14 +352,14 @@ export async function previewConversationPurge(
   if (!conversation) return null;
 
   const { ids, tombstones } = await withMergedInto(db, [conversation.id]);
-  const counts = await countFor(db, ids);
+  const [counts, ticketNumbers] = await Promise.all([countFor(db, ids), ticketNumbersFor(db, ids)]);
 
   return {
     id: conversation.id,
     summary: conversationSummary(conversation),
     confirmation: String(conversation.number),
     counts: { ...counts, tombstones },
-    ticketNumbers: [],
+    ticketNumbers,
   };
 }
 
@@ -401,15 +422,8 @@ async function contactScope(
     owned.map((row) => row.id),
   );
 
-  // Re-read rather than reusing `owned`: `withMergedInto` may have added
-  // tombstone tickets raised by somebody else, and a panel that lists fewer
-  // numbers than the count beside it says is a panel nobody trusts twice.
-  const going = await tx
-    .select({ number: conversations.number })
-    .from(conversations)
-    .where(inArray(conversations.id, ids));
-
-  const [counts, identityCount, accountCount, shipmentCount] = await Promise.all([
+  const [numbers, counts, identityCount, accountCount, shipmentCount] = await Promise.all([
+    ticketNumbersFor(tx, ids),
     countFor(tx, ids),
     tx
       .select({ n: count() })
@@ -433,7 +447,7 @@ async function contactScope(
   return {
     ids,
     contactIds,
-    numbers: going.map((row) => row.number).sort((a, b) => a - b),
+    numbers,
     counts: {
       ...counts,
       tombstones: merged.length + tombstones,
@@ -486,6 +500,7 @@ export async function purgeConversation(input: {
 
     const { ids, tombstones } = await withMergedInto(tx, [conversation.id]);
     const counts = { ...(await countFor(tx, ids)), tombstones };
+    const ticketNumbers = await ticketNumbersFor(tx, ids);
     const paths = [...new Set(await storagePathsFor(tx, ids))];
     const summary = conversationSummary(conversation);
 
@@ -494,7 +509,7 @@ export async function purgeConversation(input: {
       subjectId: conversation.id,
       summary,
       counts,
-      ticketNumbers: [],
+      ticketNumbers,
       pendingObjects: paths,
       agent: input.agent,
     });

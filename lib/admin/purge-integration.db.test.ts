@@ -16,7 +16,7 @@ import {
   sideConversations,
   ticketStatuses,
 } from '@/db/schema';
-import { purgeContact, purgeConversation } from './purge';
+import { previewConversationPurge, purgeContact, purgeConversation } from './purge';
 
 const mocks = vi.hoisted(() => ({
   database: null as typeof db | null,
@@ -229,6 +229,32 @@ describe.skipIf(!databaseUrl)('purge entry points against Postgres', () => {
     });
   });
 
+  it('names every ticket a ticket purge takes, merged-in tombstones included', async () => {
+    await fixture(async (tx, statusId) => {
+      const target = await seedScope(tx, statusId);
+      // A ticket somebody else raised, merged into the target: an empty shell
+      // the purge takes with it, and which the admin must be told about.
+      const other = await seedScope(tx, statusId);
+      await tx
+        .update(conversations)
+        .set({ mergedIntoId: target.conversationId })
+        .where(eq(conversations.id, other.conversationId));
+      const expected = [target.number, other.number].sort((a, b) => a - b);
+
+      const preview = await previewConversationPurge(target.conversationId);
+      expect(preview).toMatchObject({ ticketNumbers: expected, counts: { conversations: 2 } });
+
+      await purgeConversation({
+        conversationId: target.conversationId,
+        confirmation: String(target.number),
+        agent: null,
+      });
+      expect(await receiptFor(tx, target.conversationId)).toMatchObject({
+        ticketNumbers: expected,
+      });
+    });
+  });
+
   it('drops pendingObjects once every key was removed', async () => {
     await fixture(async (tx, statusId) => {
       const target = await seedScope(tx, statusId);
@@ -346,7 +372,7 @@ describe.skipIf(!databaseUrl)('purge entry points against Postgres', () => {
           expect(receipt[0]).toMatchObject({
             subject,
             details: {
-              ticketNumbers: subject === 'contact' ? [target.number] : [],
+              ticketNumbers: [target.number],
               counts: {
                 conversations: 1,
                 messages: 1,
