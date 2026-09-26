@@ -47,6 +47,18 @@ function toAddress(full?: { Email?: string; Name?: string }): EmailAddress | nul
   return full.Name ? { address: full.Email, name: full.Name } : { address: full.Email };
 }
 
+/**
+ * How long a send may take before the job gives up on it.
+ *
+ * Every send runs in a job, and the worker awaits a whole batch before it
+ * claims the next, so one that never answered stopped the queue. The deadline
+ * sits in a window with two edges: below about a minute, an email Postmark was
+ * still accepting is given up on and sent again; past `STALLED_AFTER_MS`, a
+ * worker restarted mid-send has the job reclaimed and sent twice. The same
+ * window Graph sends use (`graphTimeout`).
+ */
+const SEND_TIMEOUT_MS = 90_000;
+
 export class PostmarkEmailProvider implements EmailProvider {
   readonly name = 'postmark';
 
@@ -96,15 +108,24 @@ export class PostmarkEmailProvider implements EmailProvider {
       })),
     };
 
-    const response = await fetch(API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        'X-Postmark-Server-Token': this.serverToken,
-      },
-      body: JSON.stringify(body),
-    });
+    let response: Response;
+    try {
+      response = await fetch(API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          'X-Postmark-Server-Token': this.serverToken,
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+      });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'TimeoutError') {
+        throw new Error(`Postmark send did not answer in ${SEND_TIMEOUT_MS / 1000}s`);
+      }
+      throw error;
+    }
 
     if (!response.ok) {
       const text = await response.text();

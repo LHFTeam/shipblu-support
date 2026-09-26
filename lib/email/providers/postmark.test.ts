@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { STALLED_AFTER_MS } from '@/lib/queue';
 import { PostmarkEmailProvider } from './postmark';
 
 const provider = new PostmarkEmailProvider('token', 'webhook-secret-value');
@@ -261,5 +262,56 @@ describe('PostmarkEmailProvider.send', () => {
     } finally {
       globalThis.fetch = original;
     }
+  });
+});
+
+/**
+ * Every Postmark send runs in a job, and it had no deadline: one that never
+ * answered stopped the whole queue, because the worker awaits a batch before it
+ * claims the next. A send's deadline has two edges — below about a minute, an
+ * email Postmark was still accepting is given up on and sent again; past the
+ * stalled-job window, a worker restarted mid-send has the job run twice.
+ */
+describe('PostmarkEmailProvider.send deadline', () => {
+  const email = {
+    to: [{ address: 'customer@example.com' }],
+    from: { address: 'support@shipblu.com' },
+    replyTo: 'support@shipblu.com',
+    subject: 'Re: parcel',
+    textBody: 'On its way.',
+    htmlBody: '<p>On its way.</p>',
+    messageId: 'our-generated-id@shipblu.com',
+  };
+  const original = globalThis.fetch;
+
+  beforeEach(() => {
+    // Answers like `fetch` does: a signal that has fired rejects with its reason.
+    globalThis.fetch = (async (_url: string | URL, init?: RequestInit) => {
+      if (init?.signal?.aborted) throw init.signal.reason;
+      return new Response(JSON.stringify({ MessageID: 'pm-1' }), { status: 200 });
+    }) as typeof fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = original;
+    vi.restoreAllMocks();
+  });
+
+  it('sits between a minute and the window after which the queue runs a job again', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+
+    await provider.send(email);
+
+    const deadline = timeout.mock.calls[0]?.[0] ?? 0;
+    expect(deadline).toBeGreaterThanOrEqual(60_000);
+    expect(deadline).toBeLessThan(STALLED_AFTER_MS);
+  });
+
+  it('says it did not answer when the deadline passes, so the job retries with a reason', async () => {
+    vi.spyOn(AbortSignal, 'timeout').mockReturnValue(
+      AbortSignal.abort(new DOMException('The operation timed out.', 'TimeoutError')),
+    );
+
+    await expect(provider.send(email)).rejects.toThrow(/Postmark send did not answer in 90s/);
   });
 });
