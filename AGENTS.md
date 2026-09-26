@@ -108,11 +108,13 @@ not the React version.
 file — the env-var catalogue, the job registry, the `db/sql` rules, the
 confinement of the delivery payload, and the rest. Each lives in its own module
 under `scripts/ci/rules/`, named as the violation labels it, and carries the
-reason it exists; what they share is `scripts/ci/lib.mjs`. If one of them is
-wrong, change it there and say why in the same commit; do not add your call site
-to an exemption list. A rule with a `<name>.test.mjs` beside it is tested against
-a small git repository built per case (`scripts/ci/fixture.mjs`); a change to
-what it accepts or refuses changes a case there too.
+reason it exists; what they share is `scripts/ci/lib.mjs`, and the table naming
+which ones run is `RULES` in `scripts/ci/rules.mjs`. If one of them is wrong,
+change it there and say why in the same commit; do not add your call site to an
+exemption list. A rule with a `<name>.test.mjs` beside it is tested against a
+small git repository built per case (`scripts/ci/fixture.mjs`), which runs the
+function `RULES` pairs with the rule's name; a change to what it accepts or
+refuses changes a case there too.
 
 `knip` gates **dependency hygiene and nothing else** — `dependencies`,
 `devDependencies`, `optionalPeerDependencies`, `unlisted`, `unresolved` and
@@ -923,5 +925,5 @@ Edit `AGENTS.md`; CI fails if either becomes a copy.
 
 If what you learned is mechanical — a shape two files have to share, a name that
 has to match — prefer a check in `scripts/ci/rules/`, registered in
-`scripts/ci/repo-rules.mjs`, over a paragraph here. A rule in prose is enforced
+`RULES` in `scripts/ci/rules.mjs`, over a paragraph here. A rule in prose is enforced
 by whoever last read the prose.

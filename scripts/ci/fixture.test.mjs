@@ -14,33 +14,60 @@ import { many, registeredCheck, runRule } from './fixture.mjs';
  */
 
 describe('registeredCheck', () => {
-  it('finds the check when an exported constant sorts ahead of it', () => {
+  it('returns the function the table pairs with the name', () => {
     const ran = vi.fn();
-    // Namespace keys come out sorted: ACTION, ZED, checkA. The first export is
-    // a string, which is what the fixture used to call.
-    const ruleModule = { ACTION: 'a', ZED: 'z', checkA: ran };
-    expect(Object.keys(ruleModule)[0]).toBe('ACTION');
-
-    registeredCheck('fake', ruleModule, "const RULES = [\n  ['fake', checkA],\n];")();
-
+    registeredCheck('fake', [
+      ['other', () => {}],
+      ['fake', ran],
+    ])();
     expect(ran).toHaveBeenCalledOnce();
   });
 
+  it('matches the name exactly, metacharacters included', () => {
+    // Read as a pattern, 'a.b' matches 'axb' — the source-parsing lookup would
+    // have run the neighbouring rule.
+    expect(() => registeredCheck('a.b', [['axb', () => {}]])).toThrow(/no entry named 'a\.b'/);
+  });
+
   it('refuses a rule the RULES table does not name', () => {
-    expect(() => registeredCheck('fake', { checkA() {} }, 'const RULES = [];')).toThrow(
-      /no RULES entry named 'fake'/,
-    );
+    expect(() => registeredCheck('fake', [])).toThrow(/no entry named 'fake'/);
   });
 
-  it('refuses when the table names a function the module does not export', () => {
-    expect(() => registeredCheck('fake', { ACTION: 'a', checkB() {} }, "['fake', checkA]")).toThrow(
-      /runs checkA for 'fake', but rules\/fake\.mjs exports no function/,
-    );
+  it('refuses an entry that is not a function', () => {
+    expect(() => registeredCheck('fake', [['fake', 'checkA']])).toThrow(/is not a function/);
   });
 
-  it('resolves a real rule to the function repo-rules.mjs registers', async () => {
+  it('resolves a real rule to the function repo-rules.mjs runs', async () => {
+    const { RULES } = await import('./rules.mjs');
     const ruleModule = await import('./rules/console-scroll.mjs');
-    expect(registeredCheck('console-scroll', ruleModule)).toBe(ruleModule.checkConsolePagesScroll);
+    expect(registeredCheck('console-scroll', RULES)).toBe(ruleModule.checkConsolePagesScroll);
+  });
+});
+
+describe('runRule with an entry that does not name the rule module export', () => {
+  const pages = {
+    ...many(
+      8,
+      (i) => `app/(console)/area${i}/page.tsx`,
+      () => '<div className="overflow-y-auto" />\n',
+    ),
+    'app/(console)/mine/page.tsx': '<div className="p-6" />\n',
+  };
+  // Imported inside the fixture's reset, the way rules.mjs is, so the check
+  // reads the fixture rather than this repository.
+  const table = async () => {
+    const { checkConsolePagesScroll: aliased } = await import('./rules/console-scroll.mjs');
+    return {
+      RULES: [
+        ['aliased', aliased],
+        ['wrapped', () => aliased()],
+      ],
+    };
+  };
+
+  it.each(['aliased', 'wrapped'])('runs a %s entry against the fixture', async (rule) => {
+    const found = await runRule(rule, pages, { loadTable: table });
+    expect(found.map((f) => f.where)).toEqual(['app/(console)/mine/page.tsx']);
   });
 });
 

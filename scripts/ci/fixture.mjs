@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { vi } from 'vitest';
@@ -12,15 +12,21 @@ import { isolatedGitEnv } from './git-env.mjs';
  * The rules read what git tracks, so the fixture is a real repository with
  * every file staged. `lib.mjs` reads the root and the file list when it is
  * first imported, which is why each run resets the module cache and imports
- * the rule afresh: two cases in one file would otherwise share a file list and
- * one `failures` array.
+ * the RULES table afresh — and with it every rule module and `lib.mjs`: two
+ * cases in one file would otherwise share a file list and one `failures` array,
+ * and a table imported before `REPO_RULES_ROOT` was set would have its checks
+ * read the real repository.
  *
  * git runs with the variables that point it at a repository removed
  * (`isolatedGitEnv`). A git hook exports GIT_DIR and GIT_INDEX_FILE, and git honours
  * them over `cwd`: run from a pre-commit hook, `git add -A` would stage the
  * fixture's files into the real repository's index.
+ *
+ * `loadTable` stands in for `import('./rules.mjs')` only so a test can register
+ * an entry the real table does not have. It is called inside the reset, so
+ * whatever it imports sees the fixture too.
  */
-export async function runRule(rule, files) {
+export async function runRule(rule, files, { loadTable = () => import('./rules.mjs') } = {}) {
   const root = mkdtempSync(path.join(tmpdir(), 'repo-rules-'));
   try {
     for (const [file, contents] of Object.entries(files)) {
@@ -33,10 +39,10 @@ export async function runRule(rule, files) {
 
     vi.resetModules();
     vi.stubEnv('REPO_RULES_ROOT', root);
-    const ruleModule = await import(`./rules/${rule}.mjs`);
+    const { RULES } = await loadTable();
     const { failures } = await import('./lib.mjs');
 
-    registeredCheck(rule, ruleModule)();
+    registeredCheck(rule, RULES)();
     return failures.map(({ rule: name, where, message }) => ({ rule: name, where, message }));
   } finally {
     vi.unstubAllEnvs();
@@ -45,33 +51,24 @@ export async function runRule(rule, files) {
 }
 
 /**
- * The function CI runs for `rule`: the one the RULES table in `repo-rules.mjs`
- * pairs with its name, looked up by that name in the rule's module.
+ * The function CI runs for `rule`: the one the RULES table pairs with its name.
  *
- * Not "the module's first export". A module namespace lists its exports
- * alphabetically, not in declaration order, so the first rule module to export
- * a constant sorting before its check — `ACTION` beside `checkA` — would have
- * had every fixture call the constant. Resolving through the RULES entry also
- * means a fixture cannot test a function CI never calls: if the table names
- * something the module does not export as a function, this says so.
- *
- * `runner` is the source of `repo-rules.mjs`, a parameter only so a test can
- * register a module that is not in the real table.
+ * Looked up in the table itself rather than by reading `repo-rules.mjs` as
+ * text. Parsing the source meant building a pattern from the rule name, where a
+ * metacharacter would match some other entry, and then resolving the identifier
+ * it found as an export of the rule module — which named the wrong thing, or
+ * nothing, for an entry imported under an alias or wrapped in a closure. The
+ * table entry is the function CI calls, so there is nothing left to resolve,
+ * and a fixture still cannot test a rule CI never runs.
  */
-export function registeredCheck(
-  rule,
-  ruleModule,
-  runner = readFileSync(new URL('./repo-rules.mjs', import.meta.url), 'utf8'),
-) {
-  const entry = runner.match(new RegExp(`\\[\\s*'${rule}'\\s*,\\s*(\\w+)\\s*\\]`));
-  if (!entry) throw new Error(`repo-rules.mjs has no RULES entry named '${rule}'`);
-  const name = entry[1];
-  if (typeof ruleModule[name] !== 'function') {
-    throw new Error(
-      `RULES runs ${name} for '${rule}', but rules/${rule}.mjs exports no function by that name`,
-    );
+export function registeredCheck(rule, table) {
+  const entry = table.find(([name]) => name === rule);
+  if (!entry) throw new Error(`the RULES table has no entry named '${rule}'`);
+  const [, run] = entry;
+  if (typeof run !== 'function') {
+    throw new Error(`the RULES entry for '${rule}' is not a function`);
   }
-  return ruleModule[name];
+  return run;
 }
 
 /** `count` files named by `name(i)`, each holding `contents(i)`. */
