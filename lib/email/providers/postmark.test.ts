@@ -210,15 +210,23 @@ describe('PostmarkEmailProvider.send', () => {
   };
 
   async function capture(response: unknown) {
-    const calls: { url: string; body: Record<string, unknown> }[] = [];
+    const calls: { url: string; init: RequestInit | undefined; body: Record<string, unknown> }[] =
+      [];
 
     stubFetch(async (url, init) => {
-      calls.push({ url, body: JSON.parse(String(init?.body)) as Record<string, unknown> });
+      calls.push({ url, init, body: JSON.parse(String(init?.body)) as Record<string, unknown> });
       return Response.json(response);
     });
 
     const result = await provider.send(email);
-    return { result, url: calls[0]!.url, sent: calls[0]!.body };
+    const [call] = calls;
+    return {
+      result,
+      url: call!.url,
+      method: call!.init?.method,
+      headers: Object.fromEntries(new Headers(call!.init?.headers)),
+      sent: call!.body,
+    };
   }
 
   // The stream is not checked by anything else. A name Postmark does not know is
@@ -229,7 +237,8 @@ describe('PostmarkEmailProvider.send', () => {
     const { url, sent } = await capture({ MessageID: 'x' });
 
     expect(url).toBe('https://api.postmarkapp.com/email');
-    expect(sent).toMatchObject({
+    // Whole, so a field nothing here asked for — `TrackLinks`, say — fails it.
+    expect(sent).toEqual({
       From: '"ShipBlu Support" <support@shipblu.com>',
       To: 'customer@example.com',
       ReplyTo: 'support+c42.deadbeefdeadbeef@shipblu.com',
@@ -237,6 +246,24 @@ describe('PostmarkEmailProvider.send', () => {
       TextBody: 'On its way.',
       HtmlBody: '<p>On its way.</p>',
       MessageStream: 'outbound',
+      Headers: [
+        { Name: 'Message-ID', Value: '<our-generated-id@shipblu.com>' },
+        { Name: 'In-Reply-To', Value: '<parent@shipblu.com>' },
+        { Name: 'References', Value: '<root@shipblu.com> <parent@shipblu.com>' },
+      ],
+    });
+  });
+
+  // The credential rides a header nothing else checks. Renamed or dropped, every
+  // send fails with a 401 in production and no test here notices.
+  it('posts JSON, authenticated with the server token', async () => {
+    const { method, headers } = await capture({ MessageID: 'x' });
+
+    expect(method).toBe('POST');
+    expect(headers).toEqual({
+      'content-type': 'application/json',
+      accept: 'application/json',
+      'x-postmark-server-token': 'token',
     });
   });
 

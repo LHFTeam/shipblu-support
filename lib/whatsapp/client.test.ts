@@ -44,9 +44,16 @@ describe('the request a send makes', () => {
     return stubFetch(async () => new Response(JSON.stringify({ messages: [{ id: 'wamid.1' }] })));
   }
 
+  // The content type is part of the shape: Graph reads the body as JSON only
+  // because of it. The token beside it is pinned by the credential tests below.
   function sent(fetchMock: ReturnType<typeof capture>) {
     const [url, init] = fetchMock.mock.calls[0]! as unknown as [string, RequestInit];
-    return { url, method: init.method, body: JSON.parse(String(init.body)) as unknown };
+    return {
+      url,
+      method: init.method,
+      contentType: new Headers(init.headers).get('Content-Type'),
+      body: JSON.parse(String(init.body)) as unknown,
+    };
   }
 
   it("posts free text to the number's messages edge", async () => {
@@ -59,6 +66,7 @@ describe('the request a send makes', () => {
     expect(sent(fetchMock)).toEqual({
       url: `${GRAPH_BASE}/123/messages`,
       method: 'POST',
+      contentType: 'application/json',
       body: {
         messaging_product: 'whatsapp',
         recipient_type: 'individual',
@@ -78,6 +86,7 @@ describe('the request a send makes', () => {
     expect(sent(fetchMock)).toEqual({
       url: `${GRAPH_BASE}/123/messages`,
       method: 'POST',
+      contentType: 'application/json',
       body: {
         messaging_product: 'whatsapp',
         recipient_type: 'individual',
@@ -85,6 +94,23 @@ describe('the request a send makes', () => {
         type: 'template',
         template: { name: 'delivery_update', language: { code: 'ar' } },
       },
+    });
+  });
+
+  it('puts the components it was given inside the template, as given', async () => {
+    const fetchMock = capture();
+    const components = [
+      { type: 'body' as const, parameters: [{ type: 'text' as const, text: 'SB123456789' }] },
+    ];
+
+    await sendTemplate('201001234567', 'delivery_update', 'ar', components);
+
+    expect(sent(fetchMock).body).toEqual({
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: '201001234567',
+      type: 'template',
+      template: { name: 'delivery_update', language: { code: 'ar' }, components },
     });
   });
 });
