@@ -1,6 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetEnvCache } from '@/lib/env';
-import { discoverLanguageCode, mapStatus, mapVisibility } from './client';
+import {
+  discoverLanguageCode,
+  FreshdeskError,
+  getTranslatedCategory,
+  mapStatus,
+  mapVisibility,
+} from './client';
 
 describe('mapVisibility', () => {
   it('maps the documented Freshdesk levels', () => {
@@ -119,5 +125,106 @@ describe('discoverLanguageCode', () => {
       '/solutions/categories/111/en-GB',
       '/solutions/articles/900/en-GB',
     ]);
+  });
+});
+
+/**
+ * The importer runs as a job, and the worker awaits a whole batch before it
+ * claims the next one. A request with no deadline of its own therefore held
+ * every queued job — every send, every sync — for the five minutes `fetch`
+ * waits before it gives up.
+ */
+describe('a Freshdesk request', () => {
+  const ORIGINAL_ENV = process.env;
+  const ORIGINAL_FETCH = globalThis.fetch;
+
+  beforeEach(() => {
+    process.env = {
+      NODE_ENV: 'test',
+      DATABASE_URL: 'postgresql://localhost:5432/test',
+      APP_SECRET: '0'.repeat(64),
+      FRESHDESK_DOMAIN: 'shipblu.freshdesk.com',
+      FRESHDESK_API_KEY: 'key',
+    } as NodeJS.ProcessEnv;
+    resetEnvCache();
+  });
+
+  afterEach(() => {
+    process.env = ORIGINAL_ENV;
+    globalThis.fetch = ORIGINAL_FETCH;
+    resetEnvCache();
+    vi.restoreAllMocks();
+  });
+
+  /** Answers like `fetch` does: a signal that has fired rejects with its reason. */
+  function serveUnlessAborted(): void {
+    globalThis.fetch = (async (_url: string | URL, init?: RequestInit) => {
+      if (init?.signal?.aborted) throw init.signal.reason;
+      return new Response(JSON.stringify({ id: 1, name: 'x' }), { status: 200 });
+    }) as typeof fetch;
+  }
+
+  it('carries a deadline', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    serveUnlessAborted();
+
+    await getTranslatedCategory(1, 'ar');
+
+    expect(timeout).toHaveBeenCalledWith(15_000);
+  });
+
+  it('that does not answer in time fails as a retryable Freshdesk error that says so', async () => {
+    vi.spyOn(AbortSignal, 'timeout').mockReturnValue(
+      AbortSignal.abort(new DOMException('The operation timed out.', 'TimeoutError')),
+    );
+    serveUnlessAborted();
+
+    const failure = getTranslatedCategory(1, 'ar');
+
+    await expect(failure).rejects.toBeInstanceOf(FreshdeskError);
+    await expect(failure).rejects.toMatchObject({ isTransient: true });
+    await expect(failure).rejects.toThrow(/did not answer in 15s/);
+  });
+
+  /**
+   * A DNS failure or a reset says the same thing a deadline does: Freshdesk did
+   * not answer. It surfaced as a bare `TypeError: fetch failed`, which the
+   * importer could not tell from an item's own failure.
+   */
+  it('that cannot reach Freshdesk fails as a Freshdesk error that never got an answer', async () => {
+    globalThis.fetch = (async () => {
+      throw new TypeError('fetch failed');
+    }) as typeof fetch;
+
+    const failure = getTranslatedCategory(1, 'ar');
+
+    await expect(failure).rejects.toBeInstanceOf(FreshdeskError);
+    await expect(failure).rejects.toMatchObject({ status: 0, isTransient: true });
+    await expect(failure).rejects.toThrow(/unreachable: fetch failed/);
+  });
+
+  /**
+   * The signal governs the body as well as the status. A deadline passing
+   * mid-body rejected with the signal's own reason, which is not a
+   * `FreshdeskError` and names no path.
+   */
+  it('says the same when the deadline passes while the answer is arriving', async () => {
+    globalThis.fetch = (async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.error(
+              new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
+            );
+          },
+        }),
+        { status: 200 },
+      )) as typeof fetch;
+
+    const failure = getTranslatedCategory(1, 'ar');
+
+    await expect(failure).rejects.toBeInstanceOf(FreshdeskError);
+    await expect(failure).rejects.toMatchObject({ isTransient: true });
+    await expect(failure).rejects.toThrow(/did not answer in 15s/);
   });
 });

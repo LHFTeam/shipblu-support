@@ -5,6 +5,7 @@ import { kbArticles, kbCategories, kbFolders, kbRedirects } from '@/db/schema';
 import { env } from '@/lib/env';
 import {
   discoverLanguageCode,
+  FreshdeskError,
   getTranslatedArticle,
   getTranslatedCategory,
   getTranslatedFolder,
@@ -82,6 +83,20 @@ export async function importFreshdeskKb(): Promise<void> {
 
   const started = Date.now();
   const failures: string[] = [];
+  /*
+    One item's failure is recorded and the run carries on — except when
+    Freshdesk did not answer at all. Every request left would then wait out its
+    own fifteen-second deadline, over an hour for a few hundred articles,
+    holding the worker's whole batch and outliving the reclaim window, so a
+    deploy could start a second import beside it. Thrown instead, the job fails
+    now and the queue retries the run later: the import is idempotent on
+    `(source_system, external_id)`, so running it again repairs rather than
+    duplicates.
+  */
+  const record = (what: string, error: unknown) => {
+    if (error instanceof FreshdeskError && error.status === 0) throw error;
+    failures.push(`${what}: ${message(error)}`);
+  };
   let categoryCount = 0;
   let folderCount = 0;
   const articlesByLocale = new Map<Locale, number>(LOCALES.map((locale) => [locale, 0]));
@@ -107,13 +122,13 @@ export async function importFreshdeskKb(): Promise<void> {
         try {
           contents.push({ folder, articles: await listArticles(folder.id) });
         } catch (error) {
-          failures.push(`folder ${folder.id}: ${message(error)}`);
+          record(`folder ${folder.id}`, error);
         }
       }
 
       tree.push({ category, contents });
     } catch (error) {
-      failures.push(`category ${category.id}: ${message(error)}`);
+      record(`category ${category.id}`, error);
     }
   }
 
@@ -175,11 +190,11 @@ export async function importFreshdeskKb(): Promise<void> {
               await writeRedirects(article.id, result.id);
               count(articlesByLocale, primaryLocale);
             } catch (error) {
-              failures.push(`article ${article.id}: ${message(error)}`);
+              record(`article ${article.id}`, error);
             }
           }
         } catch (error) {
-          failures.push(`folder ${folder.id}: ${message(error)}`);
+          record(`folder ${folder.id}`, error);
         }
       }
 
@@ -189,7 +204,7 @@ export async function importFreshdeskKb(): Promise<void> {
         articleGroups,
       });
     } catch (error) {
-      failures.push(`category ${category.id}: ${message(error)}`);
+      record(`category ${category.id}`, error);
     }
   }
 
@@ -308,12 +323,12 @@ export async function importFreshdeskKb(): Promise<void> {
               );
               count(articlesByLocale, locale);
             } catch (error) {
-              failures.push(`article ${article.id} (${locale}): ${message(error)}`);
+              record(`article ${article.id} (${locale})`, error);
             }
           }
         }
       } catch (error) {
-        failures.push(`category ${category.id} (${locale}): ${message(error)}`);
+        record(`category ${category.id} (${locale})`, error);
       }
     }
   }
