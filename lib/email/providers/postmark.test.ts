@@ -218,8 +218,27 @@ describe('PostmarkEmailProvider.send', () => {
     });
 
     const result = await provider.send(email);
-    return { result, sent: calls[0]!.body };
+    return { result, url: calls[0]!.url, sent: calls[0]!.body };
   }
+
+  // The stream is not checked by anything else. A name Postmark does not know is
+  // refused, but `broadcast` exists on every server and is accepted: a
+  // customer's reply would go out on the bulk-mail stream, with its unsubscribe
+  // handling, and nothing in the response says which stream was used.
+  it('sends to the email endpoint, on the transactional stream', async () => {
+    const { url, sent } = await capture({ MessageID: 'x' });
+
+    expect(url).toBe('https://api.postmarkapp.com/email');
+    expect(sent).toMatchObject({
+      From: '"ShipBlu Support" <support@shipblu.com>',
+      To: 'customer@example.com',
+      ReplyTo: 'support+c42.deadbeefdeadbeef@shipblu.com',
+      Subject: 'Re: parcel [#42.deadbeefdeadbeef]',
+      TextBody: 'On its way.',
+      HtmlBody: '<p>On its way.</p>',
+      MessageStream: 'outbound',
+    });
+  });
 
   it('reports the Postmark UUID as a provider id, never as an RFC message id', async () => {
     const { result } = await capture({ MessageID: 'e4f9b1c2-0000-4a11-9b33-postmarkuuid' });
