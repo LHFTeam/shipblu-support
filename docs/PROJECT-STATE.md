@@ -2662,7 +2662,7 @@ access_token`, authorised with the System User token, which never expires)
     a recording of a reply Graph refuses is a rejected submission.
 
 30. **`npm run db:seed` is not part of any deploy, so adding a row to
-    `db/seed.ts` does not put it in production.** `render.yaml` runs
+    `db/baseline.ts` does not put it in production.** `render.yaml` runs
     `preDeployCommand: npm run db:migrate` and nothing else; the seed is a
     manual script. This is easy to miss because the seed's own doc comment says
     it is "safe to re-run after every deploy", which reads as a description of
