@@ -13,6 +13,7 @@ import {
   whatsappAccounts,
 } from '@/db/schema';
 import { requirePermission } from '@/lib/auth/guard';
+import { isUuid } from '@/lib/http/uuid';
 import { forgetCategoryIds } from '@/lib/categorise/apply';
 import { looksLikeEmail, normaliseEmail } from '@/lib/auth/normalise';
 import { sealInviteToken } from '@/lib/auth/invite-token';
@@ -187,6 +188,7 @@ export async function setAgentActive(_state: AdminState, formData: FormData): Pr
 
   const agentId = String(formData.get('agentId') ?? '');
   const active = formData.get('active') === 'true';
+  if (!isUuid(agentId)) return { error: 'Unknown agent' };
 
   // Locking yourself out is always a mistake, and recovering needs shell access.
   if (agentId === admin.id && !active) {
@@ -221,6 +223,7 @@ export async function setAgentCapacity(
   await requirePermission('admin.agents');
 
   const agentId = String(formData.get('agentId') ?? '');
+  if (!isUuid(agentId)) return { error: 'Unknown agent' };
   const raw = String(formData.get('maxOpenTickets') ?? '').trim();
 
   let maxOpenTickets: number | null = null;
@@ -250,7 +253,7 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
   // edits. The form's field only says what to create.
   let type = String(formData.get('type') ?? '');
   if (id) {
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    if (!isUuid(id)) {
       return { error: 'That form is out of date — reload the page and try again' };
     }
 
@@ -265,6 +268,9 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
   }
 
   const defaultGroupId = String(formData.get('defaultGroupId') ?? '') || null;
+  // Written to the row as given, so its shape is checked first: Postgres answers
+  // a malformed uuid with 22P02, a throw where the form promises a sentence.
+  if (defaultGroupId && !isUuid(defaultGroupId)) return { error: 'Unknown default group' };
   const phoneNumberId = String(formData.get('phoneNumberId') ?? '').trim();
   const address = String(formData.get('address') ?? '').trim();
   const whatsappAccountId = String(formData.get('whatsappAccountId') ?? '') || null;
@@ -529,7 +535,7 @@ export async function saveCategory(_state: AdminState, formData: FormData): Prom
   const labelEn = String(formData.get('labelEn') ?? '').trim();
   const labelAr = String(formData.get('labelAr') ?? '').trim();
 
-  if (!id) return { error: 'Unknown category' };
+  if (!isUuid(id)) return { error: 'Unknown category' };
   if (!labelEn || !labelAr) {
     // Both, always. Arabic is the default locale and the labels are what a
     // report shown to an Egyptian operations lead is read in, so a blank Arabic
@@ -555,7 +561,7 @@ export async function setCategoryActive(
 
   const id = String(formData.get('id') ?? '');
   const active = formData.get('active') === 'true';
-  if (!id) return { error: 'Unknown category' };
+  if (!isUuid(id)) return { error: 'Unknown category' };
 
   await db
     .update(ticketCategories)
@@ -579,7 +585,7 @@ export async function saveRootCause(_state: AdminState, formData: FormData): Pro
   const labelEn = String(formData.get('labelEn') ?? '').trim();
   const labelAr = String(formData.get('labelAr') ?? '').trim();
 
-  if (!id) return { error: 'Unknown cause' };
+  if (!isUuid(id)) return { error: 'Unknown cause' };
   if (!labelEn || !labelAr) {
     return { error: 'Both the English and the Arabic label are required' };
   }
@@ -601,7 +607,7 @@ export async function setRootCauseActive(
 
   const id = String(formData.get('id') ?? '');
   const active = formData.get('active') === 'true';
-  if (!id) return { error: 'Unknown cause' };
+  if (!isUuid(id)) return { error: 'Unknown cause' };
 
   await db
     .update(ticketRootCauses)

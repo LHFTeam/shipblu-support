@@ -6,6 +6,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { kbArticleVersions, kbArticles, kbCategories, kbFolders } from '@/db/schema';
 import { requirePermission } from '@/lib/auth/guard';
+import { isUuid } from '@/lib/http/uuid';
 import type { AgentRole } from '@/lib/auth/permissions';
 import { htmlToText, preview, sanitiseArticleHtml } from '@/lib/html/sanitize';
 import {
@@ -60,7 +61,10 @@ function parseMinRole(value: FormDataEntryValue | null): AgentRole | null | 'inv
  * a row because `||` short-circuits.
  */
 async function readable(id: string, role: AgentRole): Promise<EditableArticle | null> {
-  if (!id) return null;
+  // Every action that names an article by an id out of a form field asks this
+  // first, so the shape is checked here once: Postgres answers a malformed uuid
+  // with 22P02, and an action that throws says nothing about what went wrong.
+  if (!isUuid(id)) return null;
   return getArticleForEdit(id, role);
 }
 
@@ -111,7 +115,7 @@ export async function saveArticle(_state: KbState, formData: FormData): Promise<
     .filter(Boolean);
 
   if (!title) return { error: 'Give the article a title' };
-  if (!folderId) return { error: 'Choose a folder' };
+  if (!isUuid(folderId)) return { error: 'Choose a folder' };
   if (!isLocale(locale)) return { error: 'Unknown locale' };
   if (!VISIBILITIES.includes(visibility as (typeof VISIBILITIES)[number])) {
     return { error: 'Unknown visibility' };
@@ -321,7 +325,7 @@ export async function createFolder(_state: KbState, formData: FormData): Promise
   const minRole = parseMinRole(formData.get('minRole'));
 
   if (!name) return { error: 'Give the folder a name' };
-  if (!categoryId) return { error: 'Choose a category' };
+  if (!isUuid(categoryId)) return { error: 'Choose a category' };
   if (!VISIBILITIES.includes(visibility as (typeof VISIBILITIES)[number])) {
     return { error: 'Unknown visibility' };
   }
@@ -425,6 +429,7 @@ export async function restoreVersion(_state: KbState, formData: FormData): Promi
 
   const id = String(formData.get('id') ?? '');
   const versionId = String(formData.get('versionId') ?? '');
+  if (!isUuid(versionId)) return { error: 'That version no longer exists' };
 
   const current = await readable(id, agent.role);
   if (!current) return { error: 'Article not found' };
