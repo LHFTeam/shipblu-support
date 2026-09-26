@@ -60,7 +60,7 @@ export async function metaReplyTarget(
  *
  * A plain `text` column, so the name is the contract between the four places
  * that touch it — the action that writes it, the two readers below and in
- * `lib/tickets/queries.ts`, and the timeline sentence in the ticket view. Named
+ * `lib/tickets/conversation.ts`, and the timeline sentence in the ticket view. Named
  * once here rather than spelled out in each.
  */
 export const THREAD_CONTROL_TAKEN = 'thread_control_taken';

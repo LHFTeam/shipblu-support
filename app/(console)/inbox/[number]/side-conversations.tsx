@@ -6,7 +6,7 @@ import { Badge, Button, ErrorText, Input, Label, Select, Textarea } from '@/comp
 import { formatBytes, formatDateTime, formatRelative } from '@/lib/format';
 import type { PickerEntry, SideConversationView } from '@/lib/side-conversations/queries';
 import { describeRecipient, trackingPrefill } from '@/lib/side-conversations/format';
-import type { ConversationDetail } from '@/lib/tickets/queries';
+import type { ConversationDetail } from '@/lib/tickets/conversation';
 import {
   replyToSideConversation,
   setSideConversationState,

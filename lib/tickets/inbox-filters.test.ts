@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { encodeInboxCursor, parseFilters, parseInboxCursor } from './queries';
+import { encodeInboxCursor, parseFilters, parseInboxCursor } from './inbox-filters';
 
 const ROW_ID = '3f1c9a4e-6b2d-4c8f-9a71-2e5d8c0b7f43';
 const ROW_TIME = '2026-08-19 23:24:51.640649+00';

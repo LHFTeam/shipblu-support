@@ -2,7 +2,7 @@ import { and, eq, gte, isNull, lt, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agentFocusIntervals, conversationPresence, conversations } from '@/db/schema';
 import type { SessionAgent } from '@/lib/auth/session';
-import { conversationVisibility } from '@/lib/tickets/queries';
+import { conversationVisibility } from '@/lib/tickets/visibility';
 
 /**
  * How long an agent actually had a ticket in front of them.

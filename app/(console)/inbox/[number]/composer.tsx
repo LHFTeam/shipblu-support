@@ -7,7 +7,8 @@ import { ChevronDownIcon, ChevronUpIcon } from '@/components/icons';
 import { Button, ErrorText, Input, Label, Select, Textarea } from '@/components/ui';
 import { useNow } from '@/components/use-now';
 import type { AgentArticleHit } from '@/lib/kb/agent-search';
-import type { CannedResponseOption, ConversationDetail } from '@/lib/tickets/queries';
+import type { ConversationDetail } from '@/lib/tickets/conversation';
+import type { CannedResponseOption } from '@/lib/tickets/lookups';
 import {
   availableLocales,
   CANNED_LOCALES,

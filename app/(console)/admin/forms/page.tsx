@@ -4,7 +4,7 @@ import { groups, ticketFields, ticketForms } from '@/db/schema';
 import { Card, EmptyState, PageHeader } from '@/components/ui';
 import { requirePermission } from '@/lib/auth/guard';
 import { parseFormElements } from '@/lib/forms/elements';
-import { listAllTicketFields } from '@/lib/tickets/queries';
+import { listAllTicketFields } from '@/lib/tickets/lookups';
 import { FormEditor, NewForm } from './forms';
 
 export const dynamic = 'force-dynamic';

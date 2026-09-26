@@ -4,11 +4,14 @@ import { localised } from '@/lib/tickets/custom-fields';
 /**
  * What a form is called, wherever it is named.
  *
- * Its own module, and not beside the queries, because `lib/tickets/queries.ts`
- * needs it to put a form's name on a ticket while `lib/forms/queries.ts` needs
- * `listTicketFields` from there — the two importing each other is a cycle whose
- * failure mode is an undefined function at runtime rather than an error at
- * build time. Nothing here touches the database, so both sides can have it.
+ * Its own module, and not beside the queries, because when the ticket read
+ * models were one `lib/tickets/queries.ts` it needed this to put a form's name
+ * on a ticket while `lib/forms/queries.ts` needed `listTicketFields` from it —
+ * the two importing each other is a cycle whose failure mode is an undefined
+ * function at runtime rather than an error at build time. Those halves are now
+ * `lib/tickets/conversation.ts` and `lib/tickets/lookups.ts`, which removes the
+ * cycle, but nothing here touches the database, so both sides can still have
+ * it.
  */
 
 /** The form's own name, in the reader's language. */

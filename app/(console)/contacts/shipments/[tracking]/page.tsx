@@ -17,7 +17,7 @@ import {
   returnStepLabel,
   RETURN_STEPS,
 } from '@/lib/shipments/status';
-import { scopeForAgent } from '@/lib/tickets/queries';
+import { scopeForAgent } from '@/lib/tickets/visibility';
 import { ConversationTable } from '../../conversation-table';
 import { SyncBadge } from '../../page';
 import { PartyField, RefreshShipmentButton } from './forms';

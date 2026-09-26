@@ -2,7 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversations } from '@/db/schema';
 import type { SessionAgent } from '@/lib/auth/session';
-import { conversationVisibility } from '@/lib/tickets/queries';
+import { conversationVisibility } from '@/lib/tickets/visibility';
 
 /**
  * Re-checks a requested conversation before opening its dedicated LISTEN topic.
