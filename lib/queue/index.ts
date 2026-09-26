@@ -139,10 +139,13 @@ export async function enqueueMany(
  * misspelled one matched no job at all and the guard let every click through.
  * Here it is a `JobType`, checked by the compiler against the union above.
  *
- * It is a read, not a lock, so two clicks in the same instant can both see
- * nothing. The callers pair it with a `dedupeKey` bucketed to the minute, which
- * is what actually collapses a double-click; this is the part that catches the
- * second person pressing the button an hour into the first run.
+ * It is a read, not a lock, so two requests racing each other can both see
+ * nothing. The callers also key the enqueue on the minute, which collapses that
+ * race unless the two land either side of a minute boundary. Any click that
+ * arrives once the first job's row exists — a second later or an hour into the
+ * run — is refused here. What is left, two requests racing across a minute
+ * boundary, starts two passes whose writes are each idempotent: a wasted run,
+ * not wrong data.
  */
 export async function hasActiveJob(type: JobType): Promise<boolean> {
   const rows = await db
