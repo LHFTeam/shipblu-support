@@ -4097,6 +4097,68 @@ null`, and argued it from write cost and 13 MB of disk. The read side turned
     on screen; a conditionally rendered field means a conditional in the
     `values` object too.
 
+71. **`next dev` rewrote AGENTS.md whenever it thought an agent was running
+    it.** _2026-09-25._ Next 16 detects a coding agent and appends a block of
+    its own to `AGENTS.md` on every start, telling the agent to commit it — and
+    `CLAUDE.md` and the Copilot file are symlinks to that file, so every session
+    that ran the dev server was left with a dirty tree whose easiest resolution
+    was committing text nobody here wrote. `agentRules: false` in
+    `next.config.ts` turns it off (#172); the reasoning is beside it, and the
+    `next-agent-rules` repo rule fails a pull request that drops the setting,
+    including a Next upgrade that removes the option. If a session's tree still
+    shows AGENTS.md modified after `npm run dev`, Next has found another way to
+    write it.
+
+72. **A browser submits a textarea's line breaks as CRLF, so a split on `\n`
+    never sees a blank line.** _2026-09-25._ The HTML spec normalises a
+    textarea's value to `\r\n` in form data, and `textToHtml` split
+    paragraphs on `/\n{2,}/`, which `\r\n\r\n` does not match — so every
+    agent reply, and every canned response saved from the admin textarea, went
+    out as one `<p>` joined by `<br>`s. Nothing looked wrong in a unit test fed
+    `\n`. Any helper reading text a person typed into a form normalises line
+    endings first (#171).
+
+73. **`fetch` with no signal waits five minutes, and a signal governs the body
+    as well as the status.** _2026-09-26._ Node 22's `fetch` gives up on its own
+    only after five minutes without response headers, and never on a body that
+    keeps trickling in (undici's `headersTimeout` and `bodyTimeout`, both
+    300 000 ms, read from Node's own source). The worker awaits a whole batch
+    before it claims the next, so one unresponsive provider held every queued
+    job — sends included — for at least that long, which is also exactly the
+    stalled-job reclaim window. And an `AbortSignal.timeout` passed to `fetch`
+    keeps running while the body is read: a deadline passing after the status
+    rejects `text()`, `json()` or a stream reader with the signal's own
+    `DOMException`, which names no call and is not the client's error type. A
+    body read outside the client's error handling therefore escapes it — and on
+    a send the provider had already accepted, that becomes a retry and a second
+    copy to the customer. Nothing on `main` ever did this, because nothing there
+    passed a signal: it was caught in review of the first commits of row 2.8 of
+    `plans/refactor-in-stages.md`, before any of them merged. That row, open at
+    the time of writing as #184–#188, gives every outbound call in a job path a
+    deadline and reads each body inside it.
+
+74. **A run of merges to `main` shows cancelled CI runs, and they are not
+    failures.** _2026-09-25._ `ci.yml` puts every run for a ref in one
+    concurrency group and exempts `main` from `cancel-in-progress`, so an
+    in-flight run on `main` is never cut short — but a group holds at most one
+    _pending_ run, and GitHub cancels the waiting one when another arrives. Merge
+    three PRs in a minute and the middle merge commit's run reads "cancelled".
+    Judge `main` by its newest head. If that head's own run reads cancelled,
+    re-run it once; a second failure is real. Row 0.4 (#193) gives each push to
+    `main` a concurrency group of its own, after which every merge keeps its
+    result and this entry describes history.
+
+75. **Two traps in the cloud agent container, not in the product.**
+    _2026-09-25._ `pkill -f <pattern>` matches the shell running the command,
+    because its own command line contains the pattern, so a one-line "stop the
+    dev server and restart it" kills itself before the restart. Kill by pid — a
+    pid file, or `pgrep -x` on the process name — rather than by `-f`. And the
+    session's scratchpad parent, `/tmp/claude-0`, loses its `o+x` bit within
+    seconds of being given it, so a Postgres started as the `postgres` user with
+    its data directory under the scratchpad dies with "could not stat data
+    directory". Keep a local database's data directory somewhere the `postgres`
+    user can traverse on its own, or verify against CI's `database` job instead.
+
 ## 7. Verification already done
 
 - **The knowledge-base role floor, against a real Postgres.** _2026-09-04._ The
