@@ -125,6 +125,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 3.6   | Widget: shared shapes move to `lib/widget`       | #220            | open    |
 | 3.7   | Widget: one declaration of the postMessage names | #221            | open    |
 | 3.8   | `errorMessage()` for caught values               | #222            | open    |
+| 3.9   | HTTP helpers: rate limiter moves to `lib/http`   | #229            | open    |
 | 4.1   | Split `lib/tickets/queries.ts`                   | #224            | open    |
 | 4.2   | Shared ingest steps                              |                 | pending |
 | 4.3   | Meta Graph transport                             | #228            | open    |
