@@ -37,7 +37,7 @@ forwarding list, an origin that is not localhost).
 - [ ] New tables end up with RLS enabled by the loop in `db/sql/`, never `FORCE`
 - [ ] New env vars are in `lib/env.ts` **and** `render.yaml` in this PR, values
       only in Render — `shipblu-support-production` / `shipblu-support-staging` if the value differs by
-      environment or can reach a customer, `shipblu-shared` if it genuinely does
+      environment or can reach a customer, `shipblu-support-shared` if it genuinely does
       not, per-service only as a deliberate exception
 - [ ] Rollback: <!-- what undoes this if the deploy goes wrong -->
 

@@ -10,12 +10,12 @@ previewsEnabled: false
 #
 # Three groups, split by blast radius rather than by convenience:
 #
-#   shipblu-shared               identical in every environment, and harmless
+#   shipblu-support-shared       identical in every environment, and harmless
 #                                to the outside world if it is wrong
 #   shipblu-support-production   anything that can reach a real customer or the
 #                                production database
-#   shipblu-support-staging      staging's own database, and the settings that
-#                                stop it reaching anyone
+#   shipblu-support-staging      the same for staging: its own database, and
+#                                its own Meta app
 #
 # The rule inside a group is the one this file has always had: a value that is
 # the same on more than one service in that environment is declared once, in the
@@ -31,43 +31,43 @@ previewsEnabled: false
 # a rotation you have to remember to do three times, and forgetting leaves a
 # half-working system rather than a clean break.
 #
-# **No group entry below carries a value, and none uses `sync: false` either.**
-# Render's Blueprint reference rules `sync: false` out inside an environment
-# group, and a group entry has to have either a literal value or
-# `generateValue` — a literal would put the secret in the repo, and `value: ''`
-# would blank the real one on the next sync. So each group lists its keys as a
-# comment instead, and declares `envVars: []` ("zero or more" is the spec's
-# wording). The blueprint still names everything the group holds, which is the
-# point of keeping it in the repo, without being the place the value lives.
+# **A group entry carries a value only where the dashboard shows one that is
+# not a secret, and none uses `sync: false`.** Render's Blueprint reference
+# rules `sync: false` out inside an environment group, and a group entry has to
+# have either a literal value or `generateValue` — a literal would put the
+# secret in the repo, and `value: ''` would blank the real one on the next sync.
+# So every other key a group holds is listed as a comment beside it. The
+# blueprint still names everything the group holds, which is the point of
+# keeping it in the repo, without being the place the value lives.
 #
-# That now covers the non-secret keys too (NODE_VERSION, EMAIL_FROM_NAME,
-# EMAIL_PROVIDER, SUPABASE_STORAGE_BUCKET), which used to be literals here. A
-# literal is a value a sync writes over whatever the dashboard holds, and the
-# blueprint had drifted far enough from the dashboard — it generated an
-# APP_SECRET into shipblu-shared that actually lives in production, which on a
-# successful sync would have minted a second signing key beside the real one —
-# that describing rather than asserting is the safe direction. Put a literal
-# back only after reading the live value it would replace.
+# The literals below are exactly the values the dashboard exports showed on
+# 2026-09-26 (NODE_VERSION, EMAIL_FROM_NAME, EMAIL_REPLY_DOMAIN,
+# SUPABASE_STORAGE_BUCKET, all in shipblu-support-shared), so a sync writes
+# nothing that is not already there. **Do not add a literal for a key whose
+# live value you have not read.** A literal is a value a sync writes over
+# whatever the dashboard holds, and this file once generated an APP_SECRET into
+# a group where it did not live — on the first sync that worked it would have
+# minted a second reply-signing key beside the real one (docs/PROJECT-STATE.md
+# §6.76). EMAIL_PROVIDER in staging is the case to watch: the file used to set
+# it to `local`, and no longer does, because the dashboard's value is not one
+# this repo has seen.
 #
-# The key lists below are the dashboard's as of 2026-09-25, read by hand from
-# each group and service. Change them in the same commit as the dashboard.
+# The key lists are the dashboard's as of that date. Change them in the same
+# commit as the dashboard.
 #
 # **Known duplicates, recorded rather than resolved.** Render gives a service
 # value precedence over a group value, and documents no tiebreak between two
 # groups linked by one service. Today:
 #
-#   KB_PUBLIC_HOST, SUPABASE_STORAGE_BUCKET   in both shipblu-shared and
-#                                             shipblu-support-production
-#   APP_URL                                   in shipblu-support-production and
-#                                             on the web and worker services,
-#                                             whose value wins there
-#   EMAIL_PROVIDER                            in shipblu-shared and in
-#                                             shipblu-support-staging
-#
-# Each should be deleted from all but one place in the dashboard; see the notes
-# beside each group for which copy is the one to keep.
+#   NODE_VERSION, EMAIL_FROM_NAME   in shipblu-support-shared and in
+#                                   shipblu-support-staging. Delete the staging
+#                                   copies — the shared ones have the values.
+#   APP_URL                         in shipblu-support-production and on the web
+#                                   and worker services, whose value wins there.
+#                                   Delete the service copies once the values
+#                                   are confirmed identical.
 
-# `shipblu-shared` sits outside the project, and it has to.
+# `shipblu-support-shared` sits outside the project, and it has to.
 #
 # A group scoped to a project environment cannot be linked to any service
 # outside that environment, and Render has no project-wide scope in between: a
@@ -76,113 +76,63 @@ previewsEnabled: false
 # works for it. `ungrouped` is how a Blueprint says that outright — leaving the
 # group in a top-level `envVarGroups` list would instead mean "keep whatever
 # scope it happens to have", which is not a thing to leave to chance.
+#
+# The name was `shipblu-shared` until 2026-09-26. Render adopts a group by name,
+# so this line has to match the dashboard's exactly: renamed in one place and
+# not the other, a sync would create a second, empty group.
 ungrouped:
   envVarGroups:
-    - name: shipblu-shared
-      # Dashboard-owned, listed rather than declared — see the note above.
-      #
-      #   NODE_VERSION
-      #   EMAIL_PROVIDER             postmark | local
-      #   EMAIL_API_KEY              Postmark server token
-      #   EMAIL_FROM_ADDRESS
-      #   EMAIL_FROM_NAME
-      #   EMAIL_REPLY_DOMAIN         builds support+<token>@
-      #   SUPABASE_STORAGE_BUCKET    duplicate — also in production
-      #   KB_PUBLIC_HOST             duplicate — also in production
-      #   WIDGET_ALLOWED_ORIGINS     origins allowed to frame the widget
-      #
-      #   META_PAGE_ACCESS_TOKEN     sends on every Meta channel
-      #   META_APP_SECRET            verifies X-Hub-Signature-256
-      #   META_VERIFY_TOKEN          answers the subscription handshake
-      #   META_APP_ID                addresses the subscription endpoint
-      #   FACEBOOK_PAGE_ID
-      #   INSTAGRAM_ACCOUNT_ID
-      #   INSTAGRAM_APP_SECRET       signs the `instagram` object's webhooks
-      #                              delivered by the Instagram Login
-      #                              connection. Both secrets are tried, so
-      #                              neither can be removed while both
-      #                              connections are live.
-      #   META_INSTAGRAM_APP_SECRET  the same value under the name this repo
-      #                              shipped first; still read, so a rename
-      #                              cannot drop a channel. Unset once the log
-      #                              says Instagram is verifying with
-      #                              INSTAGRAM_APP_SECRET.
-      #   INSTAGRAM_ACCESS_TOKEN     sends, replies and moderates against
-      #                              graph.instagram.com. Setting it is what
-      #                              routes Instagram off the Page token — and
-      #                              it must be set *with* the secret above,
-      #                              never before it.
-      #   WHATSAPP_PHONE_NUMBER_ID
-      #   WHATSAPP_WABA_ID
-      #   WHATSAPP_TOKEN_SHIPBLU     a connected WABA's own credential, named on
-      #                              its `whatsapp_accounts` row
-      #   TYPESAFE_API_KEY           TypeSafe System One, read only by the shadow
-      #                              categorisation job
-      #
-      # Present in the dashboard but read by nothing in this repo:
-      #
-      #   WHATSAPP_APP_SECRET        retired WhatsApp-specific names. Nothing
-      #   WHATSAPP_VERIFY_TOKEN      looks for them any more, not even to warn;
-      #                              META_APP_SECRET and META_VERIFY_TOKEN are
-      #                              what verifies. Safe to delete.
-      #   META_SYSTEM_ADMIN_TOKEN    not referenced by any code — presumably a
-      #   FB_PAGE_ACCESS_TOKEN_ALI   hand-kept credential. Confirm who uses it
-      #                              before deleting.
-      #
-      # **The Meta credentials and TYPESAFE_API_KEY are in the wrong group.**
-      # They were meant to live in shipblu-support-production so that staging
-      # could not inherit them: Meta has no test mode, so a send from staging
-      # carrying a real page token arrives on a real customer's phone, and the
-      # TypeSafe job sends real customer text to a third party. In this group,
-      # staging holds all of them. It is suspended, which is the only thing
-      # keeping that inert — move them to shipblu-support-production (the
-      # production services link both groups, so they lose nothing) before
-      # staging is resumed. EMAIL_API_KEY is the same case one step removed:
-      # staging only avoids Postmark while EMAIL_PROVIDER=local wins there.
-      #
-      # APP_SECRET is *not* here, contrary to what this file used to say: it
-      # lives in shipblu-support-production. It must be identical across every
-      # service in an environment — it signs the email reply tokens
-      # (support+c42.<sig>@), the worker generates one when sending and verifies
-      # it when the customer replies — so it can never be a per-service
-      # `generateValue`, and never be regenerated without invalidating every
-      # reply token already sitting in a customer's mailbox.
-      #
-      # Read by the code, normally unset, and set nowhere today:
-      #
-      #   SHIPMENT_TRACKING_PATTERN   what a tracking number looks like
-      #   SHIPMENT_SBID_PATTERN       what an SBID looks like
-      #   SHIPMENT_IGNORE             references never to link
-      #   SHIPBLU_API_URL             the delivery platform's base URL
-      #   CATEGORISE_DISABLED_RULES   rule keys to stop applying
-      #   CATEGORISE_AUTO_MIN         confidence at which a category auto-applies
-      #   CATEGORISE_RECORD_MIN       confidence below which nothing is written
-      #
-      # Shared, when set, because both halves of one system have to agree on
-      # the answer: the web service applies the pattern when an agent searches
-      # `track:...`, the worker applies it to every inbound message, and a
-      # service that disagreed would link a ticket the search could never find
-      # again. Unset means the defaults in lib/shipments/detect.ts and
-      # DEFAULT_SHIPBLU_API_URL in lib/shipments/platform.ts. Note that staging
-      # therefore reads *production* parcels.
-      #
-      # EMAIL_REPLY_PLUS_ADDRESSING is deliberately not set anywhere, which reads
-      # as off. shipblu.com's MX is Zoho, and the route in is a Zoho forwarding
-      # rule on the one address help-support@shipblu.com — a plus-suffixed
-      # variant is rejected there and never reaches Postmark, so advertising one
-      # in Reply-To bounced the first reply anybody sent us
-      # (docs/PROJECT-STATE.md §6.41). Set it to "true" only after a Zoho rule
-      # covers help-support+*@shipblu.com and a plus-addressed test mail has been
-      # seen landing in webhook_events.
-      #
-      # A connected WABA that needs its own credential names the variable
-      # holding it, and the name must start `WHATSAPP_TOKEN_` (enforced in
-      # lib/whatsapp/accounts.ts, because the value is sent to Meta as a bearer
-      # token and a free-text variable name would be a way to exfiltrate any
-      # secret in the process). Add such a key to this list in the same commit
-      # that names it on the account. Only the token varies per account:
-      # META_APP_SECRET and META_VERIFY_TOKEN belong to the Meta *app*.
-      envVars: []
+    - name: shipblu-support-shared
+      # Identical in every environment, and harmless to the outside world if it
+      # is wrong. Nothing that can reach a customer lives here: since staging
+      # got its own Meta app, every credential is per environment.
+      envVars:
+        - key: NODE_VERSION
+          value: '22'
+        - key: EMAIL_FROM_NAME
+          value: ShipBlu Support
+        - key: EMAIL_REPLY_DOMAIN
+          value: shipblu.com
+        - key: SUPABASE_STORAGE_BUCKET
+          value: attachments
+
+        # Dashboard-owned, listed rather than declared:
+        #
+        #   EMAIL_FROM_ADDRESS
+        #   FACEBOOK_PAGE_ID
+        #   INSTAGRAM_ACCOUNT_ID
+        #
+        # The two ids are shared, which means staging's Meta app is pointed at
+        # the same Page and Instagram account as production's. An id is not a
+        # credential, but it is a real customer inbox: staging's own token
+        # reaches whoever that Page reaches.
+        #
+        # Read by the code, normally unset, and set nowhere today:
+        #
+        #   SHIPMENT_TRACKING_PATTERN   what a tracking number looks like
+        #   SHIPMENT_SBID_PATTERN       what an SBID looks like
+        #   SHIPMENT_IGNORE             references never to link
+        #   SHIPBLU_API_URL             the delivery platform's base URL
+        #   CATEGORISE_DISABLED_RULES   rule keys to stop applying
+        #   CATEGORISE_AUTO_MIN         confidence at which a category auto-applies
+        #   CATEGORISE_RECORD_MIN       confidence below which nothing is written
+        #
+        # Shared, when set, because both halves of one system have to agree on
+        # the answer: the web service applies the pattern when an agent searches
+        # `track:...`, the worker applies it to every inbound message, and a
+        # service that disagreed would link a ticket the search could never find
+        # again. Unset means the defaults in lib/shipments/detect.ts and
+        # DEFAULT_SHIPBLU_API_URL in lib/shipments/platform.ts — so staging reads
+        # *production* parcels.
+        #
+        # EMAIL_REPLY_PLUS_ADDRESSING is deliberately not set anywhere, which
+        # reads as off. shipblu.com's MX is Zoho, and the route in is a Zoho
+        # forwarding rule on the one address help-support@shipblu.com — a
+        # plus-suffixed variant is rejected there and never reaches Postmark, so
+        # advertising one in Reply-To bounced the first reply anybody sent us
+        # (docs/PROJECT-STATE.md §6.41). Set it to "true" only after a Zoho rule
+        # covers help-support+*@shipblu.com and a plus-addressed test mail has
+        # been seen landing in webhook_events.
 
 projects:
   # These three names are the dashboard's, capitalisation included. A Blueprint
@@ -199,23 +149,52 @@ projects:
       - name: Production
         envVarGroups:
           - name: shipblu-support-production
-            # Dashboard-owned, listed rather than declared:
+            # Anything that can reach a real customer or the production
+            # database. Dashboard-owned, listed rather than declared:
             #
-            #   APP_SECRET                 signs email reply tokens — see the
-            #                              shipblu-shared note. Never regenerate.
-            #   APP_URL                    shadowed on web and worker by their
-            #                              own APP_URL; the crons read this one.
-            #                              Delete the service copies once the
-            #                              values are confirmed identical.
+            #   APP_SECRET                 signs email reply tokens
+            #   APP_URL                    shadowed on web and worker (above)
             #   DATABASE_URL               Supavisor transaction pooler
             #   DATABASE_URL_SESSION       direct connection, for LISTEN
             #   SUPABASE_URL               storage, for attachments
             #   SUPABASE_SERVICE_ROLE_KEY
-            #   SUPABASE_STORAGE_BUCKET    duplicate — also in shipblu-shared.
-            #                              Keep the shared one.
-            #   KB_PUBLIC_HOST             duplicate — also in shipblu-shared.
-            #                              Keep this one: the help centre's host
-            #                              differs per environment.
+            #   KB_PUBLIC_HOST             host the help centre answers on
+            #   WIDGET_ALLOWED_ORIGINS     origins allowed to frame the widget
+            #
+            #   EMAIL_PROVIDER             postmark | local
+            #   EMAIL_API_KEY              Postmark server token
+            #   EMAIL_WEBHOOK_SECRET       the Basic Auth password Postmark
+            #                              presents on inbound. Required: unset,
+            #                              the Postmark driver refuses every
+            #                              inbound email.
+            #
+            #   META_PAGE_ACCESS_TOKEN     sends on every Meta channel
+            #   META_APP_SECRET            verifies X-Hub-Signature-256
+            #   META_VERIFY_TOKEN          answers the subscription handshake
+            #   META_APP_ID                addresses the subscription endpoint
+            #   INSTAGRAM_APP_SECRET       signs the `instagram` object's
+            #                              webhooks delivered by the Instagram
+            #                              Login connection
+            #   META_INSTAGRAM_APP_SECRET  the same value under the name this
+            #                              repo shipped first; still read
+            #   INSTAGRAM_ACCESS_TOKEN     sends, replies and moderates against
+            #                              graph.instagram.com
+            #   WHATSAPP_PHONE_NUMBER_ID
+            #   WHATSAPP_WABA_ID
+            #   WHATSAPP_TOKEN_SHIPBLU     a connected WABA's own credential,
+            #                              named on its `whatsapp_accounts` row
+            #
+            #   TYPESAFE_API_KEY           TypeSafe System One, read only by the
+            #                              shadow categorisation job
+            #
+            # Present, and read by nothing in this repo:
+            #
+            #   WHATSAPP_APP_SECRET        retired WhatsApp-specific names;
+            #   WHATSAPP_VERIFY_TOKEN      META_APP_SECRET and META_VERIFY_TOKEN
+            #                              are what verifies. Safe to delete.
+            #   META_SYSTEM_ADMIN_TOKEN    hand-kept credentials, as far as the
+            #   FB_PAGE_ACCESS_TOKEN_ALI   code can tell. Confirm who uses them
+            #                              before deleting.
             #
             # Read by the code, set nowhere today, and belonging here when set:
             #
@@ -231,21 +210,39 @@ projects:
             #   TYPESAFE_MODEL           pins a shadow run to one Jev version
             #                            instead of the moving `jev-latest`
             #
-            # The notice keys are dashboard-owned because their whole point is
-            # that ops can put a delay warning in front of every customer
-            # without opening a pull request, and here rather than shared so a
-            # notice set once does not appear on staging long after
-            # production's outage ended. Unset is no banner.
+            # APP_SECRET must be identical across every service in an
+            # environment — the worker signs a reply token when sending and the
+            # web service verifies it when the customer replies — so it can never
+            # be a per-service `generateValue`, and regenerating it invalidates
+            # every reply token already sitting in a customer's mailbox.
+            #
+            # The Meta credentials are per environment because Meta has no test
+            # mode: a send carrying production's page token arrives on a real
+            # customer's phone. Each environment has its own Meta app, so
+            # META_APP_SECRET and META_VERIFY_TOKEN — which belong to the *app* —
+            # differ too, and every WABA connected in an environment has to sit
+            # under that environment's app, or its webhooks are stored unverified
+            # and answered 403.
             #
             # The Instagram pair is the one exception to "one app, one
-            # credential". An Instagram professional account connected through
-            # Instagram Login rather than through its Facebook Page gets its own
-            # app secret and its own access token inside the same app, and on
-            # 2026-08-26 the account was moved without them: from 07:37 UTC
-            # every Instagram delivery failed signature verification — 2,309 in
-            # thirteen hours — while Facebook's kept verifying against the
-            # unchanged META_APP_SECRET. Set both or neither. See
-            # lib/meta/connection.ts.
+            # credential". An account connected through Instagram Login rather
+            # than through its Facebook Page gets its own app secret and access
+            # token inside the same app; on 2026-08-26 the account was moved
+            # without them and every Instagram delivery failed verification for
+            # thirteen hours. Both secrets are tried, so neither can be removed
+            # while both connections are live; INSTAGRAM_ACCESS_TOKEN is set
+            # *with* its secret, never before it. See lib/meta/connection.ts.
+            #
+            # A connected WABA that needs its own credential names the variable
+            # holding it, and the name must start `WHATSAPP_TOKEN_` (enforced in
+            # lib/whatsapp/accounts.ts: the value is sent to Meta as a bearer
+            # token, and a free-text name would let an admin choose which secret
+            # that is). Add such a key to this list in the same commit that
+            # names it on the account.
+            #
+            # The notice keys are dashboard-owned because ops can put a delay
+            # warning in front of every customer without opening a pull request.
+            # Unset is no banner.
             envVars: []
 
         services:
@@ -269,7 +266,7 @@ projects:
               maxInstances: 3
               targetCPUPercent: 70
             envVars:
-              - fromGroup: shipblu-shared
+              - fromGroup: shipblu-support-shared
               - fromGroup: shipblu-support-production
               - key: NODE_ENV
                 value: production
@@ -280,13 +277,10 @@ projects:
               # identical this copy can go, and the group's serves everyone.
               - key: APP_URL
                 sync: false
-              # EMAIL_WEBHOOK_SECRET belongs here and is **not set anywhere
-              # today**: only the web service receives inbound webhooks, so the
-              # Basic Auth password Postmark presents would live on its one
-              # consumer. Unset, lib/email/providers/postmark.ts accepts inbound
-              # mail unauthenticated and logs a warning saying so. Setting it is
-              # a pair with the Postmark inbound webhook URL's credentials —
-              # set one without the other and every inbound mail is rejected.
+              # EMAIL_WEBHOOK_SECRET comes from shipblu-support-production. Only
+              # this service receives inbound webhooks, so it could live here
+              # alone; it is in the group because that is where the dashboard
+              # has it, and declaring it here as well would shadow the group.
               # Debug switch, normally unset. `true` prints every inbound webhook
               # — headers and raw body — before it is verified or parsed, which
               # is the only way to tell a delivery that was rejected from one
@@ -325,7 +319,7 @@ projects:
             # everything the system reads, including what it reads only when
             # somebody overrides a default.
             envVars:
-              - fromGroup: shipblu-shared
+              - fromGroup: shipblu-support-shared
               - fromGroup: shipblu-support-production
               - key: NODE_ENV
                 value: production
@@ -385,7 +379,7 @@ projects:
             buildCommand: npm ci --include=dev
             startCommand: npm run job -- sla_sweep && npm run job -- presence_sweep && npm run job -- assign_sweep
             envVars:
-              - fromGroup: shipblu-shared
+              - fromGroup: shipblu-support-shared
               - fromGroup: shipblu-support-production
 
           - type: cron
@@ -401,7 +395,7 @@ projects:
             buildCommand: npm ci --include=dev
             startCommand: npm run job -- run_time_automations
             envVars:
-              - fromGroup: shipblu-shared
+              - fromGroup: shipblu-support-shared
               - fromGroup: shipblu-support-production
 
           # This runs two jobs now, chained the way shipblu-nightly chains
@@ -439,10 +433,10 @@ projects:
             startCommand: npm run job -- sync_whatsapp_templates; npm run job -- snapshot_backlog
             envVars:
               # WHATSAPP_WABA_ID and META_PAGE_ACCESS_TOKEN come from
-              # shipblu-shared today. The handler skips cleanly while they are unset, so
+              # shipblu-support-production. The handler skips cleanly while they are unset, so
               # this cron is green from the day the Blueprint creates it rather
               # than red until Meta is configured.
-              - fromGroup: shipblu-shared
+              - fromGroup: shipblu-support-shared
               - fromGroup: shipblu-support-production
 
           - type: cron
@@ -459,7 +453,7 @@ projects:
             buildCommand: npm ci --include=dev
             startCommand: npm run job -- cleanup && npm run job -- rollup_metrics
             envVars:
-              - fromGroup: shipblu-shared
+              - fromGroup: shipblu-support-shared
               - fromGroup: shipblu-support-production
               # The per-service exception lib/env.ts describes for this variable,
               # and the one service that is the case it describes: the 30-second
@@ -493,42 +487,55 @@ projects:
       - name: Staging
         envVarGroups:
           - name: shipblu-support-staging
-            envVars:
-              # Staging never reaches a real customer, and this group is most of
-              # how that is guaranteed.
-              #
-              # EMAIL_PROVIDER=local writes to .mail-outbox/ instead of calling
-              # Postmark. It is set here rather than as a service-level override
-              # so that it holds for anything added to this environment later —
-              # a staging worker, say — instead of only for the one service
-              # somebody remembered to write it on.
-              #
-              # The one literal left in this file, kept on purpose: unlike the
-              # values removed elsewhere, writing it can only stop a send, never
-              # start one. It is **not a guarantee today**, though. shipblu-shared
-              # also holds EMAIL_PROVIDER, the staging service links both groups,
-              # and Render documents no tiebreak between two groups — so which
-              # value staging reads is undefined until the shared copy moves to
-              # shipblu-support-production.
-              #
-              # The same move is owed for the Meta credentials and
-              # TYPESAFE_API_KEY, which staging currently inherits from
-              # shipblu-shared (see the note there). `pageToken()` in
-              # lib/meta/client.ts throws "META_PAGE_ACCESS_TOKEN is not
-              # configured" on an unset value, which is the state staging is
-              # meant to be in. Do not resume staging before both are done.
-              - key: EMAIL_PROVIDER
-                value: local
-
-              # Dashboard-owned, listed rather than declared:
-              #
-              #   DATABASE_URL             staging's own Supabase project
-              #   DATABASE_URL_SESSION
-              #   SUPABASE_URL
-              #   SUPABASE_SERVICE_ROLE_KEY
-              #
-              # Its own database, so that its migrations run against staging
-              # rather than production.
+            # Staging's own of everything production's group holds, against its
+            # own Supabase project and its own Meta app. Dashboard-owned, listed
+            # rather than declared:
+            #
+            #   APP_SECRET
+            #   APP_URL
+            #   DATABASE_URL               staging's own Supabase project, so
+            #   DATABASE_URL_SESSION       its migrations run against staging
+            #   SUPABASE_URL               rather than production
+            #   SUPABASE_SERVICE_ROLE_KEY
+            #   KB_PUBLIC_HOST
+            #   WIDGET_ALLOWED_ORIGINS
+            #
+            #   EMAIL_PROVIDER             should be `local`, which writes to
+            #                              .mail-outbox/ instead of calling
+            #                              Postmark. The blueprint used to set
+            #                              that and no longer does; staging now
+            #                              holds an EMAIL_API_KEY too, so whether
+            #                              it can mail a customer depends on this
+            #                              value alone.
+            #   EMAIL_API_KEY
+            #   EMAIL_WEBHOOK_SECRET
+            #
+            #   META_PAGE_ACCESS_TOKEN     staging's own Meta app
+            #   META_APP_SECRET
+            #   META_VERIFY_TOKEN
+            #   META_APP_ID
+            #   INSTAGRAM_APP_SECRET
+            #   META_INSTAGRAM_APP_SECRET
+            #   INSTAGRAM_ACCESS_TOKEN
+            #   WHATSAPP_PHONE_NUMBER_ID
+            #   WHATSAPP_WABA_ID
+            #
+            #   TYPESAFE_API_KEY           sends real customer text to a third
+            #                              party if a shadow run is started here
+            #
+            #   NODE_VERSION               duplicates of shipblu-support-shared
+            #   EMAIL_FROM_NAME            — see the note at the top
+            #
+            # Present, and read by nothing in this repo:
+            #
+            #   WHATSAPP_ACCESS_TOKEN      not a name the code reads: a per-WABA
+            #                              token must start WHATSAPP_TOKEN_, and
+            #                              the fallback is META_PAGE_ACCESS_TOKEN
+            #   WHATSAPP_APP_SECRET        retired, as in production
+            #   WHATSAPP_VERIFY_TOKEN
+            #   META_SYSTEM_ADMIN_TOKEN
+            #   FB_PAGE_ACCESS_TOKEN_ALI
+            envVars: []
 
         services:
           - type: web
@@ -540,7 +547,7 @@ projects:
             # feature branch claude/shipblu-support-app-03p2we, which has since
             # been deleted — and a branch that does not exist fails the whole
             # Blueprint sync, not just this service (docs/PROJECT-STATE.md
-            # §6.67, §6.71).
+            # §6.67, §6.76).
             branch: main
             # The only service in the project that deploys itself: resuming
             # staging arms a deploy of `main` on the next commit, against
@@ -551,9 +558,9 @@ projects:
             startCommand: npm run start
             healthCheckPath: /api/health
             envVars:
-              - fromGroup: shipblu-shared
+              - fromGroup: shipblu-support-shared
               - fromGroup: shipblu-support-staging
               - key: NODE_ENV
                 value: production
-              - key: APP_URL
-                sync: false
+              # APP_URL comes from shipblu-support-staging. A service copy would
+              # shadow the group, as it does on production's web and worker.
