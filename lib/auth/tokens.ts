@@ -32,7 +32,9 @@ export function hashToken(token: string): string {
  * forgot either one would read as correct.
  *
  * Not for the hex HMAC in `lib/whatsapp/verify.ts`, which compares the decoded
- * digests rather than the strings.
+ * digests rather than the strings. The signed reply tokens and subject tags in
+ * `lib/email/threading.ts` are hex HMACs too, but they are compared as strings,
+ * lowercased first, so they come here.
  */
 export function safeEqual(a: string, b: string): boolean {
   const bufA = Buffer.from(a);

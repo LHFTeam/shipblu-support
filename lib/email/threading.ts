@@ -1,4 +1,5 @@
 import { createHmac } from 'node:crypto';
+import { safeEqual } from '@/lib/auth/tokens';
 import type { EmailAddress, ParsedInboundEmail } from './types';
 
 /**
@@ -96,7 +97,7 @@ export function parseReplyToken(token: string, secret: string): number | null {
   if (!digits || !signature) return null;
 
   // Compared lowercased so a case-folding relay cannot break threading.
-  if (signature.toLowerCase() !== sign(secret, digits)) return null;
+  if (!safeEqual(signature.toLowerCase(), sign(secret, digits))) return null;
 
   return Number.parseInt(digits, 10);
 }
@@ -135,7 +136,7 @@ export function parseSideReplyToken(token: string, secret: string): number | nul
   const [, digits, signature] = match;
   if (!digits || !signature) return null;
 
-  if (signature.toLowerCase() !== sign(secret, sideSubject(digits))) return null;
+  if (!safeEqual(signature.toLowerCase(), sign(secret, sideSubject(digits)))) return null;
 
   return Number.parseInt(digits, 10);
 }
@@ -150,7 +151,7 @@ export function parseSideSubjectTag(subject: string, secret: string): number | n
 
   const [, digits, signature] = match;
   if (!digits || !signature) return null;
-  if (signature.toLowerCase() !== sign(secret, sideSubject(digits))) return null;
+  if (!safeEqual(signature.toLowerCase(), sign(secret, sideSubject(digits)))) return null;
 
   return Number.parseInt(digits, 10);
 }
@@ -165,7 +166,7 @@ export function parseSubjectTag(subject: string, secret: string): number | null 
 
   const [, digits, signature] = match;
   if (!digits || !signature) return null;
-  if (signature.toLowerCase() !== sign(secret, digits)) return null;
+  if (!safeEqual(signature.toLowerCase(), sign(secret, digits))) return null;
 
   return Number.parseInt(digits, 10);
 }
