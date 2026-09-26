@@ -1,5 +1,6 @@
 import { DateTime } from 'luxon';
 import { isBlank, type CustomFieldValues, type TicketFieldDef } from './custom-fields';
+import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
 
 /**
  * Turning what somebody typed into the value a rule will later compare against.
@@ -13,8 +14,6 @@ import { isBlank, type CustomFieldValues, type TicketFieldDef } from './custom-f
  * its value is a ticket no single rule can match, and nothing would report the
  * disagreement.
  */
-
-const ZONE = 'Africa/Cairo';
 
 /** Ceilings on what one field can hold, so a ticket's jsonb cannot grow without bound. */
 const MAX_TEXT = 500;
@@ -181,7 +180,7 @@ function parseByType(def: TicketFieldDef, raw: string | string[]): ParsedValue {
       // again, so the offset is not a constant to add — luxon resolves it from
       // the date, and what gets stored is an unambiguous instant that a rule can
       // order against `now`.
-      const parsed = DateTime.fromISO(text, { zone: ZONE });
+      const parsed = DateTime.fromISO(text, { zone: TEAM_TIME_ZONE });
       if (!parsed.isValid) return { ok: false, error: `${def.label} must be a date and time` };
       return { ok: true, value: parsed.toISO() };
     }

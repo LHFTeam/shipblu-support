@@ -46,6 +46,7 @@ import { PHRASE_GROUPS } from '@/lib/shipments/status';
 import { parseTokenEnvVar } from '@/lib/whatsapp/accounts';
 import { validatePolicy } from '@/lib/presence/idle';
 import { savePresencePolicy } from '@/lib/presence/policy';
+import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
 
 /**
  * Everything the admin screens write.
@@ -1060,7 +1061,7 @@ export async function saveBusinessHours(
   const id = uuidField(formData, 'id');
   if (id === undefined) return { error: GONE };
   const name = text(formData, 'name');
-  const timezone = text(formData, 'timezone') || 'Africa/Cairo';
+  const timezone = text(formData, 'timezone') || TEAM_TIME_ZONE;
 
   if (!name) return { error: 'Give the schedule a name' };
 

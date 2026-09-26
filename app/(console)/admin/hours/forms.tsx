@@ -5,6 +5,7 @@ import { Badge, Button, Field, Input, Toggle } from '@/components/ui';
 import type { WeeklySchedule } from '@/db/schema/config';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
 import { deleteHoliday, saveBusinessHours, saveHoliday } from '../settings-actions';
+import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
 
 type Schedule = {
   id: string;
@@ -34,7 +35,7 @@ function Fields({ schedule }: { schedule?: Schedule }) {
           <Input name="name" defaultValue={schedule?.name} required placeholder="Cairo office" />
         </Field>
         <Field label="Timezone" hint="An IANA name, e.g. Africa/Cairo.">
-          <Input name="timezone" defaultValue={schedule?.timezone ?? 'Africa/Cairo'} required />
+          <Input name="timezone" defaultValue={schedule?.timezone ?? TEAM_TIME_ZONE} required />
         </Field>
       </div>
 
