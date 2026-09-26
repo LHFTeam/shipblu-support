@@ -5,9 +5,39 @@ import { env } from '@/lib/env';
  * Supabase Storage via its REST API rather than the JS SDK.
  *
  * The SDK pulls in a large dependency tree for what is, for our purposes, two
- * HTTP calls. Attachments are written by the worker and read through signed
- * URLs, so nothing here runs in the request path.
+ * HTTP calls. Attachments are written mostly by the worker and read through
+ * signed URLs — but a customer's form upload writes from inside their request,
+ * and every signed URL is minted inside an agent's, so both calls carry a
+ * deadline. In a job the deadline matters more: the worker awaits a whole batch
+ * before it claims another, so one request that never answered stopped the
+ * queue.
  */
+
+/**
+ * Room for the largest object we write — a form allows 25 MB in total — over a
+ * server-to-server link. An upload still going after a minute is a connection
+ * that has gone, not a file that is large.
+ */
+const UPLOAD_TIMEOUT_MS = 60_000;
+/** Signing is one small round trip, and somebody is waiting on the page. */
+const SIGN_TIMEOUT_MS = 10_000;
+
+/** `fetch` with a deadline, and a message that names the object when it passes. */
+async function storageRequest(
+  what: string,
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  try {
+    return await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'TimeoutError') {
+      throw new Error(`Storage ${what} did not answer in ${timeoutMs / 1000}s`);
+    }
+    throw error;
+  }
+}
 
 export type StoredObject = {
   path: string;
@@ -76,16 +106,23 @@ export async function uploadObject(
 ): Promise<StoredObject> {
   const { url, key, bucket } = config();
 
-  const response = await fetch(`${url}/storage/v1/object/${bucket}/${encodeURI(path)}`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${key}`,
-      'Content-Type': contentType || 'application/octet-stream',
-      // Re-running a failed job must not 409 on the object it already wrote.
-      'x-upsert': 'true',
+  // Safe to time out and retry: `x-upsert` makes a second attempt overwrite
+  // whatever the first managed to write.
+  const response = await storageRequest(
+    `upload of ${path}`,
+    `${url}/storage/v1/object/${bucket}/${encodeURI(path)}`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'Content-Type': contentType || 'application/octet-stream',
+        // Re-running a failed job must not 409 on the object it already wrote.
+        'x-upsert': 'true',
+      },
+      body: new Uint8Array(content),
     },
-    body: new Uint8Array(content),
-  });
+    UPLOAD_TIMEOUT_MS,
+  );
 
   if (!response.ok) {
     throw new Error(`Storage upload failed (${response.status}): ${await response.text()}`);
@@ -106,11 +143,16 @@ export async function uploadObject(
 export async function signedUrl(path: string, expiresInSeconds = 300): Promise<string> {
   const { url, key, bucket } = config();
 
-  const response = await fetch(`${url}/storage/v1/object/sign/${bucket}/${encodeURI(path)}`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ expiresIn: expiresInSeconds }),
-  });
+  const response = await storageRequest(
+    `sign of ${path}`,
+    `${url}/storage/v1/object/sign/${bucket}/${encodeURI(path)}`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expiresIn: expiresInSeconds }),
+    },
+    SIGN_TIMEOUT_MS,
+  );
 
   if (!response.ok) {
     throw new Error(`Storage sign failed (${response.status}): ${await response.text()}`);
