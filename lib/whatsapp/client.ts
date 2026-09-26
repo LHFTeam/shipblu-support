@@ -1,4 +1,5 @@
 import { env } from '@/lib/env';
+import { isTimeout, sizedTimeout } from '@/lib/http/deadline';
 import { GRAPH_BASE, graphTimeout } from '@/lib/meta/graph';
 import { ACCESS_TOKEN_CODE } from './errors';
 import type { WhatsAppTemplateComponent } from './templates';
@@ -128,10 +129,9 @@ function credentials(override?: CallCredentials | null) {
  * timeout", which names no call.
  */
 function unanswered(what: string, error: unknown, timeoutMs: number): WhatsAppApiError {
-  const reason =
-    error instanceof DOMException && error.name === 'TimeoutError'
-      ? `did not answer in ${timeoutMs / 1000}s`
-      : `unreachable: ${error instanceof Error ? error.message : String(error)}`;
+  const reason = isTimeout(error)
+    ? `did not answer in ${timeoutMs / 1000}s`
+    : `unreachable: ${error instanceof Error ? error.message : String(error)}`;
   return new WhatsAppApiError(`${what} ${reason}`, 0, null, null, true);
 }
 
@@ -381,22 +381,19 @@ const LARGEST_MEDIA_BYTES = 100 * 1024 * 1024;
 /**
  * How long one download may take, from the size Meta reported for it.
  *
- * A minute for anything, and a second more for every 2 MB — the slowest link
- * this accepts, a choice rather than a measurement. A flat minute gave a 100 MB
- * document up below 1.7 MB/s on every attempt alike, and the media was lost
- * when the job died; scaled rather than simply raised, because a small image
- * that stalls should still be noticed in a minute. A size Meta did not report
- * gets the largest file's budget, the one guess that cannot fail a real file.
+ * `sizedTimeout`'s rule, which carries the reasoning; the media was lost when
+ * the job died, so a flat minute cost the customer's file. A size Meta did not
+ * report gets the largest file's budget, the one guess that cannot fail a real
+ * file.
  *
  * The largest is 110 seconds, so the lookup and the download together leave at
  * least half of `STALLED_AFTER_MS` to the storage upload that follows, which
- * `uploadObject` bounds by this same rule — 110 seconds at the largest. Both
+ * `uploadObject` bounds by the same rule — 110 seconds at the largest. Both
  * halves have to fit: a job past the window is reclaimed and runs twice, and
  * the second run writes a second attachment row.
  */
 export function mediaTimeout(sizeBytes: number | null | undefined): number {
-  const bytes = sizeBytes ?? LARGEST_MEDIA_BYTES;
-  return 60_000 + Math.ceil(bytes / (2 * 1024 * 1024)) * 1000;
+  return sizedTimeout(sizeBytes ?? LARGEST_MEDIA_BYTES);
 }
 
 /** Meta's CDN requires the access token on the download itself, not just the lookup. */
