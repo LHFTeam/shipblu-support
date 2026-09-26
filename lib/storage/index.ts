@@ -9,18 +9,34 @@ import { env } from '@/lib/env';
  * signed URLs — but a customer's form upload writes from inside their request,
  * and every signed URL is minted inside an agent's, so both calls carry a
  * deadline. In a job the deadline matters more: the worker awaits a whole batch
- * before it claims another, so one request that never answered stopped the
- * queue.
+ * before it claims another, and `fetch` with no signal waits five minutes for a
+ * response that is not coming, so one slow request held every queued job.
  */
 
 /**
- * Room for the largest object we write — a form allows 25 MB in total — over a
- * server-to-server link. An upload still going after a minute is a connection
- * that has gone, not a file that is large.
+ * How long an upload of this many bytes may take.
+ *
+ * A minute for anything, and a second more for every 2 MB — the slowest link
+ * this accepts, a choice rather than a measurement. The largest object we write
+ * is a WhatsApp document at 100 MB, not a form's 25 MB, and a flat minute gave
+ * it up below 1.7 MB/s on every attempt alike. That matters most where nothing
+ * retries: email ingest drops an attachment whose upload failed, so a slow but
+ * working upload cut short is a file the customer sent and the agent never
+ * sees. Scaled rather than simply raised, because a small file that stalls
+ * should still be noticed in a minute. 110 seconds at the largest.
  */
-const UPLOAD_TIMEOUT_MS = 60_000;
+function uploadTimeout(bytes: number): number {
+  return 60_000 + Math.ceil(bytes / (2 * 1024 * 1024)) * 1000;
+}
 /** Signing is one small round trip, and somebody is waiting on the page. */
 const SIGN_TIMEOUT_MS = 10_000;
+
+/** The error for a deadline that passed, naming the object rather than the signal. */
+function unanswered(what: string, error: unknown, timeoutMs: number): unknown {
+  return error instanceof DOMException && error.name === 'TimeoutError'
+    ? new Error(`Storage ${what} did not answer in ${timeoutMs / 1000}s`)
+    : error;
+}
 
 /** `fetch` with a deadline, and a message that names the object when it passes. */
 async function storageRequest(
@@ -32,10 +48,21 @@ async function storageRequest(
   try {
     return await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
   } catch (error) {
-    if (error instanceof DOMException && error.name === 'TimeoutError') {
-      throw new Error(`Storage ${what} did not answer in ${timeoutMs / 1000}s`);
-    }
-    throw error;
+    throw unanswered(what, error, timeoutMs);
+  }
+}
+
+/**
+ * The body a storage request answered with, read under the same deadline.
+ *
+ * The signal governs the read as well as the status, and a deadline passing
+ * mid-body rejects with the signal's own reason, which names no object.
+ */
+async function readBody(what: string, response: Response, timeoutMs: number): Promise<string> {
+  try {
+    return await response.text();
+  } catch (error) {
+    throw unanswered(what, error, timeoutMs);
   }
 }
 
@@ -106,8 +133,10 @@ export async function uploadObject(
 ): Promise<StoredObject> {
   const { url, key, bucket } = config();
 
-  // Safe to time out and retry: `x-upsert` makes a second attempt overwrite
-  // whatever the first managed to write.
+  // Safe to retry after a timeout: `x-upsert` makes a second attempt overwrite
+  // whatever the first managed to write. Not every caller retries, which is
+  // why the deadline is sized from the file rather than guessed.
+  const timeoutMs = uploadTimeout(content.length);
   const response = await storageRequest(
     `upload of ${path}`,
     `${url}/storage/v1/object/${bucket}/${encodeURI(path)}`,
@@ -121,11 +150,16 @@ export async function uploadObject(
       },
       body: new Uint8Array(content),
     },
-    UPLOAD_TIMEOUT_MS,
+    timeoutMs,
   );
 
+  // The success body is never read: a 2xx is the object stored, and waiting on
+  // the rest of the answer could only turn a stored file into a failure.
   if (!response.ok) {
-    throw new Error(`Storage upload failed (${response.status}): ${await response.text()}`);
+    throw new Error(
+      `Storage upload failed (${response.status}): ` +
+        (await readBody(`upload of ${path}`, response, timeoutMs)),
+    );
   }
 
   return {
@@ -154,11 +188,12 @@ export async function signedUrl(path: string, expiresInSeconds = 300): Promise<s
     SIGN_TIMEOUT_MS,
   );
 
+  const text = await readBody(`sign of ${path}`, response, SIGN_TIMEOUT_MS);
   if (!response.ok) {
-    throw new Error(`Storage sign failed (${response.status}): ${await response.text()}`);
+    throw new Error(`Storage sign failed (${response.status}): ${text}`);
   }
 
-  const body = (await response.json()) as { signedURL?: string };
+  const body = JSON.parse(text) as { signedURL?: string };
   if (!body.signedURL) throw new Error('Storage sign returned no URL');
 
   return `${url}/storage/v1${body.signedURL}`;
