@@ -224,6 +224,50 @@ async function exchange(
 }
 
 /**
+ * A request to one node, answered and parsed, or refused as a subscription
+ * error.
+ *
+ * Each of the three levels below resolves its own credential and names its own
+ * node, because those are what differ between them. What a refusal most likely
+ * means differs too, and Graph's own sentence rarely says, so a level that knows
+ * passes it as `explain` — after Graph's message, never instead of it.
+ */
+async function request<T>(
+  host: string,
+  node: string,
+  token: string,
+  init: { method: 'GET' | 'POST'; query?: Record<string, string> },
+  explain: string | null = null,
+): Promise<T> {
+  const url = new URL(node);
+  for (const [key, value] of Object.entries(init.query ?? {})) {
+    url.searchParams.set(key, value);
+  }
+
+  const { response, text } = await exchange(host, url, init.method, token);
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    body = null;
+  }
+
+  if (!response.ok) {
+    const error = (body as { error?: Record<string, unknown> } | null)?.error ?? {};
+    const message = typeof error.message === 'string' ? error.message : `HTTP ${response.status}`;
+
+    throw new GraphSubscriptionError(
+      explain === null ? message : `${message}\n\n${explain}`,
+      response.status,
+      typeof error.code === 'number' ? error.code : null,
+      typeof error.fbtrace_id === 'string' ? error.fbtrace_id : null,
+    );
+  }
+
+  return body as T;
+}
+
+/**
  * `{app-id}|{app-secret}`, Meta's app access token, and the app id it is built
  * from.
  *
@@ -262,34 +306,11 @@ async function graph<T>(init: {
   // being unreachable.
   const { appId, token } = appCredentials();
 
-  const url = new URL(`${GRAPH_BASE}/${appId}/subscriptions`);
-  for (const [key, value] of Object.entries(init.query ?? {})) {
-    url.searchParams.set(key, value);
-  }
-
   // The token goes in the header, not in the query string as the other two
   // Graph clients do. An app access token contains the app secret verbatim,
   // and a URL is the part of a request that ends up in logs and error
   // messages.
-  const { response, text } = await exchange('Graph API', url, init.method, token);
-  let body: unknown;
-  try {
-    body = JSON.parse(text);
-  } catch {
-    body = null;
-  }
-
-  if (!response.ok) {
-    const error = (body as { error?: Record<string, unknown> } | null)?.error ?? {};
-    throw new GraphSubscriptionError(
-      typeof error.message === 'string' ? error.message : `HTTP ${response.status}`,
-      response.status,
-      typeof error.code === 'number' ? error.code : null,
-      typeof error.fbtrace_id === 'string' ? error.fbtrace_id : null,
-    );
-  }
-
-  return body as T;
+  return request<T>('Graph API', `${GRAPH_BASE}/${appId}/subscriptions`, token, init);
 }
 
 /** What the app is subscribed to today, or null if it has no subscription. */
@@ -450,38 +471,19 @@ async function pageGraph<T>(
     );
   }
 
-  const url = new URL(`${GRAPH_BASE}/${pageId}/subscribed_apps`);
-  for (const [key, value] of Object.entries(init.query ?? {})) {
-    url.searchParams.set(key, value);
-  }
-
-  const { response, text } = await exchange('Graph API', url, init.method, token);
-  let body: unknown;
-  try {
-    body = JSON.parse(text);
-  } catch {
-    body = null;
-  }
-
-  if (!response.ok) {
-    const error = (body as { error?: Record<string, unknown> } | null)?.error ?? {};
-    const message = typeof error.message === 'string' ? error.message : `HTTP ${response.status}`;
-
-    throw new GraphSubscriptionError(
-      // The two permissions are named because this call is the one that fails
-      // for want of them, and Graph's own sentence names neither. Both are
-      // dependencies nobody requests deliberately — see
-      // `plans/meta-app-review-submission.md`.
-      `${message}\n\nThis call needs a Page token whose person can MANAGE the Page, ` +
-        `and the pages_manage_metadata and pages_show_list permissions. A token ` +
-        `missing either is refused with a message that names neither.`,
-      response.status,
-      typeof error.code === 'number' ? error.code : null,
-      typeof error.fbtrace_id === 'string' ? error.fbtrace_id : null,
-    );
-  }
-
-  return body as T;
+  return request<T>(
+    'Graph API',
+    `${GRAPH_BASE}/${pageId}/subscribed_apps`,
+    token,
+    init,
+    // The two permissions are named because this call is the one that fails
+    // for want of them, and Graph's own sentence names neither. Both are
+    // dependencies nobody requests deliberately — see
+    // `plans/meta-app-review-submission.md`.
+    `This call needs a Page token whose person can MANAGE the Page, ` +
+      `and the pages_manage_metadata and pages_show_list permissions. A token ` +
+      `missing either is refused with a message that names neither.`,
+  );
 }
 
 /**
@@ -583,37 +585,18 @@ async function instagramGraph<T>(
 ): Promise<T> {
   const token = instagramToken();
 
-  const url = new URL(`${INSTAGRAM_GRAPH_BASE}/${accountId}/subscribed_apps`);
-  for (const [key, value] of Object.entries(init.query ?? {})) {
-    url.searchParams.set(key, value);
-  }
-
   // Header rather than query string, as everywhere else here: a URL is the
   // part of a request that ends up in logs and error messages.
-  const { response, text } = await exchange('graph.instagram.com', url, init.method, token);
-  let body: unknown;
-  try {
-    body = JSON.parse(text);
-  } catch {
-    body = null;
-  }
-
-  if (!response.ok) {
-    const error = (body as { error?: Record<string, unknown> } | null)?.error ?? {};
-    const message = typeof error.message === 'string' ? error.message : `HTTP ${response.status}`;
-
-    throw new GraphSubscriptionError(
-      `${message}\n\nThis call is addressed to graph.instagram.com and authenticated with ` +
-        `INSTAGRAM_ACCESS_TOKEN. A Page token sent here is refused with a message that names ` +
-        `neither, and so is an Instagram token sent to graph.facebook.com — check which of ` +
-        `the two credentials is in the variable before reading anything else into this.`,
-      response.status,
-      typeof error.code === 'number' ? error.code : null,
-      typeof error.fbtrace_id === 'string' ? error.fbtrace_id : null,
-    );
-  }
-
-  return body as T;
+  return request<T>(
+    'graph.instagram.com',
+    `${INSTAGRAM_GRAPH_BASE}/${accountId}/subscribed_apps`,
+    token,
+    init,
+    `This call is addressed to graph.instagram.com and authenticated with ` +
+      `INSTAGRAM_ACCESS_TOKEN. A Page token sent here is refused with a message that names ` +
+      `neither, and so is an Instagram token sent to graph.facebook.com — check which of ` +
+      `the two credentials is in the variable before reading anything else into this.`,
+  );
 }
 
 /**
