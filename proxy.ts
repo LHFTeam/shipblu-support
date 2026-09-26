@@ -9,11 +9,17 @@ import { SESSION_COOKIE } from '@/lib/auth/cookie';
  *    rewritten under `/kb`, so support.shipblu.com/en/a/foo renders
  *    /kb/en/a/foo while the URL the customer sees stays clean.
  *
- * 2. The signed-out redirect for the console. This runs on the Edge runtime
- *    with no database access, so it only checks that a session cookie exists —
- *    it cannot tell a revoked session from a live one. `requireAgent()` does
- *    that on the page itself. The value here is that a signed-out visitor
- *    lands on /login instead of watching a console shell render and bounce.
+ * 2. The signed-out redirect for the console. This only checks that a session
+ *    cookie exists — it cannot tell a revoked session from a live one.
+ *    `requireAgent()` does that on the page itself. The value here is that a
+ *    signed-out visitor lands on /login instead of watching a console shell
+ *    render and bounce.
+ *
+ * Staying out of the database is a choice, not a limit of the runtime. Next 16
+ * runs the proxy on Node.js (a proxy file may not even declare a `runtime`), so
+ * a query here would work. It would also sit in front of every request the app
+ * serves but static assets — each prefetch, poll and widget call — to repeat a
+ * check the page makes anyway.
  */
 
 /** Paths that are public on every hostname. */

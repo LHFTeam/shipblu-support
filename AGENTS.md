@@ -216,9 +216,10 @@ object with `error: string | null`. Never
 trust an id or address arriving in a `FormData` field — re-read the row
 server-side.
 
-**Authorisation lives in code.** `proxy.ts` runs on the Edge and only checks
-that a session cookie exists; it cannot tell a revoked session from a live one.
-Re-check on every page and every action with `requireAgent()` or
+**Authorisation lives in code.** `proxy.ts` only checks that a session cookie
+exists; it cannot tell a revoked session from a live one. It runs on Node.js in
+Next 16, not the Edge, so that is a choice rather than a limit — its header says
+why. Re-check on every page and every action with `requireAgent()` or
 `requirePermission()`. RLS is enabled with zero policies and never `FORCE`. Add
 new permission keys to `PERMISSIONS` in `lib/auth/permissions.ts` with a comment
 saying why the capability is separate.
