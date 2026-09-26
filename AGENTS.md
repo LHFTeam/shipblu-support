@@ -800,7 +800,10 @@ CI as the last step of the `database` job, after `npm run db:seed` — against a
 migrated Postgres named by `TEST_DATABASE_URL`, never `DATABASE_URL`. Start the
 file with `withCleanDatabase()` from `lib/testing/db.ts`: every test begins from
 a truncated database holding only what the seed writes (`db/baseline.ts`), so a
-test states every row it depends on and no test can lean on another's. The
+test states every row it depends on and no test can lean on another's. Code that
+takes its transaction as an argument can be tested the other way, as
+`lib/admin/purge-*.db.test.ts` are: fixtures written inside a transaction the
+test rolls back, on a connection of its own to `TEST_DATABASE_URL`. The
 files run one at a time, since they share the database. Because it truncates
 every table it reaches, the helper refuses any database that is not the one
 `TEST_DATABASE_URL` named, or not on this machine. Locally, once:

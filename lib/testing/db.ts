@@ -11,10 +11,12 @@ import { forgetPresencePolicy } from '@/lib/presence/policy';
  * `npm run db:seed` writes, and from nothing else.
  *
  * Truncated before each test rather than wrapped in a transaction that rolls
- * back. That would be faster, but the code under test reaches the database
+ * back. That would be faster, but most code under test reaches the database
  * through the module-level `db`, which a test cannot swap for its own
  * transaction — every statement it ran would commit outside the rollback, and
- * the next test would start from the last one's rows.
+ * the next test would start from the last one's rows. Code that takes the
+ * transaction as an argument can be tested the faster way, and
+ * `lib/admin/purge-*.db.test.ts` are.
  *
  * Call it once at the top of a `*.db.test.ts` file. It registers its own hooks,
  * so a test file cannot forget the half that closes the pool.
