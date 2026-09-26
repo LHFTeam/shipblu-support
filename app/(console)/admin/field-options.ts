@@ -2,6 +2,7 @@ import { asc, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { ticketFields, ticketForms, ticketStatuses } from '@/db/schema';
 import { formName } from '@/lib/forms/naming';
+import { PRIORITY_CHOICES } from '@/lib/tickets/vocabulary';
 import type { FieldOption } from './condition-builder';
 
 /**
@@ -35,12 +36,7 @@ export async function ticketFieldOptions(): Promise<FieldOption[]> {
       value: 'priority',
       label: 'Priority',
       kind: 'choice',
-      choices: [
-        { value: 'low', label: 'Low' },
-        { value: 'medium', label: 'Medium' },
-        { value: 'high', label: 'High' },
-        { value: 'urgent', label: 'Urgent' },
-      ],
+      choices: PRIORITY_CHOICES,
     },
     {
       value: 'channel',

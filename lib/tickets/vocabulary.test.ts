@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { agentRoleEnum, priorityEnum, statusCategoryEnum } from '@/db/schema/enums';
 import { isAgentRole, ROLES_BY_SENIORITY } from '@/lib/auth/permissions';
-import { isPriority, isStatusCategory, PRIORITIES, STATUS_CATEGORIES } from './vocabulary';
+import {
+  isPriority,
+  isStatusCategory,
+  PRIORITIES,
+  PRIORITY_CHOICES,
+  STATUS_CATEGORIES,
+} from './vocabulary';
 
 /**
  * The lists are copies, so that a client form can import them; these hold each
@@ -23,6 +29,11 @@ describe('the ticket vocabulary', () => {
     // the list most junior first; `lib/kb/internal.ts` explains why nothing may
     // lean on the enum's order.
     expect([...ROLES_BY_SENIORITY].sort()).toEqual([...agentRoleEnum.enumValues].sort());
+  });
+
+  it('offers every priority as a labelled choice, in the same order', () => {
+    expect(PRIORITY_CHOICES.map((choice) => choice.value)).toEqual([...PRIORITIES]);
+    expect(PRIORITY_CHOICES.every((choice) => choice.label.length > 0)).toBe(true);
   });
 
   it('recognises its own words and nothing else', () => {

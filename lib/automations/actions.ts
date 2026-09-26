@@ -9,11 +9,16 @@
  */
 
 import type { AssignmentStrategy } from '@/lib/assignment';
-import { isPriority, isStatusCategory } from '@/lib/tickets/vocabulary';
+import {
+  isPriority,
+  isStatusCategory,
+  type Priority,
+  type StatusCategory,
+} from '@/lib/tickets/vocabulary';
 
 export type Action =
-  | { type: 'set_priority'; value: 'low' | 'medium' | 'high' | 'urgent' }
-  | { type: 'set_status'; category: 'open' | 'pending' | 'resolved' | 'closed' }
+  | { type: 'set_priority'; value: Priority }
+  | { type: 'set_status'; category: StatusCategory }
   | { type: 'assign_agent'; agentId: string | null }
   | { type: 'assign_group'; groupId: string | null }
   /**

@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, isNull, notInArray, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
+import type { Priority } from '@/lib/tickets/vocabulary';
 import {
   agents,
   channels,
@@ -167,7 +168,7 @@ export type NewTicket = {
    */
   formId?: string | null;
   groupId?: string | null;
-  priority?: 'low' | 'medium' | 'high' | 'urgent' | null;
+  priority?: Priority | null;
   type?: string | null;
   tags?: string[];
 };

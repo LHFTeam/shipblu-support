@@ -17,6 +17,24 @@
 export const PRIORITIES = ['low', 'medium', 'high', 'urgent'] as const;
 export type Priority = (typeof PRIORITIES)[number];
 
+/**
+ * What an admin screen calls each priority. A record rather than a list, so a
+ * priority added to `PRIORITIES` without a label here fails to compile rather
+ * than rendering a blank option in every picker.
+ */
+const PRIORITY_LABELS: Record<Priority, string> = {
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+  urgent: 'Urgent',
+};
+
+/** The priorities as picker options, least pressing first. */
+export const PRIORITY_CHOICES = PRIORITIES.map((value) => ({
+  value,
+  label: PRIORITY_LABELS[value],
+}));
+
 export const STATUS_CATEGORIES = ['open', 'pending', 'resolved', 'closed'] as const;
 export type StatusCategory = (typeof STATUS_CATEGORIES)[number];
 
