@@ -594,16 +594,17 @@ adopts a group by name, so a rename has to land in the dashboard and in
 Render gives service-level variables precedence over group values, so a key
 declared in both places silently takes the service value. That cost us a
 debugging session on `DATABASE_URL`. Two _groups_ linked by one service and both
-declaring a key is the same trap with no precedence rule to settle it. Three
-such overlaps exist today and are listed at the top of `render.yaml` for
-deletion in the dashboard: `NODE_VERSION` and `EMAIL_FROM_NAME` in both the
-shared and the staging group, and `APP_URL` in the production group and on the
-web and worker services.
+declaring a key is the same trap with no precedence rule to settle it. No key
+is declared twice today: the last overlaps — `NODE_VERSION` and
+`EMAIL_FROM_NAME` in the staging group as well as the shared one, and `APP_URL`
+on the web and worker services as well as in the production group — were
+deleted from the dashboard on 2026-09-26.
 
 Service-level entries exist only as deliberate exceptions, each commented in
 `render.yaml`: `LOG_ALL_INCOMING_WEBHOOKS` on the web service, the two
 `FRESHDESK_*` keys on the worker (the importer is a queued job),
-`DB_QUERY_TIMEOUT_MS` on `shipblu-nightly`, and the `APP_URL` copies above.
+and `DB_QUERY_TIMEOUT_MS` on `shipblu-nightly`, plus `NODE_ENV` on the web and
+worker services. Confirmed against the dashboard on 2026-09-26.
 
 **`shipblu-support-shared` is workspace-scoped and cannot be moved into the
 project.** A group scoped to a project environment cannot be linked to any
@@ -700,19 +701,16 @@ newlines, so a single `console.log` became ~20 entries per delivery, and on Linu
 paid on the event loop, not in the background. Headers are one line now, the body
 another; a delivery is at most three entries.
 
-### The three-group split is applied; the cleanup is not
+### The three-group split is applied; one cleanup is left
 
 The dashboard holds the three groups `render.yaml` describes. What is left is
 deleting, by hand, what the split left behind — Render _preserves_ a variable
-the Blueprint stopped declaring, so none of these goes away on its own:
+the Blueprint stopped declaring, so none of these goes away on its own.
 
-1. The overlaps listed above (`NODE_VERSION` and `EMAIL_FROM_NAME` from
-   `shipblu-support-staging`; `APP_URL` from the web and worker services once
-   the group's value is confirmed identical).
-2. Keys nothing reads, in both environment groups: `WHATSAPP_APP_SECRET` and
-   `WHATSAPP_VERIFY_TOKEN` (retired names), staging's `WHATSAPP_ACCESS_TOKEN`,
-   and — once whoever uses them has been asked — `META_SYSTEM_ADMIN_TOKEN` and
-   `FB_PAGE_ACCESS_TOKEN_ALI`.
+Keys nothing reads, in both environment groups: `WHATSAPP_APP_SECRET` and
+`WHATSAPP_VERIFY_TOKEN` (retired names), staging's `WHATSAPP_ACCESS_TOKEN`,
+and — once whoever uses them has been asked — `META_SYSTEM_ADMIN_TOKEN` and
+`FB_PAGE_ACCESS_TOKEN_ALI`.
 
 ---
 

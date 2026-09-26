@@ -55,17 +55,13 @@ previewsEnabled: false
 # The key lists are the dashboard's as of that date. Change them in the same
 # commit as the dashboard.
 #
-# **Known duplicates, recorded rather than resolved.** Render gives a service
-# value precedence over a group value, and documents no tiebreak between two
-# groups linked by one service. Today:
-#
-#   NODE_VERSION, EMAIL_FROM_NAME   in shipblu-support-shared and in
-#                                   shipblu-support-staging. Delete the staging
-#                                   copies — the shared ones have the values.
-#   APP_URL                         in shipblu-support-production and on the web
-#                                   and worker services, whose value wins there.
-#                                   Delete the service copies once the values
-#                                   are confirmed identical.
+# **No key is declared in two places.** Render gives a service value
+# precedence over a group value, and documents no tiebreak between two groups
+# linked by one service, so either overlap makes one copy silently dead. The
+# last ones — NODE_VERSION and EMAIL_FROM_NAME in the staging group as well as
+# the shared one, APP_URL on the web and worker as well as in the production
+# group — were deleted from the dashboard on 2026-09-26. Keep it that way: a
+# key a service needs from its group is not re-declared on the service.
 
 # `shipblu-support-shared` sits outside the project, and it has to.
 #
@@ -153,7 +149,8 @@ projects:
             # database. Dashboard-owned, listed rather than declared:
             #
             #   APP_SECRET                 signs email reply tokens
-            #   APP_URL                    shadowed on web and worker (above)
+            #   APP_URL                    read by web and worker; the crons
+            #                              inherit it and build no links
             #   DATABASE_URL               Supavisor transaction pooler
             #   DATABASE_URL_SESSION       direct connection, for LISTEN
             #   SUPABASE_URL               storage, for attachments
@@ -270,13 +267,9 @@ projects:
               - fromGroup: shipblu-support-production
               - key: NODE_ENV
                 value: production
-              # APP_URL is set here *and* in shipblu-support-production, and this
-              # copy wins on this service. The crons read the group's; they build
-              # no links, and `appUrl()` asks for the variable only where a link
-              # is actually constructed. Once the two values are confirmed
-              # identical this copy can go, and the group's serves everyone.
-              - key: APP_URL
-                sync: false
+              # APP_URL comes from shipblu-support-production. It used to be
+              # set here as well, which shadowed the group; that copy was
+              # deleted on 2026-09-26 and must not come back.
               # EMAIL_WEBHOOK_SECRET comes from shipblu-support-production. Only
               # this service receives inbound webhooks, so it could live here
               # alone; it is in the group because that is where the dashboard
@@ -323,9 +316,8 @@ projects:
               - fromGroup: shipblu-support-production
               - key: NODE_ENV
                 value: production
-              # Shadows the group's APP_URL, as on the web service.
-              - key: APP_URL
-                sync: false
+              # APP_URL comes from shipblu-support-production, as on the web
+              # service.
               # Freshdesk credentials are read only by the knowledge base
               # importer. It is a queued job, so it runs here on the worker —
               # which is where the dashboard has them. They can go once the
@@ -523,8 +515,8 @@ projects:
             #   TYPESAFE_API_KEY           sends real customer text to a third
             #                              party if a shadow run is started here
             #
-            #   NODE_VERSION               duplicates of shipblu-support-shared
-            #   EMAIL_FROM_NAME            — see the note at the top
+            # NODE_VERSION and EMAIL_FROM_NAME come from shipblu-support-shared;
+            # the staging copies were deleted on 2026-09-26.
             #
             # Present, and read by nothing in this repo:
             #
@@ -563,4 +555,5 @@ projects:
               - key: NODE_ENV
                 value: production
               # APP_URL comes from shipblu-support-staging. A service copy would
-              # shadow the group, as it does on production's web and worker.
+              # shadow the group — production's web and worker had one until
+              # 2026-09-26.
