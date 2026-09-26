@@ -6,7 +6,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { kbArticleVersions, kbArticles, kbCategories, kbFolders } from '@/db/schema';
 import { requirePermission } from '@/lib/auth/guard';
-import { isUuid } from '@/lib/http/uuid';
+import { canonicalUuid, isUuid } from '@/lib/http/uuid';
 import type { AgentRole } from '@/lib/auth/permissions';
 import { htmlToText, preview, sanitiseArticleHtml } from '@/lib/html/sanitize';
 import {
@@ -99,9 +99,12 @@ function refuseUnreachableFloor(role: AgentRole, floor: AgentRole | null): KbSta
 export async function saveArticle(_state: KbState, formData: FormData): Promise<KbState> {
   const agent = await requirePermission('kb.edit');
 
-  const id = String(formData.get('id') ?? '');
+  // Canonical, so the paths revalidated below are the ones the page lives at.
+  // An empty id creates; a malformed one names an article that cannot exist.
+  const rawId = String(formData.get('id') ?? '');
+  const id = canonicalUuid(rawId);
   const title = String(formData.get('title') ?? '').trim();
-  const folderId = String(formData.get('folderId') ?? '');
+  const folderId = canonicalUuid(formData.get('folderId'));
   const locale = String(formData.get('locale') ?? 'en');
   const rawBody = String(formData.get('bodyHtml') ?? '');
   const visibility = String(formData.get('visibility') ?? 'public');
@@ -115,12 +118,13 @@ export async function saveArticle(_state: KbState, formData: FormData): Promise<
     .filter(Boolean);
 
   if (!title) return { error: 'Give the article a title' };
-  if (!isUuid(folderId)) return { error: 'Choose a folder' };
+  if (!folderId) return { error: 'Choose a folder' };
   if (!isLocale(locale)) return { error: 'Unknown locale' };
   if (!VISIBILITIES.includes(visibility as (typeof VISIBILITIES)[number])) {
     return { error: 'Unknown visibility' };
   }
   if (minRole === 'invalid') return { error: 'Unknown minimum role' };
+  if (rawId && !id) return { error: 'Article not found' };
   const before = id ? await readable(id, agent.role) : null;
   if (id && !before) return { error: 'Article not found' };
 
@@ -250,7 +254,7 @@ export async function saveArticle(_state: KbState, formData: FormData): Promise<
 }
 
 export async function setArticleStatus(_state: KbState, formData: FormData): Promise<KbState> {
-  const id = String(formData.get('id') ?? '');
+  const id = canonicalUuid(formData.get('id')) ?? '';
   const status = String(formData.get('status') ?? '');
 
   if (status !== 'draft' && status !== 'published' && status !== 'archived') {
@@ -281,7 +285,7 @@ export async function setArticleStatus(_state: KbState, formData: FormData): Pro
 export async function deleteArticle(_state: KbState, formData: FormData): Promise<KbState> {
   const agent = await requirePermission('kb.publish');
 
-  const id = String(formData.get('id') ?? '');
+  const id = canonicalUuid(formData.get('id')) ?? '';
   if (!(await readable(id, agent.role))) return { error: 'Article not found' };
 
   await db.delete(kbArticles).where(eq(kbArticles.id, id));
@@ -320,12 +324,12 @@ export async function createFolder(_state: KbState, formData: FormData): Promise
   const agent = await requirePermission('kb.edit');
 
   const name = String(formData.get('name') ?? '').trim();
-  const categoryId = String(formData.get('categoryId') ?? '');
+  const categoryId = canonicalUuid(formData.get('categoryId'));
   const visibility = String(formData.get('visibility') ?? 'public');
   const minRole = parseMinRole(formData.get('minRole'));
 
   if (!name) return { error: 'Give the folder a name' };
-  if (!isUuid(categoryId)) return { error: 'Choose a category' };
+  if (!categoryId) return { error: 'Choose a category' };
   if (!VISIBILITIES.includes(visibility as (typeof VISIBILITIES)[number])) {
     return { error: 'Unknown visibility' };
   }
@@ -338,6 +342,15 @@ export async function createFolder(_state: KbState, formData: FormData): Promise
   const folderInternal = visibility === 'agents_only';
   const unreachable = refuseUnreachableFloor(agent.role, folderInternal ? minRole : null);
   if (unreachable) return unreachable;
+
+  // Re-read rather than inserted as given: a category deleted since the page
+  // loaded would break the foreign key, a throw where the form promises this.
+  const [category] = await db
+    .select({ id: kbCategories.id })
+    .from(kbCategories)
+    .where(eq(kbCategories.id, categoryId))
+    .limit(1);
+  if (!category) return { error: 'Choose a category' };
 
   const existing = await db
     .select({ slug: kbFolders.slug })
@@ -382,10 +395,15 @@ export async function createFolder(_state: KbState, formData: FormData): Promise
 export async function linkTranslation(_state: KbState, formData: FormData): Promise<KbState> {
   const agent = await requirePermission('kb.edit');
 
-  const id = String(formData.get('id') ?? '');
-  const otherId = String(formData.get('otherId') ?? '');
+  const rawOtherId = String(formData.get('otherId') ?? '');
+  if (!rawOtherId) return { error: 'Choose an article to link to' };
 
-  if (!otherId) return { error: 'Choose an article to link to' };
+  // Both sides' shape before either is read, and both canonical, so the check
+  // below compares what Postgres would match: the upper-case spelling of the
+  // same id used to get past it.
+  const id = canonicalUuid(formData.get('id'));
+  const otherId = canonicalUuid(rawOtherId);
+  if (!id || !otherId) return { error: 'Article not found' };
   if (otherId === id) return { error: 'An article cannot be its own translation' };
   // Both sides: linking is a write to one article and an assertion about the
   // other, and either being out of reach makes this somebody else's business.
@@ -427,9 +445,9 @@ export async function linkTranslation(_state: KbState, formData: FormData): Prom
 export async function restoreVersion(_state: KbState, formData: FormData): Promise<KbState> {
   const agent = await requirePermission('kb.edit');
 
-  const id = String(formData.get('id') ?? '');
-  const versionId = String(formData.get('versionId') ?? '');
-  if (!isUuid(versionId)) return { error: 'That version no longer exists' };
+  const id = canonicalUuid(formData.get('id')) ?? '';
+  const versionId = canonicalUuid(formData.get('versionId'));
+  if (!versionId) return { error: 'That version no longer exists' };
 
   const current = await readable(id, agent.role);
   if (!current) return { error: 'Article not found' };

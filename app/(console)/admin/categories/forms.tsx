@@ -79,15 +79,28 @@ export function CategoryRow({
     category.id,
   );
   const [togglingBusy, setTogglingBusy] = useState(false);
+  const [toggleError, setToggleError] = useState<string | null>(null);
 
+  // The action's answer is read, not dropped: a refusal is a sentence the row
+  // has to show, and a throw must not leave the button busy until a reload.
   async function toggle() {
     setTogglingBusy(true);
-    const formData = new FormData();
-    formData.set('id', category.id);
-    formData.set('active', category.isActive ? 'false' : 'true');
-    await setCategoryActive({ error: null }, formData);
-    setTogglingBusy(false);
-    editor.router.refresh();
+    setToggleError(null);
+    try {
+      const formData = new FormData();
+      formData.set('id', category.id);
+      formData.set('active', category.isActive ? 'false' : 'true');
+      const result = await setCategoryActive({ error: null }, formData);
+      if (result.error) {
+        setToggleError(result.error);
+        return;
+      }
+      editor.router.refresh();
+    } catch {
+      setToggleError('That did not save — reload the page and try again');
+    } finally {
+      setTogglingBusy(false);
+    }
   }
 
   return (
@@ -116,6 +129,7 @@ export function CategoryRow({
           </>
         )}
         {editor.error ? <p className="mt-1 text-xs text-red-600">{editor.error}</p> : null}
+        {toggleError ? <p className="mt-1 text-xs text-red-600">{toggleError}</p> : null}
       </Cell>
 
       <Cell>
@@ -210,15 +224,28 @@ export function RootCauseRow({
     cause.id,
   );
   const [togglingBusy, setTogglingBusy] = useState(false);
+  const [toggleError, setToggleError] = useState<string | null>(null);
 
+  // The action's answer is read, not dropped: a refusal is a sentence the row
+  // has to show, and a throw must not leave the button busy until a reload.
   async function toggle() {
     setTogglingBusy(true);
-    const formData = new FormData();
-    formData.set('id', cause.id);
-    formData.set('active', cause.isActive ? 'false' : 'true');
-    await setRootCauseActive({ error: null }, formData);
-    setTogglingBusy(false);
-    editor.router.refresh();
+    setToggleError(null);
+    try {
+      const formData = new FormData();
+      formData.set('id', cause.id);
+      formData.set('active', cause.isActive ? 'false' : 'true');
+      const result = await setRootCauseActive({ error: null }, formData);
+      if (result.error) {
+        setToggleError(result.error);
+        return;
+      }
+      editor.router.refresh();
+    } catch {
+      setToggleError('That did not save — reload the page and try again');
+    } finally {
+      setTogglingBusy(false);
+    }
   }
 
   return (
@@ -242,6 +269,7 @@ export function RootCauseRow({
           </>
         )}
         {editor.error ? <p className="mt-1 text-xs text-red-600">{editor.error}</p> : null}
+        {toggleError ? <p className="mt-1 text-xs text-red-600">{toggleError}</p> : null}
       </Cell>
 
       <Cell>

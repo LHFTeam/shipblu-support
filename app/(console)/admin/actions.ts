@@ -6,6 +6,7 @@ import { db } from '@/db/client';
 import {
   agents,
   channels,
+  groups,
   invites,
   jobs,
   ticketCategories,
@@ -13,7 +14,7 @@ import {
   whatsappAccounts,
 } from '@/db/schema';
 import { requirePermission } from '@/lib/auth/guard';
-import { isUuid } from '@/lib/http/uuid';
+import { canonicalUuid } from '@/lib/http/uuid';
 import { forgetCategoryIds } from '@/lib/categorise/apply';
 import { looksLikeEmail, normaliseEmail } from '@/lib/auth/normalise';
 import { sealInviteToken } from '@/lib/auth/invite-token';
@@ -186,16 +187,24 @@ export async function createInvite(_state: AdminState, formData: FormData): Prom
 export async function setAgentActive(_state: AdminState, formData: FormData): Promise<AdminState> {
   const admin = await requirePermission('admin.agents');
 
-  const agentId = String(formData.get('agentId') ?? '');
+  // Canonical, so the comparison below agrees with the one the update makes:
+  // Postgres matches an upper-case uuid to the same row, and `===` did not, so
+  // the upper-case spelling of your own id got past the guard.
+  const agentId = canonicalUuid(formData.get('agentId'));
   const active = formData.get('active') === 'true';
-  if (!isUuid(agentId)) return { error: 'Unknown agent' };
+  if (!agentId) return { error: 'Unknown agent' };
 
   // Locking yourself out is always a mistake, and recovering needs shell access.
   if (agentId === admin.id && !active) {
     return { error: 'You cannot deactivate your own account' };
   }
 
-  await db.update(agents).set({ isActive: active }).where(eq(agents.id, agentId));
+  const updated = await db
+    .update(agents)
+    .set({ isActive: active })
+    .where(eq(agents.id, agentId))
+    .returning({ id: agents.id });
+  if (!updated.length) return { error: 'Unknown agent' };
 
   // Deactivation must take effect now, not when their cookie expires.
   if (!active) await destroyAllSessionsForAgent(agentId);
@@ -222,18 +231,27 @@ export async function setAgentCapacity(
 ): Promise<AdminState> {
   await requirePermission('admin.agents');
 
-  const agentId = String(formData.get('agentId') ?? '');
-  if (!isUuid(agentId)) return { error: 'Unknown agent' };
+  const agentId = canonicalUuid(formData.get('agentId'));
+  if (!agentId) return { error: 'Unknown agent' };
   const raw = String(formData.get('maxOpenTickets') ?? '').trim();
 
   let maxOpenTickets: number | null = null;
   if (raw) {
     const value = Number(raw);
-    if (!Number.isFinite(value) || value < 0) return { error: 'That is not a number of tickets' };
+    // The column is a 32-bit integer, and Postgres answers anything larger with
+    // 22003 — a throw, where the form promises a sentence.
+    if (!Number.isFinite(value) || value < 0 || value > 2_147_483_647) {
+      return { error: 'That is not a number of tickets' };
+    }
     maxOpenTickets = Math.trunc(value);
   }
 
-  await db.update(agents).set({ maxOpenTickets }).where(eq(agents.id, agentId));
+  const updated = await db
+    .update(agents)
+    .set({ maxOpenTickets })
+    .where(eq(agents.id, agentId))
+    .returning({ id: agents.id });
+  if (!updated.length) return { error: 'Unknown agent' };
 
   revalidatePath('/admin/agents');
   return { error: null };
@@ -242,7 +260,8 @@ export async function setAgentCapacity(
 export async function saveChannel(_state: AdminState, formData: FormData): Promise<AdminState> {
   await requirePermission('admin.channels');
 
-  const id = String(formData.get('id') ?? '');
+  const rawId = String(formData.get('id') ?? '');
+  const id = canonicalUuid(rawId);
   const name = String(formData.get('name') ?? '').trim();
 
   // On an edit the type is the stored row's, never the form's. Everything
@@ -252,10 +271,8 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
   // and the same request could rewrite a `portal` or `api` row that no form
   // edits. The form's field only says what to create.
   let type = String(formData.get('type') ?? '');
-  if (id) {
-    if (!isUuid(id)) {
-      return { error: 'That form is out of date — reload the page and try again' };
-    }
+  if (rawId) {
+    if (!id) return { error: 'That form is out of date — reload the page and try again' };
 
     const existing = await db
       .select({ type: channels.type })
@@ -267,10 +284,21 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
     type = existing[0].type;
   }
 
-  const defaultGroupId = String(formData.get('defaultGroupId') ?? '') || null;
-  // Written to the row as given, so its shape is checked first: Postgres answers
-  // a malformed uuid with 22P02, a throw where the form promises a sentence.
-  if (defaultGroupId && !isUuid(defaultGroupId)) return { error: 'Unknown default group' };
+  // Re-read rather than written as given: Postgres answers a malformed uuid with
+  // 22P02 and a deleted group with a foreign-key violation, and either is a
+  // throw where the form promises a sentence. The whatsapp account below is
+  // re-read the same way.
+  const rawGroupId = String(formData.get('defaultGroupId') ?? '');
+  const defaultGroupId = rawGroupId ? canonicalUuid(rawGroupId) : null;
+  if (rawGroupId && !defaultGroupId) return { error: 'Unknown default group' };
+  if (defaultGroupId) {
+    const [group] = await db
+      .select({ id: groups.id })
+      .from(groups)
+      .where(eq(groups.id, defaultGroupId))
+      .limit(1);
+    if (!group) return { error: 'That default group no longer exists — reload the page' };
+  }
   const phoneNumberId = String(formData.get('phoneNumberId') ?? '').trim();
   const address = String(formData.get('address') ?? '').trim();
   const whatsappAccountId = String(formData.get('whatsappAccountId') ?? '') || null;
@@ -531,11 +559,11 @@ export async function startShipmentBackfill(
 export async function saveCategory(_state: AdminState, formData: FormData): Promise<AdminState> {
   await requirePermission('admin.categories');
 
-  const id = String(formData.get('id') ?? '');
+  const id = canonicalUuid(formData.get('id'));
   const labelEn = String(formData.get('labelEn') ?? '').trim();
   const labelAr = String(formData.get('labelAr') ?? '').trim();
 
-  if (!isUuid(id)) return { error: 'Unknown category' };
+  if (!id) return { error: 'Unknown category' };
   if (!labelEn || !labelAr) {
     // Both, always. Arabic is the default locale and the labels are what a
     // report shown to an Egyptian operations lead is read in, so a blank Arabic
@@ -543,10 +571,12 @@ export async function saveCategory(_state: AdminState, formData: FormData): Prom
     return { error: 'Both the English and the Arabic label are required' };
   }
 
-  await db
+  const updated = await db
     .update(ticketCategories)
     .set({ labelEn, labelAr, updatedAt: new Date() })
-    .where(eq(ticketCategories.id, id));
+    .where(eq(ticketCategories.id, id))
+    .returning({ id: ticketCategories.id });
+  if (!updated.length) return { error: 'Unknown category' };
 
   forgetCategoryIds();
   revalidatePath('/admin/categories');
@@ -559,14 +589,16 @@ export async function setCategoryActive(
 ): Promise<AdminState> {
   await requirePermission('admin.categories');
 
-  const id = String(formData.get('id') ?? '');
+  const id = canonicalUuid(formData.get('id'));
   const active = formData.get('active') === 'true';
-  if (!isUuid(id)) return { error: 'Unknown category' };
+  if (!id) return { error: 'Unknown category' };
 
-  await db
+  const updated = await db
     .update(ticketCategories)
     .set({ isActive: active, updatedAt: new Date() })
-    .where(eq(ticketCategories.id, id));
+    .where(eq(ticketCategories.id, id))
+    .returning({ id: ticketCategories.id });
+  if (!updated.length) return { error: 'Unknown category' };
 
   // Retiring a category is how somebody stops an over-firing rule filling a
   // report, so the detector has to stop assigning it — not just the picker stop
@@ -581,19 +613,21 @@ export async function setCategoryActive(
 export async function saveRootCause(_state: AdminState, formData: FormData): Promise<AdminState> {
   await requirePermission('admin.categories');
 
-  const id = String(formData.get('id') ?? '');
+  const id = canonicalUuid(formData.get('id'));
   const labelEn = String(formData.get('labelEn') ?? '').trim();
   const labelAr = String(formData.get('labelAr') ?? '').trim();
 
-  if (!isUuid(id)) return { error: 'Unknown cause' };
+  if (!id) return { error: 'Unknown cause' };
   if (!labelEn || !labelAr) {
     return { error: 'Both the English and the Arabic label are required' };
   }
 
-  await db
+  const updated = await db
     .update(ticketRootCauses)
     .set({ labelEn, labelAr, updatedAt: new Date() })
-    .where(eq(ticketRootCauses.id, id));
+    .where(eq(ticketRootCauses.id, id))
+    .returning({ id: ticketRootCauses.id });
+  if (!updated.length) return { error: 'Unknown cause' };
 
   revalidatePath('/admin/categories');
   return { error: null };
@@ -605,14 +639,16 @@ export async function setRootCauseActive(
 ): Promise<AdminState> {
   await requirePermission('admin.categories');
 
-  const id = String(formData.get('id') ?? '');
+  const id = canonicalUuid(formData.get('id'));
   const active = formData.get('active') === 'true';
-  if (!isUuid(id)) return { error: 'Unknown cause' };
+  if (!id) return { error: 'Unknown cause' };
 
-  await db
+  const updated = await db
     .update(ticketRootCauses)
     .set({ isActive: active, updatedAt: new Date() })
-    .where(eq(ticketRootCauses.id, id));
+    .where(eq(ticketRootCauses.id, id))
+    .returning({ id: ticketRootCauses.id });
+  if (!updated.length) return { error: 'Unknown cause' };
 
   revalidatePath('/admin/categories');
   return { error: null };

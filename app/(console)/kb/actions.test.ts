@@ -1,25 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  answerNoRows,
+  expectNoQuery,
+  expectNoWrite,
+  formData as form,
+  refuseEveryQuery,
+} from '@/lib/testing/fake-db';
 
 /**
  * The knowledge base actions take an article's, a folder's, a category's or a
  * version's id from a form field. A malformed one reached Postgres, which
  * answers with error 22P02 rather than with no rows — the action threw instead
- * of saying the article was not found. The database here fails loudly if asked
- * anything, so each case below has to be answered before a query is built.
+ * of saying the article was not found.
  */
 
-const untouchable = () => {
-  throw new Error('the database was asked about an id that cannot exist');
-};
-const db = {
-  select: vi.fn(untouchable),
-  insert: vi.fn(untouchable),
-  update: vi.fn(untouchable),
-  delete: vi.fn(untouchable),
-  transaction: vi.fn(untouchable),
-};
-
-vi.mock('@/db/client', () => ({ db }));
+vi.mock('@/db/client', async () => ({ db: (await import('@/lib/testing/fake-db')).fakeDb }));
 vi.mock('@/lib/auth/guard', () => ({
   requirePermission: async () => ({ id: 'admin-1', role: 'admin' }),
 }));
@@ -32,23 +27,13 @@ vi.mock('next/navigation', () => ({
 
 const actions = await import('./actions');
 
-function form(fields: Record<string, string>): FormData {
-  const data = new FormData();
-  for (const [key, value] of Object.entries(fields)) data.set(key, value);
-  return data;
-}
-
 const INITIAL = { error: null };
 const MALFORMED = 'not-a-uuid';
 const WELL_FORMED = '0b6f3c2e-8a51-4d3e-9f0a-2c7d1e5b9a44';
 
 beforeEach(() => {
-  for (const fn of Object.values(db)) fn.mockClear();
+  refuseEveryQuery();
 });
-
-function expectNoQuery() {
-  for (const fn of Object.values(db)) expect(fn).not.toHaveBeenCalled();
-}
 
 describe('knowledge base actions given an id no row can have', () => {
   it.each([
@@ -58,15 +43,29 @@ describe('knowledge base actions given an id no row can have', () => {
     ],
     ['deleteArticle', () => actions.deleteArticle(INITIAL, form({ id: MALFORMED }))],
     [
-      'linkTranslation',
-      () => actions.linkTranslation(INITIAL, form({ id: MALFORMED, otherId: 'also-not-one' })),
-    ],
-    [
       'restoreVersion',
       () => actions.restoreVersion(INITIAL, form({ id: MALFORMED, versionId: WELL_FORMED })),
     ],
+    [
+      'saveArticle, editing',
+      () =>
+        actions.saveArticle(
+          INITIAL,
+          form({ id: MALFORMED, title: 'Returns', folderId: WELL_FORMED }),
+        ),
+    ],
   ])('%s says the article was not found, without querying', async (_name, run) => {
     await expect(run()).resolves.toEqual({ error: 'Article not found' });
+    expectNoQuery();
+  });
+
+  it.each([
+    ['this article', { id: MALFORMED, otherId: WELL_FORMED }],
+    ['the other article', { id: WELL_FORMED, otherId: MALFORMED }],
+  ])('linkTranslation refuses a malformed id for %s, without querying', async (_side, ids) => {
+    await expect(actions.linkTranslation(INITIAL, form(ids))).resolves.toEqual({
+      error: 'Article not found',
+    });
     expectNoQuery();
   });
 
@@ -89,5 +88,33 @@ describe('knowledge base actions given an id no row can have', () => {
       actions.createFolder(INITIAL, form({ name: 'Shipping', categoryId: MALFORMED })),
     ).resolves.toEqual({ error: 'Choose a category' });
     expectNoQuery();
+  });
+});
+
+describe('linkTranslation given one article in two spellings', () => {
+  /**
+   * Postgres matches either spelling to the same row; `===` did not, so the
+   * self-link check passed and the agent was told the two articles were in the
+   * same language instead.
+   */
+  it('says an article cannot be its own translation', async () => {
+    await expect(
+      actions.linkTranslation(
+        INITIAL,
+        form({ id: WELL_FORMED, otherId: WELL_FORMED.toUpperCase() }),
+      ),
+    ).resolves.toEqual({ error: 'An article cannot be its own translation' });
+    expectNoQuery();
+  });
+});
+
+describe('createFolder given a well-formed category that names nothing', () => {
+  it('asks for a category rather than breaking the foreign key', async () => {
+    answerNoRows();
+
+    await expect(
+      actions.createFolder(INITIAL, form({ name: 'Shipping', categoryId: WELL_FORMED })),
+    ).resolves.toEqual({ error: 'Choose a category' });
+    expectNoWrite();
   });
 });
