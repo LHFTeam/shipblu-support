@@ -108,11 +108,13 @@ not the React version.
 file — the env-var catalogue, the job registry, the `db/sql` rules, the
 confinement of the delivery payload, and the rest. Each lives in its own module
 under `scripts/ci/rules/`, named as the violation labels it, and carries the
-reason it exists; what they share is `scripts/ci/lib.mjs`. If one of them is
-wrong, change it there and say why in the same commit; do not add your call site
-to an exemption list. A rule with a `<name>.test.mjs` beside it is tested against
-a small git repository built per case (`scripts/ci/fixture.mjs`); a change to
-what it accepts or refuses changes a case there too.
+reason it exists; what they share is `scripts/ci/lib.mjs`, and the table naming
+which ones run is `RULES` in `scripts/ci/rules.mjs`. If one of them is wrong,
+change it there and say why in the same commit; do not add your call site to an
+exemption list. A rule with a `<name>.test.mjs` beside it is tested against a
+small git repository built per case (`scripts/ci/fixture.mjs`), which runs the
+function `RULES` pairs with the rule's name; a change to what it accepts or
+refuses changes a case there too.
 
 `knip` gates **dependency hygiene and nothing else** — `dependencies`,
 `devDependencies`, `optionalPeerDependencies`, `unlisted`, `unresolved` and
@@ -222,9 +224,10 @@ object with `error: string | null`. Never
 trust an id or address arriving in a `FormData` field — re-read the row
 server-side.
 
-**Authorisation lives in code.** `proxy.ts` runs on the Edge and only checks
-that a session cookie exists; it cannot tell a revoked session from a live one.
-Re-check on every page and every action with `requireAgent()` or
+**Authorisation lives in code.** `proxy.ts` only checks that a session cookie
+exists; it cannot tell a revoked session from a live one. It runs on Node.js in
+Next 16, not the Edge, so that is a choice rather than a limit — its header says
+why. Re-check on every page and every action with `requireAgent()` or
 `requirePermission()`. RLS is enabled with zero policies and never `FORCE`. Add
 new permission keys to `PERMISSIONS` in `lib/auth/permissions.ts` with a comment
 saying why the capability is separate.
@@ -923,5 +926,5 @@ Edit `AGENTS.md`; CI fails if either becomes a copy.
 
 If what you learned is mechanical — a shape two files have to share, a name that
 has to match — prefer a check in `scripts/ci/rules/`, registered in
-`scripts/ci/repo-rules.mjs`, over a paragraph here. A rule in prose is enforced
+`RULES` in `scripts/ci/rules.mjs`, over a paragraph here. A rule in prose is enforced
 by whoever last read the prose.

@@ -85,22 +85,23 @@ this plan answers them rather than setting them aside:
 
 Claim a row before starting it, and update it when the PR opens and when it
 merges. If a row is claimed and its PR is open, do not start another PR on the
-same files. Keep each cell inside its column's current width — `this PR` or a PR
-number, and `open` or `merged` — so an update is a one-line diff: a longer value
-makes Prettier re-pad every row, and two sessions claiming different rows then
-conflict on all of them.
+same files. A follow-up PR on a merged row's files gets a row of its own while
+it is open, so the table shows those files as taken again. Keep each cell inside
+its column's current width — `this PR` or a PR number, and `open` or `merged` —
+so an update is a one-line diff: a longer value makes Prettier re-pad every row,
+and two sessions claiming different rows then conflict on all of them.
 
 | Stage | Item                                             | Branch / PR | Status  |
 | ----- | ------------------------------------------------ | ----------- | ------- |
 | 0.1   | Commit this plan                                 | #166        | merged  |
 | 0.2   | Harden `server-actions` and minimum-count guards | #167        | merged  |
-| 0.3   | Split `repo-rules.mjs` into per-rule modules     |             | pending |
-| 0.4   | CI tidy-up                                       |             | pending |
+| 0.3   | Split `repo-rules.mjs` into per-rule modules     | #191–#192   | merged  |
+| 0.4   | CI tidy-up                                       | #193–#195   | merged  |
 | 0.5   | Remove Playwright                                | #173        | merged  |
 | 1.1   | `lib/testing/` fixtures                          |             | pending |
 | 1.2   | Database test tier                               |             | pending |
 | 1.3   | Characterise the seven ingest entry points       |             | pending |
-| 1.4   | Webhook route tests                              |             | pending |
+| 1.4   | Webhook route tests                              | #196        | merged  |
 | 1.5   | DB test for the admin overview's raw SQL         |             | pending |
 | 2.1   | Email webhook dedupes before it verifies         | #168        | merged  |
 | 2.2   | Portal agent replies bypass `carrierFor()`       | #169        | merged  |
@@ -109,11 +110,16 @@ conflict on all of them.
 | 2.5   | Ids taken from `FormData`                        | #180–#182   | merged  |
 | 2.6   | KB admin search does not escape LIKE             | #176        | merged  |
 | 2.7   | One `GRAPH_VERSION`                              | #175        | merged  |
-| 2.8   | Fetch timeouts, one provider per PR              |             | pending |
+| 2.8   | Fetch timeouts, one provider per PR              | #184–#188   | merged  |
 | 2.9   | Replies never get paragraphs (CRLF)              | #171        | merged  |
 | 2.10  | Email webhook fails open without its secret      | #177        | merged  |
 | 2.11  | Staging's `local` email webhook accepts anything | #177        | merged  |
-| 3     | Shared primitives (one row per PR as opened)     |             | pending |
+| 0–2   | Follow-ups to the reviews of #187–#196           | #203, #205  | open    |
+| 3     | Shared primitives (one row per PR as opened)     |             | open    |
+| 3.1   | Queue helper: `hasActiveJob(type)`               | #197        | merged  |
+| 3.2   | Email helpers: `buildReferences`, escaper name   | #198        | merged  |
+| 3.3   | Shared constants: `TEAM_TIME_ZONE`               | #199        | merged  |
+| 3.4   | Shared constants: proxy regex from `LOCALES`     | #200        | merged  |
 | 4.1   | Split `lib/tickets/queries.ts`                   |             | pending |
 | 4.2   | Shared ingest steps                              |             | pending |
 | 4.3   | Meta Graph transport                             |             | pending |
@@ -134,7 +140,10 @@ conflict on all of them.
     reads that way under
     `git diff origin/main -M -C --color-moved=dimmed-zebra`.
   - A behaviour PR carries a test that fails on `main`.
-- Record move and format commits in a new `.git-blame-ignore-revs`.
+- Record pure reformat commits in `.git-blame-ignore-revs`. Not moves across
+  files: ignore-revs only looks for a line in the same file's parent, so it
+  cannot see where moved code came from and mis-credits whatever the commit
+  wrote. `git blame -C -C` follows a move with no file at all.
 
 **Comments**
 
@@ -513,16 +522,23 @@ An in-house module of about fifty lines, with no new dependency.
 - Leave `lib/whatsapp/verify.ts`'s compare alone. It compares hex-decoded HMACs,
   which is a different operation.
 
-### Email helpers
+### Email helpers — merged as #198
 
-- The worker's `escapeHtml` becomes `textToEscapedHtml` in `lib/email/html.ts`.
-  Its output must be byte-identical:
-  - it keeps `\n` → `<br>`;
-  - it does not escape `'`.
-- `buildReferences` (copied in `send-email.ts` and `send-side-email.ts`) moves
-  beside it.
-- **Do not merge it with the existing `escapeHtml`.** That would change the
-  bytes of every email.
+- `buildReferences` (copied in `send-email.ts` and `send-side-email.ts`) moved
+  to `lib/email/threading.ts`, beside `formatMessageId` and `buildReplySubject`,
+  not to `html.ts`: it decides threading order, and `threading.test.ts` is where
+  that is tested.
+- The worker's private `escapeHtml` became `textToEscapedHtml` in
+  `lib/email/html.ts`. This plan said to keep it a separate escaper with
+  byte-identical output (`'` left unescaped) and never to merge it with
+  `escapeHtml`. **#198's review overrode that on purpose:** it is now
+  `escapeHtml(text)` plus `\n` → `<br>`, so there is one escaper to keep in
+  step. The one output difference, `'` → `&#39;`, renders the same in element
+  text, and its only input, the side conversation footer, carries no
+  apostrophe. Across footers for tickets 1 to 100,000 the old and new output
+  are identical, so no email's bytes changed.
+- What still stands: `escapeHtml` itself must not gain the `<br>`. It escapes
+  attribute values too, where a `<br>` is corruption.
 
 ### HTTP helpers
 
@@ -533,8 +549,9 @@ An in-house module of about fifty lines, with no new dependency.
 
 ### Queue
 
-A typed `hasActiveJob(type)` in `lib/queue` replaces the three raw-SQL copies at
-`app/(console)/admin/actions.ts:381`, `:431` and `:475`.
+Merged as #197. A typed `hasActiveJob(type)` in `lib/queue` replaced the three
+raw-SQL copies in `app/(console)/admin/actions.ts`: `startFreshdeskImport`,
+`startLocationBackfill` and `startShipmentBackfill`.
 
 ### Vocabulary
 
@@ -549,9 +566,15 @@ A typed `hasActiveJob(type)` in `lib/queue` replaces the three raw-SQL copies at
 
 ### Constants
 
-- `TEAM_TIME_ZONE` replaces the seven `'Africa/Cairo'` literals in `lib/`.
-  Tests keep the literal.
-- `proxy.ts` builds its locale pattern from `LOCALES` in `lib/kb/locale.ts`.
+- Merged as #199: `TEAM_TIME_ZONE` in `lib/hours/zone.ts` replaced eleven
+  `'Africa/Cairo'` literals — seven in `lib/`, and four in `app/` that meant
+  the same thing (the widget, the shadow categorisation page, and both halves
+  of the business hours editor). Tests keep their own literal, the zone they
+  assert in. The one new test holds the constant equal to the
+  `business_hours.timezone` column default, which stays a literal because it
+  lands in a generated migration.
+- Merged as #200: `proxy.ts` builds its locale pattern from `LOCALES` in
+  `lib/kb/locale.ts`.
 
 ### Widget
 
@@ -801,7 +824,9 @@ condition.
   one is the loop's backoff by failure kind, the other each job's retry
   schedule.
 - Agent replies do not go through `outbound.ts`.
-- The two `escapeHtml` variants stay separate.
+- `escapeHtml` and `textToEscapedHtml` stay two functions, the second built on
+  the first. `escapeHtml` must not gain the `<br>`, because it also escapes
+  attribute values.
 
 **Contracts and deliberate reads**
 

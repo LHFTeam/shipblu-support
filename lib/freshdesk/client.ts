@@ -1,4 +1,5 @@
 import { env } from '@/lib/env';
+import { isTimeout } from '@/lib/http/deadline';
 
 /**
  * Freshdesk Solutions API client.
@@ -98,7 +99,7 @@ async function request(path: string): Promise<{ response: Response; text: string
     // failure or a reset is the same fact as a deadline, so it takes the same
     // shape, as it does in the other clients here.
     throw new FreshdeskError(
-      error instanceof DOMException && error.name === 'TimeoutError'
+      isTimeout(error)
         ? `Freshdesk ${path} did not answer in ${TIMEOUT_MS / 1000}s`
         : `Freshdesk ${path} unreachable: ${error instanceof Error ? error.message : String(error)}`,
       0,

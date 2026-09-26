@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { env } from '@/lib/env';
+import { isTimeout } from '@/lib/http/deadline';
 
 /**
  * TypeSafe's System One endpoint — the first AI provider this system calls.
@@ -172,6 +173,7 @@ export async function systemOne(
 
   const url = `${(options.baseUrl ?? TYPESAFE_API_URL).replace(/\/+$/, '')}/v1/systemone`;
 
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   let response: Response;
   try {
     response = await fetch(url, {
@@ -182,11 +184,15 @@ export async function systemOne(
         Accept: 'application/json',
       },
       body: JSON.stringify(request),
-      signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
+    // Named in seconds, as `lib/shipments/platform.ts` does: the signal's own
+    // message says neither which call nor how long it waited.
     throw new TypeSafeApiError(
-      `Could not reach TypeSafe: ${error instanceof Error ? error.message : error}`,
+      isTimeout(error)
+        ? `TypeSafe did not answer in ${timeoutMs / 1000}s`
+        : `Could not reach TypeSafe: ${error instanceof Error ? error.message : error}`,
       null,
       true,
     );
@@ -208,8 +214,16 @@ export async function systemOne(
   let body: unknown;
   try {
     body = await response.json();
-  } catch {
-    throw new TypeSafeApiError('TypeSafe returned a 200 that was not JSON', response.status, true);
+  } catch (error) {
+    // A deadline passing mid-body lands here too; calling it "not JSON" points
+    // at a proxy when the answer was only slow.
+    throw new TypeSafeApiError(
+      isTimeout(error)
+        ? `TypeSafe's answer did not finish arriving in ${timeoutMs / 1000}s`
+        : 'TypeSafe returned a 200 that was not JSON',
+      response.status,
+      true,
+    );
   }
 
   const parsed = responseSchema.safeParse(body);

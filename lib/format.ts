@@ -6,13 +6,13 @@
  * two agents looking at the same ticket causes real confusion during handover.
  */
 
-const TIMEZONE = 'Africa/Cairo';
+import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
 
 export function formatDateTime(value: Date | string): string {
   return new Intl.DateTimeFormat('en-GB', {
     dateStyle: 'medium',
     timeStyle: 'short',
-    timeZone: TIMEZONE,
+    timeZone: TEAM_TIME_ZONE,
   }).format(new Date(value));
 }
 

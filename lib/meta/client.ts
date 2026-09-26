@@ -1,4 +1,5 @@
 import { env } from '@/lib/env';
+import { isTimeout } from '@/lib/http/deadline';
 import { commentRequest, type CommentOperation } from './comments';
 import { CONNECTION_LABEL, type MetaConnection, metaConnection } from './connection';
 import { takeThreadControlRequest } from './handover';
@@ -59,10 +60,6 @@ class MetaTimeoutError extends MetaApiError {
     super(`${what} did not answer in ${timeoutMs / 1000}s`, 0, null, null, true);
     this.name = 'MetaTimeoutError';
   }
-}
-
-function isTimeout(error: unknown): boolean {
-  return error instanceof DOMException && error.name === 'TimeoutError';
 }
 
 /**

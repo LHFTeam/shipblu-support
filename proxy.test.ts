@@ -1,5 +1,6 @@
 import { beforeEach, afterEach, describe, expect, it } from 'vitest';
 import { NextRequest } from 'next/server';
+import { LOCALES } from '@/lib/kb/locale';
 import proxy from './proxy';
 
 /**
@@ -58,6 +59,16 @@ describe('the help-centre hostname', () => {
 describe('every other hostname', () => {
   it('still rewrites a locale-prefixed path under /help', () => {
     expect(rewrittenTo(visit('https://shipblu-support.onrender.com/ar'))).toBe('/help/ar');
+  });
+
+  it('rewrites every locale the help centre has, and only as a whole segment', () => {
+    for (const locale of LOCALES) {
+      expect(rewrittenTo(visit(`https://shipblu-support.onrender.com/${locale}/a/x`))).toBe(
+        `/help/${locale}/a/x`,
+      );
+    }
+    // A console path that merely starts with a locale's letters is not one.
+    expect(rewrittenTo(visit('https://shipblu-support.onrender.com/area'))).toBeNull();
   });
 
   it('lets a signed-out visitor reach the widget but not the console', () => {

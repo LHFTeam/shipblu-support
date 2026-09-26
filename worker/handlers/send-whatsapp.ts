@@ -112,7 +112,8 @@ export async function sendWhatsApp(job: ClaimedJob): Promise<void> {
           // Receipts match on the wamid, so this row will never hear another
           // word — an asynchronous rejection included. Said on the row, where
           // "sent" can be read as "sent, unconfirmed", rather than only in a
-          // worker log nobody reads next to the ticket.
+          // worker log nobody reads next to the ticket; `lostReceiptNote`
+          // (lib/whatsapp/receipts.ts) is what the console shows for it.
           ...(result.wamid === null ? { wamidLost: true } : {}),
         },
       })

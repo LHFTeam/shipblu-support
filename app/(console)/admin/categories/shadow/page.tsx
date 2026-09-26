@@ -4,6 +4,7 @@ import { InfoTip } from '@/components/tooltip';
 import { requirePermission } from '@/lib/auth/guard';
 import { reportFor, runLabels } from '@/lib/categorise-ai/report';
 import { CONVERSATION_CHANNELS, hiddenChannels } from '@/lib/tickets/channel-policy';
+import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
 
 export const dynamic = 'force-dynamic';
 
@@ -264,7 +265,7 @@ export default async function ShadowCategorisationPage({
 function dateRange(firstAt: Date | null, lastAt: Date | null): string {
   const format = (at: Date) =>
     at.toLocaleString('en-GB', {
-      timeZone: 'Africa/Cairo',
+      timeZone: TEAM_TIME_ZONE,
       dateStyle: 'medium',
       timeStyle: 'short',
     });

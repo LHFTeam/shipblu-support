@@ -93,6 +93,10 @@ beforeEach(() => {
   };
   resetEnvCache();
   writes.length = 0;
+  // Reset with the other recorders: the conflict-target assertion compares the
+  // whole array, so without this it passes only while its test is the file's
+  // first POST, and any reorder or new test above it fails it for no reason.
+  conflictTargets.length = 0;
   conflict = false;
   enqueue.mockClear();
   vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -184,6 +188,32 @@ describe('a signed delivery', () => {
     await deliver(empty);
 
     expect(writes[0]).toMatchObject({ providerEventId: null, signatureVerified: true });
+  });
+
+  it('keys a long batch on every wamid in it, not on the first few', async () => {
+    const batchOf = (count: number) => ({
+      object: 'whatsapp_business_account',
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                messages: Array.from({ length: count }, (_, i) => ({
+                  id: `wamid.HBgMMjAxMDAwMDAwMDAwFQIAEhgUM0E${String(i).padStart(16, '0')}AA==`,
+                })),
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    await deliver(batchOf(12));
+    await deliver(batchOf(13));
+
+    const [first, later] = writes.map((w) => w.providerEventId as string);
+    expect(first!.length).toBeLessThanOrEqual(500);
+    expect(later).not.toBe(first);
   });
 
   it('answers a redelivery 200, so Meta stops, and queues nothing', async () => {

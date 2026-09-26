@@ -1,14 +1,13 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { and, asc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, isNull } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   agents,
   channels,
   groups,
   invites,
-  jobs,
   ticketCategories,
   ticketRootCauses,
   whatsappAccounts,
@@ -23,7 +22,7 @@ import { destroyAllSessionsForAgent } from '@/lib/auth/session';
 import { listFolderOptions } from '@/lib/kb/admin';
 import { LOCALES } from '@/lib/kb/locale';
 import { resolveFaqFolders } from '@/lib/widget/config';
-import { enqueue } from '@/lib/queue';
+import { enqueue, hasActiveJob } from '@/lib/queue';
 import { appUrl, env } from '@/lib/env';
 
 export type AdminState = {
@@ -408,15 +407,7 @@ export async function startFreshdeskImport(
   // A second import running against the same rows would not corrupt anything —
   // every write is idempotent — but it would double the API calls against
   // Freshdesk's per-minute rate limit and make the logs unreadable.
-  const running = await db
-    .select({ id: jobs.id })
-    .from(jobs)
-    .where(
-      sql`${jobs.type} = 'import_freshdesk_kb' and ${jobs.status} in ('pending', 'processing')`,
-    )
-    .limit(1);
-
-  if (running.length > 0) {
+  if (await hasActiveJob('import_freshdesk_kb')) {
     return { error: 'An import is already queued or running.' };
   }
 
@@ -458,15 +449,7 @@ export async function startLocationBackfill(
 ): Promise<AdminState> {
   await requirePermission('admin.agents');
 
-  const running = await db
-    .select({ id: jobs.id })
-    .from(jobs)
-    .where(
-      sql`${jobs.type} = 'backfill_message_locations' and ${jobs.status} in ('pending', 'processing')`,
-    )
-    .limit(1);
-
-  if (running.length > 0) {
+  if (await hasActiveJob('backfill_message_locations')) {
     return { error: 'A location backfill is already queued or running.' };
   }
 
@@ -502,15 +485,7 @@ export async function startShipmentBackfill(
 ): Promise<AdminState> {
   await requirePermission('admin.agents');
 
-  const running = await db
-    .select({ id: jobs.id })
-    .from(jobs)
-    .where(
-      sql`${jobs.type} = 'backfill_shipment_links' and ${jobs.status} in ('pending', 'processing')`,
-    )
-    .limit(1);
-
-  if (running.length > 0) {
+  if (await hasActiveJob('backfill_shipment_links')) {
     return { error: 'A backfill is already queued or running.' };
   }
 

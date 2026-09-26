@@ -17,8 +17,7 @@
  */
 
 import type { TicketFieldOption, TicketFieldValidation } from '@/db/schema/config';
-
-const ZONE = 'Africa/Cairo';
+import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
 
 export type TicketFieldType =
   | 'text'
@@ -142,7 +141,7 @@ export function formatForInput(def: TicketFieldDef, value: unknown): string {
     // exactly `yyyy-MM-ddTHH:mm`, and every locale's own rendering of that is
     // something else.
     const parts = new Intl.DateTimeFormat('en-GB', {
-      timeZone: ZONE,
+      timeZone: TEAM_TIME_ZONE,
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',

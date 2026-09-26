@@ -6,7 +6,7 @@ import { emailProvider } from '@/lib/email/providers';
 import { REPLY_ABOVE_MARKER } from '@/lib/email/quote-strip';
 import { textToHtml } from '@/lib/html/sanitize';
 import { replyToAddress } from '@/lib/email/reply-address';
-import { buildReplySubject, formatMessageId } from '@/lib/email/threading';
+import { buildReferences, buildReplySubject, formatMessageId } from '@/lib/email/threading';
 import type { OutboundEmail } from '@/lib/email/types';
 import type { ClaimedJob } from '@/lib/queue';
 
@@ -128,21 +128,6 @@ export async function sendEmail(job: ClaimedJob): Promise<void> {
     // provider keeps refusing it.
     throw error;
   }
-}
-
-/**
- * The References chain: the parent, then this message's own id.
- *
- * Including our own id is a deliberate belt against providers that replace the
- * Message-ID header — Postmark and SES both reserve the right to, and neither
- * announces it. References is left alone by every provider we have used, so an
- * id that appears there is still findable when the customer replies, even if
- * the header we set never reached them.
- */
-function buildReferences(inReplyTo: string | null, ownMessageId: string): string[] {
-  const chain = inReplyTo ? [inReplyTo] : [];
-  if (!chain.includes(ownMessageId)) chain.push(ownMessageId);
-  return chain;
 }
 
 /** Stable per message, so the id in References matches the one in the header. */

@@ -19,86 +19,10 @@
  * nobody remembers gets deleted the first time it is inconvenient.
  */
 
-import { fail, failures } from './lib.mjs';
-import { checkEnvParity } from './rules/env-parity.mjs';
-import { checkRenderGroups } from './rules/render-groups.mjs';
-import { checkJobRegistry } from './rules/job-registry.mjs';
-import { checkDbJobs } from './rules/db-jobs.mjs';
-import { checkPostMigrationSql } from './rules/db-sql.mjs';
-import { checkNoForceRls } from './rules/force-rls.mjs';
-import { checkShipmentPayloadConfinement } from './rules/shipment-payload.mjs';
-import { checkServerActions } from './rules/server-actions.mjs';
-import { checkSanitiserConfinement } from './rules/sanitiser.mjs';
-import { checkArticleNormalisation } from './rules/article-normalisation.mjs';
-import { checkSlugConfinement } from './rules/slugify.mjs';
-import { checkNoDomTitleAttribute } from './rules/dom-title.mjs';
-import { checkLikePatternsUseTheBuilder } from './rules/like-patterns.mjs';
-import { checkConsolePagesScroll } from './rules/console-scroll.mjs';
-import { checkLightOnly } from './rules/light-only.mjs';
-import { checkFramingHeaders } from './rules/framing.mjs';
-import { checkNextAgentRulesOff } from './rules/next-agent-rules.mjs';
-import { checkNoCommittedEnvFiles } from './rules/secrets.mjs';
-import { checkInstructionSymlinks } from './rules/agents-symlinks.mjs';
-import { checkMigrationsNotHandEdited } from './rules/generated-files.mjs';
-import { checkFormSystemKeys } from './rules/form-system-keys.mjs';
-import { checkAutomatedRepliesDoNotCountAsAgentReplies } from './rules/automated-reply-boundary.mjs';
-import { checkClientBundleStaysOutOfTheDatabase } from './rules/client-bundle.mjs';
-import { checkNoDeadExports } from './rules/dead-exports.mjs';
+import { failures, runCheck } from './lib.mjs';
+import { RULES } from './rules.mjs';
 
-// ---------------------------------------------------------------------------
-
-const RULES = [
-  ['env-parity', checkEnvParity],
-  ['render-groups', checkRenderGroups],
-  ['job-registry', checkJobRegistry],
-  ['db-jobs', checkDbJobs],
-  // ---------------------------------------------------------------------------
-  // SQL that Drizzle does not write
-  //
-  // db/sql/*.sql is replayed after every migration, so each file has to survive
-  // being run again — and db/migrate.ts sends each file as one implicit
-  // transaction, which CREATE INDEX CONCURRENTLY cannot run inside.
-  //
-  // The database job in CI proves idempotency by actually replaying these files.
-  // These checks are the cheap half: they name the offending line instead of
-  // handing back a Postgres error from the middle of a 500-line file.
-  // ---------------------------------------------------------------------------
-  ['db-sql', checkPostMigrationSql],
-  ['force-rls', checkNoForceRls],
-  ['shipment-payload', checkShipmentPayloadConfinement],
-  // ---------------------------------------------------------------------------
-  // Source conventions that are one grep away from being enforced
-  // ---------------------------------------------------------------------------
-  ['server-actions', checkServerActions],
-  ['sanitiser', checkSanitiserConfinement],
-  ['article-normalisation', checkArticleNormalisation],
-  ['slugify', checkSlugConfinement],
-  ['dom-title', checkNoDomTitleAttribute],
-  ['like-patterns', checkLikePatternsUseTheBuilder],
-  ['console-scroll', checkConsolePagesScroll],
-  ['light-only', checkLightOnly],
-  ['framing', checkFramingHeaders],
-  ['next-agent-rules', checkNextAgentRulesOff],
-  ['secrets', checkNoCommittedEnvFiles],
-  ['agents-symlinks', checkInstructionSymlinks],
-  ['generated-files', checkMigrationsNotHandEdited],
-  ['form-system-keys', checkFormSystemKeys],
-  ['automated-reply-boundary', checkAutomatedRepliesDoNotCountAsAgentReplies],
-  ['client-bundle', checkClientBundleStaysOutOfTheDatabase],
-  ['dead-exports', checkNoDeadExports],
-];
-
-for (const [name, run] of RULES) {
-  try {
-    run();
-  } catch (error) {
-    fail(
-      name,
-      '(check itself)',
-      `the check threw, which usually means the file it reads changed shape: ${error.message}`,
-    );
-  }
-}
+for (const [name, run] of RULES) runCheck(name, run);
 
 if (failures.length === 0) {
   console.log(`repo rules: ${RULES.length} checks, no violations.`);

@@ -4131,11 +4131,18 @@ null`, and argued it from write cost and 13 MB of disk. The read side turned
     `DOMException`, which names no call and is not the client's error type. A
     body read outside the client's error handling therefore escapes it — and on
     a send the provider had already accepted, that becomes a retry and a second
-    copy to the customer. Nothing on `main` ever did this, because nothing there
-    passed a signal: it was caught in review of the first commits of row 2.8 of
-    `plans/refactor-in-stages.md`, before any of them merged. That row, open at
-    the time of writing as #184–#188, gives every outbound call in a job path a
-    deadline and reads each body inside it.
+    copy to the customer. The escape itself never reached `main`: it was caught
+    in review of the first commits of row 2.8 of `plans/refactor-in-stages.md`,
+    before any of them merged, and that row (#184–#188) gives every outbound
+    call in a job path a deadline and reads each body inside it. Two clients
+    already passed a signal before it, `lib/shipments/platform.ts` and
+    `lib/typesafe/client.ts`, and both read the body inside their own `try`, so a
+    deadline passing mid-body there is caught and retried as transient. Neither
+    sends anything to a customer. Until the follow-up to row 2.8 (#205) both
+    misreported it, though: a timeout mid-body read as "a 200 that was not
+    JSON", which points at a proxy rather than at latency, and one at the status
+    as the signal's own nameless "aborted due to timeout". Each now checks
+    `isTimeout` from `lib/http/deadline.ts` and names the deadline in seconds.
 
 74. **A run of merges to `main` shows cancelled CI runs, and they are not
     failures.** _2026-09-25._ `ci.yml` puts every run for a ref in one
