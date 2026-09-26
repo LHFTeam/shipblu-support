@@ -187,6 +187,23 @@ describe('a Freshdesk request', () => {
   });
 
   /**
+   * A DNS failure or a reset says the same thing a deadline does: Freshdesk did
+   * not answer. It surfaced as a bare `TypeError: fetch failed`, which the
+   * importer could not tell from an item's own failure.
+   */
+  it('that cannot reach Freshdesk fails as a Freshdesk error that never got an answer', async () => {
+    globalThis.fetch = (async () => {
+      throw new TypeError('fetch failed');
+    }) as typeof fetch;
+
+    const failure = getTranslatedCategory(1, 'ar');
+
+    await expect(failure).rejects.toBeInstanceOf(FreshdeskError);
+    await expect(failure).rejects.toMatchObject({ status: 0, isTransient: true });
+    await expect(failure).rejects.toThrow(/unreachable: fetch failed/);
+  });
+
+  /**
    * The signal governs the body as well as the status. A deadline passing
    * mid-body rejected with the signal's own reason, which is not a
    * `FreshdeskError` and names no path.

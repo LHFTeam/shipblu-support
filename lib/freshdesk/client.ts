@@ -79,8 +79,9 @@ const TIMEOUT_MS = 15_000;
  * so one request held every queued job, sends and syncs included, for that
  * long. The body is read inside it because the signal governs the read too: a
  * deadline passing mid-body rejected with the signal's own reason, which names
- * no path. A timeout is a transient failure like a 5xx: the queue's backoff
- * retries the import.
+ * no path. A request that never answered fails the import rather than one
+ * item of it, and the queue's backoff retries the run: carrying on would spend
+ * the deadline again on every request left.
  */
 async function request(path: string): Promise<{ response: Response; text: string }> {
   const { base, auth } = credentials();
@@ -92,14 +93,17 @@ async function request(path: string): Promise<{ response: Response; text: string
     });
     return { response, text: await response.text() };
   } catch (error) {
-    if (error instanceof DOMException && error.name === 'TimeoutError') {
-      throw new FreshdeskError(
-        `Freshdesk ${path} did not answer in ${TIMEOUT_MS / 1000}s`,
-        0,
-        true,
-      );
-    }
-    throw error;
+    // Status 0: Freshdesk never answered, which the importer treats as the end
+    // of the run rather than one item's failure — see `record` there. A DNS
+    // failure or a reset is the same fact as a deadline, so it takes the same
+    // shape, as it does in the other clients here.
+    throw new FreshdeskError(
+      error instanceof DOMException && error.name === 'TimeoutError'
+        ? `Freshdesk ${path} did not answer in ${TIMEOUT_MS / 1000}s`
+        : `Freshdesk ${path} unreachable: ${error instanceof Error ? error.message : String(error)}`,
+      0,
+      true,
+    );
   }
 }
 
