@@ -6,6 +6,8 @@
  * URL structure, and retrofitting it means revisiting every page.
  */
 
+import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
+
 export const LOCALES = ['en', 'ar'] as const;
 export type Locale = (typeof LOCALES)[number];
 
@@ -466,7 +468,7 @@ export function formatTimestamp(locale: Locale, value: Date | string): string {
   return new Intl.DateTimeFormat(locale === 'ar' ? 'ar-EG-u-nu-latn' : 'en-GB', {
     dateStyle: 'medium',
     timeStyle: 'short',
-    timeZone: 'Africa/Cairo',
+    timeZone: TEAM_TIME_ZONE,
   }).format(new Date(value));
 }
 
@@ -500,6 +502,6 @@ export function formatCalendarDate(locale: Locale, value: string): string {
 export function formatArticleDate(locale: Locale, value: Date | string): string {
   return new Intl.DateTimeFormat(locale === 'ar' ? 'ar-EG' : 'en-GB', {
     dateStyle: 'long',
-    timeZone: 'Africa/Cairo',
+    timeZone: TEAM_TIME_ZONE,
   }).format(new Date(value));
 }

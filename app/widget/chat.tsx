@@ -8,6 +8,7 @@ import { copyFor } from './copy';
 import { WidgetHome } from './home';
 import { WidgetThread, type OfflineDetails } from './thread';
 import type { ArticleLink, Message, WidgetView } from './types';
+import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
 
 /**
  * The widget shell: which screen is showing, and everything that outlives one.
@@ -652,6 +653,6 @@ function formatOpens(iso: string, locale: Locale): string {
     weekday: 'short',
     hour: '2-digit',
     minute: '2-digit',
-    timeZone: 'Africa/Cairo',
+    timeZone: TEAM_TIME_ZONE,
   }).format(new Date(iso));
 }
