@@ -67,13 +67,41 @@ function credentials() {
   };
 }
 
-/** Returns null on 404 instead of throwing, for endpoints that may not exist. */
-async function getOptional<T>(path: string): Promise<T | null> {
+/** A slow page of articles is seconds; anything past this is not coming back. */
+const TIMEOUT_MS = 15_000;
+
+/**
+ * One GET, with a deadline.
+ *
+ * The deadline is what keeps the rest of the queue moving. The importer runs as
+ * a job, and the worker awaits its whole batch before it claims another — so a
+ * request that never answered stopped every queued job, sends and syncs
+ * included, until the process restarted. A timeout is a transient failure like
+ * a 5xx: the queue's backoff retries the import.
+ */
+async function request(path: string): Promise<Response> {
   const { base, auth } = credentials();
 
-  const response = await fetch(`${base}${path}`, {
-    headers: { Authorization: auth, Accept: 'application/json' },
-  });
+  try {
+    return await fetch(`${base}${path}`, {
+      headers: { Authorization: auth, Accept: 'application/json' },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'TimeoutError') {
+      throw new FreshdeskError(
+        `Freshdesk ${path} did not answer in ${TIMEOUT_MS / 1000}s`,
+        0,
+        true,
+      );
+    }
+    throw error;
+  }
+}
+
+/** Returns null on 404 instead of throwing, for endpoints that may not exist. */
+async function getOptional<T>(path: string): Promise<T | null> {
+  const response = await request(path);
 
   // 404 is the normal answer for "this item has no translation in that
   // language", so it is a result rather than a failure.
@@ -92,11 +120,7 @@ async function getOptional<T>(path: string): Promise<T | null> {
 }
 
 async function get<T>(path: string): Promise<T> {
-  const { base, auth } = credentials();
-
-  const response = await fetch(`${base}${path}`, {
-    headers: { Authorization: auth, Accept: 'application/json' },
-  });
+  const response = await request(path);
 
   if (!response.ok) {
     const text = await response.text();

@@ -431,6 +431,19 @@ This is low priority, one provider per PR.
   provider has accepted a send means a retry, and a retry means a duplicate
   message to a customer.
 
+Found while starting this row: it matters more than "low priority" suggests,
+and "no timeout" is not a safe choice for a send.
+
+- **One hung request stops the whole queue.** `runOnce` in `worker/index.ts`
+  awaits every job in a batch before it claims the next batch, and the stalled
+  job sweep runs only between batches. A request that never answers therefore
+  stops every queued job — sends, syncs, sweeps — until the process restarts.
+- **The restart then runs the job again.** Startup reclaims anything locked for
+  more than five minutes (`reclaimStalledJobs`). For a send the provider had
+  already accepted, that is the duplicate the 60-second floor exists to avoid.
+- So every outbound call in a job path gets a deadline. A send's sits between
+  60 seconds and the five-minute reclaim window.
+
 ### 2.9 Replies never get paragraphs
 
 Found while verifying 2.2 end to end, not by the audit. A browser submits a
