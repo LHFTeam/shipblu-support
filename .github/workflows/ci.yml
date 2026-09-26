@@ -284,3 +284,18 @@ jobs:
           # of them internal, and every role on the ladder addressed. A folder
           # that lost its floor is how a supervisor article reaches every agent.
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/ci/handbook-audience.sql
+
+      # `npm run db:seed` is a hand-run script that no deploy runs (§6.30 of
+      # docs/PROJECT-STATE.md), so this is the one place it is exercised before
+      # somebody needs it.
+      - name: The baseline seed runs
+        run: npm run db:seed
+
+      # The database tier, `*.db.test.ts`. Last, because every test in it
+      # starts by truncating every table, and the steps above assert on rows
+      # they wrote. Its own variable rather than DATABASE_URL: vitest.db.config.mts
+      # says why.
+      - name: Database tests
+        run: npm run test:db
+        env:
+          TEST_DATABASE_URL: ${{ env.DATABASE_URL }}

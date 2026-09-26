@@ -58,6 +58,7 @@ npm run job -- cleanup         # run one scheduled job by hand
 | Command                           | Purpose                                  |
 | --------------------------------- | ---------------------------------------- |
 | `npm run test`                    | Vitest unit tests                        |
+| `npm run test:db`                 | The database tier, `*.db.test.ts`        |
 | `npm run typecheck`               | `tsc --noEmit`                           |
 | `npm run lint`                    | ESLint (flat config)                     |
 | `npm run format` / `format:check` | Prettier                                 |
@@ -85,7 +86,7 @@ npx prettier --write AGENTS.md         # one file
 | ------------ | --------------------------------------------------------------------- |
 | `verify`     | `tsc`, `eslint`, `format:check`, `vitest`, `knip`, `build` — one each |
 | `repo-rules` | `scripts/ci/repo-rules.mjs`, and migration drift against `db/schema/` |
-| `database`   | migrations, `db/sql/` and every DB-only job handler, on real Postgres |
+| `database`   | migrations, `db/sql/`, DB-only jobs, `*.db.test.ts`, on real Postgres |
 
 Run the same thing locally when you want the answer sooner — the `verify` job
 calls these same npm scripts, so `npm run lint` fails on a warning here as it
@@ -152,8 +153,9 @@ Three things CI still cannot check, so they remain yours:
 
 - **Which side of the read/write boundary a sanitiser call sits on.** CI keeps
   `sanitize-html` in one module. It cannot tell that you called it on the way in.
-- **Raw SQL outside a job handler.** The `database` job runs the handlers; a
-  query in a page or an action is still only ever executed in production.
+- **Raw SQL outside a job handler.** The `database` job runs the handlers and
+  the `*.db.test.ts` tier; a query in a page or an action that no database test
+  reaches is still only ever executed in production.
 - **Anything about live infrastructure.** See
   [Tool use](#tool-use-and-live-infrastructure).
 
@@ -767,12 +769,13 @@ after the window opens, says where they start and why (§6.54).
 
 ## Tests
 
-Vitest, `*.test.ts` next to the code, node environment, no database. Put tests
-where bugs actually hide — email threading order, quote stripping, the WhatsApp
-24-hour boundary, business hours across DST, Arabic slugs, the condition
-language — not on glue code. Add one when you fix a bug of that kind.
+Vitest, `*.test.ts` next to the code, node environment, no database — a test
+that needs Postgres is a `*.db.test.ts`, below. Put tests where bugs actually
+hide — email threading order, quote stripping, the WhatsApp 24-hour boundary,
+business hours across DST, Arabic slugs, the condition language — not on glue
+code. Add one when you fix a bug of that kind.
 
-**Vitest runs without a database, so no SQL is executed there.** A query
+**`npm run test` runs without a database, so no SQL is executed there.** A query
 Postgres will reject still passes every static check: `tsc` type-checks the
 Drizzle builder, not the statement it emits, and a raw `sql` fragment is a
 template string to all of them. `backfill_meta_profiles` shipped green and died
@@ -787,9 +790,28 @@ where that error is raised.
 
 It does not cover queries in pages and actions. So a raw `sql` fragment, a
 `->>`, a cast or a join across an enum **outside a job handler** still gets run
-against the real database before it is pushed — `execute_sql` on the production
-project answers it in one call, and reading the row count back is also how you
-learn the predicate selects what you meant.
+against a real database before it is pushed — a `*.db.test.ts` beside it, or
+`execute_sql` on the production project, which answers it in one call; reading
+the row count back is also how you learn the predicate selects what you meant.
+
+**The database tier is where a query is tested, not only planned.** A file named
+`*.db.test.ts` is left out of `npm run test` and run by `npm run test:db` — in
+CI as the last step of the `database` job, after `npm run db:seed` — against a
+migrated Postgres named by `TEST_DATABASE_URL`, never `DATABASE_URL`. Start the
+file with `withCleanDatabase()` from `lib/testing/db.ts`: every test begins from
+a truncated database holding only what the seed writes (`db/baseline.ts`), so a
+test states every row it depends on and no test can lean on another's. The
+files run one at a time, since they share the database. Because it truncates
+every table it reaches, the helper refuses any database that is not the one
+`TEST_DATABASE_URL` named, or not on this machine. Locally, once:
+
+```bash
+createdb shipblu_test
+export TEST_DATABASE_URL=postgresql://postgres@localhost:5432/shipblu_test
+# db:migrate prefers DATABASE_URL_SESSION, so name both.
+DATABASE_URL=$TEST_DATABASE_URL DATABASE_URL_SESSION=$TEST_DATABASE_URL npm run db:migrate
+npm run test:db
+```
 
 **A bare `Date` interpolated into a `sql` template is the same class of trap.**
 postgres.js gets it as an untyped parameter, assumes text and throws

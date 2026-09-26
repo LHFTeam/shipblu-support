@@ -8,7 +8,9 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['**/*.test.ts', 'scripts/**/*.test.mjs'],
-    exclude: ['node_modules/**', '.next/**'],
+    // The database tier has its own config, vitest.db.config.mts: unit tests
+    // run with no database at all, and those tests cannot run without one.
+    exclude: ['node_modules/**', '.next/**', '**/*.db.test.ts'],
   },
   resolve: {
     alias: {

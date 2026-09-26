@@ -23,6 +23,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:db": "vitest run -c vitest.db.config.mts",
     "db:seed": "tsx db/seed.ts"
   },
   "dependencies": {
