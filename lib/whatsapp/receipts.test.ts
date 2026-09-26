@@ -3,7 +3,6 @@ import { lostReceiptNote } from './receipts';
 
 const sent = {
   direction: 'outbound' as const,
-  deliveryStatus: 'sent',
   meta: { wamid: null, wamidLost: true },
 };
 
@@ -14,12 +13,6 @@ describe('lostReceiptNote', () => {
 
   it('says nothing about a send with its wamid', () => {
     expect(lostReceiptNote({ ...sent, meta: { wamid: 'wamid.1' } })).toBeNull();
-  });
-
-  // A row that later failed carries its own reason, and a lost-receipt note
-  // beside "Not delivered" would contradict it.
-  it('says nothing once the row has failed', () => {
-    expect(lostReceiptNote({ ...sent, deliveryStatus: 'failed' })).toBeNull();
   });
 
   it('says nothing about an inbound message, whatever its meta holds', () => {

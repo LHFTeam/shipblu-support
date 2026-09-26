@@ -8,15 +8,16 @@
  * "sent and nothing went wrong", when it means "sent, and nothing will be heard
  * about it either way".
  *
- * Pure and import-free because the conversation view is a client component, and
- * a row that has since failed says nothing here: the failure is the answer.
+ * Pure and import-free because the conversation view is a client component.
+ * It does not look at a failed row: `DeliveryState` renders the failure before
+ * it asks, and `send_whatsapp` writes `wamidLost` only together with `sent`, a
+ * status nothing moves such a row out of.
  */
 export function lostReceiptNote(message: {
   direction: 'inbound' | 'outbound';
-  deliveryStatus: string;
   meta: Record<string, unknown> | null;
 }): string | null {
-  if (message.direction !== 'outbound' || message.deliveryStatus === 'failed') return null;
+  if (message.direction !== 'outbound') return null;
   if (message.meta?.wamidLost !== true) return null;
 
   return (
