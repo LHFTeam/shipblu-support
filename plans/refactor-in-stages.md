@@ -94,13 +94,13 @@ conflict on all of them.
 | ----- | ------------------------------------------------ | ----------- | ------- |
 | 0.1   | Commit this plan                                 | #166        | merged  |
 | 0.2   | Harden `server-actions` and minimum-count guards | #167        | merged  |
-| 0.3   | Split `repo-rules.mjs` into per-rule modules     | #191–#192   | open    |
-| 0.4   | CI tidy-up                                       | #193–#195   | open    |
+| 0.3   | Split `repo-rules.mjs` into per-rule modules     | #191–#192   | merged  |
+| 0.4   | CI tidy-up                                       | #193–#195   | merged  |
 | 0.5   | Remove Playwright                                | #173        | merged  |
 | 1.1   | `lib/testing/` fixtures                          |             | pending |
 | 1.2   | Database test tier                               |             | pending |
 | 1.3   | Characterise the seven ingest entry points       |             | pending |
-| 1.4   | Webhook route tests                              | #196        | open    |
+| 1.4   | Webhook route tests                              | #196        | merged  |
 | 1.5   | DB test for the admin overview's raw SQL         |             | pending |
 | 2.1   | Email webhook dedupes before it verifies         | #168        | merged  |
 | 2.2   | Portal agent replies bypass `carrierFor()`       | #169        | merged  |
@@ -109,7 +109,7 @@ conflict on all of them.
 | 2.5   | Ids taken from `FormData`                        | #180–#182   | merged  |
 | 2.6   | KB admin search does not escape LIKE             | #176        | merged  |
 | 2.7   | One `GRAPH_VERSION`                              | #175        | merged  |
-| 2.8   | Fetch timeouts, one provider per PR              | #184–#188   | open    |
+| 2.8   | Fetch timeouts, one provider per PR              | #184–#188   | merged  |
 | 2.9   | Replies never get paragraphs (CRLF)              | #171        | merged  |
 | 2.10  | Email webhook fails open without its secret      | #177        | merged  |
 | 2.11  | Staging's `local` email webhook accepts anything | #177        | merged  |
