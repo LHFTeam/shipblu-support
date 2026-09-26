@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { HOST_SAYS, SOURCE, WIDGET_SAYS } from '@/lib/widget/protocol';
 import { GET } from './route';
 
 /**
@@ -38,5 +39,25 @@ describe('the embed snippet', () => {
     for (const method of ['identify', 'clear', 'setLocale', 'compose', 'open', 'close', 'toggle']) {
       expect(body).toMatch(new RegExp(`^\\s*${method}:`, 'm'));
     }
+  });
+
+  /**
+   * The snippet speaks the frame's protocol by name, and a name that is not in
+   * `lib/widget/protocol.ts` reads as `undefined` in the browser — no error,
+   * just a message the frame ignores. So every name the served script reaches
+   * for has to be declared, and no quoted wire value may be left behind to
+   * drift from the frame's copy.
+   */
+  it('speaks only the names lib/widget/protocol.ts declares', async () => {
+    const body = await (await GET()).text();
+    const declared: Record<string, Record<string, string>> = { SOURCE, WIDGET_SAYS, HOST_SAYS };
+
+    const used = [...body.matchAll(/\b(SOURCE|WIDGET_SAYS|HOST_SAYS)\.(\w+)/g)];
+    expect(used.length).toBeGreaterThanOrEqual(13);
+    for (const [, group, name] of used) {
+      expect(Object.keys(declared[group!]!)).toContain(name);
+    }
+
+    expect(body).not.toMatch(/'shipblu-(host|widget)'/);
   });
 });

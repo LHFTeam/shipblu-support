@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { direction, type Locale } from '@/lib/kb/locale';
+import { HOST_SAYS, SOURCE, WIDGET_SAYS } from '@/lib/widget/protocol';
 import { initialView } from '@/lib/widget/view';
 import { WidgetArticle } from './article';
 import { copyFor } from './copy';
@@ -308,7 +309,7 @@ export function WidgetChat({
     // '*' is correct here and only here: the widget does not know which origin
     // embedded it, and the payload carries nothing secret — an unread count.
     // The host's listener checks *our* origin, which is the half that matters.
-    window.parent?.postMessage({ source: 'shipblu-widget', ...message }, '*');
+    window.parent?.postMessage({ source: SOURCE.widget, ...message }, '*');
   }, []);
 
   // --- Who the host page says this is --------------------------------------
@@ -382,7 +383,7 @@ export function WidgetChat({
    */
   useEffect(() => {
     if (!token) return;
-    postToHost({ type: 'ready' });
+    postToHost({ type: WIDGET_SAYS.ready });
     void sendIdentity(token);
   }, [token, postToHost, sendIdentity]);
 
@@ -398,7 +399,7 @@ export function WidgetChat({
   useEffect(() => {
     const replies = messages.filter((message) => message.from === 'agent').length;
     if (panelOpen && view === 'thread') seenCount.current = replies;
-    postToHost({ type: 'unread', count: Math.max(0, replies - seenCount.current) });
+    postToHost({ type: WIDGET_SAYS.unread, count: Math.max(0, replies - seenCount.current) });
   }, [messages, view, panelOpen, postToHost]);
 
   useEffect(() => {
@@ -412,12 +413,12 @@ export function WidgetChat({
        * itself.
        */
       if (event.origin !== window.location.origin && !hostOrigins.includes(event.origin)) return;
-      if (event.data?.source !== 'shipblu-host') return;
+      if (event.data?.source !== SOURCE.host) return;
 
-      if (event.data.type === 'opened') setPanelOpen(true);
-      if (event.data.type === 'closed') setPanelOpen(false);
+      if (event.data.type === HOST_SAYS.opened) setPanelOpen(true);
+      if (event.data.type === HOST_SAYS.closed) setPanelOpen(false);
 
-      if (event.data.type === 'identify') {
+      if (event.data.type === HOST_SAYS.identify) {
         identity.current = {
           identity: event.data.identity,
           signature: typeof event.data.signature === 'string' ? event.data.signature : null,
@@ -432,13 +433,13 @@ export function WidgetChat({
        * meant to write under, and a host page — or anyone who can post to this
        * frame from an allowed origin — should not be able to fill the box.
        */
-      if (event.data.type === 'compose') {
+      if (event.data.type === HOST_SAYS.compose) {
         compose(typeof event.data.text === 'string' ? event.data.text.slice(0, 1000) : '');
       }
 
       // The host page signing its user out. Not merely an identity of null: the
       // point is that the next person at this browser starts clean.
-      if (event.data.type === 'clear') {
+      if (event.data.type === HOST_SAYS.clear) {
         identity.current = null;
         resets.current = 0;
         startFreshSession();
@@ -457,7 +458,7 @@ export function WidgetChat({
      * those leaves a hidden panel believing it is visible, which silently
      * swallows the unread badge. The host answers this with its real state.
      */
-    postToHost({ type: 'hello' });
+    postToHost({ type: WIDGET_SAYS.hello });
 
     return () => window.removeEventListener('message', onHostMessage);
   }, [compose, hostOrigins, postToHost, sendIdentity, startFreshSession, token]);
@@ -595,7 +596,7 @@ export function WidgetChat({
 
         <button
           type="button"
-          onClick={() => postToHost({ type: 'close' })}
+          onClick={() => postToHost({ type: WIDGET_SAYS.close })}
           aria-label={copy.close}
           className="ms-auto rounded px-2 py-1 opacity-50 hover:opacity-100"
         >
