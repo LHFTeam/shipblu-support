@@ -222,8 +222,10 @@ export async function ingestInboundEmail(email: ParsedInboundEmail): Promise<Ing
 
     const messageId = insertedMessage[0]!.id;
 
-    // An autoresponder is not the customer writing, so it does not move the
-    // time the customer last wrote — only the time anything last arrived.
+    // An autoresponder is not the customer writing, so on a ticket that already
+    // exists it does not move the time the customer last wrote — only the time
+    // anything last arrived. A new ticket from one keeps the insert's value: it
+    // is filed as spam, which the reports and the portal leave out.
     await tx
       .update(conversations)
       .set(

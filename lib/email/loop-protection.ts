@@ -59,8 +59,10 @@ const AUTOMATED_LOCAL_PARTS = [
 function isAutoReplyHeader(email: ParsedInboundEmail): boolean {
   return (
     header(email, 'auto-submitted')?.trim().toLowerCase() === 'auto-replied' ||
-    header(email, 'x-autoreply') !== undefined ||
-    header(email, 'x-autorespond') !== undefined ||
+    // Truthy, not merely present: the chain below reads these the same way, so
+    // an empty `X-Autoreply:` is neither automated nor an auto-reply.
+    Boolean(header(email, 'x-autoreply')) ||
+    Boolean(header(email, 'x-autorespond')) ||
     header(email, 'precedence')?.trim().toLowerCase() === 'auto_reply'
   );
 }
@@ -76,7 +78,10 @@ export function classifyAutomation(email: ParsedInboundEmail): AutomationVerdict
   // Read apart from the chain below, which stops at the first signal: an
   // `Auto-Submitted: auto-generated` with `X-Autoreply` beside it is still an
   // autoresponder. A bounce is never one — it is kept as the failure it
-  // reports, which is the one automated mail an agent needs to see.
+  // reports, which is the one automated mail an agent needs to see. And an
+  // auto-reply is always automated: ingest skips the reopen for one, and the
+  // acknowledgement code assumes it never runs on a resolved ticket, so an
+  // auto-reply that still allowed `shouldAutoReply` would answer a finished one.
   const autoReply = isAutoReplyHeader(email);
 
   const verdict = (
@@ -88,7 +93,7 @@ export function classifyAutomation(email: ParsedInboundEmail): AutomationVerdict
     return {
       isAutomated,
       isBounce,
-      isAutoReply: autoReply && !isBounce,
+      isAutoReply: autoReply && isAutomated && !isBounce,
       shouldAutoReply: !isAutomated && !isBounce,
       reason,
     };

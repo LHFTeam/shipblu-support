@@ -149,6 +149,17 @@ describe('classifyAutomation: isAutoReply', () => {
     expect(v.isAutoReply).toBe(false);
   });
 
+  // The chain ignores an empty vendor header, so the flag must too. Otherwise the
+  // mail is an auto-reply that still allows our acknowledgement: ingest keeps it
+  // from reopening a resolved ticket, and the acknowledgement then answers it.
+  it.each([['X-Autoreply'], ['X-Autorespond']])(
+    'ignores an empty %s, as the chain does',
+    (name) => {
+      const v = classifyAutomation(email({ headers: { [name.toLowerCase()]: '' } }));
+      expect(v).toMatchObject({ isAutomated: false, isAutoReply: false, shouldAutoReply: true });
+    },
+  );
+
   it('is not an auto-reply on Auto-Submitted: no, or on an ordinary email', () => {
     expect(classifyAutomation(email({ headers: { 'auto-submitted': 'no' } })).isAutoReply).toBe(
       false,
