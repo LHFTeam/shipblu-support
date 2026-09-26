@@ -10,6 +10,7 @@ import {
   getMediaUrl,
   listTemplates,
   mediaTimeout,
+  sendTemplate,
   sendText,
 } from './client';
 import { ACCESS_TOKEN_CODE } from './errors';
@@ -31,6 +32,88 @@ async function classify(): Promise<WhatsAppApiError> {
 }
 
 withTestEnv({ META_PAGE_ACCESS_TOKEN: 'token', WHATSAPP_PHONE_NUMBER_ID: '123' });
+
+/**
+ * What a send puts on the wire, whole. A wrong shape is invisible in the
+ * response — Graph answers a path it does not have with the same error it gives
+ * a deleted resource — so the URL and the body are asserted exactly rather than
+ * by `toContain`, which let an extra segment in the path through.
+ */
+describe('the request a send makes', () => {
+  function capture() {
+    return stubFetch(async () => new Response(JSON.stringify({ messages: [{ id: 'wamid.1' }] })));
+  }
+
+  // The content type is part of the shape: Graph reads the body as JSON only
+  // because of it. The token beside it is pinned by the credential tests below.
+  function sent(fetchMock: ReturnType<typeof capture>) {
+    const [url, init] = fetchMock.mock.calls[0]! as unknown as [string, RequestInit];
+    return {
+      url,
+      method: init.method,
+      contentType: new Headers(init.headers).get('Content-Type'),
+      body: JSON.parse(String(init.body)) as unknown,
+    };
+  }
+
+  it("posts free text to the number's messages edge", async () => {
+    const fetchMock = capture();
+
+    await sendText('201001234567', 'Your parcel is out for delivery', {
+      replyToWamid: 'wamid.customer',
+    });
+
+    expect(sent(fetchMock)).toEqual({
+      url: `${GRAPH_BASE}/123/messages`,
+      method: 'POST',
+      contentType: 'application/json',
+      body: {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: '201001234567',
+        type: 'text',
+        text: { body: 'Your parcel is out for delivery', preview_url: true },
+        context: { message_id: 'wamid.customer' },
+      },
+    });
+  });
+
+  it('posts a template to the same edge, and leaves out components it was not given', async () => {
+    const fetchMock = capture();
+
+    await sendTemplate('201001234567', 'delivery_update', 'ar');
+
+    expect(sent(fetchMock)).toEqual({
+      url: `${GRAPH_BASE}/123/messages`,
+      method: 'POST',
+      contentType: 'application/json',
+      body: {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: '201001234567',
+        type: 'template',
+        template: { name: 'delivery_update', language: { code: 'ar' } },
+      },
+    });
+  });
+
+  it('puts the components it was given inside the template, as given', async () => {
+    const fetchMock = capture();
+    const components = [
+      { type: 'body' as const, parameters: [{ type: 'text' as const, text: 'SB123456789' }] },
+    ];
+
+    await sendTemplate('201001234567', 'delivery_update', 'ar', components);
+
+    expect(sent(fetchMock).body).toEqual({
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: '201001234567',
+      type: 'template',
+      template: { name: 'delivery_update', language: { code: 'ar' }, components },
+    });
+  });
+});
 
 describe('WhatsApp credentials', () => {
   it('authorises with the shared Meta page token', async () => {
