@@ -36,6 +36,11 @@ permissions:
 # runs with this workflow's token and the repository's code; a commit cannot be
 # moved. Dependabot (.github/dependabot.yml) proposes the next release as a
 # reviewable diff, which is the only way a pin changes.
+#
+# Every checkout sets `persist-credentials: false` for the same reason. The
+# default leaves the job's token readable for the rest of the job, in a file
+# `.git/config` points to, and the next step is `npm ci`, which runs third-party
+# install scripts. No step fetches or pushes after checkout, so nothing needs it.
 
 env:
   # Node 22, matching the `engines` pin in package.json (>=22 <23).
@@ -85,6 +90,8 @@ jobs:
             run: npm run build
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -102,8 +109,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The migrations-are-append-only check diffs against the base branch,
-          # which needs more than the default single commit.
+          # which needs more than the default single commit. The history is
+          # fetched here, during checkout, so the token need not outlive it.
           fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -164,6 +173,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
