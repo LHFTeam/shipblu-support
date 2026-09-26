@@ -244,9 +244,7 @@ async function storeAvatar(
     return { path: stored.path, retryable: false };
   } catch (error) {
     // Our own storage being unavailable is the most retryable failure here.
-    console.warn(
-      `[profile_refresh] ${contactId} avatar upload failed: ` + `${errorMessage(error)}`,
-    );
+    console.warn(`[profile_refresh] ${contactId} avatar upload failed: ${errorMessage(error)}`);
     return { path: existingPath, retryable: true };
   }
 }

@@ -137,7 +137,7 @@ export function logIncomingWebhook(delivery: IncomingWebhook): void {
     console.log(describeIncomingWebhook(delivery).join('\n'));
   } catch (error) {
     console.warn(
-      `[webhook:all] could not log the ${delivery.source} delivery: ` + `${errorMessage(error)}`,
+      `[webhook:all] could not log the ${delivery.source} delivery: ${errorMessage(error)}`,
     );
   }
 }

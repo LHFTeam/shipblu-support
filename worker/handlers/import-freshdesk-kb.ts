@@ -96,7 +96,7 @@ export async function importFreshdeskKb(): Promise<void> {
   */
   const record = (what: string, error: unknown) => {
     if (error instanceof FreshdeskError && error.status === 0) throw error;
-    failures.push(`${what}: ${message(error)}`);
+    failures.push(`${what}: ${errorMessage(error)}`);
   };
   let categoryCount = 0;
   let folderCount = 0;
@@ -624,8 +624,4 @@ async function writeRedirects(freshdeskId: number, articleId: string): Promise<v
       .values({ fromPath, articleId })
       .onConflictDoUpdate({ target: kbRedirects.fromPath, set: { articleId } });
   }
-}
-
-function message(error: unknown): string {
-  return errorMessage(error);
 }
