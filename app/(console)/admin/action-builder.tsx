@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Select } from '@/components/ui';
+import { PRIORITY_CHOICES } from '@/lib/tickets/vocabulary';
 
 /**
  * Builds the `actions` array an automation rule performs.
@@ -37,13 +38,6 @@ const KINDS: { value: ActionKind; label: string }[] = [
   { value: 'add_watchers', label: 'Add watchers' },
   { value: 'mark_spam', label: 'Mark as spam' },
   { value: 'send_reply', label: 'Send a canned response' },
-];
-
-const PRIORITIES: Choice[] = [
-  { value: 'low', label: 'Low' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'high', label: 'High' },
-  { value: 'urgent', label: 'Urgent' },
 ];
 
 /**
@@ -170,7 +164,7 @@ function ValueInput({
 
   switch (item.type) {
     case 'set_priority':
-      return select(PRIORITIES, 'Choose a priority…');
+      return select(PRIORITY_CHOICES, 'Choose a priority…');
     case 'set_status':
       return select(CATEGORIES, 'Choose a status…');
     case 'assign_agent':

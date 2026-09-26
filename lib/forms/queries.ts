@@ -1,5 +1,6 @@
 import { and, asc, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
+import type { Priority } from '@/lib/tickets/vocabulary';
 import { ticketForms } from '@/db/schema';
 import type { TicketFieldDef } from '@/lib/tickets/custom-fields';
 import { listTicketFields } from '@/lib/tickets/lookups';
@@ -32,7 +33,7 @@ export type FormRecord = {
   showOnHelpCentre: boolean;
   showInConsole: boolean;
   defaultGroupId: string | null;
-  defaultPriority: 'low' | 'medium' | 'high' | 'urgent' | null;
+  defaultPriority: Priority | null;
   defaultType: string | null;
   defaultTags: string[];
   subjectTemplate: string | null;

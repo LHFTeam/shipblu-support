@@ -13,6 +13,7 @@ import {
   whatsappAccounts,
 } from '@/db/schema';
 import { requirePermission } from '@/lib/auth/guard';
+import { isAgentRole } from '@/lib/auth/permissions';
 import { canonicalUuid } from '@/lib/http/uuid';
 import { forgetCategoryIds } from '@/lib/categorise/apply';
 import { looksLikeEmail, normaliseEmail } from '@/lib/auth/normalise';
@@ -86,7 +87,7 @@ export async function createInvite(_state: AdminState, formData: FormData): Prom
   if (name.length > MAX_INVITE_NAME) {
     return { error: `A name cannot be longer than ${MAX_INVITE_NAME} characters` };
   }
-  if (!['agent', 'supervisor', 'admin', 'account_admin'].includes(role)) {
+  if (!isAgentRole(role)) {
     return { error: 'Unknown role' };
   }
 
@@ -128,7 +129,7 @@ export async function createInvite(_state: AdminState, formData: FormData): Prom
         tokenCiphertext,
         email,
         name,
-        role: role as 'agent' | 'supervisor' | 'admin' | 'account_admin',
+        role,
         invitedByAgentId: admin.id,
         expiresAt,
       })

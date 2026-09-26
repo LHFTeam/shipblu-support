@@ -3,6 +3,7 @@
 import { useId, useState } from 'react';
 import { Input, Select } from '@/components/ui';
 import { SYSTEM_KEYS, type SystemKey } from '@/lib/forms/elements';
+import { PRIORITY_CHOICES } from '@/lib/tickets/vocabulary';
 import { ConditionBuilder, type FieldOption } from '../condition-builder';
 
 /**
@@ -406,12 +407,7 @@ function vocabulary(before: Item[], fields: FieldChoice[]): FieldOption[] {
         value: 'priority',
         label: 'Priority',
         kind: 'choice',
-        choices: [
-          { value: 'low', label: 'Low' },
-          { value: 'medium', label: 'Medium' },
-          { value: 'high', label: 'High' },
-          { value: 'urgent', label: 'Urgent' },
-        ],
+        choices: PRIORITY_CHOICES,
       });
     } else {
       options.push({ value: key, label: SYSTEM_LABELS[key], kind: 'text' });

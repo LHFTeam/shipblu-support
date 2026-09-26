@@ -40,6 +40,7 @@ import { forgetHoursCatalog } from '@/lib/hours/catalog';
 import { formsUsingField } from '@/lib/forms/queries';
 import { slugify } from '@/lib/kb/slug';
 import { parseCondition } from '@/lib/rules/conditions';
+import { isPriority, isStatusCategory, PRIORITIES } from '@/lib/tickets/vocabulary';
 import { parseOptionLines, type TicketFieldDef } from '@/lib/tickets/custom-fields';
 import { listAllTicketFields } from '@/lib/tickets/lookups';
 import { PHRASE_GROUPS } from '@/lib/shipments/status';
@@ -395,13 +396,13 @@ export async function saveStatus(
   const isDefault = formData.get('isDefault') === 'on';
 
   if (!name) return { error: 'Give the status a name' };
-  if (!['open', 'pending', 'resolved', 'closed'].includes(category)) {
+  if (!isStatusCategory(category)) {
     return { error: 'Pick a category' };
   }
 
   const values = {
     name,
-    category: category as 'open' | 'pending' | 'resolved' | 'closed',
+    category,
     stopsSlaClock,
     visibleToCustomer,
     customerLabel,
@@ -765,9 +766,7 @@ export async function saveTicketForm(
     showOnHelpCentre: formData.get('showOnHelpCentre') === 'on',
     showInConsole: formData.get('showInConsole') === 'on',
     defaultGroupId,
-    defaultPriority: PRIORITIES.includes(priority as (typeof PRIORITIES)[number])
-      ? (priority as (typeof PRIORITIES)[number])
-      : null,
+    defaultPriority: isPriority(priority) ? priority : null,
     defaultType: text(formData, 'defaultType') || null,
     defaultTags: text(formData, 'defaultTags')
       .split(',')
@@ -1236,8 +1235,6 @@ export async function deleteHoliday(
 }
 
 // --- SLA policies -----------------------------------------------------------
-
-const PRIORITIES = ['low', 'medium', 'high', 'urgent'] as const;
 
 const HOURS_SOURCES = ['group', 'schedule', 'round_the_clock'] as const;
 type HoursSourceValue = (typeof HOURS_SOURCES)[number];

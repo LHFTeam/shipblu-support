@@ -1,4 +1,5 @@
 import { db } from '@/db/client';
+import { isPriority, type Priority } from '@/lib/tickets/vocabulary';
 import { conversationEvents, messages } from '@/db/schema';
 import { normaliseEmail, looksLikeEmail } from '@/lib/auth/normalise';
 import type { Locale } from '@/lib/kb/locale';
@@ -335,11 +336,9 @@ export async function submitForm(input: {
 }
 
 /** Only an agent is offered the control, and only the four real values count. */
-function priorityFrom(system: SystemValues): 'low' | 'medium' | 'high' | 'urgent' | null {
+function priorityFrom(system: SystemValues): Priority | null {
   const value = system.priority;
-  return value === 'low' || value === 'medium' || value === 'high' || value === 'urgent'
-    ? value
-    : null;
+  return isPriority(value) ? value : null;
 }
 
 /** The labels of the questions a submission left unanswered, for an agent's error. */

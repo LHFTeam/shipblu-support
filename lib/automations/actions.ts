@@ -9,10 +9,16 @@
  */
 
 import type { AssignmentStrategy } from '@/lib/assignment';
+import {
+  isPriority,
+  isStatusCategory,
+  type Priority,
+  type StatusCategory,
+} from '@/lib/tickets/vocabulary';
 
 export type Action =
-  | { type: 'set_priority'; value: 'low' | 'medium' | 'high' | 'urgent' }
-  | { type: 'set_status'; category: 'open' | 'pending' | 'resolved' | 'closed' }
+  | { type: 'set_priority'; value: Priority }
+  | { type: 'set_status'; category: StatusCategory }
   | { type: 'assign_agent'; agentId: string | null }
   | { type: 'assign_group'; groupId: string | null }
   /**
@@ -39,9 +45,7 @@ export type Action =
   | { type: 'mark_spam' }
   | { type: 'send_reply'; cannedResponseId: string };
 
-const PRIORITIES = new Set(['low', 'medium', 'high', 'urgent']);
 const STRATEGIES = new Set(['group_default', 'manual', 'round_robin', 'load_balanced']);
-const CATEGORIES = new Set(['open', 'pending', 'resolved', 'closed']);
 
 /**
  * Validates one stored action.
@@ -56,16 +60,11 @@ export function parseAction(input: unknown): Action | null {
 
   switch (node.type) {
     case 'set_priority':
-      return typeof node.value === 'string' && PRIORITIES.has(node.value)
-        ? { type: 'set_priority', value: node.value as 'low' | 'medium' | 'high' | 'urgent' }
-        : null;
+      return isPriority(node.value) ? { type: 'set_priority', value: node.value } : null;
 
     case 'set_status':
-      return typeof node.category === 'string' && CATEGORIES.has(node.category)
-        ? {
-            type: 'set_status',
-            category: node.category as 'open' | 'pending' | 'resolved' | 'closed',
-          }
+      return isStatusCategory(node.category)
+        ? { type: 'set_status', category: node.category }
         : null;
 
     case 'assign_agent':

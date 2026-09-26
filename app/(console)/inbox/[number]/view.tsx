@@ -25,6 +25,7 @@ import type { CategoryOption, RootCauseOption } from '@/lib/categorise/queries';
 import { describeRequesterRole } from '@/lib/shipments/roles';
 import { humaniseStatus, returnStepLabel, stageDisplay } from '@/lib/shipments/status';
 import { lostReceiptNote } from '@/lib/whatsapp/receipts';
+import { PRIORITIES } from '@/lib/tickets/vocabulary';
 import { formatRemaining, windowState } from '@/lib/whatsapp/window';
 import {
   linkShipment,
@@ -728,7 +729,7 @@ function Sidebar({
           conversationId={conversation.id}
           field="priority"
           value={conversation.priority}
-          options={['low', 'medium', 'high', 'urgent'].map((p) => ({ value: p, label: p }))}
+          options={PRIORITIES.map((p) => ({ value: p, label: p }))}
         />
       </Field>
 
