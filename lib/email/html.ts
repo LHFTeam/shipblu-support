@@ -52,3 +52,27 @@ export function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 }
+
+/**
+ * Plain text for an HTML part, escaped, with its line breaks kept as `<br>`.
+ *
+ * For a block we compose as text and show verbatim — the side conversation's
+ * footer. It differs from `escapeHtml` above in both directions, which is why
+ * the two carry different names: newlines become `<br>` rather than collapsing
+ * into one run of text, and `'` is left alone, because the output only ever
+ * lands in element text and never in an attribute. Lifted from
+ * `send-side-email.ts` byte for byte, so the move changed nothing a recipient
+ * receives. The footer is a single line today; the `<br>` is what keeps a
+ * second line from running into the first.
+ *
+ * Not `textToHtml` from `lib/html/sanitize.ts` either: that one makes
+ * paragraphs out of a message body, and a footer is one block.
+ */
+export function textToEscapedHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/\n/g, '<br>');
+}

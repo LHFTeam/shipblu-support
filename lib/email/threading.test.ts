@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildReferences,
   buildReplyAddress,
   buildReplySubject,
   buildReplyToken,
@@ -214,6 +215,14 @@ describe('header helpers', () => {
     expect(formatAddress({ address: 'a@b.com', name: 'He "Q" Him' })).toBe(
       '"He \\"Q\\" Him" <a@b.com>',
     );
+  });
+
+  it('chains References as the parent, then our own id', () => {
+    expect(buildReferences('parent@host', 'own@host')).toEqual(['parent@host', 'own@host']);
+    // The first message of a thread has no parent, and its own id still goes in:
+    // that is the belt against a provider rewriting the Message-ID header.
+    expect(buildReferences(null, 'own@host')).toEqual(['own@host']);
+    expect(buildReferences('own@host', 'own@host')).toEqual(['own@host']);
   });
 });
 

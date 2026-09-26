@@ -6,7 +6,8 @@ import { emailProvider } from '@/lib/email/providers';
 import { REPLY_ABOVE_MARKER } from '@/lib/email/quote-strip';
 import { textToHtml } from '@/lib/html/sanitize';
 import { replyToAddress } from '@/lib/email/reply-address';
-import { buildSideSubjectTag, formatMessageId } from '@/lib/email/threading';
+import { textToEscapedHtml } from '@/lib/email/html';
+import { buildReferences, buildSideSubjectTag, formatMessageId } from '@/lib/email/threading';
 import type { OutboundEmail } from '@/lib/email/types';
 import type { ClaimedJob } from '@/lib/queue';
 import {
@@ -106,7 +107,7 @@ export async function sendSideEmail(job: ClaimedJob): Promise<void> {
     // survive in the HTML part too — hidden from view, present in source.
     `<div style="color:#999;font-size:11px;margin-top:24px">${REPLY_ABOVE_MARKER}</div>`,
     signature ? `<div style="margin-top:12px">${signature}</div>` : '',
-    `<div style="color:#666;font-size:12px;margin-top:16px;border-top:1px solid #ddd;padding-top:8px">${escapeHtml(footer)}</div>`,
+    `<div style="color:#666;font-size:12px;margin-top:16px;border-top:1px solid #ddd;padding-top:8px">${textToEscapedHtml(footer)}</div>`,
   ].join('\n');
 
   const outbound: OutboundEmail = {
@@ -165,27 +166,4 @@ export async function sendSideEmail(job: ClaimedJob): Promise<void> {
 
     throw error;
   }
-}
-
-/**
- * The References chain: the parent, then this message's own id.
- *
- * Our own id is included as a belt against providers that replace the Message-ID
- * header — Postmark and SES both reserve the right to and neither announces it.
- * References is left alone by every provider we have used, so an id that appears
- * there is still findable when the hub replies.
- */
-function buildReferences(inReplyTo: string | null, ownMessageId: string): string[] {
-  const chain = inReplyTo ? [inReplyTo] : [];
-  if (!chain.includes(ownMessageId)) chain.push(ownMessageId);
-  return chain;
-}
-
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/\n/g, '<br>');
 }
