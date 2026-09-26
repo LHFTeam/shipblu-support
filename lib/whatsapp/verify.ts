@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { safeEqual } from '@/lib/auth/tokens';
 
 /**
  * X-Hub-Signature-256 verification for Meta webhooks.
@@ -47,10 +48,7 @@ export function verifyChallenge(params: URLSearchParams, verifyToken: string): s
   const provided = params.get('hub.verify_token');
   if (!provided) return null;
 
-  const a = Buffer.from(provided);
-  const b = Buffer.from(verifyToken);
-  if (a.length !== b.length) return null;
-  if (!timingSafeEqual(a, b)) return null;
+  if (!safeEqual(provided, verifyToken)) return null;
 
   return params.get('hub.challenge');
 }
