@@ -21,8 +21,10 @@ type Handler = (url: string, init?: RequestInit) => Response | Promise<Response>
 
 /** Answers every `fetch` in the current test with `handler`; returns the mock, to read its calls. */
 export function stubFetch(handler: Handler) {
+  // A `Request` stringifies to "[object Request]", which no handler could match
+  // a URL against; its own `url` is the address it was sent to.
   const mock = vi.fn(async (input: string | URL | Request, init?: RequestInit) =>
-    handler(String(input), init),
+    handler(input instanceof Request ? input.url : String(input), init),
   );
   vi.stubGlobal('fetch', mock);
   onTestFinished(() => {
