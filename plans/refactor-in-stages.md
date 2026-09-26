@@ -127,6 +127,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 3.8   | `errorMessage()` for caught values               | #222            | open    |
 | 3.9   | HTTP helpers: rate limiter moves to `lib/http`   | #229            | open    |
 | 3.10  | HTTP helpers: `readJsonBody`                     | #230            | open    |
+| 3.11  | Vocabulary: priorities, categories, roles        | #231            | open    |
 | 4.1   | Split `lib/tickets/queries.ts`                   | #224            | open    |
 | 4.2   | Shared ingest steps                              |                 | pending |
 | 4.3   | Meta Graph transport                             | #228            | open    |
