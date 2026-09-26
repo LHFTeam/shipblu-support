@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetEnvCache } from '@/lib/env';
-import { WhatsAppApiError, getMediaUrl, listTemplates, sendText } from './client';
+import { WhatsAppApiError, downloadMedia, getMediaUrl, listTemplates, sendText } from './client';
 import { ACCESS_TOKEN_CODE } from './errors';
 
 /**
@@ -158,5 +158,71 @@ describe('WhatsApp error classification', () => {
     expect(error.code).toBeNull();
     expect(error.message).toContain('Bad Gateway');
     expect(error.isTransient).toBe(true);
+  });
+});
+
+/**
+ * WhatsApp runs in jobs, and none of its calls had a deadline: one that never
+ * answered stopped the whole queue, because the worker awaits a batch before
+ * it claims the next.
+ */
+describe('WhatsApp deadlines', () => {
+  /** Answers like `fetch` does: a signal that has fired rejects with its reason. */
+  function serveUnlessAborted(body: unknown) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string | URL, init?: RequestInit) => {
+        if (init?.signal?.aborted) throw init.signal.reason;
+        return new Response(JSON.stringify(body), { status: 200 });
+      }),
+    );
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('gives a send the Graph write deadline', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    serveUnlessAborted({ messages: [{ id: 'wamid.1' }] });
+
+    await sendText('201000000000', 'hello');
+
+    expect(timeout).toHaveBeenCalledWith(90_000);
+  });
+
+  it('gives a lookup the Graph read deadline', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    serveUnlessAborted({ url: 'https://cdn' });
+
+    await getMediaUrl('media-1');
+
+    expect(timeout).toHaveBeenCalledWith(15_000);
+  });
+
+  it('gives a media download a minute', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    serveUnlessAborted({});
+
+    await downloadMedia('https://lookaside.fbsbx.com/whatsapp_business/attachments/1');
+
+    expect(timeout).toHaveBeenCalledWith(60_000);
+  });
+
+  /**
+   * Recorded on the message row, where the agent reads it, and retried: a send
+   * that timed out may still arrive, and is not a reason to give up on it.
+   */
+  it('turns a send whose deadline passed into a retryable error that says so', async () => {
+    vi.spyOn(AbortSignal, 'timeout').mockReturnValue(
+      AbortSignal.abort(new DOMException('The operation timed out.', 'TimeoutError')),
+    );
+    serveUnlessAborted({});
+
+    const failure = sendText('201000000000', 'hello');
+
+    await expect(failure).rejects.toBeInstanceOf(WhatsAppApiError);
+    await expect(failure).rejects.toMatchObject({ isTransient: true });
+    await expect(failure).rejects.toThrow(/did not answer in 90s/);
   });
 });

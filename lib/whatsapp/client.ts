@@ -1,5 +1,5 @@
 import { env } from '@/lib/env';
-import { GRAPH_BASE } from '@/lib/meta/graph';
+import { GRAPH_BASE, graphTimeout } from '@/lib/meta/graph';
 import { ACCESS_TOKEN_CODE } from './errors';
 import type { WhatsAppTemplateComponent } from './templates';
 
@@ -119,18 +119,46 @@ function credentials(override?: CallCredentials | null) {
   return { token: accessToken(override), phoneNumberId: resolved };
 }
 
+/**
+ * `fetch` with a deadline, failing as a transient `WhatsAppApiError`.
+ *
+ * A deadline because every caller is a job, and the worker awaits a whole batch
+ * before it claims the next — so one request that never answered stopped the
+ * queue. Transient because a send that timed out may still arrive: the handler
+ * records the sentence on the message and the queue retries.
+ */
+async function request(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  try {
+    return await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+  } catch (error) {
+    const reason =
+      error instanceof DOMException && error.name === 'TimeoutError'
+        ? `did not answer in ${timeoutMs / 1000}s`
+        : `unreachable: ${error instanceof Error ? error.message : String(error)}`;
+    throw new WhatsAppApiError(`WhatsApp API ${reason}`, 0, null, null, true);
+  }
+}
+
 async function graph<T>(
   path: string,
-  init: { method?: string; token: string; body?: unknown },
+  init: { method?: 'GET' | 'POST'; token: string; body?: unknown },
 ): Promise<T> {
-  const response = await fetch(`${GRAPH_BASE}/${path}`, {
-    method: init.method ?? 'GET',
-    headers: {
-      Authorization: `Bearer ${init.token}`,
-      ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+  const method = init.method ?? 'GET';
+  const response = await request(
+    `${GRAPH_BASE}/${path}`,
+    {
+      method,
+      headers: {
+        Authorization: `Bearer ${init.token}`,
+        ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+      },
+      body: init.body ? JSON.stringify(init.body) : undefined,
     },
-    body: init.body ? JSON.stringify(init.body) : undefined,
-  });
+    // The deadlines Messenger and Instagram use: a send's sits inside the
+    // window where giving up neither retries a message Meta was still accepting
+    // nor lets the queue reclaim the job mid-send.
+    graphTimeout(method),
+  );
 
   const text = await response.text();
 
@@ -269,6 +297,8 @@ export async function getMediaUrl(
   };
 }
 
+const MEDIA_TIMEOUT_MS = 60_000;
+
 /** Meta's CDN requires the access token on the download itself, not just the lookup. */
 export async function downloadMedia(
   url: string,
@@ -276,7 +306,12 @@ export async function downloadMedia(
 ): Promise<{ content: Buffer; contentType: string }> {
   const token = accessToken(options);
 
-  const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  // A minute, like a storage upload: room for a large file over the CDN.
+  const response = await request(
+    url,
+    { headers: { Authorization: `Bearer ${token}` } },
+    MEDIA_TIMEOUT_MS,
+  );
 
   if (!response.ok) {
     throw new WhatsAppApiError(
