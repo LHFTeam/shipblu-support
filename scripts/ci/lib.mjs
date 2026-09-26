@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, statSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isolatedGitEnv } from './git-env.mjs';
 
 /**
  * What every rule in `rules/` shares: the repository root, the list of files git
@@ -35,8 +36,16 @@ export function read(rel) {
  * Every file git actually tracks, which is the right population for these rules:
  * a build artefact or a local .env sitting in the working tree is not the
  * repository's problem, and node_modules would swamp every scan in `rules/`.
+ *
+ * Against a fixture, git is kept off any repository an inherited GIT_DIR names
+ * (`git-env.mjs`), or a test run from a hook lists the real index instead. The
+ * real run inherits its environment untouched, exactly as it always has.
  */
-export const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: ROOT, encoding: 'utf8' })
+export const tracked = execFileSync('git', ['ls-files', '-z'], {
+  cwd: ROOT,
+  encoding: 'utf8',
+  env: process.env.REPO_RULES_ROOT ? isolatedGitEnv() : process.env,
+})
   .split('\0')
   .filter(Boolean);
 
