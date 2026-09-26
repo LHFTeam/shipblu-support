@@ -158,7 +158,8 @@ async function request(
 
 /**
  * Answers null for exactly one case: a write Meta accepted whose body was lost
- * on the way back. A read, and a refusal, never answer null.
+ * on the way back, or arrived as something other than JSON. A read, and a
+ * refusal, never answer null.
  */
 async function graph<T>(
   path: string,
@@ -235,7 +236,30 @@ async function graph<T>(
     );
   }
 
-  return (text ? JSON.parse(text) : {}) as T;
+  if (!text) return {} as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    // A 2xx whose body is not JSON — an edge's HTML page, or a body cut short.
+    // The status is still Meta's answer, so a write takes the lost-body path
+    // above: the message went, and a bare SyntaxError here marked it failed and
+    // the queue sent it again. A read has nothing to act on, and is retried as
+    // one that did not answer properly rather than thrown as "unexpected token".
+    if (method !== 'GET') {
+      console.warn(
+        `[whatsapp] ${method} ${path} was accepted with ${response.status}, but its body ` +
+          `was not JSON: ${text.slice(0, 200)}`,
+      );
+      return null;
+    }
+    throw new WhatsAppApiError(
+      `WhatsApp API answered ${response.status} with a body that is not JSON: ${text.slice(0, 300)}`,
+      response.status,
+      null,
+      null,
+      true,
+    );
+  }
 }
 
 export type SendResult = {
@@ -468,6 +492,16 @@ function toSendResult(response: SendResponse | null): SendResult {
   if (response === null) return { wamid: null, recipientId: null };
 
   const wamid = response.messages?.[0]?.id;
-  if (!wamid) throw new Error('WhatsApp send returned no message id');
+  if (!wamid) {
+    // A 2xx with no id — an empty body, or JSON without `messages`. It used to
+    // throw, which marked a message Meta had accepted as failed and let the
+    // queue send it a second time. Missing the id is the same loss as missing
+    // the whole body, and is answered the same way.
+    console.warn(
+      `[whatsapp] a send was accepted, but its answer carried no message id: ` +
+        JSON.stringify(response).slice(0, 200),
+    );
+    return { wamid: null, recipientId: response.contacts?.[0]?.wa_id ?? null };
+  }
   return { wamid, recipientId: response.contacts?.[0]?.wa_id ?? null };
 }

@@ -347,3 +347,54 @@ describe('a deadline that passes while the body is arriving', () => {
     await expect(failure).rejects.toThrow('Media download did not answer in 60s');
   });
 });
+
+/**
+ * A 2xx is Meta's answer whatever its body says. A send answered with HTML or
+ * with nothing threw — a SyntaxError, or "no message id" — and the handler
+ * marked a message the customer had received as failed, so the queue sent it
+ * again.
+ */
+describe('a 2xx whose body cannot be read', () => {
+  function answer(body: string) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(body, { status: 200 })),
+    );
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('reports a send answered with HTML as sent, rather than sending it again', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    answer('<html>OK</html>');
+
+    await expect(sendText('201000000000', 'hello')).resolves.toEqual({
+      wamid: null,
+      recipientId: null,
+    });
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/accepted with 200.*not JSON/));
+  });
+
+  it('reports a send answered with an empty body as sent', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    answer('');
+
+    await expect(sendText('201000000000', 'hello')).resolves.toEqual({
+      wamid: null,
+      recipientId: null,
+    });
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/no message id/));
+  });
+
+  it('retries a lookup answered with HTML, as a WhatsApp error rather than a SyntaxError', async () => {
+    answer('<html>OK</html>');
+
+    const failure = getMediaUrl('media-1');
+
+    await expect(failure).rejects.toBeInstanceOf(WhatsAppApiError);
+    await expect(failure).rejects.toMatchObject({ isTransient: true, status: 200 });
+    await expect(failure).rejects.toThrow(/not JSON/);
+  });
+});
