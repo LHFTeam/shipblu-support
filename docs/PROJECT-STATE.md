@@ -595,15 +595,14 @@ what a service is actually running before concluding a change is live, and
 before enqueueing a job whose handler only exists in the new code — the running
 worker would take it, find no handler, and kill it.
 
-**Staging is suspended, and the branch it would deploy is not the one this
-repo says.** `render.yaml` pins it to the feature branch
-`claude/shipblu-support-app-03p2we`; the running service says `main`, with
-`autoDeploy: yes` and `autoDeployTrigger: commit` — the only service in the
-project that deploys itself. So the warning this paragraph used to carry, "do
-not assume it tracks `main`", was exactly backwards: the live service does, and
-the blueprint is what is stale. Resuming staging therefore arms an automatic
-deploy of `main` on the next commit, against staging's own database. Read the
-service, not the file, before you resume it. See §6.67.
+**Staging is suspended, tracks `main`, and deploys itself.** The running
+service says `branch: main` and `autoDeployTrigger: commit` — the only service
+in the project that deploys itself — and `render.yaml` now says the same (it
+used to pin a deleted feature branch, which failed every Blueprint sync:
+§6.67, §6.76). Resuming staging therefore arms an automatic deploy of `main` on
+the next commit, against staging's own database. Before resuming it, read
+staging's `EMAIL_PROVIDER` in the dashboard: it should be `local`, the blueprint
+no longer sets it, and staging holds a Postmark `EMAIL_API_KEY` of its own.
 
 ### Supabase — org `ihngokrzwjmgpogkecug`
 
@@ -630,67 +629,69 @@ deploy, so a new table is locked down whether or not anybody remembered.
 ### Environment variables — the rule
 
 **Any value that is the same on more than one service in an environment is
-declared once, in that environment's group, and nowhere else.** There are three:
+declared once, in that environment's group, and nowhere else.** There are three,
+and as of 2026-09-26 the dashboard matches this split:
 
 | Group                        | Scope        | Holds                                                              |
 | ---------------------------- | ------------ | ------------------------------------------------------------------ |
-| `shipblu-shared`             | workspace    | identical everywhere and harmless outside this system if wrong     |
+| `shipblu-support-shared`     | workspace    | identical everywhere and harmless outside this system if wrong     |
 | `shipblu-support-production` | `Production` | anything that can reach a real customer or the production database |
-| `shipblu-support-staging`    | `Staging`    | staging's own database, and what stops it reaching anyone          |
+| `shipblu-support-staging`    | `Staging`    | the same for staging: its own database and its own Meta app        |
+
+`shipblu-support-shared` was called `shipblu-shared` until 2026-09-26. Render
+adopts a group by name, so a rename has to land in the dashboard and in
+`render.yaml` together, or the next sync creates a second, empty group.
 
 Render gives service-level variables precedence over group values, so a key
 declared in both places silently takes the service value. That cost us a
 debugging session on `DATABASE_URL`. Two _groups_ linked by one service and both
-declaring a key is the same trap with no precedence rule to settle it, so no key
-appears in more than one group — `EMAIL_PROVIDER` is in `shipblu-support-production` and
-`shipblu-support-staging`, which is safe only because no service links both.
+declaring a key is the same trap with no precedence rule to settle it. No key
+is declared twice today: the last overlaps — `NODE_VERSION` and
+`EMAIL_FROM_NAME` in the staging group as well as the shared one, and `APP_URL`
+on the web and worker services as well as in the production group — were
+deleted from the dashboard on 2026-09-26.
 
-Service-level entries now exist only as deliberate exceptions, each commented in
-`render.yaml`: `EMAIL_WEBHOOK_SECRET` and the two `FRESHDESK_*` keys on the web
-service, which have exactly one consumer each, and `APP_URL`, which is
-per-service because the crons deliberately do not have it at all.
+Service-level entries exist only as deliberate exceptions, each commented in
+`render.yaml`: `LOG_ALL_INCOMING_WEBHOOKS` on the web service, the two
+`FRESHDESK_*` keys on the worker (the importer is a queued job),
+and `DB_QUERY_TIMEOUT_MS` on `shipblu-nightly`, plus `NODE_ENV` on the web and
+worker services. Confirmed against the dashboard on 2026-09-26.
 
-**`shipblu-shared` is workspace-scoped and cannot be moved into the project.** A
-group scoped to a project environment cannot be linked to any service outside
-it, and Render has no project-wide scope in between — a group belongs to one
-environment or to the whole workspace. Services in both environments link this
-one. `render.yaml` says so with `ungrouped`, which is the only way to state "no
-environment" outright; a group left in a top-level `envVarGroups` list keeps
-whatever scope it happens to have.
+**`shipblu-support-shared` is workspace-scoped and cannot be moved into the
+project.** A group scoped to a project environment cannot be linked to any
+service outside it, and Render has no project-wide scope in between — a group
+belongs to one environment or to the whole workspace. Services in both
+environments link this one. `render.yaml` says so with `ungrouped`, which is the
+only way to state "no environment" outright; a group left in a top-level
+`envVarGroups` list keeps whatever scope it happens to have.
 
 **A secret's value is never in the file, and neither is `sync: false` inside a
 group** — Render's Blueprint reference does not accept it there, and a group
 entry needs a literal value or `generateValue`. A literal would commit the
 secret and `value: ''` would blank the live one on the next sync. So each group
-lists its dashboard-owned keys as a comment beside its literal ones. The file
-still names everything each group holds, which is the point of keeping it in the
-repo. This is worth knowing before "fixing" the comments back into entries: the
-old single group declared some twenty keys with `sync: false`, which the
-reference says was never valid.
+lists its dashboard-owned keys as a comment beside its literal ones. **A literal
+appears only where the dashboard export showed that exact value** — today four
+keys in the shared group. A literal is a value every sync writes, so one typed
+from memory is a change to production nobody reviewed as one (§6.76).
 
-`META_PAGE_ACCESS_TOKEN` and the rest of the Meta set are in `shipblu-support-production`
-rather than the shared group so staging cannot inherit them. Meta has no test
-mode: a send from staging carrying a real page token arrives on a real
-customer's phone. Staging used to blank the token with a service-level
-`value: ''`, which worked but depended on somebody remembering to write the
-override; not holding the credential at all is the same protection without the
-vigilance. `pageToken()` in `lib/meta/client.ts` throws
-`META_PAGE_ACCESS_TOKEN is not configured` on an unset value exactly as it did
-on a blank one.
-
-`APP_SECRET` stays in `shipblu-shared`, which means staging holds production's
-email-reply signing key. Splitting it per environment would be tidier and is
-deliberately not done: it regenerates production's value, and that invalidates
-every reply token already sitting in a customer's mailbox. Staging sends no real
-mail, so it mints no token anyone can reply to.
+**Every credential is per environment, and each environment has its own Meta
+app.** Meta has no test mode: a send carrying production's page token arrives on
+a real customer's phone, so staging holds its own `META_*` set, its own
+`TYPESAFE_API_KEY`, its own `APP_SECRET` and its own Postmark key. Because
+`META_APP_SECRET` and `META_VERIFY_TOKEN` belong to the _app_, a WABA connected
+in one environment has to sit under that environment's app, or its webhooks are
+stored unverified and answered 403. `FACEBOOK_PAGE_ID` and
+`INSTAGRAM_ACCOUNT_ID` are still shared, so staging's app points at the same
+real Page and account as production's.
 
 One family of keys is declared without being read by name: a connected WhatsApp
 business account may carry its own access token, and its row names the variable
 holding it. The name must start `WHATSAPP_TOKEN_` — enforced in
 `lib/whatsapp/accounts.ts`, because the value is sent to Meta as a bearer token
 and a free-text variable name would be a way to exfiltrate any secret in the
-process. The value goes in `shipblu-support-production`; the key is listed in `render.yaml`
-without it, in the same commit that names it on the account.
+process. The value goes in the environment's group; the key is listed in
+`render.yaml` without it, in the same commit that names it on the account.
+Staging's `WHATSAPP_ACCESS_TOKEN` is not such a name and nothing reads it.
 
 When you add a variable, add it to `render.yaml` in the same commit. The
 blueprint is meant to describe the running system; it is not documentation that
@@ -751,43 +752,16 @@ newlines, so a single `console.log` became ~20 entries per delivery, and on Linu
 paid on the event loop, not in the background. Headers are one line now, the body
 another; a delivery is at most three entries.
 
-### The three-group split is not applied on Render yet
+### The three-group split is applied; one cleanup is left
 
-`render.yaml` describes it; the dashboard still has the single `shipblu-shared`
-group and the old service-level entries. Nothing is broken in the meantime —
-until somebody syncs the Blueprint the running config is exactly what it was —
-but the file and the dashboard disagree until these run, **in this order**:
+The dashboard holds the three groups `render.yaml` describes. What is left is
+deleting, by hand, what the split left behind — Render _preserves_ a variable
+the Blueprint stopped declaring, so none of these goes away on its own.
 
-1. **Names are confirmed.** The project is `ShipBlu Support Platform` and its
-   environments are `Production` and `Staging`, capitalised, as the dashboard
-   has them. A Blueprint adopts a service by name and Render does not document
-   what it does with a project or environment name matching nothing, so these
-   three are worth re-reading before a sync rather than after.
-2. **Sync the Blueprint.** It creates `shipblu-support-production` and `shipblu-support-staging`
-   holding only `EMAIL_PROVIDER`, and links them. Nothing changes yet: every
-   other value is still where it was, and service-level entries still win.
-3. **Copy values in.** Each key listed in the `shipblu-support-production` comment moves from
-   `shipblu-shared` into `shipblu-support-production`, same value. Staging's `DATABASE_URL`,
-   `DATABASE_URL_SESSION`, `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` move
-   off the staging service into `shipblu-support-staging`. Both copies existing at once
-   is fine — they agree.
-4. **Delete the moved keys from `shipblu-shared`.** Before step 5, not after.
-   While the shared group still says `EMAIL_PROVIDER=postmark`, staging is held
-   to `local` only by its service-level override; dropping that first would
-   leave two linked groups disagreeing about whether staging sends real mail.
-5. **Delete the redundant service-level entries:** `SUPABASE_URL` and
-   `SUPABASE_SERVICE_ROLE_KEY` from web, worker and staging; `DATABASE_URL`,
-   `DATABASE_URL_SESSION`, `EMAIL_PROVIDER` and `META_PAGE_ACCESS_TOKEN` from
-   staging. Render _preserves_ a service-level variable the Blueprint stopped
-   declaring, so none of these goes away on its own — and each one still shadows
-   the group until it is removed by hand.
-6. **Verify:** `/api/health` on production, and a staging boot. Staging is
-   suspended, so that half needs a resume first.
-
-Step 3 is also the pending `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` move the
-old `render.yaml` described and never finished — the reason it was left was that
-those keys held live values at service level, which is what steps 3 and 5
-sequence around.
+Keys nothing reads, in both environment groups: `WHATSAPP_APP_SECRET` and
+`WHATSAPP_VERIFY_TOKEN` (retired names), staging's `WHATSAPP_ACCESS_TOKEN`,
+and — once whoever uses them has been asked — `META_SYSTEM_ADMIN_TOKEN` and
+`FB_PAGE_ACCESS_TOKEN_ALI`.
 
 ---
 
@@ -1217,7 +1191,7 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   SBID looks like, so it stays keyword-anchored, and a bare number is still never
   read as one.
 
-  The variables live in the `shipblu-shared` group because the web service and
+  The variables belong in the `shipblu-support-shared` group (then `shipblu-shared`) because the web service and
   the worker have to agree: the worker links on the pattern, the console searches
   on it, and a service that disagreed would link a ticket the search could never
   find again. ~~**After this deploys, run the backfill from `/admin/import`.**~~
@@ -4216,6 +4190,46 @@ null`, and argued it from write cost and 13 MB of disk. The read side turned
     its data directory under the scratchpad dies with "could not stat data
     directory". Keep a local database's data directory somewhere the `postgres`
     user can traverse on its own, or verify against CI's `database` job instead.
+
+76. **The Blueprint had not synced in weeks, and the error named the one
+    service nobody runs.** _2026-09-25._ Every sync failed with
+    `projects[0].environments[1].services[0].branch: branch
+claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
+    feature branch that had been deleted. One unresolvable field fails the
+    whole sync, so none of the six production services had been reconciled
+    against `render.yaml` either, and the file drifted unchecked. §6.67 had
+    already recorded that the running staging service tracks `main`; nothing
+    acted on it because staging was suspended and the failure looked local to
+    it.
+
+    The drift found when the file was re-read against the dashboard was worse
+    than the error. The blueprint generated `APP_SECRET` into `shipblu-shared`,
+    where it does not live — it is in `shipblu-support-production` — so the
+    first successful sync would have minted a second reply-signing key beside
+    the real one, in two groups linked by the same services with no documented
+    tiebreak. It set `EMAIL_PROVIDER=postmark` into production while the live
+    copy is in shared. It put the Freshdesk credentials on the web service,
+    though the importer is a queued job and the dashboard (correctly) has them
+    on the worker. And the Meta credentials and `TYPESAFE_API_KEY` it placed in
+    production so staging could not inherit them are all in `shipblu-shared`,
+    which staging links.
+
+    (Group names in this entry are as they were that day; the shared group
+    has since been renamed `shipblu-support-shared`, and on 2026-09-26 the
+    Meta and TypeSafe keys were moved into the environment groups, with a
+    separate Meta app for staging.)
+
+    Fixed by making `render.yaml` describe rather than assert: staging on
+    `main`, every group key listed as a comment with `envVars: []`, the service
+    keys moved to where the dashboard has them, and `autoDeployTrigger` written
+    out to match (quoted `'off'`: bare `off` is YAML 1.1 for `false`). Left for
+    the dashboard, recorded in the file: `KB_PUBLIC_HOST`,
+    `SUPABASE_STORAGE_BUCKET`, `APP_URL` and `EMAIL_PROVIDER` each set in two
+    places; the Meta and TypeSafe keys to move out of shared before staging is
+    resumed; `EMAIL_WEBHOOK_SECRET` set nowhere, so inbound mail is accepted
+    unauthenticated. The lesson is the one §6.67 already taught, from the other
+    side: a Blueprint that cannot sync is not documentation, it is a list of
+    changes queued to land all at once on the day somebody fixes the branch.
 
 ## 7. Verification already done
 

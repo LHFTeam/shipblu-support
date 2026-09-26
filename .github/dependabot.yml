@@ -1,6 +1,14 @@
-# Keeps the actions pinned in .github/workflows current, one grouped pull
-# request a week. GitHub Actions only, as row 0.4 of plans/refactor-in-stages.md
-# scopes it: automating npm updates is a separate decision.
+# Keeps the actions pinned in .github/workflows current. GitHub Actions only, as
+# row 0.4 of plans/refactor-in-stages.md scopes it: automating npm updates is a
+# separate decision.
+#
+# Minor and patch releases arrive as one grouped pull request a week. A major
+# release does not join the group: it opens a pull request of its own, titled
+# with that action and version. The group used to take everything, and its first
+# pull request carried three majors of two actions under "Bump the actions group
+# with 2 updates" — a runtime change, an ESM rewrite, a credential-file move and
+# a change marked [BREAKING], none of it named in the title or labels, and one
+# revert rolling back both. A major deserves the reviewer's attention on its own.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -10,3 +18,4 @@ updates:
     groups:
       actions:
         patterns: ['*']
+        update-types: [minor, patch]

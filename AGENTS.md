@@ -309,7 +309,7 @@ options are reachable without hand-inserting a `jobs` row.
 **Environment variables** are declared in `lib/env.ts` (Zod, parsed lazily) and
 in `render.yaml` in the same commit — CI fails a pull request where the two
 disagree, in either direction. Three env groups hold them:
-`shipblu-shared` for what is identical in every environment, `shipblu-support-production` for
+`shipblu-support-shared` for what is identical in every environment, `shipblu-support-production` for
 anything that can reach a real customer or the production database, and
 `shipblu-support-staging` for staging's own — declare a value in exactly one of them.
 Render gives service-level variables precedence, and a key declared in both
@@ -540,8 +540,8 @@ in its own change.
 
 Four rules hold, and the module is inert until somebody starts it — presence of
 `TYPESAFE_API_KEY` is the flag, the `instagramLoginConfigured()` device, and the
-key lives in `shipblu-support-production` rather than the shared group because the
-job sends real customer text to a third party:
+key lives in the environment groups rather than the shared one because the job
+sends real customer text to a third party:
 
 - **The option list comes from `ticket_categories`, never from `TAXONOMY`.** A
   retired category leaves the rules path at once; if it did not leave the model's
@@ -840,8 +840,9 @@ any **write** — `apply_migration`, write SQL, `update_environment_variables`,
   value now, which rows match, what does the service run today.
 - **Confirm you are pointed at the right target.** Production and staging are
   separate Supabase projects and separate Render services; `docs/PROJECT-STATE.md`
-  §2 has the ids. Staging is suspended and pinned to a feature branch rather
-  than to `main` — check what you are about to deploy.
+  §2 has the ids. Staging is suspended, tracks `main` and deploys itself on
+  commit — check what you are about to deploy, and that staging's
+  `EMAIL_PROVIDER` is `local`, before resuming it.
 - **Know the blast radius.** How many rows does the `WHERE` clause match — run
   it as a `SELECT` first. What breaks if this env var is wrong on the other
   service. Which tables does this migration lock, and is anything holding a
