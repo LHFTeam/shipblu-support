@@ -190,6 +190,32 @@ describe('a signed delivery', () => {
     expect(writes[0]).toMatchObject({ providerEventId: null, signatureVerified: true });
   });
 
+  it('keys a long batch on every wamid in it, not on the first few', async () => {
+    const batchOf = (count: number) => ({
+      object: 'whatsapp_business_account',
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                messages: Array.from({ length: count }, (_, i) => ({
+                  id: `wamid.HBgMMjAxMDAwMDAwMDAwFQIAEhgUM0E${String(i).padStart(16, '0')}AA==`,
+                })),
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    await deliver(batchOf(12));
+    await deliver(batchOf(13));
+
+    const [first, later] = writes.map((w) => w.providerEventId as string);
+    expect(first!.length).toBeLessThanOrEqual(500);
+    expect(later).not.toBe(first);
+  });
+
   it('answers a redelivery 200, so Meta stops, and queues nothing', async () => {
     conflict = true;
 
