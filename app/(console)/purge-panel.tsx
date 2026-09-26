@@ -1,12 +1,12 @@
 'use client';
 
-import { useActionState, useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useActionState, useState } from 'react';
 import { Button, ErrorText } from '@/components/ui';
 import { confirmationMatches, describePurgeCounts, RETAINED } from '@/lib/admin/purge-summary';
 import type { PurgePreview } from '@/lib/admin/purge-summary';
 
-type PurgeState = { error: string | null; ok?: boolean; nonce?: number };
+// Only a refusal ever comes back: success redirects from the action instead.
+type PurgeState = { error: string | null };
 
 /**
  * The confirmation an irreversible delete is worth.
@@ -30,6 +30,12 @@ type PurgeState = { error: string | null; ok?: boolean; nonce?: number };
  * deletes — a ticket that arrived in between goes too, and the audit row records
  * the transaction's numbers rather than these.
  *
+ * It does not navigate on success, and must not be made to. The action
+ * redirects: a revalidating action re-renders the page it was posted from, which
+ * is the one just deleted, so its notFound() would win the race against any
+ * effect here. A successful purge therefore never hands this component a state
+ * — only a refusal does, and that is the only thing it renders from `state`.
+ *
  * And it says what it does **not** delete. "Completely delete" is the phrase
  * that gets asked for, and the raw webhook archive and already-rolled-up metrics
  * survive this; an admin who needs a real erasure should find that out here
@@ -41,7 +47,6 @@ export function PurgePanel({
   idField,
   noun,
   confirmationHint,
-  redirectTo,
 }: {
   preview: PurgePreview;
   action: (state: PurgeState, formData: FormData) => Promise<PurgeState>;
@@ -51,20 +56,10 @@ export function PurgePanel({
   noun: string;
   /** What the typed value is, in words: 'the ticket number', 'the email address'. */
   confirmationHint: string;
-  redirectTo: string;
 }) {
-  const router = useRouter();
   const [state, formAction, pending] = useActionState(action, { error: null } as PurgeState);
   const [open, setOpen] = useState(false);
   const [typed, setTyped] = useState('');
-
-  useEffect(() => {
-    if (!state.ok) return;
-    // `replace`, not `push`: the page behind this no longer resolves, so leaving
-    // it in the history would make Back a 404.
-    router.replace(redirectTo);
-    router.refresh();
-  }, [state.ok, state.nonce, router, redirectTo]);
 
   const destroyed = describePurgeCounts(preview.counts);
   const armed = confirmationMatches(preview.confirmation, typed);

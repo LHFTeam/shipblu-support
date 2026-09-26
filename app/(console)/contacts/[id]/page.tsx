@@ -314,7 +314,6 @@ export default async function ContactPage({
               idField="contactId"
               noun="contact"
               confirmationHint="the highlighted value"
-              redirectTo="/contacts"
             />
           </Card>
         </section>

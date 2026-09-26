@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '@/db/client';
@@ -2113,13 +2114,18 @@ export async function purgeTicket(_state: ActionState, formData: FormData): Prom
 
   if (!result.ok) return { error: PURGE_ERRORS[result.reason] };
 
-  // Nothing revalidates the ticket's own path: it does not resolve any more, and
-  // the client redirects to the inbox on success. Other agents' inboxes stay
-  // stale until they navigate — the notify trigger is INSERT/UPDATE only, so a
-  // delete raises no event, and adding one would mean a DELETE trigger whose
-  // payload names a row nobody can read.
+  // Other agents' inboxes stay stale until they navigate — the notify trigger is
+  // INSERT/UPDATE only, so a delete raises no event, and adding one would mean a
+  // DELETE trigger whose payload names a row nobody can read.
   revalidatePath('/inbox');
   revalidatePath('/contacts');
   revalidatePath('/admin/categories/review');
-  return ok();
+
+  // The redirect happens here, not in the panel. A server action that
+  // revalidates makes Next re-render the route the form was posted from in the
+  // same response, and that route is this ticket — whose row is now gone, so
+  // its page calls notFound() and the 404 replaces the tree before any client
+  // effect could navigate away. A redirect from the action makes the response
+  // carry the inbox instead. It throws, so it stays last and outside any try.
+  redirect('/inbox');
 }

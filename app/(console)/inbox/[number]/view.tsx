@@ -772,7 +772,6 @@ function Sidebar({
             idField="conversationId"
             noun="ticket"
             confirmationHint="the ticket number"
-            redirectTo="/inbox"
           />
         </div>
       ) : null}

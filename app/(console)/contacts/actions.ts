@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
 import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { contacts, shipments } from '@/db/schema';
@@ -317,12 +318,16 @@ export async function purgeContactRecord(
 
   if (!result.ok) return { error: PURGE_ERRORS[result.reason] };
 
-  // The contact's own page is gone, so it is not revalidated — the client
-  // redirects to the list. The inbox loses every ticket this person raised, and
-  // any shipment page that named them now shows an unset party.
+  // The inbox loses every ticket this person raised, and any shipment page that
+  // named them now shows an unset party.
   revalidatePath('/contacts');
   revalidatePath('/inbox');
   revalidatePath('/admin/categories/review');
   revalidatePath('/contacts/shipments');
-  return ok();
+
+  // Redirected from the action rather than by the panel, for the reason
+  // `purgeTicket` gives: a revalidating action re-renders the page it was posted
+  // from, this contact's page no longer resolves, and its notFound() would land
+  // before a client-side navigation could run. Last, because it throws.
+  redirect('/contacts');
 }
