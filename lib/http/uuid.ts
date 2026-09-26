@@ -13,3 +13,17 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export function isUuid(value: unknown): value is string {
   return typeof value === 'string' && UUID.test(value);
 }
+
+/**
+ * A uuid out of a request, lower-cased, or null when it is not one.
+ *
+ * Postgres reads `0B6F…` and `0b6f…` as the same uuid; JavaScript's `===` does
+ * not. So an id compared in code against a row's or a session's — the check
+ * that stops an admin deactivating themselves was one — let the upper-case
+ * spelling past a guard the query then applied to the very row it protects.
+ * Canonical on the way in, every later comparison and every path built from it
+ * agrees with what the database will match.
+ */
+export function canonicalUuid(value: unknown): string | null {
+  return isUuid(value) ? value.toLowerCase() : null;
+}
