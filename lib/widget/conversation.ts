@@ -11,7 +11,7 @@ import {
 } from '@/db/schema';
 import { preview } from '@/lib/html/sanitize';
 import { afterInboundMessage, afterMessageStored } from '@/lib/tickets/lifecycle';
-import { defaultOpenStatusId } from '@/lib/tickets/statuses';
+import { defaultOpenStatusId, requireDefaultOpenStatusId } from '@/lib/tickets/statuses';
 import type { VisitorDetails } from './contact';
 import { recordIdentityOnConversation } from './identify';
 import { findLiveConversation, webchatChannel } from './session';
@@ -94,10 +94,7 @@ export async function appendVisitorMessage(
     let createdConversation = false;
 
     if (!conversationId) {
-      const statusId = await defaultOpenStatusId(tx);
-      if (!statusId) {
-        throw new Error('No default open ticket status configured — run `npm run db:seed`');
-      }
+      const statusId = await requireDefaultOpenStatusId(tx);
 
       const inserted = await tx
         .insert(conversations)

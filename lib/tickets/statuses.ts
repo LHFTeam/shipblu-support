@@ -41,3 +41,21 @@ export async function defaultOpenStatusId(tx: typeof db): Promise<string | null>
 
   return fallback[0]?.id ?? null;
 }
+
+/**
+ * `defaultOpenStatusId` for a caller about to insert a ticket, which cannot go
+ * on without one.
+ *
+ * Only a database with no open status at all gets here — one that was never
+ * seeded — because the fallback above accepts any open status. Seven insert
+ * paths across the five channels threw the same sentence for that case, each
+ * written out by hand; they now share this one, so the instruction it gives
+ * cannot drift the way the lookup above once did.
+ */
+export async function requireDefaultOpenStatusId(tx: typeof db): Promise<string> {
+  const statusId = await defaultOpenStatusId(tx);
+  if (!statusId) {
+    throw new Error('No default open ticket status configured — run `npm run db:seed`');
+  }
+  return statusId;
+}

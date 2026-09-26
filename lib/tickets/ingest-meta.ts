@@ -12,7 +12,7 @@ import { enqueue } from '@/lib/queue';
 import { onCustomerReply } from '@/lib/sla';
 import { findContactByIdentity, needsChannelProfile, resolveContact } from './contacts';
 import { afterInboundMessage, afterMessageStored } from './lifecycle';
-import { defaultOpenStatusId } from './statuses';
+import { defaultOpenStatusId, requireDefaultOpenStatusId } from './statuses';
 
 /**
  * Inbound Facebook and Instagram → conversations.
@@ -81,10 +81,7 @@ export async function ingestMetaMessage(
         await reopen(tx, conversationId, existing.reopenCount, `inbound_${message.platform}`);
       }
     } else {
-      const statusId = await defaultOpenStatusId(tx);
-      if (!statusId) {
-        throw new Error('No default open ticket status configured — run `npm run db:seed`');
-      }
+      const statusId = await requireDefaultOpenStatusId(tx);
 
       const inserted = await tx
         .insert(conversations)
@@ -204,10 +201,7 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
         await reopen(tx, conversationId, existing.reopenCount, `inbound_${comment.platform}`);
       }
     } else {
-      const statusId = await defaultOpenStatusId(tx);
-      if (!statusId) {
-        throw new Error('No default open ticket status configured — run `npm run db:seed`');
-      }
+      const statusId = await requireDefaultOpenStatusId(tx);
 
       const inserted = await tx
         .insert(conversations)
