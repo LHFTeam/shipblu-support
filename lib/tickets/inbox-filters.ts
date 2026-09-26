@@ -1,5 +1,15 @@
 import { FILTERABLE_CHANNELS, type FilterableChannel } from './channel-policy';
 
+/**
+ * What an inbox URL may ask for, and where a page of results stops.
+ *
+ * No database here, which is why it is its own module: the console list takes
+ * `InboxFilters` from it without reaching `db/schema`. It is not all
+ * browser-safe, though. The two cursor functions use Node's `Buffer`, and only
+ * server code calls them today; a client file importing one would compile, and
+ * fail only when it ran.
+ */
+
 export type InboxFilters = {
   view: 'all' | 'mine' | 'unassigned';
   statusCategory: 'open' | 'pending' | 'resolved' | 'closed' | 'all' | 'unresolved';
