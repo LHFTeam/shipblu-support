@@ -1,0 +1,6 @@
+# Commits that only move or reformat code. With
+# `git config blame.ignoreRevsFile .git-blame-ignore-revs`, `git blame` looks past
+# them; GitHub reads this file on its own.
+
+# 0.3: split scripts/ci/repo-rules.mjs into one module per rule.
+73f4bb8f639b42961cecbe3980b8eea17ba84c59
