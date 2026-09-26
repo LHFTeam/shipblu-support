@@ -163,6 +163,25 @@ describe('dueDatesOnCreate', () => {
     }
   });
 
+  it('opens a working day at its wall-clock time on the day the clocks go forward', () => {
+    // The two cases above never count time on a changeover day, because CAIRO
+    // is shut on Fridays and both 2026 changes fall on one. On 24 April the day
+    // begins at 01:00, so an opening time found by adding minutes to the start
+    // of the day lands an hour late. A schedule open on Friday reaches it.
+    const everyDay = Object.fromEntries(
+      (['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const).map((day) => [
+        day,
+        [{ start: '09:00', end: '17:00' }],
+      ]),
+    ) as WeeklySchedule;
+    const hours: HoursConfig = { schedule: everyDay, timezone: 'Africa/Cairo' };
+
+    const due = dueDatesOnCreate(policy(), 'high', at('2026-04-24T08:00'), hours);
+
+    // Opens at 09:00, and the one-hour target is spent by 10:00.
+    expect(inCairo(due.firstResponseDueAt)).toBe('2026-04-24T10:00');
+  });
+
   it('counts elapsed time, not clock time, when no schedule applies', () => {
     // Four real hours from 21:00 on the night the clocks fall back: the hour
     // from 23:00 is lived twice, so the clock reads midnight, not 01:00.
