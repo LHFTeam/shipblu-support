@@ -72,6 +72,15 @@ async function truncateEverything(): Promise<void> {
   );
 }
 
+// Loopback only, because a tier that truncates every table must never reach a
+// shared database: a staging or production URL pasted into TEST_DATABASE_URL
+// passes the equality check below, and this is the only thing left between it
+// and an empty database. CI satisfies it because its Postgres is a service
+// container published on the runner's localhost. If the job ever moves into a
+// container of its own and reaches Postgres by service name (`postgres:5432`),
+// add that one exact hostname here — never a pattern, and never a way to switch
+// the check off from the environment, which would be the first thing set to
+// make a failing run pass.
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]']);
 
 /**
@@ -82,7 +91,9 @@ const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]']);
  * called it would otherwise truncate whatever `DATABASE_URL` said.
  *
  * Given both URLs rather than reading them, so `db.test.ts` can show it refusing
- * without a database to refuse.
+ * without a database to refuse. The rolled-back `purge-*.db.test.ts` files call
+ * it too, so a run without the database fails every file rather than skipping
+ * some.
  */
 export function refuseUnlessDisposable(url: string | undefined, testUrl: string | undefined): void {
   if (!testUrl) {

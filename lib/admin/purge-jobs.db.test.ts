@@ -14,10 +14,14 @@ import {
   sideConversations,
   ticketStatuses,
 } from '@/db/schema';
+import { refuseUnlessDisposable } from '@/lib/testing/db';
 import { purgeJobs } from './purge-jobs';
 
-// Deliberately opt-in, with no fallback to the app's DATABASE_URL or dotenv.
-// CI supplies its disposable Postgres service; ordinary unit tests open nothing.
+// Only the tier's own database, never the app's DATABASE_URL or dotenv. The
+// rows are rolled back rather than truncated, but the file is refused on the
+// same terms as every other `*.db.test.ts`: a `skipIf` on the variable reported
+// this suite as skipped — green — in a run that had forgotten the database,
+// while the files on `withCleanDatabase` beside it failed.
 const databaseUrl = process.env.TEST_DATABASE_URL;
 
 type Scope = {
@@ -107,11 +111,12 @@ async function seedJobs(tx: typeof db, specs: JobSpec[]) {
   };
 }
 
-describe.skipIf(!databaseUrl)('purgeJobs against Postgres', () => {
+describe('purgeJobs against Postgres', () => {
   let client: ReturnType<typeof postgres>;
   let database: typeof db;
 
   beforeAll(() => {
+    refuseUnlessDisposable(process.env.DATABASE_URL, databaseUrl);
     client = postgres(databaseUrl!, { max: 1, prepare: false });
     database = drizzle(client, { schema });
   });
