@@ -195,6 +195,40 @@ describe.skipIf(!databaseUrl)('purge entry points against Postgres', () => {
     },
   );
 
+  it("leaves a merge survivor's inherited avatar when purging the merged-away contact", async () => {
+    await fixture(async (tx) => {
+      // reconcileContact() copies the loser's avatar_path onto a survivor that
+      // had none, so after the merge both rows name one object.
+      const avatarPath = `contacts/${randomUUID()}/avatar.jpg`;
+      const survivorId = randomUUID();
+      const loserId = randomUUID();
+      const loserName = `Purge merged loser ${loserId}`;
+      await tx.insert(contacts).values({ id: survivorId, name: 'Survivor', avatarPath });
+      await tx.insert(contacts).values({
+        id: loserId,
+        name: loserName,
+        avatarPath,
+        mergedIntoContactId: survivorId,
+      });
+
+      const result = await purgeContact({
+        contactId: loserId,
+        confirmation: loserName,
+        agent: null,
+      });
+
+      expect(result).toMatchObject({ ok: true });
+      expect(mocks.removeObjects.mock.calls.flatMap((call) => call[0])).not.toContain(avatarPath);
+      expect(await receiptFor(tx, loserId)).not.toHaveProperty('pendingObjects');
+      expect(
+        await tx
+          .select({ avatarPath: contacts.avatarPath })
+          .from(contacts)
+          .where(eq(contacts.id, survivorId)),
+      ).toEqual([{ avatarPath }]);
+    });
+  });
+
   it('drops pendingObjects once every key was removed', async () => {
     await fixture(async (tx, statusId) => {
       const target = await seedScope(tx, statusId);

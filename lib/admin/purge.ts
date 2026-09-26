@@ -35,7 +35,7 @@
  * handled here explicitly; `webhook_events` deliberately is not — see
  * `RETAINED` in `./purge-summary`, which the confirmation panel reads out.
  */
-import { and, count, eq, inArray, isNotNull, or, sql } from 'drizzle-orm';
+import { and, count, eq, inArray, isNotNull, notInArray, or, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   adminDeletions,
@@ -566,11 +566,29 @@ export async function purgeContact(input: {
       .select({ path: contacts.avatarPath })
       .from(contacts)
       .where(and(inArray(contacts.id, contactIds), isNotNull(contacts.avatarPath)));
+    const avatarPaths = [
+      ...new Set(avatars.map((row) => row.path).filter((path) => path !== null)),
+    ];
+
+    // That sharing cuts the other way too. Purging a merged-away contact on its
+    // own reaches the loser but not the survivor, and the survivor is showing
+    // the picture it inherited — the very object the loser's column names.
+    // Deleting it would leave a live contact pointing at a key that 404s, with
+    // nothing to say why. So a key any contact outside this purge still names is
+    // not ours to remove; it goes when the last contact holding it does.
+    const stillNamed =
+      avatarPaths.length === 0
+        ? []
+        : await tx
+            .select({ path: contacts.avatarPath })
+            .from(contacts)
+            .where(
+              and(inArray(contacts.avatarPath, avatarPaths), notInArray(contacts.id, contactIds)),
+            );
+    const shared = new Set(stillNamed.map((row) => row.path));
 
     const summary = contactLabel(contact);
-    const objects = [
-      ...new Set([...paths, ...avatars.map((row) => row.path).filter((path) => path !== null)]),
-    ];
+    const objects = [...new Set([...paths, ...avatarPaths.filter((path) => !shared.has(path))])];
 
     const deletionId = await recordDeletion(tx, {
       subject: 'contact',
