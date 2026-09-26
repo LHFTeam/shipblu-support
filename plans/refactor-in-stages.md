@@ -102,7 +102,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 1.2   | Database test tier                               | #212        | open    |
 | 1.3   | Characterise the seven ingest entry points       |             | pending |
 | 1.4   | Webhook route tests                              | #196        | merged  |
-| 1.5   | DB test for the admin overview's raw SQL         |             | pending |
+| 1.5   | DB test for the admin overview's raw SQL         | #214        | open    |
 | 2.1   | Email webhook dedupes before it verifies         | #168        | merged  |
 | 2.2   | Portal agent replies bypass `carrierFor()`       | #169        | merged  |
 | 2.3   | Contacts pages cannot scroll                     | #170        | merged  |
