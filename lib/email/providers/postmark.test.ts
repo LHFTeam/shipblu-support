@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { STALLED_AFTER_MS } from '@/lib/queue';
 import { PostmarkEmailProvider } from './postmark';
 
 const provider = new PostmarkEmailProvider('token', 'webhook-secret-value');
@@ -261,5 +262,107 @@ describe('PostmarkEmailProvider.send', () => {
     } finally {
       globalThis.fetch = original;
     }
+  });
+});
+
+/**
+ * Every Postmark send runs in a job, and it had no deadline of its own: `fetch`
+ * gives up only after five minutes without a response, and every queued job
+ * waited behind it, because the worker awaits a batch before it claims the
+ * next. A send's deadline has two edges — below about a minute, an email
+ * Postmark was still accepting is given up on and sent again; past the
+ * stalled-job window, a deploy's new worker can reclaim the job mid-send and
+ * run it twice.
+ */
+describe('PostmarkEmailProvider.send deadline', () => {
+  const email = {
+    to: [{ address: 'customer@example.com' }],
+    from: { address: 'support@shipblu.com' },
+    replyTo: 'support@shipblu.com',
+    subject: 'Re: parcel',
+    textBody: 'On its way.',
+    htmlBody: '<p>On its way.</p>',
+    messageId: 'our-generated-id@shipblu.com',
+  };
+  const original = globalThis.fetch;
+
+  beforeEach(() => {
+    // Answers like `fetch` does: a signal that has fired rejects with its reason.
+    globalThis.fetch = (async (_url: string | URL, init?: RequestInit) => {
+      if (init?.signal?.aborted) throw init.signal.reason;
+      return new Response(JSON.stringify({ MessageID: 'pm-1' }), { status: 200 });
+    }) as typeof fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = original;
+    vi.restoreAllMocks();
+  });
+
+  it('sits between a minute and the window after which the queue runs a job again', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+
+    await provider.send(email);
+
+    const deadline = timeout.mock.calls[0]?.[0] ?? 0;
+    expect(deadline).toBeGreaterThanOrEqual(60_000);
+    expect(deadline).toBeLessThan(STALLED_AFTER_MS);
+  });
+
+  it('says it did not answer when the deadline passes, so the job retries with a reason', async () => {
+    vi.spyOn(AbortSignal, 'timeout').mockReturnValue(
+      AbortSignal.abort(new DOMException('The operation timed out.', 'TimeoutError')),
+    );
+
+    await expect(provider.send(email)).rejects.toThrow(/Postmark send did not answer in 90s/);
+  });
+
+  /** The status line arrives; the body is still coming when the deadline passes. */
+  function stallBody(status: number) {
+    globalThis.fetch = (async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.error(
+              new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
+            );
+          },
+        }),
+        { status },
+      )) as typeof fetch;
+  }
+
+  /**
+   * The deadline governs the body too. Passing it after Postmark's 200 threw
+   * from `response.json()`, and the job sent the customer a second copy of an
+   * email Postmark had already accepted.
+   */
+  it('reports a send Postmark accepted as sent, rather than sending it again', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stallBody(200);
+
+    await expect(provider.send(email)).resolves.toEqual({
+      providerMessageId: null,
+      rfcMessageId: null,
+      accepted: true,
+    });
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/accepted with 200/));
+  });
+
+  it('still fails a refusal whose reason never arrived, naming the status', async () => {
+    stallBody(422);
+
+    await expect(provider.send(email)).rejects.toThrow(
+      'Postmark send failed (422), and its reason never arrived in 90s',
+    );
+  });
+
+  it('keeps an accepted send whose body is not the JSON it expected', async () => {
+    globalThis.fetch = (async () => new Response('OK', { status: 200 })) as typeof fetch;
+
+    await expect(provider.send(email)).resolves.toMatchObject({
+      providerMessageId: null,
+      accepted: true,
+    });
   });
 });
