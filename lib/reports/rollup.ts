@@ -7,6 +7,7 @@ import { loadHoursCatalog } from '@/lib/hours/catalog';
 import { defaultHours, ticketHours, type HoursCatalog } from '@/lib/hours/resolve';
 import { loadPolicies, type LoadedPolicy } from '@/lib/sla';
 import { readOnlyChannels } from '@/lib/tickets/channel-policy';
+import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
 
 /**
  * One day of figures, computed from the source tables.
@@ -36,7 +37,7 @@ import { readOnlyChannels } from '@/lib/tickets/channel-policy';
  * would mean the totals no longer equalled the sum of the slices. Which hours
  * *count* is per group; which day a ticket lands on is the company's.
  */
-const FALLBACK_ZONE = 'Africa/Cairo';
+const FALLBACK_ZONE = TEAM_TIME_ZONE;
 
 /** The schedule a ticket is measured against, given its policy and its group. */
 export type HoursFor = (policyId: string | null, groupId: string | null) => HoursConfig | null;

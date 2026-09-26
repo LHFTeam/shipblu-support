@@ -7,6 +7,7 @@ import {
   type TicketFieldDef,
 } from '@/lib/tickets/custom-fields';
 import { elementLabel, type FormElement } from './elements';
+import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
 
 /**
  * The answers, written into the ticket somebody will actually read.
@@ -24,8 +25,6 @@ import { elementLabel, type FormElement } from './elements';
  * a string assembled from customer input, and around every value substituted
  * into it, to buy formatting nobody needs on three lines of "Label: value".
  */
-
-const ZONE = 'Africa/Cairo';
 
 /**
  * One stored answer as the words a person reads.
@@ -60,7 +59,7 @@ export function answerText(def: TicketFieldDef, value: unknown, locale: Locale):
     const at = new Date(String(value));
     if (Number.isNaN(at.getTime())) return '';
     const parts = new Intl.DateTimeFormat('en-GB', {
-      timeZone: ZONE,
+      timeZone: TEAM_TIME_ZONE,
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',

@@ -287,6 +287,22 @@ export function formatMessageId(id: string): string {
   return `<${bare}>`;
 }
 
+/**
+ * The References chain for a message we send: the parent, then this message's
+ * own id.
+ *
+ * Including our own id is a deliberate belt against providers that replace the
+ * Message-ID header — Postmark and SES both reserve the right to, and neither
+ * announces it. References is left alone by every provider we have used, so an
+ * id that appears there is still findable when the customer — or, on a side
+ * conversation, the hub — replies, even if the header we set never reached them.
+ */
+export function buildReferences(inReplyTo: string | null, ownMessageId: string): string[] {
+  const chain = inReplyTo ? [inReplyTo] : [];
+  if (!chain.includes(ownMessageId)) chain.push(ownMessageId);
+  return chain;
+}
+
 export function formatAddress(addr: EmailAddress): string {
   if (!addr.name) return addr.address;
   // Quote and escape: a display name containing a comma or quote would
