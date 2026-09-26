@@ -1,0 +1,46 @@
+# Which job types CI's `database` job runs against real Postgres, and why each
+# of the others is not run there.
+#
+# Every JobType in lib/queue/index.ts appears here exactly once, and the
+# `db-jobs` rule holds that — so a new job type arrives as a decision, not as
+# a gap nobody noticed: run it here, or say why it cannot be.
+#
+#   run: <type> [key=value ...]   passed to `npm run job --` as written
+#   skip: <type> — <why>
+#
+# A run line's predicates usually match nothing on the job's empty database,
+# which is fine: Postgres still plans every statement, and planning is where
+# `operator does not exist: text = channel` is raised.
+
+run: cleanup
+run: sla_sweep
+run: presence_sweep
+run: assign_sweep
+run: run_time_automations
+run: snapshot_backlog
+run: rollup_metrics
+run: sync_whatsapp_templates
+run: sync_stale_shipments
+run: backfill_meta_profiles limit=1
+run: backfill_shipment_links limit=1
+run: backfill_message_locations limit=1
+run: normalise_kb_formatting dryRun=true
+run: backfill_categorise_ai dryRun=true limit=1
+
+skip: seed_console_handbook — its own step runs it twice and asserts on what the second run wrote
+skip: process_webhook — needs a stored webhook event to process
+skip: send_email — needs a message to send, and sends it
+skip: send_side_email — needs a side-conversation message to send, and sends it
+skip: send_notification_email — needs a rendered email in its payload, and sends it
+skip: send_agent_invite — needs an invite to send, and sends it
+skip: send_whatsapp — needs a message to send, and calls the WhatsApp Cloud API
+skip: send_meta — needs a message to send, and calls Graph
+skip: moderate_meta_comment — needs a comment to act on, and calls Graph
+skip: download_media — needs a message with media, and downloads it from Meta
+skip: fetch_meta_profile — needs a contact and a Meta user id, and calls Graph
+skip: send_csat — needs a resolved conversation to survey
+skip: sync_shipment — needs a tracking number, and calls api.shipblu.com
+skip: subscribe_meta_webhooks — has no SQL; it only calls Graph, with the app credential
+skip: check_meta_permissions — has no SQL; it only calls Graph
+skip: test_comment_permission — has no SQL; it posts a real comment through Graph
+skip: import_freshdesk_kb — fails on a missing Freshdesk credential before reaching any SQL

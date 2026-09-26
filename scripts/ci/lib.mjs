@@ -179,6 +179,16 @@ export function directiveOf(file) {
 }
 
 /**
+ * The members of the `JobType` union in lib/queue/index.ts, or null when the
+ * union cannot be found. Shared by the two rules that hold other files to it,
+ * so they cannot disagree about which job types exist.
+ */
+export function jobTypes() {
+  const union = read('lib/queue/index.ts').match(/export type JobType =([\s\S]*?);/);
+  return union ? [...union[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]) : null;
+}
+
+/**
  * A guard for checks that pass by finding nothing.
  *
  * Most rules here select files or declarations with a pattern and then fail on
