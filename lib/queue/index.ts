@@ -1,4 +1,4 @@
-import { and, eq, lte, or, sql } from 'drizzle-orm';
+import { and, eq, inArray, lte, or, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { jobs } from '@/db/schema';
 
@@ -124,6 +124,34 @@ export async function enqueueMany(
     .returning({ id: jobs.id });
 
   return rows.length;
+}
+
+/**
+ * Whether a job of this type is queued or running — for the admin buttons that
+ * start a whole-archive pass and refuse to start a second one beside it.
+ *
+ * `pending` includes a job sitting out its backoff before a retry, which is
+ * still the same run: starting another would put two passes over the archive
+ * side by side the moment the first one's retry comes due.
+ *
+ * Typed rather than written as a raw fragment, which is what the three copies
+ * this replaced were: there the type was a string literal inside the SQL, so a
+ * misspelled one matched no job at all and the guard let every click through.
+ * Here it is a `JobType`, checked by the compiler against the union above.
+ *
+ * It is a read, not a lock, so two clicks in the same instant can both see
+ * nothing. The callers pair it with a `dedupeKey` bucketed to the minute, which
+ * is what actually collapses a double-click; this is the part that catches the
+ * second person pressing the button an hour into the first run.
+ */
+export async function hasActiveJob(type: JobType): Promise<boolean> {
+  const rows = await db
+    .select({ id: jobs.id })
+    .from(jobs)
+    .where(and(eq(jobs.type, type), inArray(jobs.status, ['pending', 'processing'])))
+    .limit(1);
+
+  return rows.length > 0;
 }
 
 /**
