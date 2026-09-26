@@ -20,7 +20,22 @@ export function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
-/** Constant-time compare for any secret we check by value rather than by index. */
+/**
+ * Constant-time compare for any secret we check by value rather than by index.
+ *
+ * The one copy. The widget's identity signature already used it; the Postmark
+ * webhook's password, Meta's verify token and the Render probe's header each
+ * wrote it out by hand, and each had to remember the same two things: compare
+ * bytes rather than characters, because `timingSafeEqual` throws on a length
+ * mismatch and `'é'` is one character but two bytes; and check the lengths
+ * first, which gives away only how long the secret is. A fourth copy that
+ * forgot either one would read as correct.
+ *
+ * Not for the hex HMAC in `lib/whatsapp/verify.ts`, which compares the decoded
+ * digests rather than the strings. The signed reply tokens and subject tags in
+ * `lib/email/threading.ts` are hex HMACs too, but they are compared as strings,
+ * lowercased first, so they come here.
+ */
 export function safeEqual(a: string, b: string): boolean {
   const bufA = Buffer.from(a);
   const bufB = Buffer.from(b);

@@ -1,4 +1,4 @@
-import { timingSafeEqual } from 'node:crypto';
+import { safeEqual } from '@/lib/auth/tokens';
 import { isTimeout, WRITE_TIMEOUT_MS } from '@/lib/http/deadline';
 import { formatAddress, formatMessageId, normaliseMessageId } from '../threading';
 import type {
@@ -201,9 +201,7 @@ export class PostmarkEmailProvider implements EmailProvider {
     if (colon === -1) return { verified: false, reason: 'Basic Auth credential has no password' };
     const password = decoded.slice(colon + 1);
 
-    const a = Buffer.from(password);
-    const b = Buffer.from(this.webhookSecret);
-    if (a.length !== b.length || !timingSafeEqual(a, b)) {
+    if (!safeEqual(password, this.webhookSecret)) {
       return { verified: false, reason: 'Basic Auth password did not match EMAIL_WEBHOOK_SECRET' };
     }
     return { verified: true };

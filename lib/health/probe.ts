@@ -1,4 +1,5 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac } from 'node:crypto';
+import { safeEqual } from '@/lib/auth/tokens';
 import { env } from '@/lib/env';
 
 /**
@@ -83,9 +84,7 @@ export function renderProbeToken(): string {
 
 export function isRenderProbeRequest(value: string | null): boolean {
   if (!value) return false;
-  const expected = Buffer.from(renderProbeToken());
-  const given = Buffer.from(value);
-  return given.length === expected.length && timingSafeEqual(given, expected);
+  return safeEqual(value, renderProbeToken());
 }
 
 /**
