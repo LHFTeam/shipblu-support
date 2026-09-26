@@ -365,11 +365,10 @@ const LARGEST_MEDIA_BYTES = 100 * 1024 * 1024;
  * gets the largest file's budget, the one guess that cannot fail a real file.
  *
  * The largest is 110 seconds, so the lookup and the download together leave at
- * least half of `STALLED_AFTER_MS` to the storage upload that follows. That
- * upload is bounded by `uploadObject`, not here, and only once `lib/storage`
- * carries its own deadline (row 2.8's storage PR, sized by this same rule): a
- * `fetch` with no signal waits five minutes, the whole window, and a job
- * reclaimed mid-upload runs twice and writes a second attachment row.
+ * least half of `STALLED_AFTER_MS` to the storage upload that follows, which
+ * `uploadObject` bounds by this same rule — 110 seconds at the largest. Both
+ * halves have to fit: a job past the window is reclaimed and runs twice, and
+ * the second run writes a second attachment row.
  */
 export function mediaTimeout(sizeBytes: number | null | undefined): number {
   const bytes = sizeBytes ?? LARGEST_MEDIA_BYTES;
