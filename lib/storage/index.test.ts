@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetEnvCache } from '@/lib/env';
+import { setTestEnv, withTestEnv } from '@/lib/testing/env';
 import { removeObjects, signedUrl, uploadObject } from './index';
 
 /**
@@ -10,19 +10,14 @@ import { removeObjects, signedUrl, uploadObject } from './index';
  * request open instead.
  */
 
-const ORIGINAL_ENV = process.env;
 const ORIGINAL_FETCH = globalThis.fetch;
 
-beforeEach(() => {
-  process.env = {
-    NODE_ENV: 'test',
-    DATABASE_URL: 'postgresql://localhost:5432/test',
-    APP_SECRET: '0'.repeat(64),
-    SUPABASE_URL: 'https://project.supabase.co',
-    SUPABASE_SERVICE_ROLE_KEY: 'service-role',
-  } as NodeJS.ProcessEnv;
-  resetEnvCache();
+withTestEnv({
+  SUPABASE_URL: 'https://project.supabase.co',
+  SUPABASE_SERVICE_ROLE_KEY: 'service-role',
+});
 
+beforeEach(() => {
   // Answers like `fetch` does: a signal that has fired rejects with its reason.
   globalThis.fetch = (async (_url: string | URL, init?: RequestInit) => {
     if (init?.signal?.aborted) throw init.signal.reason;
@@ -33,9 +28,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  process.env = ORIGINAL_ENV;
   globalThis.fetch = ORIGINAL_FETCH;
-  resetEnvCache();
   vi.restoreAllMocks();
 });
 
@@ -198,9 +191,7 @@ describe('removeObjects', () => {
     ['missing key', 'SUPABASE_SERVICE_ROLE_KEY', undefined],
     ['invalid URL', 'SUPABASE_URL', 'not a URL'],
   ])('reports all keys when configuration has a %s', async (_what, name, value) => {
-    if (value === undefined) delete process.env[name!];
-    else process.env[name!] = value;
-    resetEnvCache();
+    setTestEnv({ [name!]: value });
     const request = vi.spyOn(globalThis, 'fetch');
 
     await expect(removeObjects([paths[0]!, paths[0]!, '', paths[1]!])).resolves.toEqual({
@@ -210,8 +201,14 @@ describe('removeObjects', () => {
   });
 
   it('returns immediately for empty keys without requiring storage configuration', async () => {
-    process.env = {} as NodeJS.ProcessEnv;
-    resetEnvCache();
+    // Nothing at all, not only storage's two: `env()` would refuse to parse, so
+    // this passing means the empty case never asks it.
+    setTestEnv({
+      DATABASE_URL: undefined,
+      APP_SECRET: undefined,
+      SUPABASE_URL: undefined,
+      SUPABASE_SERVICE_ROLE_KEY: undefined,
+    });
     const request = vi.spyOn(globalThis, 'fetch');
 
     await expect(removeObjects(['', '  '])).resolves.toEqual({ failed: [] });

@@ -1,16 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { resetEnvCache } from '@/lib/env';
+import { describe, expect, it } from 'vitest';
+import { setTestEnv, withTestEnv } from '@/lib/testing/env';
 import { isRenderProbeRequest, renderProbeToken, within } from './probe';
 
-beforeEach(() => {
-  process.env.DATABASE_URL = 'postgres://localhost/test';
-  process.env.APP_SECRET = 'x'.repeat(32);
-  resetEnvCache();
-});
-
-afterEach(() => {
-  resetEnvCache();
-});
+withTestEnv();
 
 // `/probe` is public in proxy.ts, so this check is the only thing between a
 // stranger and a database query per request.
@@ -28,8 +20,7 @@ describe('isRenderProbeRequest', () => {
 
   it('refuses the token of a deployment with a different secret', () => {
     const other = renderProbeToken();
-    process.env.APP_SECRET = 'y'.repeat(32);
-    resetEnvCache();
+    setTestEnv({ APP_SECRET: 'y'.repeat(32) });
 
     expect(isRenderProbeRequest(other)).toBe(false);
   });
@@ -37,8 +28,7 @@ describe('isRenderProbeRequest', () => {
 
 describe('within', () => {
   it('abandons what it stops waiting for', async () => {
-    process.env.DB_QUERY_TIMEOUT_MS = '20';
-    resetEnvCache();
+    setTestEnv({ DB_QUERY_TIMEOUT_MS: '20' });
     let abandoned = false;
 
     await expect(
@@ -47,7 +37,5 @@ describe('within', () => {
       }),
     ).rejects.toThrow('never did not answer in 20ms');
     expect(abandoned).toBe(true);
-
-    delete process.env.DB_QUERY_TIMEOUT_MS;
   });
 });

@@ -1,6 +1,6 @@
 import { createHmac } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetEnvCache } from '@/lib/env';
+import { setTestEnv, withTestEnv } from '@/lib/testing/env';
 
 /**
  * The WhatsApp webhook's decisions: the handshake, which delivery id a stored
@@ -42,7 +42,6 @@ const { GET, POST } = await import('./route');
 const { webhookEvents } = await import('@/db/schema');
 
 const SECRET = 'whatsapp-app-secret';
-const ORIGINAL_ENV = process.env;
 
 // Out of order within a kind, and with an echo, so the id has to be sorted and
 // has to count all three kinds.
@@ -83,15 +82,9 @@ function deliver(
   );
 }
 
+withTestEnv({ META_APP_SECRET: SECRET, META_VERIFY_TOKEN: 'verify-me' });
+
 beforeEach(() => {
-  process.env = {
-    ...ORIGINAL_ENV,
-    DATABASE_URL: 'postgres://localhost/test',
-    APP_SECRET: 'x'.repeat(32),
-    META_APP_SECRET: SECRET,
-    META_VERIFY_TOKEN: 'verify-me',
-  };
-  resetEnvCache();
   writes.length = 0;
   // Reset with the other recorders: the conflict-target assertion compares the
   // whole array, so without this it passes only while its test is the file's
@@ -103,8 +96,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  process.env = ORIGINAL_ENV;
-  resetEnvCache();
   vi.restoreAllMocks();
 });
 
@@ -129,8 +120,7 @@ describe('the subscription handshake', () => {
   });
 
   it('says it is not configured rather than refusing, when there is no token', async () => {
-    delete process.env.META_VERIFY_TOKEN;
-    resetEnvCache();
+    setTestEnv({ META_VERIFY_TOKEN: undefined });
     vi.spyOn(console, 'error').mockImplementation(() => {});
 
     expect((await handshake('verify-me')).status).toBe(500);
@@ -242,8 +232,7 @@ describe('an unsigned delivery', () => {
   });
 
   it('is refused the same way when no app secret is configured', async () => {
-    delete process.env.META_APP_SECRET;
-    resetEnvCache();
+    setTestEnv({ META_APP_SECRET: undefined });
 
     const response = await deliver();
 

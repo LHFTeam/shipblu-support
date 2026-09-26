@@ -1,6 +1,6 @@
 import { createHmac } from 'node:crypto';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { resetEnvCache } from '@/lib/env';
+import { describe, expect, it } from 'vitest';
+import { setTestEnv, withTestEnv } from '@/lib/testing/env';
 import {
   identitySigningEnabled,
   identityKey,
@@ -16,22 +16,9 @@ import {
  * having are about what the parser refuses and what the signature covers.
  */
 
-const ORIGINAL = process.env;
 const SECRET = 'a-shared-secret-for-the-dashboard';
 
-beforeEach(() => {
-  process.env = {
-    NODE_ENV: 'test',
-    DATABASE_URL: 'postgresql://localhost:5432/test',
-    APP_SECRET: '0'.repeat(64),
-  } as NodeJS.ProcessEnv;
-  resetEnvCache();
-});
-
-afterEach(() => {
-  process.env = ORIGINAL;
-  resetEnvCache();
-});
+withTestEnv();
 
 /** What the merchant dashboard actually sends, in the Freshchat shape. */
 function dashboardUser(overrides: Record<string, unknown> = {}) {
@@ -134,8 +121,7 @@ describe('verifyIdentity', () => {
   }
 
   it('accepts what the host backend signed', () => {
-    process.env.WIDGET_IDENTITY_SECRET = SECRET;
-    resetEnvCache();
+    setTestEnv({ WIDGET_IDENTITY_SECRET: SECRET });
 
     const identity = parseIdentity(dashboardUser())!;
     expect(verifyIdentity(identity, sign(identity))).toBe(true);
@@ -146,8 +132,7 @@ describe('verifyIdentity', () => {
     // Name, phone and the extra fields are decoration. Covering them would mean
     // a merchant renaming themselves in the dashboard silently stops being
     // identified at all, which is the failure nobody would diagnose.
-    process.env.WIDGET_IDENTITY_SECRET = SECRET;
-    resetEnvCache();
+    setTestEnv({ WIDGET_IDENTITY_SECRET: SECRET });
 
     const signature = sign(parseIdentity(dashboardUser())!);
     const renamed = parseIdentity(dashboardUser({ firstName: 'Someone', phone: '201110000000' }))!;
@@ -156,8 +141,7 @@ describe('verifyIdentity', () => {
   });
 
   it('rejects a claim to a different account or address', () => {
-    process.env.WIDGET_IDENTITY_SECRET = SECRET;
-    resetEnvCache();
+    setTestEnv({ WIDGET_IDENTITY_SECRET: SECRET });
 
     const signature = sign(parseIdentity(dashboardUser())!);
 
@@ -170,8 +154,7 @@ describe('verifyIdentity', () => {
   });
 
   it('rejects a signature made with another environment secret', () => {
-    process.env.WIDGET_IDENTITY_SECRET = SECRET;
-    resetEnvCache();
+    setTestEnv({ WIDGET_IDENTITY_SECRET: SECRET });
 
     const identity = parseIdentity(dashboardUser())!;
     expect(verifyIdentity(identity, sign(identity, 'the-staging-secret'))).toBe(false);

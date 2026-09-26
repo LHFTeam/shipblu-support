@@ -1,7 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import postgres from 'postgres';
 import { getSql, instrumentClient, poolPressure } from '@/db/client';
-import { env, resetEnvCache } from '@/lib/env';
+import { env } from '@/lib/env';
+import { withTestEnv } from '@/lib/testing/env';
 
 /**
  * These tests do not open a connection. Two halves: the postgres.js internals
@@ -19,11 +20,7 @@ import { env, resetEnvCache } from '@/lib/env';
  * connection timers, and the startup parameters — so the deadline has to be
  * ours, and it has to reach inside. See §62 and `plans/web-freeze-2026-09-08.md`.
  */
-beforeEach(() => {
-  process.env.DATABASE_URL = 'postgres://localhost/test';
-  process.env.APP_SECRET = 'x'.repeat(32);
-  resetEnvCache();
-});
+withTestEnv();
 
 /** A query object, built the way drizzle builds every one of its queries. */
 function pendingQuery() {

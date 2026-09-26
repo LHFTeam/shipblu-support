@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { resetEnvCache } from '@/lib/env';
+import { describe, expect, it } from 'vitest';
+import { setTestEnv, withTestEnv } from '@/lib/testing/env';
 import { parseTokenEnvVar, resolveAccount, tokenForAccount } from './accounts';
 
 /**
@@ -104,19 +104,7 @@ describe('resolveAccount', () => {
 });
 
 describe('tokenForAccount', () => {
-  beforeEach(() => {
-    process.env.DATABASE_URL = 'postgres://localhost/test';
-    process.env.APP_SECRET = 'x'.repeat(32);
-    process.env.META_PAGE_ACCESS_TOKEN = 'shared-token';
-    process.env.WHATSAPP_TOKEN_SAUDI = 'saudi-token';
-    resetEnvCache();
-  });
-
-  afterEach(() => {
-    delete process.env.META_PAGE_ACCESS_TOKEN;
-    delete process.env.WHATSAPP_TOKEN_SAUDI;
-    resetEnvCache();
-  });
+  withTestEnv({ META_PAGE_ACCESS_TOKEN: 'shared-token', WHATSAPP_TOKEN_SAUDI: 'saudi-token' });
 
   it('uses the shared token when the account names none', () => {
     expect(tokenForAccount(ACCOUNTS.egypt)).toBe('shared-token');
@@ -133,7 +121,7 @@ describe('tokenForAccount', () => {
    * that gap is the ordinary way this is set up.
    */
   it('names the missing variable when it is not set', () => {
-    delete process.env.WHATSAPP_TOKEN_SAUDI;
+    setTestEnv({ WHATSAPP_TOKEN_SAUDI: undefined });
     expect(() => tokenForAccount(ACCOUNTS.saudi)).toThrow(/WHATSAPP_TOKEN_SAUDI/);
   });
 

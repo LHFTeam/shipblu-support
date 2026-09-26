@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetEnvCache } from '@/lib/env';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { withTestEnv } from '@/lib/testing/env';
 import {
   downloadAttachment,
   fetchProfile,
@@ -24,16 +24,10 @@ import { normaliseGender } from './profile';
  * missing approval hides as a run of private profiles.
  */
 
-beforeEach(() => {
-  process.env.DATABASE_URL = 'postgres://localhost/test';
-  process.env.APP_SECRET = 'x'.repeat(32);
-  process.env.META_PAGE_ACCESS_TOKEN = 'token';
-  resetEnvCache();
-});
+withTestEnv({ META_PAGE_ACCESS_TOKEN: 'token' });
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  resetEnvCache();
 });
 
 describe('profileFields', () => {

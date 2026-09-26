@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { setTestEnv, withTestEnv } from '@/lib/testing/env';
 import { publicBaseUrl, requestBaseUrl } from './site';
 
 /** Just enough of `Headers` for the one method `requestBaseUrl` calls. */
@@ -10,18 +11,9 @@ function headers(entries: Record<string, string>) {
 }
 
 describe('requestBaseUrl', () => {
-  const original = { ...process.env };
-
-  beforeEach(() => {
-    // The fallback reads these, so the tests below have to own them rather than
-    // inherit whatever the shell happened to export.
-    delete process.env.KB_PUBLIC_HOST;
-    process.env.APP_URL = 'https://app.example.com';
-  });
-
-  afterEach(() => {
-    process.env = { ...original };
-  });
+  // The fallback reads KB_PUBLIC_HOST and APP_URL, so the tests below own them
+  // rather than inherit whatever the shell happened to export.
+  withTestEnv({ APP_URL: 'https://app.example.com' });
 
   it('uses the host the request actually arrived on', () => {
     expect(requestBaseUrl(headers({ host: 'shipblu-support.onrender.com' }))).toBe(
@@ -32,7 +24,7 @@ describe('requestBaseUrl', () => {
   it('does not follow the published host when they disagree', () => {
     // The whole point: KB_PUBLIC_HOST can name a domain that does not serve
     // this app yet, and an agent clicking a link needs the one that does.
-    process.env.KB_PUBLIC_HOST = 'support.shipblu.com';
+    setTestEnv({ KB_PUBLIC_HOST: 'support.shipblu.com' });
 
     expect(requestBaseUrl(headers({ host: 'shipblu-support.onrender.com' }))).toBe(
       'https://shipblu-support.onrender.com',

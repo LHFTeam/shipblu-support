@@ -1,7 +1,7 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import { whatsappTemplates } from '@/db/schema';
-import { resetEnvCache } from '@/lib/env';
+import { withTestEnv } from '@/lib/testing/env';
 import { staleTemplateFilter } from './sync-whatsapp-templates';
 
 /**
@@ -20,11 +20,7 @@ import { staleTemplateFilter } from './sync-whatsapp-templates';
 
 // Building a query validates the environment, but never opens a connection:
 // `toSQL()` is entirely offline, which is what makes this test cheap.
-beforeEach(() => {
-  process.env.DATABASE_URL = 'postgres://localhost/test';
-  process.env.APP_SECRET = 'x'.repeat(32);
-  resetEnvCache();
-});
+withTestEnv();
 
 const ACCOUNT = '11111111-1111-4111-8111-111111111111';
 

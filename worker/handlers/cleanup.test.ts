@@ -1,7 +1,7 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import { jobs, webhookEvents } from '@/db/schema';
-import { resetEnvCache } from '@/lib/env';
+import { withTestEnv } from '@/lib/testing/env';
 import { completedJobRetentionFilter, webhookRetentionFilter } from './cleanup';
 
 /**
@@ -15,11 +15,7 @@ import { completedJobRetentionFilter, webhookRetentionFilter } from './cleanup';
  * signature verification never got a `processed_at`, never matched, and was
  * never deleted — 4,648 rows on 2026-09-09, the oldest from 19 August.
  */
-beforeEach(() => {
-  process.env.DATABASE_URL = 'postgres://localhost/test';
-  process.env.APP_SECRET = 'x'.repeat(32);
-  resetEnvCache();
-});
+withTestEnv();
 
 function webhookDelete() {
   return db.delete(webhookEvents).where(webhookRetentionFilter()).toSQL();
