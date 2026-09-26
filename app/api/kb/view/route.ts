@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server';
+import { z } from 'zod';
+import { readJsonBody } from '@/lib/http/json-body';
 import { allow, clientIp } from '@/lib/http/rate-limit';
 import { recordArticleView } from '@/lib/kb/queries';
 
@@ -8,17 +10,18 @@ export const dynamic = 'force-dynamic';
 const LIMIT = 60;
 const WINDOW_MS = 60_000;
 
+/** Any object; the id is checked below. */
+const viewBody = z.object({ articleId: z.unknown().optional() });
+
 export async function POST(request: Request) {
   if (!allow(`kb-view:${clientIp(request)}`, LIMIT, WINDOW_MS)) {
     return new NextResponse(null, { status: 429 });
   }
 
-  let articleId: unknown;
-  try {
-    ({ articleId } = (await request.json()) as { articleId?: unknown });
-  } catch {
-    return new NextResponse(null, { status: 400 });
-  }
+  const body = await readJsonBody(request, viewBody);
+  if (!body) return new NextResponse(null, { status: 400 });
+
+  const { articleId } = body;
 
   if (typeof articleId !== 'string' || !UUID.test(articleId)) {
     return new NextResponse(null, { status: 400 });

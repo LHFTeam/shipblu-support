@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
+import { z } from 'zod';
 import { isWithinBusinessHours, nextOpeningAt } from '@/lib/hours';
+import { readJsonBody } from '@/lib/http/json-body';
 import { allow, clientIp } from '@/lib/http/rate-limit';
 import { listMessages } from '@/lib/widget/conversation';
 import {
@@ -12,6 +14,9 @@ import {
 } from '@/lib/widget/session';
 
 export const dynamic = 'force-dynamic';
+
+/** Any object; a token that is not a string is treated as no token below. */
+const sessionBody = z.object({ token: z.unknown().optional() });
 
 /**
  * Opens or resumes a widget session.
@@ -26,14 +31,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'slow down' }, { status: 429 });
   }
 
-  let body: { token?: unknown };
-  try {
-    body = (await request.json()) as typeof body;
-  } catch {
-    body = {};
-  }
+  const body = await readJsonBody(request, sessionBody);
 
-  const supplied = typeof body.token === 'string' ? body.token : '';
+  const supplied = typeof body?.token === 'string' ? body.token : '';
   let token = supplied;
   let contactId = supplied ? await resolveVisitor(supplied) : null;
 

@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
+import { z } from 'zod';
 import { MAX_COMMENT, recordResponse } from '@/lib/csat';
+import { readJsonBody } from '@/lib/http/json-body';
 import { allow, clientIp } from '@/lib/http/rate-limit';
 
 export const dynamic = 'force-dynamic';
@@ -15,17 +17,20 @@ export const dynamic = 'force-dynamic';
 const LIMIT = 20;
 const WINDOW_MS = 60 * 60_000;
 
+/** Any object; each field is checked below, where each refusal is decided. */
+const csatBody = z.object({
+  token: z.unknown().optional(),
+  rating: z.unknown().optional(),
+  comment: z.unknown().optional(),
+});
+
 export async function POST(request: Request) {
   if (!allow(`csat:${clientIp(request)}`, LIMIT, WINDOW_MS)) {
     return new NextResponse(null, { status: 429 });
   }
 
-  let body: { token?: unknown; rating?: unknown; comment?: unknown };
-  try {
-    body = (await request.json()) as typeof body;
-  } catch {
-    return new NextResponse(null, { status: 400 });
-  }
+  const body = await readJsonBody(request, csatBody);
+  if (!body) return new NextResponse(null, { status: 400 });
 
   if (typeof body.token !== 'string' || !body.token) {
     return new NextResponse(null, { status: 400 });
