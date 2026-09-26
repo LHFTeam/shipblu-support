@@ -1,6 +1,8 @@
 import { fail, jobTypes, read, requireAtLeast } from '../lib.mjs';
 
 const LIST = 'scripts/ci/db-jobs.txt';
+/** The `sed` that turns the list's `run:` lines into the jobs CI runs. */
+const READER = /sed -n (['"])s\/\^run: \/\/p\1 scripts\/ci\/db-jobs\.txt/;
 
 /**
  * Every job type is either run by CI's `database` job or skipped with a reason.
@@ -49,8 +51,10 @@ export function checkDbJobs() {
 
       if (kind === 'run') {
         run += 1;
-        if (rest !== '' && !/^( [A-Za-z]+=[^\s]+)+$/.test(rest)) {
-          fail(rule, where, 'a run line takes only key=value arguments after the type');
+        // No glob characters: ci.yml splits the line unquoted, so `x=*` would
+        // reach the handler as whatever the working directory holds.
+        if (rest !== '' && !/^( [A-Za-z]+=[^\s*?[]+)+$/.test(rest)) {
+          fail(rule, where, 'a run line takes only key=value arguments, without glob characters');
         }
       } else if (!/^ — \S/.test(rest)) {
         fail(rule, where, `"${type}" is skipped without saying why — write the reason after " — "`);
@@ -69,7 +73,14 @@ export function checkDbJobs() {
 
   requireAtLeast(rule, LIST, run, 10, 'job types run against Postgres');
 
-  if (!read('.github/workflows/ci.yml').includes(LIST)) {
+  // The command that reads the list, on a line that is not a YAML comment. A
+  // bare mention of the path proved nothing: the comment above the step names
+  // it, so a loop rewritten to hard-code its jobs still passed.
+  const reads = read('.github/workflows/ci.yml')
+    .split('\n')
+    .filter((line) => !line.trimStart().startsWith('#'))
+    .some((line) => READER.test(line));
+  if (!reads) {
     fail(rule, '.github/workflows/ci.yml', `the database job no longer reads ${LIST}`);
   }
 }

@@ -255,6 +255,10 @@ jobs:
         run: |
           set -euo pipefail
           mapfile -t jobs < <(sed -n 's/^run: //p' scripts/ci/db-jobs.txt)
+          # `set -e` does not see a failure inside `< <(...)`: a missing list
+          # would run nothing and pass. repo-rules catches that too, but this
+          # step should not be the one that goes green.
+          [ "${#jobs[@]}" -gt 0 ] || { echo "no jobs read from scripts/ci/db-jobs.txt"; exit 1; }
           for job in "${jobs[@]}"; do
             echo "::group::npm run job -- $job"
             # Unquoted on purpose: a line's key=value arguments are separate words.

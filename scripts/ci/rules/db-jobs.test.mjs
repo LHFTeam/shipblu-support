@@ -101,6 +101,32 @@ describe('db-jobs', () => {
     ]);
   });
 
+  it('does not count a comment that names the list as CI reading it', async () => {
+    const found = await runRule('db-jobs', {
+      ...REPO,
+      '.github/workflows/ci.yml': [
+        '      # Which jobs is scripts/ci/db-jobs.txt.',
+        '      - run: for job in sweep_a; do npm run job -- $job; done',
+        '',
+      ].join('\n'),
+    });
+
+    expect(found).toEqual([
+      expect.objectContaining({ message: expect.stringMatching(/no longer reads/) }),
+    ]);
+  });
+
+  it('refuses a run argument the shell would glob', async () => {
+    const found = await runRule(
+      'db-jobs',
+      withList([...RUN_ALL.slice(1), 'run: sweep_a limit=*', 'skip: send_email — sends']),
+    );
+
+    expect(found).toEqual([
+      expect.objectContaining({ message: expect.stringMatching(/without glob characters/) }),
+    ]);
+  });
+
   it('fails when it runs too few job types to be checking anything', async () => {
     const found = await runRule('db-jobs', {
       ...REPO,
