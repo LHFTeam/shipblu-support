@@ -130,8 +130,9 @@ describe('discoverLanguageCode', () => {
 
 /**
  * The importer runs as a job, and the worker awaits a whole batch before it
- * claims the next one. A request that never answered therefore stopped every
- * queued job — every send, every sync — until the process was restarted.
+ * claims the next one. A request with no deadline of its own therefore held
+ * every queued job — every send, every sync — for the five minutes `fetch`
+ * waits before it gives up.
  */
 describe('a Freshdesk request', () => {
   const ORIGINAL_ENV = process.env;
@@ -177,6 +178,31 @@ describe('a Freshdesk request', () => {
       AbortSignal.abort(new DOMException('The operation timed out.', 'TimeoutError')),
     );
     serveUnlessAborted();
+
+    const failure = getTranslatedCategory(1, 'ar');
+
+    await expect(failure).rejects.toBeInstanceOf(FreshdeskError);
+    await expect(failure).rejects.toMatchObject({ isTransient: true });
+    await expect(failure).rejects.toThrow(/did not answer in 15s/);
+  });
+
+  /**
+   * The signal governs the body as well as the status. A deadline passing
+   * mid-body rejected with the signal's own reason, which is not a
+   * `FreshdeskError` and names no path.
+   */
+  it('says the same when the deadline passes while the answer is arriving', async () => {
+    globalThis.fetch = (async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.error(
+              new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
+            );
+          },
+        }),
+        { status: 200 },
+      )) as typeof fetch;
 
     const failure = getTranslatedCategory(1, 'ar');
 

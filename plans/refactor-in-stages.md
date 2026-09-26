@@ -434,15 +434,31 @@ This is low priority, one provider per PR.
 Found while starting this row: it matters more than "low priority" suggests,
 and "no timeout" is not a safe choice for a send.
 
-- **One hung request stops the whole queue.** `runOnce` in `worker/index.ts`
+- **One slow request holds the whole queue.** `runOnce` in `worker/index.ts`
   awaits every job in a batch before it claims the next batch, and the stalled
-  job sweep runs only between batches. A request that never answers therefore
-  stops every queued job — sends, syncs, sweeps — until the process restarts.
-- **The restart then runs the job again.** Startup reclaims anything locked for
-  more than five minutes (`reclaimStalledJobs`). For a send the provider had
-  already accepted, that is the duplicate the 60-second floor exists to avoid.
+  job sweep runs only between batches. Node's `fetch` with no signal gives up
+  only after five minutes without a response, and never on a body that keeps
+  trickling in. So one unresponsive provider holds every queued job — sends,
+  syncs, sweeps — for at least five minutes per request.
+- **A slow send can then run twice.** Nothing refreshes a job's lock while it
+  runs, and a deploy's new worker sweeps on start (`reclaimStalledJobs`,
+  anything locked for more than five minutes). A send still waiting past that
+  is run again: the duplicate the 60-second floor exists to avoid.
 - So every outbound call in a job path gets a deadline. A send's sits between
   60 seconds and the five-minute reclaim window.
+- **The deadline covers the body, not just the status.** The same signal
+  governs reading the response, and a deadline passing mid-body rejects with
+  the signal's own reason. So each client reads the body inside its deadline
+  handling. A send whose 2xx arrived is treated as accepted even if its body
+  never does, because retrying it is the duplicate again.
+- **Media deadlines scale with size.** A WhatsApp document can be 100 MB. The
+  download and the storage upload each get a minute plus a second per 2 MB,
+  so 110 seconds at most.
+
+The structural fix is for `runOnce` to refill a slot as each job finishes
+rather than awaiting the batch. That is worker work for Stage 4.4, not this
+row: per-request deadlines are needed either way, because a hung request still
+holds its own slot and its own lock.
 
 ### 2.9 Replies never get paragraphs
 

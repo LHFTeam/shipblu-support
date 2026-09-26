@@ -71,22 +71,26 @@ function credentials() {
 const TIMEOUT_MS = 15_000;
 
 /**
- * One GET, with a deadline.
+ * One GET and the body it answers with, under one deadline.
  *
  * The deadline is what keeps the rest of the queue moving. The importer runs as
- * a job, and the worker awaits its whole batch before it claims another — so a
- * request that never answered stopped every queued job, sends and syncs
- * included, until the process restarted. A timeout is a transient failure like
- * a 5xx: the queue's backoff retries the import.
+ * a job, and the worker awaits its whole batch before it claims another — and
+ * `fetch` with no signal waits five minutes for a response that is not coming,
+ * so one request held every queued job, sends and syncs included, for that
+ * long. The body is read inside it because the signal governs the read too: a
+ * deadline passing mid-body rejected with the signal's own reason, which names
+ * no path. A timeout is a transient failure like a 5xx: the queue's backoff
+ * retries the import.
  */
-async function request(path: string): Promise<Response> {
+async function request(path: string): Promise<{ response: Response; text: string }> {
   const { base, auth } = credentials();
 
   try {
-    return await fetch(`${base}${path}`, {
+    const response = await fetch(`${base}${path}`, {
       headers: { Authorization: auth, Accept: 'application/json' },
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
+    return { response, text: await response.text() };
   } catch (error) {
     if (error instanceof DOMException && error.name === 'TimeoutError') {
       throw new FreshdeskError(
@@ -101,14 +105,13 @@ async function request(path: string): Promise<Response> {
 
 /** Returns null on 404 instead of throwing, for endpoints that may not exist. */
 async function getOptional<T>(path: string): Promise<T | null> {
-  const response = await request(path);
+  const { response, text } = await request(path);
 
   // 404 is the normal answer for "this item has no translation in that
   // language", so it is a result rather than a failure.
   if (response.status === 404) return null;
 
   if (!response.ok) {
-    const text = await response.text();
     throw new FreshdeskError(
       `Freshdesk ${path} failed (${response.status}): ${text.slice(0, 300)}`,
       response.status,
@@ -116,15 +119,13 @@ async function getOptional<T>(path: string): Promise<T | null> {
     );
   }
 
-  return (await response.json()) as T;
+  return JSON.parse(text) as T;
 }
 
 async function get<T>(path: string): Promise<T> {
-  const response = await request(path);
+  const { response, text } = await request(path);
 
   if (!response.ok) {
-    const text = await response.text();
-
     // 429 carries Retry-After and is the one Freshdesk returns most: the
     // Solutions API is rate limited per minute and a full KB is hundreds of
     // requests.
@@ -135,7 +136,7 @@ async function get<T>(path: string): Promise<T> {
     );
   }
 
-  return (await response.json()) as T;
+  return JSON.parse(text) as T;
 }
 
 /**
