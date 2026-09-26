@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { stubFetch } from '@/lib/testing/fetch';
 import { withTestEnv } from '@/lib/testing/env';
 import { checkMetaPermissions } from './check-meta-permissions';
 
@@ -10,17 +11,10 @@ import { checkMetaPermissions } from './check-meta-permissions';
  */
 
 function answer(status: number, body: BodyInit) {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async () => new Response(body, { status })),
-  );
+  stubFetch(async () => new Response(body, { status }));
 }
 
 withTestEnv({ META_APP_ID: '123', META_APP_SECRET: 'secret', META_PAGE_ACCESS_TOKEN: 'token' });
-
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
 
 describe('checkMetaPermissions', () => {
   it('says the deadline passed when debug_token stops answering mid-body', async () => {

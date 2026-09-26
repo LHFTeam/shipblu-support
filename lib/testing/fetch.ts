@@ -5,7 +5,7 @@ import { onTestFinished, vi } from 'vitest';
  *
  * Every provider client here is a thin layer over `fetch`, and its tests are
  * about what it does with an answer: which failures it retries, what it logs,
- * whether a deadline passing mid-body reads as a timeout. Nine test files
+ * whether a deadline passing mid-body reads as a timeout. Eleven test files
  * replaced `fetch` for that, three different ways, and each owed the restore
  * separately — an `afterEach` with `vi.unstubAllGlobals()`, a saved
  * `ORIGINAL_FETCH` put back by hand, or a `try`/`finally` around one call. A

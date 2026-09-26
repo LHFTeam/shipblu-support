@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { stubFetch } from '@/lib/testing/fetch';
 import { withTestEnv } from '@/lib/testing/env';
 import {
   type GraphSubscription,
@@ -363,26 +364,19 @@ describe('a Graph answer that stops arriving', () => {
   withTestEnv({ META_APP_ID: '123', META_PAGE_ACCESS_TOKEN: 'token' });
 
   beforeEach(() => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(
-        async () =>
-          new Response(
-            new ReadableStream({
-              start(controller) {
-                controller.error(
-                  new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
-                );
-              },
-            }),
-            { status: 200 },
-          ),
-      ),
+    stubFetch(
+      async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.error(
+                new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
+              );
+            },
+          }),
+          { status: 200 },
+        ),
     );
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
   });
 
   it('fails as a subscription error that says the deadline passed', async () => {
