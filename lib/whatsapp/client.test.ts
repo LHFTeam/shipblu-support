@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetEnvCache } from '@/lib/env';
 import { STALLED_AFTER_MS } from '@/lib/queue';
-import { graphTimeout } from '@/lib/meta/graph';
+import { GRAPH_BASE, graphTimeout } from '@/lib/meta/graph';
 import {
   WhatsAppApiError,
   downloadMedia,
@@ -349,12 +349,14 @@ describe('a deadline that passes while the body is arriving', () => {
 });
 
 /**
- * A 2xx is Meta's answer whatever its body says. A send answered with HTML or
- * with nothing threw — a SyntaxError, or "no message id" — and the handler
- * marked a message the customer had received as failed, so the queue sent it
- * again.
+ * Graph answers in JSON, so a complete 2xx body that is empty, not JSON, or
+ * JSON without a message id is somebody else answering in Meta's place — an
+ * edge page, a portal, a proxy. Each is retried as a named WhatsApp error. It
+ * used to escape as a bare SyntaxError or "no message id"; recording it as
+ * "sent" instead would drop a reply that probably never left, with nothing on
+ * the row to say so. Only a body cut short after the status (above) is sent.
  */
-describe('a 2xx whose body cannot be read', () => {
+describe('a 2xx whose complete body is not a Graph answer', () => {
   function answer(body: string) {
     vi.stubGlobal(
       'fetch',
@@ -366,26 +368,28 @@ describe('a 2xx whose body cannot be read', () => {
     vi.restoreAllMocks();
   });
 
-  it('reports a send answered with HTML as sent, rather than sending it again', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    answer('<html>OK</html>');
+  it.each([
+    ['HTML', '<html>OK</html>', /not a JSON object/],
+    ['an empty body', '', /an empty body/],
+    ['a bare JSON value', 'null', /not a JSON object/],
+  ])('retries a send answered with %s rather than calling it sent', async (_what, body, reason) => {
+    answer(body);
 
-    await expect(sendText('201000000000', 'hello')).resolves.toEqual({
-      wamid: null,
-      recipientId: null,
-    });
-    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/accepted with 200.*not JSON/));
+    const failure = sendText('201000000000', 'hello');
+
+    await expect(failure).rejects.toBeInstanceOf(WhatsAppApiError);
+    await expect(failure).rejects.toMatchObject({ isTransient: true, status: 200 });
+    await expect(failure).rejects.toThrow(reason);
   });
 
-  it('reports a send answered with an empty body as sent', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    answer('');
+  it('retries a send answered without a message id, naming keys but not the number', async () => {
+    answer(JSON.stringify({ contacts: [{ input: '201000000000', wa_id: '201000000000' }] }));
 
-    await expect(sendText('201000000000', 'hello')).resolves.toEqual({
-      wamid: null,
-      recipientId: null,
-    });
-    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/no message id/));
+    const failure = sendText('201000000000', 'hello');
+
+    await expect(failure).rejects.toMatchObject({ isTransient: true });
+    await expect(failure).rejects.toThrow('without a message id (keys: contacts)');
+    await expect(failure).rejects.not.toThrow(/201000000000/);
   });
 
   it('retries a lookup answered with HTML, as a WhatsApp error rather than a SyntaxError', async () => {
@@ -395,6 +399,23 @@ describe('a 2xx whose body cannot be read', () => {
 
     await expect(failure).rejects.toBeInstanceOf(WhatsAppApiError);
     await expect(failure).rejects.toMatchObject({ isTransient: true, status: 200 });
-    await expect(failure).rejects.toThrow(/not JSON/);
+    await expect(failure).rejects.toThrow(/not a JSON object/);
+  });
+
+  /**
+   * An empty page read as `{}` — a last page with no data — so template sync
+   * kept the first page and marked every template after it DELETED.
+   */
+  it('fails a template listing whose next page answers empty, rather than ending it', async () => {
+    const pages = [
+      JSON.stringify({ data: [{ name: 'a' }], paging: { next: `${GRAPH_BASE}/waba/page2` } }),
+      '',
+    ];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(pages.shift() ?? '', { status: 200 })),
+    );
+
+    await expect(listTemplates({ wabaId: 'waba' })).rejects.toThrow(/an empty body/);
   });
 });

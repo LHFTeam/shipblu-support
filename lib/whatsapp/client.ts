@@ -158,8 +158,8 @@ async function request(
 
 /**
  * Answers null for exactly one case: a write Meta accepted whose body was lost
- * on the way back, or arrived as something other than JSON. A read, and a
- * refusal, never answer null.
+ * on the way back. A read, a refusal, and a 2xx whose complete body is not a
+ * JSON object never answer null.
  */
 async function graph<T>(
   path: string,
@@ -236,30 +236,34 @@ async function graph<T>(
     );
   }
 
-  if (!text) return {} as T;
+  // Graph answers every call this client makes with a JSON object, so a 2xx
+  // that is empty or is not one is not evidence Meta took anything: it is an
+  // edge page, a captive portal or a proxy answering in Meta's place, which is
+  // how `lib/shipments/platform.ts` reads the same evidence. So it is retried,
+  // a send included. That is the opposite of the lost-body case above, and
+  // deliberately: a body cut short is Meta's answer interrupted, and resending
+  // it risks a duplicate; a complete body that is not Meta's answer means the
+  // message probably never left, and calling it "sent" would drop the reply
+  // with nothing on the row or in the queue to say so. An empty read was the
+  // same trap on the other side: `{}` read as a last page with no data, and
+  // template sync marked every template past the first page DELETED.
+  let parsed: unknown;
   try {
-    return JSON.parse(text) as T;
+    parsed = text ? JSON.parse(text) : undefined;
   } catch {
-    // A 2xx whose body is not JSON — an edge's HTML page, or a body cut short.
-    // The status is still Meta's answer, so a write takes the lost-body path
-    // above: the message went, and a bare SyntaxError here marked it failed and
-    // the queue sent it again. A read has nothing to act on, and is retried as
-    // one that did not answer properly rather than thrown as "unexpected token".
-    if (method !== 'GET') {
-      console.warn(
-        `[whatsapp] ${method} ${path} was accepted with ${response.status}, but its body ` +
-          `was not JSON: ${text.slice(0, 200)}`,
-      );
-      return null;
-    }
+    // Left undefined; refused below with the rest.
+  }
+  if (typeof parsed !== 'object' || parsed === null) {
     throw new WhatsAppApiError(
-      `WhatsApp API answered ${response.status} with a body that is not JSON: ${text.slice(0, 300)}`,
+      `WhatsApp API answered ${response.status} with ` +
+        (text ? `a body that is not a JSON object: ${text.slice(0, 200)}` : 'an empty body'),
       response.status,
       null,
       null,
       true,
     );
   }
+  return parsed as T;
 }
 
 export type SendResult = {
@@ -490,15 +494,17 @@ function toSendResult(response: SendResponse | null): SendResult {
 
   const wamid = response.messages?.[0]?.id;
   if (!wamid) {
-    // A 2xx with no id — an empty body, or JSON without `messages`. It used to
-    // throw, which marked a message Meta had accepted as failed and let the
-    // queue send it a second time. Missing the id is the same loss as missing
-    // the whole body, and is answered the same way.
-    console.warn(
-      `[whatsapp] a send was accepted, but its answer carried no message id: ` +
-        JSON.stringify(response).slice(0, 200),
+    // A complete JSON answer without `messages` is not a Graph acceptance, for
+    // the reason `graph` gives for a body that is not JSON: retried, not
+    // recorded as sent. Only the keys are named — `contacts` holds the
+    // recipient's number, which has no place in a worker log.
+    throw new WhatsAppApiError(
+      `WhatsApp answered a send without a message id (keys: ${Object.keys(response).join(', ') || 'none'})`,
+      0,
+      null,
+      null,
+      true,
     );
-    return { wamid: null, recipientId: response.contacts?.[0]?.wa_id ?? null };
   }
   return { wamid, recipientId: response.contacts?.[0]?.wa_id ?? null };
 }
