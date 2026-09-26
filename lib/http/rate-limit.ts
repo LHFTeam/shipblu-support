@@ -1,5 +1,9 @@
 /**
- * Per-instance rate limiting for the public knowledge base endpoints.
+ * Per-instance rate limiting for the public endpoints.
+ *
+ * It began as the guard on the knowledge base's view and feedback endpoints,
+ * which the next two paragraphs are about, and now also stands in front of the
+ * CSAT link, the widget, the tracking page and the public forms.
  *
  * The view and feedback endpoints are unauthenticated by necessity — the help
  * centre has no sign-in — so the only thing between them and a script is this.

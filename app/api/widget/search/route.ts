@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { DEFAULT_LOCALE, isLocale } from '@/lib/kb/locale';
 import { searchArticles } from '@/lib/kb/queries';
 import { ANONYMOUS } from '@/lib/kb/visibility';
-import { allow, clientIp } from '@/lib/kb/rate-limit';
+import { allow, clientIp } from '@/lib/http/rate-limit';
 import { requestBaseUrl } from '@/lib/kb/site';
 
 export const dynamic = 'force-dynamic';

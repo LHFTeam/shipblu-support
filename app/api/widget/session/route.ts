@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { isWithinBusinessHours, nextOpeningAt } from '@/lib/hours';
-import { allow, clientIp } from '@/lib/kb/rate-limit';
+import { allow, clientIp } from '@/lib/http/rate-limit';
 import { listMessages } from '@/lib/widget/conversation';
 import {
   findLiveConversation,

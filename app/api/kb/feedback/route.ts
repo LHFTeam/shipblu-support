@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { eq, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { kbArticleFeedback, kbArticles } from '@/db/schema';
-import { allow, clientIp } from '@/lib/kb/rate-limit';
+import { allow, clientIp } from '@/lib/http/rate-limit';
 
 export const dynamic = 'force-dynamic';
 

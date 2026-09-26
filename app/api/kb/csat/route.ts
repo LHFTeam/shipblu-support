@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { MAX_COMMENT, recordResponse } from '@/lib/csat';
-import { allow, clientIp } from '@/lib/kb/rate-limit';
+import { allow, clientIp } from '@/lib/http/rate-limit';
 
 export const dynamic = 'force-dynamic';
 

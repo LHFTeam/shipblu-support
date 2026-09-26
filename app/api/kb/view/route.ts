@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { allow, clientIp } from '@/lib/kb/rate-limit';
+import { allow, clientIp } from '@/lib/http/rate-limit';
 import { recordArticleView } from '@/lib/kb/queries';
 
 export const dynamic = 'force-dynamic';

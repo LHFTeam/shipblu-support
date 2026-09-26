@@ -4,7 +4,7 @@ import type { Metadata } from 'next';
 import { PackageSearchIcon } from '@/components/icons';
 import { formatCalendarDate, formatTimestamp, isLocale, t, type Locale } from '@/lib/kb/locale';
 import { popularArticles, searchArticles } from '@/lib/kb/queries';
-import { allow, clientIpFrom } from '@/lib/kb/rate-limit';
+import { allow, clientIpFrom } from '@/lib/http/rate-limit';
 import { kbViewer } from '@/lib/kb/viewer';
 import { normaliseTrackingNumber } from '@/lib/shipments/format';
 import { publicTrackingFor } from '@/lib/shipments/lookup';
