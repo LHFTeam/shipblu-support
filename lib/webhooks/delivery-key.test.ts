@@ -4,7 +4,11 @@ import { boundedDeliveryKey } from './delivery-key';
 /** What both webhooks stored before the hash, kept here as the compatibility target. */
 const previous = (joined: string) => joined.slice(0, 500);
 
-/** A real-length WhatsApp message part: `m:` and a wamid, ~60 characters. */
+/**
+ * A WhatsApp message part: `m:` and a 57-character wamid, 59 in all. Production
+ * wamids run 50–78 characters (median 62), so this is at the short end, and it
+ * takes nine of these to pass the cap where the median needs eight.
+ */
 const wamid = (n: number) =>
   `m:wamid.HBgMMjAxMDAwMDAwMDAwFQIAEhgUM0E${String(n).padStart(16, '0')}AA==`;
 
@@ -20,7 +24,7 @@ describe('boundedDeliveryKey', () => {
   });
 
   it('tells apart two long batches that share their first 500 characters', () => {
-    // The bug: nine wamids fill the old key, so a batch holding those nine and
+    // The bug: nine of these wamids fill the old key, so a batch holding those nine and
     // one more was answered "duplicate" and never processed.
     const first = batch([1, 2, 3, 4, 5, 6, 7, 8, 9]);
     const later = batch([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);

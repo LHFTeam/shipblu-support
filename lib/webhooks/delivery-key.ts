@@ -9,10 +9,12 @@ import { createHash } from 'node:crypto';
  * entry has a hard size limit — hence a cap, of 500 characters.
  *
  * The cap used to be `.slice(0, 500)`, which is not a key of the batch but of
- * its first few ids: at ~70 characters a wamid part, seven of them fill it. A
- * later batch sharing those seven plus one more message or status rebuilt the
- * same key, was answered "duplicate" with a 200, and was never processed — the
- * index spans the whole table with no expiry, so the collision is permanent.
+ * its first few ids. A wamid is 50–78 characters — median 62, measured across
+ * 120,975 stored in production — so a part (`m:` and the id) is about 64, and
+ * eight of them pass the cap. A later batch sharing those eight plus one more
+ * message or status rebuilt the same key, was answered "duplicate" with a 200,
+ * and was never processed — the index spans the whole table with no expiry, so
+ * the collision is permanent.
  *
  * So a key over the limit keeps a readable prefix and ends in a sha256 of the
  * **whole** joined string: stable across redeliveries (the parts are sorted
