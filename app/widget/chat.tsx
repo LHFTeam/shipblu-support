@@ -7,7 +7,7 @@ import { WidgetArticle } from './article';
 import { copyFor } from './copy';
 import { WidgetHome } from './home';
 import { WidgetThread, type OfflineDetails } from './thread';
-import type { ArticleLink, Message, WidgetView } from './types';
+import type { ArticleLink, Message, WidgetView } from '@/lib/widget/types';
 import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
 
 /**

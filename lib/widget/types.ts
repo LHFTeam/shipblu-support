@@ -2,8 +2,8 @@
  * Shapes the widget's three views pass between each other.
  *
  * Declared here rather than imported from `lib/widget/conversation.ts`, which
- * they mirror: that module opens a database connection at import, so a client
- * component naming its types would pull the driver into the browser bundle.
+ * they mirror: that module imports the database client, so a client component
+ * naming its types would pull the driver into the browser bundle.
  */
 
 export type Message = {

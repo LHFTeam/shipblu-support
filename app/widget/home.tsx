@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { t, type Locale } from '@/lib/kb/locale';
 import type { WidgetCopy } from './copy';
-import type { ArticleLink } from './types';
+import type { ArticleLink } from '@/lib/widget/types';
 
 /**
  * The screen the launcher opens onto.
