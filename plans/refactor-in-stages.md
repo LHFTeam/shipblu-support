@@ -106,7 +106,7 @@ conflict on all of them.
 | 2.2   | Portal agent replies bypass `carrierFor()`       | #169        | merged  |
 | 2.3   | Contacts pages cannot scroll                     | #170        | merged  |
 | 2.4   | `PermanentJobError`                              | #174        | merged  |
-| 2.5   | Ids taken from `FormData`                        |             | pending |
+| 2.5   | Ids taken from `FormData`                        | #180–#182   | merged  |
 | 2.6   | KB admin search does not escape LIKE             | #176        | merged  |
 | 2.7   | One `GRAPH_VERSION`                              | #175        | merged  |
 | 2.8   | Fetch timeouts, one provider per PR              |             | pending |
