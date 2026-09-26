@@ -1,10 +1,20 @@
 import { NextResponse } from 'next/server';
+import { z } from 'zod';
+import { readJsonBody } from '@/lib/http/json-body';
 import { allow, clientIp } from '@/lib/http/rate-limit';
 import { parseVisitorDetails } from '@/lib/widget/contact';
 import { attachVisitorDetails } from '@/lib/widget/conversation';
 import { findLiveConversation, resolveVisitor } from '@/lib/widget/session';
 
 export const dynamic = 'force-dynamic';
+
+/** Any object; each field is read below, where what a bad one means is decided. */
+const contactBody = z.object({
+  token: z.unknown().optional(),
+  name: z.unknown().optional(),
+  email: z.unknown().optional(),
+  phone: z.unknown().optional(),
+});
 
 /**
  * Captures how to reach a visitor who wrote in with nobody available.
@@ -26,12 +36,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'slow down' }, { status: 429 });
   }
 
-  let body: { token?: unknown; name?: unknown; email?: unknown; phone?: unknown };
-  try {
-    body = (await request.json()) as typeof body;
-  } catch {
-    return NextResponse.json({ error: 'invalid json' }, { status: 400 });
-  }
+  const body = await readJsonBody(request, contactBody);
+  if (!body) return NextResponse.json({ error: 'invalid json' }, { status: 400 });
 
   const token = typeof body.token === 'string' ? body.token : '';
   const contactId = await resolveVisitor(token);

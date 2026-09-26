@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
 import { eq, sql } from 'drizzle-orm';
+import { z } from 'zod';
 import { db } from '@/db/client';
 import { kbArticleFeedback, kbArticles } from '@/db/schema';
+import { readJsonBody } from '@/lib/http/json-body';
 import { allow, clientIp } from '@/lib/http/rate-limit';
 
 export const dynamic = 'force-dynamic';
@@ -13,17 +15,20 @@ const WINDOW_MS = 60 * 60_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_COMMENT = 2000;
 
+/** Any object; each field is checked below, where each refusal is decided. */
+const feedbackBody = z.object({
+  articleId: z.unknown().optional(),
+  wasHelpful: z.unknown().optional(),
+  comment: z.unknown().optional(),
+});
+
 export async function POST(request: Request) {
   if (!allow(`kb-feedback:${clientIp(request)}`, LIMIT, WINDOW_MS)) {
     return new NextResponse(null, { status: 429 });
   }
 
-  let body: { articleId?: unknown; wasHelpful?: unknown; comment?: unknown };
-  try {
-    body = (await request.json()) as typeof body;
-  } catch {
-    return new NextResponse(null, { status: 400 });
-  }
+  const body = await readJsonBody(request, feedbackBody);
+  if (!body) return new NextResponse(null, { status: 400 });
 
   const { articleId, wasHelpful } = body;
   if (typeof articleId !== 'string' || !UUID.test(articleId)) {

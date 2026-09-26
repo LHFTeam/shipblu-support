@@ -1,11 +1,20 @@
 import { NextResponse } from 'next/server';
+import { z } from 'zod';
 import { hashToken } from '@/lib/auth/tokens';
+import { readJsonBody } from '@/lib/http/json-body';
 import { allow, clientIp } from '@/lib/http/rate-limit';
 import { applyVisitorIdentity, recordIdentityOnConversation } from '@/lib/widget/identify';
 import { identitySigningEnabled, parseIdentity, verifyIdentity } from '@/lib/widget/identity';
 import { findLiveConversation, resolveVisitor } from '@/lib/widget/session';
 
 export const dynamic = 'force-dynamic';
+
+/** Any object; each field is read below, where what a bad one means is decided. */
+const identifyBody = z.object({
+  token: z.unknown().optional(),
+  identity: z.unknown().optional(),
+  signature: z.unknown().optional(),
+});
 
 /**
  * Takes the identity the host page holds for its signed-in user.
@@ -23,12 +32,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'slow down' }, { status: 429 });
   }
 
-  let body: { token?: unknown; identity?: unknown; signature?: unknown };
-  try {
-    body = (await request.json()) as typeof body;
-  } catch {
-    return NextResponse.json({ error: 'invalid json' }, { status: 400 });
-  }
+  const body = await readJsonBody(request, identifyBody);
+  if (!body) return NextResponse.json({ error: 'invalid json' }, { status: 400 });
 
   const token = typeof body.token === 'string' ? body.token : '';
   const contactId = await resolveVisitor(token);

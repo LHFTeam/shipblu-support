@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { getSessionAgent, touchSessionActivity } from '@/lib/auth/session';
+import { readJsonBody } from '@/lib/http/json-body';
 import { applyIdleAway, recordInput } from '@/lib/presence/activity';
 import { loadPresencePolicy } from '@/lib/presence/policy';
 
@@ -34,10 +35,10 @@ export async function POST(request: Request) {
   const agent = await getSessionAgent();
   if (!agent) return new Response('unauthorised', { status: 401 });
 
-  const parsed = beat.safeParse(await request.json().catch(() => null));
-  if (!parsed.success) return new Response('bad request', { status: 400 });
+  const parsed = await readJsonBody(request, beat);
+  if (!parsed) return new Response('bad request', { status: 400 });
 
-  if (parsed.data.idle) {
+  if (parsed.idle) {
     const changed = await applyIdleAway(agent.id, await loadPresencePolicy());
     return Response.json({ accepting: changed ? false : agent.isAcceptingTickets });
   }

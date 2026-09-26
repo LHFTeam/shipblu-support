@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server';
+import { z } from 'zod';
+import { readJsonBody } from '@/lib/http/json-body';
 import { allow, clientIp } from '@/lib/http/rate-limit';
 import { appendVisitorMessage, listMessages } from '@/lib/widget/conversation';
 import { resolveVisitor } from '@/lib/widget/session';
@@ -7,17 +9,20 @@ export const dynamic = 'force-dynamic';
 
 const MAX_LENGTH = 5000;
 
+/** Any object; each field is read below, where what a bad one means is decided. */
+const messageBody = z.object({
+  token: z.unknown().optional(),
+  body: z.unknown().optional(),
+  pageUrl: z.unknown().optional(),
+});
+
 export async function POST(request: Request) {
   if (!allow(`widget-message:${clientIp(request)}`, 30, 60_000)) {
     return NextResponse.json({ error: 'slow down' }, { status: 429 });
   }
 
-  let body: { token?: unknown; body?: unknown; pageUrl?: unknown };
-  try {
-    body = (await request.json()) as typeof body;
-  } catch {
-    return NextResponse.json({ error: 'invalid json' }, { status: 400 });
-  }
+  const body = await readJsonBody(request, messageBody);
+  if (!body) return NextResponse.json({ error: 'invalid json' }, { status: 400 });
 
   const token = typeof body.token === 'string' ? body.token : '';
   const contactId = await resolveVisitor(token);

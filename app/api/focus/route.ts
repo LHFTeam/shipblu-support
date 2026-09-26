@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { getSessionAgent } from '@/lib/auth/session';
+import { readJsonBody } from '@/lib/http/json-body';
 import { recordFocus, releaseFocus } from '@/lib/presence/focus';
 
 export const dynamic = 'force-dynamic';
@@ -26,10 +27,10 @@ export async function POST(request: Request) {
   const agent = await getSessionAgent();
   if (!agent) return new Response('unauthorised', { status: 401 });
 
-  const parsed = beat.safeParse(await request.json().catch(() => null));
-  if (!parsed.success) return new Response('bad request', { status: 400 });
+  const parsed = await readJsonBody(request, beat);
+  if (!parsed) return new Response('bad request', { status: 400 });
 
-  const { conversationId, release } = parsed.data;
+  const { conversationId, release } = parsed;
 
   if (release) {
     await releaseFocus(agent.id, conversationId);
