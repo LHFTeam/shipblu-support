@@ -27,6 +27,7 @@ import {
   whatsappTemplates,
 } from '@/db/schema';
 import { purgeConversation, type PurgeRefusal } from '@/lib/admin/purge';
+import { hiddenScopeRefusal } from '@/lib/admin/purge-visibility';
 import { assignConversation } from '@/lib/assignment';
 import { refreshPrimary } from '@/lib/categorise/apply';
 import { CAUSE_REQUIRED_AREAS } from '@/lib/categorise/taxonomy';
@@ -2092,7 +2093,9 @@ const PURGE_ERRORS: Record<PurgeRefusal, string> = {
  *
  * `loadConversation()` is reused deliberately: an admin who cannot see the bot
  * channel must not be able to delete a ticket on it, and that rule already lives
- * in one place.
+ * in one place. It only covers the ticket on screen, though, and the purge also
+ * takes every ticket merged into it — so `hiddenScopeRefusal()` asks the same
+ * question of those.
  */
 export async function purgeTicket(_state: ActionState, formData: FormData): Promise<ActionState> {
   const agent = await requireAgent();
@@ -2105,6 +2108,9 @@ export async function purgeTicket(_state: ActionState, formData: FormData): Prom
 
   const loaded = await loadConversation(agent, conversationId);
   if (!loaded) return { error: PURGE_ERRORS.not_found };
+
+  const hidden = await hiddenScopeRefusal(agent, { conversationId });
+  if (hidden) return { error: hidden };
 
   const result = await purgeConversation({
     conversationId,

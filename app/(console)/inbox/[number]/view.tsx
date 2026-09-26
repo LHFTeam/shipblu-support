@@ -125,6 +125,7 @@ export function ConversationView({
   categoryOptions,
   rootCauses,
   purgePreview,
+  purgeRefusal,
   currentAgentId,
 }: {
   conversation: ConversationDetail;
@@ -156,6 +157,8 @@ export function ConversationView({
   rootCauses: RootCauseOption[];
   /** Non-null only for an admin holding `ticket.purge`; see the sidebar. */
   purgePreview: PurgePreview | null;
+  /** Why that admin still may not purge it; see `hiddenScopeRefusal()`. */
+  purgeRefusal: string | null;
   currentAgentId: string;
 }) {
   return (
@@ -200,6 +203,7 @@ export function ConversationView({
         categoryOptions={categoryOptions}
         rootCauses={rootCauses}
         purgePreview={purgePreview}
+        purgeRefusal={purgeRefusal}
         currentAgentId={currentAgentId}
       />
     </div>
@@ -652,6 +656,7 @@ function Sidebar({
   categoryOptions,
   rootCauses,
   purgePreview,
+  purgeRefusal,
   currentAgentId,
 }: {
   conversation: ConversationDetail;
@@ -664,6 +669,7 @@ function Sidebar({
   categoryOptions: CategoryOption[];
   rootCauses: RootCauseOption[];
   purgePreview: PurgePreview | null;
+  purgeRefusal: string | null;
   currentAgentId: string;
 }) {
   return (
@@ -772,6 +778,7 @@ function Sidebar({
             idField="conversationId"
             noun="ticket"
             confirmationHint="the ticket number"
+            refusal={purgeRefusal}
           />
         </div>
       ) : null}

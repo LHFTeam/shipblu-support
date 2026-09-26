@@ -4,6 +4,7 @@ import { Avatar } from '@/components/avatar';
 import { InfoTip } from '@/components/tooltip';
 import { Badge, Card, PageHeader } from '@/components/ui';
 import { previewContactPurge } from '@/lib/admin/purge';
+import { hiddenScopeRefusal } from '@/lib/admin/purge-visibility';
 import { requirePermission } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
 import { DEFAULT_CONTACT_LOCALE } from '@/lib/contacts/locale';
@@ -63,24 +64,28 @@ export default async function ContactPage({
   const mayMerge = can(agent, 'contact.merge');
   const mayPurge = can(agent, 'contact.purge');
 
-  const [accounts, parcels, conversations, merges, duplicates, purgePreview] = await Promise.all([
-    shippingAccountsForContact(contact.id),
-    shipmentsForContact(contact.id),
-    conversationsForContact(agent, contact.id),
-    mergeHistory(contact.id),
-    // Only for somebody who could act on the answer. The suggestion query is
-    // three ILIKEs over the contact table and there is no reason to run it for
-    // an agent who will only be shown a sentence saying they cannot merge.
-    mayMerge
-      ? mergeQuery
-        ? searchMergeCandidates(contact.id, mergeQuery)
-        : mergeCandidates(contact.id)
-      : Promise.resolve([]),
-    // Same reasoning as the duplicate search above, and more so: this is half a
-    // dozen counting queries across the whole ticket history, and only an admin
-    // has anything to do with the answer.
-    mayPurge ? previewContactPurge(contact.id) : Promise.resolve(null),
-  ]);
+  const [accounts, parcels, conversations, merges, duplicates, purgePreview, purgeRefusal] =
+    await Promise.all([
+      shippingAccountsForContact(contact.id),
+      shipmentsForContact(contact.id),
+      conversationsForContact(agent, contact.id),
+      mergeHistory(contact.id),
+      // Only for somebody who could act on the answer. The suggestion query is
+      // three ILIKEs over the contact table and there is no reason to run it for
+      // an agent who will only be shown a sentence saying they cannot merge.
+      mayMerge
+        ? mergeQuery
+          ? searchMergeCandidates(contact.id, mergeQuery)
+          : mergeCandidates(contact.id)
+        : Promise.resolve([]),
+      // Same reasoning as the duplicate search above, and more so: this is half a
+      // dozen counting queries across the whole ticket history, and only an admin
+      // has anything to do with the answer.
+      mayPurge ? previewContactPurge(contact.id) : Promise.resolve(null),
+      // Asked on render as well as in the action, so an admin who may not delete
+      // this customer is told so before typing the confirmation, not after.
+      mayPurge ? hiddenScopeRefusal(agent, { contactId: contact.id }) : Promise.resolve(null),
+    ]);
 
   const editable = can(agent, 'contact.edit');
 
@@ -314,6 +319,7 @@ export default async function ContactPage({
               idField="contactId"
               noun="contact"
               confirmationHint="the highlighted value"
+              refusal={purgeRefusal}
             />
           </Card>
         </section>

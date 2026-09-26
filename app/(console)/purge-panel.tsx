@@ -47,6 +47,7 @@ export function PurgePanel({
   idField,
   noun,
   confirmationHint,
+  refusal = null,
 }: {
   preview: PurgePreview;
   action: (state: PurgeState, formData: FormData) => Promise<PurgeState>;
@@ -56,6 +57,13 @@ export function PurgePanel({
   noun: string;
   /** What the typed value is, in words: 'the ticket number', 'the email address'. */
   confirmationHint: string;
+  /**
+   * Why this admin may not purge it even holding the permission — today, a
+   * ticket in scope on a channel they cannot see. Shown in place of the button,
+   * so nobody types a confirmation the action is certain to refuse; the action
+   * still checks for itself.
+   */
+  refusal?: string | null;
 }) {
   const [state, formAction, pending] = useActionState(action, { error: null } as PurgeState);
   const [open, setOpen] = useState(false);
@@ -63,6 +71,10 @@ export function PurgePanel({
 
   const destroyed = describePurgeCounts(preview.counts);
   const armed = confirmationMatches(preview.confirmation, typed);
+
+  if (refusal) {
+    return <p className="text-xs text-[var(--muted-foreground)]">{refusal}</p>;
+  }
 
   if (!open) {
     return (

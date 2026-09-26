@@ -8,6 +8,7 @@ import { contacts, shipments } from '@/db/schema';
 import { requireAgent } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
 import { purgeContact, type PurgeRefusal } from '@/lib/admin/purge';
+import { hiddenScopeRefusal } from '@/lib/admin/purge-visibility';
 import { isUuid } from '@/lib/http/uuid';
 import { mergeContacts, type MergeRefusal } from '@/lib/contacts/merge';
 import { normaliseSbid, normaliseTrackingNumber } from '@/lib/shipments/format';
@@ -297,6 +298,11 @@ const PURGE_ERRORS: Record<PurgeRefusal, string> = {
  * page showed as the blast radius and what the transaction actually finds can
  * differ if a ticket arrived in between, which is exactly why the counts written
  * to the audit trail are the transaction's own, not the preview's.
+ *
+ * It also applies the channel rule `purgeTicket` gets from `loadConversation()`,
+ * and needs it more: the contact page lists this person's tickets through the
+ * agent's own visibility filter, so without `hiddenScopeRefusal()` an admin
+ * without `ticket.view.bot` would destroy bot transcripts they were never shown.
  */
 export async function purgeContactRecord(
   _state: ContactActionState,
@@ -309,6 +315,9 @@ export async function purgeContactRecord(
 
   const contactId = String(formData.get('contactId') ?? '');
   if (!isUuid(contactId)) return { error: 'No contact to delete' };
+
+  const hidden = await hiddenScopeRefusal(agent, { contactId });
+  if (hidden) return { error: hidden };
 
   const result = await purgeContact({
     contactId,
