@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { SESSION_COOKIE } from '@/lib/auth/cookie';
+import { LOCALES } from '@/lib/kb/locale';
 
 /**
  * Two jobs, both of which have to happen before anything touches a database.
@@ -53,8 +54,14 @@ const PUBLIC_PREFIXES = [
  */
 const LEGACY_ARTICLE = /\/solutions\/articles\/(\d+)/;
 
-/** `/en`, `/ar`, and anything beneath them. Kept in step with LOCALES. */
-const LOCALE_PREFIX = /^\/(en|ar)(\/|$)/;
+/**
+ * `/en`, `/ar`, and anything beneath them: one alternative per entry in
+ * LOCALES, so a locale added there reaches the help centre without a second
+ * edit here. The hand-written version said it was kept in step with LOCALES,
+ * and only that note did the keeping. A locale code is two lowercase letters,
+ * so joining them needs no escaping.
+ */
+const LOCALE_PREFIX = new RegExp(`^/(${LOCALES.join('|')})(/|$)`);
 const LEGACY_FOLDER = /\/solutions\/folders\/(\d+)/;
 
 /**
