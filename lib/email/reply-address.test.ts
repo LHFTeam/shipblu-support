@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { resetEnvCache } from '@/lib/env';
+import { describe, expect, it } from 'vitest';
+import { setTestEnv, withTestEnv } from '@/lib/testing/env';
 import { plusAddressingEnabled, replyToAddress } from './reply-address';
 import { parseReplyToken, parseSideReplyToken, extractTokenFromAddress } from './threading';
 
@@ -13,25 +13,7 @@ import { parseReplyToken, parseSideReplyToken, extractTokenFromAddress } from '.
 const SECRET = '0'.repeat(64);
 const FROM = 'help-support@shipblu.com';
 
-const ORIGINAL = process.env;
-
-function configure(extra: Record<string, string>) {
-  process.env = {
-    NODE_ENV: 'test',
-    DATABASE_URL: 'postgresql://localhost:5432/test',
-    APP_SECRET: SECRET,
-    EMAIL_FROM_ADDRESS: FROM,
-    ...extra,
-  } as NodeJS.ProcessEnv;
-  resetEnvCache();
-}
-
-beforeEach(() => configure({}));
-
-afterEach(() => {
-  process.env = ORIGINAL;
-  resetEnvCache();
-});
+withTestEnv({ APP_SECRET: SECRET, EMAIL_FROM_ADDRESS: FROM });
 
 describe('replyToAddress', () => {
   it('advertises the from address, not a token, by default', () => {
@@ -44,13 +26,13 @@ describe('replyToAddress', () => {
     // The trap this closes: `<mailbox>@<reply domain>` splices two independent
     // settings into an address nobody has confirmed exists. The from address is
     // the one we just proved deliverable by sending from it.
-    configure({ EMAIL_REPLY_DOMAIN: 'reply.shipblu.com' });
+    setTestEnv({ EMAIL_REPLY_DOMAIN: 'reply.shipblu.com' });
 
     expect(replyToAddress({ kind: 'side', sideNumber: 3 })).toBe(FROM);
   });
 
   it('carries a signed token once a deployment opts in', () => {
-    configure({ EMAIL_REPLY_PLUS_ADDRESSING: 'true' });
+    setTestEnv({ EMAIL_REPLY_PLUS_ADDRESSING: 'true' });
 
     const ticket = replyToAddress({ kind: 'ticket', conversationNumber: 77 });
     const side = replyToAddress({ kind: 'side', sideNumber: 3 });
@@ -64,7 +46,7 @@ describe('replyToAddress', () => {
   });
 
   it('builds the opted-in token on the reply domain when one is set', () => {
-    configure({ EMAIL_REPLY_PLUS_ADDRESSING: 'true', EMAIL_REPLY_DOMAIN: 'reply.shipblu.com' });
+    setTestEnv({ EMAIL_REPLY_PLUS_ADDRESSING: 'true', EMAIL_REPLY_DOMAIN: 'reply.shipblu.com' });
 
     expect(replyToAddress({ kind: 'side', sideNumber: 3 })).toMatch(
       /^help-support\+s3\.[0-9a-f]{16}@reply\.shipblu\.com$/,
@@ -73,18 +55,13 @@ describe('replyToAddress', () => {
 
   it('treats anything but "true" as off, so a typo cannot silently bounce mail', () => {
     for (const value of ['false', '1', 'yes', 'TRUE', '']) {
-      configure({ EMAIL_REPLY_PLUS_ADDRESSING: value });
+      setTestEnv({ EMAIL_REPLY_PLUS_ADDRESSING: value });
       expect(replyToAddress({ kind: 'side', sideNumber: 3 })).toBe(FROM);
     }
   });
 
   it('refuses to invent a sender when the from address is missing', () => {
-    process.env = {
-      NODE_ENV: 'test',
-      DATABASE_URL: 'postgresql://localhost:5432/test',
-      APP_SECRET: SECRET,
-    } as NodeJS.ProcessEnv;
-    resetEnvCache();
+    setTestEnv({ EMAIL_FROM_ADDRESS: undefined });
 
     expect(() => replyToAddress({ kind: 'ticket', conversationNumber: 1 })).toThrow(
       /EMAIL_FROM_ADDRESS/,

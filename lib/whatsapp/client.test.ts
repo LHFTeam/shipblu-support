@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetEnvCache } from '@/lib/env';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { setTestEnv, withTestEnv } from '@/lib/testing/env';
 import { STALLED_AFTER_MS } from '@/lib/queue';
 import { sizedTimeout } from '@/lib/http/deadline';
 import { GRAPH_BASE, graphTimeout } from '@/lib/meta/graph';
@@ -41,17 +41,10 @@ async function classify(): Promise<WhatsAppApiError> {
   throw new Error('expected getMediaUrl to reject');
 }
 
-beforeEach(() => {
-  process.env.DATABASE_URL = 'postgres://localhost/test';
-  process.env.APP_SECRET = 'x'.repeat(32);
-  process.env.META_PAGE_ACCESS_TOKEN = 'token';
-  process.env.WHATSAPP_PHONE_NUMBER_ID = '123';
-  resetEnvCache();
-});
+withTestEnv({ META_PAGE_ACCESS_TOKEN: 'token', WHATSAPP_PHONE_NUMBER_ID: '123' });
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  resetEnvCache();
 });
 
 describe('WhatsApp credentials', () => {
@@ -63,8 +56,7 @@ describe('WhatsApp credentials', () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ url: 'https://cdn' })));
     vi.stubGlobal('fetch', fetchMock);
 
-    process.env.META_PAGE_ACCESS_TOKEN = 'page-token-abc';
-    resetEnvCache();
+    setTestEnv({ META_PAGE_ACCESS_TOKEN: 'page-token-abc' });
 
     await getMediaUrl('media-1');
 
@@ -73,8 +65,7 @@ describe('WhatsApp credentials', () => {
   });
 
   it('refuses to call Meta with no token rather than sending an unauthorised request', async () => {
-    delete process.env.META_PAGE_ACCESS_TOKEN;
-    resetEnvCache();
+    setTestEnv({ META_PAGE_ACCESS_TOKEN: undefined });
 
     await expect(getMediaUrl('media-1')).rejects.toThrow(/META_PAGE_ACCESS_TOKEN/);
   });
@@ -112,8 +103,7 @@ describe('WhatsApp credentials', () => {
 
   /** Media is addressed by id, so it must not need a number configured. */
   it('downloads media with no phone number id set at all', async () => {
-    delete process.env.WHATSAPP_PHONE_NUMBER_ID;
-    resetEnvCache();
+    setTestEnv({ WHATSAPP_PHONE_NUMBER_ID: undefined });
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => new Response(JSON.stringify({ url: 'https://cdn' }))),

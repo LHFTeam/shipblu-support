@@ -1,6 +1,7 @@
-import { beforeEach, afterEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { NextRequest } from 'next/server';
 import { LOCALES } from '@/lib/kb/locale';
+import { setTestEnv, withTestEnv } from '@/lib/testing/env';
 import proxy from './proxy';
 
 /**
@@ -30,14 +31,12 @@ function rewrittenTo(response: Response): string | null {
   return destination ? new URL(destination).pathname : null;
 }
 
-describe('the help-centre hostname', () => {
-  beforeEach(() => {
-    process.env.KB_PUBLIC_HOST = KB_HOST;
-  });
+// A KB_PUBLIC_HOST exported in the shell would decide which hostname below is
+// the help centre's.
+withTestEnv();
 
-  afterEach(() => {
-    delete process.env.KB_PUBLIC_HOST;
-  });
+describe('the help-centre hostname', () => {
+  beforeEach(() => setTestEnv({ KB_PUBLIC_HOST: KB_HOST }));
 
   it('rewrites a public page under /help', () => {
     expect(rewrittenTo(visit(`https://${KB_HOST}/en/a/where-is-my-parcel`))).toBe(

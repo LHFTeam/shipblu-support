@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetEnvCache } from '@/lib/env';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { withTestEnv } from '@/lib/testing/env';
 import {
   discoverLanguageCode,
   FreshdeskError,
@@ -36,24 +36,12 @@ describe('mapStatus', () => {
 });
 
 describe('discoverLanguageCode', () => {
-  const ORIGINAL_ENV = process.env;
   const ORIGINAL_FETCH = globalThis.fetch;
 
-  beforeEach(() => {
-    process.env = {
-      NODE_ENV: 'test',
-      DATABASE_URL: 'postgresql://localhost:5432/test',
-      APP_SECRET: '0'.repeat(64),
-      FRESHDESK_DOMAIN: 'shipblu.freshdesk.com',
-      FRESHDESK_API_KEY: 'key',
-    } as NodeJS.ProcessEnv;
-    resetEnvCache();
-  });
+  withTestEnv({ FRESHDESK_DOMAIN: 'shipblu.freshdesk.com', FRESHDESK_API_KEY: 'key' });
 
   afterEach(() => {
-    process.env = ORIGINAL_ENV;
     globalThis.fetch = ORIGINAL_FETCH;
-    resetEnvCache();
   });
 
   /** Serves 200 for the listed paths and 404 for everything else. */
@@ -135,24 +123,12 @@ describe('discoverLanguageCode', () => {
  * waits before it gives up.
  */
 describe('a Freshdesk request', () => {
-  const ORIGINAL_ENV = process.env;
   const ORIGINAL_FETCH = globalThis.fetch;
 
-  beforeEach(() => {
-    process.env = {
-      NODE_ENV: 'test',
-      DATABASE_URL: 'postgresql://localhost:5432/test',
-      APP_SECRET: '0'.repeat(64),
-      FRESHDESK_DOMAIN: 'shipblu.freshdesk.com',
-      FRESHDESK_API_KEY: 'key',
-    } as NodeJS.ProcessEnv;
-    resetEnvCache();
-  });
+  withTestEnv({ FRESHDESK_DOMAIN: 'shipblu.freshdesk.com', FRESHDESK_API_KEY: 'key' });
 
   afterEach(() => {
-    process.env = ORIGINAL_ENV;
     globalThis.fetch = ORIGINAL_FETCH;
-    resetEnvCache();
     vi.restoreAllMocks();
   });
 

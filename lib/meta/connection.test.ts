@@ -1,22 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { resetEnvCache } from '@/lib/env';
+import { describe, expect, it } from 'vitest';
+import { setTestEnv, withTestEnv } from '@/lib/testing/env';
 import { instagramLoginConfigured, metaConnection } from './connection';
 
-beforeEach(() => {
-  process.env.DATABASE_URL = 'postgres://localhost/test';
-  process.env.APP_SECRET = 'x'.repeat(32);
-  resetEnvCache();
-});
-
-afterEach(() => {
-  delete process.env.INSTAGRAM_ACCESS_TOKEN;
-  resetEnvCache();
-});
+withTestEnv();
 
 describe('metaConnection', () => {
   it('sends Instagram over the direct connection once it has a credential', () => {
-    process.env.INSTAGRAM_ACCESS_TOKEN = 'ig-token';
-    resetEnvCache();
+    setTestEnv({ INSTAGRAM_ACCESS_TOKEN: 'ig-token' });
 
     expect(metaConnection('instagram')).toBe('instagram_login');
     expect(instagramLoginConfigured()).toBe(true);
@@ -33,8 +23,7 @@ describe('metaConnection', () => {
     // A Page has no second way to be reached, and the Instagram token cannot
     // address one. This is the case a "prefer the newest credential" rule would
     // get wrong.
-    process.env.INSTAGRAM_ACCESS_TOKEN = 'ig-token';
-    resetEnvCache();
+    setTestEnv({ INSTAGRAM_ACCESS_TOKEN: 'ig-token' });
 
     expect(metaConnection('facebook')).toBe('facebook_page');
   });
@@ -49,8 +38,7 @@ describe('metaConnection', () => {
     */
     expect(metaConnection('instagram')).toBe('facebook_page');
 
-    process.env.INSTAGRAM_ACCESS_TOKEN = 'ig-token';
-    resetEnvCache();
+    setTestEnv({ INSTAGRAM_ACCESS_TOKEN: 'ig-token' });
 
     expect(metaConnection('instagram')).toBe('instagram_login');
   });

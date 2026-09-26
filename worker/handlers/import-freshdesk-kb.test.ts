@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetEnvCache } from '@/lib/env';
+import { withTestEnv } from '@/lib/testing/env';
 
 /**
  * One item's failure is recorded and the import carries on; a Freshdesk that
@@ -31,17 +31,9 @@ const { FreshdeskError } = await import('@/lib/freshdesk/client');
 const { refuseEveryQuery } = await import('@/lib/testing/fake-db');
 const { importFreshdeskKb } = await import('./import-freshdesk-kb');
 
-const ORIGINAL_ENV = process.env;
+withTestEnv({ FRESHDESK_DOMAIN: 'shipblu.freshdesk.com', FRESHDESK_API_KEY: 'key' });
 
 beforeEach(() => {
-  process.env = {
-    ...ORIGINAL_ENV,
-    DATABASE_URL: 'postgres://localhost/test',
-    APP_SECRET: 'x'.repeat(32),
-    FRESHDESK_DOMAIN: 'shipblu.freshdesk.com',
-    FRESHDESK_API_KEY: 'key',
-  };
-  resetEnvCache();
   refuseEveryQuery();
   listCategories.mockReset().mockResolvedValue([{ id: 1, name: 'Shipping' }]);
   listFolders.mockReset().mockResolvedValue([
@@ -56,8 +48,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  process.env = ORIGINAL_ENV;
-  resetEnvCache();
   vi.unstubAllGlobals();
 });
 

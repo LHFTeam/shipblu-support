@@ -1,23 +1,16 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { setTestEnv, withTestEnv } from '@/lib/testing/env';
 import { passwordResetEmail, verificationEmail } from './emails';
 
 /**
  * The links are the whole content of these emails, so that is what is pinned:
  * the hostname a customer is sent to, the locale segment, and the token.
  */
-const ORIGINAL = { ...process.env };
-
-beforeEach(() => {
-  process.env.KB_PUBLIC_HOST = 'support.shipblu.com';
-});
-
-afterEach(() => {
-  process.env = { ...ORIGINAL };
-});
+withTestEnv({ KB_PUBLIC_HOST: 'support.shipblu.com' });
 
 describe('verificationEmail', () => {
   it('links to the help centre hostname, not the Render URL', () => {
-    process.env.APP_URL = 'https://shipblu-support.onrender.com';
+    setTestEnv({ APP_URL: 'https://shipblu-support.onrender.com' });
 
     const email = verificationEmail('ar', 'tok-123');
 
@@ -27,8 +20,7 @@ describe('verificationEmail', () => {
   });
 
   it('falls back to APP_URL before the custom domain exists', () => {
-    delete process.env.KB_PUBLIC_HOST;
-    process.env.APP_URL = 'https://shipblu-support.onrender.com';
+    setTestEnv({ KB_PUBLIC_HOST: undefined, APP_URL: 'https://shipblu-support.onrender.com' });
 
     expect(verificationEmail('en', 'tok').textBody).toContain(
       'https://shipblu-support.onrender.com/en/account/verify/tok',

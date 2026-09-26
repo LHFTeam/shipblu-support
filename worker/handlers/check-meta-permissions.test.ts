@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetEnvCache } from '@/lib/env';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { withTestEnv } from '@/lib/testing/env';
 import { checkMetaPermissions } from './check-meta-permissions';
 
 /**
@@ -9,8 +9,6 @@ import { checkMetaPermissions } from './check-meta-permissions';
  * answered 200 for as refused.
  */
 
-const ORIGINAL_ENV = process.env;
-
 function answer(status: number, body: BodyInit) {
   vi.stubGlobal(
     'fetch',
@@ -18,22 +16,10 @@ function answer(status: number, body: BodyInit) {
   );
 }
 
-beforeEach(() => {
-  process.env = {
-    ...ORIGINAL_ENV,
-    DATABASE_URL: 'postgres://localhost/test',
-    APP_SECRET: 'x'.repeat(32),
-    META_APP_ID: '123',
-    META_APP_SECRET: 'secret',
-    META_PAGE_ACCESS_TOKEN: 'token',
-  };
-  resetEnvCache();
-});
+withTestEnv({ META_APP_ID: '123', META_APP_SECRET: 'secret', META_PAGE_ACCESS_TOKEN: 'token' });
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  process.env = ORIGINAL_ENV;
-  resetEnvCache();
 });
 
 describe('checkMetaPermissions', () => {

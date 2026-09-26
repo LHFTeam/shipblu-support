@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetEnvCache } from '@/lib/env';
+import { withTestEnv } from '@/lib/testing/env';
 import {
   type GraphSubscription,
   GraphSubscriptionError,
@@ -360,17 +360,9 @@ describe('planPageSubscription', () => {
  * error every caller here reports.
  */
 describe('a Graph answer that stops arriving', () => {
-  const ORIGINAL_ENV = process.env;
+  withTestEnv({ META_APP_ID: '123', META_PAGE_ACCESS_TOKEN: 'token' });
 
   beforeEach(() => {
-    process.env = {
-      ...ORIGINAL_ENV,
-      DATABASE_URL: 'postgres://localhost/test',
-      APP_SECRET: 'x'.repeat(32),
-      META_APP_ID: '123',
-      META_PAGE_ACCESS_TOKEN: 'token',
-    };
-    resetEnvCache();
     vi.stubGlobal(
       'fetch',
       vi.fn(
@@ -391,8 +383,6 @@ describe('a Graph answer that stops arriving', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
-    process.env = ORIGINAL_ENV;
-    resetEnvCache();
   });
 
   it('fails as a subscription error that says the deadline passed', async () => {

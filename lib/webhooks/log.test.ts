@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { setTestEnv, withTestEnv } from '@/lib/testing/env';
 import { describeIncomingWebhook, logIncomingWebhook, shouldLogIncomingWebhooks } from './log';
 
 function delivery(overrides: Partial<Parameters<typeof describeIncomingWebhook>[0]> = {}) {
@@ -12,31 +13,26 @@ function delivery(overrides: Partial<Parameters<typeof describeIncomingWebhook>[
   };
 }
 
-const originalFlag = process.env.LOG_ALL_INCOMING_WEBHOOKS;
-
-afterEach(() => {
-  if (originalFlag === undefined) delete process.env.LOG_ALL_INCOMING_WEBHOOKS;
-  else process.env.LOG_ALL_INCOMING_WEBHOOKS = originalFlag;
-});
+withTestEnv();
 
 describe('shouldLogIncomingWebhooks', () => {
   it('is off unless the flag is exactly "true"', () => {
-    delete process.env.LOG_ALL_INCOMING_WEBHOOKS;
+    setTestEnv({ LOG_ALL_INCOMING_WEBHOOKS: undefined });
     expect(shouldLogIncomingWebhooks()).toBe(false);
 
     // A half-set flag must not turn this on: it prints customer content, so
     // "1", "TRUE" and "yes" are all off rather than helpfully coerced.
     for (const value of ['false', '1', 'TRUE', 'yes', '']) {
-      process.env.LOG_ALL_INCOMING_WEBHOOKS = value;
+      setTestEnv({ LOG_ALL_INCOMING_WEBHOOKS: value });
       expect(shouldLogIncomingWebhooks()).toBe(false);
     }
 
-    process.env.LOG_ALL_INCOMING_WEBHOOKS = 'true';
+    setTestEnv({ LOG_ALL_INCOMING_WEBHOOKS: 'true' });
     expect(shouldLogIncomingWebhooks()).toBe(true);
   });
 
   it('prints nothing while off, whatever it is handed', () => {
-    delete process.env.LOG_ALL_INCOMING_WEBHOOKS;
+    setTestEnv({ LOG_ALL_INCOMING_WEBHOOKS: undefined });
 
     const written: unknown[] = [];
     const original = console.log;

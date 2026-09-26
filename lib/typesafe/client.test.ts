@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetEnvCache } from '@/lib/env';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { setTestEnv, withTestEnv } from '@/lib/testing/env';
 import {
   TypeSafeApiError,
   choiceAnswer,
@@ -47,17 +47,10 @@ const REQUEST: SystemOneRequest = {
   },
 };
 
-beforeEach(() => {
-  process.env.DATABASE_URL = 'postgres://localhost/test';
-  process.env.APP_SECRET = 'x'.repeat(32);
-  process.env.TYPESAFE_API_KEY = 'test-key';
-  resetEnvCache();
-});
+withTestEnv({ TYPESAFE_API_KEY: 'test-key' });
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  delete process.env.TYPESAFE_API_KEY;
-  resetEnvCache();
 });
 
 function stubFetch(handler: (url: string, init?: RequestInit) => Response | Promise<Response>) {
@@ -94,8 +87,7 @@ describe('systemOne', () => {
   });
 
   it('refuses to call at all without a key, and says which one', async () => {
-    delete process.env.TYPESAFE_API_KEY;
-    resetEnvCache();
+    setTestEnv({ TYPESAFE_API_KEY: undefined });
     const mock = stubFetch(() => answered({ answers: {} }));
 
     await expect(systemOne(REQUEST, { baseUrl: BASE })).rejects.toThrow(/TYPESAFE_API_KEY/);

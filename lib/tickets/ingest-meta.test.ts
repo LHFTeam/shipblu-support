@@ -1,8 +1,8 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversations } from '@/db/schema';
-import { resetEnvCache } from '@/lib/env';
+import { withTestEnv } from '@/lib/testing/env';
 import { interactionWindowSet } from './ingest-meta';
 
 /**
@@ -23,11 +23,7 @@ import { interactionWindowSet } from './ingest-meta';
  */
 
 // Building a query validates the environment but never opens a connection.
-beforeEach(() => {
-  process.env.DATABASE_URL = 'postgres://localhost/test';
-  process.env.APP_SECRET = 'x'.repeat(32);
-  resetEnvCache();
-});
+withTestEnv();
 
 const AT = new Date('2026-09-06T10:00:00.000Z');
 

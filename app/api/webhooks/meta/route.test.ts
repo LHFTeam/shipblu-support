@@ -1,6 +1,6 @@
 import { createHmac } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetEnvCache } from '@/lib/env';
+import { setTestEnv, withTestEnv } from '@/lib/testing/env';
 
 /**
  * The Facebook and Instagram webhook's decisions: which secret signed a
@@ -47,7 +47,6 @@ const { resetVerifyingSecretNotice } = await import('@/lib/meta/signing');
 
 const PAGE_SECRET = 'page-app-secret';
 const INSTAGRAM_SECRET = 'instagram-login-secret';
-const ORIGINAL_ENV = process.env;
 
 const message = (object: 'page' | 'instagram') => ({
   object,
@@ -73,17 +72,13 @@ function deliver(payload: unknown, secret: string | null) {
   );
 }
 
+withTestEnv({
+  META_APP_SECRET: PAGE_SECRET,
+  INSTAGRAM_APP_SECRET: INSTAGRAM_SECRET,
+  META_VERIFY_TOKEN: 'verify-me',
+});
+
 beforeEach(() => {
-  process.env = {
-    ...ORIGINAL_ENV,
-    DATABASE_URL: 'postgres://localhost/test',
-    APP_SECRET: 'x'.repeat(32),
-    META_APP_SECRET: PAGE_SECRET,
-    INSTAGRAM_APP_SECRET: INSTAGRAM_SECRET,
-    META_VERIFY_TOKEN: 'verify-me',
-  };
-  delete process.env.META_INSTAGRAM_APP_SECRET;
-  resetEnvCache();
   writes.length = 0;
   conflictTargets.length = 0;
   conflict = false;
@@ -96,8 +91,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  process.env = ORIGINAL_ENV;
-  resetEnvCache();
   vi.restoreAllMocks();
 });
 
@@ -117,8 +110,7 @@ describe('the subscription handshake', () => {
   });
 
   it('says it is not configured rather than refusing, when there is no token', async () => {
-    delete process.env.META_VERIFY_TOKEN;
-    resetEnvCache();
+    setTestEnv({ META_VERIFY_TOKEN: undefined });
     vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const response = await GET(
@@ -176,9 +168,7 @@ describe('a signed delivery', () => {
   );
 
   it('accepts the Instagram secret under its legacy name too', async () => {
-    delete process.env.INSTAGRAM_APP_SECRET;
-    process.env.META_INSTAGRAM_APP_SECRET = INSTAGRAM_SECRET;
-    resetEnvCache();
+    setTestEnv({ INSTAGRAM_APP_SECRET: undefined, META_INSTAGRAM_APP_SECRET: INSTAGRAM_SECRET });
 
     await deliver(message('instagram'), INSTAGRAM_SECRET);
 
@@ -186,8 +176,7 @@ describe('a signed delivery', () => {
   });
 
   it('tries the legacy name too when both are set to different values', async () => {
-    process.env.META_INSTAGRAM_APP_SECRET = 'legacy-instagram-secret';
-    resetEnvCache();
+    setTestEnv({ META_INSTAGRAM_APP_SECRET: 'legacy-instagram-secret' });
 
     await deliver(message('instagram'), 'legacy-instagram-secret');
 
@@ -254,8 +243,7 @@ describe('an unsigned delivery', () => {
   });
 
   it('says so when no secret is configured at all', async () => {
-    delete process.env.META_APP_SECRET;
-    resetEnvCache();
+    setTestEnv({ META_APP_SECRET: undefined });
 
     const response = await deliver(message('page'), PAGE_SECRET);
 
