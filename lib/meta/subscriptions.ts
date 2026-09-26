@@ -449,8 +449,9 @@ export type PageSubscriptionPlan = {
 /**
  * A Page-token call against `/{page-id}/subscribed_apps`.
  *
- * Separate from `graph` above because almost nothing about it matches: a
- * different node, a different token, and a failure that means something else.
+ * Separate from `graph` above, though both send through `request()`: what
+ * differs is everything `request()` is handed — a different node, a different
+ * token, and a failure that means something else.
  * The app token cannot install an app on a Page — that is a decision only
  * somebody with `CREATE_CONTENT`, `MANAGE` or `MODERATE` on the Page can make,
  * so Meta requires a token minted for such a person.
