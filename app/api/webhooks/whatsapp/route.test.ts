@@ -93,6 +93,10 @@ beforeEach(() => {
   };
   resetEnvCache();
   writes.length = 0;
+  // Reset with the other recorders: the conflict-target assertion compares the
+  // whole array, so without this it passes only while its test is the file's
+  // first POST, and any reorder or new test above it fails it for no reason.
+  conflictTargets.length = 0;
   conflict = false;
   enqueue.mockClear();
   vi.spyOn(console, 'warn').mockImplementation(() => {});
