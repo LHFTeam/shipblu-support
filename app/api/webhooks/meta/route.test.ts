@@ -1,0 +1,226 @@
+import { createHmac } from 'node:crypto';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resetEnvCache } from '@/lib/env';
+
+/**
+ * The Facebook and Instagram webhook's decisions: which secret signed a
+ * delivery, which connection that makes it, the delivery id it is stored
+ * under, what Meta is told, and whether a job is queued.
+ *
+ * Instagram is connected twice and the two connections sign byte-identical
+ * bodies with different app secrets (§6.26, §6.29). The secret that verifies
+ * is the only thing that says which connection a delivery came in on, and the
+ * connection is part of the delivery id — so the same message arriving on both
+ * is two rows, and arriving twice on one is a duplicate.
+ *
+ * The database and the queue are recorders, as in the other webhook tests;
+ * `conflict` stands in for the unique index. Signatures are real HMACs.
+ */
+
+const writes: Record<string, unknown>[] = [];
+let conflict = false;
+
+vi.mock('@/db/client', () => ({
+  db: {
+    insert: () => ({
+      values: (values: Record<string, unknown>) => {
+        writes.push(values);
+        return {
+          onConflictDoNothing: () => ({
+            returning: async () => (conflict ? [] : [{ id: 'event-1' }]),
+          }),
+        };
+      },
+    }),
+  },
+}));
+
+const enqueue = vi.fn(async () => {});
+vi.mock('@/lib/queue', () => ({ enqueue }));
+vi.mock('@/lib/webhooks/log', () => ({ logIncomingWebhook: () => {} }));
+
+const { GET, POST } = await import('./route');
+
+const PAGE_SECRET = 'page-app-secret';
+const INSTAGRAM_SECRET = 'instagram-login-secret';
+const ORIGINAL_ENV = process.env;
+
+const message = (object: 'page' | 'instagram') => ({
+  object,
+  entry: [
+    { id: '17841400000000000', messaging: [{ sender: { id: 'user-1' }, message: { mid: 'm_1' } }] },
+  ],
+});
+
+function sign(body: string, secret: string) {
+  return `sha256=${createHmac('sha256', secret).update(body, 'utf8').digest('hex')}`;
+}
+
+function deliver(payload: unknown, secret: string | null) {
+  const body = typeof payload === 'string' ? payload : JSON.stringify(payload);
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+    authorization: 'Bearer private',
+  };
+  if (secret) headers['x-hub-signature-256'] = sign(body, secret);
+  return POST(
+    new Request('https://support.example/api/webhooks/meta', { method: 'POST', headers, body }),
+  );
+}
+
+beforeEach(() => {
+  process.env = {
+    ...ORIGINAL_ENV,
+    DATABASE_URL: 'postgres://localhost/test',
+    APP_SECRET: 'x'.repeat(32),
+    META_APP_SECRET: PAGE_SECRET,
+    INSTAGRAM_APP_SECRET: INSTAGRAM_SECRET,
+    META_VERIFY_TOKEN: 'verify-me',
+  };
+  delete process.env.META_INSTAGRAM_APP_SECRET;
+  resetEnvCache();
+  writes.length = 0;
+  conflict = false;
+  enqueue.mockClear();
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  vi.spyOn(console, 'log').mockImplementation(() => {});
+});
+
+afterEach(() => {
+  process.env = ORIGINAL_ENV;
+  resetEnvCache();
+  vi.restoreAllMocks();
+});
+
+describe('the subscription handshake', () => {
+  it('answers the bare challenge to the right token, and refuses another', async () => {
+    const handshake = (token: string) =>
+      GET(
+        new Request(
+          `https://support.example/api/webhooks/meta?hub.mode=subscribe&hub.verify_token=${token}&hub.challenge=42`,
+        ),
+      );
+
+    const accepted = await handshake('verify-me');
+    expect(accepted.status).toBe(200);
+    expect(await accepted.text()).toBe('42');
+    expect((await handshake('guess')).status).toBe(403);
+  });
+});
+
+describe('a signed delivery', () => {
+  it.each([
+    ['a Page delivery signed by the app secret', 'page', PAGE_SECRET, 'facebook', 'facebook_page'],
+    [
+      'an Instagram delivery signed by the app secret',
+      'instagram',
+      PAGE_SECRET,
+      'instagram',
+      'facebook_page',
+    ],
+    [
+      'an Instagram delivery signed by the Instagram Login secret',
+      'instagram',
+      INSTAGRAM_SECRET,
+      'instagram',
+      'instagram_login',
+    ],
+  ] as const)(
+    '%s is stored on its connection, under an id naming it, and queued',
+    async (_what, object, secret, channel, connection) => {
+      const response = await deliver(message(object), secret);
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ status: 'queued' });
+      expect(writes).toEqual([
+        expect.objectContaining({
+          provider: 'meta',
+          channel,
+          connection,
+          providerEventId: `${connection}|m:m_1`,
+          signatureVerified: true,
+          error: null,
+        }),
+      ]);
+      expect(enqueue).toHaveBeenCalledWith(
+        'process_webhook',
+        { webhookEventId: 'event-1' },
+        { priority: 10, dedupeKey: 'process_webhook:event-1' },
+      );
+    },
+  );
+
+  it('accepts the Instagram secret under its legacy name too', async () => {
+    delete process.env.INSTAGRAM_APP_SECRET;
+    process.env.META_INSTAGRAM_APP_SECRET = INSTAGRAM_SECRET;
+    resetEnvCache();
+
+    await deliver(message('instagram'), INSTAGRAM_SECRET);
+
+    expect(writes[0]).toMatchObject({ connection: 'instagram_login', signatureVerified: true });
+  });
+
+  it('does not accept the Instagram secret on a Page delivery', async () => {
+    const response = await deliver(message('page'), INSTAGRAM_SECRET);
+
+    expect(response.status).toBe(403);
+    expect(writes[0]).toMatchObject({
+      signatureVerified: false,
+      error: 'signature did not match META_APP_SECRET',
+    });
+  });
+
+  it('keeps the signature as evidence and drops the credentials', async () => {
+    await deliver(message('page'), PAGE_SECRET);
+
+    const headers = writes[0]!.headers as Record<string, string>;
+    expect(headers['x-hub-signature-256']).toMatch(/^sha256=/);
+    expect(headers).not.toHaveProperty('authorization');
+  });
+
+  it('answers a redelivery 200, so Meta stops, and queues nothing', async () => {
+    conflict = true;
+
+    const response = await deliver(message('page'), PAGE_SECRET);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: 'duplicate' });
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+});
+
+describe('an unsigned delivery', () => {
+  it('is stored as evidence under no id and no connection, with the secrets it tried, and refused', async () => {
+    const response = await deliver(message('instagram'), 'forged');
+
+    expect(response.status).toBe(403);
+    expect(writes).toEqual([
+      expect.objectContaining({
+        providerEventId: null,
+        connection: null,
+        signatureVerified: false,
+        error: 'signature did not match INSTAGRAM_APP_SECRET or META_APP_SECRET',
+      }),
+    ]);
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it('says so when no secret is configured at all', async () => {
+    delete process.env.META_APP_SECRET;
+    resetEnvCache();
+
+    const response = await deliver(message('page'), PAGE_SECRET);
+
+    expect(response.status).toBe(403);
+    expect(writes[0]).toMatchObject({
+      error: 'signature not verified: no app secret is configured (META_APP_SECRET)',
+    });
+  });
+});
+
+it('refuses a body that is not JSON, and stores nothing', async () => {
+  const response = await deliver('{not json', PAGE_SECRET);
+
+  expect(response.status).toBe(400);
+  expect(writes).toEqual([]);
+});
