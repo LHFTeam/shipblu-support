@@ -1,6 +1,23 @@
-# Commits that only move or reformat code. With
-# `git config blame.ignoreRevsFile .git-blame-ignore-revs`, `git blame` looks past
-# them; GitHub reads this file on its own.
-
-# 0.3: split scripts/ci/repo-rules.mjs into one module per rule.
-73f4bb8f639b42961cecbe3980b8eea17ba84c59
+# Commits that only reformat code in place — a Prettier bump, a re-indent.
+# GitHub reads this file on its own; locally, run
+# `git config blame.ignoreRevsFile .git-blame-ignore-revs` once per clone.
+#
+# What this can do: for a line a listed commit touched, blame looks for the
+# matching line in that commit's parent *in the same file* and credits whoever
+# wrote it there. That is right for a reformat, where every line has such a
+# twin.
+#
+# What it cannot do: follow code into another file. A commit that creates a
+# file leaves no parent version to look in, so every line keeps its blame on
+# the listed commit. And any line the commit genuinely wrote gets pinned on a
+# guess — whichever nearby parent line happens to match — which is worse than
+# the honest answer.
+#
+# So a move across files is not listed here. Use `git blame -C -C <file>`,
+# which searches the files the commit changed for where each line came from and
+# needs no configuration. The split of scripts/ci/repo-rules.mjs into
+# scripts/ci/rules/*.mjs (73f4bb8) was listed once and taken out: it did
+# nothing for the rule modules or lib.mjs, and in repo-rules.mjs and AGENTS.md
+# it credited the new import lines and the rewritten paragraphs to commits that
+# never wrote them. `git blame -C -C scripts/ci/rules/env-parity.mjs` takes
+# that file from 73 lines on the split to 2.
