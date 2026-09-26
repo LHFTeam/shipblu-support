@@ -322,3 +322,11 @@ export function roleSeniority(role: AgentRole): number {
 
 /** Every role, most junior first — the order a "minimum role" picker reads in. */
 export const ROLES_BY_SENIORITY: AgentRole[] = ['agent', 'supervisor', 'admin', 'account_admin'];
+
+/**
+ * Whether a value out of a request names a role. The list it checks against is
+ * held to the `agent_role` enum by `lib/tickets/vocabulary.test.ts`.
+ */
+export function isAgentRole(value: unknown): value is AgentRole {
+  return (ROLES_BY_SENIORITY as readonly unknown[]).includes(value);
+}

@@ -38,6 +38,7 @@ import { env } from '@/lib/env';
 import { can } from '@/lib/auth/permissions';
 import { canSeeChannel, readOnlyReason } from '@/lib/tickets/channel-policy';
 import { carrierFor, sendsByEmail } from '@/lib/tickets/outbound';
+import { isPriority } from '@/lib/tickets/vocabulary';
 import type { SessionAgent } from '@/lib/auth/session';
 import { htmlToText, sanitiseEmailHtml, textToHtml } from '@/lib/html/sanitize';
 import { enqueue } from '@/lib/queue';
@@ -1014,13 +1015,12 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
     }
 
     case 'priority': {
-      if (!['low', 'medium', 'high', 'urgent'].includes(value))
-        return { error: 'Unknown priority' };
+      if (!isPriority(value)) return { error: 'Unknown priority' };
 
       await db.transaction(async (tx) => {
         await tx
           .update(conversations)
-          .set({ priority: value as 'low' | 'medium' | 'high' | 'urgent' })
+          .set({ priority: value })
           .where(eq(conversations.id, conversationId));
 
         await tx.insert(conversationEvents).values({

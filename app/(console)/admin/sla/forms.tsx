@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Badge, Button, Field, Input, Select, Toggle } from '@/components/ui';
 import { InfoTip } from '@/components/tooltip';
 import type { SlaTargets } from '@/db/schema/config';
+import { PRIORITIES } from '@/lib/tickets/vocabulary';
 import { ConditionBuilder, type FieldOption } from '../condition-builder';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
 import { deleteSlaPolicy, saveSlaPolicy } from '../settings-actions';
@@ -23,8 +24,6 @@ type Policy = {
   isDefault: boolean;
   isActive: boolean;
 };
-
-const PRIORITIES = ['low', 'medium', 'high', 'urgent'] as const;
 
 /** Says which calendar a policy counts against, in the words the setting uses. */
 function describeHours(policy: Policy, scheduleName: string | null): string {
