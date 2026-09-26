@@ -26,11 +26,25 @@ export function checkMigrationsNotHandEdited() {
   const base = process.env.GITHUB_BASE_REF;
   if (!base) return; // Only meaningful against a base branch, i.e. on a PR.
 
+  // A base named but not fetched is a broken checkout, not a pass. This is the
+  // only check that needs `fetch-depth: 0` to have created `origin/<base>`, and
+  // it used to return quietly without it — so a checkout release, or an edit to
+  // that step, that stopped creating the ref would let a rewritten migration
+  // merge under a green `repo rules`, and nothing would say the check had not
+  // run. Refused here, with what to fix.
   let changed;
   try {
     changed = git(['diff', '--name-status', `origin/${base}...HEAD`, '--', 'db/migrations']);
-  } catch {
-    return; // No base fetched; the drift check still covers the common case.
+  } catch (error) {
+    const reason = String(error?.stderr || error?.message || error)
+      .trim()
+      .split('\n')[0];
+    fail(
+      rule,
+      'db/migrations',
+      `could not diff against origin/${base} (${reason}) — the checkout needs fetch-depth: 0 so the base branch exists; without it this check cannot tell an appended migration from a rewritten one`,
+    );
+    return;
   }
 
   for (const line of changed.split('\n').filter(Boolean)) {
