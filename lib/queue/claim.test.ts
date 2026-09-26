@@ -8,21 +8,23 @@ import { toClaimedJob } from './index';
  * should have died at five attempts retries for as long as the worker runs.
  */
 describe('toClaimedJob', () => {
+  // The instants are the text Postgres sends rather than Dates: drizzle leaves a
+  // raw row's timestamps unparsed, and a fixture of Dates is what hid that.
   const row = {
     id: '11d547d4-28ce-4858-93a3-d78581c6d197',
     type: 'send_meta',
     payload: { messageId: 'abc' },
     status: 'processing',
     priority: 10,
-    run_at: new Date('2026-08-20T20:56:09Z'),
+    run_at: '2026-08-20 20:56:09+00',
     attempts: 5,
     max_attempts: 5,
     last_error: 'An unknown error has occurred.',
     dedupe_key: 'send:abc',
-    locked_at: new Date('2026-08-20T20:56:10Z'),
+    locked_at: '2026-08-20 20:56:10+00',
     locked_by: 'worker-1',
     completed_at: null,
-    created_at: new Date('2026-08-20T20:51:05Z'),
+    created_at: '2026-08-20 20:51:05+00',
   };
 
   it('reads the attempt limit the queue enforces', () => {
@@ -41,12 +43,13 @@ describe('toClaimedJob', () => {
       payload: { messageId: 'abc' },
       status: 'processing',
       priority: 10,
-      runAt: row.run_at,
+      runAt: new Date('2026-08-20T20:56:09Z'),
       lastError: row.last_error,
       dedupeKey: 'send:abc',
       lockedBy: 'worker-1',
       completedAt: null,
-      createdAt: row.created_at,
+      lockedAt: new Date('2026-08-20T20:56:10Z'),
+      createdAt: new Date('2026-08-20T20:51:05Z'),
     });
   });
 
