@@ -10,7 +10,7 @@ import {
 } from '@/db/schema';
 import { readOnlyChannels } from '@/lib/tickets/channel-policy';
 import { afterInboundMessage, afterMessageStored } from '@/lib/tickets/lifecycle';
-import { defaultOpenStatusId } from '@/lib/tickets/statuses';
+import { defaultOpenStatusId, requireDefaultOpenStatusId } from '@/lib/tickets/statuses';
 
 /**
  * The customer's own view of their tickets.
@@ -194,10 +194,7 @@ export async function createTicket(contactId: string, input: NewTicket): Promise
   const portal = await portalChannel();
 
   const created = await db.transaction(async (tx) => {
-    const statusId = await defaultOpenStatusId(tx);
-    if (!statusId) {
-      throw new Error('No default open ticket status configured — run `npm run db:seed`');
-    }
+    const statusId = await requireDefaultOpenStatusId(tx);
 
     const inserted = await tx
       .insert(conversations)

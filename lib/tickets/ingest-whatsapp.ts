@@ -12,7 +12,7 @@ import type {
 import { windowState } from '@/lib/whatsapp/window';
 import { isReadOnlyChannel } from './channel-policy';
 import { resolveContact } from './contacts';
-import { defaultOpenStatusId } from './statuses';
+import { defaultOpenStatusId, requireDefaultOpenStatusId } from './statuses';
 
 /**
  * Inbound WhatsApp → conversation.
@@ -98,10 +98,7 @@ export async function ingestWhatsAppMessage(
         }
       }
     } else {
-      const statusId = await defaultOpenStatusId(tx);
-      if (!statusId) {
-        throw new Error('No default open ticket status configured — run `npm run db:seed`');
-      }
+      const statusId = await requireDefaultOpenStatusId(tx);
 
       const inserted = await tx
         .insert(conversations)
@@ -291,10 +288,7 @@ export async function ingestWhatsAppEcho(echo: NormalisedEcho): Promise<WhatsApp
       conversationId = existing.id;
       conversationNumber = existing.number;
     } else {
-      const statusId = await defaultOpenStatusId(tx);
-      if (!statusId) {
-        throw new Error('No default open ticket status configured — run `npm run db:seed`');
-      }
+      const statusId = await requireDefaultOpenStatusId(tx);
 
       const inserted = await tx
         .insert(conversations)

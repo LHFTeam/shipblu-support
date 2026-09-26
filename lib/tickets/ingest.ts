@@ -17,7 +17,7 @@ import { ingestSideReply, resolveSideConversation } from '@/lib/side-conversatio
 import { buildAttachmentPath, uploadObject } from '@/lib/storage';
 import { resolveContact } from './contacts';
 import { afterInboundMessage, afterMessageStored } from './lifecycle';
-import { defaultOpenStatusId } from './statuses';
+import { defaultOpenStatusId, requireDefaultOpenStatusId } from './statuses';
 
 export type IngestResult = {
   conversationId: string;
@@ -161,10 +161,7 @@ export async function ingestInboundEmail(email: ParsedInboundEmail): Promise<Ing
         }
       }
     } else {
-      const statusId = await defaultOpenStatusId(tx);
-      if (!statusId) {
-        throw new Error('No default open ticket status configured — run `npm run db:seed`');
-      }
+      const statusId = await requireDefaultOpenStatusId(tx);
 
       const inserted = await tx
         .insert(conversations)
