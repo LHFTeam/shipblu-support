@@ -495,12 +495,32 @@ adds only what a cascade cannot do: the preview, the attachment objects in the
 private bucket, the queued jobs owned by the deleted records, and one
 `admin_deletions` row recording who destroyed what.
 
-Two things it does **not** delete, and the console says so rather than implying
-otherwise: the raw `webhook_events` archive, which is keyed by provider ids and
-not by ours, and daily metrics already rolled up — the nightly job rebuilds only
-the last three days, and `agent_backlog_snapshots` cannot be recomputed at all by
-design. This is a testing-phase cleanup tool, not a right-to-be-forgotten; that
-would be a separate job working from identifiers.
+What it does **not** delete, and the panel lists every item (`RETAINED` in
+`lib/admin/purge-summary.ts`) rather than implying otherwise:
+
+- the raw `webhook_events` archive, which is keyed by provider ids and not by ours;
+- daily metrics already rolled up — the nightly job rebuilds only the last three
+  days, and `agent_backlog_snapshots` cannot be recomputed at all by design;
+- completed and dead queue jobs, and jobs a worker is running, whose payloads can
+  carry the customer's address and message bodies;
+- messages the customer wrote on _other_ customers' tickets, which stay there
+  with `author_contact_id` set null;
+- the `admin_deletions` row itself, whose `summary` keeps the customer's name and
+  address or number, or the ticket's subject;
+- inbound deliveries already queued at the moment of deletion, which re-create
+  the customer when they are ingested.
+
+So this is a testing-phase cleanup tool and **not a data-erasure tool**; a
+right-to-be-forgotten would be a separate job working from identifiers.
+
+A purge is also refused, on the page and again in the action, when anything it
+would take — a ticket merged into the one being deleted, or any ticket of the
+customer or of a contact merged into them — is on a channel the admin cannot
+see (`lib/admin/purge-visibility.ts`). Without it an admin whose override
+removed `ticket.view.bot` could destroy bot transcripts the contact page never
+showed them. Both actions redirect server-side on success: a revalidating action
+re-renders the route it was posted from, and that route's row is the one just
+deleted.
 
 Queue cleanup runs inside the deletion transaction, **before** the cascade,
 and matches both the job type and the records being deleted. A `messageId` on

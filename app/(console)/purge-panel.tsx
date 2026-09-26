@@ -37,9 +37,10 @@ type PurgeState = { error: string | null };
  * — only a refusal does, and that is the only thing it renders from `state`.
  *
  * And it says what it does **not** delete. "Completely delete" is the phrase
- * that gets asked for, and the raw webhook archive and already-rolled-up metrics
- * survive this; an admin who needs a real erasure should find that out here
- * rather than from a report six weeks later.
+ * that gets asked for, and the webhook archive, finished jobs, their words on
+ * other tickets and the deletion record itself all survive this — `RETAINED`
+ * has the list and the reasons. An admin who needs a real erasure should find
+ * that out here rather than from a report six weeks later.
  */
 export function PurgePanel({
   preview,
@@ -122,9 +123,16 @@ export function PurgePanel({
         </p>
       ) : null}
 
-      <p className="mt-2 text-xs text-[var(--muted-foreground)]">
-        Kept: {RETAINED.join(', and ')}.
-      </p>
+      {/* A list rather than one joined sentence: there are six of these now,
+          and a run-on clause is the part of a warning that gets skimmed. */}
+      <div className="mt-2 text-xs text-[var(--muted-foreground)]">
+        <p>Not deleted:</p>
+        <ul className="mt-1 list-disc ps-4">
+          {RETAINED.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      </div>
 
       <form action={formAction} className="mt-3 flex flex-col gap-2">
         <input type="hidden" name={idField} value={preview.id} />

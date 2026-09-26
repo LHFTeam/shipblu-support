@@ -191,12 +191,15 @@ export const whatsappTemplates = pgTable(
  * **Deliberately not a foreign key to anything.** Every other audit trail in
  * this schema points at rows that still exist; this one points at rows that by
  * definition do not, so `subject_id` is a bare uuid and `summary` carries the
- * human-readable identity — ticket number, customer name and address — that the
- * id can no longer be resolved to. A `references()` here would either refuse the
- * delete or cascade the evidence away with it.
+ * human-readable identity the id can no longer be resolved to. A
+ * `references()` here would either refuse the delete or cascade the evidence
+ * away with it. It also makes this row a copy of personal data that outlives
+ * the purge by design — one of the reasons `RETAINED` gives for this not being
+ * an erasure tool.
  *
  * `deleted_by_agent_id` is the exception and is `set null`: the purge still
- * happened after the person who did it has left, and `summary` names them too.
+ * happened after the person who did it has left, and `deleted_by_label` still
+ * names them.
  */
 export const adminDeletions = pgTable(
   'admin_deletions',
@@ -208,8 +211,12 @@ export const adminDeletions = pgTable(
     subjectId: uuid('subject_id').notNull(),
 
     /**
-     * Who and what, in one line an admin can read without joining anything:
-     * `Ticket #482 (whatsapp) — Ali Hassan <ali@example.com>`.
+     * What was destroyed, in one line an admin can read without joining
+     * anything. A ticket is named by number, channel and subject —
+     * `Ticket #482 (whatsapp) — Where is my parcel?` — and never by its
+     * requester; a contact by name and address or number —
+     * `Ali Hassan (ali@example.com · +20…)`. Who did it is in the two columns
+     * below, not here.
      */
     summary: text('summary').notNull(),
 

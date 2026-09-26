@@ -38,10 +38,36 @@
  * recomputed, so nothing can retro-correct it. Both are aggregates over a
  * archive that is being actively measured, and silently rewriting history to
  * match a deletion would be its own kind of lie.
+ *
+ * The rest are the places the customer's own words and details survive, listed
+ * because the first version of this list named only the two above and so read
+ * as a promise that everything else went:
+ *
+ * - **Finished queue jobs.** Only pending and failed jobs owned by the purge are
+ *   removed. A completed or dead `send_email`/`send_meta` row keeps the payload
+ *   it was enqueued with — an address, sometimes a body — and a job a worker is
+ *   holding is left to finish rather than yanked out from under it.
+ * - **What they wrote on somebody else's ticket.** `messages.author_contact_id`
+ *   is `set null`, so a reply they sent into another customer's thread — a CC'd
+ *   email, a merged conversation — stays in that thread with no author.
+ * - **The deletion record itself.** `admin_deletions.summary` names the customer
+ *   and their address or number, or the ticket and its subject, because that is
+ *   the only way "where did #482 go" can be answered afterwards. It is why this
+ *   is a cleanup tool and not an erasure.
+ * - **Deliveries already in the queue.** A webhook that arrived before the purge
+ *   and is still waiting to be ingested will, when it runs, find no contact for
+ *   its sender and create one — the customer can reappear minutes later.
+ *
+ * Each entry is a clause of one sentence the panel reads out, so they stay short
+ * and agent-facing; the reasoning lives here.
  */
 export const RETAINED = [
   'the raw webhook archive, which is keyed by provider ids and not by ours',
   'already-rolled-up daily metrics, which cannot be recomputed for past days',
+  'finished and running queue jobs, whose payloads can hold the customer’s address and message text',
+  'messages they wrote on other customers’ tickets, kept there without an author',
+  'the deletion record, which keeps their name and contact details or the ticket’s subject — so this is not a data-erasure tool',
+  'incoming messages already queued when you delete, which can create the customer again',
 ] as const;
 
 export type PurgeRefusal = 'not_found' | 'confirmation_mismatch';

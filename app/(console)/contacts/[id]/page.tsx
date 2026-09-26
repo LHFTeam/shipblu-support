@@ -308,10 +308,10 @@ export default async function ContactPage({
           <h2 className="mb-2 text-sm font-medium">Danger zone</h2>
           <Card>
             <p className="mb-3 text-xs text-[var(--muted-foreground)]">
-              Deletes this customer outright — every address and number they write in on, their
-              portal sign-in, and <span className="font-medium">every ticket they ever raised</span>
-              , because a ticket cannot exist without a requester. If this is a duplicate of
-              somebody real, merge it above instead: a merge keeps the history and redirects.
+              Deletes this customer — every address and number they write in on, their portal
+              sign-in, and <span className="font-medium">every ticket they ever raised</span>,
+              because a ticket cannot exist without a requester. If this is a duplicate of somebody
+              real, merge it above instead: a merge keeps the history and redirects.
             </p>
             <PurgePanel
               preview={purgePreview}
