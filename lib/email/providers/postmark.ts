@@ -48,14 +48,17 @@ function toAddress(full?: { Email?: string; Name?: string }): EmailAddress | nul
 }
 
 /**
- * How long a send may take before the job gives up on it.
+ * How long a send may take before the job gives up on it, headers and body
+ * together.
  *
  * Every send runs in a job, and the worker awaits a whole batch before it
- * claims the next, so one that never answered stopped the queue. The deadline
- * sits in a window with two edges: below about a minute, an email Postmark was
- * still accepting is given up on and sent again; past `STALLED_AFTER_MS`, a
- * worker restarted mid-send has the job reclaimed and sent twice. The same
- * window Graph sends use (`graphTimeout`).
+ * claims the next — and `fetch` with no signal waits five minutes for a
+ * response that is not coming, so one slow send held every queued job behind
+ * it. The deadline sits in a window with two edges: below about a minute, an
+ * email Postmark was still accepting is given up on and sent again; past
+ * `STALLED_AFTER_MS`, a deploy's new worker can reclaim the job while the send
+ * is still waiting and send it twice. The same window Graph sends use
+ * (`graphTimeout`).
  */
 const SEND_TIMEOUT_MS = 90_000;
 
@@ -108,6 +111,9 @@ export class PostmarkEmailProvider implements EmailProvider {
       })),
     };
 
+    const timedOut = (error: unknown) =>
+      error instanceof DOMException && error.name === 'TimeoutError';
+
     let response: Response;
     try {
       response = await fetch(API_URL, {
@@ -121,21 +127,51 @@ export class PostmarkEmailProvider implements EmailProvider {
         signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
       });
     } catch (error) {
-      if (error instanceof DOMException && error.name === 'TimeoutError') {
+      if (timedOut(error)) {
         throw new Error(`Postmark send did not answer in ${SEND_TIMEOUT_MS / 1000}s`);
       }
       throw error;
     }
 
+    // Read inside the same deadline, which governs the body as well as the
+    // status: a deadline passing mid-body rejects with the signal's own reason.
+    let text: string | null;
+    try {
+      text = await response.text();
+    } catch (error) {
+      if (!response.ok) {
+        throw new Error(
+          `Postmark send failed (${response.status}), and its reason never arrived` +
+            (timedOut(error) ? ` in ${SEND_TIMEOUT_MS / 1000}s` : ''),
+        );
+      }
+      // A 2xx is Postmark's answer: the email is accepted and will go. Retrying
+      // it sends the customer a second copy — with a fresh Message-ID on
+      // transactional mail, so not even their client can fold the two. What is
+      // lost is only Postmark's own id, which the message row records and
+      // nothing reads.
+      console.warn(
+        `[postmark] send accepted with ${response.status}, but its body never arrived: ` +
+          `${error instanceof Error ? error.message : String(error)}`,
+      );
+      text = null;
+    }
+
     if (!response.ok) {
-      const text = await response.text();
       // Thrown, not swallowed: the queue's retry and backoff is the right place
       // to handle a transient provider failure, and a dead job is a visible
       // record of one that never succeeded.
       throw new Error(`Postmark send failed (${response.status}): ${text}`);
     }
 
-    const result = (await response.json()) as { MessageID?: string };
+    // Parsed apart from the read for the same reason: a 2xx whose body is not
+    // the JSON we expected is still an accepted send.
+    let result: { MessageID?: string } = {};
+    try {
+      result = text ? (JSON.parse(text) as { MessageID?: string }) : {};
+    } catch {
+      // No id to report; the send stands.
+    }
 
     // Postmark's MessageID is its own UUID, not the Message-ID header it
     // stamps on the wire, so it is deliberately not reported as rfcMessageId.

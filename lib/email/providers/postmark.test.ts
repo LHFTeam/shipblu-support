@@ -266,11 +266,13 @@ describe('PostmarkEmailProvider.send', () => {
 });
 
 /**
- * Every Postmark send runs in a job, and it had no deadline: one that never
- * answered stopped the whole queue, because the worker awaits a batch before it
- * claims the next. A send's deadline has two edges — below about a minute, an
- * email Postmark was still accepting is given up on and sent again; past the
- * stalled-job window, a worker restarted mid-send has the job run twice.
+ * Every Postmark send runs in a job, and it had no deadline of its own: `fetch`
+ * gives up only after five minutes without a response, and every queued job
+ * waited behind it, because the worker awaits a batch before it claims the
+ * next. A send's deadline has two edges — below about a minute, an email
+ * Postmark was still accepting is given up on and sent again; past the
+ * stalled-job window, a deploy's new worker can reclaim the job mid-send and
+ * run it twice.
  */
 describe('PostmarkEmailProvider.send deadline', () => {
   const email = {
@@ -313,5 +315,54 @@ describe('PostmarkEmailProvider.send deadline', () => {
     );
 
     await expect(provider.send(email)).rejects.toThrow(/Postmark send did not answer in 90s/);
+  });
+
+  /** The status line arrives; the body is still coming when the deadline passes. */
+  function stallBody(status: number) {
+    globalThis.fetch = (async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.error(
+              new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
+            );
+          },
+        }),
+        { status },
+      )) as typeof fetch;
+  }
+
+  /**
+   * The deadline governs the body too. Passing it after Postmark's 200 threw
+   * from `response.json()`, and the job sent the customer a second copy of an
+   * email Postmark had already accepted.
+   */
+  it('reports a send Postmark accepted as sent, rather than sending it again', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stallBody(200);
+
+    await expect(provider.send(email)).resolves.toEqual({
+      providerMessageId: null,
+      rfcMessageId: null,
+      accepted: true,
+    });
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/accepted with 200/));
+  });
+
+  it('still fails a refusal whose reason never arrived, naming the status', async () => {
+    stallBody(422);
+
+    await expect(provider.send(email)).rejects.toThrow(
+      'Postmark send failed (422), and its reason never arrived in 90s',
+    );
+  });
+
+  it('keeps an accepted send whose body is not the JSON it expected', async () => {
+    globalThis.fetch = (async () => new Response('OK', { status: 200 })) as typeof fetch;
+
+    await expect(provider.send(email)).resolves.toMatchObject({
+      providerMessageId: null,
+      accepted: true,
+    });
   });
 });
