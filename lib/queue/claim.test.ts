@@ -53,6 +53,17 @@ describe('toClaimedJob', () => {
     });
   });
 
+  // An Invalid Date type-checks as a Date, so passing one on would move the
+  // failure into whichever handler first did arithmetic with it.
+  it('refuses an instant that does not parse, naming the column and the value', () => {
+    expect(() => toClaimedJob({ ...row, run_at: 'not a timestamp' })).toThrow(
+      'jobs.run_at is not a timestamp: "not a timestamp"',
+    );
+    expect(() => toClaimedJob({ ...row, locked_at: '' })).toThrow(
+      expect.objectContaining({ name: 'InvalidJobTimestampError' }),
+    );
+  });
+
   it('defaults a missing payload rather than handing a handler undefined', () => {
     expect(toClaimedJob({ ...row, payload: null }).payload).toEqual({});
   });
