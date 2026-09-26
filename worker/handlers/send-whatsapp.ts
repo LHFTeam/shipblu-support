@@ -108,6 +108,12 @@ export async function sendWhatsApp(job: ClaimedJob): Promise<void> {
           phoneNumberId: credentials.phoneNumberId,
           whatsappAccountId: credentials.accountId,
           sentAt: sentAt.toISOString(),
+          // Meta accepted the send and the answer carrying its id was lost.
+          // Receipts match on the wamid, so this row will never hear another
+          // word — an asynchronous rejection included. Said on the row, where
+          // "sent" can be read as "sent, unconfirmed", rather than only in a
+          // worker log nobody reads next to the ticket.
+          ...(result.wamid === null ? { wamidLost: true } : {}),
         },
       })
       .where(eq(messages.id, messageId));
@@ -124,7 +130,9 @@ export async function sendWhatsApp(job: ClaimedJob): Promise<void> {
       })
       .where(eq(conversations.id, row.conversation.id));
 
-    console.log(`[send_whatsapp] ${messageId} sent as ${result.wamid}`);
+    console.log(
+      `[send_whatsapp] ${messageId} sent as ${result.wamid ?? 'an unknown wamid: Meta accepted it and its answer was lost'}`,
+    );
   } catch (error) {
     await markFailed(
       messageId,

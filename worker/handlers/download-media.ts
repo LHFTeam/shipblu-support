@@ -84,7 +84,10 @@ export async function downloadMediaJob(job: ClaimedJob): Promise<void> {
 
   try {
     const metadata = await getMediaUrl(mediaId, { token });
-    const downloaded = await downloadMedia(metadata.url, { token });
+    const downloaded = await downloadMedia(metadata.url, {
+      token,
+      sizeBytes: metadata.fileSize,
+    });
     content = downloaded.content;
     contentType = metadata.mimeType ?? downloaded.contentType;
   } catch (error) {

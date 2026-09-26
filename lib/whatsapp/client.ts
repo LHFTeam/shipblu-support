@@ -1,5 +1,5 @@
 import { env } from '@/lib/env';
-import { GRAPH_BASE } from '@/lib/meta/graph';
+import { GRAPH_BASE, graphTimeout } from '@/lib/meta/graph';
 import { ACCESS_TOKEN_CODE } from './errors';
 import type { WhatsAppTemplateComponent } from './templates';
 
@@ -119,20 +119,97 @@ function credentials(override?: CallCredentials | null) {
   return { token: accessToken(override), phoneNumberId: resolved };
 }
 
+/**
+ * A request that did not answer, as a transient `WhatsAppApiError`.
+ *
+ * Transient because a send that timed out may still arrive: the handler records
+ * the sentence on the message and the queue retries. A deadline that passed
+ * says so, rather than as the signal's own "The operation was aborted due to
+ * timeout", which names no call.
+ */
+function unanswered(what: string, error: unknown, timeoutMs: number): WhatsAppApiError {
+  const reason =
+    error instanceof DOMException && error.name === 'TimeoutError'
+      ? `did not answer in ${timeoutMs / 1000}s`
+      : `unreachable: ${error instanceof Error ? error.message : String(error)}`;
+  return new WhatsAppApiError(`${what} ${reason}`, 0, null, null, true);
+}
+
+/**
+ * `fetch` with a deadline.
+ *
+ * A deadline because every caller is a job, and the worker claims nothing new
+ * until its whole batch is done — and `fetch` with no signal waits five minutes
+ * for a response that is not coming. The signal governs reading the body too,
+ * so each caller reads it inside the same handling.
+ */
+async function request(
+  what: string,
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  try {
+    return await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+  } catch (error) {
+    throw unanswered(what, error, timeoutMs);
+  }
+}
+
+/**
+ * Answers null for exactly one case: a write Meta accepted whose body was lost
+ * on the way back. A read, and a refusal, never answer null.
+ */
 async function graph<T>(
   path: string,
-  init: { method?: string; token: string; body?: unknown },
-): Promise<T> {
-  const response = await fetch(`${GRAPH_BASE}/${path}`, {
-    method: init.method ?? 'GET',
-    headers: {
-      Authorization: `Bearer ${init.token}`,
-      ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+  init: { method?: 'GET' | 'POST'; token: string; body?: unknown },
+): Promise<T | null> {
+  const method = init.method ?? 'GET';
+  const timeoutMs = graphTimeout(method);
+  const response = await request(
+    'WhatsApp API',
+    `${GRAPH_BASE}/${path}`,
+    {
+      method,
+      headers: {
+        Authorization: `Bearer ${init.token}`,
+        ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+      },
+      body: init.body ? JSON.stringify(init.body) : undefined,
     },
-    body: init.body ? JSON.stringify(init.body) : undefined,
-  });
+    // The deadlines Messenger and Instagram use: a send's sits inside the
+    // window where giving up neither retries a message Meta was still accepting
+    // nor lets the queue reclaim the job mid-send.
+    timeoutMs,
+  );
 
-  const text = await response.text();
+  let text: string;
+  try {
+    text = await response.text();
+  } catch (error) {
+    // The status arrived and the body did not. A 2xx on a send says the message
+    // went, and retrying it sends it twice; a refusal keeps its status and is
+    // retried to learn the reason; a read is retried as one that did not
+    // answer. The same three answers `graph()` in lib/meta/client.ts gives.
+    if (response.ok && method !== 'GET') {
+      console.warn(
+        `[whatsapp] ${method} ${path} was accepted with ${response.status}, but its body ` +
+          `never arrived: ${unanswered('WhatsApp API', error, timeoutMs).message}`,
+      );
+      return null;
+    }
+    if (!response.ok) {
+      throw new WhatsAppApiError(
+        `WhatsApp API refused with ${response.status}, and its reason never arrived ` +
+          `(${unanswered('WhatsApp API', error, timeoutMs).message})`,
+        response.status,
+        null,
+        null,
+        true,
+      );
+    }
+    throw unanswered('WhatsApp API', error, timeoutMs);
+  }
 
   if (!response.ok) {
     let parsed: MetaErrorBody = {};
@@ -162,8 +239,13 @@ async function graph<T>(
 }
 
 export type SendResult = {
-  /** The wamid Meta assigned. Delivery-status webhooks arrive keyed on this. */
-  wamid: string;
+  /**
+   * The wamid Meta assigned. Delivery-status webhooks arrive keyed on this.
+   *
+   * Null when Meta accepted the send and the answer carrying the id was lost:
+   * the message went, and only its receipts cannot be matched to the row.
+   */
+  wamid: string | null;
   /** Meta's normalised recipient number, which can differ from what we sent. */
   recipientId: string | null;
 };
@@ -259,7 +341,7 @@ export async function getMediaUrl(
     file_size?: number;
   }>(mediaId, { token });
 
-  if (!body.url) throw new Error(`Meta returned no download URL for media ${mediaId}`);
+  if (!body?.url) throw new Error(`Meta returned no download URL for media ${mediaId}`);
 
   return {
     url: body.url,
@@ -269,16 +351,54 @@ export async function getMediaUrl(
   };
 }
 
+/** WhatsApp's largest media: a document, at 100 MB. */
+const LARGEST_MEDIA_BYTES = 100 * 1024 * 1024;
+
+/**
+ * How long one download may take, from the size Meta reported for it.
+ *
+ * A minute for anything, and a second more for every 2 MB — the slowest link
+ * this accepts, a choice rather than a measurement. A flat minute gave a 100 MB
+ * document up below 1.7 MB/s on every attempt alike, and the media was lost
+ * when the job died; scaled rather than simply raised, because a small image
+ * that stalls should still be noticed in a minute. A size Meta did not report
+ * gets the largest file's budget, the one guess that cannot fail a real file.
+ *
+ * The largest is 110 seconds, so the lookup and the download together leave at
+ * least half of `STALLED_AFTER_MS` to the storage upload that follows. That
+ * upload is bounded by `uploadObject`, not here, and only once `lib/storage`
+ * carries its own deadline (row 2.8's storage PR, sized by this same rule): a
+ * `fetch` with no signal waits five minutes, the whole window, and a job
+ * reclaimed mid-upload runs twice and writes a second attachment row.
+ */
+export function mediaTimeout(sizeBytes: number | null | undefined): number {
+  const bytes = sizeBytes ?? LARGEST_MEDIA_BYTES;
+  return 60_000 + Math.ceil(bytes / (2 * 1024 * 1024)) * 1000;
+}
+
 /** Meta's CDN requires the access token on the download itself, not just the lookup. */
 export async function downloadMedia(
   url: string,
-  options: CallCredentials = {},
+  options: CallCredentials & {
+    /** `MediaMetadata.fileSize`, which sizes the deadline. */
+    sizeBytes?: number | null;
+  } = {},
 ): Promise<{ content: Buffer; contentType: string }> {
   const token = accessToken(options);
 
-  const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  const timeoutMs = mediaTimeout(options.sizeBytes);
+  const response = await request(
+    'Media download',
+    url,
+    { headers: { Authorization: `Bearer ${token}` } },
+    timeoutMs,
+  );
 
   if (!response.ok) {
+    // Nothing reads a refusal's body, and one left unread holds the connection
+    // until it is collected. Released here, and its failure ignored: the
+    // status is the answer.
+    await response.body?.cancel().catch(() => {});
     throw new WhatsAppApiError(
       `Media download failed (${response.status})`,
       response.status,
@@ -288,7 +408,12 @@ export async function downloadMedia(
     );
   }
 
-  const buffer = Buffer.from(await response.arrayBuffer());
+  let buffer: Buffer;
+  try {
+    buffer = Buffer.from(await response.arrayBuffer());
+  } catch (error) {
+    throw unanswered('Media download', error, timeoutMs);
+  }
   return {
     content: buffer,
     contentType:
@@ -327,19 +452,22 @@ export async function listTemplates(
   // Bounded rather than `while (next)`: a paging bug on either side must not
   // turn an hourly cron into an unbounded loop against Meta's API.
   for (let page = 0; page < 20 && path; page += 1) {
-    const body: { data?: MetaTemplate[]; paging?: { next?: string } } = await graph(path, {
+    const body: { data?: MetaTemplate[]; paging?: { next?: string } } | null = await graph(path, {
       token,
     });
-    collected.push(...(body.data ?? []));
+    collected.push(...(body?.data ?? []));
 
-    const next = body.paging?.next;
+    const next: string | undefined = body?.paging?.next;
     path = next ? next.replace(`${GRAPH_BASE}/`, '') : null;
   }
 
   return collected;
 }
 
-function toSendResult(response: SendResponse): SendResult {
+function toSendResult(response: SendResponse | null): SendResult {
+  // Reported as sent rather than retried into a duplicate — see `graph`.
+  if (response === null) return { wamid: null, recipientId: null };
+
   const wamid = response.messages?.[0]?.id;
   if (!wamid) throw new Error('WhatsApp send returned no message id');
   return { wamid, recipientId: response.contacts?.[0]?.wa_id ?? null };

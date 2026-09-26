@@ -1,6 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetEnvCache } from '@/lib/env';
-import { WhatsAppApiError, getMediaUrl, listTemplates, sendText } from './client';
+import { STALLED_AFTER_MS } from '@/lib/queue';
+import { graphTimeout } from '@/lib/meta/graph';
+import {
+  WhatsAppApiError,
+  downloadMedia,
+  getMediaUrl,
+  listTemplates,
+  mediaTimeout,
+  sendText,
+} from './client';
 import { ACCESS_TOKEN_CODE } from './errors';
 
 /**
@@ -158,5 +167,183 @@ describe('WhatsApp error classification', () => {
     expect(error.code).toBeNull();
     expect(error.message).toContain('Bad Gateway');
     expect(error.isTransient).toBe(true);
+  });
+});
+
+/**
+ * WhatsApp runs in jobs, and none of its calls had a deadline of its own:
+ * `fetch` gives up only after five minutes without a response, and every
+ * queued job waited behind it, because the worker awaits a batch before it
+ * claims the next.
+ */
+describe('WhatsApp deadlines', () => {
+  /** Answers like `fetch` does: a signal that has fired rejects with its reason. */
+  function serveUnlessAborted(body: unknown) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string | URL, init?: RequestInit) => {
+        if (init?.signal?.aborted) throw init.signal.reason;
+        return new Response(JSON.stringify(body), { status: 200 });
+      }),
+    );
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('gives a send the Graph write deadline', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    serveUnlessAborted({ messages: [{ id: 'wamid.1' }] });
+
+    await sendText('201000000000', 'hello');
+
+    expect(timeout).toHaveBeenCalledWith(90_000);
+  });
+
+  it('gives a lookup the Graph read deadline', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    serveUnlessAborted({ url: 'https://cdn' });
+
+    await getMediaUrl('media-1');
+
+    expect(timeout).toHaveBeenCalledWith(15_000);
+  });
+
+  /**
+   * A document can be 100 MB, which a flat minute gave up on below 1.7 MB/s —
+   * identically on every attempt, until the job died and the media with it.
+   */
+  it.each([
+    ['an empty file', 0, 60_000],
+    ['a 2 MB image', 2 * 1024 * 1024, 61_000],
+    ['a 100 MB document', 100 * 1024 * 1024, 110_000],
+    ['a file Meta gave no size for', null, 110_000],
+  ])('gives %s a minute and a second per 2 MB', async (_what, sizeBytes, expected) => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    serveUnlessAborted({});
+
+    await downloadMedia('https://lookaside.fbsbx.com/whatsapp_business/attachments/1', {
+      sizeBytes,
+    });
+
+    expect(timeout).toHaveBeenCalledWith(expected);
+  });
+
+  /**
+   * Computed from the deadlines the calls actually get, so raising the largest
+   * size or the per-MB allowance fails here rather than in a reclaimed job.
+   */
+  it('leaves the storage upload after the largest download half the reclaim window', () => {
+    const lookupAndDownload = graphTimeout('GET') + mediaTimeout(null);
+
+    expect(mediaTimeout(null)).toBe(mediaTimeout(100 * 1024 * 1024));
+    expect(lookupAndDownload).toBeLessThanOrEqual(STALLED_AFTER_MS / 2);
+  });
+
+  it('releases the connection a refused download holds', async () => {
+    const cancel = vi.fn(() => Promise.resolve());
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        const response = new Response('denied', { status: 403 });
+        Object.defineProperty(response, 'body', { value: { cancel } });
+        return response;
+      }),
+    );
+
+    await expect(downloadMedia('https://lookaside.fbsbx.com/1')).rejects.toThrow(/\(403\)/);
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  /**
+   * Recorded on the message row, where the agent reads it, and retried: a send
+   * that timed out may still arrive, and is not a reason to give up on it.
+   */
+  it('turns a send whose deadline passed into a retryable error that says so', async () => {
+    vi.spyOn(AbortSignal, 'timeout').mockReturnValue(
+      AbortSignal.abort(new DOMException('The operation timed out.', 'TimeoutError')),
+    );
+    serveUnlessAborted({});
+
+    const failure = sendText('201000000000', 'hello');
+
+    await expect(failure).rejects.toBeInstanceOf(WhatsAppApiError);
+    await expect(failure).rejects.toMatchObject({ isTransient: true });
+    await expect(failure).rejects.toThrow(/did not answer in 90s/);
+  });
+});
+
+/**
+ * The signal governs reading the body as well as waiting for the status. A
+ * deadline passing mid-body rejected with the signal's own reason — not a
+ * `WhatsAppApiError`, naming no call — and on a send Meta had accepted, the
+ * handler marked the message failed and the queue sent it again.
+ */
+describe('a deadline that passes while the body is arriving', () => {
+  /** The status line arrives; the body is still coming when the deadline passes. */
+  function stallBody(status = 200) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.error(
+                  new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
+                );
+              },
+            }),
+            { status },
+          ),
+      ),
+    );
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('reports a send Meta accepted as sent, rather than sending it again', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    stallBody(200);
+
+    await expect(sendText('201000000000', 'hello')).resolves.toEqual({
+      wamid: null,
+      recipientId: null,
+    });
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/accepted with 200/));
+  });
+
+  it('retries a refusal whose reason never arrived, keeping its status', async () => {
+    stallBody(400);
+
+    const failure = sendText('201000000000', 'hello');
+
+    await expect(failure).rejects.toBeInstanceOf(WhatsAppApiError);
+    await expect(failure).rejects.toMatchObject({ isTransient: true, status: 400 });
+    await expect(failure).rejects.toThrow(/refused with 400, and its reason never arrived/);
+  });
+
+  it('retries a lookup, and says the deadline passed', async () => {
+    stallBody(200);
+
+    const failure = getMediaUrl('media-1');
+
+    await expect(failure).rejects.toMatchObject({ isTransient: true });
+    await expect(failure).rejects.toThrow('WhatsApp API did not answer in 15s');
+  });
+
+  it('names a media download that stalled mid-read', async () => {
+    stallBody(200);
+
+    const failure = downloadMedia('https://lookaside.fbsbx.com/whatsapp_business/attachments/1', {
+      sizeBytes: 0,
+    });
+
+    await expect(failure).rejects.toBeInstanceOf(WhatsAppApiError);
+    await expect(failure).rejects.toMatchObject({ isTransient: true });
+    await expect(failure).rejects.toThrow('Media download did not answer in 60s');
   });
 });
