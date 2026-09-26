@@ -4140,7 +4140,9 @@ null`, and argued it from write cost and 13 MB of disk. The read side turned
     _pending_ run, and GitHub cancels the waiting one when another arrives. Merge
     three PRs in a minute and the middle merge commit's run reads "cancelled".
     Judge `main` by its newest head. If that head's own run reads cancelled,
-    re-run it once; a second failure is real.
+    re-run it once; a second failure is real. Row 0.4 (#193) gives each push to
+    `main` a concurrency group of its own, after which every merge keeps its
+    result and this entry describes history.
 
 75. **Two traps in the cloud agent container, not in the product.**
     _2026-09-25._ `pkill -f <pattern>` matches the shell running the command,
