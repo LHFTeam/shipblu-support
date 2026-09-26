@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, statSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isolatedGitEnv } from './git-env.mjs';
 
 /**
  * What every rule in `rules/` shares: the repository root, the list of files git
@@ -27,8 +28,50 @@ export function fail(rule, where, message) {
   failures.push({ rule, where, message });
 }
 
+/**
+ * Runs one check, recording a throw as a violation of that rule instead of
+ * letting it escape.
+ *
+ * A check that throws has usually been outrun by the file it reads, and one
+ * broken parser should not hide every other rule's findings behind a stack
+ * trace. `repo-rules.mjs` and the rule fixture both run checks through this,
+ * so a rule that throws is reported the same way in a test as in CI — rather
+ * than as a rejected promise the test would have to know to expect.
+ */
+export function runCheck(name, run) {
+  try {
+    run();
+  } catch (error) {
+    fail(
+      name,
+      '(check itself)',
+      `the check threw, which usually means the file it reads changed shape: ${error.message}`,
+    );
+  }
+}
+
 export function read(rel) {
   return readFileSync(path.join(ROOT, rel), 'utf8');
+}
+
+/**
+ * Runs git against the repository the rules read, and answers its stdout.
+ *
+ * Every rule that asks git anything goes through here rather than calling
+ * `execFileSync('git', …)` itself. Against a fixture, git is kept off any
+ * repository an inherited GIT_DIR names (`git-env.mjs`): git honours that over
+ * `cwd`, so a test run from a hook would otherwise list the real index, or diff
+ * the real history, and report on a repository it never built. Isolating only
+ * the file list and not the diff was how `generated-files` came to read
+ * another repository's history while every other rule read the fixture. The
+ * real run inherits its environment untouched, exactly as it always has.
+ */
+export function git(args) {
+  return execFileSync('git', args, {
+    cwd: ROOT,
+    encoding: 'utf8',
+    env: process.env.REPO_RULES_ROOT ? isolatedGitEnv() : process.env,
+  });
 }
 
 /**
@@ -36,9 +79,7 @@ export function read(rel) {
  * a build artefact or a local .env sitting in the working tree is not the
  * repository's problem, and node_modules would swamp every scan in `rules/`.
  */
-export const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: ROOT, encoding: 'utf8' })
-  .split('\0')
-  .filter(Boolean);
+export const tracked = git(['ls-files', '-z']).split('\0').filter(Boolean);
 
 const trackedSource = tracked.filter((f) => /\.(ts|tsx|mts|mjs)$/.test(f));
 

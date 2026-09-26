@@ -165,4 +165,24 @@ describe('deliveryId', () => {
 
     expect(deliveryId(many, 'facebook_page')!.length).toBeLessThanOrEqual(500);
   });
+
+  it('does not let a long batch take the key of a longer one it begins', () => {
+    const batchOf = (count: number) => ({
+      object: 'page',
+      entry: [
+        {
+          id: '1',
+          messaging: Array.from({ length: count }, (_, i) => ({
+            message: { mid: `mid-${'x'.repeat(40)}-${String(i).padStart(3, '0')}` },
+          })),
+        },
+      ],
+    });
+
+    // Both share far more than 500 characters of key; a truncated key made
+    // the second a "duplicate" of the first.
+    expect(deliveryId(batchOf(20), 'facebook_page')).not.toBe(
+      deliveryId(batchOf(21), 'facebook_page'),
+    );
+  });
 });

@@ -138,7 +138,10 @@ conflict on all of them.
     reads that way under
     `git diff origin/main -M -C --color-moved=dimmed-zebra`.
   - A behaviour PR carries a test that fails on `main`.
-- Record move and format commits in a new `.git-blame-ignore-revs`.
+- Record pure reformat commits in `.git-blame-ignore-revs`. Not moves across
+  files: ignore-revs only looks for a line in the same file's parent, so it
+  cannot see where moved code came from and mis-credits whatever the commit
+  wrote. `git blame -C -C` follows a move with no file at all.
 
 **Comments**
 

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { env } from '@/lib/env';
+import { isTimeout, sizedTimeout } from '@/lib/http/deadline';
 
 /**
  * Supabase Storage via its REST API rather than the JS SDK.
@@ -13,27 +14,12 @@ import { env } from '@/lib/env';
  * response that is not coming, so one slow request held every queued job.
  */
 
-/**
- * How long an upload of this many bytes may take.
- *
- * A minute for anything, and a second more for every 2 MB — the slowest link
- * this accepts, a choice rather than a measurement. The largest object we write
- * is a WhatsApp document at 100 MB, not a form's 25 MB, and a flat minute gave
- * it up below 1.7 MB/s on every attempt alike. That matters most where nothing
- * retries: email ingest drops an attachment whose upload failed, so a slow but
- * working upload cut short is a file the customer sent and the agent never
- * sees. Scaled rather than simply raised, because a small file that stalls
- * should still be noticed in a minute. 110 seconds at the largest.
- */
-function uploadTimeout(bytes: number): number {
-  return 60_000 + Math.ceil(bytes / (2 * 1024 * 1024)) * 1000;
-}
 /** Signing is one small round trip, and somebody is waiting on the page. */
 const SIGN_TIMEOUT_MS = 10_000;
 
 /** The error for a deadline that passed, naming the object rather than the signal. */
 function unanswered(what: string, error: unknown, timeoutMs: number): unknown {
-  return error instanceof DOMException && error.name === 'TimeoutError'
+  return isTimeout(error)
     ? new Error(`Storage ${what} did not answer in ${timeoutMs / 1000}s`)
     : error;
 }
@@ -134,9 +120,11 @@ export async function uploadObject(
   const { url, key, bucket } = config();
 
   // Safe to retry after a timeout: `x-upsert` makes a second attempt overwrite
-  // whatever the first managed to write. Not every caller retries, which is
-  // why the deadline is sized from the file rather than guessed.
-  const timeoutMs = uploadTimeout(content.length);
+  // whatever the first managed to write. Not every caller retries — email
+  // ingest drops an attachment whose upload failed — which is why the deadline
+  // is sized from the file rather than guessed. The largest object written is a
+  // WhatsApp document at 100 MB, not a form's 25 MB: 110 seconds.
+  const timeoutMs = sizedTimeout(content.length);
   const response = await storageRequest(
     `upload of ${path}`,
     `${url}/storage/v1/object/${bucket}/${encodeURI(path)}`,

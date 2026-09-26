@@ -1,3 +1,4 @@
+import { boundedDeliveryKey } from '@/lib/webhooks/delivery-key';
 import type { MetaConnection } from './connection';
 import type { MetaWebhookPayload } from './types';
 
@@ -81,5 +82,6 @@ export function deliveryId(payload: MetaWebhookPayload, connection: MetaConnecti
   }
 
   if (parts.length === 0) return null;
-  return `${connection}|${parts.sort().join('|')}`.slice(0, 500);
+  // Hashed whole rather than truncated when too long: see `boundedDeliveryKey`.
+  return boundedDeliveryKey(`${connection}|${parts.sort().join('|')}`);
 }

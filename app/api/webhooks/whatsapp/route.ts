@@ -3,6 +3,7 @@ import { db } from '@/db/client';
 import { webhookEvents } from '@/db/schema';
 import { metaAppSecret, metaVerifyToken } from '@/lib/env';
 import { enqueue } from '@/lib/queue';
+import { boundedDeliveryKey } from '@/lib/webhooks/delivery-key';
 import { logIncomingWebhook } from '@/lib/webhooks/log';
 import { SIGNATURE_HEADER, verifyChallenge, verifySignature } from '@/lib/whatsapp/verify';
 import type { WhatsAppWebhookPayload } from '@/lib/whatsapp/types';
@@ -128,7 +129,9 @@ export async function POST(request: Request) {
  * the wamids of every message, echo and status in it, which is stable across
  * redeliveries of the same batch and differs between distinct ones. Returning
  * null for an empty batch is deliberate — the unique index treats nulls as
- * distinct, so contentless deliveries are stored rather than colliding.
+ * distinct, so contentless deliveries are stored rather than colliding. A
+ * batch too long for the column is hashed whole rather than truncated — see
+ * `boundedDeliveryKey`.
  */
 function deliveryId(payload: WhatsAppWebhookPayload): string | null {
   const parts: string[] = [];
@@ -148,5 +151,5 @@ function deliveryId(payload: WhatsAppWebhookPayload): string | null {
   }
 
   if (parts.length === 0) return null;
-  return parts.sort().join('|').slice(0, 500);
+  return boundedDeliveryKey(parts.sort().join('|'));
 }

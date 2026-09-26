@@ -19,6 +19,20 @@ import {
  * retried.
  */
 
+/** A body whose read fails the way a deadline passing mid-read does. */
+function stalledBody(): Response {
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.error(
+          new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
+        );
+      },
+    }),
+    { status: 200 },
+  );
+}
+
 const BASE = 'https://typesafe.test';
 
 const REQUEST: SystemOneRequest = {
@@ -128,6 +142,23 @@ describe('systemOne', () => {
       isTransient: true,
       status: null,
     });
+  });
+
+  it('names a deadline that passed before the status, in seconds', async () => {
+    stubFetch(() => {
+      throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+    });
+    await expect(systemOne(REQUEST, { baseUrl: BASE, timeoutMs: 20_000 })).rejects.toThrow(
+      'TypeSafe did not answer in 20s',
+    );
+  });
+
+  // Mid-body, it had read as "a 200 that was not JSON".
+  it('names a deadline that passed mid-body, rather than calling the answer not JSON', async () => {
+    stubFetch(() => stalledBody());
+    const failure = systemOne(REQUEST, { baseUrl: BASE, timeoutMs: 20_000 });
+    await expect(failure).rejects.toThrow("TypeSafe's answer did not finish arriving in 20s");
+    await expect(failure).rejects.toMatchObject({ isTransient: true });
   });
 
   it('treats a 200 that is not JSON as transient', async () => {

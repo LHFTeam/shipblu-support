@@ -1,7 +1,6 @@
-import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { ROOT, fail } from '../lib.mjs';
+import { ROOT, fail, git } from '../lib.mjs';
 
 /**
  * Generated files are not hand-edited.
@@ -29,14 +28,7 @@ export function checkMigrationsNotHandEdited() {
 
   let changed;
   try {
-    changed = execFileSync(
-      'git',
-      ['diff', '--name-status', `origin/${base}...HEAD`, '--', 'db/migrations'],
-      {
-        cwd: ROOT,
-        encoding: 'utf8',
-      },
-    );
+    changed = git(['diff', '--name-status', `origin/${base}...HEAD`, '--', 'db/migrations']);
   } catch {
     return; // No base fetched; the drift check still covers the common case.
   }
@@ -70,10 +62,7 @@ const JOURNAL = 'db/migrations/meta/_journal.json';
 function checkJournalAppendOnly(rule, base) {
   let baseText;
   try {
-    baseText = execFileSync('git', ['show', `origin/${base}:${JOURNAL}`], {
-      cwd: ROOT,
-      encoding: 'utf8',
-    });
+    baseText = git(['show', `origin/${base}:${JOURNAL}`]);
   } catch {
     return; // Not on the base branch yet, so there is no history to preserve.
   }

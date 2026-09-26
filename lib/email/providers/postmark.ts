@@ -1,4 +1,5 @@
 import { timingSafeEqual } from 'node:crypto';
+import { isTimeout, WRITE_TIMEOUT_MS } from '@/lib/http/deadline';
 import { formatAddress, formatMessageId, normaliseMessageId } from '../threading';
 import type {
   EmailAddress,
@@ -46,21 +47,6 @@ function toAddress(full?: { Email?: string; Name?: string }): EmailAddress | nul
   if (!full?.Email) return null;
   return full.Name ? { address: full.Email, name: full.Name } : { address: full.Email };
 }
-
-/**
- * How long a send may take before the job gives up on it, headers and body
- * together.
- *
- * Every send runs in a job, and the worker awaits a whole batch before it
- * claims the next — and `fetch` with no signal waits five minutes for a
- * response that is not coming, so one slow send held every queued job behind
- * it. The deadline sits in a window with two edges: below about a minute, an
- * email Postmark was still accepting is given up on and sent again; past
- * `STALLED_AFTER_MS`, a deploy's new worker can reclaim the job while the send
- * is still waiting and send it twice. The same window Graph sends use
- * (`graphTimeout`).
- */
-const SEND_TIMEOUT_MS = 90_000;
 
 export class PostmarkEmailProvider implements EmailProvider {
   readonly name = 'postmark';
@@ -111,9 +97,9 @@ export class PostmarkEmailProvider implements EmailProvider {
       })),
     };
 
-    const timedOut = (error: unknown) =>
-      error instanceof DOMException && error.name === 'TimeoutError';
-
+    // Every send runs in a job, so it gets the write deadline Graph sends get:
+    // long enough not to give up on an email Postmark is still accepting, short
+    // enough that a deploy cannot reclaim the job mid-send and send it twice.
     let response: Response;
     try {
       response = await fetch(API_URL, {
@@ -124,11 +110,11 @@ export class PostmarkEmailProvider implements EmailProvider {
           'X-Postmark-Server-Token': this.serverToken,
         },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+        signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
       });
     } catch (error) {
-      if (timedOut(error)) {
-        throw new Error(`Postmark send did not answer in ${SEND_TIMEOUT_MS / 1000}s`);
+      if (isTimeout(error)) {
+        throw new Error(`Postmark send did not answer in ${WRITE_TIMEOUT_MS / 1000}s`);
       }
       throw error;
     }
@@ -142,7 +128,7 @@ export class PostmarkEmailProvider implements EmailProvider {
       if (!response.ok) {
         throw new Error(
           `Postmark send failed (${response.status}), and its reason never arrived` +
-            (timedOut(error) ? ` in ${SEND_TIMEOUT_MS / 1000}s` : ''),
+            (isTimeout(error) ? ` in ${WRITE_TIMEOUT_MS / 1000}s` : ''),
         );
       }
       // A 2xx is Postmark's answer: the email is accepted and will go. Retrying

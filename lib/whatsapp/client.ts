@@ -1,4 +1,5 @@
 import { env } from '@/lib/env';
+import { isTimeout, sizedTimeout } from '@/lib/http/deadline';
 import { GRAPH_BASE, graphTimeout } from '@/lib/meta/graph';
 import { ACCESS_TOKEN_CODE } from './errors';
 import type { WhatsAppTemplateComponent } from './templates';
@@ -128,10 +129,9 @@ function credentials(override?: CallCredentials | null) {
  * timeout", which names no call.
  */
 function unanswered(what: string, error: unknown, timeoutMs: number): WhatsAppApiError {
-  const reason =
-    error instanceof DOMException && error.name === 'TimeoutError'
-      ? `did not answer in ${timeoutMs / 1000}s`
-      : `unreachable: ${error instanceof Error ? error.message : String(error)}`;
+  const reason = isTimeout(error)
+    ? `did not answer in ${timeoutMs / 1000}s`
+    : `unreachable: ${error instanceof Error ? error.message : String(error)}`;
   return new WhatsAppApiError(`${what} ${reason}`, 0, null, null, true);
 }
 
@@ -158,7 +158,8 @@ async function request(
 
 /**
  * Answers null for exactly one case: a write Meta accepted whose body was lost
- * on the way back. A read, and a refusal, never answer null.
+ * on the way back. A read, a refusal, and a 2xx whose complete body is not a
+ * JSON object never answer null.
  */
 async function graph<T>(
   path: string,
@@ -235,7 +236,34 @@ async function graph<T>(
     );
   }
 
-  return (text ? JSON.parse(text) : {}) as T;
+  // Graph answers every call this client makes with a JSON object, so a 2xx
+  // that is empty or is not one is not evidence Meta took anything: it is an
+  // edge page, a captive portal or a proxy answering in Meta's place, which is
+  // how `lib/shipments/platform.ts` reads the same evidence. So it is retried,
+  // a send included. That is the opposite of the lost-body case above, and
+  // deliberately: a body cut short is Meta's answer interrupted, and resending
+  // it risks a duplicate; a complete body that is not Meta's answer means the
+  // message probably never left, and calling it "sent" would drop the reply
+  // with nothing on the row or in the queue to say so. An empty read was the
+  // same trap on the other side: `{}` read as a last page with no data, and
+  // template sync marked every template past the first page DELETED.
+  let parsed: unknown;
+  try {
+    parsed = text ? JSON.parse(text) : undefined;
+  } catch {
+    // Left undefined; refused below with the rest.
+  }
+  if (typeof parsed !== 'object' || parsed === null) {
+    throw new WhatsAppApiError(
+      `WhatsApp API answered ${response.status} with ` +
+        (text ? `a body that is not a JSON object: ${text.slice(0, 200)}` : 'an empty body'),
+      response.status,
+      null,
+      null,
+      true,
+    );
+  }
+  return parsed as T;
 }
 
 export type SendResult = {
@@ -357,22 +385,19 @@ const LARGEST_MEDIA_BYTES = 100 * 1024 * 1024;
 /**
  * How long one download may take, from the size Meta reported for it.
  *
- * A minute for anything, and a second more for every 2 MB — the slowest link
- * this accepts, a choice rather than a measurement. A flat minute gave a 100 MB
- * document up below 1.7 MB/s on every attempt alike, and the media was lost
- * when the job died; scaled rather than simply raised, because a small image
- * that stalls should still be noticed in a minute. A size Meta did not report
- * gets the largest file's budget, the one guess that cannot fail a real file.
+ * `sizedTimeout`'s rule, which carries the reasoning; the media was lost when
+ * the job died, so a flat minute cost the customer's file. A size Meta did not
+ * report gets the largest file's budget, the one guess that cannot fail a real
+ * file.
  *
  * The largest is 110 seconds, so the lookup and the download together leave at
  * least half of `STALLED_AFTER_MS` to the storage upload that follows, which
- * `uploadObject` bounds by this same rule — 110 seconds at the largest. Both
+ * `uploadObject` bounds by the same rule — 110 seconds at the largest. Both
  * halves have to fit: a job past the window is reclaimed and runs twice, and
  * the second run writes a second attachment row.
  */
 export function mediaTimeout(sizeBytes: number | null | undefined): number {
-  const bytes = sizeBytes ?? LARGEST_MEDIA_BYTES;
-  return 60_000 + Math.ceil(bytes / (2 * 1024 * 1024)) * 1000;
+  return sizedTimeout(sizeBytes ?? LARGEST_MEDIA_BYTES);
 }
 
 /** Meta's CDN requires the access token on the download itself, not just the lookup. */
@@ -468,6 +493,18 @@ function toSendResult(response: SendResponse | null): SendResult {
   if (response === null) return { wamid: null, recipientId: null };
 
   const wamid = response.messages?.[0]?.id;
-  if (!wamid) throw new Error('WhatsApp send returned no message id');
+  if (!wamid) {
+    // A complete JSON answer without `messages` is not a Graph acceptance, for
+    // the reason `graph` gives for a body that is not JSON: retried, not
+    // recorded as sent. Only the keys are named — `contacts` holds the
+    // recipient's number, which has no place in a worker log.
+    throw new WhatsAppApiError(
+      `WhatsApp answered a send without a message id (keys: ${Object.keys(response).join(', ') || 'none'})`,
+      0,
+      null,
+      null,
+      true,
+    );
+  }
   return { wamid, recipientId: response.contacts?.[0]?.wa_id ?? null };
 }

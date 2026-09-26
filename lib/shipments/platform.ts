@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { env } from '@/lib/env';
+import { isTimeout } from '@/lib/http/deadline';
 import { normaliseTrackingNumber } from './format';
 
 /**
@@ -244,8 +245,12 @@ async function getJson(url: string, subject: string, timeoutMs: number): Promise
   } catch (error) {
     // A timeout, a DNS failure, a reset connection. None of these is an answer,
     // so none of them may be allowed to stamp `not_found` on a real parcel.
+    // A deadline says so in seconds: the signal's own message, "The operation
+    // was aborted due to timeout", names neither the call nor how long it had.
     throw new ShipbluApiError(
-      `Could not reach the delivery platform: ${error instanceof Error ? error.message : error}`,
+      isTimeout(error)
+        ? `The delivery platform did not answer in ${timeoutMs / 1000}s for ${subject}`
+        : `Could not reach the delivery platform: ${error instanceof Error ? error.message : error}`,
       null,
       true,
     );
@@ -266,12 +271,17 @@ async function getJson(url: string, subject: string, timeoutMs: number): Promise
 
   try {
     return await response.json();
-  } catch {
-    // A 200 carrying something that is not JSON is a proxy or a captive portal
-    // answering instead of the platform — and this API really does serve an HTML
-    // error page for a malformed path, so it is a shape worth naming.
+  } catch (error) {
+    // The signal governs the body too, so a deadline passing mid-read lands
+    // here — and reported as "not JSON" it sent whoever was on call looking for
+    // a proxy rather than at latency. Otherwise, a 200 carrying something that
+    // is not JSON is a proxy or a captive portal answering instead of the
+    // platform — and this API really does serve an HTML error page for a
+    // malformed path, so it is a shape worth naming.
     throw new ShipbluApiError(
-      `Delivery platform returned a 200 that was not JSON for ${subject}`,
+      isTimeout(error)
+        ? `The delivery platform's answer for ${subject} did not finish arriving in ${timeoutMs / 1000}s`
+        : `Delivery platform returned a 200 that was not JSON for ${subject}`,
       response.status,
       true,
     );

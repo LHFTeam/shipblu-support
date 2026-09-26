@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetEnvCache } from '@/lib/env';
 import { STALLED_AFTER_MS } from '@/lib/queue';
-import { graphTimeout } from '@/lib/meta/graph';
+import { sizedTimeout } from '@/lib/http/deadline';
+import { GRAPH_BASE, graphTimeout } from '@/lib/meta/graph';
 import {
   WhatsAppApiError,
   downloadMedia,
@@ -231,14 +232,18 @@ describe('WhatsApp deadlines', () => {
   });
 
   /**
-   * Computed from the deadlines the calls actually get, so raising the largest
-   * size or the per-MB allowance fails here rather than in a reclaimed job.
+   * The whole media job, computed from the deadlines its calls actually get:
+   * the lookup, the largest download, and `uploadObject`'s upload of the same
+   * bytes. Raising the largest size or the per-MB allowance, or lowering the
+   * reclaim window, fails here rather than in a job reclaimed mid-upload that
+   * writes a second attachment row.
    */
-  it('leaves the storage upload after the largest download half the reclaim window', () => {
-    const lookupAndDownload = graphTimeout('GET') + mediaTimeout(null);
+  it('fits the lookup, the largest download and its upload inside the reclaim window', () => {
+    const largest = 100 * 1024 * 1024;
+    const job = graphTimeout('GET') + mediaTimeout(null) + sizedTimeout(largest);
 
-    expect(mediaTimeout(null)).toBe(mediaTimeout(100 * 1024 * 1024));
-    expect(lookupAndDownload).toBeLessThanOrEqual(STALLED_AFTER_MS / 2);
+    expect(mediaTimeout(null)).toBe(mediaTimeout(largest));
+    expect(job).toBeLessThanOrEqual(STALLED_AFTER_MS);
   });
 
   it('releases the connection a refused download holds', async () => {
@@ -345,5 +350,77 @@ describe('a deadline that passes while the body is arriving', () => {
     await expect(failure).rejects.toBeInstanceOf(WhatsAppApiError);
     await expect(failure).rejects.toMatchObject({ isTransient: true });
     await expect(failure).rejects.toThrow('Media download did not answer in 60s');
+  });
+});
+
+/**
+ * Graph answers in JSON, so a complete 2xx body that is empty, not JSON, or
+ * JSON without a message id is somebody else answering in Meta's place — an
+ * edge page, a portal, a proxy. Each is retried as a named WhatsApp error. It
+ * used to escape as a bare SyntaxError or "no message id"; recording it as
+ * "sent" instead would drop a reply that probably never left, with nothing on
+ * the row to say so. Only a body cut short after the status (above) is sent.
+ */
+describe('a 2xx whose complete body is not a Graph answer', () => {
+  function answer(body: string) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(body, { status: 200 })),
+    );
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it.each([
+    ['HTML', '<html>OK</html>', /not a JSON object/],
+    ['an empty body', '', /an empty body/],
+    ['a bare JSON value', 'null', /not a JSON object/],
+  ])('retries a send answered with %s rather than calling it sent', async (_what, body, reason) => {
+    answer(body);
+
+    const failure = sendText('201000000000', 'hello');
+
+    await expect(failure).rejects.toBeInstanceOf(WhatsAppApiError);
+    await expect(failure).rejects.toMatchObject({ isTransient: true, status: 200 });
+    await expect(failure).rejects.toThrow(reason);
+  });
+
+  it('retries a send answered without a message id, naming keys but not the number', async () => {
+    answer(JSON.stringify({ contacts: [{ input: '201000000000', wa_id: '201000000000' }] }));
+
+    const failure = sendText('201000000000', 'hello');
+
+    await expect(failure).rejects.toMatchObject({ isTransient: true });
+    await expect(failure).rejects.toThrow('without a message id (keys: contacts)');
+    await expect(failure).rejects.not.toThrow(/201000000000/);
+  });
+
+  it('retries a lookup answered with HTML, as a WhatsApp error rather than a SyntaxError', async () => {
+    answer('<html>OK</html>');
+
+    const failure = getMediaUrl('media-1');
+
+    await expect(failure).rejects.toBeInstanceOf(WhatsAppApiError);
+    await expect(failure).rejects.toMatchObject({ isTransient: true, status: 200 });
+    await expect(failure).rejects.toThrow(/not a JSON object/);
+  });
+
+  /**
+   * An empty page read as `{}` — a last page with no data — so template sync
+   * kept the first page and marked every template after it DELETED.
+   */
+  it('fails a template listing whose next page answers empty, rather than ending it', async () => {
+    const pages = [
+      JSON.stringify({ data: [{ name: 'a' }], paging: { next: `${GRAPH_BASE}/waba/page2` } }),
+      '',
+    ];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(pages.shift() ?? '', { status: 200 })),
+    );
+
+    await expect(listTemplates({ wabaId: 'waba' })).rejects.toThrow(/an empty body/);
   });
 });
