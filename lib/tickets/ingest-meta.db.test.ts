@@ -2,6 +2,7 @@ import { asc, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import {
+  agents,
   contactIdentities,
   contacts,
   conversationEvents,
@@ -77,6 +78,8 @@ async function conversation(id: string) {
       status: ticketStatuses.name,
       requesterContactId: conversations.requesterContactId,
       reopenCount: conversations.reopenCount,
+      resolvedAt: conversations.resolvedAt,
+      resolvedByAgentId: conversations.resolvedByAgentId,
       lastMessageAt: conversations.lastMessageAt,
       lastCustomerMessageAt: conversations.lastCustomerMessageAt,
     })
@@ -119,7 +122,7 @@ async function queued() {
     .orderBy(asc(jobs.createdAt));
 }
 
-async function setStatus(conversationId: string, name: string) {
+async function setStatus(conversationId: string, name: string, extra = {}) {
   const [status] = await db
     .select({ id: ticketStatuses.id })
     .from(ticketStatuses)
@@ -127,8 +130,22 @@ async function setStatus(conversationId: string, name: string) {
   if (!status) throw new Error(`no status ${name}`);
   await db
     .update(conversations)
-    .set({ statusId: status.id })
+    .set({ statusId: status.id, ...extra })
     .where(eq(conversations.id, conversationId));
+}
+
+/** Resolves a ticket the way an agent does: status, time and who. */
+async function resolveAsAgent(conversationId: string): Promise<string> {
+  const [agent] = await db
+    .insert(agents)
+    .values({ name: 'Omar', email: 'omar@shipblu.test' })
+    .returning({ id: agents.id });
+  if (!agent) throw new Error('no agent');
+  await setStatus(conversationId, 'Resolved', {
+    resolvedAt: new Date('2026-09-20T10:30:00Z'),
+    resolvedByAgentId: agent.id,
+  });
+  return agent.id;
 }
 
 describe('ingestMetaMessage', () => {
@@ -155,6 +172,8 @@ describe('ingestMetaMessage', () => {
       status: 'Open',
       requesterContactId: contact?.id,
       reopenCount: 0,
+      resolvedAt: null,
+      resolvedByAgentId: null,
       lastMessageAt: SENT,
       lastCustomerMessageAt: SENT,
     });
@@ -262,11 +281,11 @@ describe('ingestMetaMessage', () => {
     ]);
   });
 
-  it('reopens a resolved thread, labelled with the platform', async () => {
+  it('reopens a resolved thread, labelled with the platform, naming who resolved it', async () => {
     const first = await ingestMetaMessage(
       dm({ platform: 'instagram', connection: 'instagram_login' }),
     );
-    await setStatus(first.conversationId, 'Resolved');
+    const resolver = await resolveAsAgent(first.conversationId);
 
     await ingestMetaMessage(
       dm({ platform: 'instagram', connection: 'instagram_login', mid: 'm_second', sentAt: LATER }),
@@ -276,12 +295,15 @@ describe('ingestMetaMessage', () => {
       channel: 'instagram',
       status: 'Open',
       reopenCount: 1,
+      resolvedAt: null,
+      // Left for the event to read, as the email path leaves it.
+      resolvedByAgentId: resolver,
     });
     expect((await eventsOf(first.conversationId)).filter((e) => e.type === 'reopened')).toEqual([
       {
         type: 'reopened',
         actorLabel: 'inbound_instagram',
-        data: { reason: 'customer_replied', resolvedBy: null },
+        data: { reason: 'customer_replied', resolvedBy: resolver },
       },
     ]);
   });
@@ -396,9 +418,9 @@ describe('ingestMetaComment', () => {
     expect(direct.conversationId).not.toBe(onPost.conversationId);
   });
 
-  it('reopens a resolved comment thread', async () => {
+  it('reopens a resolved comment thread, naming who resolved it', async () => {
     const root = await ingestMetaComment(comment());
-    await setStatus(root.conversationId, 'Resolved');
+    const resolver = await resolveAsAgent(root.conversationId);
 
     await ingestMetaComment(
       comment({ commentId: 'post-1_c2', parentCommentId: 'post-1_c1', createdAt: LATER }),
@@ -407,7 +429,36 @@ describe('ingestMetaComment', () => {
     expect(await conversation(root.conversationId)).toMatchObject({
       status: 'Open',
       reopenCount: 1,
+      resolvedAt: null,
+      resolvedByAgentId: resolver,
     });
+    expect((await eventsOf(root.conversationId)).filter((e) => e.type === 'reopened')).toEqual([
+      {
+        type: 'reopened',
+        actorLabel: 'inbound_facebook',
+        data: { reason: 'customer_replied', resolvedBy: resolver },
+      },
+    ]);
+  });
+
+  it('keys an Instagram comment thread, and labels it, by its own platform', async () => {
+    const result = await ingestMetaComment(
+      comment({ platform: 'instagram', connection: 'instagram_login' }),
+    );
+
+    expect(await conversation(result.conversationId)).toMatchObject({
+      channel: 'instagram',
+      externalId: 'instagram:comment:post-1_c1',
+    });
+    expect(
+      (await eventsOf(result.conversationId)).filter((e) => e.type === 'comment_thread_opened'),
+    ).toEqual([
+      {
+        type: 'comment_thread_opened',
+        actorLabel: 'inbound_instagram',
+        data: { postId: 'post-1', rootCommentId: 'post-1_c1' },
+      },
+    ]);
   });
 
   // Recorded, not endorsed: unlike a direct message, the lookup by
