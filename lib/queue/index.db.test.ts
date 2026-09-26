@@ -96,6 +96,19 @@ describe('claimJobs', () => {
       lastError: null,
     });
   });
+
+  it('hands its instants back as the Dates its type promises', async () => {
+    const runAt = new Date(Date.now() - 60_000);
+    await enqueued('cleanup', {}, { runAt });
+
+    const [job] = await claimJobs(1, 'worker-a');
+    if (!job) throw new Error('nothing claimed');
+    expect(job.runAt).toBeInstanceOf(Date);
+    expect(job.runAt.getTime()).toBe(runAt.getTime());
+    expect(job.lockedAt).toBeInstanceOf(Date);
+    expect(job.createdAt).toBeInstanceOf(Date);
+    expect(job.completedAt).toBeNull();
+  });
 });
 
 describe('failJob', () => {

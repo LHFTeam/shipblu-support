@@ -200,6 +200,9 @@ type JobRow = Record<string, unknown>;
  * Written out field by field rather than case-converted in a loop, because then
  * a column added to the table stops this compiling instead of arriving as
  * another silent `undefined`.
+ *
+ * It bypasses the column types too, which is why the instants go through
+ * `instant()` rather than a cast.
  */
 export function toClaimedJob(row: JobRow): ClaimedJob {
   return {
@@ -208,16 +211,50 @@ export function toClaimedJob(row: JobRow): ClaimedJob {
     payload: (row.payload ?? {}) as Record<string, unknown>,
     status: row.status as ClaimedJob['status'],
     priority: row.priority as number,
-    runAt: row.run_at as Date,
+    runAt: instant(row.run_at, 'run_at'),
     attempts: row.attempts as number,
     maxAttempts: row.max_attempts as number,
     lastError: (row.last_error ?? null) as string | null,
     dedupeKey: (row.dedupe_key ?? null) as string | null,
-    lockedAt: (row.locked_at ?? null) as Date | null,
+    lockedAt: row.locked_at == null ? null : instant(row.locked_at, 'locked_at'),
     lockedBy: (row.locked_by ?? null) as string | null,
-    completedAt: (row.completed_at ?? null) as Date | null,
-    createdAt: row.created_at as Date,
+    completedAt: row.completed_at == null ? null : instant(row.completed_at, 'completed_at'),
+    createdAt: instant(row.created_at, 'created_at'),
   };
+}
+
+/**
+ * A `timestamptz` off a raw row, as the `Date` `ClaimedJob` promises.
+ *
+ * drizzle's postgres-js driver switches the driver's own timestamp parsing off,
+ * so that each column can map the text itself — and `execute` runs no column. So
+ * the value arrives as the text Postgres sent, `2026-09-26 17:54:18.995+00`, and
+ * the `as Date` this replaced relabelled a string rather than converting it.
+ * Nothing had read one yet; the first handler to call `job.runAt.getTime()`
+ * would have thrown on a job that had otherwise run fine.
+ *
+ * `new Date` of that text is what drizzle's own `timestamptz` column does.
+ *
+ * Refuses what does not parse rather than handing on an Invalid Date. That is a
+ * `Date` to every type check, so it would travel into a handler and surface as
+ * `NaN` in a delay or a comparison that is quietly always false — the same shape
+ * as the `undefined` attempt limit above. Thrown here, the claim fails naming
+ * the column and the value, which is the one place both are still known.
+ */
+function instant(value: unknown, column: string): Date {
+  const date = new Date(value as string);
+  if (Number.isNaN(date.getTime())) {
+    throw new InvalidJobTimestampError(column, value);
+  }
+  return date;
+}
+
+class InvalidJobTimestampError extends Error {
+  override name = 'InvalidJobTimestampError';
+
+  constructor(column: string, value: unknown) {
+    super(`jobs.${column} is not a timestamp: ${JSON.stringify(value) ?? String(value)}`);
+  }
 }
 
 export async function completeJob(id: string): Promise<void> {
