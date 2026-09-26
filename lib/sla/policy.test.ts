@@ -137,6 +137,41 @@ describe('dueDatesOnCreate', () => {
     expect(inCairo(due.resolutionDueAt)).toBe('2026-08-23T16:00');
   });
 
+  /*
+   * The two above are both August, when Cairo is UTC+3. Every due date the
+   * suite checked was summer-dated, so a schedule read at a fixed +03:00 passed
+   * all of it. These cover winter, when Cairo is UTC+2, and the two 2026
+   * changeovers: clocks jump from 00:00 to 01:00 on Friday 24 April and fall
+   * back from 00:00 to 23:00 on Friday 30 October.
+   */
+  it('adds working time the same way in winter', () => {
+    const due = dueDatesOnCreate(policy(), 'high', at('2026-01-15T16:00'), CAIRO_HOURS);
+
+    expect(inCairo(due.firstResponseDueAt)).toBe('2026-01-15T17:00');
+    expect(inCairo(due.resolutionDueAt)).toBe('2026-01-18T16:00');
+  });
+
+  it('carries working time across either changeover by the wall clock', () => {
+    // Thursday 16:00 on the eve of each change: the last hour of Thursday, then
+    // seven on Sunday — in the new offset, and still at 16:00 on the clock.
+    for (const [arrived, resolved] of [
+      ['2026-04-23T16:00', '2026-04-26T16:00'],
+      ['2026-10-29T16:00', '2026-11-01T16:00'],
+    ] as const) {
+      const due = dueDatesOnCreate(policy(), 'high', at(arrived), CAIRO_HOURS);
+      expect(inCairo(due.resolutionDueAt)).toBe(resolved);
+    }
+  });
+
+  it('counts elapsed time, not clock time, when no schedule applies', () => {
+    // Four real hours from 21:00 on the night the clocks fall back: the hour
+    // from 23:00 is lived twice, so the clock reads midnight, not 01:00.
+    const due = dueDatesOnCreate(policy(), 'urgent', at('2026-10-29T21:00'), null);
+
+    expect(due.resolutionDueAt?.getTime()).toBe(at('2026-10-29T21:00').getTime() + 4 * 3_600_000);
+    expect(inCairo(due.resolutionDueAt)).toBe('2026-10-30T00:00');
+  });
+
   it('leaves the next-response clock unset on a new ticket', () => {
     // Until someone has replied once, the first-response target is the one that
     // applies; two countdowns on a brand new ticket is just noise.
