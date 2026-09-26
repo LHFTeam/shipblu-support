@@ -4137,9 +4137,12 @@ null`, and argued it from write cost and 13 MB of disk. The read side turned
     call in a job path a deadline and reads each body inside it. Two clients
     already passed a signal before it, `lib/shipments/platform.ts` and
     `lib/typesafe/client.ts`, and both read the body inside their own `try`, so a
-    deadline passing mid-body there is caught and retried as transient. The
-    message is wrong, though: it reports "a 200 that was not JSON", so a timeout
-    there reads as a malformed answer. Neither sends anything to a customer.
+    deadline passing mid-body there is caught and retried as transient. Neither
+    sends anything to a customer. Until the follow-up to row 2.8 (#205) both
+    misreported it, though: a timeout mid-body read as "a 200 that was not
+    JSON", which points at a proxy rather than at latency, and one at the status
+    as the signal's own nameless "aborted due to timeout". Each now checks
+    `isTimeout` from `lib/http/deadline.ts` and names the deadline in seconds.
 
 74. **A run of merges to `main` shows cancelled CI runs, and they are not
     failures.** _2026-09-25._ `ci.yml` puts every run for a ref in one

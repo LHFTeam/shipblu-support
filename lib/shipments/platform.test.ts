@@ -30,6 +30,20 @@ import {
  * - Fields nothing maps (`cash_amount`, warehouses, `on_hold`), so the raw
  *   passthrough is tested against a payload that actually has some.
  */
+/** A body whose read fails the way a deadline passing mid-read does. */
+function stalledBody(): Response {
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.error(
+          new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
+        );
+      },
+    }),
+    { status: 200 },
+  );
+}
+
 function deliveryOrderPayload(): Record<string, unknown> {
   return {
     id: 3150567,
@@ -283,6 +297,25 @@ describe('fetchDeliveryOrder', () => {
       isTransient: true,
       status: null,
     });
+  });
+
+  // A deadline reads as one, in seconds: at the status it had read as the
+  // signal's own nameless "aborted due to timeout", and mid-body as a 200 that
+  // was not JSON — which points whoever is on call at a proxy, not at latency.
+  it('names a deadline that passed before the status, in seconds', async () => {
+    stubFetch(() => {
+      throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+    });
+    await expect(fetchDeliveryOrder('1755021358719', { baseUrl: BASE })).rejects.toThrow(
+      /did not answer in \d+s/,
+    );
+  });
+
+  it('names a deadline that passed mid-body, rather than calling the answer not JSON', async () => {
+    stubFetch(() => stalledBody());
+    const failure = fetchDeliveryOrder('1755021358719', { baseUrl: BASE });
+    await expect(failure).rejects.toThrow(/did not finish arriving in \d+s/);
+    await expect(failure).rejects.toMatchObject({ isTransient: true });
   });
 
   it('treats a 200 that is not JSON as transient', async () => {
