@@ -224,8 +224,14 @@ async function storagePathsFor(tx: typeof db, conversationIds: string[]): Promis
  * together or not at all. The obvious alternative — write it afterwards, once
  * the Storage cleanup has reported how many objects it could not remove — loses
  * the audit row entirely if that write fails, which is the one outcome this
- * table exists to prevent. The orphan count is patched on afterwards instead;
- * losing it costs a number, not the record.
+ * table exists to prevent.
+ *
+ * The Storage keys go in with it, as `pendingObjects`, for the same reason. The
+ * rows that named them are deleted by this transaction, so from the moment it
+ * commits this row is the only place left that knows them. Held only in memory
+ * until `removeObjects()` returns, a worker killed in between — a deploy, an
+ * out-of-memory, a request timeout — would orphan every one of them with no way
+ * to find them again. `settlePendingObjects()` shrinks the list afterwards.
  */
 async function recordDeletion(
   tx: typeof db,
@@ -235,6 +241,7 @@ async function recordDeletion(
     summary: string;
     counts: PurgeCounts;
     ticketNumbers: number[];
+    pendingObjects: string[];
     agent: { id: string; name: string } | null;
   },
 ): Promise<string | null> {
@@ -248,6 +255,7 @@ async function recordDeletion(
         counts: input.counts,
         ticketNumbers: input.ticketNumbers,
         retained: [...RETAINED],
+        ...(input.pendingObjects.length > 0 ? { pendingObjects: input.pendingObjects } : {}),
       },
       deletedByAgentId: input.agent?.id ?? null,
       deletedByLabel: input.agent?.name ?? null,
@@ -258,25 +266,39 @@ async function recordDeletion(
 }
 
 /**
- * Records that some attachment bytes outlived the rows that named them.
+ * Shrinks `pendingObjects` to the keys Storage would not remove, or drops it
+ * when every one went.
  *
- * Best-effort by design: the deletion is already committed and correct, and this
- * only adds the keys nobody can reach any more to the row somebody would read
- * when chasing storage costs. It must never turn a successful purge into a
- * failed one.
+ * The one writer of that key after `recordDeletion()`, so the key always means
+ * one thing: objects that may still be in the bucket although nothing names
+ * them. While the cleanup runs that is all of them; if this write never lands —
+ * the process died, or this update failed — it stays all of them, which is an
+ * over-count rather than a loss, and re-deleting a key Storage no longer holds
+ * succeeds, so whoever chases the list can simply delete it all again.
+ *
+ * Best-effort by design: the deletion is already committed and correct, and
+ * this must never turn a successful purge into a failed one.
  */
-async function noteOrphanedObjects(deletionId: string | null, paths: string[]): Promise<void> {
-  if (!deletionId || paths.length === 0) return;
+async function settlePendingObjects(
+  deletionId: string | null,
+  pending: string[],
+  failed: string[],
+): Promise<void> {
+  if (!deletionId || pending.length === 0) return;
 
   try {
     await db
       .update(adminDeletions)
       .set({
-        details: sql`${adminDeletions.details} || ${JSON.stringify({ orphanedObjects: paths })}::jsonb`,
+        details:
+          failed.length === 0
+            ? sql`${adminDeletions.details} - 'pendingObjects'`
+            : sql`${adminDeletions.details} || ${JSON.stringify({ pendingObjects: failed })}::jsonb`,
       })
       .where(eq(adminDeletions.id, deletionId));
   } catch {
-    // Nothing useful to do: the purge happened, and this is a footnote to it.
+    // Nothing useful to do: the purge happened, and the list left on the row
+    // still covers every key that could remain.
   }
 }
 
@@ -433,8 +455,9 @@ async function contactScope(
  * Storage is cleaned up **after** the commit, and deliberately cannot fail the
  * purge: an HTTP delete has no place inside a transaction that holds locks on
  * `conversations`, and there is nothing sensible to roll back to once the rows
- * are gone. Keys that could not be removed are counted into the audit row, which
- * is the only place they can still be chased from.
+ * are gone. The keys are written into the audit row before the commit and
+ * trimmed to the ones that could not be removed after it, so that row — the only
+ * place they can still be chased from — holds them however the cleanup ends.
  */
 export async function purgeConversation(input: {
   conversationId: string;
@@ -463,7 +486,7 @@ export async function purgeConversation(input: {
 
     const { ids, tombstones } = await withMergedInto(tx, [conversation.id]);
     const counts = { ...(await countFor(tx, ids)), tombstones };
-    const paths = await storagePathsFor(tx, ids);
+    const paths = [...new Set(await storagePathsFor(tx, ids))];
     const summary = conversationSummary(conversation);
 
     const deletionId = await recordDeletion(tx, {
@@ -472,6 +495,7 @@ export async function purgeConversation(input: {
       summary,
       counts,
       ticketNumbers: [],
+      pendingObjects: paths,
       agent: input.agent,
     });
 
@@ -484,7 +508,7 @@ export async function purgeConversation(input: {
   if (!outcome.ok) return outcome;
 
   const { failed } = await removeObjects(outcome.paths);
-  await noteOrphanedObjects(outcome.deletionId, failed);
+  await settlePendingObjects(outcome.deletionId, outcome.paths, failed);
 
   return {
     ok: true,
@@ -537,13 +561,16 @@ export async function purgeContact(input: {
     // `deleted_at`. `buildAvatarPath()` is not used to derive the keys: the
     // column is what was actually written, and a merge copies a loser's
     // `avatar_path` onto the survivor, so two rows can legitimately name one
-    // object. `removeObjects()` de-duplicates.
+    // object; the set below keeps the audit row's list to one entry per key.
     const avatars = await tx
       .select({ path: contacts.avatarPath })
       .from(contacts)
       .where(and(inArray(contacts.id, contactIds), isNotNull(contacts.avatarPath)));
 
     const summary = contactLabel(contact);
+    const objects = [
+      ...new Set([...paths, ...avatars.map((row) => row.path).filter((path) => path !== null)]),
+    ];
 
     const deletionId = await recordDeletion(tx, {
       subject: 'contact',
@@ -551,6 +578,7 @@ export async function purgeContact(input: {
       summary,
       counts,
       ticketNumbers: numbers,
+      pendingObjects: objects,
       agent: input.agent,
     });
 
@@ -562,7 +590,7 @@ export async function purgeContact(input: {
       ok: true as const,
       summary,
       counts,
-      paths: [...paths, ...avatars.map((row) => row.path).filter((path) => path !== null)],
+      paths: objects,
       deletionId,
     };
   });
@@ -570,7 +598,7 @@ export async function purgeContact(input: {
   if (!outcome.ok) return outcome;
 
   const { failed } = await removeObjects(outcome.paths);
-  await noteOrphanedObjects(outcome.deletionId, failed);
+  await settlePendingObjects(outcome.deletionId, outcome.paths, failed);
 
   return {
     ok: true,

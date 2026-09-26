@@ -126,6 +126,87 @@ describe.skipIf(!databaseUrl)('purge entry points against Postgres', () => {
     await client?.end({ timeout: 5 });
   });
 
+  /** One rolled-back transaction per case; the purge runs as a savepoint in it. */
+  async function fixture(run: (tx: typeof db, statusId: string) => Promise<void>) {
+    const rollback = new Error('rollback purge integration fixtures');
+    mocks.removeObjects.mockReset();
+    mocks.removeObjects.mockImplementation(async () => ({ failed: [] }));
+    try {
+      await database.transaction(async (tx) => {
+        mocks.database = tx;
+        const statusId = randomUUID();
+        await tx.insert(ticketStatuses).values({
+          id: statusId,
+          name: `Purge integration ${statusId}`,
+          category: 'open',
+        });
+        await run(tx, statusId);
+        throw rollback;
+      });
+    } catch (error) {
+      if (error !== rollback) throw error;
+    } finally {
+      mocks.database = null;
+    }
+  }
+
+  async function receiptFor(tx: typeof db, subjectId: string) {
+    const rows = await tx
+      .select({ details: adminDeletions.details })
+      .from(adminDeletions)
+      .where(eq(adminDeletions.subjectId, subjectId));
+    return rows[0]?.details;
+  }
+
+  it.each(['conversation', 'contact'] as const)(
+    'records the %s purge storage keys before the commit and trims them to the failures after',
+    async (subject) => {
+      await fixture(async (tx, statusId) => {
+        const target = await seedScope(tx, statusId);
+        const subjectId = subject === 'contact' ? target.contactId : target.conversationId;
+        const keys = [...target.paths, ...(subject === 'contact' ? [target.avatarPath] : [])];
+
+        // Seen from inside removeObjects: the purge has committed, the rows that
+        // named these keys are gone, and nothing but the audit row still knows
+        // them. A worker dying here must not lose them.
+        let pendingDuringRemoval: unknown;
+        mocks.removeObjects.mockImplementation(async () => {
+          pendingDuringRemoval = (await receiptFor(tx, subjectId))?.pendingObjects;
+          return { failed: [target.paths[1]!] };
+        });
+
+        const result =
+          subject === 'conversation'
+            ? await purgeConversation({
+                conversationId: target.conversationId,
+                confirmation: String(target.number),
+                agent: null,
+              })
+            : await purgeContact({
+                contactId: target.contactId,
+                confirmation: target.name,
+                agent: null,
+              });
+
+        expect(result).toMatchObject({ ok: true, orphanedObjects: 1 });
+        expect((pendingDuringRemoval as string[]).slice().sort()).toEqual(keys.sort());
+        expect((await receiptFor(tx, subjectId))?.pendingObjects).toEqual([target.paths[1]]);
+      });
+    },
+  );
+
+  it('drops pendingObjects once every key was removed', async () => {
+    await fixture(async (tx, statusId) => {
+      const target = await seedScope(tx, statusId);
+      await purgeConversation({
+        conversationId: target.conversationId,
+        confirmation: String(target.number),
+        agent: null,
+      });
+      expect(await receiptFor(tx, target.conversationId)).not.toHaveProperty('pendingObjects');
+    });
+  });
+
   it.each(['conversation', 'contact'] as const)(
     'purges a %s with its queued work and audit receipt, preserving unrelated side emails',
     async (subject) => {
