@@ -2,7 +2,8 @@
 
 import { useActionState } from 'react';
 import { ErrorText } from '@/components/ui';
-import { startShipmentBackfill, type AdminState } from '../actions';
+import type { AdminState } from '../settings-shared';
+import { startShipmentBackfill } from './actions';
 import {
   BackfillRuns,
   StartBackfillButton,

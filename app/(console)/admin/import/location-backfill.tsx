@@ -2,7 +2,8 @@
 
 import { useActionState } from 'react';
 import { ErrorText } from '@/components/ui';
-import { startLocationBackfill, type AdminState } from '../actions';
+import type { AdminState } from '../settings-shared';
+import { startLocationBackfill } from './actions';
 import {
   BackfillRuns,
   StartBackfillButton,

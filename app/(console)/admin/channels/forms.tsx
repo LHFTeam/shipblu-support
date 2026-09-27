@@ -3,7 +3,8 @@
 import { useActionState, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Badge, Button, ErrorText, Field, Input, Select } from '@/components/ui';
-import { saveChannel, type AdminState } from '../actions';
+import type { AdminState } from '../settings-shared';
+import { saveChannel } from './actions';
 
 const INITIAL: AdminState = { error: null };
 
