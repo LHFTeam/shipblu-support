@@ -18,10 +18,14 @@ import {
   skills,
   ticketFields,
   ticketStatuses,
+  whatsappAccounts,
+  whatsappTemplates,
 } from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
 import {
+  countTemplatesByAccount,
   listActiveAgents,
+  listActiveTicketFields,
   listAnyHoliday,
   listAutomationRules,
   listCannedResponses,
@@ -236,5 +240,56 @@ describe('the auto-response, automation and agent lists', () => {
       'new@shipblu.test',
       'old@shipblu.test',
     ]);
+  });
+});
+
+describe('the channel and condition-builder lists', () => {
+  it('counts each account’s templates, and how many of them are approved', async () => {
+    const accounts = await db
+      .insert(whatsappAccounts)
+      .values([
+        { name: 'Main', wabaId: 'waba-1' },
+        { name: 'Empty sync', wabaId: 'waba-2' },
+      ])
+      .returning({ id: whatsappAccounts.id, name: whatsappAccounts.name });
+    const main = accounts.find((account) => account.name === 'Main')!.id;
+    const empty = accounts.find((account) => account.name === 'Empty sync')!.id;
+    const template = (accountId: string, name: string, status: string) => ({
+      whatsappAccountId: accountId,
+      metaTemplateId: `${accountId}:${name}`,
+      name,
+      language: 'ar',
+      category: 'UTILITY',
+      status,
+    });
+    await db
+      .insert(whatsappTemplates)
+      .values([
+        template(main, 'delivered', 'APPROVED'),
+        template(main, 'delayed', 'APPROVED'),
+        template(main, 'refund', 'PENDING'),
+        template(empty, 'draft', 'REJECTED'),
+      ]);
+
+    const counts = await countTemplatesByAccount();
+
+    expect(counts).toHaveLength(2);
+    expect(counts).toEqual(
+      expect.arrayContaining([
+        { accountId: main, approved: 2, total: 3 },
+        { accountId: empty, approved: 0, total: 1 },
+      ]),
+    );
+  });
+
+  // A rule condition naming a retired field would always read it as absent.
+  it('offers the condition builder only the active fields, by position', async () => {
+    await db.insert(ticketFields).values([
+      { key: 'warehouse', label: 'Warehouse', type: 'text', position: 2 },
+      { key: 'reason', label: 'Reason', type: 'text', position: 1, isActive: false },
+      { key: 'area', label: 'Area', type: 'text', position: 1 },
+    ]);
+
+    expect((await listActiveTicketFields()).map((row) => row.key)).toEqual(['area', 'warehouse']);
   });
 });

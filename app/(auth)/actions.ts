@@ -1,7 +1,7 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { and, eq, gt, isNull } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agents, groupMembers, invites } from '@/db/schema';
 import { needsBootstrap } from '@/lib/auth/guard';
@@ -9,10 +9,10 @@ import { safePath } from '@/lib/auth/next-path';
 import { normaliseEmail } from '@/lib/auth/normalise';
 import { hashPassword, validatePasswordStrength } from '@/lib/auth/password';
 import { createSession } from '@/lib/auth/session';
-import { hashToken } from '@/lib/auth/tokens';
 import { DEFAULT_LOCALE } from '@/lib/kb/locale';
 import { text } from '@/lib/http/form-data';
 import { requestMeta } from '@/lib/http/request-meta';
+import { findOpenInvite } from '@/lib/auth/invites';
 import { signInWithPassword } from '@/lib/auth/sign-in';
 
 export type AuthFormState = { error: string | null };
@@ -104,19 +104,7 @@ export async function acceptInvite(
   const strength = validatePasswordStrength(password);
   if (!strength.ok) return { error: strength.reason };
 
-  const rows = await db
-    .select()
-    .from(invites)
-    .where(
-      and(
-        eq(invites.tokenHash, hashToken(token)),
-        isNull(invites.acceptedAt),
-        gt(invites.expiresAt, new Date()),
-      ),
-    )
-    .limit(1);
-
-  const invite = rows[0];
+  const invite = await findOpenInvite(token, new Date());
   if (!invite) return { error: 'This invite has expired or has already been used' };
 
   const passwordHash = await hashPassword(password);

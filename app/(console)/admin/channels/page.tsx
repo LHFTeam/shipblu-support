@@ -1,9 +1,12 @@
 import Link from 'next/link';
-import { asc, sql } from 'drizzle-orm';
-import { db } from '@/db/client';
-import { channels, groups, whatsappAccounts, whatsappTemplates } from '@/db/schema';
 import { ChannelBadge } from '@/components/channel';
 import { Badge, Card, PageHeader } from '@/components/ui';
+import {
+  countTemplatesByAccount,
+  listChannelsForAdmin,
+  listGroupNames,
+  listWhatsAppAccounts,
+} from '@/lib/admin/settings';
 import { requirePermission } from '@/lib/auth/guard';
 import { env } from '@/lib/env';
 import { listFolderOptions } from '@/lib/kb/admin';
@@ -17,37 +20,10 @@ export default async function ChannelsPage() {
   await requirePermission('admin.channels');
 
   const [channelList, groupList, accountList, templateCounts, folderList] = await Promise.all([
-    db
-      .select({
-        id: channels.id,
-        type: channels.type,
-        name: channels.name,
-        config: channels.config,
-        createdAt: channels.createdAt,
-        defaultGroupId: channels.defaultGroupId,
-        whatsappAccountId: channels.whatsappAccountId,
-        isActive: channels.isActive,
-      })
-      .from(channels)
-      .orderBy(asc(channels.name)),
-
-    db.select({ id: groups.id, name: groups.name }).from(groups).orderBy(asc(groups.name)),
-
-    db.select().from(whatsappAccounts).orderBy(asc(whatsappAccounts.name)),
-
-    // Approved and total, because they answer different questions. Approved is
-    // what an agent can actually pick; total is what the sync last read back
-    // from Meta, and zero of it is the difference between "connected" and
-    // "connected to something that is not this WABA".
-    db
-      .select({
-        accountId: whatsappTemplates.whatsappAccountId,
-        approved: sql<number>`count(*) filter (where ${whatsappTemplates.status} = 'APPROVED')::int`,
-        total: sql<number>`count(*)::int`,
-      })
-      .from(whatsappTemplates)
-      .groupBy(whatsappTemplates.whatsappAccountId),
-
+    listChannelsForAdmin(),
+    listGroupNames(),
+    listWhatsAppAccounts(),
+    countTemplatesByAccount(),
     listFolderOptions(),
   ]);
 
