@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Field, Input, Textarea } from '@/components/ui';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
-import { deleteCannedResponse, saveCannedResponse } from '../settings-actions';
+import { deleteCannedResponse, saveCannedResponse } from './actions';
 
 type Canned = {
   id: string;

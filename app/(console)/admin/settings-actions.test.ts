@@ -32,6 +32,9 @@ const actions = {
   ...(await import('./groups/actions')),
   ...(await import('./locations/actions')),
   ...(await import('./statuses/actions')),
+  ...(await import('./fields/actions')),
+  ...(await import('./forms/actions')),
+  ...(await import('./canned/actions')),
 };
 
 function form(fields: Record<string, string>): FormData {

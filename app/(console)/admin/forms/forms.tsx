@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Badge, Field, Input, Select, Textarea, Toggle } from '@/components/ui';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
-import { deleteTicketForm, saveTicketForm } from '../settings-actions';
+import { deleteTicketForm, saveTicketForm } from './actions';
 import { ElementsBuilder, type FieldChoice } from './elements-builder';
 
 type Choice = { value: string; label: string };
