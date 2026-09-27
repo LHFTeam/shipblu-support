@@ -7,12 +7,12 @@ import { formatBytes, formatDateTime, formatRelative } from '@/lib/format';
 import type { PickerEntry, SideConversationView } from '@/lib/side-conversations/queries';
 import { describeRecipient, trackingPrefill } from '@/lib/side-conversations/format';
 import type { ConversationDetail } from '@/lib/tickets/conversation';
+import type { ActionState } from '../../actions';
 import {
   replyToSideConversation,
   setSideConversationState,
   startSideConversation,
-  type ActionState,
-} from '../../actions';
+} from '../../side-conversation-actions';
 
 const INITIAL: ActionState = { error: null };
 
