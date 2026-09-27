@@ -7,7 +7,7 @@ import type { SlaTargets } from '@/db/schema/config';
 import { PRIORITIES } from '@/lib/tickets/vocabulary';
 import { ConditionBuilder, type FieldOption } from '../condition-builder';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
-import { deleteSlaPolicy, saveSlaPolicy } from '../settings-actions';
+import { deleteSlaPolicy, saveSlaPolicy } from './actions';
 
 type Choice = { value: string; label: string };
 

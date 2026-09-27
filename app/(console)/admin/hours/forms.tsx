@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Badge, Button, Field, Input, Toggle } from '@/components/ui';
 import type { WeeklySchedule } from '@/db/schema/config';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
-import { deleteHoliday, saveBusinessHours, saveHoliday } from '../settings-actions';
+import { deleteHoliday, saveBusinessHours, saveHoliday } from './actions';
 import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
 
 type Schedule = {
