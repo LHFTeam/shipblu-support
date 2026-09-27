@@ -115,6 +115,8 @@ and two sessions claiming different rows then conflict on all of them.
 | 2.9   | Replies never get paragraphs (CRLF)              | #171            | merged  |
 | 2.10  | Email webhook fails open without its secret      | #177            | merged  |
 | 2.11  | Staging's `local` email webhook accepts anything | #177            | merged  |
+| 2.12  | SLA escalations after a wait never fire          | #242            | merged  |
+| 2.13  | Away agent with an open tab is never reclaimed   | #243            | merged  |
 | 0–2   | Follow-ups to the reviews of #187–#196           | #203, #205      | merged  |
 | 3     | Shared primitives (one row per PR as opened)     |                 | open    |
 | 3.1   | Queue helper: `hasActiveJob(type)`               | #197            | merged  |
@@ -128,14 +130,82 @@ and two sessions claiming different rows then conflict on all of them.
 | 3.9   | HTTP helpers: rate limiter moves to `lib/http`   | #229            | merged  |
 | 3.10  | HTTP helpers: `readJsonBody`                     | #230            | merged  |
 | 3.11  | Vocabulary: priorities, categories, roles        | #231            | merged  |
+| 3.12  | Action state: one `ok()`                         | #240            | merged  |
+| 3.13  | FormData readers move to `lib/http/form-data.ts` | #241            | merged  |
+| 3.13  | FormData readers: adoption in the action files   | #244–#246       | merged  |
+| 3.14  | Logger: `lib/log.ts` and the first worker files  | #249            | merged  |
 | 4.1   | Split `lib/tickets/queries.ts`                   | #224            | merged  |
-| 4.2   | Shared ingest steps                              | #232            | open    |
+| 4.2   | Shared ingest steps                              | #232–#233, #235 | merged  |
 | 4.3   | Meta Graph transport                             | #228            | merged  |
-| 4.4   | Worker: typed payloads, backfill, KB import      |                 | pending |
+| 4.4   | Worker: typed payloads, backfill, KB import      | #236–9, #247–8  | merged  |
 | ⛳    | Gate: check in with the requester                |                 | pending |
 | 5.x   | Server side of `app/`                            |                 | pending |
 | 6.x   | Client components                                |                 | pending |
 | 7     | Lint tightening, finish logging                  |                 | pending |
+
+### Handoff, 2026-09-27 07:00 UTC
+
+The session that opened #233–#241 stopped here because of its usage limit. It
+unsubscribed from its PRs and deleted its hourly check-in. The next session must
+subscribe to the open PRs again.
+
+**State at 15:20 UTC.** A second session took over at 07:05 and worked
+through the list below. Every PR named in this handoff (#233, #235–#241) is
+merged, and so are #242–#249, which that session opened. No refactor PR is
+open except this one.
+
+**Rules that still hold.**
+
+- Another agent reviews each PR. Fix review comments on that PR's own branch.
+- Merge only when the requester asks.
+- Do not deploy. Production does not deploy on merge, and it still runs #202's
+  commit (`4fcb6fd`).
+- After merges, restart this branch from `main` and mark the rows `merged` in
+  one table-only commit.
+- The requester wants replies in ASD Simplified Technical English (STE100).
+
+**Next work, in this order.** Items 1–4 of the original list are done or
+narrowed; what remains of each is below.
+
+1. **4.4 typed payloads.** The second family merged as #247 and three jobs of
+   the third as #248. Five jobs remain, because #237 and #238 held their files
+   when #248 was written: `backfill_shipment_links`,
+   `backfill_message_locations`, `backfill_categorise_ai`,
+   `normalise_kb_formatting` and `seed_console_handbook`. **The PR must say
+   this:** today a handler tests `payload.dryRun === true`, so `dryRun=1` or
+   `dryRun=yes` does a real run. `z.boolean()` makes those values fail, and
+   nothing is written.
+2. **4.4 sweeps** is done: see "Sweeps, narrowed in #242 and #243".
+3. **3.13 adoption** merged as #244–#246. The counts in the old list were of
+   every inline read; only the exact `String(formData.get(k) ?? '').trim()`
+   reads change, and two files still have some:
+   - `(console)/actions.ts`: 5. A hot file, so a PR of its own.
+   - `admin/settings-actions.ts`: 2, in `saveInternalRecipient`.
+4. **Stage 3 logger.** `lib/log.ts` merged as #249, with `worker/index.ts` and
+   seven handlers. The rest of `worker/` follows, then `lib/`, then `app/`,
+   each message word for word.
+5. Then the **⛳ gate**: the requester was asked on 2026-09-27 whether to start
+   Stage 5, and has not answered yet.
+
+**Findings outside the plan.** Each one is queued as a suggested task for the
+requester, and neither is fixed.
+
+- `htmlToText` writes headings in capitals. Production has 8 English excerpts
+  and 1 Arabic excerpt that start that way.
+- `restoreVersion` does not write `excerpt`.
+
+**Traps in this container.**
+
+- The local Postgres (port 55432, data under the scratchpad) stops when
+  `/tmp/claude-0` loses its `o+x` bit. Run `chmod o+x` on the path, then
+  `pg_ctl … start` as `postgres`.
+- Turbopack refuses a symlinked `node_modules` in a worktree. Build in the main
+  checkout.
+- The DB tier needs `TEST_DATABASE_URL`, and the database must be migrated and
+  seeded first.
+- Keeping the cluster's data directory out of `/tmp/claude-0` altogether
+  (for example under `/var/lib/postgresql`, owned by `postgres`) avoids the
+  permission trap above.
 
 ## Ground rules for every PR
 
@@ -501,6 +571,12 @@ that.
 - Adopt them one action file per PR. A specialised state becomes
   `ActionState & {…}`.
 
+**Action state, narrowed in #240.** `ok()` and the shape moved, with seven
+copies of the success object switched over. `INITIAL` did not. In each of about
+thirty client forms it is `{ error: null }`, and the compiler already checks it
+against that form's own state type. A shared constant would change every one of
+those files and prevent nothing.
+
 ### Logging: `lib/log.ts`
 
 An in-house module of about fifty lines, with no new dependency.
@@ -681,6 +757,43 @@ stays with the one client that uses it.
   `repo-rules.mjs` moves in the same PR.
 - **Send guards.** The "already delivered" guard (four copies) and the
   mark-failed update (two copies) become shared helpers.
+
+**KB import, narrowed in #238.** The two upserts have the same shape but share
+no logic, so they stay with their writers:
+
+- Each keys its rows on a different identity. The import uses `freshdesk` and a
+  locale-scoped id, and falls back to the bare id. The handbook uses `native`
+  and a fixed key.
+- Each decides its slug differently.
+- Each has its own rule for when to write. The import overwrites every run. The
+  handbook compares first, and on a run with nothing to do it must issue no
+  UPDATE at all.
+
+A shared upsert would take all of this as parameters. That is the general
+pipeline that 4.2 declined for ingest. What every KB writer does share — the
+import, the handbook, the console editor and the formatting pass — is two
+steps. They moved to `lib/kb/article-write.ts`, not to `lib/kb/import.ts`,
+because two of their callers are not imports:
+
+- `articleBody()`: three copies;
+- `cutArticleVersion()`: four copies.
+
+**Sweeps, narrowed in #242 and #243.** Reading the two sweeps for this item
+found a defect in each, and the fixes did what the item was for:
+
+- #242: an SLA escalation with a wait of five minutes or more never fired. The
+  breach flag took the ticket out of the sweep on the run that found it, and
+  that run was the only one that tried the escalation. Production had 262
+  breaches and no escalation. The new `sla-sweep.db.test.ts` pins the sweep.
+- #243: the reclaim wait of an away agent with an open tab restarted on each
+  heartbeat. The rule moved to `reclaimDue` in `lib/assignment/reclaim.ts`,
+  pure and unit-tested, as `shouldAutoAway` is in `lib/presence`. The new
+  `assign-sweep.db.test.ts` pins the reclaim pass.
+
+The queries and the writes stay in the handlers. Each has one caller, and a
+sweep's SQL belongs to its job, as in `presence-sweep.ts`. The SLA wait check in
+`escalate()` is one comparison, and the DB test covers it. So the
+`automated-reply-boundary` path does not move either.
 
 ### ⛳ Gate
 
