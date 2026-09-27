@@ -115,8 +115,8 @@ and two sessions claiming different rows then conflict on all of them.
 | 2.9   | Replies never get paragraphs (CRLF)              | #171            | merged  |
 | 2.10  | Email webhook fails open without its secret      | #177            | merged  |
 | 2.11  | Staging's `local` email webhook accepts anything | #177            | merged  |
-| 2.12  | SLA escalations after a wait never fire          | #242            | open    |
-| 2.13  | Away agent with an open tab is never reclaimed   | #243            | open    |
+| 2.12  | SLA escalations after a wait never fire          | #242            | merged  |
+| 2.13  | Away agent with an open tab is never reclaimed   | #243            | merged  |
 | 0–2   | Follow-ups to the reviews of #187–#196           | #203, #205      | merged  |
 | 3     | Shared primitives (one row per PR as opened)     |                 | open    |
 | 3.1   | Queue helper: `hasActiveJob(type)`               | #197            | merged  |
@@ -130,12 +130,12 @@ and two sessions claiming different rows then conflict on all of them.
 | 3.9   | HTTP helpers: rate limiter moves to `lib/http`   | #229            | merged  |
 | 3.10  | HTTP helpers: `readJsonBody`                     | #230            | merged  |
 | 3.11  | Vocabulary: priorities, categories, roles        | #231            | merged  |
-| 3.12  | Action state: one `ok()`                         | #240            | open    |
+| 3.12  | Action state: one `ok()`                         | #240            | merged  |
 | 3.13  | FormData readers move to `lib/http/form-data.ts` | #241            | open    |
 | 3.13  | FormData readers: adoption in the action files   | #244–#246       | open    |
 | 3.14  | Logger: `lib/log.ts` and the first worker files  | #249            | open    |
 | 4.1   | Split `lib/tickets/queries.ts`                   | #224            | merged  |
-| 4.2   | Shared ingest steps                              | #232–#233, #235 | open    |
+| 4.2   | Shared ingest steps                              | #232–#233, #235 | merged  |
 | 4.3   | Meta Graph transport                             | #228            | merged  |
 | 4.4   | Worker: typed payloads, backfill, KB import      | #236–9, #247–8  | open    |
 | ⛳    | Gate: check in with the requester                |                 | pending |
