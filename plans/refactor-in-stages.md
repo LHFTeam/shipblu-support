@@ -135,6 +135,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 3.13  | FormData readers: adoption in the action files   | #244–#246, #250 | merged  |
 | 3.14  | Logger: `lib/log.ts` and the first worker files  | #249, #253      | merged  |
 | 3.14  | Logger: eight more files in `worker/` and `lib/` | #261            | merged  |
+| 3.14  | Logger: `lib/`                                   | #269            | open    |
 | 4.1   | Split `lib/tickets/queries.ts`                   | #224            | merged  |
 | 4.2   | Shared ingest steps                              | #232–#233, #235 | merged  |
 | 4.3   | Meta Graph transport                             | #228            | merged  |
@@ -233,7 +234,8 @@ This replaces three of the rules in the handoff above.
 
 **State at 23:10 UTC.** #258–#264 are merged. Open: #265 (5.1: skills,
 automations, recipients), #266 (5.4: categories, channels, invite, field
-options), and #268 (5.2: `availability-actions.ts`). #265 holds
+options), #268 (5.2: `availability-actions.ts`) and #269 (3.14: the logger in
+`lib/`). #265 holds
 `admin/settings-actions.ts`, #266 holds `lib/admin/settings.ts` and #268 holds
 `(console)/actions.ts`, so the next batch of each waits for it.
 
