@@ -1,19 +1,23 @@
-import { asc, eq, inArray, isNotNull, notInArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, notInArray, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   agentSkills,
   agents,
+  automationRules,
+  autoResponses,
   businessHours,
   cannedResponses,
   conversations,
   groupMembers,
   groups,
   holidays,
+  invites,
   locations,
   shipmentPhrases,
   skills,
   slaPolicies,
   ticketFields,
+  ticketForms,
   ticketStatuses,
 } from '@/db/schema';
 import { readOnlyChannels } from '@/lib/tickets/channel-policy';
@@ -192,4 +196,91 @@ export function listSlaPolicies() {
 /** Schedule names for the SLA editor, in the order the table holds them. */
 export function listScheduleNames() {
   return db.select({ id: businessHours.id, name: businessHours.name }).from(businessHours);
+}
+
+/** Group names for a picker, by name. Auto-responses, automations and forms each offer it. */
+export function listGroupNames() {
+  return db.select({ id: groups.id, name: groups.name }).from(groups).orderBy(asc(groups.name));
+}
+
+export function listAutoResponses() {
+  return db.select().from(autoResponses).orderBy(asc(autoResponses.createdAt));
+}
+
+/** One holiday or none: the auto-responses page asks only whether any calendar has one. */
+export function listAnyHoliday() {
+  return db.select({ id: holidays.id }).from(holidays).limit(1);
+}
+
+/** Every rule, in the order it runs: by trigger, then position. */
+export function listAutomationRules() {
+  return db
+    .select()
+    .from(automationRules)
+    .orderBy(asc(automationRules.trigger), asc(automationRules.position));
+}
+
+/** Canned-response titles for the automation builder's "send a reply" action. */
+export function listCannedTitles() {
+  return db
+    .select({ id: cannedResponses.id, title: cannedResponses.title })
+    .from(cannedResponses)
+    .orderBy(asc(cannedResponses.title));
+}
+
+/** Forms in the order the help centre offers them. */
+export function listTicketForms() {
+  return db.select().from(ticketForms).orderBy(asc(ticketForms.position), asc(ticketForms.slug));
+}
+
+/** The fields the form builder can place. */
+export function listFormFieldChoices() {
+  // Retired fields included, marked. A form can already be placing one, and
+  // leaving it out of the picker renders that row blank with no way to tell
+  // which question it is — while every save re-posts it.
+  return db
+    .select({
+      key: ticketFields.key,
+      label: ticketFields.label,
+      type: ticketFields.type,
+      options: ticketFields.options,
+      visibleToCustomer: ticketFields.visibleToCustomer,
+      editableByCustomer: ticketFields.editableByCustomer,
+      isActive: ticketFields.isActive,
+    })
+    .from(ticketFields)
+    .orderBy(asc(ticketFields.position), asc(ticketFields.label));
+}
+
+/** Every agent, deactivated ones included, by name. */
+export function listAgentsForAdmin() {
+  return db
+    .select({
+      id: agents.id,
+      name: agents.name,
+      email: agents.email,
+      role: agents.role,
+      isActive: agents.isActive,
+      lastSeenAt: agents.lastSeenAt,
+      presence: agents.presence,
+      isAcceptingTickets: agents.isAcceptingTickets,
+      maxOpenTickets: agents.maxOpenTickets,
+    })
+    .from(agents)
+    .orderBy(asc(agents.name));
+}
+
+/** Invites not yet accepted and not expired at `now`, newest first. */
+export function listOpenInvites(now: Date) {
+  return db
+    .select({
+      id: invites.id,
+      email: invites.email,
+      role: invites.role,
+      expiresAt: invites.expiresAt,
+      tokenCiphertext: invites.tokenCiphertext,
+    })
+    .from(invites)
+    .where(and(isNull(invites.acceptedAt), gt(invites.expiresAt, now)))
+    .orderBy(desc(invites.createdAt));
 }

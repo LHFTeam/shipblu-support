@@ -1,8 +1,11 @@
 import Link from 'next/link';
-import { asc } from 'drizzle-orm';
-import { db } from '@/db/client';
-import { autoResponses, businessHours, groups, holidays } from '@/db/schema';
 import { Card, PageHeader } from '@/components/ui';
+import {
+  listAnyHoliday,
+  listAutoResponses,
+  listGroupNames,
+  listScheduleOptions,
+} from '@/lib/admin/settings';
 import { requirePermission } from '@/lib/auth/guard';
 import { AutoResponseEditor, NewAutoResponse } from './forms';
 
@@ -25,10 +28,10 @@ export default async function AutoResponsesPage() {
   await requirePermission('admin.automations');
 
   const [rules, groupRows, schedules, anyHoliday] = await Promise.all([
-    db.select().from(autoResponses).orderBy(asc(autoResponses.createdAt)),
-    db.select({ id: groups.id, name: groups.name }).from(groups).orderBy(asc(groups.name)),
-    db.select({ id: businessHours.id, isDefault: businessHours.isDefault }).from(businessHours),
-    db.select({ id: holidays.id }).from(holidays).limit(1),
+    listAutoResponses(),
+    listGroupNames(),
+    listScheduleOptions(),
+    listAnyHoliday(),
   ]);
 
   // A rule with no calendar behind it never fires, and nothing on this page

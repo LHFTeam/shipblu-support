@@ -1,7 +1,10 @@
-import { asc, eq } from 'drizzle-orm';
-import { db } from '@/db/client';
-import { agents, automationRules, cannedResponses, groups } from '@/db/schema';
 import { Badge, Card, PageHeader } from '@/components/ui';
+import {
+  listActiveAgents,
+  listAutomationRules,
+  listCannedTitles,
+  listGroupNames,
+} from '@/lib/admin/settings';
 import { formatDateTime } from '@/lib/format';
 import { requirePermission } from '@/lib/auth/guard';
 import { NewRule, RuleEditor } from './forms';
@@ -32,20 +35,10 @@ export default async function AutomationsPage() {
   await requirePermission('admin.automations');
 
   const [rules, agentList, groupList, canned, fieldOptions] = await Promise.all([
-    db
-      .select()
-      .from(automationRules)
-      .orderBy(asc(automationRules.trigger), asc(automationRules.position)),
-    db
-      .select({ id: agents.id, name: agents.name, email: agents.email })
-      .from(agents)
-      .where(eq(agents.isActive, true))
-      .orderBy(asc(agents.name)),
-    db.select({ id: groups.id, name: groups.name }).from(groups).orderBy(asc(groups.name)),
-    db
-      .select({ id: cannedResponses.id, title: cannedResponses.title })
-      .from(cannedResponses)
-      .orderBy(asc(cannedResponses.title)),
+    listAutomationRules(),
+    listActiveAgents(),
+    listGroupNames(),
+    listCannedTitles(),
     ticketFieldOptions(),
   ]);
 
