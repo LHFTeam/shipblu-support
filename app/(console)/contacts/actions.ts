@@ -9,6 +9,7 @@ import { requireAgent } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
 import { purgeContact, type PurgeRefusal } from '@/lib/admin/purge';
 import { hiddenScopeRefusal } from '@/lib/admin/purge-visibility';
+import { ok, type ActionState } from '@/lib/http/action-state';
 import { isUuid } from '@/lib/http/uuid';
 import { mergeContacts, type MergeRefusal } from '@/lib/contacts/merge';
 import { normaliseSbid, normaliseTrackingNumber } from '@/lib/shipments/format';
@@ -32,11 +33,7 @@ import {
  * changed, on every ticket that moved, so each one gets an entry of its own.
  */
 
-export type ContactActionState = { error: string | null; ok?: boolean; nonce?: number };
-
-function ok(): ContactActionState {
-  return { error: null, ok: true, nonce: Date.now() };
-}
+export type ContactActionState = ActionState;
 
 /**
  * Says that a person can speak for a shipping account.

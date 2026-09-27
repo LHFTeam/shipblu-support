@@ -33,6 +33,7 @@ import { refreshPrimary } from '@/lib/categorise/apply';
 import { CAUSE_REQUIRED_AREAS } from '@/lib/categorise/taxonomy';
 import { requestAssignmentSweep, setAccepting } from '@/lib/assignment/presence';
 import { requireAgent, requirePermission } from '@/lib/auth/guard';
+import { ok, type ActionState as BaseActionState } from '@/lib/http/action-state';
 import { isUuid } from '@/lib/http/uuid';
 import { env } from '@/lib/env';
 import { can } from '@/lib/auth/permissions';
@@ -99,26 +100,14 @@ import { windowState } from '@/lib/whatsapp/window';
  * outage delays the send instead of losing what they wrote.
  */
 
-export type ActionState = {
-  error: string | null;
-  ok?: boolean;
+export type ActionState = BaseActionState & {
   /**
    * What happened, when succeeding quietly would leave the agent guessing.
    * Most actions change something visible on the page and need none; a profile
    * refresh whose whole output is Meta's answer needs one.
    */
   message?: string;
-  /**
-   * Changes on every success. The composer keys its form on this so a second
-   * consecutive send still clears the textarea — `ok: true` alone is the same
-   * value twice and would leave the previous reply sitting in the box.
-   */
-  nonce?: number;
 };
-
-function ok(): ActionState {
-  return { error: null, ok: true, nonce: Date.now() };
-}
 
 async function loadConversation(agent: SessionAgent, conversationId: string) {
   // Every action on a ticket starts here with an id out of a form field. A
