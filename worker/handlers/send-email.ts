@@ -9,6 +9,8 @@ import { replyToAddress } from '@/lib/email/reply-address';
 import { buildReferences, buildReplySubject, formatMessageId } from '@/lib/email/threading';
 import type { OutboundEmail } from '@/lib/email/types';
 import type { ClaimedJob } from '@/lib/queue';
+import { parseJobPayload } from '@/lib/queue/payloads';
+import { alreadySent } from './already-sent';
 import { subjectGone } from './subject-gone';
 import { errorMessage } from '@/lib/errors';
 
@@ -20,10 +22,7 @@ import { errorMessage } from '@/lib/errors';
  * ordering means a provider outage delays delivery but never loses the reply.
  */
 export async function sendEmail(job: ClaimedJob): Promise<void> {
-  const messageId = job.payload.messageId;
-  if (typeof messageId !== 'string') {
-    throw new Error('send_email requires a messageId');
-  }
+  const { messageId } = parseJobPayload(job, 'send_email');
 
   const rows = await db
     .select({
@@ -43,10 +42,7 @@ export async function sendEmail(job: ClaimedJob): Promise<void> {
   if (!row) throw subjectGone('send_email', `message ${messageId}`);
 
   // Already delivered: a retry after a partial failure must not send twice.
-  if (row.message.deliveryStatus !== 'pending' && row.message.deliveryStatus !== 'failed') {
-    console.log(`[send_email] ${messageId} is ${row.message.deliveryStatus}, skipping`);
-    return;
-  }
+  if (alreadySent('send_email', messageId, row.message.deliveryStatus)) return;
 
   const e = env();
   if (!e.EMAIL_FROM_ADDRESS) throw new Error('EMAIL_FROM_ADDRESS is not configured');

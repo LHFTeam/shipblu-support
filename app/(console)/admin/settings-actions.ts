@@ -28,6 +28,7 @@ import {
 import type { SlaTargets, TicketFieldValidation, WeeklySchedule } from '@/db/schema/config';
 import { requirePermission } from '@/lib/auth/guard';
 import { textToHtml } from '@/lib/html/sanitize';
+import { ok, type ActionState } from '@/lib/http/action-state';
 import { int, optionalMinutes, optionalNumber, text, uuidField } from '@/lib/http/form-data';
 import { looksLikeEmail, normaliseEmail } from '@/lib/auth/normalise';
 import { parseActions } from '@/lib/automations/actions';
@@ -67,12 +68,7 @@ import { errorMessage } from '@/lib/errors';
  * ticket or take it with it.
  */
 
-export type SettingsState = { error: string | null; ok?: boolean; nonce?: number };
-
-const OK: SettingsState = { error: null, ok: true };
-function ok(): SettingsState {
-  return { ...OK, nonce: Date.now() };
-}
+export type SettingsState = ActionState;
 
 function refresh(path: string) {
   revalidatePath(path);
@@ -1323,11 +1319,7 @@ export async function deleteSlaPolicy(
   if ((inUse[0]?.count ?? 0) > 0) {
     await db.update(slaPolicies).set({ isActive: false }).where(eq(slaPolicies.id, id));
     refresh('/admin/sla');
-    return {
-      error: null,
-      ok: true,
-      nonce: Date.now(),
-    };
+    return ok();
   }
 
   await db.delete(slaPolicies).where(eq(slaPolicies.id, id));
@@ -1610,7 +1602,7 @@ export async function saveInternalRecipient(
   }
 
   revalidatePath('/admin/recipients');
-  return { ...OK, nonce: Date.now() };
+  return ok();
 }
 
 export async function deleteInternalRecipient(
@@ -1645,7 +1637,7 @@ export async function deleteInternalRecipient(
   await db.delete(internalRecipients).where(eq(internalRecipients.id, id));
 
   revalidatePath('/admin/recipients');
-  return { ...OK, nonce: Date.now() };
+  return ok();
 }
 
 // --- WhatsApp business accounts ---------------------------------------------

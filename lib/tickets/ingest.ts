@@ -3,7 +3,6 @@ import { db } from '@/db/client';
 import {
   attachments as attachmentsTable,
   channels,
-  conversationEvents,
   conversations,
   messages,
   ticketStatuses,
@@ -17,7 +16,8 @@ import { ingestSideReply, resolveSideConversation } from '@/lib/side-conversatio
 import { buildAttachmentPath, uploadObject } from '@/lib/storage';
 import { resolveContact } from './contacts';
 import { afterInboundMessage, afterMessageStored } from './lifecycle';
-import { defaultOpenStatusId, requireDefaultOpenStatusId } from './statuses';
+import { reopenResolved } from './reopen';
+import { requireDefaultOpenStatusId } from './statuses';
 
 export type IngestResult = {
   conversationId: string;
@@ -136,32 +136,11 @@ export async function ingestInboundEmail(email: ParsedInboundEmail): Promise<Ing
       // put a finished ticket back in the queue and count a reopen against
       // whoever resolved it. It is still stored below, on the timeline.
       if (existingConversation.statusCategory === 'resolved' && !automation.isAutoReply) {
-        const reopenTo = await defaultOpenStatusId(tx);
-        if (reopenTo) {
-          // `resolvedByAgentId` is deliberately not cleared here, so it survives
-          // to be read back below.
-          const reopened = await tx
-            .update(conversations)
-            .set({
-              statusId: reopenTo,
-              resolvedAt: null,
-              reopenCount: existingConversation.reopenCount + 1,
-            })
-            .where(eq(conversations.id, conversationId))
-            .returning({ resolvedBy: conversations.resolvedByAgentId });
-
-          await tx.insert(conversationEvents).values({
-            conversationId,
-            type: 'reopened',
-            actorLabel: 'inbound_email',
-            // The resolver is snapshotted onto the event rather than looked up
-            // later. `conversations.resolved_by_agent_id` is overwritten by the
-            // next resolution, and the nightly rollup rebuilds the last three
-            // days — so reading it at report time would let a ticket resolved
-            // again by somebody else silently move this reopening onto them.
-            data: { reason: 'customer_replied', resolvedBy: reopened[0]?.resolvedBy ?? null },
-          });
-        }
+        await reopenResolved(
+          tx,
+          { id: conversationId, reopenCount: existingConversation.reopenCount },
+          { actorLabel: 'inbound_email', reason: 'customer_replied' },
+        );
       }
     } else {
       const statusId = await requireDefaultOpenStatusId(tx);

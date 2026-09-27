@@ -10,6 +10,8 @@ import { textToEscapedHtml } from '@/lib/email/html';
 import { buildReferences, buildSideSubjectTag, formatMessageId } from '@/lib/email/threading';
 import type { OutboundEmail } from '@/lib/email/types';
 import type { ClaimedJob } from '@/lib/queue';
+import { parseJobPayload } from '@/lib/queue/payloads';
+import { alreadySent } from './already-sent';
 import { subjectGone } from './subject-gone';
 import {
   buildSideReplySubject,
@@ -31,10 +33,7 @@ import { errorMessage } from '@/lib/errors';
  * one that emails the customer.
  */
 export async function sendSideEmail(job: ClaimedJob): Promise<void> {
-  const messageId = job.payload.messageId;
-  if (typeof messageId !== 'string') {
-    throw new Error('send_side_email requires a messageId');
-  }
+  const { messageId } = parseJobPayload(job, 'send_side_email');
 
   const rows = await db
     .select({
@@ -57,10 +56,7 @@ export async function sendSideEmail(job: ClaimedJob): Promise<void> {
   if (!row) throw subjectGone('send_side_email', `side conversation message ${messageId}`);
 
   // Already delivered: a retry after a partial failure must not send twice.
-  if (row.message.deliveryStatus !== 'pending' && row.message.deliveryStatus !== 'failed') {
-    console.log(`[send_side_email] ${messageId} is ${row.message.deliveryStatus}, skipping`);
-    return;
-  }
+  if (alreadySent('send_side_email', messageId, row.message.deliveryStatus)) return;
 
   const e = env();
   if (!e.EMAIL_FROM_ADDRESS) throw new Error('EMAIL_FROM_ADDRESS is not configured');

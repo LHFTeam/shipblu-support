@@ -1,17 +1,11 @@
 import { and, asc, desc, eq, isNull, notInArray, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import type { Priority } from '@/lib/tickets/vocabulary';
-import {
-  agents,
-  channels,
-  conversationEvents,
-  conversations,
-  messages,
-  ticketStatuses,
-} from '@/db/schema';
+import { agents, channels, conversations, messages, ticketStatuses } from '@/db/schema';
 import { readOnlyChannels } from '@/lib/tickets/channel-policy';
 import { afterInboundMessage, afterMessageStored } from '@/lib/tickets/lifecycle';
-import { defaultOpenStatusId, requireDefaultOpenStatusId } from '@/lib/tickets/statuses';
+import { reopenResolved } from '@/lib/tickets/reopen';
+import { requireDefaultOpenStatusId } from '@/lib/tickets/statuses';
 
 /**
  * The customer's own view of their tickets.
@@ -296,21 +290,11 @@ export async function appendReply(
     if (!ticket || ticket.statusCategory === 'closed') return null;
 
     if (ticket.statusCategory === 'resolved') {
-      const reopenTo = await defaultOpenStatusId(tx);
-      if (reopenTo) {
-        const reopened = await tx
-          .update(conversations)
-          .set({ statusId: reopenTo, resolvedAt: null, reopenCount: ticket.reopenCount + 1 })
-          .where(eq(conversations.id, ticket.id))
-          .returning({ resolvedBy: conversations.resolvedByAgentId });
-
-        await tx.insert(conversationEvents).values({
-          conversationId: ticket.id,
-          type: 'reopened',
-          actorLabel: 'portal',
-          data: { reason: 'customer_replied', resolvedBy: reopened[0]?.resolvedBy ?? null },
-        });
-      }
+      await reopenResolved(
+        tx,
+        { id: ticket.id, reopenCount: ticket.reopenCount },
+        { actorLabel: 'portal', reason: 'customer_replied' },
+      );
     }
 
     const insertedMessage = await tx

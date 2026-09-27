@@ -1,6 +1,6 @@
-import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { channels, conversationEvents, conversations, messages, ticketStatuses } from '@/db/schema';
+import { channels, conversations, messages } from '@/db/schema';
 import { enqueue } from '@/lib/queue';
 import { afterInboundMessage, afterMessageStored } from '@/lib/tickets/lifecycle';
 import { explainDeliveryError } from '@/lib/whatsapp/errors';
@@ -12,7 +12,9 @@ import type {
 import { windowState } from '@/lib/whatsapp/window';
 import { isReadOnlyChannel } from './channel-policy';
 import { resolveContact } from './contacts';
-import { defaultOpenStatusId, requireDefaultOpenStatusId } from './statuses';
+import { findLiveConversation } from './live-conversation';
+import { reopenResolved } from './reopen';
+import { requireDefaultOpenStatusId } from './statuses';
 
 /**
  * Inbound WhatsApp → conversation.
@@ -77,25 +79,11 @@ export async function ingestWhatsAppMessage(
       conversationNumber = existing.number;
 
       if (existing.statusCategory === 'resolved') {
-        const reopenTo = await defaultOpenStatusId(tx);
-        if (reopenTo) {
-          const reopened = await tx
-            .update(conversations)
-            .set({
-              statusId: reopenTo,
-              resolvedAt: null,
-              reopenCount: existing.reopenCount + 1,
-            })
-            .where(eq(conversations.id, conversationId))
-            .returning({ resolvedBy: conversations.resolvedByAgentId });
-
-          await tx.insert(conversationEvents).values({
-            conversationId,
-            type: 'reopened',
-            actorLabel: 'inbound_whatsapp',
-            data: { reason: 'customer_replied', resolvedBy: reopened[0]?.resolvedBy ?? null },
-          });
-        }
+        await reopenResolved(
+          tx,
+          { id: conversationId, reopenCount: existing.reopenCount },
+          { actorLabel: 'inbound_whatsapp', reason: 'customer_replied' },
+        );
       }
     } else {
       const statusId = await requireDefaultOpenStatusId(tx);
@@ -483,51 +471,6 @@ async function explainFailure(
     inboundPhoneNumberId: typeof arrivedOn === 'string' ? arrivedOn : null,
     sentFromPhoneNumberId: typeof sentFrom === 'string' ? sentFrom : null,
   });
-}
-
-type LiveConversation = {
-  id: string;
-  number: number;
-  statusCategory: 'open' | 'pending' | 'resolved' | 'closed';
-  reopenCount: number;
-};
-
-/**
- * The customer's current WhatsApp conversation, if any.
- *
- * A closed conversation is deliberately *not* continued: closing is the team's
- * signal that the matter is finished, and reopening it weeks later would bury
- * the new question under old history. Resolved is different — that is a
- * pending-confirmation state, so a reply reopens it.
- */
-async function findLiveConversation(
-  contactId: string,
-  channel: 'whatsapp' | 'whatsapp_bot',
-): Promise<LiveConversation | null> {
-  const rows = await db
-    .select({
-      id: conversations.id,
-      number: conversations.number,
-      statusCategory: ticketStatuses.category,
-      reopenCount: conversations.reopenCount,
-    })
-    .from(conversations)
-    .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
-    .where(
-      and(
-        eq(conversations.requesterContactId, contactId),
-        eq(conversations.channel, channel),
-        isNull(conversations.deletedAt),
-        isNull(conversations.mergedIntoId),
-      ),
-    )
-    .orderBy(desc(conversations.lastMessageAt))
-    .limit(1);
-
-  const row = rows[0];
-  if (!row) return null;
-  if (row.statusCategory === 'closed') return null;
-  return row;
 }
 
 export type ResolvedChannel = {

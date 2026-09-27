@@ -1,12 +1,13 @@
-import { and, asc, desc, eq, isNull } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import { cache } from 'react';
 import { db } from '@/db/client';
-import { channels, contactIdentities, contacts, conversations, ticketStatuses } from '@/db/schema';
+import { channels, contactIdentities, contacts } from '@/db/schema';
 import { generateToken, hashToken } from '@/lib/auth/tokens';
 import type { HoursConfig } from '@/lib/hours';
 import { loadHoursCatalog } from '@/lib/hours/catalog';
 import { groupHours } from '@/lib/hours/resolve';
 import { resolveContact } from '@/lib/tickets/contacts';
+import { findLiveConversation as findLiveOnChannel } from '@/lib/tickets/live-conversation';
 
 /**
  * Visitor identity for the chat widget.
@@ -81,24 +82,7 @@ export async function registerVisitor(token: string, displayName?: string | null
  * awaiting-confirmation, so a reply reopens it, exactly as on WhatsApp.
  */
 export async function findLiveConversation(contactId: string): Promise<string | null> {
-  const rows = await db
-    .select({ id: conversations.id, category: ticketStatuses.category })
-    .from(conversations)
-    .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
-    .where(
-      and(
-        eq(conversations.requesterContactId, contactId),
-        eq(conversations.channel, 'webchat'),
-        isNull(conversations.deletedAt),
-        isNull(conversations.mergedIntoId),
-      ),
-    )
-    .orderBy(desc(conversations.lastMessageAt))
-    .limit(1);
-
-  const row = rows[0];
-  if (!row || row.category === 'closed') return null;
-  return row.id;
+  return (await findLiveOnChannel(contactId, 'webchat'))?.id ?? null;
 }
 
 /**

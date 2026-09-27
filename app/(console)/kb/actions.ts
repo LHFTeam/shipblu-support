@@ -2,29 +2,27 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { kbArticleVersions, kbArticles, kbCategories, kbFolders } from '@/db/schema';
 import { requirePermission } from '@/lib/auth/guard';
+import { ok, type ActionState } from '@/lib/http/action-state';
 import { canonicalUuid, isUuid } from '@/lib/http/uuid';
 import type { AgentRole } from '@/lib/auth/permissions';
-import { htmlToText, preview, sanitiseArticleHtml } from '@/lib/html/sanitize';
+import { htmlToText, sanitiseArticleHtml } from '@/lib/html/sanitize';
 import {
   getArticleForEdit,
   takenSlugs,
   translationGroupHasLocale,
   type EditableArticle,
 } from '@/lib/kb/admin';
+import { articleBody, cutArticleVersion } from '@/lib/kb/article-write';
 import { FLOOR_LABELS, SELECTABLE_FLOORS, folderFloor, meetsFloor } from '@/lib/kb/floors';
 import { normaliseArticleHtml } from '@/lib/kb/format';
 import { isLocale } from '@/lib/kb/locale';
 import { slugify, uniqueSlug } from '@/lib/kb/slug';
 
-export type KbState = { error: string | null; ok?: boolean; nonce?: number };
-
-function ok(): KbState {
-  return { error: null, ok: true, nonce: Date.now() };
-}
+export type KbState = ActionState;
 
 const VISIBILITIES = ['public', 'logged_in', 'agents_only', 'selected_companies'] as const;
 
@@ -134,9 +132,7 @@ export async function saveArticle(_state: KbState, formData: FormData): Promise<
   // side because an author pasting from another help desk cannot see what came
   // with the paste, and the preview beside the textarea renders their draft
   // through `.kb-article` — the same stylesheet the standard is written for.
-  const bodyHtml = normaliseArticleHtml(sanitiseArticleHtml(rawBody));
-  const bodyText = htmlToText(bodyHtml);
-  const excerpt = preview(bodyText, 200);
+  const { bodyHtml, bodyText, excerpt } = articleBody(rawBody);
 
   // The folder decides the category, and the category carries a locale. An
   // English article inside an Arabic category would be unreachable — the public
@@ -229,14 +225,8 @@ export async function saveArticle(_state: KbState, formData: FormData): Promise<
     const changed = current.bodyHtml !== bodyHtml || current.title !== title;
 
     if (changed) {
-      const next = await tx
-        .select({ version: sql<number>`coalesce(max(${kbArticleVersions.version}), 0) + 1` })
-        .from(kbArticleVersions)
-        .where(eq(kbArticleVersions.articleId, id));
-
-      await tx.insert(kbArticleVersions).values({
+      await cutArticleVersion(tx, {
         articleId: id,
-        version: next[0]?.version ?? 1,
         // The version stores the state being replaced, so restoring one means
         // taking the body out of the row rather than reconstructing a diff.
         title: current.title,
@@ -462,14 +452,8 @@ export async function restoreVersion(_state: KbState, formData: FormData): Promi
   if (!version) return { error: 'That version no longer exists' };
 
   await db.transaction(async (tx) => {
-    const next = await tx
-      .select({ version: sql<number>`coalesce(max(${kbArticleVersions.version}), 0) + 1` })
-      .from(kbArticleVersions)
-      .where(eq(kbArticleVersions.articleId, id));
-
-    await tx.insert(kbArticleVersions).values({
+    await cutArticleVersion(tx, {
       articleId: id,
-      version: next[0]?.version ?? 1,
       title: current.title,
       bodyHtml: current.bodyHtml,
       editedByAgentId: agent.id,
