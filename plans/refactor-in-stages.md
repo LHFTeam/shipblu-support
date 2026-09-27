@@ -147,7 +147,8 @@ and two sessions claiming different rows then conflict on all of them.
 | 5.2   | Console guards move to `lib/tickets`             | #260            | merged  |
 | 5.4   | Admin pages stop importing `db`: first batches   | #254, #256      | merged  |
 | 5.4   | Admin pages: agents, auto-responses, automations | #259            | merged  |
-| 5.5   | One receive path for webhooks                    | #263            | open    |
+| 5.4   | Categories, channels, invite, field options      | #266            | open    |
+| 5.5   | One receive path for webhooks                    | #263            | merged  |
 | 5.6   | One `localeOf` and one `requestMeta`             | #251            | merged  |
 | 5.6   | One sign-in sequence for both forms              | #264            | merged  |
 | 6.x   | Client components                                |                 | pending |
@@ -229,18 +230,18 @@ This replaces three of the rules in the handoff above.
   expected. Staging stays suspended.
 - **The ⛳ gate is passed.** The requester said to start Stage 5.
 
-**State at 23:00 UTC.** #258–#261 and #264 are merged. Open: #263 (5.5) and
-#265 (5.1: skills, automations, recipients). #265 holds
-`admin/settings-actions.ts`, so the last 5.1 batch waits for it.
+**State at 23:10 UTC.** #258–#264 are merged. Open: #265 (5.1: skills,
+automations, recipients) and #266 (5.4: categories, channels, invite, field
+options). #265 holds `admin/settings-actions.ts` and #266 holds
+`lib/admin/settings.ts`, so the next batch of each waits for it.
 
 **Next work.**
 
 1. 5.1: WhatsApp accounts and tracking, then the header of
    `settings-actions.ts`. Presence moves with the
    `admin/actions.ts` split into `agents/`.
-2. 5.4: categories, channels, import, the `(auth)` invite page and
-   `admin/field-options.ts`. Then the repo rule against `db/client` in a
-   `page.tsx`.
+2. 5.4: the import page, whose three raw-SQL counts need db tests. Then the
+   repo rule against `db/client` in a `page.tsx`.
 3. 5.2: the seven sibling files, one PR each. #260 is merged, so they can start.
 4. Logger. Three places in `worker/` stay on `console`, because a move would
    change what they print:
