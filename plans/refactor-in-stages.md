@@ -147,7 +147,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 5.1   | `settings-actions.ts`: auto-responses to SLA     | #258            | merged  |
 | 5.1   | `settings-actions.ts`: skills to recipients      | #265            | merged  |
 | 5.1   | `settings-actions.ts`: the last three, deleted   | #270            | merged  |
-| 5.1   | `admin/actions.ts` split by domain, deleted      | #275            | open    |
+| 5.1   | `admin/actions.ts` split by domain, deleted      | #275            | merged  |
 | 5.2   | Console guards move to `lib/tickets`             | #260            | merged  |
 | 5.2   | `availability-actions.ts`                        | #268            | merged  |
 | 5.2   | `category-actions.ts`                            | #271            | merged  |
@@ -241,14 +241,15 @@ This replaces three of the rules in the handoff above.
   expected. Staging stays suspended.
 - **The ⛳ gate is passed.** The requester said to start Stage 5.
 
-**State at 23:50 UTC.** #258–#274 are merged. Open, each holding its files
-until it merges: #275 (5.1: `admin/actions.ts`, which holds `admin/agents/`,
-`channels/`, `import/` and `categories/`), #277 (5.4: the `page-db` rule) and
-#278 (5.2: `side-conversation-actions.ts`).
+**State at 23:45 UTC.** #258–#275 are merged. Open, each holding its files
+until it merges: #277 (5.4: the `page-db` rule, which holds
+`scripts/ci/rules.mjs`, `scripts/ci/rules/page-db*.mjs` and `AGENTS.md`) and
+#278 (5.2: `side-conversation-actions.ts`, which holds `(console)/actions.ts`
+and `inbox/[number]/side-conversations.tsx`).
 
 **Next work.**
 
-1. 5.1: after #275, move `forms-shared.tsx` onto `lib/http/action-state`.
+1. 5.1: move `forms-shared.tsx` onto `lib/http/action-state`.
 2. 5.4: done once #277 merges.
 3. 5.2: the two siblings left after #278 (`meta-actions.ts`,
    `reply-actions.ts`),
