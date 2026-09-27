@@ -27,15 +27,14 @@ import { humaniseStatus, returnStepLabel, stageDisplay } from '@/lib/shipments/s
 import { lostReceiptNote } from '@/lib/whatsapp/receipts';
 import { PRIORITIES } from '@/lib/tickets/vocabulary';
 import { formatRemaining, windowState } from '@/lib/whatsapp/window';
+import { purgeTicket, updateTicket } from '../../actions';
 import {
   linkShipment,
   linkShippingAccount,
-  purgeTicket,
   refreshShipment,
   unlinkShipment,
   unlinkShippingAccount,
-  updateTicket,
-} from '../../actions';
+} from '../../shipment-actions';
 import {
   addCategory,
   confirmCategory,
