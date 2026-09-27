@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation';
 import { useFormStatus } from 'react-dom';
 import { Badge, Button, ErrorText } from '@/components/ui';
 import { labelFor, moderatableComment, readCommentModeration } from '@/lib/meta/moderation';
-import { moderateComment, type ActionState } from '../../actions';
+import type { ActionState } from '../../actions';
+import { moderateComment } from '../../meta-actions';
 
 const INITIAL: ActionState = { error: null };
 
