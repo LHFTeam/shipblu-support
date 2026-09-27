@@ -38,6 +38,9 @@ const actions = {
   ...(await import('./auto-responses/actions')),
   ...(await import('./hours/actions')),
   ...(await import('./sla/actions')),
+  ...(await import('./skills/actions')),
+  ...(await import('./automations/actions')),
+  ...(await import('./recipients/actions')),
 };
 
 function form(fields: Record<string, string>): FormData {

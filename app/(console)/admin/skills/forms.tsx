@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Badge, Button, Field, Input, Toggle } from '@/components/ui';
 import { ConditionBuilder, type FieldOption } from '../condition-builder';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
-import { deleteSkill, saveSkill } from '../settings-actions';
+import { deleteSkill, saveSkill } from './actions';
 
 type Skill = {
   id: string;

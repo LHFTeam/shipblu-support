@@ -5,7 +5,7 @@ import { Badge, Button, Field, Input, Select, Toggle } from '@/components/ui';
 import { ActionBuilder, type Choice } from '../action-builder';
 import { ConditionBuilder, type FieldOption } from '../condition-builder';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
-import { deleteAutomationRule, saveAutomationRule } from '../settings-actions';
+import { deleteAutomationRule, saveAutomationRule } from './actions';
 
 type Rule = {
   id: string;
