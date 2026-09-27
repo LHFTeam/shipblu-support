@@ -177,10 +177,12 @@ proxy.ts         Next 16 middleware: host routing + the signed-out redirect
 ```
 
 Put logic in `lib/`, not in route files. A page or action authorises, calls into
-`lib/`, and revalidates. A page never imports `db/client`: a query there runs
-nowhere before production, and in `lib/` a `*.db.test.ts` can reach it. CI
-checks it (`page-db`). `app/probe/page.tsx` is the one exception, because
-reaching the database from a page is what the render probe tests.
+`lib/`, and revalidates. A page never imports `db/client`, and neither does a
+layout or a helper module beside it: a query there runs nowhere before
+production, and in `lib/` a `*.db.test.ts` can reach it. CI checks every module
+under `app/` except server actions, `route.ts` handlers and tests (`page-db`).
+`app/probe/page.tsx` is the one exception, because reaching the database from a
+page is what the render probe tests.
 
 **A page under `(console)` outside `admin/` brings its own scroll container.**
 The shell is `h-dvh overflow-hidden` so the inbox can own the full height and

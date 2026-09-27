@@ -1,7 +1,16 @@
-import { fail, lineOf, read, scannable, stripComments, requireAtLeast } from '../lib.mjs';
+import {
+  directiveOf,
+  fail,
+  lineOf,
+  read,
+  scannable,
+  stripComments,
+  requireAtLeast,
+} from '../lib.mjs';
 
 /**
- * A page never imports the database client.
+ * A page never imports the database client, directly or through a module
+ * beside it.
  *
  * A page is where a query is first run in production: no static check reads
  * the SQL a Drizzle builder or a raw `sql` fragment emits, and the `database`
@@ -12,7 +21,15 @@ import { fail, lineOf, read, scannable, stripComments, requireAtLeast } from '..
  * `lib/admin/import-status.ts`, `lib/auth/invites.ts` and the rest); this keeps
  * the next one from being written inline.
  *
- * It checks `db/client` only. A page importing a table from `db/schema` for a
+ * So it reads every module under `app/` that a page can reach, not only the
+ * `page.tsx` files: a helper beside the page is the same query one import away,
+ * and `admin/field-options.ts` was exactly that until #266 (review on #277).
+ * `layout.tsx`, `template.tsx` and `default.tsx` are Server Components too.
+ * Three kinds of module under `app/` are not pages and may hold a query:
+ * server actions (`'use server'`), whose writes are the point of them; route
+ * handlers (`route.ts`); and tests.
+ *
+ * It checks `db/client` only. A module importing a table from `db/schema` for a
  * type, or a vocabulary, runs no query; the client is the thing that does.
  *
  * One page is exempt, by name, and the check fails if the exemption stops being
@@ -31,19 +48,26 @@ const CLIENT_IMPORT = /['"](?:@\/|(?:\.\.?\/)+)db\/client['"]/;
 export function checkPagesDoNotImportTheDatabase() {
   const rule = 'page-db';
 
-  const pages = scannable.filter((f) => /^app\/(?:.*\/)?page\.tsx$/.test(f));
+  const modules = scannable.filter(
+    (f) =>
+      /^app\/.*\.tsx?$/.test(f) &&
+      !/\.test\.tsx?$/.test(f) &&
+      !/(?:^|\/)route\.ts$/.test(f) &&
+      directiveOf(f) !== 'server',
+  );
+  const pages = modules.filter((f) => /(?:^|\/)page\.tsx$/.test(f));
   if (!requireAtLeast(rule, 'app/', pages.length, 40, 'page.tsx files')) return;
 
-  for (const page of pages) {
-    const contents = stripComments(read(page));
+  for (const file of modules) {
+    const contents = stripComments(read(file));
     const match = CLIENT_IMPORT.exec(contents);
 
-    if (EXEMPT.has(page)) {
+    if (EXEMPT.has(file)) {
       if (!match) {
         fail(
           rule,
-          page,
-          `exempt from page-db (${EXEMPT.get(page)}) but no longer imports db/client — remove it from EXEMPT so the exemption cannot cover a query added later`,
+          file,
+          `exempt from page-db (${EXEMPT.get(file)}) but no longer imports db/client — remove it from EXEMPT so the exemption cannot cover a query added later`,
         );
       }
       continue;
@@ -52,8 +76,8 @@ export function checkPagesDoNotImportTheDatabase() {
     if (match) {
       fail(
         rule,
-        `${page}:${lineOf(contents, match.index)}`,
-        'imports db/client — move the query into lib/<domain>/, where a *.db.test.ts can run it, and call that from the page (AGENTS.md, Layout; plans/refactor-in-stages.md §5.4)',
+        `${file}:${lineOf(contents, match.index)}`,
+        'imports db/client — move the query into lib/<domain>/, where a *.db.test.ts can run it, and call that from the page or component (AGENTS.md, Layout; plans/refactor-in-stages.md §5.4)',
       );
     }
   }

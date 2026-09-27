@@ -39,6 +39,45 @@ describe('page-db', () => {
     ]);
   });
 
+  // Review on #277: `admin/field-options.ts` was exactly this until #266 — a
+  // query one import away from three pages.
+  it('refuses a helper module beside a page that imports the client', async () => {
+    const found = await runRule('page-db', {
+      ...PAGES,
+      'app/(console)/admin/teams/queries.ts':
+        "import { db } from '@/db/client';\nexport const listTeams = () => db.select();\n",
+      'app/(console)/admin/teams/page.tsx':
+        "import { listTeams } from './queries';\nexport default async function Page() {\n  return null;\n}\n",
+    });
+
+    expect(found).toEqual([
+      expect.objectContaining({ where: 'app/(console)/admin/teams/queries.ts:1' }),
+    ]);
+  });
+
+  it('refuses a layout that imports the client', async () => {
+    const found = await runRule('page-db', {
+      ...PAGES,
+      'app/(console)/layout.tsx':
+        "import { db } from '@/db/client';\nexport default function Layout({ children }) {\n  return children;\n}\n",
+    });
+
+    expect(found).toEqual([expect.objectContaining({ where: 'app/(console)/layout.tsx:1' })]);
+  });
+
+  it('leaves server actions, route handlers and tests to hold their queries', async () => {
+    const found = await runRule('page-db', {
+      ...PAGES,
+      'app/(console)/teams-actions.ts':
+        "'use server';\n\nimport { db } from '@/db/client';\nexport async function saveTeam() {}\n",
+      'app/api/teams/route.ts':
+        "import { db } from '@/db/client';\nexport async function GET() {\n  return new Response();\n}\n",
+      'app/(console)/teams.test.ts': "import { db } from '@/db/client';\n",
+    });
+
+    expect(found).toEqual([]);
+  });
+
   it('refuses the client reached by a relative path', async () => {
     const found = await runRule('page-db', {
       ...PAGES,
