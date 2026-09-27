@@ -2,6 +2,9 @@ import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { presencePolicy } from '@/db/schema';
 import { DEFAULT_POLICY, type PresencePolicy, type StoredPresencePolicy } from './idle';
+import { logger } from '@/lib/log';
+
+const log = logger('presence');
 
 /**
  * Reading the idle policy, cheaply enough to do it on every request.
@@ -54,7 +57,7 @@ export async function loadPresencePolicy(): Promise<StoredPresencePolicy> {
     //
     // Not cached, so the next request tries again rather than serving defaults
     // for the next thirty seconds.
-    console.error('[presence] could not read the idle policy, using defaults', error);
+    log.error('could not read the idle policy, using defaults', error);
     return UNSET;
   }
 

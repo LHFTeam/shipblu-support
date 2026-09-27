@@ -13,6 +13,9 @@ import {
 } from '@/lib/tickets/outbound';
 import { requesterLocale } from '@/lib/tickets/locale';
 import { pickBody, pickRule, substitute, type AutoResponseRule } from './resolve';
+import { logger } from '@/lib/log';
+
+const log = logger('auto-response');
 
 /**
  * "Thanks — we are closed, and we will reply when we open."
@@ -65,7 +68,7 @@ export async function maybeSendAutoResponse(
   try {
     await send(conversationId, at);
   } catch (error) {
-    console.error(`[auto-response] failed on conversation ${conversationId}`, error);
+    log.error(`failed on conversation ${conversationId}`, error);
   }
 }
 
@@ -162,8 +165,8 @@ async function send(conversationId: string, at: Date): Promise<void> {
   // English first in the log line — the audience is whoever is reading Render's
   // logs, not the customer — falling back to the Arabic name when that is the
   // only one the calendar carries.
-  console.log(
-    `[auto-response] acknowledged #${ticket.number} on ${ticket.channel}` +
+  log.info(
+    `acknowledged #${ticket.number} on ${ticket.channel}` +
       `${holiday ? ` (${holidayName(holiday, 'en') ?? 'holiday'})` : ''}`,
   );
 }

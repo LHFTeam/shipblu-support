@@ -4,6 +4,9 @@ import { GRAPH_BASE, graphTimeout } from '@/lib/meta/graph';
 import { ACCESS_TOKEN_CODE } from './errors';
 import type { WhatsAppTemplateComponent } from './templates';
 import { errorMessage } from '@/lib/errors';
+import { logger } from '@/lib/log';
+
+const log = logger('whatsapp');
 
 /**
  * Meta Cloud API client.
@@ -194,8 +197,8 @@ async function graph<T>(
     // retried to learn the reason; a read is retried as one that did not
     // answer. The same three answers `graph()` in lib/meta/client.ts gives.
     if (response.ok && method !== 'GET') {
-      console.warn(
-        `[whatsapp] ${method} ${path} was accepted with ${response.status}, but its body ` +
+      log.warn(
+        `${method} ${path} was accepted with ${response.status}, but its body ` +
           `never arrived: ${unanswered('WhatsApp API', error, timeoutMs).message}`,
       );
       return null;

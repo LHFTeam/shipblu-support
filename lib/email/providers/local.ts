@@ -8,6 +8,9 @@ import type {
   ParsedInboundEmail,
   SendResult,
 } from '../types';
+import { logger } from '@/lib/log';
+
+const log = logger('email:local');
 
 /**
  * Development driver. Writes outbound mail to `.mail-outbox/` instead of sending
@@ -53,7 +56,7 @@ export class LocalEmailProvider implements EmailProvider {
       'utf8',
     );
 
-    console.log(`[email:local] wrote ${safeName}.json to ${this.outboxDir}`);
+    log.info(`wrote ${safeName}.json to ${this.outboxDir}`);
     return { providerMessageId: id, rfcMessageId: email.messageId, accepted: true };
   }
 

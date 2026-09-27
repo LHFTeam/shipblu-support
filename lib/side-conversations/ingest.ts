@@ -13,6 +13,9 @@ import { classifyAutomation } from '@/lib/email/loop-protection';
 import { resolveThread } from '@/lib/email/threading';
 import type { ParsedInboundEmail } from '@/lib/email/types';
 import { buildAttachmentPath, uploadObject } from '@/lib/storage';
+import { logger } from '@/lib/log';
+
+const log = logger('side-ingest');
 
 /**
  * Filing a reply from a hub, a warehouse or another internal team.
@@ -255,10 +258,7 @@ async function storeAttachments(
         isInline: attachment.isInline,
       });
     } catch (error) {
-      console.error(
-        `[side-ingest] attachment "${attachment.filename}" failed for ${sideMessageId}`,
-        error,
-      );
+      log.error(`attachment "${attachment.filename}" failed for ${sideMessageId}`, error);
     }
   }
 }

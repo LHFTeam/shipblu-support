@@ -22,6 +22,9 @@ import {
   type LoadedPolicy,
   type Priority,
 } from './policy';
+import { logger } from '@/lib/log';
+
+const log = logger('sla');
 
 /**
  * Applying SLA policies to real tickets.
@@ -138,7 +141,7 @@ export async function applySlaOnCreate(conversationId: string): Promise<void> {
       .set({ slaPolicyId: policy.id, ...due })
       .where(eq(conversations.id, conversationId));
   } catch (error) {
-    console.error(`[sla] could not apply a policy to ${conversationId}`, error);
+    log.error(`could not apply a policy to ${conversationId}`, error);
   }
 }
 
@@ -162,7 +165,7 @@ export async function onAgentReply(conversationId: string, at: Date = new Date()
       })
       .where(eq(conversations.id, conversationId));
   } catch (error) {
-    console.error(`[sla] could not record an agent reply on ${conversationId}`, error);
+    log.error(`could not record an agent reply on ${conversationId}`, error);
   }
 }
 
@@ -198,7 +201,7 @@ export async function onCustomerReply(
       })
       .where(eq(conversations.id, conversationId));
   } catch (error) {
-    console.error(`[sla] could not record a customer reply on ${conversationId}`, error);
+    log.error(`could not record a customer reply on ${conversationId}`, error);
   }
 }
 
@@ -266,7 +269,7 @@ export async function onStatusChanged(
       data: { pausedMinutes },
     });
   } catch (error) {
-    console.error(`[sla] could not pause or resume the clock on ${conversationId}`, error);
+    log.error(`could not pause or resume the clock on ${conversationId}`, error);
   }
 }
 
@@ -380,7 +383,7 @@ export async function onGroupChanged(conversationId: string): Promise<void> {
       },
     });
   } catch (error) {
-    console.error(`[sla] could not move the clocks on ${conversationId}`, error);
+    log.error(`could not move the clocks on ${conversationId}`, error);
   }
 }
 

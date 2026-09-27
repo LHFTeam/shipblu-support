@@ -21,6 +21,9 @@ import { matches } from '@/lib/rules/conditions';
 import { conversationFacts } from '@/lib/rules/facts';
 import { onGroupChanged, onStatusChanged } from '@/lib/sla';
 import { parseActions, type Action } from './actions';
+import { logger } from '@/lib/log';
+
+const log = logger('automations');
 
 /**
  * Automation rules — Freshdesk's Dispatch'r, Observer and Supervisor in one
@@ -106,7 +109,7 @@ export async function runAutomations(
 
     return await applyRules(rules, ticket);
   } catch (error) {
-    console.error(`[automations] ${trigger} failed on ${conversationId}`, error);
+    log.error(`${trigger} failed on ${conversationId}`, error);
     return 0;
   }
 }
@@ -131,7 +134,7 @@ export async function applyRules(
         // Isolated per action: a rule that assigns, tags and replies should not
         // lose the assignment because the tag write failed. Loud, though — this
         // is a rule that is not doing what its author asked for.
-        console.error(`[automations] "${rule.name}" could not apply ${action.type}`, error);
+        log.error(`"${rule.name}" could not apply ${action.type}`, error);
       }
     }
 
@@ -379,7 +382,7 @@ async function sendCannedReply(
 
   const canned = rows[0];
   if (!canned) {
-    console.warn(`[automations] "${ruleName}" references a canned response that is gone`);
+    log.warn(`"${ruleName}" references a canned response that is gone`);
     return;
   }
 
@@ -392,12 +395,12 @@ async function sendCannedReply(
   // window.
   const blocked = automatedReplyBlocked(conversation);
   if (blocked) {
-    console.warn(`[automations] "${ruleName}" skipped a reply: ${blocked}`);
+    log.warn(`"${ruleName}" skipped a reply: ${blocked}`);
     return;
   }
 
   if (await alreadyReplied(conversation, ruleName)) {
-    console.warn(`[automations] "${ruleName}" skipped a reply: it has already sent one`);
+    log.warn(`"${ruleName}" skipped a reply: it has already sent one`);
     return;
   }
 
@@ -420,7 +423,7 @@ async function sendCannedReply(
   const chosen = resolveLocale(body, locale);
 
   if (!chosen) {
-    console.warn(`[automations] "${ruleName}" references a canned response with no body`);
+    log.warn(`"${ruleName}" references a canned response with no body`);
     return;
   }
 

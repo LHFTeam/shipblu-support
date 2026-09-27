@@ -1,6 +1,9 @@
 import { hasEnoughContent, normaliseForMatch } from './normalise';
 import { ANCHORED_GRADE, PATTERNS, type PatternRule, disabledRuleKeys, phraseIndex } from './rules';
 import { SPAM_KEY, UNCLASSIFIED_KEY, allCategories } from './taxonomy';
+import { logger } from '@/lib/log';
+
+const log = logger('categorise');
 
 /**
  * Turning one message into the categories it is evidence for.
@@ -108,7 +111,7 @@ function envNumber(name: string, fallback: number): number {
   if (!raw) return fallback;
   const value = Number(raw);
   if (!Number.isFinite(value) || value < 0 || value > 1) {
-    console.warn(`[categorise] ${name}=${raw} is not a number in 0..1; using ${fallback}`);
+    log.warn(`${name}=${raw} is not a number in 0..1; using ${fallback}`);
     return fallback;
   }
   return value;

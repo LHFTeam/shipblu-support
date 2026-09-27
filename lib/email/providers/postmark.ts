@@ -11,6 +11,12 @@ import type {
   SendResult,
 } from '../types';
 import { errorMessage } from '@/lib/errors';
+import { logger } from '@/lib/log';
+
+// Two tags, as before: sending logs as `postmark`, and the inbound webhook's
+// check as `email:postmark`, the source name its route logs deliveries under.
+const log = logger('postmark');
+const inboundLog = logger('email:postmark');
 
 /**
  * Postmark driver — the reference implementation of EmailProvider.
@@ -137,8 +143,8 @@ export class PostmarkEmailProvider implements EmailProvider {
       // transactional mail, so not even their client can fold the two. What is
       // lost is only Postmark's own id, which the message row records and
       // nothing reads.
-      console.warn(
-        `[postmark] send accepted with ${response.status}, but its body never arrived: ` +
+      log.warn(
+        `send accepted with ${response.status}, but its body never arrived: ` +
           `${errorMessage(error)}`,
       );
       text = null;
@@ -182,7 +188,7 @@ export class PostmarkEmailProvider implements EmailProvider {
     // should let the retries through — whether a retry already scheduled picks
     // up a changed URL is not something we have observed.
     if (!this.webhookSecret) {
-      console.error('[email:postmark] EMAIL_WEBHOOK_SECRET is not set — refusing inbound mail');
+      inboundLog.error('EMAIL_WEBHOOK_SECRET is not set — refusing inbound mail');
       return {
         verified: false,
         reason: 'EMAIL_WEBHOOK_SECRET is not set; every delivery is refused',

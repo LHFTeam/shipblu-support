@@ -3,6 +3,9 @@ import { sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import type { categoryMetricsDaily, rootCauseMetricsDaily } from '@/db/schema';
 import type { ReportingContext } from './rollup';
+import { logger } from '@/lib/log';
+
+const log = logger('rollup_metrics');
 
 /**
  * What tickets were about, and why they happened, for one day.
@@ -115,8 +118,8 @@ export async function computeCategoryDay(
     // quiet week.
     const banded = row.assigned_auto + row.assigned_suggested + row.assigned_manual;
     if (banded !== row.tickets_any) {
-      console.error(
-        `[rollup_metrics] ${day} ${row.category_key}/${row.channel}: ` +
+      log.error(
+        `${day} ${row.category_key}/${row.channel}: ` +
           `${banded} banded assignments but ${row.tickets_any} rows`,
       );
     }

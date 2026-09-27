@@ -3,6 +3,9 @@ import { db } from '@/db/client';
 import { agentFocusIntervals, conversationPresence, conversations } from '@/db/schema';
 import type { SessionAgent } from '@/lib/auth/session';
 import { conversationVisibility } from '@/lib/tickets/visibility';
+import { logger } from '@/lib/log';
+
+const log = logger('focus');
 
 /**
  * How long an agent actually had a ticket in front of them.
@@ -115,7 +118,7 @@ export async function recordFocus(agent: SessionAgent, conversationId: string): 
         set: { updatedAt: now },
       });
   } catch (error) {
-    console.error('[focus] could not refresh conversation presence', error);
+    log.error('could not refresh conversation presence', error);
   }
 
   return true;

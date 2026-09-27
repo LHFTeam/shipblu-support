@@ -5,6 +5,9 @@ import { categoriseFromMessage } from '@/lib/categorise/apply';
 import { linkShipmentsFromMessage } from '@/lib/shipments/links';
 import { scheduleSurvey } from '@/lib/csat';
 import { applySlaOnCreate, onCustomerReply } from '@/lib/sla';
+import { logger } from '@/lib/log';
+
+const log = logger('lifecycle');
 
 /**
  * What happens to a ticket after something changes it.
@@ -97,7 +100,7 @@ async function autoAssign(conversationId: string): Promise<void> {
   try {
     await assignConversation(conversationId);
   } catch (error) {
-    console.error(`[lifecycle] auto-assignment failed for conversation ${conversationId}`, error);
+    log.error(`auto-assignment failed for conversation ${conversationId}`, error);
   }
 }
 
@@ -162,7 +165,7 @@ export async function afterMessageStored(message: StoredMessage): Promise<void> 
   try {
     await linkShipmentsFromMessage(message);
   } catch (error) {
-    console.error(`[lifecycle] shipment linking failed for message ${message.messageId}`, error);
+    log.error(`shipment linking failed for message ${message.messageId}`, error);
   }
 
   // Its own try/catch rather than sharing one: a bug in shipment detection must
@@ -172,6 +175,6 @@ export async function afterMessageStored(message: StoredMessage): Promise<void> 
   try {
     await categoriseFromMessage(message, 'notify');
   } catch (error) {
-    console.error(`[lifecycle] categorisation failed for message ${message.messageId}`, error);
+    log.error(`categorisation failed for message ${message.messageId}`, error);
   }
 }
