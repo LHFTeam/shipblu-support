@@ -16,6 +16,7 @@ import { allowEmailDispatch, allowLoginAttempt, clearLoginAttempts } from '@/lib
 import { hashToken } from '@/lib/auth/tokens';
 import { DEFAULT_LOCALE } from '@/lib/kb/locale';
 import { recordSignIn, requestPasswordReset } from '@/lib/portal/accounts';
+import { text } from '@/lib/http/form-data';
 
 export type AuthFormState = { error: string | null };
 
@@ -89,7 +90,7 @@ export async function bootstrapAdmin(
     return { error: 'Setup has already been completed. Sign in instead.' };
   }
 
-  const name = String(formData.get('name') ?? '').trim();
+  const name = text(formData, 'name');
   const email = normaliseEmail(String(formData.get('email') ?? ''));
   const password = String(formData.get('password') ?? '');
 
@@ -121,7 +122,7 @@ export async function acceptInvite(
   formData: FormData,
 ): Promise<AuthFormState> {
   const token = String(formData.get('token') ?? '');
-  const name = String(formData.get('name') ?? '').trim();
+  const name = text(formData, 'name');
   const password = String(formData.get('password') ?? '');
 
   if (!token) return { error: 'This invite link is not valid' };

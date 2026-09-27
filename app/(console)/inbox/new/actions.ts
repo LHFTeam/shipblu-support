@@ -7,6 +7,7 @@ import { getFormBySlug } from '@/lib/forms/queries';
 import { labelsFor, submitForm } from '@/lib/forms/submit';
 import { DEFAULT_LOCALE } from '@/lib/kb/locale';
 import { resolveContact } from '@/lib/tickets/contacts';
+import { text } from '@/lib/http/form-data';
 
 /**
  * Opening a ticket for a customer who reached the team some other way.
@@ -42,7 +43,7 @@ export async function createTicketFromForm(
   const contact = await resolveContact({
     channel: 'email',
     identifier: email,
-    displayName: String(formData.get('requesterName') ?? '').trim() || null,
+    displayName: text(formData, 'requesterName') || null,
   });
 
   const result = await submitForm({
