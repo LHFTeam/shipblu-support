@@ -13,6 +13,7 @@ import { explainMetaSendError, MetaSendRefusal } from '@/lib/meta/errors';
 import type { MetaPlatform } from '@/lib/meta/types';
 import { messagingTag, metaWindowState, type MetaSendAuthor } from '@/lib/meta/window';
 import type { ClaimedJob } from '@/lib/queue';
+import { parseJobPayload } from '@/lib/queue/payloads';
 import { alreadySent } from './already-sent';
 import { subjectGone } from './subject-gone';
 import { metaReplyTarget } from '@/lib/tickets/meta-thread';
@@ -44,8 +45,7 @@ type SendMeta = {
 };
 
 export async function sendMeta(job: ClaimedJob): Promise<void> {
-  const messageId = job.payload.messageId;
-  if (typeof messageId !== 'string') throw new Error('send_meta requires a messageId');
+  const { messageId } = parseJobPayload(job, 'send_meta');
 
   const rows = await db
     .select({ message: messages, conversation: conversations })

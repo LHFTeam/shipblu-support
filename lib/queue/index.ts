@@ -1,6 +1,7 @@
 import { and, eq, inArray, lte, or, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { jobs } from '@/db/schema';
+import type { JobPayload } from './payloads';
 
 export type JobType =
   | 'process_webhook'
@@ -62,14 +63,15 @@ export type EnqueueOptions = {
 
 export type ClaimedJob = typeof jobs.$inferSelect;
 
-export async function enqueue(
-  type: JobType,
-  payload: Record<string, unknown> = {},
+export async function enqueue<T extends JobType>(
+  type: T,
+  payload: JobPayload<T>,
   options: EnqueueOptions = {},
 ): Promise<string | null> {
   const values = {
     type,
-    payload,
+    // Checked against the type by the signature; the column is typed for any job.
+    payload: payload as Record<string, unknown>,
     priority: options.priority ?? 100,
     runAt: options.runAt ?? new Date(),
     maxAttempts: options.maxAttempts ?? 5,
@@ -102,9 +104,9 @@ export async function enqueue(
  * `dedupeKey` above — so the handlers this is used with have to be idempotent
  * themselves.
  */
-export async function enqueueMany(
-  type: JobType,
-  payloads: Record<string, unknown>[],
+export async function enqueueMany<T extends JobType>(
+  type: T,
+  payloads: JobPayload<T>[],
   options: Omit<EnqueueOptions, 'dedupeKey'> = {},
 ): Promise<number> {
   if (payloads.length === 0) return 0;
@@ -114,7 +116,7 @@ export async function enqueueMany(
     .values(
       payloads.map((payload) => ({
         type,
-        payload,
+        payload: payload as Record<string, unknown>,
         priority: options.priority ?? 100,
         runAt: options.runAt ?? new Date(),
         maxAttempts: options.maxAttempts ?? 5,

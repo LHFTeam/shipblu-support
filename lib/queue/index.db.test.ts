@@ -153,8 +153,8 @@ describe('failJob', () => {
 
 describe('reclaimStalledJobs', () => {
   it('returns a job whose worker stopped holding it, and leaves a live one alone', async () => {
-    const stalled = await enqueued('cleanup');
-    const live = await enqueued('rollup_metrics');
+    const stalled = await enqueued('cleanup', {});
+    const live = await enqueued('rollup_metrics', {});
     await claimJobs(2, 'worker-a');
 
     await db

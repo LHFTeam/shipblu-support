@@ -2,6 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { contactIdentities, conversations, messages } from '@/db/schema';
 import type { ClaimedJob } from '@/lib/queue';
+import { parseJobPayload } from '@/lib/queue/payloads';
 import { alreadySent } from './already-sent';
 import { subjectGone } from './subject-gone';
 import { credentialsForPhoneNumberId } from '@/lib/whatsapp/accounts';
@@ -32,10 +33,7 @@ type SendMeta = {
 };
 
 export async function sendWhatsApp(job: ClaimedJob): Promise<void> {
-  const messageId = job.payload.messageId;
-  if (typeof messageId !== 'string') {
-    throw new Error('send_whatsapp requires a messageId');
-  }
+  const { messageId } = parseJobPayload(job, 'send_whatsapp');
 
   const rows = await db
     .select({ message: messages, conversation: conversations })
