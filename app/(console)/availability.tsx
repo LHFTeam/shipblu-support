@@ -1,7 +1,7 @@
 'use client';
 
 import { useActionState } from 'react';
-import { setAcceptingTickets } from './actions';
+import { setAcceptingTickets } from './availability-actions';
 
 /**
  * The agent's own "route work to me" switch, in the console header.

@@ -2,7 +2,7 @@
 
 import { useActionState } from 'react';
 import { Button, ErrorText } from '@/components/ui';
-import { setAgentAvailability, type AvailabilityState } from '../../actions';
+import { setAgentAvailability, type AvailabilityState } from '../../availability-actions';
 
 const INITIAL: AvailabilityState = { error: null };
 
