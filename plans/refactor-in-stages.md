@@ -149,21 +149,10 @@ The session that opened #233–#241 stopped here because of its usage limit. It
 unsubscribed from its PRs and deleted its hourly check-in. The next session must
 subscribe to the open PRs again.
 
-**Open PRs.** CI was green on each head when last checked, except #238, #240 and
-#241, which were pushed last. Check those three first.
-
-- #233 `reopenResolved` (4.2).
-- #235 one `findLiveConversation`. Stacked on #233: after #233 merges, change
-  its base to `main`.
-- #236 `alreadySent`, the send guard (4.4).
-- #237 the backfill keyset loop (4.4).
-- #238 `lib/kb/article-write.ts`, plus the Freshdesk import's first DB test
-  (4.4).
-- #239 typed payloads for the six send jobs. Stacked on #236: after #236
-  merges, change its base to `main`.
-- #240 one `ok()` and a shared `ActionState` (3.12).
-- #241 the FormData readers move to `lib/http/form-data.ts` (3.13).
-- #234 this branch: the claims, the narrowing notes and this handoff.
+**State at 15:20 UTC.** A second session took over at 07:05 and worked
+through the list below. Every PR named in this handoff (#233, #235–#241) is
+merged, and so are #242–#249, which that session opened. No refactor PR is
+open except this one.
 
 **Rules that still hold.**
 
@@ -175,43 +164,28 @@ subscribe to the open PRs again.
   one table-only commit.
 - The requester wants replies in ASD Simplified Technical English (STE100).
 
-**Next work, in this order.**
+**Next work, in this order.** Items 1–4 of the original list are done or
+narrowed; what remains of each is below.
 
-1. **4.4 typed payloads, second family.** Wait for the review of #239 first,
-   because this family uses its API. Add these jobs to `JOB_PAYLOADS` in
-   `lib/queue/payloads.ts`, each with its handler:
-   - `process_webhook`: `webhookEventId`.
-   - `download_media`: a union. Either `source: 'meta'`, `url` and an optional
-     `index` (the handler uses 0 when there is none), or a WhatsApp `mediaId`.
-   - `moderate_meta_comment`: `action` is `hide`, `unhide` or `delete`.
-   - `fetch_meta_profile`: `platform` is `facebook` or `instagram`, and `force`
-     is optional.
-   - `sync_shipment`: `trackingNumber` can be a string or a number, and becomes
-     a string. Move its comment into the schema with the rule.
-   - `send_csat`: `conversationId`.
-2. **4.4 typed payloads, third family**: the hand-run jobs that take options.
-   These are the backfills, `normalise_kb_formatting`, `seed_console_handbook`,
-   `rollup_metrics`, `sync_stale_shipments` and `subscribe_meta_webhooks`.
-   - The schemas must accept the booleans and numbers that `run-job.ts` makes.
-   - **The PR must say this:** today a handler tests `payload.dryRun === true`,
-     so `dryRun=1` or `dryRun=yes` does a real run. `z.boolean()` makes those
-     values fail, and nothing is written.
-3. **4.4 sweeps.** This item probably has low value, because
-   `presence-sweep.ts` already keeps its logic out of the handler. Read
-   `assign-sweep.ts` and `sla-sweep.ts`, then either do the item or record why
-   not, as the 4.3 note does.
-4. **3.13 adoption**, one action file per PR. Replace only an exact
-   `String(formData.get(k) ?? '').trim()` with `text(formData, k)`. A read
-   without `.trim()` stays as it is: passwords must never be trimmed. Counts of
-   inline reads:
-   - `kb/actions.ts`: 16;
-   - `contacts/actions.ts`: 13;
-   - `admin/actions.ts`: 16;
-   - `inbox/new/actions.ts`: 3;
-   - the three help-centre action files: 16;
-   - `(console)/actions.ts`: 46. This is a hot file, so do it last.
-5. **Stage 3 logger**, `lib/log.ts`, as the "Logging" section describes.
-6. Then the **⛳ gate**: check in with the requester before Stage 5.
+1. **4.4 typed payloads.** The second family merged as #247 and three jobs of
+   the third as #248. Five jobs remain, because #237 and #238 held their files
+   when #248 was written: `backfill_shipment_links`,
+   `backfill_message_locations`, `backfill_categorise_ai`,
+   `normalise_kb_formatting` and `seed_console_handbook`. **The PR must say
+   this:** today a handler tests `payload.dryRun === true`, so `dryRun=1` or
+   `dryRun=yes` does a real run. `z.boolean()` makes those values fail, and
+   nothing is written.
+2. **4.4 sweeps** is done: see "Sweeps, narrowed in #242 and #243".
+3. **3.13 adoption** merged as #244–#246. The counts in the old list were of
+   every inline read; only the exact `String(formData.get(k) ?? '').trim()`
+   reads change, and two files still have some:
+   - `(console)/actions.ts`: 5. A hot file, so a PR of its own.
+   - `admin/settings-actions.ts`: 2, in `saveInternalRecipient`.
+4. **Stage 3 logger.** `lib/log.ts` merged as #249, with `worker/index.ts` and
+   seven handlers. The rest of `worker/` follows, then `lib/`, then `app/`,
+   each message word for word.
+5. Then the **⛳ gate**: the requester was asked on 2026-09-27 whether to start
+   Stage 5, and has not answered yet.
 
 **Findings outside the plan.** Each one is queued as a suggested task for the
 requester, and neither is fixed.
@@ -229,6 +203,9 @@ requester, and neither is fixed.
   checkout.
 - The DB tier needs `TEST_DATABASE_URL`, and the database must be migrated and
   seeded first.
+- Keeping the cluster's data directory out of `/tmp/claude-0` altogether
+  (for example under `/var/lib/postgresql`, owned by `postgres`) avoids the
+  permission trap above.
 
 ## Ground rules for every PR
 
