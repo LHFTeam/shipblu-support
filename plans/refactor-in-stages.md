@@ -148,6 +148,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 5.1   | `settings-actions.ts`: skills to recipients      | #265            | merged  |
 | 5.1   | `settings-actions.ts`: the last three, deleted   | #270            | merged  |
 | 5.1   | `admin/actions.ts` split by domain, deleted      | #275            | merged  |
+| 5.1   | `forms-shared.tsx` onto `lib/http/action-state`  | #279            | open    |
 | 5.2   | Console guards move to `lib/tickets`             | #260            | merged  |
 | 5.2   | `availability-actions.ts`                        | #268            | merged  |
 | 5.2   | `category-actions.ts`                            | #271            | merged  |
@@ -245,11 +246,12 @@ This replaces three of the rules in the handoff above.
 until it merges: #277 (5.4: the `page-db` rule, which holds
 `scripts/ci/rules.mjs`, `scripts/ci/rules/page-db*.mjs` and `AGENTS.md`) and
 #278 (5.2: `side-conversation-actions.ts`, which holds `(console)/actions.ts`
-and `inbox/[number]/side-conversations.tsx`).
+and `inbox/[number]/side-conversations.tsx`) and #279 (5.1: which holds
+`admin/forms-shared.tsx` and `admin/agents/forms.tsx`).
 
 **Next work.**
 
-1. 5.1: move `forms-shared.tsx` onto `lib/http/action-state`.
+1. 5.1: done once #279 merges.
 2. 5.4: done once #277 merges.
 3. 5.2: the two siblings left after #278 (`meta-actions.ts`,
    `reply-actions.ts`),
