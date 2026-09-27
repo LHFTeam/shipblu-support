@@ -4,6 +4,9 @@ import { conversationEvents, csatSurveys } from '@/db/schema';
 import { generateToken, hashToken } from '@/lib/auth/tokens';
 import { publicBaseUrl } from '@/lib/kb/site';
 import { enqueue } from '@/lib/queue';
+import { logger } from '@/lib/log';
+
+const log = logger('csat');
 
 /**
  * Customer satisfaction surveys.
@@ -41,7 +44,7 @@ export async function scheduleSurvey(conversationId: string): Promise<void> {
       },
     );
   } catch (error) {
-    console.error(`[csat] could not schedule a survey for ${conversationId}`, error);
+    log.error(`could not schedule a survey for ${conversationId}`, error);
   }
 }
 

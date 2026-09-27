@@ -3,6 +3,9 @@ import { alias } from 'drizzle-orm/pg-core';
 import { db } from '@/db/client';
 import { channels, whatsappAccounts, whatsappTemplates } from '@/db/schema';
 import { env } from '@/lib/env';
+import { logger } from '@/lib/log';
+
+const log = logger('whatsapp');
 
 /**
  * Which WhatsApp Business Account a number belongs to, and the token that talks
@@ -268,7 +271,7 @@ export async function ensureEnvironmentAccount(): Promise<WhatsAppAccount | null
   try {
     await adoptUnassigned(account);
   } catch (error) {
-    console.error(`[whatsapp] adopting unassigned rows for ${account.name} failed`, error);
+    log.error(`adopting unassigned rows for ${account.name} failed`, error);
   }
 
   return account;
@@ -310,9 +313,7 @@ async function insertEnvironmentAccount(wabaId: string): Promise<WhatsAppAccount
     .returning(ACCOUNT_COLUMNS);
 
   if (inserted[0]) {
-    console.log(
-      `[whatsapp] adopted WHATSAPP_WABA_ID ${wabaId} as business account ${inserted[0].id}`,
-    );
+    log.info(`adopted WHATSAPP_WABA_ID ${wabaId} as business account ${inserted[0].id}`);
     return inserted[0];
   }
 
@@ -321,8 +322,8 @@ async function insertEnvironmentAccount(wabaId: string): Promise<WhatsAppAccount
   // notice that the environment's WABA never became a row.
   const raced = await accountForWabaId(wabaId);
   if (!raced) {
-    console.warn(
-      `[whatsapp] could not adopt WHATSAPP_WABA_ID ${wabaId}: a business account with the ` +
+    log.warn(
+      `could not adopt WHATSAPP_WABA_ID ${wabaId}: a business account with the ` +
         `same name already exists. Rename it under Settings → Channels, or connect this ` +
         `WABA there by hand.`,
     );
@@ -412,8 +413,8 @@ async function adoptUnassigned(account: WhatsAppAccount): Promise<void> {
     .returning({ id: whatsappTemplates.id });
 
   if (channelRows.length || templateRows.length || superseded.length) {
-    console.log(
-      `[whatsapp] ${account.name} adopted ${channelRows.length} unassigned channel(s) and ` +
+    log.info(
+      `${account.name} adopted ${channelRows.length} unassigned channel(s) and ` +
         `${templateRows.length} unassigned template(s), and removed ${superseded.length} ` +
         `unassigned template(s) the sync had already replaced`,
     );

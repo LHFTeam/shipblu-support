@@ -8,6 +8,9 @@ import { defaultHours, ticketHours, type HoursCatalog } from '@/lib/hours/resolv
 import { loadPolicies, type LoadedPolicy } from '@/lib/sla';
 import { readOnlyChannels } from '@/lib/tickets/channel-policy';
 import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
+import { logger } from '@/lib/log';
+
+const log = logger('rollup');
 
 /**
  * One day of figures, computed from the source tables.
@@ -195,7 +198,7 @@ export async function computeDay(
 ): Promise<Slice[]> {
   const start = DateTime.fromISO(day, { zone });
   if (!start.isValid) {
-    console.warn(`[rollup] ignoring an unparseable day "${day}"`);
+    log.warn(`ignoring an unparseable day "${day}"`);
     return [];
   }
 

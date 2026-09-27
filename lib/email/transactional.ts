@@ -4,6 +4,7 @@ import { formatMessageId } from '@/lib/email/threading';
 import type { NotificationEmail } from '@/lib/email/notify';
 import type { OutboundEmail } from '@/lib/email/types';
 import { env, replyDomain } from '@/lib/env';
+import { logger } from '@/lib/log';
 
 /**
  * Puts one composed, ticket-less email on the wire.
@@ -49,5 +50,5 @@ export async function sendTransactionalEmail(
   // The recipient and the Message-ID, never the body: these messages carry
   // one-time links, and a log line is the one place a credential outlives the
   // thing it was minted for.
-  console.log(`[${label}] sent ${formatMessageId(outbound.messageId)} to ${email.to}`);
+  logger(label).info(`sent ${formatMessageId(outbound.messageId)} to ${email.to}`);
 }

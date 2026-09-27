@@ -7,6 +7,9 @@ import { directMessageRequest } from './send';
 import { GRAPH_BASE, graphTimeout, INSTAGRAM_GRAPH_BASE } from './graph';
 import type { MetaPlatform } from './types';
 import { errorMessage } from '@/lib/errors';
+import { logger } from '@/lib/log';
+
+const log = logger('meta');
 
 /**
  * Graph API client for Messenger and Instagram.
@@ -243,8 +246,8 @@ async function graph<T>(
       to learn the reason; a read is retried as a request that did not answer.
     */
     if (response.ok && init.method !== 'GET') {
-      console.warn(
-        `[meta] ${platform} via ${connection} ${init.method} ${url.host}/${path} was accepted ` +
+      log.warn(
+        `${platform} via ${connection} ${init.method} ${url.host}/${path} was accepted ` +
           `with ${response.status}, but its body never arrived: ${unanswered(error).message}`,
       );
       return null as T;
@@ -289,8 +292,8 @@ async function graph<T>(
     // Graph declines. Without it a log line cannot be read at all — the same
     // request, the same error, two different fixes.
     if (!init.quiet) {
-      console.warn(
-        `[meta] ${platform} via ${connection} ${init.method} ${url.host}/${path} failed with ` +
+      log.warn(
+        `${platform} via ${connection} ${init.method} ${url.host}/${path} failed with ` +
           `${response.status}: ${text.slice(0, 1000)}`,
       );
     }

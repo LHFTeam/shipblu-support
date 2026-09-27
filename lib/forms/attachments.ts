@@ -1,6 +1,9 @@
 import { db } from '@/db/client';
 import { attachments } from '@/db/schema';
 import { buildAttachmentPath, uploadObject } from '@/lib/storage';
+import { logger } from '@/lib/log';
+
+const log = logger('forms');
 
 /**
  * Uploads the files and files them against the ticket's first message.
@@ -48,7 +51,7 @@ export async function storeFormAttachments(input: {
 
       stored += 1;
     } catch (error) {
-      console.error(`[forms] could not store ${file.name} on ${input.conversationId}`, error);
+      log.error(`could not store ${file.name} on ${input.conversationId}`, error);
       failed.push(file.name);
     }
   }

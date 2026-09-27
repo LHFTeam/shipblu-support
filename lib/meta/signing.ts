@@ -1,4 +1,7 @@
 import type { MetaConnection } from './connection';
+import { logger } from '@/lib/log';
+
+const log = logger('webhook:meta');
 
 /**
  * Which app secret an inbound Meta delivery is signed with.
@@ -154,8 +157,8 @@ export function noteVerifyingSecret(
   if (noted.has(key)) return;
 
   noted.add(key);
-  console.log(
-    `[webhook:meta] instagram ${envelope} deliveries are verifying with ${candidate.name} ` +
+  log.info(
+    `instagram ${envelope} deliveries are verifying with ${candidate.name} ` +
       `— ${candidate.connection}`,
   );
 }

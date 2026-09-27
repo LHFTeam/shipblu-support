@@ -3,6 +3,9 @@ import { db } from '@/db/client';
 import { agentPresenceIntervals, agents } from '@/db/schema';
 import { enqueue } from '@/lib/queue';
 import { HEARTBEAT_TTL_MS } from './eligibility';
+import { logger } from '@/lib/log';
+
+const log = logger('presence');
 
 /** Who turned the switch off — `null` is only ever "they are accepting". */
 export type AvailabilityReason = 'self' | 'idle' | 'supervisor';
@@ -218,7 +221,7 @@ async function record(agentId: string, accepting: boolean): Promise<void> {
 
     await open(agentId, accepting, now);
   } catch (error) {
-    console.error('[presence] could not record an interval', error);
+    log.error('could not record an interval', error);
   }
 }
 
@@ -228,7 +231,7 @@ async function open(agentId: string, accepting: boolean, at: Date): Promise<void
       .insert(agentPresenceIntervals)
       .values({ agentId, accepting, startedAt: at, lastBeatAt: at });
   } catch (error) {
-    console.error('[presence] could not open an interval', error);
+    log.error('could not open an interval', error);
   }
 }
 
@@ -242,7 +245,7 @@ async function close(agentId: string, at: Date): Promise<void> {
         and(eq(agentPresenceIntervals.agentId, agentId), isNull(agentPresenceIntervals.endedAt)),
       );
   } catch (error) {
-    console.error('[presence] could not close an interval', error);
+    log.error('could not close an interval', error);
   }
 }
 
@@ -268,7 +271,7 @@ async function requestSweep(): Promise<void> {
   } catch (error) {
     // Presence is worth recording even when the queue is unreachable; the cron
     // will pick the tickets up on its own schedule.
-    console.error('[presence] could not enqueue assign_sweep', error);
+    log.error('could not enqueue assign_sweep', error);
   }
 }
 

@@ -11,6 +11,9 @@ import {
 import { normaliseTrackingNumber } from './format';
 import { fetchDeliveryOrder } from './platform';
 import { currentEstimateFor, syncShipment } from './sync';
+import { logger } from '@/lib/log';
+
+const log = logger('track');
 
 /**
  * Answering "where is my parcel" for somebody who is not signed in.
@@ -118,8 +121,8 @@ async function readThrough(canonical: string): Promise<PublicTracking | null> {
     // Logged rather than surfaced: the customer gets the page's ordinary "no
     // status yet", which is true from where they are standing, and the operator
     // gets the reason.
-    console.warn(
-      `[track] could not read ${canonical} from the platform: ${
+    log.warn(
+      `could not read ${canonical} from the platform: ${
         error instanceof Error ? error.message : error
       }`,
     );

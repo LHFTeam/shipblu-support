@@ -13,6 +13,9 @@ import {
 } from '@/db/schema';
 import { detectShipmentRefs, shipmentPatterns } from './detect';
 import { normaliseSbid, normaliseTrackingNumber } from './format';
+import { logger } from '@/lib/log';
+
+const log = logger('shipments');
 
 /**
  * Writing the links between conversations, shipments and shipping accounts.
@@ -164,7 +167,7 @@ export async function upsertShipmentStub(trackingNumber: string): Promise<string
     try {
       await enqueue('sync_shipment', { shipmentId });
     } catch (error) {
-      console.error(`[shipments] could not queue a sync for ${canonical}`, error);
+      log.error(`could not queue a sync for ${canonical}`, error);
     }
     return shipmentId;
   }

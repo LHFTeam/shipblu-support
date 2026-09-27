@@ -15,6 +15,9 @@ import type { MetaPlatform } from '@/lib/meta/types';
 import { buildAvatarPath, isStorableAvatarType, uploadObject } from '@/lib/storage';
 import { applyChannelProfile } from '@/lib/tickets/contacts';
 import { errorMessage } from '@/lib/errors';
+import { logger } from '@/lib/log';
+
+const log = logger('profile_refresh');
 
 /**
  * Putting a name and a face on a Facebook or Instagram customer.
@@ -219,23 +222,18 @@ async function storeAvatar(
     }));
   } catch (error) {
     if (error instanceof MetaContentTooLargeError) {
-      console.warn(
-        `[profile_refresh] ${contactId} avatar is over ${MAX_AVATAR_BYTES} bytes, not stored`,
-      );
+      log.warn(`${contactId} avatar is over ${MAX_AVATAR_BYTES} bytes, not stored`);
       return { path: existingPath, retryable: false };
     }
 
-    console.warn(
-      `[profile_refresh] ${contactId} avatar download failed, keeping the name: ` +
-        `${errorMessage(error)}`,
-    );
+    log.warn(`${contactId} avatar download failed, keeping the name: ` + `${errorMessage(error)}`);
     // Keeps whatever was already on file rather than blanking a working picture
     // because one refresh could not reach the CDN.
     return { path: existingPath, retryable: true };
   }
 
   if (!isStorableAvatarType(contentType)) {
-    console.warn(`[profile_refresh] ${contactId} avatar is ${contentType}, not stored`);
+    log.warn(`${contactId} avatar is ${contentType}, not stored`);
     return { path: existingPath, retryable: false };
   }
 
@@ -244,7 +242,7 @@ async function storeAvatar(
     return { path: stored.path, retryable: false };
   } catch (error) {
     // Our own storage being unavailable is the most retryable failure here.
-    console.warn(`[profile_refresh] ${contactId} avatar upload failed: ${errorMessage(error)}`);
+    log.warn(`${contactId} avatar upload failed: ${errorMessage(error)}`);
     return { path: existingPath, retryable: true };
   }
 }

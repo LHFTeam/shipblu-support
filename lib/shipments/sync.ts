@@ -10,6 +10,9 @@ import {
   type FetchOptions,
 } from './platform';
 import { stageDisplay } from './status';
+import { logger } from '@/lib/log';
+
+const log = logger('shipments');
 
 /**
  * Bringing one shipment up to date with the delivery platform.
@@ -184,8 +187,8 @@ export async function currentEstimateFor(
     if (!estimate) return null;
 
     if (estimate.trackingNumber && estimate.trackingNumber !== order.trackingNumber) {
-      console.error(
-        `[shipments] order ${order.platformId} answers for ${estimate.trackingNumber}, not ` +
+      log.error(
+        `order ${order.platformId} answers for ${estimate.trackingNumber}, not ` +
           `${order.trackingNumber} — not storing an estimate`,
       );
       return null;
@@ -193,8 +196,8 @@ export async function currentEstimateFor(
 
     return estimate.date;
   } catch (error) {
-    console.warn(
-      `[shipments] could not read the current estimate for ${order.trackingNumber}: ${
+    log.warn(
+      `could not read the current estimate for ${order.trackingNumber}: ${
         error instanceof Error ? error.message : error
       }`,
     );

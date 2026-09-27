@@ -18,6 +18,9 @@ import { resolveContact } from './contacts';
 import { afterInboundMessage, afterMessageStored } from './lifecycle';
 import { reopenResolved } from './reopen';
 import { requireDefaultOpenStatusId } from './statuses';
+import { logger } from '@/lib/log';
+
+const log = logger('ingest');
 
 export type IngestResult = {
   conversationId: string;
@@ -48,7 +51,7 @@ export async function ingestInboundEmail(email: ParsedInboundEmail): Promise<Ing
   // from our own replies, forever.
   const ourAddresses = [env().EMAIL_FROM_ADDRESS].filter((a): a is string => Boolean(a));
   if (ourAddresses.length && isSelfAddressed(email, ourAddresses)) {
-    console.warn(`[ingest] dropping self-addressed mail from ${email.from.address}`);
+    log.warn(`dropping self-addressed mail from ${email.from.address}`);
     return null;
   }
 
@@ -325,7 +328,7 @@ async function storeAttachments(
     } catch (error) {
       // One bad attachment must not lose the message it came with; the body is
       // already committed and an agent can ask the customer to resend.
-      console.error(`[ingest] attachment "${attachment.filename}" failed for ${messageId}`, error);
+      log.error(`attachment "${attachment.filename}" failed for ${messageId}`, error);
     }
   }
 }

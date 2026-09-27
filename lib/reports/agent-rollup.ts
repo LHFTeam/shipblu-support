@@ -27,6 +27,9 @@ import {
   type Span,
 } from './intervals';
 import type { ReportingContext } from './rollup';
+import { logger } from '@/lib/log';
+
+const log = logger('agent-rollup');
 
 /**
  * One day of agent-productivity figures.
@@ -165,7 +168,7 @@ export async function computeAgentDay(
 ): Promise<AgentDay[]> {
   const start = DateTime.fromISO(day, { zone });
   if (!start.isValid) {
-    console.warn(`[agent-rollup] ignoring an unparseable day "${day}"`);
+    log.warn(`ignoring an unparseable day "${day}"`);
     return [];
   }
 
