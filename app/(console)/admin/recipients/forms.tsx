@@ -2,7 +2,7 @@
 
 import { Badge, Field, Input, Select, Textarea, Toggle } from '@/components/ui';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
-import { deleteInternalRecipient, saveInternalRecipient } from '../settings-actions';
+import { deleteInternalRecipient, saveInternalRecipient } from './actions';
 import type { InternalRecipient } from '@/lib/side-conversations/queries';
 
 function Fields({ recipient }: { recipient?: InternalRecipient }) {
