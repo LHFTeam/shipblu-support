@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Badge, Field, Input, Select, Toggle } from '@/components/ui';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
-import { deleteStatus, saveStatus } from '../settings-actions';
+import { deleteStatus, saveStatus } from './actions';
 
 type Status = {
   id: string;

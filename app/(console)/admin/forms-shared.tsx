@@ -4,7 +4,7 @@ import { useActionState, useEffect, useState, type ReactNode } from 'react';
 import { useFormStatus } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { Button, Card, ErrorText } from '@/components/ui';
-import type { SettingsState } from './settings-actions';
+import type { SettingsState } from './settings-shared';
 
 /**
  * The shape every admin editor shares: a disclosure that opens a form, submits

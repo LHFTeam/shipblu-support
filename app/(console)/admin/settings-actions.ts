@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { and, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   agents,
@@ -11,11 +11,9 @@ import {
   businessHours,
   cannedResponses,
   holidays,
-  locations,
   slaPolicies,
   ticketFields,
   ticketForms,
-  ticketStatuses,
   groups,
   conversations,
   internalRecipients,
@@ -28,21 +26,15 @@ import {
 import type { SlaTargets, TicketFieldValidation, WeeklySchedule } from '@/db/schema/config';
 import { requirePermission } from '@/lib/auth/guard';
 import { textToHtml } from '@/lib/html/sanitize';
-import { ok, type ActionState } from '@/lib/http/action-state';
+import { ok } from '@/lib/http/action-state';
 import { int, optionalMinutes, optionalNumber, text, uuidField } from '@/lib/http/form-data';
-import { looksLikeEmail, normaliseEmail } from '@/lib/auth/normalise';
 import { parseActions } from '@/lib/automations/actions';
-import {
-  isValidLocationCode,
-  normaliseLocationCode,
-  LOCATION_CODE_MAX,
-} from '@/lib/locations/format';
 import { parseFormElements } from '@/lib/forms/elements';
 import { forgetHoursCatalog } from '@/lib/hours/catalog';
 import { formsUsingField } from '@/lib/forms/queries';
 import { slugify } from '@/lib/kb/slug';
 import { parseCondition } from '@/lib/rules/conditions';
-import { isPriority, isStatusCategory, PRIORITIES } from '@/lib/tickets/vocabulary';
+import { isPriority, PRIORITIES } from '@/lib/tickets/vocabulary';
 import { parseOptionLines, type TicketFieldDef } from '@/lib/tickets/custom-fields';
 import { listAllTicketFields } from '@/lib/tickets/lookups';
 import { PHRASE_GROUPS } from '@/lib/shipments/status';
@@ -51,6 +43,7 @@ import { validatePolicy } from '@/lib/presence/idle';
 import { savePresencePolicy } from '@/lib/presence/policy';
 import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
 import { errorMessage } from '@/lib/errors';
+import { GONE, refresh, type SettingsState } from './settings-shared';
 
 /**
  * Everything the admin screens write.
@@ -67,130 +60,6 @@ import { errorMessage } from '@/lib/errors';
  * than deleted when it is in use, because deleting it would either orphan the
  * ticket or take it with it.
  */
-
-export type SettingsState = ActionState;
-
-function refresh(path: string) {
-  revalidatePath(path);
-}
-
-/**
- * What a save answers when the row it names cannot exist. Every save and delete
- * below takes the row's `id` from the form, and passing it straight to a query
- * turned a malformed one into a 22P02 thrown out of the action — a blank crash
- * where the form promises a sentence. An empty id on a save still means "create".
- */
-const GONE = 'That no longer exists — reload the page and try again';
-
-// --- Groups -----------------------------------------------------------------
-
-export async function saveGroup(_state: SettingsState, formData: FormData): Promise<SettingsState> {
-  await requirePermission('admin.groups');
-
-  const id = uuidField(formData, 'id');
-  if (id === undefined) return { error: GONE };
-  const name = text(formData, 'name');
-  const description = text(formData, 'description') || null;
-
-  // Null means "work the default schedule" rather than "no hours at all", which
-  // is why an empty select clears the override instead of being rejected.
-  const businessHoursId = text(formData, 'businessHoursId') || null;
-
-  if (!name) return { error: 'Give the group a name' };
-
-  if (businessHoursId) {
-    const schedule = await db
-      .select({ id: businessHours.id })
-      .from(businessHours)
-      .where(eq(businessHours.id, businessHoursId))
-      .limit(1);
-    if (!schedule.length) return { error: 'That schedule no longer exists' };
-  }
-
-  const strategy = text(formData, 'assignmentStrategy') || 'manual';
-  if (!['manual', 'round_robin', 'load_balanced'].includes(strategy)) {
-    return { error: 'Unknown assignment strategy' };
-  }
-
-  const escalateToAgentId = text(formData, 'escalateToAgentId') || null;
-  if (escalateToAgentId) {
-    const target = await db
-      .select({ id: agents.id })
-      .from(agents)
-      .where(and(eq(agents.id, escalateToAgentId), eq(agents.isActive, true)))
-      .limit(1);
-    if (!target.length) return { error: 'That escalation contact is not an active agent' };
-  }
-
-  const assignment = {
-    assignmentStrategy: strategy as 'manual' | 'round_robin' | 'load_balanced',
-    // The whole assignment block is hidden when the strategy is manual, so the
-    // browser submits none of its fields. Reading them anyway would clear an
-    // admin's caps and timeouts every time they renamed the group; a group put
-    // back on manual keeps its settings, waiting for the day it comes off again.
-    ...(strategy === 'manual'
-      ? {}
-      : {
-          matchSkills: text(formData, 'matchSkills') === 'on',
-          skillTimeoutMins: optionalMinutes(formData, 'skillTimeoutMins'),
-          defaultMaxOpenTickets: optionalMinutes(formData, 'defaultMaxOpenTickets'),
-          assignWithinHoursOnly: text(formData, 'assignWithinHoursOnly') === 'on',
-          reclaimAfterMins: optionalMinutes(formData, 'reclaimAfterMins'),
-        }),
-    escalateToAgentId,
-    escalateAfterMins: optionalMinutes(formData, 'escalateAfterMins'),
-  };
-
-  if (id) {
-    await db
-      .update(groups)
-      .set({ name, description, businessHoursId, ...assignment, updatedAt: new Date() })
-      .where(eq(groups.id, id));
-  } else {
-    const existing = await db.select({ id: groups.id }).from(groups).where(eq(groups.name, name));
-    if (existing.length) return { error: 'A group with that name already exists' };
-    await db.insert(groups).values({ name, description, businessHoursId, ...assignment });
-  }
-
-  // A group's hours are the arithmetic behind every due date on its tickets, so
-  // the SLA and reports pages are showing stale wording until they re-read.
-  refresh('/admin/groups');
-  // The catalogue is memoised for thirty seconds and a due date is computed
-  // from it, so the process that took the edit drops its copy now rather than
-  // serving a stale schedule to the next SLA calculation.
-  forgetHoursCatalog();
-  refresh('/admin/hours');
-  return ok();
-}
-
-export async function deleteGroup(
-  _state: SettingsState,
-  formData: FormData,
-): Promise<SettingsState> {
-  await requirePermission('admin.groups');
-  const id = uuidField(formData, 'id');
-  if (!id) return { error: 'Nothing to delete' };
-
-  // Tickets keep a group id; deleting one out from under them would leave the
-  // inbox filtering on a group nobody can name.
-  const inUse = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(conversations)
-    .where(eq(conversations.groupId, id));
-
-  if ((inUse[0]?.count ?? 0) > 0) {
-    return { error: `That group is on ${inUse[0]!.count} ticket(s). Reassign them first.` };
-  }
-
-  await db.delete(groups).where(eq(groups.id, id));
-  refresh('/admin/groups');
-  // Same reason as `saveGroup`, and the easier one to forget: the catalogue
-  // holds `groups.business_hours_id` as its override map, so a deleted group
-  // that carried a schedule keeps resolving to it for the rest of the TTL, and
-  // any due date computed in that window comes from a row that is gone.
-  forgetHoursCatalog();
-  return ok();
-}
 
 // --- Presence policy ---------------------------------------------------------
 
@@ -249,181 +118,6 @@ function minutesOrOff(formData: FormData, key: string): number | null | 'not_a_n
 
   const value = Number(raw);
   return Number.isFinite(value) ? value : 'not_a_number';
-}
-
-// --- Locations --------------------------------------------------------------
-
-/**
- * ShipBlu's own locations.
- *
- * Both identifiers are normalised before the uniqueness check, so `cai-1` and
- * `CAI-1` collide instead of becoming two hubs — and they are checked here, with
- * a sentence naming the location already using them, rather than left to the
- * unique index. A 23505 reaching the form is a stack trace where an explanation
- * belongs, and "which location has that code?" is the question an admin
- * entering sixteen of them actually has.
- */
-export async function saveLocation(
-  _state: SettingsState,
-  formData: FormData,
-): Promise<SettingsState> {
-  await requirePermission('admin.locations');
-
-  const id = uuidField(formData, 'id');
-  if (id === undefined) return { error: GONE };
-  const name = text(formData, 'name');
-  const code = normaliseLocationCode(text(formData, 'code'));
-  const email = normaliseEmail(text(formData, 'email'));
-  const isActive = formData.get('isActive') === 'on';
-
-  if (!name) return { error: 'Give the location a name' };
-  if (!isValidLocationCode(code)) {
-    return {
-      error: `A code is 2 to ${LOCATION_CODE_MAX} letters, digits or hyphens — for example CAI-1`,
-    };
-  }
-  if (!looksLikeEmail(email)) return { error: "Enter the location's email address" };
-
-  const clash = await db
-    .select({
-      id: locations.id,
-      name: locations.name,
-      code: locations.code,
-      email: locations.email,
-    })
-    .from(locations)
-    .where(or(eq(locations.code, code), eq(locations.email, email)));
-
-  const other = clash.find((row) => row.id !== id);
-  if (other) {
-    return {
-      error:
-        other.code === code
-          ? `${other.name} already uses the code ${code}`
-          : `${other.name} already uses ${email}`,
-    };
-  }
-
-  if (id) {
-    await db
-      .update(locations)
-      .set({ name, code, email, isActive, updatedAt: new Date() })
-      .where(eq(locations.id, id));
-  } else {
-    await db.insert(locations).values({ name, code, email, isActive });
-  }
-
-  refresh('/admin/locations');
-  return ok();
-}
-
-/**
- * Deletes a location outright.
- *
- * Safe today only because nothing references a location yet: no agent carries
- * one, no ticket is attributed to one. The moment something does, this needs the
- * in-use guard `deleteGroup` has — and `is_active` is already the right answer
- * for a hub that has closed but whose code appears in history.
- */
-export async function deleteLocation(
-  _state: SettingsState,
-  formData: FormData,
-): Promise<SettingsState> {
-  await requirePermission('admin.locations');
-  const id = uuidField(formData, 'id');
-  if (!id) return { error: 'Nothing to delete' };
-
-  await db.delete(locations).where(eq(locations.id, id));
-  refresh('/admin/locations');
-  return ok();
-}
-
-// --- Ticket statuses --------------------------------------------------------
-
-export async function saveStatus(
-  _state: SettingsState,
-  formData: FormData,
-): Promise<SettingsState> {
-  await requirePermission('admin.fields');
-
-  const id = uuidField(formData, 'id');
-  if (id === undefined) return { error: GONE };
-  const name = text(formData, 'name');
-  const category = text(formData, 'category');
-  const stopsSlaClock = formData.get('stopsSlaClock') === 'on';
-  const visibleToCustomer = formData.get('visibleToCustomer') === 'on';
-  const customerLabel = text(formData, 'customerLabel') || null;
-  const position = int(formData, 'position');
-  const isDefault = formData.get('isDefault') === 'on';
-
-  if (!name) return { error: 'Give the status a name' };
-  if (!isStatusCategory(category)) {
-    return { error: 'Pick a category' };
-  }
-
-  const values = {
-    name,
-    category,
-    stopsSlaClock,
-    visibleToCustomer,
-    customerLabel,
-    position,
-    isDefault,
-  };
-
-  await db.transaction(async (tx) => {
-    // Exactly one default per category, or ingest picks arbitrarily between them.
-    if (isDefault) {
-      await tx
-        .update(ticketStatuses)
-        .set({ isDefault: false })
-        .where(
-          and(
-            eq(ticketStatuses.category, values.category),
-            id ? ne(ticketStatuses.id, id) : sql`true`,
-          ),
-        );
-    }
-
-    if (id) {
-      await tx.update(ticketStatuses).set(values).where(eq(ticketStatuses.id, id));
-    } else {
-      await tx.insert(ticketStatuses).values(values);
-    }
-  });
-
-  refresh('/admin/statuses');
-  return ok();
-}
-
-export async function deleteStatus(
-  _state: SettingsState,
-  formData: FormData,
-): Promise<SettingsState> {
-  await requirePermission('admin.fields');
-  const id = uuidField(formData, 'id');
-  if (!id) return { error: 'Nothing to delete' };
-
-  const rows = await db
-    .select({ isSystem: ticketStatuses.isSystem })
-    .from(ticketStatuses)
-    .where(eq(ticketStatuses.id, id))
-    .limit(1);
-
-  if (rows[0]?.isSystem) return { error: 'That status is built in and cannot be deleted' };
-
-  const inUse = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(conversations)
-    .where(eq(conversations.statusId, id));
-
-  if ((inUse[0]?.count ?? 0) > 0) {
-    return { error: `That status is on ${inUse[0]!.count} ticket(s). Move them first.` };
-  }
-
-  await db.delete(ticketStatuses).where(eq(ticketStatuses.id, id));
-  refresh('/admin/statuses');
-  return ok();
 }
 
 // --- Ticket fields ----------------------------------------------------------

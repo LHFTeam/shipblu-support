@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Card, Cell, Field, Input, Row, Select, Table, Toggle } from '@/components/ui';
 import { InfoTip } from '@/components/tooltip';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
-import { deleteGroup, saveGroup } from '../settings-actions';
+import { deleteGroup, saveGroup } from './actions';
 
 type Group = {
   id: string;

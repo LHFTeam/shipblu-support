@@ -16,7 +16,7 @@ import { InfoTip, Tooltip } from '@/components/tooltip';
 import { formatRelative } from '@/lib/format';
 import { createInvite, setAgentActive, setAgentCapacity, type AdminState } from '../actions';
 import { savePresenceSettings } from '../settings-actions';
-import type { SettingsState } from '../settings-actions';
+import type { SettingsState } from '../settings-shared';
 
 const INITIAL: AdminState = { error: null };
 const SETTINGS_INITIAL: SettingsState = { error: null };
