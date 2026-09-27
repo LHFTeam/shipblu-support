@@ -5,6 +5,9 @@ import { goOffline, setAccepting } from '@/lib/assignment/presence';
 import { agentsWithLiveSessions, deleteSessionsIdleSince } from '@/lib/auth/session';
 import { shouldAutoAway, signOutCutoff } from '@/lib/presence/idle';
 import { loadPresencePolicy } from '@/lib/presence/policy';
+import { logger } from '@/lib/log';
+
+const log = logger('presence_sweep');
 
 /**
  * Apply the idle policy to everybody the console could not report on.
@@ -33,7 +36,7 @@ export async function presenceSweep(): Promise<void> {
   const policy = await loadPresencePolicy();
 
   if (policy.autoAwayAfterMins === null && policy.autoSignoutAfterMins === null) {
-    console.log('[presence_sweep] both windows are off, nothing to do');
+    log.info('both windows are off, nothing to do');
     return;
   }
 
@@ -99,5 +102,5 @@ export async function presenceSweep(): Promise<void> {
     }
   }
 
-  console.log(`[presence_sweep] parked=${parked} sessions_signed_out=${signedOut.length}`);
+  log.info(`parked=${parked} sessions_signed_out=${signedOut.length}`);
 }

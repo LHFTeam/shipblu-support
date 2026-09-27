@@ -1,4 +1,7 @@
 import { activeRules, applyRules, liveTickets } from '@/lib/automations';
+import { logger } from '@/lib/log';
+
+const log = logger('run_time_automations');
 
 /**
  * Time-based automations — Freshdesk's Supervisor. Cron, every fifteen minutes.
@@ -29,7 +32,7 @@ const MAX_TICKETS_PER_RUN = 1000;
 export async function runTimeAutomations(): Promise<void> {
   const rules = await activeRules('time_based');
   if (rules.length === 0) {
-    console.log('[run_time_automations] no active rules');
+    log.info('no active rules');
     return;
   }
 
@@ -49,12 +52,12 @@ export async function runTimeAutomations(): Promise<void> {
     } catch (error) {
       // One ticket that cannot be processed must not stop the sweep for every
       // other ticket behind it.
-      console.error(`[run_time_automations] ticket ${ticket.conversation.id} failed`, error);
+      log.error(`ticket ${ticket.conversation.id} failed`, error);
     }
   }
 
-  console.log(
-    `[run_time_automations] rules=${rules.length} scanned=${tickets.length} ` +
+  log.info(
+    `rules=${rules.length} scanned=${tickets.length} ` +
       `tickets_changed=${ticketsChanged} rules_applied=${rulesApplied}` +
       (tickets.length === MAX_TICKETS_PER_RUN
         ? ` (capped at ${MAX_TICKETS_PER_RUN}; older tickets were not scanned this run)`
