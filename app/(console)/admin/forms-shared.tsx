@@ -4,7 +4,7 @@ import { useActionState, useEffect, useState, type ReactNode } from 'react';
 import { useFormStatus } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { Button, Card, ErrorText } from '@/components/ui';
-import type { SettingsState } from './settings-shared';
+import type { ActionState } from '@/lib/http/action-state';
 
 /**
  * The shape every admin editor shares: a disclosure that opens a form, submits
@@ -15,7 +15,7 @@ import type { SettingsState } from './settings-shared';
  * them to leave a stale list on screen.
  */
 
-export const INITIAL: SettingsState = { error: null };
+export const INITIAL: ActionState = { error: null };
 
 export function SubmitButton({
   idle,
@@ -37,7 +37,7 @@ export function SubmitButton({
 }
 
 /** Refreshes the server components after a successful write. */
-export function useRefreshOnSuccess(state: SettingsState, onSuccess?: () => void) {
+export function useRefreshOnSuccess(state: ActionState, onSuccess?: () => void) {
   const router = useRouter();
   useEffect(() => {
     if (!state.ok) return;
@@ -53,7 +53,7 @@ export function EditorForm({
   submitLabel,
   onSaved,
 }: {
-  action: (state: SettingsState, formData: FormData) => Promise<SettingsState>;
+  action: (state: ActionState, formData: FormData) => Promise<ActionState>;
   children: ReactNode;
   submitLabel: string;
   onSaved?: () => void;
@@ -168,7 +168,7 @@ export function DangerAction({
   label = 'Delete',
   confirmLabel = 'Really delete?',
 }: {
-  action: (state: SettingsState, formData: FormData) => Promise<SettingsState>;
+  action: (state: ActionState, formData: FormData) => Promise<ActionState>;
   id: string;
   label?: string;
   confirmLabel?: string;
