@@ -1554,14 +1554,14 @@ export async function saveInternalRecipient(
 
   const id = uuidField(formData, 'id');
   if (id === undefined) return { error: GONE };
-  const name = String(formData.get('name') ?? '').trim();
+  const name = text(formData, 'name');
   // Lowercased on write, because the unique index and every lookup compare the
   // canonical form — the same discipline contact_identities needs.
   const email = String(formData.get('email') ?? '')
     .trim()
     .toLowerCase();
   const kind = String(formData.get('kind') ?? 'hub');
-  const description = String(formData.get('description') ?? '').trim() || null;
+  const description = text(formData, 'description') || null;
   const isActive = formData.get('isActive') === 'on';
 
   if (!name) return { error: 'Give this recipient a name agents will recognise' };
