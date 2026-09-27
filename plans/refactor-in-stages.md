@@ -148,7 +148,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 5.4   | Admin pages: agents, auto-responses, automations | #259            | open    |
 | 5.5   | One receive path for webhooks                    | #263            | open    |
 | 5.6   | One `localeOf` and one `requestMeta`             | #251            | merged  |
-| 5.6   | One sign-in sequence for both forms              | #264            | open    |
+| 5.6   | One sign-in sequence for both forms              | #264            | merged  |
 | 6.x   | Client components                                |                 | pending |
 | 7     | Lint tightening, finish logging                  |                 | pending |
 
@@ -229,7 +229,7 @@ This replaces three of the rules in the handoff above.
 - **The ⛳ gate is passed.** The requester said to start Stage 5.
 
 **Open, each on its own files:** #258 (5.1), #259 (5.4), #260 (5.2 guards),
-#261 (3.14 logger), #263 (5.5) and #264 (5.6). #258 and #259 hold `admin/settings-actions.ts` and
+#261 (3.14 logger) and #263 (5.5). #264 (5.6) merged. #258 and #259 hold `admin/settings-actions.ts` and
 `lib/admin/settings.ts`. The next batch of each stage waits for that PR to
 merge.
 
