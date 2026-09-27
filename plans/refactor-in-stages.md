@@ -128,6 +128,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 3.9   | HTTP helpers: rate limiter moves to `lib/http`   | #229            | merged  |
 | 3.10  | HTTP helpers: `readJsonBody`                     | #230            | merged  |
 | 3.11  | Vocabulary: priorities, categories, roles        | #231            | merged  |
+| 3.12  | Action state: one `ok()`                         | #240            | open    |
 | 4.1   | Split `lib/tickets/queries.ts`                   | #224            | merged  |
 | 4.2   | Shared ingest steps                              | #232–#233, #235 | open    |
 | 4.3   | Meta Graph transport                             | #228            | merged  |
