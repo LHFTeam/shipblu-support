@@ -1,24 +1,15 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { eq } from 'drizzle-orm';
-import { db } from '@/db/client';
-import { agents } from '@/db/schema';
 import { localeOf, text } from '@/lib/http/form-data';
 import { requestMeta } from '@/lib/http/request-meta';
-import { createCustomerSession, destroyCustomerSession } from '@/lib/auth/customer-session';
-import { authenticate } from '@/lib/auth/identity';
+import { signInWithPassword } from '@/lib/auth/sign-in';
+import { destroyCustomerSession } from '@/lib/auth/customer-session';
 import { customerPath, safePath } from '@/lib/auth/next-path';
 import { normaliseEmail } from '@/lib/auth/normalise';
-import { createSession } from '@/lib/auth/session';
-import { allowEmailDispatch, allowLoginAttempt, clearLoginAttempts } from '@/lib/auth/throttle';
+import { allowEmailDispatch } from '@/lib/auth/throttle';
 import { type Locale, type StringKey } from '@/lib/kb/locale';
-import {
-  completePasswordReset,
-  recordSignIn,
-  requestAccount,
-  requestPasswordReset,
-} from '@/lib/portal/accounts';
+import { completePasswordReset, requestAccount, requestPasswordReset } from '@/lib/portal/accounts';
 
 /**
  * The help centre's sign-in, registration and password actions.
@@ -44,35 +35,19 @@ export async function portalSignIn(
 
   if (!email || !password) return { error: 'errorMissingFields' };
 
-  const { ip, userAgent } = await requestMeta();
-  if (!allowLoginAttempt(email, ip)) return { error: 'errorThrottled' };
+  const outcome = await signInWithPassword(email, password, locale);
 
-  const principal = await authenticate(email, password);
+  if (outcome === 'throttled') return { error: 'errorThrottled' };
+  if (outcome === 'invalid') return { error: 'errorCredentials' };
+  // The link was re-sent, in this page's language; see `signInWithPassword`.
+  if (outcome === 'unverified') return { error: 'errorUnverified' };
 
-  if (principal.kind === 'invalid') return { error: 'errorCredentials' };
-
-  if (principal.kind === 'unverified') {
-    // Correct password, unconfirmed address. Re-send the link rather than
-    // stranding them: the first email is old by the time anyone reads this,
-    // and they have just proved the account is theirs.
-    if (allowEmailDispatch(email, ip)) await requestPasswordReset(email, locale);
-    return { error: 'errorUnverified' };
-  }
-
-  clearLoginAttempts(email, ip);
-
-  if (principal.kind === 'agent') {
-    await createSession(principal.agentId, { ip, userAgent });
-    await db.update(agents).set({ lastSeenAt: new Date() }).where(eq(agents.id, principal.agentId));
-
+  if (outcome === 'agent') {
     // Staff go to the console, wherever they pressed Sign in. The help centre is
     // not where an agent works, and landing them in the customer portal — which
     // their address may well have tickets in — reads as a broken login.
     redirect(safePath(formData.get('next'), '/inbox'));
   }
-
-  await createCustomerSession(principal.identityId, { ip, userAgent });
-  await recordSignIn(principal.identityId);
 
   redirect(customerPath(formData.get('next'), locale, customerHome(locale)));
 }

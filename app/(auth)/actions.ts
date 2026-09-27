@@ -4,19 +4,16 @@ import { redirect } from 'next/navigation';
 import { and, eq, gt, isNull } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agents, groupMembers, invites } from '@/db/schema';
-import { createCustomerSession } from '@/lib/auth/customer-session';
 import { needsBootstrap } from '@/lib/auth/guard';
-import { authenticate } from '@/lib/auth/identity';
 import { safePath } from '@/lib/auth/next-path';
 import { normaliseEmail } from '@/lib/auth/normalise';
 import { hashPassword, validatePasswordStrength } from '@/lib/auth/password';
 import { createSession } from '@/lib/auth/session';
-import { allowEmailDispatch, allowLoginAttempt, clearLoginAttempts } from '@/lib/auth/throttle';
 import { hashToken } from '@/lib/auth/tokens';
 import { DEFAULT_LOCALE } from '@/lib/kb/locale';
-import { recordSignIn, requestPasswordReset } from '@/lib/portal/accounts';
 import { text } from '@/lib/http/form-data';
 import { requestMeta } from '@/lib/http/request-meta';
+import { signInWithPassword } from '@/lib/auth/sign-in';
 
 export type AuthFormState = { error: string | null };
 
@@ -27,39 +24,27 @@ export async function signIn(_state: AuthFormState, formData: FormData): Promise
 
   if (!email || !password) return { error: 'Enter your email and password' };
 
-  const { ip, userAgent } = await requestMeta();
-
-  if (!allowLoginAttempt(email, ip)) {
-    return { error: 'Too many attempts. Try again in a few minutes.' };
-  }
-
-  // The same check the help centre's Sign in runs. One form for both
+  // The same sign-in the help centre's form runs. One form for both
   // populations means a customer who followed a link into the console — or who
   // simply knows this URL — is signed in and sent to their tickets, rather than
   // being told their own password is wrong.
-  const principal = await authenticate(email, password);
+  const outcome = await signInWithPassword(email, password, DEFAULT_LOCALE);
+
+  if (outcome === 'throttled') return { error: 'Too many attempts. Try again in a few minutes.' };
 
   // One message for every failure mode. Distinguishing "no such account" from
   // "wrong password" tells an attacker which addresses are real.
-  if (principal.kind === 'invalid') return { error: 'Email or password is incorrect' };
+  if (outcome === 'invalid') return { error: 'Email or password is incorrect' };
 
-  if (principal.kind === 'unverified') {
-    if (allowEmailDispatch(email, ip)) await requestPasswordReset(email, DEFAULT_LOCALE);
+  if (outcome === 'unverified') {
     return { error: 'Confirm your email address first — check your inbox for the link we sent.' };
   }
 
-  clearLoginAttempts(email, ip);
-
-  if (principal.kind === 'customer') {
-    await createCustomerSession(principal.identityId, { ip, userAgent });
-    await recordSignIn(principal.identityId);
+  if (outcome === 'customer') {
     // `next` here is a console path — that is the only kind this page is
     // reached with — and a customer cannot use it.
     redirect(`/${DEFAULT_LOCALE}/portal`);
   }
-
-  await createSession(principal.agentId, { ip, userAgent });
-  await db.update(agents).set({ lastSeenAt: new Date() }).where(eq(agents.id, principal.agentId));
 
   redirect(next);
 }
