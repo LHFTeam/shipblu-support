@@ -799,6 +799,23 @@ because two of their callers are not imports:
 - `articleBody()`: three copies;
 - `cutArticleVersion()`: four copies.
 
+**Sweeps, narrowed in #242 and #243.** Reading the two sweeps for this item
+found a defect in each, and the fixes did what the item was for:
+
+- #242: an SLA escalation with a wait of five minutes or more never fired. The
+  breach flag took the ticket out of the sweep on the run that found it, and
+  that run was the only one that tried the escalation. Production had 262
+  breaches and no escalation. The new `sla-sweep.db.test.ts` pins the sweep.
+- #243: the reclaim wait of an away agent with an open tab restarted on each
+  heartbeat. The rule moved to `reclaimDue` in `lib/assignment/reclaim.ts`,
+  pure and unit-tested, as `shouldAutoAway` is in `lib/presence`. The new
+  `assign-sweep.db.test.ts` pins the reclaim pass.
+
+The queries and the writes stay in the handlers. Each has one caller, and a
+sweep's SQL belongs to its job, as in `presence-sweep.ts`. The SLA wait check in
+`escalate()` is one comparison, and the DB test covers it. So the
+`automated-reply-boundary` path does not move either.
+
 ### ⛳ Gate
 
 Check in with the requester before Stage 5:
