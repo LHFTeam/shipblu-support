@@ -145,7 +145,13 @@ export async function setAccepting(
     .set({
       isAcceptingTickets: accepting,
       acceptingOffReason: nextReason,
-      acceptingChangedAt: now,
+      // When the switch moved, and only then. A new reason on an agent who was
+      // already away — a supervisor taking over an idle park — is not the
+      // switch moving: the reclaim wait measures how long they have been
+      // unavailable, and restarting it here would push every such ticket back.
+      // The idle grace reads the column only while an agent is accepting, so
+      // it never sees the difference.
+      ...(agent.accepting !== accepting && { acceptingChangedAt: now }),
       updatedAt: now,
     })
     .where(eq(agents.id, agentId));

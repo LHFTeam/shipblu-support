@@ -9,6 +9,7 @@ import {
   groups,
   ticketStatuses,
 } from '@/db/schema';
+import { setAccepting } from '@/lib/assignment/presence';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { assignSweep } from './assign-sweep';
 
@@ -151,6 +152,28 @@ describe('assignSweep: reclaiming an unanswered ticket', () => {
     });
     const id = await assignedTicket(agentId);
 
+    await assignSweep();
+
+    expect(await outcome(id)).toEqual({
+      assigneeAgentId: null,
+      reclaimed: [{ from: agentId, afterMins: WAIT_MINS }],
+    });
+  });
+
+  // Review on #243: a supervisor taking over an idle park, so the next keypress
+  // does not undo it, changes why the agent is away and not whether. The wait
+  // is for how long they have been unavailable, so it keeps running.
+  it('keeps measuring from the switch when only the reason for the away changes', async () => {
+    const agentId = await agent({
+      presence: 'online',
+      lastSeenAt: new Date(),
+      isAcceptingTickets: false,
+      acceptingOffReason: 'idle',
+      acceptingChangedAt: minutesAgo(30),
+    });
+    const id = await assignedTicket(agentId);
+
+    expect(await setAccepting(agentId, false, 'supervisor')).toBe(true);
     await assignSweep();
 
     expect(await outcome(id)).toEqual({
