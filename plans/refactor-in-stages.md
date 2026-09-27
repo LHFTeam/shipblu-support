@@ -136,7 +136,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 4.1   | Split `lib/tickets/queries.ts`                   | #224            | merged  |
 | 4.2   | Shared ingest steps                              | #232–#233, #235 | open    |
 | 4.3   | Meta Graph transport                             | #228            | merged  |
-| 4.4   | Worker: typed payloads, backfill, KB import      | #236–#239, #247 | open    |
+| 4.4   | Worker: typed payloads, backfill, KB import      | #236–9, #247–8  | open    |
 | ⛳    | Gate: check in with the requester                |                 | pending |
 | 5.x   | Server side of `app/`                            |                 | pending |
 | 6.x   | Client components                                |                 | pending |
