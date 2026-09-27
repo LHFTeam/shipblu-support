@@ -20,6 +20,26 @@ import type { ActionState } from '@/lib/http/action-state';
 
 export type SettingsState = ActionState;
 
+/**
+ * What the agents, channels, import and categories actions answer: the error,
+ * and for an invite, which of its two deliveries happened.
+ */
+export type AdminState = {
+  error: string | null;
+  inviteUrl?: string;
+  /**
+   * The address an invitation was *queued* for, present only when it was.
+   *
+   * Named for the queue rather than the send because that is all this action
+   * can honestly report: the worker still has to run, and Postmark still has
+   * to accept the recipient. Distinct from `inviteUrl`, which comes back
+   * either way — the admin has to be told which of the two happened, because
+   * "it is on its way" and "nothing was sent, send this yourself" call for
+   * opposite next actions.
+   */
+  inviteQueuedFor?: string;
+};
+
 export function refresh(path: string) {
   revalidatePath(path);
 }

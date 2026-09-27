@@ -24,7 +24,11 @@ vi.mock('@/lib/auth/guard', () => ({
 vi.mock('@/lib/auth/session', () => ({ destroyAllSessionsForAgent: async () => {} }));
 vi.mock('next/cache', () => ({ revalidatePath: () => {} }));
 
-const actions = await import('./actions');
+const actions = {
+  ...(await import('./agents/actions')),
+  ...(await import('./channels/actions')),
+  ...(await import('./categories/actions')),
+};
 
 const INITIAL = { error: null };
 const MALFORMED = 'not-a-uuid';

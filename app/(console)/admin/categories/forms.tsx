@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Badge, Cell, Row } from '@/components/ui';
-import { saveCategory, saveRootCause, setCategoryActive, setRootCauseActive } from '../actions';
+import { saveCategory, saveRootCause, setCategoryActive, setRootCauseActive } from './actions';
 
 /**
  * One editable row each, for a category and for a cause.

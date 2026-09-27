@@ -6,7 +6,8 @@ import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { Badge, Button, ErrorText } from '@/components/ui';
 import { formatDateTime, formatRelative } from '@/lib/format';
-import { startFreshdeskImport, type AdminState } from '../actions';
+import type { AdminState } from '../settings-shared';
+import { startFreshdeskImport } from './actions';
 
 const INITIAL: AdminState = { error: null };
 
