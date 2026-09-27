@@ -1,7 +1,10 @@
-import { asc, eq, inArray } from 'drizzle-orm';
-import { db } from '@/db/client';
-import { agentSkills, agents, groups, skills } from '@/db/schema';
 import { Card, EmptyState, PageHeader } from '@/components/ui';
+import {
+  listActiveAgents,
+  listSkillHolders,
+  listSkillRoutingGroups,
+  listSkills,
+} from '@/lib/admin/settings';
 import { requirePermission } from '@/lib/auth/guard';
 import { NewSkill, SkillEditor } from './forms';
 import { ticketFieldOptions } from '../field-options';
@@ -20,31 +23,13 @@ export default async function SkillsPage() {
   await requirePermission('admin.skills');
 
   const [rows, agentList, fields, routingGroups] = await Promise.all([
-    db.select().from(skills).orderBy(asc(skills.position), asc(skills.name)),
-    db
-      .select({ id: agents.id, name: agents.name, email: agents.email })
-      .from(agents)
-      .where(eq(agents.isActive, true))
-      .orderBy(asc(agents.name)),
+    listSkills(),
+    listActiveAgents(),
     ticketFieldOptions(),
-    db
-      .select({ name: groups.name })
-      .from(groups)
-      .where(eq(groups.matchSkills, true))
-      .orderBy(asc(groups.name)),
+    listSkillRoutingGroups(),
   ]);
 
-  const holders = rows.length
-    ? await db
-        .select({ skillId: agentSkills.skillId, agentId: agentSkills.agentId })
-        .from(agentSkills)
-        .where(
-          inArray(
-            agentSkills.skillId,
-            rows.map((row) => row.id),
-          ),
-        )
-    : [];
+  const holders = await listSkillHolders(rows.map((row) => row.id));
 
   const bySkill = new Map<string, string[]>();
   for (const row of holders) {

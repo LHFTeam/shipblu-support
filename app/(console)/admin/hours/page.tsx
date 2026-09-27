@@ -1,7 +1,5 @@
-import { asc, isNotNull } from 'drizzle-orm';
-import { db } from '@/db/client';
-import { businessHours, groups, holidays } from '@/db/schema';
 import { Card, PageHeader } from '@/components/ui';
+import { listGroupsWithOwnHours, listHolidays, listSchedules } from '@/lib/admin/settings';
 import { requirePermission } from '@/lib/auth/guard';
 import { HolidayList, HoursEditor, NewSchedule } from './forms';
 
@@ -24,13 +22,9 @@ export default async function HoursPage() {
   await requirePermission('admin.sla');
 
   const [schedules, allHolidays, groupRows] = await Promise.all([
-    db.select().from(businessHours).orderBy(asc(businessHours.name)),
-    db.select().from(holidays).orderBy(asc(holidays.date)),
-    db
-      .select({ name: groups.name, businessHoursId: groups.businessHoursId })
-      .from(groups)
-      .where(isNotNull(groups.businessHoursId))
-      .orderBy(asc(groups.name)),
+    listSchedules(),
+    listHolidays(),
+    listGroupsWithOwnHours(),
   ]);
 
   return (

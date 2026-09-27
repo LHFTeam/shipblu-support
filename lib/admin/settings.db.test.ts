@@ -1,9 +1,26 @@
+import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
-import { cannedResponses, locations, shipmentPhrases, ticketFields } from '@/db/schema';
+import {
+  agentSkills,
+  agents,
+  cannedResponses,
+  contacts,
+  conversations,
+  groupMembers,
+  groups,
+  locations,
+  shipmentPhrases,
+  skills,
+  ticketFields,
+  ticketStatuses,
+} from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
 import {
+  listActiveAgents,
   listCannedResponses,
+  listGroupsForAdmin,
+  listSkillHolders,
   listLocations,
   listSavedPhrases,
   listTicketFields,
@@ -72,5 +89,79 @@ describe('the admin settings lists', () => {
     await db.insert(shipmentPhrases).values({ key: 'delivered', ar: 'تم التسليم' });
 
     expect(await listSavedPhrases()).toEqual([{ key: 'delivered', ar: 'تم التسليم' }]);
+  });
+
+  it('lists active agents only, by name', async () => {
+    await db.insert(agents).values([
+      { name: 'Zeina', email: 'zeina@shipblu.test' },
+      { name: 'Adel', email: 'adel@shipblu.test' },
+      { name: 'Former', email: 'former@shipblu.test', isActive: false },
+    ]);
+
+    expect((await listActiveAgents()).map((row) => row.name)).toEqual(['Adel', 'Zeina']);
+  });
+
+  // The two counts are raw subqueries correlated on the outer group, and the
+  // member count's correlation is the unqualified shape its neighbour's comment
+  // warns about. This is what holds both to the group they are read for.
+  it("counts each group's members and its answerable tickets, and no one else's", async () => {
+    const [support] = await db.select({ id: groups.id }).from(groups);
+    const [returns] = await db
+      .insert(groups)
+      .values({ name: 'Returns' })
+      .returning({ id: groups.id });
+    const [agent] = await db
+      .insert(agents)
+      .values({ name: 'Omar', email: 'omar@shipblu.test' })
+      .returning({ id: agents.id });
+    await db.insert(groupMembers).values({ groupId: returns!.id, agentId: agent!.id });
+
+    const [open] = await db
+      .select({ id: ticketStatuses.id })
+      .from(ticketStatuses)
+      .where(eq(ticketStatuses.name, 'Open'));
+    const [contact] = await db
+      .insert(contacts)
+      .values({ name: 'Amira' })
+      .returning({ id: contacts.id });
+    const ticket = (channel: 'email' | 'whatsapp_bot', groupId: string) => ({
+      requesterContactId: contact!.id,
+      statusId: open!.id,
+      channel,
+      groupId,
+    });
+    await db
+      .insert(conversations)
+      .values([
+        ticket('email', returns!.id),
+        ticket('email', returns!.id),
+        ticket('whatsapp_bot', returns!.id),
+        ticket('email', support!.id),
+      ]);
+
+    const rows = await listGroupsForAdmin();
+
+    expect(rows.map((row) => [row.name, row.members, row.tickets])).toEqual([
+      ['Returns', 1, 2],
+      ['Support', 0, 1],
+    ]);
+  });
+
+  it('asks nothing for no skills, and names each holder of the ones asked about', async () => {
+    expect(await listSkillHolders([])).toEqual([]);
+
+    const [arabic] = await db
+      .insert(skills)
+      .values({ name: 'Arabic' })
+      .returning({ id: skills.id });
+    const [agent] = await db
+      .insert(agents)
+      .values({ name: 'Omar', email: 'omar@shipblu.test' })
+      .returning({ id: agents.id });
+    await db.insert(agentSkills).values({ skillId: arabic!.id, agentId: agent!.id });
+
+    expect(await listSkillHolders([arabic!.id])).toEqual([
+      { skillId: arabic!.id, agentId: agent!.id },
+    ]);
   });
 });
