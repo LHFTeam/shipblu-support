@@ -1,7 +1,5 @@
-import { asc, eq } from 'drizzle-orm';
-import { db } from '@/db/client';
-import { agents, businessHours, slaPolicies } from '@/db/schema';
 import { Badge, Card, PageHeader } from '@/components/ui';
+import { listActiveAgents, listScheduleNames, listSlaPolicies } from '@/lib/admin/settings';
 import { requirePermission } from '@/lib/auth/guard';
 import { NewPolicy, PolicyEditor } from './forms';
 import { ticketFieldOptions } from '../field-options';
@@ -19,13 +17,9 @@ export default async function SlaPage() {
   await requirePermission('admin.sla');
 
   const [policies, schedules, agentList, fieldOptions] = await Promise.all([
-    db.select().from(slaPolicies).orderBy(asc(slaPolicies.position), asc(slaPolicies.name)),
-    db.select({ id: businessHours.id, name: businessHours.name }).from(businessHours),
-    db
-      .select({ id: agents.id, name: agents.name, email: agents.email })
-      .from(agents)
-      .where(eq(agents.isActive, true))
-      .orderBy(asc(agents.name)),
+    listSlaPolicies(),
+    listScheduleNames(),
+    listActiveAgents(),
     ticketFieldOptions(),
   ]);
 
