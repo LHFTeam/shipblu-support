@@ -8,6 +8,7 @@ import {
   rootCauseMetricsDaily,
 } from '@/db/schema';
 import type { ClaimedJob } from '@/lib/queue';
+import { parseJobPayload, type JobPayload } from '@/lib/queue/payloads';
 import { computeAgentDay, withActivity } from '@/lib/reports/agent-rollup';
 import { computeCategoryDay, computeRootCauseDay } from '@/lib/reports/category-rollup';
 import {
@@ -54,16 +55,8 @@ const RECOMPUTE_DAYS = 3;
  */
 const MAX_DAYS = 400;
 
-export type RollupPayload = {
-  /** A single day, as `YYYY-MM-DD`. */
-  day?: string;
-  /** Range start, inclusive. Defaults to the oldest day with any data. */
-  from?: string;
-  /** Range end, inclusive. Clamped to yesterday — today is never complete. */
-  to?: string;
-  /** The last N complete days, as an alternative to naming `from`. */
-  days?: number;
-};
+/** What a run may name. The schema in `lib/queue/payloads.ts` documents each field. */
+export type RollupPayload = JobPayload<'rollup_metrics'>;
 
 export type DayPlan = { days: string[]; skipped: number };
 
@@ -135,7 +128,7 @@ export function planDays(
  * source tables rather than adjusted in place.
  */
 export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
-  const payload = (job?.payload ?? {}) as RollupPayload;
+  const payload: RollupPayload = job ? parseJobPayload(job, 'rollup_metrics') : {};
 
   // Schedules, holidays, group overrides and policies read once for the whole
   // run rather than once per day: they are a dozen rows that every ticket in

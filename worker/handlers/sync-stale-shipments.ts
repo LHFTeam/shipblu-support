@@ -2,6 +2,7 @@ import { asc, eq, lt, and, isNotNull } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { shipments } from '@/db/schema';
 import { enqueueMany, type ClaimedJob } from '@/lib/queue';
+import { parseJobPayload } from '@/lib/queue/payloads';
 import { stageDisplay } from '@/lib/shipments/status';
 
 /**
@@ -24,32 +25,13 @@ import { stageDisplay } from '@/lib/shipments/status';
  * goes through the very same handler a single sync uses.
  */
 
-type Payload = {
-  /** Stop after this many parcels. Absent means all of them. */
-  limit?: unknown;
-  /**
-   * Also re-read parcels synced longer ago than this, in minutes.
-   *
-   * Absent by default, and that is a decision rather than a gap. How often a
-   * moving parcel should be re-read is a question about the platform's rate
-   * limits and about how fresh a status has to be, and nobody has answered
-   * either — so the cadence is the operator's to set here or in a cron
-   * schedule, not one for this file to invent. See PROJECT-STATE §6.
-   */
-  staleMinutes?: unknown;
-};
-
 /** Enough to fill the queue usefully without one run enqueueing a million rows. */
 const DEFAULT_LIMIT = 500;
 
 export async function syncStaleShipments(job: ClaimedJob): Promise<void> {
-  const payload = (job.payload ?? {}) as Payload;
-  const limit =
-    typeof payload.limit === 'number' && payload.limit > 0 ? payload.limit : DEFAULT_LIMIT;
-  const staleMinutes =
-    typeof payload.staleMinutes === 'number' && payload.staleMinutes > 0
-      ? payload.staleMinutes
-      : null;
+  const payload = parseJobPayload(job, 'sync_stale_shipments');
+  const limit = payload.limit ?? DEFAULT_LIMIT;
+  const staleMinutes = payload.staleMinutes ?? null;
 
   // Never asked about, oldest first — straight down `shipments_sync_idx`.
   const stubs = await db

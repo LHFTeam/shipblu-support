@@ -80,6 +80,44 @@ describe('the inbound family', () => {
   });
 });
 
+describe('the hand-run options', () => {
+  const parse = (type: Parameters<typeof parseJobPayload>[1], payload: Record<string, unknown>) =>
+    parseJobPayload(job(payload), type);
+
+  // The cron and the bare `npm run job -- <type>` both send no options at all.
+  it.each(['backfill_meta_profiles', 'sync_stale_shipments', 'rollup_metrics'] as const)(
+    'takes an empty %s payload, which is the default run',
+    (type) => {
+      expect(parse(type, {})).toEqual({});
+    },
+  );
+
+  it('takes the values `npm run job` makes of what an operator typed', () => {
+    expect(parse('backfill_meta_profiles', { force: true, limit: 50 })).toEqual({
+      force: true,
+      limit: 50,
+    });
+    expect(parse('sync_stale_shipments', { staleMinutes: 60 })).toEqual({ staleMinutes: 60 });
+    expect(parse('rollup_metrics', { from: '2026-09-01', to: '2026-09-20' })).toEqual({
+      from: '2026-09-01',
+      to: '2026-09-20',
+    });
+  });
+
+  // Recorded, and said in the PR: each of these used to be read as absent, and
+  // absent is the default — a real run over the whole archive.
+  it.each([
+    ['backfill_meta_profiles', { limit: 'abc' }],
+    ['backfill_meta_profiles', { limit: 0 }],
+    ['sync_stale_shipments', { limit: -1 }],
+    ['sync_stale_shipments', { staleMinutes: 'hourly' }],
+    ['rollup_metrics', { day: '2026-9-1' }],
+    ['rollup_metrics', { days: 0 }],
+  ] as const)('refuses %s %o rather than running the default', (type, payload) => {
+    expect(() => parse(type, payload)).toThrow(PermanentJobError);
+  });
+});
+
 // Never called: `tsc` is the assertion. Each line below the directive must fail
 // to compile, and would compile if `enqueue` were typed `Record<string, unknown>`.
 async function enqueueIsTypedFromTheSchema(messageId: string) {

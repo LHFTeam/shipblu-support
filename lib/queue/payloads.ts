@@ -80,6 +80,42 @@ const JOB_PAYLOADS = {
     .refine((payload) => payload.shipmentId || payload.trackingNumber, {
       message: 'requires a shipmentId or a trackingNumber',
     }),
+
+  // The jobs an operator runs by hand, whose options arrive from `npm run job`'s
+  // `key=value` parser: `true` and `false` as booleans, anything numeric as a
+  // number, the rest as strings. An option that is present but wrong is
+  // refused rather than read as absent, because absent is always the default
+  // and a default is a real run: `limit=abc` would otherwise walk the archive.
+  backfill_meta_profiles: z.object({
+    /** Re-read profiles already on file, rather than only the ones never asked. */
+    force: z.boolean().optional(),
+    /** Stop after this many contacts. Absent means all of them. */
+    limit: z.number().int().positive().optional(),
+  }),
+  sync_stale_shipments: z.object({
+    /** Stop after this many parcels. Absent means the handler's `DEFAULT_LIMIT`. */
+    limit: z.number().int().positive().optional(),
+    /**
+     * Also re-read parcels synced longer ago than this, in minutes.
+     *
+     * Absent by default, and that is a decision rather than a gap. How often a
+     * moving parcel should be re-read is a question about the platform's rate
+     * limits and about how fresh a status has to be, and nobody has answered
+     * either — so the cadence is the operator's to set here or in a cron
+     * schedule, not one for this file to invent. See PROJECT-STATE §6.
+     */
+    staleMinutes: z.number().positive().optional(),
+  }),
+  rollup_metrics: z.object({
+    /** A single day, as `YYYY-MM-DD`. */
+    day: z.iso.date().optional(),
+    /** Range start, inclusive. Defaults to the oldest day with any data. */
+    from: z.iso.date().optional(),
+    /** Range end, inclusive. Clamped to yesterday — today is never complete. */
+    to: z.iso.date().optional(),
+    /** The last N complete days, as an alternative to naming `from`. */
+    days: z.number().positive().optional(),
+  }),
 } satisfies Partial<Record<JobType, z.ZodType>>;
 
 type CheckedJob = keyof typeof JOB_PAYLOADS;
