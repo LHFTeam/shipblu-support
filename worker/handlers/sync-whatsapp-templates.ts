@@ -85,7 +85,7 @@ export async function syncWhatsAppTemplates(): Promise<void> {
   // so the admin screen showed both as merely "never synced". Below, the loop
   // fails that one account by itself and `tokenForAccount` names the variable.
   if (!env().META_PAGE_ACCESS_TOKEN && accounts.every((account) => !account.tokenEnvVar)) {
-    log.info('META_PAGE_ACCESS_TOKEN is not set and every account ' + 'relies on it — skipping');
+    log.info('META_PAGE_ACCESS_TOKEN is not set and every account relies on it — skipping');
     return;
   }
 
@@ -129,9 +129,7 @@ async function syncAccount(account: WhatsAppAccount): Promise<void> {
     // genuinely holds no templates *and* for an id that is not a WABA at all —
     // so a mistyped id syncs "successfully" every hour for ever, and the id is
     // the only thing in the message worth checking.
-    log.warn(
-      `${account.name} (${account.wabaId}) returned no templates, ` + `leaving existing rows`,
-    );
+    log.warn(`${account.name} (${account.wabaId}) returned no templates, leaving existing rows`);
     await recordSync(account.id, null);
     return;
   }
