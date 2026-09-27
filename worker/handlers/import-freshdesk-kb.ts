@@ -18,8 +18,7 @@ import {
   type FreshdeskCategory,
   type FreshdeskFolder,
 } from '@/lib/freshdesk/client';
-import { htmlToText, preview, sanitiseArticleHtml } from '@/lib/html/sanitize';
-import { normaliseArticleHtml } from '@/lib/kb/format';
+import { articleBody } from '@/lib/kb/article-write';
 import { detectCategoryLocale, detectLocale, looksUntranslated } from '@/lib/kb/language';
 import { LOCALES, LOCALE_NAMES, type Locale } from '@/lib/kb/locale';
 import { slugify, uniqueSlug } from '@/lib/kb/slug';
@@ -522,14 +521,13 @@ async function upsertArticle(
   // theme cannot survive, and 128 body `h1`s the help centre's stylesheet does
   // not dress. Re-importing without this would undo the cleanup article by
   // article — `lib/kb/format.ts` has the standard and the evidence for it.
-  const bodyHtml = normaliseArticleHtml(sanitiseArticleHtml(article.description ?? ''));
-  const bodyText = htmlToText(bodyHtml);
+  const { bodyHtml, bodyText, excerpt } = articleBody(article.description ?? '');
 
   const values = {
     title: article.title,
     bodyHtml,
     bodyText,
-    excerpt: preview(bodyText, 200),
+    excerpt,
     folderId,
     locale,
     status: mapStatus(article.status),
