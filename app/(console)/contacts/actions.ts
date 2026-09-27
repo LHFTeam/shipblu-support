@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { contacts, shipments } from '@/db/schema';
+import { text } from '@/lib/http/form-data';
 import { requireAgent } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
 import { purgeContact, type PurgeRefusal } from '@/lib/admin/purge';
@@ -137,7 +138,7 @@ export async function setShipmentParty(
 
   const trackingNumber = normaliseTrackingNumber(String(formData.get('trackingNumber') ?? ''));
   const party = String(formData.get('party') ?? '');
-  const contactId = String(formData.get('contactId') ?? '').trim();
+  const contactId = text(formData, 'contactId');
 
   if (party !== 'shipper' && party !== 'recipient') return { error: 'Unknown party' };
   if (!trackingNumber) return { error: 'Shipment not found' };

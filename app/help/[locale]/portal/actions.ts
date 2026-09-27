@@ -7,6 +7,7 @@ import { appendReply, createTicket } from '@/lib/portal/tickets';
 import { missingRequired } from '@/lib/tickets/custom-fields';
 import { applyFieldValue } from '@/lib/tickets/custom-fields-parse';
 import { customerTicketFields } from '@/lib/portal/fields';
+import { text } from '@/lib/http/form-data';
 
 /**
  * What a signed-in customer can do to their own tickets.
@@ -43,8 +44,8 @@ export async function createPortalTicket(
   const customer = await getSessionCustomer();
   if (!customer) redirect(`/${locale}/account/login`);
 
-  const subject = String(formData.get('subject') ?? '').trim();
-  const body = String(formData.get('body') ?? '').trim();
+  const subject = text(formData, 'subject');
+  const body = text(formData, 'body');
 
   if (!subject) return { error: 'errorSubjectRequired' };
   if (!body) return { error: 'errorMessageRequired' };
@@ -89,7 +90,7 @@ export async function replyToPortalTicket(
   if (!customer) redirect(`/${locale}/account/login`);
 
   const number = Number(formData.get('number'));
-  const body = String(formData.get('body') ?? '').trim();
+  const body = text(formData, 'body');
 
   if (!Number.isInteger(number)) return { error: 'errorGeneric' };
   if (!body) return { error: 'errorMessageRequired' };

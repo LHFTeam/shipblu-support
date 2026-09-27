@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agents } from '@/db/schema';
+import { text } from '@/lib/http/form-data';
 import { createCustomerSession, destroyCustomerSession } from '@/lib/auth/customer-session';
 import { authenticate } from '@/lib/auth/identity';
 import { customerPath, safePath } from '@/lib/auth/next-path';
@@ -98,7 +99,7 @@ export async function portalRegister(
 ): Promise<PortalFormState> {
   const locale = localeOf(formData);
   const email = normaliseEmail(String(formData.get('email') ?? ''));
-  const name = String(formData.get('name') ?? '').trim();
+  const name = text(formData, 'name');
   const password = String(formData.get('password') ?? '');
 
   if (!email || !password) return { error: 'errorMissingFields' };
