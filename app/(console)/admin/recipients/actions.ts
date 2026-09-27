@@ -37,9 +37,7 @@ export async function saveInternalRecipient(
   const name = text(formData, 'name');
   // Lowercased on write, because the unique index and every lookup compare the
   // canonical form — the same discipline contact_identities needs.
-  const email = String(formData.get('email') ?? '')
-    .trim()
-    .toLowerCase();
+  const email = text(formData, 'email').toLowerCase();
   const kind = String(formData.get('kind') ?? 'hub');
   const description = text(formData, 'description') || null;
   const isActive = formData.get('isActive') === 'on';
