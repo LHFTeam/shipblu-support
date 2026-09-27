@@ -133,6 +133,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 3.12  | Action state: one `ok()`                         | #240            | open    |
 | 3.13  | FormData readers move to `lib/http/form-data.ts` | #241            | open    |
 | 3.13  | FormData readers: adoption in the action files   | #244–#246       | open    |
+| 3.14  | Logger: `lib/log.ts` and the first worker files  | #249            | open    |
 | 4.1   | Split `lib/tickets/queries.ts`                   | #224            | merged  |
 | 4.2   | Shared ingest steps                              | #232–#233, #235 | open    |
 | 4.3   | Meta Graph transport                             | #228            | merged  |
