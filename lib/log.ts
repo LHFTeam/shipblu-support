@@ -36,7 +36,7 @@ export type LogFields = Record<string, Primitive>;
  * error)` did — so the stack still prints and a `cause` chain is not flattened
  * into a string. Every such line in the codebase is a message and the error.
  */
-type Logger = {
+export type Logger = {
   info(message: string, fields?: LogFields): void;
   warn(message: string, cause?: unknown): void;
   error(message: string, cause?: unknown): void;

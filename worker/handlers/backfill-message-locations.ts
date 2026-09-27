@@ -6,6 +6,7 @@ import { parseJobPayload } from '@/lib/queue/payloads';
 import { logChannelTable, scanMessagesInKeysetOrder } from '@/lib/queue/backfill';
 import { parseCoordinates, readSharedLocation } from '@/lib/tickets/shared-location';
 import { errorMessage } from '@/lib/errors';
+import { logger } from '@/lib/log';
 
 /**
  * Recovers the pins already sitting in the archive.
@@ -177,10 +178,10 @@ function report(
   failures: string[],
   dryRun: boolean,
 ): void {
-  const tag = '[backfill_message_locations]';
-  console.log(`${tag} scanned ${scanned} candidate messages (dry_run=${dryRun})`);
+  const log = logger('backfill_message_locations');
+  log.info(`scanned ${scanned} candidate messages (dry_run=${dryRun})`);
 
-  logChannelTable(tag, tallies, [
+  logChannelTable(log, tallies, [
     { heading: 'candidates', width: 11, value: (tally) => tally.candidates },
     { heading: 'already', width: 9, value: (tally) => tally.alreadyDone },
     { heading: 'recovered', width: 10, value: (tally) => tally.recovered },
@@ -194,13 +195,11 @@ function report(
   for (const [channel, tally] of [...tallies.entries()].sort()) {
     const attempted = tally.candidates - tally.alreadyDone;
     if (attempted > 0 && tally.unreadable > attempted / 2) {
-      console.warn(
-        `${tag} ${channel}: ${tally.unreadable} of ${attempted} candidates had no readable pin`,
-      );
+      log.warn(`${channel}: ${tally.unreadable} of ${attempted} candidates had no readable pin`);
     }
   }
 
   if (failures.length > 0) {
-    console.error(`${tag} ${failures.length} failed: ${failures.slice(0, 20).join('; ')}`);
+    log.error(`${failures.length} failed: ${failures.slice(0, 20).join('; ')}`);
   }
 }

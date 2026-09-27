@@ -13,6 +13,7 @@ import { scanMessagesInKeysetOrder } from '@/lib/queue/backfill';
 import { CONVERSATION_CHANNELS, readOnlyChannels } from '@/lib/tickets/channel-policy';
 import type { ConversationChannel } from '@/lib/tickets/channel-policy';
 import { typesafeConfigured, typesafeModel } from '@/lib/typesafe/client';
+import { logger } from '@/lib/log';
 
 /**
  * Runs the archive through TypeSafe and records what it said, beside the rules.
@@ -56,6 +57,7 @@ const BATCH = 200;
 const CONTEXT_MESSAGES = 3;
 
 const TAG = '[backfill_categorise_ai]';
+const log = logger('backfill_categorise_ai');
 
 export async function backfillCategoriseAi(job: ClaimedJob): Promise<void> {
   const payload = parseJobPayload(job, 'backfill_categorise_ai');
@@ -72,7 +74,7 @@ export async function backfillCategoriseAi(job: ClaimedJob): Promise<void> {
     // Unset means skip rather than fail, the same answer the Freshdesk importer
     // gives: this is a credential nobody has had to hold yet, and a hand-run that
     // throws teaches less than one that says what is missing.
-    console.log(`${TAG} TYPESAFE_API_KEY is not set — nothing to run`);
+    log.info(`TYPESAFE_API_KEY is not set — nothing to run`);
     return;
   }
 
@@ -85,7 +87,7 @@ export async function backfillCategoriseAi(job: ClaimedJob): Promise<void> {
     // is in CI's handler loop — and CI's database has migrations but no seeded
     // taxonomy, so bailing out here would skip exactly the SQL it is there to
     // prove. `tsc` type-checks the drizzle builder, not the statement it emits.
-    console.log(`${TAG} no active detectable categories in ticket_categories — nothing to ask`);
+    log.info(`no active detectable categories in ticket_categories — nothing to ask`);
     console.log(formatReport(await reportFor(runLabel)));
     return;
   }
@@ -148,8 +150,8 @@ export async function backfillCategoriseAi(job: ClaimedJob): Promise<void> {
     },
   );
 
-  console.log(
-    `${TAG} run="${runLabel}" scanned=${scanned} predicted=${predicted} failed=${failed} ` +
+  log.info(
+    `run="${runLabel}" scanned=${scanned} predicted=${predicted} failed=${failed} ` +
       `context=${withContext} dry_run=${dryRun}`,
   );
   console.log(formatReport(await reportFor(runLabel)));

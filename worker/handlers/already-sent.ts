@@ -1,4 +1,5 @@
 import type { messages } from '@/db/schema';
+import { logger } from '@/lib/log';
 
 type DeliveryStatus = (typeof messages.$inferSelect)['deliveryStatus'];
 
@@ -21,6 +22,6 @@ type DeliveryStatus = (typeof messages.$inferSelect)['deliveryStatus'];
 export function alreadySent(job: string, messageId: string, status: DeliveryStatus): boolean {
   if (status === 'pending' || status === 'failed') return false;
 
-  console.log(`[${job}] ${messageId} is ${status}, skipping`);
+  logger(job).info(`${messageId} is ${status}, skipping`);
   return true;
 }

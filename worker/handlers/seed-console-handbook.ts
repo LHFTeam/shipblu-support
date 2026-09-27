@@ -6,6 +6,7 @@ import { HANDBOOK, HANDBOOK_CATEGORY, HANDBOOK_LOCALE } from '@/lib/kb/handbook'
 import type { AgentRole } from '@/lib/auth/permissions';
 import type { ClaimedJob } from '@/lib/queue';
 import { parseJobPayload } from '@/lib/queue/payloads';
+import { logger } from '@/lib/log';
 
 /**
  * Puts the team's own handbook into the knowledge base.
@@ -349,14 +350,14 @@ async function upsertArticle(
 }
 
 function report(tally: Tally, dryRun: boolean): void {
-  const tag = '[seed_console_handbook]';
+  const log = logger('seed_console_handbook');
 
-  console.log(
-    `${tag} folders ${tally.foldersCreated} created, ${tally.foldersUpdated} updated ` +
+  log.info(
+    `folders ${tally.foldersCreated} created, ${tally.foldersUpdated} updated ` +
       `(dry_run=${dryRun})`,
   );
-  console.log(
-    `${tag} articles ${tally.articlesCreated} created, ${tally.articlesRewritten} rewritten, ` +
+  log.info(
+    `articles ${tally.articlesCreated} created, ${tally.articlesRewritten} rewritten, ` +
       `${tally.articlesUnchanged} already current`,
   );
 
@@ -366,8 +367,8 @@ function report(tally: Tally, dryRun: boolean): void {
   // for — or a content fix in this repository that has not been pushed yet,
   // and only a person can tell those apart.
   if (tally.articlesDrifted > 0) {
-    console.log(
-      `${tag} ${tally.articlesDrifted} article(s) differ from this repository and were left ` +
+    log.info(
+      `${tally.articlesDrifted} article(s) differ from this repository and were left ` +
         `as they are; re-run with overwrite=true to replace them`,
     );
   }
@@ -380,19 +381,17 @@ function report(tally: Tally, dryRun: boolean): void {
   // Counted as the run reached each article, never read back off `HANDBOOK` —
   // a table printed from the constant that produced the work is an echo, and
   // would show a reassuring three beside a folder the run never got to.
-  console.log(`${tag} ${'audience'.padEnd(16)}${'folder'.padStart(26)}${'reached'.padStart(10)}`);
+  log.info(`${'audience'.padEnd(16)}${'folder'.padStart(26)}${'reached'.padStart(10)}`);
   for (const [slug, folder] of tally.perFolder) {
-    console.log(
-      `${tag} ${folder.minRole.padEnd(16)}${slug.padStart(26)}` +
-        `${String(folder.reached).padStart(10)}`,
+    log.info(
+      `${folder.minRole.padEnd(16)}${slug.padStart(26)}` + `${String(folder.reached).padStart(10)}`,
     );
   }
 
   const empty = [...tally.perFolder].filter(([, folder]) => folder.reached === 0);
   if (empty.length > 0) {
-    console.log(
-      `${tag} ${empty.length} folder(s) had no article reached: ` +
-        empty.map(([slug]) => slug).join(', '),
+    log.info(
+      `${empty.length} folder(s) had no article reached: ` + empty.map(([slug]) => slug).join(', '),
     );
   }
 }
