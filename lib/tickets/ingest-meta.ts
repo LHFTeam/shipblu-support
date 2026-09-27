@@ -12,7 +12,8 @@ import { enqueue } from '@/lib/queue';
 import { onCustomerReply } from '@/lib/sla';
 import { findContactByIdentity, needsChannelProfile, resolveContact } from './contacts';
 import { afterInboundMessage, afterMessageStored } from './lifecycle';
-import { defaultOpenStatusId, requireDefaultOpenStatusId } from './statuses';
+import { reopenResolved } from './reopen';
+import { requireDefaultOpenStatusId } from './statuses';
 
 /**
  * Inbound Facebook and Instagram → conversations.
@@ -78,7 +79,11 @@ export async function ingestMetaMessage(
       conversationNumber = existing.number;
 
       if (existing.statusCategory === 'resolved') {
-        await reopen(tx, conversationId, existing.reopenCount, `inbound_${message.platform}`);
+        await reopenResolved(
+          tx,
+          { id: conversationId, reopenCount: existing.reopenCount },
+          { actorLabel: `inbound_${message.platform}`, reason: 'customer_replied' },
+        );
       }
     } else {
       const statusId = await requireDefaultOpenStatusId(tx);
@@ -198,7 +203,11 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
       conversationNumber = existing.number;
 
       if (existing.statusCategory === 'resolved') {
-        await reopen(tx, conversationId, existing.reopenCount, `inbound_${comment.platform}`);
+        await reopenResolved(
+          tx,
+          { id: conversationId, reopenCount: existing.reopenCount },
+          { actorLabel: `inbound_${comment.platform}`, reason: 'customer_replied' },
+        );
       }
     } else {
       const statusId = await requireDefaultOpenStatusId(tx);
@@ -406,7 +415,11 @@ export async function applyMetaInteraction(interaction: NormalisedInteraction): 
     // customer who has come back sitting in no queue, with the only trace an
     // activity line in the sidebar of a ticket nobody has open.
     if (existing.statusCategory === 'resolved') {
-      await reopen(tx, existing.id, existing.reopenCount, `inbound_${interaction.platform}`);
+      await reopenResolved(
+        tx,
+        { id: existing.id, reopenCount: existing.reopenCount },
+        { actorLabel: `inbound_${interaction.platform}`, reason: 'customer_replied' },
+      );
     }
 
     // Never backwards: a Get Started replayed after the customer's question must
@@ -554,29 +567,6 @@ async function findByExternalId(externalId: string): Promise<FoundConversation |
     .limit(1);
 
   return rows[0] ?? null;
-}
-
-async function reopen(
-  tx: typeof db,
-  conversationId: string,
-  reopenCount: number,
-  actorLabel: string,
-): Promise<void> {
-  const statusId = await defaultOpenStatusId(tx);
-  if (!statusId) return;
-
-  const reopened = await tx
-    .update(conversations)
-    .set({ statusId, resolvedAt: null, reopenCount: reopenCount + 1 })
-    .where(eq(conversations.id, conversationId))
-    .returning({ resolvedBy: conversations.resolvedByAgentId });
-
-  await tx.insert(conversationEvents).values({
-    conversationId,
-    type: 'reopened',
-    actorLabel,
-    data: { reason: 'customer_replied', resolvedBy: reopened[0]?.resolvedBy ?? null },
-  });
 }
 
 async function channelFor(platform: MetaPlatform) {
