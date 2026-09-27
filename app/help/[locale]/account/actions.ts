@@ -1,18 +1,18 @@
 'use server';
 
-import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agents } from '@/db/schema';
-import { text } from '@/lib/http/form-data';
+import { localeOf, text } from '@/lib/http/form-data';
+import { requestMeta } from '@/lib/http/request-meta';
 import { createCustomerSession, destroyCustomerSession } from '@/lib/auth/customer-session';
 import { authenticate } from '@/lib/auth/identity';
 import { customerPath, safePath } from '@/lib/auth/next-path';
 import { normaliseEmail } from '@/lib/auth/normalise';
 import { createSession } from '@/lib/auth/session';
 import { allowEmailDispatch, allowLoginAttempt, clearLoginAttempts } from '@/lib/auth/throttle';
-import { DEFAULT_LOCALE, isLocale, type Locale, type StringKey } from '@/lib/kb/locale';
+import { type Locale, type StringKey } from '@/lib/kb/locale';
 import {
   completePasswordReset,
   recordSignIn,
@@ -29,22 +29,6 @@ import {
  * interfaces happen.
  */
 export type PortalFormState = { error: StringKey | null; done?: boolean };
-
-function localeOf(formData: FormData): Locale {
-  const value = String(formData.get('locale') ?? '');
-  return isLocale(value) ? value : DEFAULT_LOCALE;
-}
-
-async function requestMeta() {
-  const headerList = await headers();
-  return {
-    ip:
-      headerList.get('x-forwarded-for')?.split(',')[0]?.trim() ??
-      headerList.get('x-real-ip') ??
-      null,
-    userAgent: headerList.get('user-agent'),
-  };
-}
 
 function customerHome(locale: Locale): string {
   return `/${locale}/portal`;

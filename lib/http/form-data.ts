@@ -1,3 +1,4 @@
+import { DEFAULT_LOCALE, isLocale, type Locale } from '@/lib/kb/locale';
 import { isUuid } from './uuid';
 
 /**
@@ -54,4 +55,13 @@ export function optionalNumber(
   if (!raw) return { ok: true, value: null };
   const value = Number(raw);
   return Number.isFinite(value) ? { ok: true, value } : null;
+}
+
+/**
+ * The help centre's locale field: the form's own locale when it names one, and
+ * the default otherwise. Each help-centre action file carried this copy.
+ */
+export function localeOf(formData: FormData): Locale {
+  const value = String(formData.get('locale') ?? '');
+  return isLocale(value) ? value : DEFAULT_LOCALE;
 }

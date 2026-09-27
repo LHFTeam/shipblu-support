@@ -7,7 +7,8 @@ import { formPath } from '@/lib/forms/naming';
 import { getFormBySlug } from '@/lib/forms/queries';
 import { submitForm } from '@/lib/forms/submit';
 import { allow, clientIpFrom } from '@/lib/http/rate-limit';
-import { DEFAULT_LOCALE, isLocale, type Locale, type StringKey } from '@/lib/kb/locale';
+import { type StringKey } from '@/lib/kb/locale';
+import { localeOf } from '@/lib/http/form-data';
 
 /**
  * Submitting a ticket form from the help centre.
@@ -25,11 +26,6 @@ export type FormSubmitState = {
   /** Keys whose answer the field's own rules refused. */
   invalid?: string[];
 };
-
-function localeOf(formData: FormData): Locale {
-  const value = String(formData.get('locale') ?? '');
-  return isLocale(value) ? value : DEFAULT_LOCALE;
-}
 
 export async function submitTicketForm(
   _state: FormSubmitState,

@@ -1,6 +1,5 @@
 'use server';
 
-import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { and, eq, gt, isNull } from 'drizzle-orm';
 import { db } from '@/db/client';
@@ -17,19 +16,9 @@ import { hashToken } from '@/lib/auth/tokens';
 import { DEFAULT_LOCALE } from '@/lib/kb/locale';
 import { recordSignIn, requestPasswordReset } from '@/lib/portal/accounts';
 import { text } from '@/lib/http/form-data';
+import { requestMeta } from '@/lib/http/request-meta';
 
 export type AuthFormState = { error: string | null };
-
-async function requestMeta() {
-  const headerList = await headers();
-  return {
-    ip:
-      headerList.get('x-forwarded-for')?.split(',')[0]?.trim() ??
-      headerList.get('x-real-ip') ??
-      null,
-    userAgent: headerList.get('user-agent'),
-  };
-}
 
 export async function signIn(_state: AuthFormState, formData: FormData): Promise<AuthFormState> {
   const email = normaliseEmail(String(formData.get('email') ?? ''));
