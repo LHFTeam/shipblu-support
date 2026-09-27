@@ -2,12 +2,12 @@
 
 import { redirect } from 'next/navigation';
 import { getSessionCustomer } from '@/lib/auth/customer-session';
-import { DEFAULT_LOCALE, isLocale, type Locale, type StringKey } from '@/lib/kb/locale';
+import { type StringKey } from '@/lib/kb/locale';
 import { appendReply, createTicket } from '@/lib/portal/tickets';
 import { missingRequired } from '@/lib/tickets/custom-fields';
 import { applyFieldValue } from '@/lib/tickets/custom-fields-parse';
 import { customerTicketFields } from '@/lib/portal/fields';
-import { text } from '@/lib/http/form-data';
+import { localeOf, text } from '@/lib/http/form-data';
 
 /**
  * What a signed-in customer can do to their own tickets.
@@ -30,11 +30,6 @@ export type PortalTicketState = {
    */
   missing?: string[];
 };
-
-function localeOf(formData: FormData): Locale {
-  const value = String(formData.get('locale') ?? '');
-  return isLocale(value) ? value : DEFAULT_LOCALE;
-}
 
 export async function createPortalTicket(
   _state: PortalTicketState,
