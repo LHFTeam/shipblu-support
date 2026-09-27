@@ -2,6 +2,7 @@ import { and, asc, eq, gte, lte, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversations, messages } from '@/db/schema';
 import type { ClaimedJob } from '@/lib/queue';
+import { parseJobPayload } from '@/lib/queue/payloads';
 import { logChannelTable, scanMessagesInKeysetOrder } from '@/lib/queue/backfill';
 import { parseCoordinates, readSharedLocation } from '@/lib/tickets/shared-location';
 import { errorMessage } from '@/lib/errors';
@@ -29,16 +30,6 @@ import { errorMessage } from '@/lib/errors';
  * would be a separate, deliberate decision.
  */
 
-type Payload = {
-  /** ISO timestamps bounding which messages are scanned. */
-  since?: string;
-  until?: string;
-  /** Scan and report, write nothing. */
-  dryRun?: boolean;
-  /** Stop after this many candidate messages. Absent means the whole archive. */
-  limit?: number;
-};
-
 const BATCH = 500;
 
 type ChannelTally = {
@@ -53,7 +44,7 @@ function emptyTally(): ChannelTally {
 }
 
 export async function backfillMessageLocations(job: ClaimedJob): Promise<void> {
-  const payload = (job.payload ?? {}) as Payload;
+  const payload = parseJobPayload(job, 'backfill_message_locations');
   const dryRun = payload.dryRun === true;
 
   const bounds: SQL[] = [];

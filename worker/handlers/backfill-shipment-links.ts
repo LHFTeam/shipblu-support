@@ -2,6 +2,7 @@ import { and, asc, eq, gte, lte, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversations, messages } from '@/db/schema';
 import type { ClaimedJob } from '@/lib/queue';
+import { parseJobPayload } from '@/lib/queue/payloads';
 import { logChannelTable, scanMessagesInKeysetOrder } from '@/lib/queue/backfill';
 import { detectShipmentRefs, shipmentPatterns } from '@/lib/shipments/detect';
 import { isLinkableMessage, linkShipmentsFromMessage } from '@/lib/shipments/links';
@@ -25,16 +26,6 @@ import { errorMessage } from '@/lib/errors';
  * `link_source = 'detected'` so it can never remove an agent's work.
  */
 
-type Payload = {
-  /** ISO timestamps bounding which messages are scanned. */
-  since?: string;
-  until?: string;
-  /** Scan only, write nothing. Useful for checking a new pattern's yield. */
-  dryRun?: boolean;
-  /** Stop after this many messages. Absent means the whole archive. */
-  limit?: number;
-};
-
 const BATCH = 500;
 
 type ChannelTally = {
@@ -51,7 +42,7 @@ function emptyTally(): ChannelTally {
 }
 
 export async function backfillShipmentLinks(job: ClaimedJob): Promise<void> {
-  const payload = (job.payload ?? {}) as Payload;
+  const payload = parseJobPayload(job, 'backfill_shipment_links');
   const patterns = shipmentPatterns();
   const dryRun = payload.dryRun === true;
 

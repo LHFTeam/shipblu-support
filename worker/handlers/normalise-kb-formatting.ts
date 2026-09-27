@@ -6,6 +6,7 @@ import { cutArticleVersion } from '@/lib/kb/article-write';
 import { normaliseArticleHtml, rewriteLegacyArticleLinks } from '@/lib/kb/format';
 import { DEFAULT_LOCALE } from '@/lib/kb/locale';
 import type { ClaimedJob } from '@/lib/queue';
+import { parseJobPayload } from '@/lib/queue/payloads';
 
 /**
  * Brings every article already in the database up to the formatting standard.
@@ -37,15 +38,6 @@ import type { ClaimedJob } from '@/lib/queue';
  * `view_count` on the same row (§6.51). The sitemap carries no `lastmod`, so
  * nothing is republished to a search engine on the strength of it.
  */
-
-type Payload = {
-  /** Count and report what would change, write nothing. */
-  dryRun?: boolean;
-  /** Stop after this many articles. Absent means all of them. */
-  limit?: number;
-  /** One locale only, for a cautious first run. */
-  locale?: string;
-};
 
 type Tally = {
   articles: number;
@@ -83,7 +75,7 @@ function legacyIndex(rows: { locale: string; slug: string; externalId: string | 
 }
 
 export async function normaliseKbFormatting(job: ClaimedJob): Promise<void> {
-  const payload = (job.payload ?? {}) as Payload;
+  const payload = parseJobPayload(job, 'normalise_kb_formatting');
   const dryRun = payload.dryRun === true;
 
   const rows = await db

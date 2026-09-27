@@ -1,5 +1,16 @@
 import { z } from 'zod';
+import { LOCALES } from '@/lib/kb/locale';
 import { PermanentJobError, type ClaimedJob, type JobType } from '@/lib/queue';
+
+/**
+ * A bound on a scan, handed straight to `new Date()`. Checked as something
+ * `Date` can read, because what `npm run job` makes of `since=20260901` is a
+ * number, which `new Date` reads as milliseconds into 1970, and a typo is an
+ * Invalid Date that fails only when the query is bound.
+ */
+const instant = z.string().refine((value) => !Number.isNaN(Date.parse(value)), {
+  message: 'expected a date or a time Date can read',
+});
 
 /**
  * What a job's payload must hold, written once for the code that enqueues it
@@ -115,6 +126,69 @@ const JOB_PAYLOADS = {
     to: z.iso.date().optional(),
     /** The last N complete days, as an alternative to naming `from`. */
     days: z.number().positive().optional(),
+  }),
+
+  // The backfills and the knowledge-base passes: hand-run, or queued with no
+  // options by an admin button. `dryRun` is the option these exist to get
+  // right. Each handler tested `payload.dryRun === true`, so `dryRun=1` or
+  // `dryRun=yes` — both meant as "do not write" — did a real run.
+  //
+  // And these five refuse a key they do not know, where every other schema
+  // here drops it. A dropped key is harmless on a payload code writes; on one
+  // an operator types, `dryrun=true` would be dropped and the run would write.
+  backfill_shipment_links: z.strictObject({
+    /** ISO timestamps bounding which messages are scanned. */
+    since: instant.optional(),
+    until: instant.optional(),
+    /** Scan only, write nothing. Useful for checking a new pattern's yield. */
+    dryRun: z.boolean().optional(),
+    /** Stop after this many messages. Absent means the whole archive. */
+    limit: z.number().int().positive().optional(),
+  }),
+  backfill_message_locations: z.strictObject({
+    /** ISO timestamps bounding which messages are scanned. */
+    since: instant.optional(),
+    until: instant.optional(),
+    /** Scan and report, write nothing. */
+    dryRun: z.boolean().optional(),
+    /** Stop after this many candidate messages. Absent means the whole archive. */
+    limit: z.number().int().positive().optional(),
+  }),
+  backfill_categorise_ai: z.strictObject({
+    /**
+     * Which experiment these rows belong to. Re-running one fills its gaps only.
+     * A label of digits arrives from `npm run job` as a number, and was read as
+     * no label at all — 'adhoc' — so it is turned back into the text it was.
+     */
+    runLabel: z.union([z.string(), z.number().transform(String)]).optional(),
+    limit: z.number().int().positive().optional(),
+    /** ISO timestamps bounding which messages are considered. */
+    since: instant.optional(),
+    until: instant.optional(),
+    /** Comma-separated channels, replacing the default "everything but the bot". */
+    channels: z.string().optional(),
+    /** Send the preceding inbound messages as context. On by default. */
+    context: z.boolean().optional(),
+    /** Only messages on tickets the rules filed as `meta.unclassified`. */
+    onlyUnclassified: z.boolean().optional(),
+    /** Select and build every request, call nothing, write nothing. */
+    dryRun: z.boolean().optional(),
+    /** Skip the run; print the report for `runLabel` as it stands. */
+    reportOnly: z.boolean().optional(),
+  }),
+  normalise_kb_formatting: z.strictObject({
+    /** Count and report what would change, write nothing. */
+    dryRun: z.boolean().optional(),
+    /** Stop after this many articles. Absent means all of them. */
+    limit: z.number().int().positive().optional(),
+    /** One locale only, for a cautious first run. */
+    locale: z.enum(LOCALES).optional(),
+  }),
+  seed_console_handbook: z.strictObject({
+    /** Report what would change, write nothing. */
+    dryRun: z.boolean().optional(),
+    /** Also replace the title and body of articles that already exist. */
+    overwrite: z.boolean().optional(),
   }),
 } satisfies Partial<Record<JobType, z.ZodType>>;
 
