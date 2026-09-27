@@ -231,6 +231,22 @@ describe('an unsigned delivery', () => {
     expect(enqueue).not.toHaveBeenCalled();
   });
 
+  // Review on #263: the delivery id is read off the payload, which nothing has
+  // checked yet. An unsigned body that parses but is not a batch must still be
+  // filed as evidence and refused, not crash the route before the row is written.
+  it.each([
+    ['null', 'null'],
+    ['an entry that is not a list', '{"entry":5}'],
+  ])('with %s for a body is still stored as evidence and refused', async (_what, body) => {
+    const response = await deliver(body, null);
+
+    expect(response.status).toBe(403);
+    expect(writes).toEqual([
+      expect.objectContaining({ providerEventId: null, signatureVerified: false }),
+    ]);
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
   it('is refused the same way when no app secret is configured', async () => {
     setTestEnv({ META_APP_SECRET: undefined });
 

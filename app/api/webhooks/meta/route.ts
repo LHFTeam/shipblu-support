@@ -1,6 +1,4 @@
 import { NextResponse } from 'next/server';
-import { db } from '@/db/client';
-import { webhookEvents } from '@/db/schema';
 import { instagramAppSecrets, metaAppSecret, metaVerifyToken } from '@/lib/env';
 import { deliveryId } from '@/lib/meta/delivery';
 import {
@@ -10,8 +8,7 @@ import {
   unverifiedReason,
 } from '@/lib/meta/signing';
 import type { MetaWebhookPayload } from '@/lib/meta/types';
-import { enqueue } from '@/lib/queue';
-import { logIncomingWebhook } from '@/lib/webhooks/log';
+import { queueDelivery, readDelivery, storeDelivery, storedHeaders } from '@/lib/webhooks/receive';
 import { SIGNATURE_HEADER, verifyChallenge, verifySignature } from '@/lib/whatsapp/verify';
 
 export const dynamic = 'force-dynamic';
@@ -60,25 +57,13 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  // Raw bytes: the signature covers exactly what Meta sent, and re-serialising
-  // parsed JSON produces a different string.
-  let rawBody: string;
-  try {
-    rawBody = await request.text();
-  } catch {
+  // Logged before verification and before parsing, so a delivery this endpoint
+  // is about to reject — bad signature, unreadable JSON, duplicate id — is still
+  // seen. Off unless LOG_ALL_INCOMING_WEBHOOKS is true.
+  const rawBody = await readDelivery(request, 'meta');
+  if (rawBody === null) {
     return NextResponse.json({ error: 'unreadable body' }, { status: 400 });
   }
-
-  // Before verification and before parsing, so a delivery this endpoint is about
-  // to reject — bad signature, unreadable JSON, duplicate id — is still seen.
-  // Off unless LOG_ALL_INCOMING_WEBHOOKS is true.
-  logIncomingWebhook({
-    source: 'meta',
-    method: request.method,
-    url: request.url,
-    headers: request.headers,
-    rawBody,
-  });
 
   // Parsed before the signature is checked, which the body being *read* rather
   // than rewritten makes safe. It is the payload's own `object` that says which
@@ -111,37 +96,23 @@ export async function POST(request: Request) {
 
   const channel = payload.object === 'instagram' ? 'instagram' : 'facebook';
 
-  const headers: Record<string, string> = {};
-  request.headers.forEach((value, key) => {
-    const name = key.toLowerCase();
-    if (name === 'authorization' || name === 'cookie') return;
-    headers[name] = value;
-  });
+  const headers = storedHeaders(request.headers);
 
-  // An unverified payload is stored as evidence but *never* under a delivery
-  // id. Sharing the id with the genuine delivery would let anyone who can see a
-  // comment id — they are public on Facebook — post an unsigned payload naming
-  // it, take the id first, and have the real event arrive later and be dropped
-  // as a duplicate. The forgery is filed for inspection; it cannot pre-empt.
-  const inserted = await db
-    .insert(webhookEvents)
-    .values({
-      provider: 'meta',
-      channel,
-      providerEventId: matched ? deliveryId(payload, matched.connection) : null,
-      connection: matched?.connection ?? null,
-      payload,
-      headers,
-      signatureVerified,
-      // Why it was rejected, on the row itself. Without this a wrong secret and
-      // a forgery are the same unexplained `false`, and the only place the
-      // difference appeared was a log line nobody was reading: the Instagram
-      // app secret going unset cost thirteen hours and 2,309 dropped
-      // deliveries before anybody looked.
-      error: signatureVerified ? null : unverifiedReason(candidates),
-    })
-    .onConflictDoNothing({ target: [webhookEvents.provider, webhookEvents.providerEventId] })
-    .returning({ id: webhookEvents.id });
+  const eventId = await storeDelivery({
+    provider: 'meta',
+    channel,
+    deliveryId: () => (matched ? deliveryId(payload, matched.connection) : null),
+    connection: matched?.connection ?? null,
+    payload,
+    headers,
+    signatureVerified,
+    // Why it was rejected, on the row itself. Without this a wrong secret and
+    // a forgery are the same unexplained `false`, and the only place the
+    // difference appeared was a log line nobody was reading: the Instagram
+    // app secret going unset cost thirteen hours and 2,309 dropped
+    // deliveries before anybody looked.
+    error: signatureVerified ? null : unverifiedReason(candidates),
+  });
 
   if (!signatureVerified) {
     console.warn(
@@ -153,7 +124,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'signature verification failed' }, { status: 403 });
   }
 
-  if (inserted.length === 0) {
+  if (eventId === null) {
     // Already have this delivery. 200 so Meta stops retrying.
     //
     // Said out loud, because a silent drop here is indistinguishable from a
@@ -173,13 +144,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ status: 'duplicate' }, { status: 200 });
   }
 
-  const eventId = inserted[0]!.id;
-
-  await enqueue(
-    'process_webhook',
-    { webhookEventId: eventId },
-    { priority: 10, dedupeKey: `process_webhook:${eventId}` },
-  );
+  await queueDelivery(eventId);
 
   return NextResponse.json({ status: 'queued' }, { status: 200 });
 }
