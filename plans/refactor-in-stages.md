@@ -115,6 +115,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 2.9   | Replies never get paragraphs (CRLF)              | #171            | merged  |
 | 2.10  | Email webhook fails open without its secret      | #177            | merged  |
 | 2.11  | Staging's `local` email webhook accepts anything | #177            | merged  |
+| 2.12  | SLA escalations after a wait never fire          | #242            | open    |
 | 0–2   | Follow-ups to the reviews of #187–#196           | #203, #205      | merged  |
 | 3     | Shared primitives (one row per PR as opened)     |                 | open    |
 | 3.1   | Queue helper: `hasActiveJob(type)`               | #197            | merged  |
