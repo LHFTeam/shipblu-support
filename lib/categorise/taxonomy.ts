@@ -780,7 +780,7 @@ export const UNCLASSIFIED_KEY = 'meta.unclassified';
  * and stops being worth reporting on.
  *
  * One definition, read by three places that would otherwise drift: the resolve
- * gate in `app/(console)/actions.ts`, and the coverage figure on
+ * gate in `lib/tickets/console-guards.ts`, and the coverage figure on
  * `/reports/categories`, which has to measure the population the gate demands.
  * A coverage line whose denominator is every resolved ticket reports a
  * permanent two-thirds gap made mostly of enquiries that never owed a cause,

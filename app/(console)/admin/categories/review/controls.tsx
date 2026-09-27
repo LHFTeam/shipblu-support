@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { confirmCategory, rejectCategory } from '../../../actions';
+import { confirmCategory, rejectCategory } from '../../../category-actions';
 
 /**
  * Confirm or reject, one click each.

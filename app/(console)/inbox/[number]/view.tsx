@@ -35,12 +35,14 @@ import {
   unlinkShipment,
   unlinkShippingAccount,
   updateTicket,
+} from '../../actions';
+import {
   addCategory,
   confirmCategory,
   rejectCategory,
   removeCategory,
   setRootCause,
-} from '../../actions';
+} from '../../category-actions';
 import { PurgePanel } from '../../purge-panel';
 import type { PurgePreview } from '@/lib/admin/purge-summary';
 import { readOnlyReason } from '@/lib/tickets/channel-policy';
