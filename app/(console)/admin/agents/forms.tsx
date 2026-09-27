@@ -16,10 +16,10 @@ import { InfoTip, Tooltip } from '@/components/tooltip';
 import { formatRelative } from '@/lib/format';
 import type { AdminState } from '../settings-shared';
 import { createInvite, savePresenceSettings, setAgentActive, setAgentCapacity } from './actions';
-import type { SettingsState } from '../settings-shared';
+import type { ActionState } from '@/lib/http/action-state';
 
 const INITIAL: AdminState = { error: null };
-const SETTINGS_INITIAL: SettingsState = { error: null };
+const SETTINGS_INITIAL: ActionState = { error: null };
 
 /**
  * The two idle windows, and the only place they are set.
