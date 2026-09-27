@@ -134,7 +134,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 3.13  | FormData readers move to `lib/http/form-data.ts` | #241            | merged  |
 | 3.13  | FormData readers: adoption in the action files   | #244–#246, #250 | merged  |
 | 3.14  | Logger: `lib/log.ts` and the first worker files  | #249, #253      | merged  |
-| 3.14  | Logger: eight more files in `worker/` and `lib/` | #261            | merged  |
+| 3.14  | Logger: nine more files in `worker/` and `lib/`  | #261            | merged  |
 | 3.14  | Logger: `lib/`                                   | #269            | open    |
 | 4.1   | Split `lib/tickets/queries.ts`                   | #224            | merged  |
 | 4.2   | Shared ingest steps                              | #232–#233, #235 | merged  |
@@ -144,12 +144,12 @@ and two sessions claiming different rows then conflict on all of them.
 | ⛳    | Gate: check in with the requester                |                 | done    |
 | 5.1   | `settings-actions.ts`: groups to canned          | #255, #257      | merged  |
 | 5.1   | `settings-actions.ts`: auto-responses to SLA     | #258            | merged  |
-| 5.1   | `settings-actions.ts`: skills to recipients      | #265            | open    |
+| 5.1   | `settings-actions.ts`: skills to recipients      | #265            | merged  |
 | 5.2   | Console guards move to `lib/tickets`             | #260            | merged  |
-| 5.2   | `availability-actions.ts`                        | #268            | open    |
+| 5.2   | `availability-actions.ts`                        | #268            | merged  |
 | 5.4   | Admin pages stop importing `db`: first batches   | #254, #256      | merged  |
 | 5.4   | Admin pages: agents, auto-responses, automations | #259            | merged  |
-| 5.4   | Categories, channels, invite, field options      | #266            | open    |
+| 5.4   | Categories, channels, invite, field options      | #266            | merged  |
 | 5.5   | One receive path for webhooks                    | #263            | merged  |
 | 5.6   | One `localeOf` and one `requestMeta`             | #251            | merged  |
 | 5.6   | One sign-in sequence for both forms              | #264            | merged  |
@@ -193,7 +193,8 @@ narrowed; what remains of each is below.
    every inline read; only the exact `String(formData.get(k) ?? '').trim()`
    reads change, and two files still have some:
    - `(console)/actions.ts`: 5. A hot file, so a PR of its own.
-   - `admin/settings-actions.ts`: 2, in `saveInternalRecipient`.
+   - `admin/recipients/actions.ts`: 2, in `saveInternalRecipient` (moved from
+     `admin/settings-actions.ts` by #265).
 4. **Stage 3 logger.** `lib/log.ts` merged as #249, with `worker/index.ts` and
    seven handlers. The rest of `worker/` follows, then `lib/`, then `app/`,
    each message word for word.
@@ -232,12 +233,9 @@ This replaces three of the rules in the handoff above.
   expected. Staging stays suspended.
 - **The ⛳ gate is passed.** The requester said to start Stage 5.
 
-**State at 23:10 UTC.** #258–#264 are merged. Open: #265 (5.1: skills,
-automations, recipients), #266 (5.4: categories, channels, invite, field
-options), #268 (5.2: `availability-actions.ts`) and #269 (3.14: the logger in
-`lib/`). #265 holds
-`admin/settings-actions.ts`, #266 holds `lib/admin/settings.ts` and #268 holds
-`(console)/actions.ts`, so the next batch of each waits for it.
+**State at 23:20 UTC.** #258–#266 and #268 are merged. Open: #269 (3.14: the
+logger in `lib/`). Each stream's next PR can start from `main`, and each one
+holds its file until it merges.
 
 **Next work.**
 
@@ -246,7 +244,9 @@ options), #268 (5.2: `availability-actions.ts`) and #269 (3.14: the logger in
    `admin/actions.ts` split into `agents/`.
 2. 5.4: the import page, whose three raw-SQL counts need db tests. Then the
    repo rule against `db/client` in a `page.tsx`.
-3. 5.2: the seven sibling files, one PR each. #260 is merged, so they can start.
+3. 5.2: the six sibling files left after #268 (`availability-actions.ts`), one
+   PR each. Each one edits `(console)/actions.ts`, so start the next when the
+   one before it merges.
 4. Logger. Three places in `worker/` stay on `console`, because a move would
    change what they print:
    - `check-meta-permissions` and `test-comment-permission`: their lines start
