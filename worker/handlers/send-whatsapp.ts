@@ -2,6 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { contactIdentities, conversations, messages } from '@/db/schema';
 import type { ClaimedJob } from '@/lib/queue';
+import { alreadySent } from './already-sent';
 import { subjectGone } from './subject-gone';
 import { credentialsForPhoneNumberId } from '@/lib/whatsapp/accounts';
 import { sendingNumberFor } from '@/lib/whatsapp/conversation';
@@ -47,10 +48,7 @@ export async function sendWhatsApp(job: ClaimedJob): Promise<void> {
   if (!row) throw subjectGone('send_whatsapp', `message ${messageId}`);
 
   // A retry after a partial failure must not send the customer a second copy.
-  if (row.message.deliveryStatus !== 'pending' && row.message.deliveryStatus !== 'failed') {
-    console.log(`[send_whatsapp] ${messageId} is ${row.message.deliveryStatus}, skipping`);
-    return;
-  }
+  if (alreadySent('send_whatsapp', messageId, row.message.deliveryStatus)) return;
 
   const to = await recipientNumber(row.conversation.requesterContactId, row.message.toAddresses);
   if (!to) throw new Error(`no WhatsApp number for conversation ${row.conversation.number}`);

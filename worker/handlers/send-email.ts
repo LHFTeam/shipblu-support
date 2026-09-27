@@ -9,6 +9,7 @@ import { replyToAddress } from '@/lib/email/reply-address';
 import { buildReferences, buildReplySubject, formatMessageId } from '@/lib/email/threading';
 import type { OutboundEmail } from '@/lib/email/types';
 import type { ClaimedJob } from '@/lib/queue';
+import { alreadySent } from './already-sent';
 import { subjectGone } from './subject-gone';
 import { errorMessage } from '@/lib/errors';
 
@@ -43,10 +44,7 @@ export async function sendEmail(job: ClaimedJob): Promise<void> {
   if (!row) throw subjectGone('send_email', `message ${messageId}`);
 
   // Already delivered: a retry after a partial failure must not send twice.
-  if (row.message.deliveryStatus !== 'pending' && row.message.deliveryStatus !== 'failed') {
-    console.log(`[send_email] ${messageId} is ${row.message.deliveryStatus}, skipping`);
-    return;
-  }
+  if (alreadySent('send_email', messageId, row.message.deliveryStatus)) return;
 
   const e = env();
   if (!e.EMAIL_FROM_ADDRESS) throw new Error('EMAIL_FROM_ADDRESS is not configured');
