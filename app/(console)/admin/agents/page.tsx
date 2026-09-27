@@ -1,6 +1,4 @@
-import { and, asc, desc, gt, isNull } from 'drizzle-orm';
-import { db } from '@/db/client';
-import { agents, invites } from '@/db/schema';
+import { listAgentsForAdmin, listOpenInvites } from '@/lib/admin/settings';
 import { requirePermission } from '@/lib/auth/guard';
 import { unsealInviteToken } from '@/lib/auth/invite-token';
 import { appUrl, env } from '@/lib/env';
@@ -15,32 +13,8 @@ export default async function AgentsPage() {
 
   const [policy, agentList, openInvites] = await Promise.all([
     loadPresencePolicy(),
-    db
-      .select({
-        id: agents.id,
-        name: agents.name,
-        email: agents.email,
-        role: agents.role,
-        isActive: agents.isActive,
-        lastSeenAt: agents.lastSeenAt,
-        presence: agents.presence,
-        isAcceptingTickets: agents.isAcceptingTickets,
-        maxOpenTickets: agents.maxOpenTickets,
-      })
-      .from(agents)
-      .orderBy(asc(agents.name)),
-
-    db
-      .select({
-        id: invites.id,
-        email: invites.email,
-        role: invites.role,
-        expiresAt: invites.expiresAt,
-        tokenCiphertext: invites.tokenCiphertext,
-      })
-      .from(invites)
-      .where(and(isNull(invites.acceptedAt), gt(invites.expiresAt, new Date())))
-      .orderBy(desc(invites.createdAt)),
+    listAgentsForAdmin(),
+    listOpenInvites(new Date()),
   ]);
 
   const hasStoredLinks = openInvites.some((invite) => invite.tokenCiphertext);

@@ -1,7 +1,5 @@
-import { asc } from 'drizzle-orm';
-import { db } from '@/db/client';
-import { groups, ticketFields, ticketForms } from '@/db/schema';
 import { Card, EmptyState, PageHeader } from '@/components/ui';
+import { listFormFieldChoices, listGroupNames, listTicketForms } from '@/lib/admin/settings';
 import { requirePermission } from '@/lib/auth/guard';
 import { parseFormElements } from '@/lib/forms/elements';
 import { listAllTicketFields } from '@/lib/tickets/lookups';
@@ -20,23 +18,9 @@ export default async function FormsPage() {
   await requirePermission('admin.forms');
 
   const [forms, groupList, fieldList, defs] = await Promise.all([
-    db.select().from(ticketForms).orderBy(asc(ticketForms.position), asc(ticketForms.slug)),
-    db.select({ id: groups.id, name: groups.name }).from(groups).orderBy(asc(groups.name)),
-    // Retired fields included, marked. A form can already be placing one, and
-    // leaving it out of the picker renders that row blank with no way to tell
-    // which question it is — while every save re-posts it.
-    db
-      .select({
-        key: ticketFields.key,
-        label: ticketFields.label,
-        type: ticketFields.type,
-        options: ticketFields.options,
-        visibleToCustomer: ticketFields.visibleToCustomer,
-        editableByCustomer: ticketFields.editableByCustomer,
-        isActive: ticketFields.isActive,
-      })
-      .from(ticketFields)
-      .orderBy(asc(ticketFields.position), asc(ticketFields.label)),
+    listTicketForms(),
+    listGroupNames(),
+    listFormFieldChoices(),
     listAllTicketFields(),
   ]);
 

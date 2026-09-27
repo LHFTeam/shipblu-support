@@ -4,11 +4,15 @@ import { db } from '@/db/client';
 import {
   agentSkills,
   agents,
+  automationRules,
+  businessHours,
   cannedResponses,
   contacts,
   conversations,
   groupMembers,
   groups,
+  holidays,
+  invites,
   locations,
   shipmentPhrases,
   skills,
@@ -18,10 +22,13 @@ import {
 import { withCleanDatabase } from '@/lib/testing/db';
 import {
   listActiveAgents,
+  listAnyHoliday,
+  listAutomationRules,
   listCannedResponses,
   listGroupsForAdmin,
   listSkillHolders,
   listLocations,
+  listOpenInvites,
   listSavedPhrases,
   listTicketFields,
   listTicketStatuses,
@@ -162,6 +169,72 @@ describe('the admin settings lists', () => {
 
     expect(await listSkillHolders([arabic!.id])).toEqual([
       { skillId: arabic!.id, agentId: agent!.id },
+    ]);
+  });
+});
+
+describe('the auto-response, automation and agent lists', () => {
+  it('finds a holiday when there is one, and asks for no more than one', async () => {
+    expect(await listAnyHoliday()).toEqual([]);
+    const [schedule] = await db
+      .insert(businessHours)
+      .values({
+        name: 'Cairo',
+        schedule: { sun: [], mon: [], tue: [], wed: [], thu: [], fri: [], sat: [] },
+      })
+      .returning({ id: businessHours.id });
+    await db.insert(holidays).values([
+      { businessHoursId: schedule!.id, name: 'Eid', date: '2026-03-20' },
+      { businessHoursId: schedule!.id, name: 'Sham el-Nessim', date: '2026-04-13' },
+    ]);
+
+    expect(await listAnyHoliday()).toHaveLength(1);
+  });
+
+  // The order the engine runs them in, which the page mirrors. `trigger` is an
+  // enum, so this is the enum's declaration order, not the alphabet.
+  it('lists automation rules by trigger, then position', async () => {
+    await db.insert(automationRules).values([
+      { name: 'sweep', trigger: 'time_based', position: 1 },
+      { name: 'second', trigger: 'on_create', position: 2 },
+      { name: 'update', trigger: 'on_update', position: 1 },
+      { name: 'first', trigger: 'on_create', position: 1 },
+    ]);
+
+    // The seed writes a default time-based rule of its own; this test states
+    // only the rows it wrote.
+    const ours = new Set(['first', 'second', 'update', 'sweep']);
+    const rows = await listAutomationRules();
+    expect(rows.map((row) => row.name).filter((name) => ours.has(name))).toEqual([
+      'first',
+      'second',
+      'update',
+      'sweep',
+    ]);
+  });
+
+  it('lists only invites that are neither accepted nor expired, newest first', async () => {
+    const now = new Date('2026-09-27T12:00:00Z');
+    const later = new Date('2026-10-04T12:00:00Z');
+    const invite = (email: string, values: Partial<typeof invites.$inferInsert>) => ({
+      tokenHash: email,
+      email,
+      name: email,
+      expiresAt: later,
+      ...values,
+    });
+    await db
+      .insert(invites)
+      .values([
+        invite('old@shipblu.test', { createdAt: new Date('2026-09-20T12:00:00Z') }),
+        invite('new@shipblu.test', { createdAt: new Date('2026-09-26T12:00:00Z') }),
+        invite('accepted@shipblu.test', { acceptedAt: new Date('2026-09-21T12:00:00Z') }),
+        invite('expired@shipblu.test', { expiresAt: now }),
+      ]);
+
+    expect((await listOpenInvites(now)).map((row) => row.email)).toEqual([
+      'new@shipblu.test',
+      'old@shipblu.test',
     ]);
   });
 });
