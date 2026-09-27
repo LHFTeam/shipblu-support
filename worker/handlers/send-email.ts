@@ -13,6 +13,9 @@ import { parseJobPayload } from '@/lib/queue/payloads';
 import { alreadySent } from './already-sent';
 import { subjectGone } from './subject-gone';
 import { errorMessage } from '@/lib/errors';
+import { logger } from '@/lib/log';
+
+const log = logger('send_email');
 
 /**
  * Sends an agent's reply.
@@ -112,7 +115,7 @@ export async function sendEmail(job: ClaimedJob): Promise<void> {
       })
       .where(eq(messages.id, messageId));
 
-    console.log(`[send_email] ${messageId} sent as ${formatMessageId(outbound.messageId)}`);
+    log.info(`${messageId} sent as ${formatMessageId(outbound.messageId)}`);
   } catch (error) {
     await db
       .update(messages)

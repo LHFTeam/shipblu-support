@@ -4,6 +4,9 @@ import { shipments } from '@/db/schema';
 import { enqueueMany, type ClaimedJob } from '@/lib/queue';
 import { parseJobPayload } from '@/lib/queue/payloads';
 import { stageDisplay } from '@/lib/shipments/status';
+import { logger } from '@/lib/log';
+
+const log = logger('sync_stale_shipments');
 
 /**
  * Finds the parcels nobody has asked the platform about, and asks.
@@ -45,7 +48,7 @@ export async function syncStaleShipments(job: ClaimedJob): Promise<void> {
 
   const candidates = [...stubs, ...stale];
   if (candidates.length === 0) {
-    console.log('[sync_stale_shipments] nothing to sync');
+    log.info('nothing to sync');
     return;
   }
 
@@ -60,8 +63,8 @@ export async function syncStaleShipments(job: ClaimedJob): Promise<void> {
     { priority: 200 },
   );
 
-  console.log(
-    `[sync_stale_shipments] enqueued ${enqueued} (${stubs.length} never synced, ` +
+  log.info(
+    `enqueued ${enqueued} (${stubs.length} never synced, ` +
       `${stale.length} stale${staleMinutes ? ` over ${staleMinutes}m` : ''})`,
   );
 }

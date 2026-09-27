@@ -18,6 +18,9 @@ import {
   reconciles,
   reportingContext,
 } from '@/lib/reports/rollup';
+import { logger } from '@/lib/log';
+
+const log = logger('rollup_metrics');
 
 /**
  * Nightly rollup into `metrics_daily`. The reports page reads only from here,
@@ -145,13 +148,13 @@ export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
   );
 
   if (plan.skipped > 0) {
-    console.warn(
-      `[rollup_metrics] range exceeds ${MAX_DAYS} days — rebuilding the most recent ${plan.days.length} and skipping ${plan.skipped} older. Re-run with an earlier "to" to finish the rest.`,
+    log.warn(
+      `range exceeds ${MAX_DAYS} days — rebuilding the most recent ${plan.days.length} and skipping ${plan.skipped} older. Re-run with an earlier "to" to finish the rest.`,
     );
   }
 
   if (plan.days.length === 0) {
-    console.log('[rollup_metrics] nothing to rebuild for this range');
+    log.info('nothing to rebuild for this range');
     return;
   }
 
@@ -211,18 +214,16 @@ export async function rollupMetrics(job?: ClaimedJob): Promise<void> {
     // see `db/schema/metrics.ts`.
     if (!reconciles(slices)) {
       inconsistent += 1;
-      console.error(`[rollup_metrics] ${day}: totals do not match the sum of the channel slices`);
+      log.error(`${day}: totals do not match the sum of the channel slices`);
     }
 
-    console.log(
-      `[rollup_metrics] ${day}: ${rows.length} rows, ${agentRows.length} agent-day(s), ` +
+    log.info(
+      `${day}: ${rows.length} rows, ${agentRows.length} agent-day(s), ` +
         `${categoryRows.length} category row(s), ${causeRows.length} cause row(s)`,
     );
   }
 
-  console.log(
-    `[rollup_metrics] rebuilt ${plan.days.length} day(s), ${plan.days.at(-1)} to ${plan.days[0]}`,
-  );
+  log.info(`rebuilt ${plan.days.length} day(s), ${plan.days.at(-1)} to ${plan.days[0]}`);
 
   // Fail the run rather than reporting success over numbers that contradict
   // themselves: a green nightly job is the only signal anyone watches.

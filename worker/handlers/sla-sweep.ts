@@ -7,6 +7,9 @@ import {
   ticketStatuses,
 } from '@/db/schema';
 import { liveTicketsFilter, loadPolicies, type LoadedPolicy } from '@/lib/sla';
+import { logger } from '@/lib/log';
+
+const log = logger('sla_sweep');
 
 /**
  * Flags SLA breaches and runs escalations. Cron, every five minutes.
@@ -63,9 +66,7 @@ export async function slaSweep(): Promise<void> {
     }
   }
 
-  console.log(
-    `[sla_sweep] first_response=${firstResponse} resolution=${resolution} escalated=${escalated}`,
-  );
+  log.info(`first_response=${firstResponse} resolution=${resolution} escalated=${escalated}`);
 }
 
 type BreachRow = {

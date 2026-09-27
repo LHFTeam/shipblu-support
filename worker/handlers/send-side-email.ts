@@ -19,6 +19,9 @@ import {
   sideConversationFooter,
 } from '@/lib/side-conversations/format';
 import { errorMessage } from '@/lib/errors';
+import { logger } from '@/lib/log';
+
+const log = logger('send_side_email');
 
 /**
  * Sends an agent's question — or their follow-up — to a hub or another internal
@@ -149,8 +152,8 @@ export async function sendSideEmail(job: ClaimedJob): Promise<void> {
       })
       .where(eq(sideConversationMessages.id, messageId));
 
-    console.log(
-      `[send_side_email] ${messageId} sent to side conversation #${row.side.number} ` +
+    log.info(
+      `${messageId} sent to side conversation #${row.side.number} ` +
         `as ${formatMessageId(outbound.messageId)}`,
     );
   } catch (error) {

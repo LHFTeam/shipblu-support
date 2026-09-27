@@ -8,6 +8,9 @@ import { ingestInboundEmail } from '@/lib/tickets/ingest';
 import { processMetaWebhook } from './process-meta-webhook';
 import { processWhatsAppWebhook } from './process-whatsapp-webhook';
 import { errorMessage } from '@/lib/errors';
+import { logger } from '@/lib/log';
+
+const log = logger('process_webhook');
 
 /**
  * Processes a stored webhook payload into a ticket.
@@ -29,7 +32,7 @@ export async function processWebhook(job: ClaimedJob): Promise<void> {
   if (!event) throw new Error(`webhook_event ${webhookEventId} not found`);
 
   if (event.processedAt) {
-    console.log(`[process_webhook] ${webhookEventId} already processed, skipping`);
+    log.info(`${webhookEventId} already processed, skipping`);
     return;
   }
 
@@ -96,8 +99,8 @@ export async function processWebhook(job: ClaimedJob): Promise<void> {
         ? `side conversation #${result.sideConversationNumber} on ticket #${result.conversationNumber}`
         : `ticket #${result.conversationNumber}`;
 
-    console.log(
-      `[process_webhook] ${webhookEventId} → ${where} ` +
+    log.info(
+      `${webhookEventId} → ${where} ` +
         `(${result.duplicate ? 'duplicate' : result.createdConversation ? 'new' : 'appended'})`,
     );
   } catch (error) {

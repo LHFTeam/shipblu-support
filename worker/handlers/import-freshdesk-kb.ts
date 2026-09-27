@@ -23,6 +23,9 @@ import { detectCategoryLocale, detectLocale, looksUntranslated } from '@/lib/kb/
 import { LOCALES, LOCALE_NAMES, type Locale } from '@/lib/kb/locale';
 import { slugify, uniqueSlug } from '@/lib/kb/slug';
 import { errorMessage } from '@/lib/errors';
+import { logger } from '@/lib/log';
+
+const log = logger('import_freshdesk_kb');
 
 /**
  * Imports the Freshdesk knowledge base, in every language it is published in.
@@ -105,7 +108,7 @@ export async function importFreshdeskKb(): Promise<void> {
 
   const categories = await listCategories();
   if (categories.length === 0) {
-    console.warn('[import_freshdesk_kb] Freshdesk returned no categories');
+    log.warn('Freshdesk returned no categories');
     return;
   }
 
@@ -161,8 +164,8 @@ export async function importFreshdeskKb(): Promise<void> {
         // at was in the right category and had simply never been translated —
         // Arabic title, English body. Both explanations are real and they need
         // opposite actions, so name the articles and let a person look.
-        console.warn(
-          `[import_freshdesk_kb] category "${category.name}" imported as ${primaryLocale}, but ` +
+        log.warn(
+          `category "${category.name}" imported as ${primaryLocale}, but ` +
             `${odd.length} of ${samples.length} article(s) are written in the other language: ` +
             `${odd
               .slice(0, 5)
@@ -223,8 +226,8 @@ export async function importFreshdeskKb(): Promise<void> {
     if (code) codes.set(locale, code);
   }
 
-  console.log(
-    `[import_freshdesk_kb] language codes: ${LOCALES.map(
+  log.info(
+    `language codes: ${LOCALES.map(
       (locale) => `${locale}=${codes.get(locale) ?? 'not found'}`,
     ).join(
       ', ',
@@ -237,8 +240,8 @@ export async function importFreshdeskKb(): Promise<void> {
   // account's whole English tree go missing without anyone noticing.
   for (const locale of LOCALES) {
     if (codes.has(locale)) continue;
-    console.warn(
-      `[import_freshdesk_kb] no ${LOCALE_NAMES[locale]} content found. Either the Freshdesk ` +
+    log.warn(
+      `no ${LOCALE_NAMES[locale]} content found. Either the Freshdesk ` +
         `account publishes nothing in it, or its language code is not one this import knows ` +
         `for ${locale}.`,
     );
@@ -274,8 +277,8 @@ export async function importFreshdeskKb(): Promise<void> {
               if (!categoryRow) {
                 const translatedCategory = await getTranslatedCategory(category.id, code);
                 if (!translatedCategory) {
-                  console.warn(
-                    `[import_freshdesk_kb] category "${category.name}" has ${locale} articles but ` +
+                  log.warn(
+                    `category "${category.name}" has ${locale} articles but ` +
                       `no ${locale} name; keeping the original name for it`,
                   );
                 }
@@ -333,16 +336,16 @@ export async function importFreshdeskKb(): Promise<void> {
     }
   }
 
-  console.log(
-    `[import_freshdesk_kb] ${categoryCount} categories, ${folderCount} folders, ` +
+  log.info(
+    `${categoryCount} categories, ${folderCount} folders, ` +
       `${LOCALES.map((locale) => `${articlesByLocale.get(locale) ?? 0} ${locale}`).join(', ')} ` +
       `articles in ${Math.round((Date.now() - started) / 1000)}s` +
       (failures.length ? `, ${failures.length} failed` : ''),
   );
 
   if (untranslated.length) {
-    console.warn(
-      `[import_freshdesk_kb] ${untranslated.length} translated article(s) carry the original text ` +
+    log.warn(
+      `${untranslated.length} translated article(s) carry the original text ` +
         `unchanged, so they read in the wrong language: ${untranslated.slice(0, 10).join(', ')}` +
         `${untranslated.length > 10 ? ', …' : ''}. Translating the body in Freshdesk is the fix; ` +
         `the next import will pick it up.`,
@@ -351,7 +354,7 @@ export async function importFreshdeskKb(): Promise<void> {
 
   if (failures.length) {
     for (const failure of failures.slice(0, 20)) {
-      console.error(`[import_freshdesk_kb] ${failure}`);
+      log.error(`${failure}`);
     }
     throw new Error(`${failures.length} item(s) failed to import`);
   }

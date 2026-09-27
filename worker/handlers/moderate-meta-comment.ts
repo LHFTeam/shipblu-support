@@ -16,6 +16,9 @@ import type { ClaimedJob } from '@/lib/queue';
 import { parseJobPayload } from '@/lib/queue/payloads';
 import { subjectGone } from './subject-gone';
 import { errorMessage } from '@/lib/errors';
+import { logger } from '@/lib/log';
+
+const log = logger('moderate_meta_comment');
 
 /**
  * Hides, unhides or deletes a public comment at Meta.
@@ -71,7 +74,7 @@ export async function moderateMetaComment(job: ClaimedJob): Promise<void> {
   // unhide-then-retry would undo a hide the agent still wants, and a repeated
   // delete is refused with an error that reads like the ticket is broken.
   if (before.pending === null) {
-    console.log(`[moderate_meta_comment] ${messageId} is already settled, skipping`);
+    log.info(`${messageId} is already settled, skipping`);
     return;
   }
 
@@ -105,9 +108,7 @@ export async function moderateMetaComment(job: ClaimedJob): Promise<void> {
     // Same rule as a refused send: a permanent refusal is not worth four more
     // attempts, and the agent finds out from the comment's own bubble.
     if (error instanceof MetaApiError && !error.isTransient) {
-      console.error(
-        `[moderate_meta_comment] ${messageId} ${action} failed permanently: ${message}`,
-      );
+      log.error(`${messageId} ${action} failed permanently: ${message}`);
       return;
     }
 
@@ -129,8 +130,8 @@ export async function moderateMetaComment(job: ClaimedJob): Promise<void> {
     data: { commentId: comment.commentId, platform: comment.platform, connection },
   });
 
-  console.log(
-    `[moderate_meta_comment] ${action} ${comment.platform} comment ${comment.commentId} ` +
+  log.info(
+    `${action} ${comment.platform} comment ${comment.commentId} ` +
       `on message ${messageId} via ${connection}`,
   );
 }

@@ -11,6 +11,9 @@ import {
 } from '@/lib/tickets/outbound';
 import { enqueue, type ClaimedJob } from '@/lib/queue';
 import { parseJobPayload } from '@/lib/queue/payloads';
+import { logger } from '@/lib/log';
+
+const log = logger('send_csat');
 
 /**
  * Sends one satisfaction survey, half an hour after a ticket was resolved.
@@ -67,7 +70,7 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
   // The customer came back and reopened it in the last half hour: they want an
   // answer, not a survey. The next resolution will schedule a new one.
   if (ticket.statusCategory !== 'resolved' && ticket.statusCategory !== 'closed') {
-    console.log(`[send_csat] #${ticket.number} is open again — no survey`);
+    log.info(`#${ticket.number} is open again — no survey`);
     return;
   }
 
@@ -78,12 +81,12 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
   // someone else's work — and the survey would go out from a number they have
   // not been talking to.
   if (isReadOnlyChannel(ticket.channel)) {
-    console.log(`[send_csat] #${ticket.number} is on a read-only channel — no survey`);
+    log.info(`#${ticket.number} is on a read-only channel — no survey`);
     return;
   }
 
   if (await recentlySurveyed(conversationId)) {
-    console.log(`[send_csat] #${ticket.number} was surveyed recently — skipping`);
+    log.info(`#${ticket.number} was surveyed recently — skipping`);
     return;
   }
 
@@ -95,7 +98,7 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
   const isWebchat = ticket.channel === 'webchat';
 
   if (lacksEmailRecipient(ticket.channel, ticket.contactEmail)) {
-    console.log(`[send_csat] #${ticket.number} has no email address to survey`);
+    log.info(`#${ticket.number} has no email address to survey`);
     return;
   }
 
@@ -107,7 +110,7 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
   // worth spending a WhatsApp template on either.
   const blocked = automatedReplyBlocked(ticket);
   if (blocked) {
-    console.log(`[send_csat] #${ticket.number}: no survey — ${blocked}`);
+    log.info(`#${ticket.number}: no survey — ${blocked}`);
     return;
   }
 
@@ -156,5 +159,5 @@ export async function sendCsat(job: ClaimedJob): Promise<void> {
     );
   }
 
-  console.log(`[send_csat] surveyed #${ticket.number} on ${ticket.channel}`);
+  log.info(`surveyed #${ticket.number} on ${ticket.channel}`);
 }

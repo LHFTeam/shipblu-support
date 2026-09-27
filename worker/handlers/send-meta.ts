@@ -18,6 +18,9 @@ import { alreadySent } from './already-sent';
 import { subjectGone } from './subject-gone';
 import { metaReplyTarget } from '@/lib/tickets/meta-thread';
 import { errorMessage } from '@/lib/errors';
+import { logger } from '@/lib/log';
+
+const log = logger('send_meta');
 
 /**
  * Delivers an agent's Facebook or Instagram reply.
@@ -93,7 +96,7 @@ export async function sendMeta(job: ClaimedJob): Promise<void> {
       })
       .where(eq(messages.id, messageId));
 
-    console.log(`[send_meta] ${messageId} sent as ${sendKind} on ${platform} via ${connection}`);
+    log.info(`${messageId} sent as ${sendKind} on ${platform} via ${connection}`);
   } catch (error) {
     const message = errorMessage(error);
 
@@ -121,7 +124,7 @@ export async function sendMeta(job: ClaimedJob): Promise<void> {
     // A permanent failure is not worth four more attempts: the agent needs to
     // know now, and the failed badge on the timeline is how they find out.
     if (error instanceof MetaApiError && !error.isTransient) {
-      console.error(`[send_meta] ${messageId} failed permanently: ${message}`);
+      log.error(`${messageId} failed permanently: ${message}`);
       return;
     }
 
