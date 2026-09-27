@@ -8,6 +8,7 @@ import { runOne, type MessageToRun, type RunSettings } from '@/lib/categorise-ai
 import { categorisationRequest } from '@/lib/categorise-ai/request';
 import { UNCLASSIFIED_KEY } from '@/lib/categorise/taxonomy';
 import type { ClaimedJob } from '@/lib/queue';
+import { parseJobPayload } from '@/lib/queue/payloads';
 import { scanMessagesInKeysetOrder } from '@/lib/queue/backfill';
 import { CONVERSATION_CHANNELS, readOnlyChannels } from '@/lib/tickets/channel-policy';
 import type { ConversationChannel } from '@/lib/tickets/channel-policy';
@@ -39,24 +40,8 @@ import { typesafeConfigured, typesafeModel } from '@/lib/typesafe/client';
  * line, not a default.
  */
 
-type Payload = {
-  /** Which experiment these rows belong to. Re-running one fills its gaps only. */
-  runLabel?: string;
-  limit?: number;
-  /** ISO timestamps bounding which messages are considered. */
-  since?: string;
-  until?: string;
-  /** Comma-separated channels, replacing the default "everything but the bot". */
-  channels?: string;
-  /** Send the preceding inbound messages as context. On by default. */
-  context?: boolean;
-  /** Only messages on tickets the rules filed as `meta.unclassified`. */
-  onlyUnclassified?: boolean;
-  /** Select and build every request, call nothing, write nothing. */
-  dryRun?: boolean;
-  /** Skip the run; print the report for `runLabel` as it stands. */
-  reportOnly?: boolean;
-};
+/** The run's options, as the schema in `lib/queue/payloads.ts` hands them over. */
+type Payload = ReturnType<typeof parseJobPayload<'backfill_categorise_ai'>>;
 
 const BATCH = 200;
 
@@ -73,8 +58,8 @@ const CONTEXT_MESSAGES = 3;
 const TAG = '[backfill_categorise_ai]';
 
 export async function backfillCategoriseAi(job: ClaimedJob): Promise<void> {
-  const payload = (job.payload ?? {}) as Payload;
-  const runLabel = typeof payload.runLabel === 'string' ? payload.runLabel : 'adhoc';
+  const payload = parseJobPayload(job, 'backfill_categorise_ai');
+  const runLabel = payload.runLabel ?? 'adhoc';
   const dryRun = payload.dryRun === true;
   const withContext = payload.context !== false;
 

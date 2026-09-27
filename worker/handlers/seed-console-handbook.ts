@@ -5,6 +5,7 @@ import { articleBody, cutArticleVersion } from '@/lib/kb/article-write';
 import { HANDBOOK, HANDBOOK_CATEGORY, HANDBOOK_LOCALE } from '@/lib/kb/handbook';
 import type { AgentRole } from '@/lib/auth/permissions';
 import type { ClaimedJob } from '@/lib/queue';
+import { parseJobPayload } from '@/lib/queue/payloads';
 
 /**
  * Puts the team's own handbook into the knowledge base.
@@ -55,13 +56,6 @@ import type { ClaimedJob } from '@/lib/queue';
  * of what a re-runnable seed wants.
  */
 
-type Payload = {
-  /** Report what would change, write nothing. */
-  dryRun?: boolean;
-  /** Also replace the title and body of articles that already exist. */
-  overwrite?: boolean;
-};
-
 type Tally = {
   foldersCreated: number;
   foldersUpdated: number;
@@ -95,7 +89,7 @@ const externalId = {
 };
 
 export async function seedConsoleHandbook(job: ClaimedJob): Promise<void> {
-  const payload = (job.payload ?? {}) as Payload;
+  const payload = parseJobPayload(job, 'seed_console_handbook');
   const dryRun = payload.dryRun === true;
   const overwrite = payload.overwrite === true;
 

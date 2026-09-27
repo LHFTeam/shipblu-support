@@ -118,6 +118,59 @@ describe('the hand-run options', () => {
   });
 });
 
+describe('the backfills and the knowledge-base passes', () => {
+  const parse = (type: Parameters<typeof parseJobPayload>[1], payload: Record<string, unknown>) =>
+    parseJobPayload(job(payload), type);
+
+  // What CI's database job and the admin buttons send, and the bare run.
+  it.each([
+    ['backfill_shipment_links', {}],
+    ['backfill_shipment_links', { limit: 1 }],
+    ['backfill_message_locations', { limit: 1 }],
+    ['backfill_categorise_ai', { dryRun: true, limit: 1 }],
+    ['normalise_kb_formatting', { dryRun: true }],
+    ['seed_console_handbook', {}],
+    ['seed_console_handbook', { overwrite: true }],
+  ] as const)('takes %s %o', (type, payload) => {
+    expect(parse(type, payload)).toEqual(payload);
+  });
+
+  // Recorded, and said in the PR: each of these used to do a real run.
+  it.each([
+    'backfill_shipment_links',
+    'backfill_message_locations',
+    'backfill_categorise_ai',
+    'normalise_kb_formatting',
+    'seed_console_handbook',
+  ] as const)('refuses a %s dryRun that is not a boolean, rather than writing', (type) => {
+    expect(() => parse(type, { dryRun: 1 })).toThrow(PermanentJobError);
+    expect(() => parse(type, { dryRun: 'yes' })).toThrow(PermanentJobError);
+  });
+
+  it('takes a scan bound Date can read, and refuses one it would misread', () => {
+    expect(parse('backfill_shipment_links', { since: '2026-09-01' })).toEqual({
+      since: '2026-09-01',
+    });
+    expect(parse('backfill_message_locations', { until: '2026-09-20T12:00:00Z' })).toEqual({
+      until: '2026-09-20T12:00:00Z',
+    });
+    // `since=20260901` at the command line: a number, milliseconds into 1970.
+    expect(() => parse('backfill_shipment_links', { since: 20260901 })).toThrow(PermanentJobError);
+    expect(() => parse('backfill_categorise_ai', { until: 'yesterday' })).toThrow(
+      PermanentJobError,
+    );
+  });
+
+  it('keeps a run label of digits as the text it was typed as', () => {
+    expect(parse('backfill_categorise_ai', { runLabel: 2026 })).toEqual({ runLabel: '2026' });
+  });
+
+  it('takes only a locale the help centre has', () => {
+    expect(parse('normalise_kb_formatting', { locale: 'ar' })).toEqual({ locale: 'ar' });
+    expect(() => parse('normalise_kb_formatting', { locale: 'fr' })).toThrow(PermanentJobError);
+  });
+});
+
 // Never called: `tsc` is the assertion. Each line below the directive must fail
 // to compile, and would compile if `enqueue` were typed `Record<string, unknown>`.
 async function enqueueIsTypedFromTheSchema(messageId: string) {
