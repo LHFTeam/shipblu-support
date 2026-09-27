@@ -6,6 +6,7 @@ import { and, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { kbArticleVersions, kbArticles, kbCategories, kbFolders } from '@/db/schema';
 import { requirePermission } from '@/lib/auth/guard';
+import { ok, type ActionState } from '@/lib/http/action-state';
 import { canonicalUuid, isUuid } from '@/lib/http/uuid';
 import type { AgentRole } from '@/lib/auth/permissions';
 import { htmlToText, sanitiseArticleHtml } from '@/lib/html/sanitize';
@@ -21,11 +22,7 @@ import { normaliseArticleHtml } from '@/lib/kb/format';
 import { isLocale } from '@/lib/kb/locale';
 import { slugify, uniqueSlug } from '@/lib/kb/slug';
 
-export type KbState = { error: string | null; ok?: boolean; nonce?: number };
-
-function ok(): KbState {
-  return { error: null, ok: true, nonce: Date.now() };
-}
+export type KbState = ActionState;
 
 const VISIBILITIES = ['public', 'logged_in', 'agents_only', 'selected_companies'] as const;
 
