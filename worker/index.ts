@@ -4,6 +4,9 @@ import { env } from '@/lib/env';
 import { claimJobs, completeJob, failJob, reclaimStalledJobs } from '@/lib/queue';
 import { backoffMs, classifyFailure } from '@/lib/queue/backoff';
 import { resolveHandler } from './handlers';
+import { logger } from '@/lib/log';
+
+const log = logger('worker');
 
 /**
  * Long-running queue consumer (Render background worker).
@@ -62,10 +65,10 @@ async function runOnce(): Promise<number> {
         const handler = resolveHandler(job.type);
         await handler(job);
         await completeJob(job.id);
-        console.log(`[worker] ${job.type} ${job.id} ok in ${Date.now() - started}ms`);
+        log.info(`${job.type} ${job.id} ok in ${Date.now() - started}ms`);
       } catch (error) {
         await failJob(job, error);
-        console.error(`[worker] ${job.type} ${job.id} failed (attempt ${job.attempts})`, error);
+        log.error(`${job.type} ${job.id} failed (attempt ${job.attempts})`, error);
       }
     }),
   );
@@ -74,7 +77,7 @@ async function runOnce(): Promise<number> {
 }
 
 async function main() {
-  console.log(`[worker] starting as ${workerId}`);
+  log.info(`starting as ${workerId}`);
 
   // LISTEN is an optimisation, not a requirement: it lets a queued job start
   // within milliseconds instead of waiting for the next poll. The loop polls
@@ -88,12 +91,9 @@ async function main() {
   try {
     listener = sessionSql();
     await listener.listen('job_enqueued', () => jobArrived());
-    console.log('[worker] listening for job_enqueued');
+    log.info('listening for job_enqueued');
   } catch (error) {
-    console.error(
-      '[worker] could not LISTEN (check DATABASE_URL_SESSION) — falling back to polling',
-      error,
-    );
+    log.error('could not LISTEN (check DATABASE_URL_SESSION) — falling back to polling', error);
     // The client can exist even when the LISTEN on it failed, and nulling the
     // reference first threw away the only handle to it — a session connection
     // opened with `idle_timeout: 0`, held until something reaped it. Same leak
@@ -117,13 +117,13 @@ async function main() {
   // minutes, so failing here costs nothing but a short delay.
   try {
     const reclaimed = await reclaimStalledJobs();
-    if (reclaimed > 0) console.log(`[worker] reclaimed ${reclaimed} stalled job(s)`);
+    if (reclaimed > 0) log.info(`reclaimed ${reclaimed} stalled job(s)`);
   } catch (error) {
-    console.error('[worker] startup reclaim failed, continuing', error);
+    log.error('startup reclaim failed, continuing', error);
   }
 
   const shutdown = (signal: string) => {
-    console.log(`[worker] ${signal} received, finishing current batch`);
+    log.info(`${signal} received, finishing current batch`);
     shuttingDown = true;
     wakeOnShutdown?.();
   };
@@ -157,15 +157,15 @@ async function main() {
       const kind = classifyFailure(error);
       const delay = backoffMs(kind, consecutiveFailures);
 
-      console.error(
-        `[worker] loop error (${kind}, attempt ${consecutiveFailures}), ` +
+      log.error(
+        `loop error (${kind}, attempt ${consecutiveFailures}), ` +
           `retrying in ${Math.round(delay / 1000)}s`,
         error,
       );
 
       if (kind === 'auth' && consecutiveFailures === 1) {
-        console.error(
-          '[worker] authentication is failing — check DATABASE_URL. Retries will ' +
+        log.error(
+          'authentication is failing — check DATABASE_URL. Retries will ' +
             'not fix this, so the worker will back off rather than keep trying.',
         );
       }
@@ -174,13 +174,13 @@ async function main() {
     }
   }
 
-  console.log('[worker] shutting down');
+  log.info('shutting down');
   if (listener) await listener.end();
   await closeDb();
   process.exit(0);
 }
 
 main().catch((error: unknown) => {
-  console.error('[worker] fatal', error);
+  log.error('fatal', error);
   process.exit(1);
 });

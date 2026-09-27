@@ -8,6 +8,9 @@ import {
 } from '@/lib/tickets/ingest-whatsapp';
 import { parseWebhook } from '@/lib/whatsapp/parse';
 import { errorMessage } from '@/lib/errors';
+import { logger } from '@/lib/log';
+
+const log = logger('whatsapp');
 
 /**
  * Turns a stored Meta webhook payload into conversations and delivery updates.
@@ -25,7 +28,7 @@ export async function processWhatsAppWebhook(event: {
   const parsed = parseWebhook(event.payload);
 
   if (parsed.errors.length) {
-    console.warn(`[whatsapp] account errors on ${event.id}: ${parsed.errors.join('; ')}`);
+    log.warn(`account errors on ${event.id}: ${parsed.errors.join('; ')}`);
   }
 
   const failures: string[] = [];
@@ -37,8 +40,8 @@ export async function processWhatsAppWebhook(event: {
     try {
       const result = await ingestWhatsAppMessage(message);
       ingested += 1;
-      console.log(
-        `[whatsapp] ${message.wamid} → #${result.conversationNumber} ` +
+      log.info(
+        `${message.wamid} → #${result.conversationNumber} ` +
           `(${result.duplicate ? 'duplicate' : result.createdConversation ? 'new' : 'appended'})`,
       );
     } catch (error) {
@@ -54,8 +57,8 @@ export async function processWhatsAppWebhook(event: {
       const result = await ingestWhatsAppEcho(echo);
       if (result.ignored) continue;
       echoed += 1;
-      console.log(
-        `[whatsapp] echo ${echo.wamid} → #${result.conversationNumber} ` +
+      log.info(
+        `echo ${echo.wamid} → #${result.conversationNumber} ` +
           `(${result.duplicate ? 'duplicate' : result.createdConversation ? 'new' : 'appended'})`,
       );
     } catch (error) {
@@ -80,15 +83,15 @@ export async function processWhatsAppWebhook(event: {
   if (failures.length > 0) {
     // Partial failure: recorded on the event so it is visible when inspecting
     // the row, but not retried — a retry would re-run the parts that worked.
-    console.error(`[whatsapp] partial failure on ${event.id}: ${failures.join(' | ')}`);
+    log.error(`partial failure on ${event.id}: ${failures.join(' | ')}`);
     await db
       .update(webhookEvents)
       .set({ error: failures.join(' | ').slice(0, 2000) })
       .where(eq(webhookEvents.id, event.id));
   }
 
-  console.log(
-    `[whatsapp] ${event.id}: ${ingested} message(s), ${echoed} echo(es), ` +
+  log.info(
+    `${event.id}: ${ingested} message(s), ${echoed} echo(es), ` +
       `${statusUpdates} status update(s)` +
       (failures.length ? `, ${failures.length} failed` : ''),
   );

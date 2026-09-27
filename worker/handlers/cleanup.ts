@@ -5,6 +5,9 @@ import { deleteExpiredCustomerSessions } from '@/lib/auth/customer-session';
 import { deleteExpiredSessions } from '@/lib/auth/session';
 import { deleteExpiredContactTokens } from '@/lib/portal/accounts';
 import type { ClaimedJob } from '@/lib/queue';
+import { logger } from '@/lib/log';
+
+const log = logger('cleanup');
 
 /**
  * Housekeeping, run nightly by a Render cron job.
@@ -129,8 +132,8 @@ export async function cleanup(_job: ClaimedJob): Promise<void> {
 
   const oldJobs = await db.delete(jobs).where(completedJobRetentionFilter());
 
-  console.log(
-    `[cleanup] sessions=${expiredSessions} customer_sessions=${expiredCustomerSessions} ` +
+  log.info(
+    `sessions=${expiredSessions} customer_sessions=${expiredCustomerSessions} ` +
       `contact_tokens=${expiredContactTokens} presence=${stalePresence.count} ` +
       `webhooks=${oldWebhooks.count} jobs=${oldJobs.count}`,
   );

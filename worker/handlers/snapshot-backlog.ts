@@ -2,6 +2,9 @@ import { eq, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agentBacklogSnapshots, agents, conversations, ticketStatuses } from '@/db/schema';
 import { openBacklog } from '@/lib/tickets/backlog';
+import { logger } from '@/lib/log';
+
+const log = logger('snapshot_backlog');
 
 /**
  * What each agent is holding, sampled hourly.
@@ -68,12 +71,12 @@ export async function snapshotBacklog(): Promise<void> {
     .groupBy(agents.id);
 
   if (rows.length === 0) {
-    console.log('[snapshot_backlog] no active agents');
+    log.info('no active agents');
     return;
   }
 
   await db.insert(agentBacklogSnapshots).values(rows.map((row) => ({ ...row, at })));
 
   const held = rows.reduce((running, row) => running + row.openCount + row.pendingCount, 0);
-  console.log(`[snapshot_backlog] ${rows.length} agent(s), ${held} ticket(s) held`);
+  log.info(`${rows.length} agent(s), ${held} ticket(s) held`);
 }

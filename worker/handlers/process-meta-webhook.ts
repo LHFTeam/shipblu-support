@@ -10,6 +10,9 @@ import {
   ingestMetaMessage,
 } from '@/lib/tickets/ingest-meta';
 import { errorMessage } from '@/lib/errors';
+import { logger } from '@/lib/log';
+
+const log = logger('meta');
 
 /**
  * Turns a stored Facebook or Instagram payload into conversations.
@@ -44,8 +47,8 @@ export async function processMetaWebhook(event: {
     try {
       const result = await ingestMetaMessage(message);
       messages += 1;
-      console.log(
-        `[meta] ${message.platform} dm ${message.mid} → #${result.conversationNumber} ` +
+      log.info(
+        `${message.platform} dm ${message.mid} → #${result.conversationNumber} ` +
           `(${result.duplicate ? 'duplicate' : result.createdConversation ? 'new' : 'appended'})`,
       );
     } catch (error) {
@@ -57,8 +60,8 @@ export async function processMetaWebhook(event: {
     try {
       const result = await ingestMetaComment(comment);
       comments += 1;
-      console.log(
-        `[meta] ${comment.platform} comment ${comment.commentId} → #${result.conversationNumber} ` +
+      log.info(
+        `${comment.platform} comment ${comment.commentId} → #${result.conversationNumber} ` +
           `(${result.duplicate ? 'duplicate' : result.createdConversation ? 'new' : 'appended'})`,
       );
     } catch (error) {
@@ -71,8 +74,8 @@ export async function processMetaWebhook(event: {
       const applied = await applyMetaInteraction(interaction);
       if (applied) interactions += 1;
       else skipped += 1;
-      console.log(
-        `[meta] ${interaction.platform} ${interaction.kind} from ${interaction.from} ` +
+      log.info(
+        `${interaction.platform} ${interaction.kind} from ${interaction.from} ` +
           `(${interaction.summary}) → ${applied ? 'recorded' : 'no live ticket'}`,
       );
     } catch (error) {
@@ -106,15 +109,15 @@ export async function processMetaWebhook(event: {
   }
 
   if (failures.length > 0) {
-    console.error(`[meta] partial failure on ${event.id}: ${failures.join(' | ')}`);
+    log.error(`partial failure on ${event.id}: ${failures.join(' | ')}`);
     await db
       .update(webhookEvents)
       .set({ error: failures.join(' | ').slice(0, 2000) })
       .where(eq(webhookEvents.id, event.id));
   }
 
-  console.log(
-    `[meta] ${event.id} via ${event.connection ?? 'an unrecorded connection'}: ` +
+  log.info(
+    `${event.id} via ${event.connection ?? 'an unrecorded connection'}: ` +
       `${messages} message(s), ${comments} comment(s), ${receipts} receipt(s), ` +
       `${interactions} interaction(s) (${skipped} skipped), ${parsed.echoes} echo(es) ignored`,
   );
