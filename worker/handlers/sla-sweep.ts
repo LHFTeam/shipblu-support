@@ -130,7 +130,10 @@ type UnescalatedRow = {
  *
  * The event row is excluded here as well as checked in `escalate`, so an
  * escalated ticket stops being read at all rather than being re-read every
- * five minutes for as long as it stays open.
+ * five minutes for as long as it stays open. A breach with nothing to escalate
+ * to — its policy has no rule for that kind, or it has no active policy — is
+ * still read on every run until its clock stops; `escalate` returns before any
+ * query for it, so what that costs is the row.
  *
  * The due dates are there for the planner, not for the answer: a breach always
  * has a due date in the past, and `escalate` refuses one that does not. Without
