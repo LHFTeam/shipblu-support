@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
 import { webhookEvents } from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
@@ -21,8 +21,16 @@ const delivery = {
 
 describe('storeDelivery', () => {
   it('stores a verified delivery once, and answers null for the redelivery', async () => {
-    const first = await storeDelivery({ ...delivery, deliveryId: 'm:1', signatureVerified: true });
-    const again = await storeDelivery({ ...delivery, deliveryId: 'm:1', signatureVerified: true });
+    const first = await storeDelivery({
+      ...delivery,
+      deliveryId: () => 'm:1',
+      signatureVerified: true,
+    });
+    const again = await storeDelivery({
+      ...delivery,
+      deliveryId: () => 'm:1',
+      signatureVerified: true,
+    });
 
     expect(first).toEqual(expect.any(String));
     expect(again).toBeNull();
@@ -34,13 +42,13 @@ describe('storeDelivery', () => {
   it('files an unverified delivery under no id, so the genuine one still lands', async () => {
     const forged = await storeDelivery({
       ...delivery,
-      deliveryId: 'm:2',
+      deliveryId: () => 'm:2',
       signatureVerified: false,
       error: 'no secret matched',
     });
     const genuine = await storeDelivery({
       ...delivery,
-      deliveryId: 'm:2',
+      deliveryId: () => 'm:2',
       signatureVerified: true,
     });
 
@@ -61,10 +69,21 @@ describe('storeDelivery', () => {
     );
   });
 
+  it('never reads the id off a delivery that did not verify', async () => {
+    const deliveryId = vi.fn((): string | null => {
+      throw new TypeError("Cannot read properties of null (reading 'entry')");
+    });
+
+    expect(await storeDelivery({ ...delivery, deliveryId, signatureVerified: false })).toEqual(
+      expect.any(String),
+    );
+    expect(deliveryId).not.toHaveBeenCalled();
+  });
+
   it('stores every unverified retry, since a null id collides with nothing', async () => {
     for (let i = 0; i < 3; i++) {
       expect(
-        await storeDelivery({ ...delivery, deliveryId: 'm:3', signatureVerified: false }),
+        await storeDelivery({ ...delivery, deliveryId: () => 'm:3', signatureVerified: false }),
       ).toEqual(expect.any(String));
     }
     expect(await db.select().from(webhookEvents)).toHaveLength(3);

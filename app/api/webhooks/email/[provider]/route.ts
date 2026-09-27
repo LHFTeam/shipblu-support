@@ -66,7 +66,7 @@ export async function POST(request: Request, context: { params: Promise<{ provid
   const eventId = await storeDelivery({
     provider: provider.name,
     channel: 'email',
-    deliveryId: extractProviderEventId(payload),
+    deliveryId: () => extractProviderEventId(payload),
     payload,
     headers,
     signatureVerified,

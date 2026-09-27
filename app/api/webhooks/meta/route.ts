@@ -101,7 +101,7 @@ export async function POST(request: Request) {
   const eventId = await storeDelivery({
     provider: 'meta',
     channel,
-    deliveryId: matched ? deliveryId(payload, matched.connection) : null,
+    deliveryId: () => (matched ? deliveryId(payload, matched.connection) : null),
     connection: matched?.connection ?? null,
     payload,
     headers,

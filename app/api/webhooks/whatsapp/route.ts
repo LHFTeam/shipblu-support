@@ -61,7 +61,7 @@ export async function POST(request: Request) {
   const eventId = await storeDelivery({
     provider: 'whatsapp',
     channel: 'whatsapp',
-    deliveryId: deliveryId(payload),
+    deliveryId: () => deliveryId(payload),
     payload,
     headers: storedHeaders(request.headers),
     signatureVerified,

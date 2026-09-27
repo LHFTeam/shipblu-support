@@ -66,8 +66,16 @@ type Delivery = Pick<
   'provider' | 'channel' | 'connection' | 'payload' | 'headers' | 'error'
 > & {
   signatureVerified: boolean;
-  /** The provider's delivery id. Stored only when the signature verified. */
-  deliveryId: string | null;
+  /**
+   * The provider's delivery id, read only when the signature verified.
+   *
+   * A function rather than a value because reading it walks the payload, and
+   * until the signature checks out the payload is whatever anybody posted: an
+   * unsigned `null` that parses as JSON crashed the WhatsApp route before its
+   * evidence row was written (review on #263). Called here, only a verified
+   * body is ever read for its id, whichever route is storing it.
+   */
+  deliveryId: () => string | null;
 };
 
 /**
@@ -90,7 +98,7 @@ export async function storeDelivery({
     .insert(webhookEvents)
     .values({
       ...values,
-      providerEventId: signatureVerified ? deliveryId : null,
+      providerEventId: signatureVerified ? deliveryId() : null,
       signatureVerified,
     })
     .onConflictDoNothing({ target: [webhookEvents.provider, webhookEvents.providerEventId] })
