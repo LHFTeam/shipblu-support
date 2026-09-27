@@ -11,18 +11,19 @@ import {
 } from './settings';
 
 /**
- * The admin settings pages' lists: every row, inactive ones included, in the
- * order the page shows them. An admin edits a retired row from these same
- * pages, so a list that dropped them would leave it uneditable.
+ * The admin settings pages' lists: every row, in the order the page shows
+ * them, inactive ones included where the table has the flag. An admin edits a
+ * retired row from these same pages, so a list that dropped them would leave
+ * it uneditable.
  */
 
 withCleanDatabase();
 
 describe('the admin settings lists', () => {
-  it('lists canned responses by folder, then title, inactive ones included', async () => {
+  it('lists canned responses by folder, then title', async () => {
     await db.insert(cannedResponses).values([
       { title: 'Refund', folder: 'Billing' },
-      { title: 'Address change', folder: 'Delivery', isActive: false },
+      { title: 'Address change', folder: 'Delivery' },
       { title: 'Apology', folder: 'Billing' },
     ]);
 
