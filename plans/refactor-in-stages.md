@@ -145,11 +145,14 @@ and two sessions claiming different rows then conflict on all of them.
 | 5.1   | `settings-actions.ts`: groups to canned          | #255, #257      | merged  |
 | 5.1   | `settings-actions.ts`: auto-responses to SLA     | #258            | merged  |
 | 5.1   | `settings-actions.ts`: skills to recipients      | #265            | merged  |
+| 5.1   | `settings-actions.ts`: the last three, deleted   | #270            | open    |
 | 5.2   | Console guards move to `lib/tickets`             | #260            | merged  |
 | 5.2   | `availability-actions.ts`                        | #268            | merged  |
+| 5.2   | `category-actions.ts`                            | #271            | open    |
 | 5.4   | Admin pages stop importing `db`: first batches   | #254, #256      | merged  |
 | 5.4   | Admin pages: agents, auto-responses, automations | #259            | merged  |
 | 5.4   | Categories, channels, invite, field options      | #266            | merged  |
+| 5.4   | The import page, with db tests                   | #272            | open    |
 | 5.5   | One receive path for webhooks                    | #263            | merged  |
 | 5.6   | One `localeOf` and one `requestMeta`             | #251            | merged  |
 | 5.6   | One sign-in sequence for both forms              | #264            | merged  |
@@ -233,20 +236,22 @@ This replaces three of the rules in the handoff above.
   expected. Staging stays suspended.
 - **The ⛳ gate is passed.** The requester said to start Stage 5.
 
-**State at 23:20 UTC.** #258–#266 and #268 are merged. Open: #269 (3.14: the
-logger in `lib/`). Each stream's next PR can start from `main`, and each one
-holds its file until it merges.
+**State at 23:40 UTC.** #258–#266 and #268 are merged. Open, each holding
+its file until it merges: #269 (3.14: the logger in `lib/`), #270 (5.1: the
+last of `settings-actions.ts`), #271 (5.2: `category-actions.ts`) and #272
+(5.4: the import page).
 
 **Next work.**
 
-1. 5.1: WhatsApp accounts and tracking, then the header of
-   `settings-actions.ts`. Presence moves with the
-   `admin/actions.ts` split into `agents/`.
-2. 5.4: the import page, whose three raw-SQL counts need db tests. Then the
-   repo rule against `db/client` in a `page.tsx`.
-3. 5.2: the six sibling files left after #268 (`availability-actions.ts`), one
-   PR each. Each one edits `(console)/actions.ts`, so start the next when the
-   one before it merges.
+1. 5.1: after #270, split `admin/actions.ts` into `agents/`, `channels/`,
+   `import/` and `categories/`, and move `forms-shared.tsx` onto
+   `lib/http/action-state`.
+2. 5.4: after #272, the repo rule against `db/client` in a `page.tsx`, with
+   the `app/probe/page.tsx` exception.
+3. 5.2: the four siblings left after #271 (`shipment-actions.ts`,
+   `side-conversation-actions.ts`, `meta-actions.ts`, `reply-actions.ts`),
+   then `ticket-actions.ts` for what remains, one PR each. Each one edits
+   `(console)/actions.ts`, so start the next when the one before it merges.
 4. Logger. Three places in `worker/` stay on `console`, because a move would
    change what they print:
    - `check-meta-permissions` and `test-comment-permission`: their lines start
