@@ -9,7 +9,7 @@ import {
   ticketStatuses,
 } from '@/db/schema';
 import { assignConversation } from '@/lib/assignment';
-import { HEARTBEAT_TTL_MS } from '@/lib/assignment/eligibility';
+import { reclaimDue } from '@/lib/assignment/reclaim';
 import { openBacklog } from '@/lib/tickets/backlog';
 
 /**
@@ -95,8 +95,6 @@ async function assignWaiting(): Promise<number> {
  *   is offline for ninety seconds.
  */
 async function reclaimAbandoned(now: Date): Promise<number> {
-  const stale = new Date(now.getTime() - HEARTBEAT_TTL_MS);
-
   const abandoned = await db
     .select({
       id: conversations.id,
@@ -106,6 +104,7 @@ async function reclaimAbandoned(now: Date): Promise<number> {
       lastSeenAt: agents.lastSeenAt,
       presence: agents.presence,
       isAcceptingTickets: agents.isAcceptingTickets,
+      acceptingChangedAt: agents.acceptingChangedAt,
       isActive: agents.isActive,
     })
     .from(conversations)
@@ -131,24 +130,10 @@ async function reclaimAbandoned(now: Date): Promise<number> {
   let reclaimed = 0;
 
   for (const row of abandoned) {
-    const waitMs = (row.reclaimAfterMins ?? 0) * 60_000;
-
     // Away counts as away. An agent who switched themselves off is as
     // unavailable as one who closed the laptop, and their unanswered tickets
-    // should go back to the queue either way.
-    const heartbeat = row.lastSeenAt ? new Date(row.lastSeenAt).getTime() : 0;
-    const gone =
-      !row.isActive ||
-      !row.isAcceptingTickets ||
-      row.presence !== 'online' ||
-      heartbeat < stale.getTime();
-    if (!gone) continue;
-
-    // Measured from the later of "they went quiet" and "they were given it", so
-    // a ticket assigned to somebody who was already offline still waits the full
-    // period before being taken back.
-    const goneSince = Math.max(heartbeat, row.assignedAt ? new Date(row.assignedAt).getTime() : 0);
-    if (now.getTime() - goneSince < waitMs) continue;
+    // should go back to the queue either way. `reclaimDue` says from when.
+    if (!reclaimDue(row, row.reclaimAfterMins ?? 0, now)) continue;
 
     await db.transaction(async (tx) => {
       const cleared = await tx
