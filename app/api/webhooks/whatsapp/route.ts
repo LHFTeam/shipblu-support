@@ -1,10 +1,7 @@
 import { NextResponse } from 'next/server';
-import { db } from '@/db/client';
-import { webhookEvents } from '@/db/schema';
 import { metaAppSecret, metaVerifyToken } from '@/lib/env';
-import { enqueue } from '@/lib/queue';
 import { boundedDeliveryKey } from '@/lib/webhooks/delivery-key';
-import { logIncomingWebhook } from '@/lib/webhooks/log';
+import { queueDelivery, readDelivery, storeDelivery, storedHeaders } from '@/lib/webhooks/receive';
 import { SIGNATURE_HEADER, verifyChallenge, verifySignature } from '@/lib/whatsapp/verify';
 import type { WhatsAppWebhookPayload } from '@/lib/whatsapp/types';
 
@@ -45,23 +42,10 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const appSecret = metaAppSecret();
 
-  // Read as text, not json(): the signature covers the exact bytes Meta sent,
-  // and re-serialising a parsed object produces a different string.
-  let rawBody: string;
-  try {
-    rawBody = await request.text();
-  } catch {
+  const rawBody = await readDelivery(request, 'whatsapp');
+  if (rawBody === null) {
     return NextResponse.json({ error: 'unreadable body' }, { status: 400 });
   }
-
-  // Before verification and before parsing — see the note on the Meta endpoint.
-  logIncomingWebhook({
-    source: 'whatsapp',
-    method: request.method,
-    url: request.url,
-    headers: request.headers,
-    rawBody,
-  });
 
   const signatureVerified = appSecret
     ? verifySignature(rawBody, request.headers.get(SIGNATURE_HEADER), appSecret)
@@ -74,30 +58,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'invalid json' }, { status: 400 });
   }
 
-  const headers: Record<string, string> = {};
-  request.headers.forEach((value, key) => {
-    const name = key.toLowerCase();
-    // The signature is recorded (it is the evidence), the credentials are not.
-    if (name === 'authorization' || name === 'cookie') return;
-    headers[name] = value;
+  const eventId = await storeDelivery({
+    provider: 'whatsapp',
+    channel: 'whatsapp',
+    deliveryId: deliveryId(payload),
+    payload,
+    headers: storedHeaders(request.headers),
+    signatureVerified,
   });
-
-  // An unverified payload is stored as evidence but never under a delivery id.
-  // Sharing the id with the genuine delivery would let anyone who learns a
-  // wamid post an unsigned payload naming it, take the id first, and have the
-  // real message arrive later and be dropped as a duplicate.
-  const inserted = await db
-    .insert(webhookEvents)
-    .values({
-      provider: 'whatsapp',
-      channel: 'whatsapp',
-      providerEventId: signatureVerified ? deliveryId(payload) : null,
-      payload,
-      headers,
-      signatureVerified,
-    })
-    .onConflictDoNothing({ target: [webhookEvents.provider, webhookEvents.providerEventId] })
-    .returning({ id: webhookEvents.id });
 
   if (!signatureVerified) {
     console.warn('[webhook:whatsapp] stored an unverified payload');
@@ -106,18 +74,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'signature verification failed' }, { status: 403 });
   }
 
-  if (inserted.length === 0) {
+  if (eventId === null) {
     // Already have this delivery. 200 so Meta stops retrying.
     return NextResponse.json({ status: 'duplicate' }, { status: 200 });
   }
 
-  const eventId = inserted[0]!.id;
-
-  await enqueue(
-    'process_webhook',
-    { webhookEventId: eventId },
-    { priority: 10, dedupeKey: `process_webhook:${eventId}` },
-  );
+  await queueDelivery(eventId);
 
   return NextResponse.json({ status: 'queued' }, { status: 200 });
 }

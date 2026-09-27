@@ -1,9 +1,6 @@
 import { NextResponse } from 'next/server';
-import { db } from '@/db/client';
-import { webhookEvents } from '@/db/schema';
 import { emailProvider } from '@/lib/email/providers';
-import { enqueue } from '@/lib/queue';
-import { logIncomingWebhook } from '@/lib/webhooks/log';
+import { queueDelivery, readDelivery, storeDelivery, storedHeaders } from '@/lib/webhooks/receive';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,30 +22,16 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: Request, context: { params: Promise<{ provider: string }> }) {
   const { provider: providerName } = await context.params;
 
-  let rawBody: string;
-  try {
-    rawBody = await request.text();
-  } catch {
+  // Logged before verification and before parsing — see the note on the Meta
+  // endpoint. Postmark authenticates with Basic Auth, so the logger redacts the
+  // Authorization header rather than printing EMAIL_WEBHOOK_SECRET.
+  const rawBody = await readDelivery(request, `email:${providerName}`);
+  if (rawBody === null) {
     return NextResponse.json({ error: 'unreadable body' }, { status: 400 });
   }
 
-  // Before verification and before parsing — see the note on the Meta endpoint.
-  // Postmark authenticates with Basic Auth, so the logger redacts the
-  // Authorization header rather than printing EMAIL_WEBHOOK_SECRET.
-  logIncomingWebhook({
-    source: `email:${providerName}`,
-    method: request.method,
-    url: request.url,
-    headers: request.headers,
-    rawBody,
-  });
-
-  const headers: Record<string, string> = {};
-  request.headers.forEach((value, key) => {
-    // Never persist the credential itself; we only record whether it checked out.
-    if (key.toLowerCase() === 'authorization' || key.toLowerCase() === 'cookie') return;
-    headers[key.toLowerCase()] = value;
-  });
+  // Never persist the credential itself; we only record whether it checked out.
+  const headers = storedHeaders(request.headers);
 
   let payload: unknown;
   try {
@@ -69,7 +52,7 @@ export async function POST(request: Request, context: { params: Promise<{ provid
   }
 
   // Verification needs the credential, so it reads the unredacted headers —
-  // separate from the map persisted above, which deliberately drops it.
+  // separate from the map stored above, which deliberately drops it.
   const authHeaders: Record<string, string> = {};
   request.headers.forEach((value, key) => {
     authHeaders[key.toLowerCase()] = value;
@@ -78,29 +61,20 @@ export async function POST(request: Request, context: { params: Promise<{ provid
   const verdict = provider.verifySignature(rawBody, authHeaders);
   const signatureVerified = verdict.verified;
 
-  // An unverified payload is stored as evidence but never under a delivery id,
-  // as on the WhatsApp and Meta endpoints. Stored under the id it claims, it
-  // would let anyone who learns a MessageID post an unsigned payload naming it,
-  // take the slot in the unique index first, and have the genuine delivery
-  // dropped as a duplicate.
-  const inserted = await db
-    .insert(webhookEvents)
-    .values({
-      provider: provider.name,
-      channel: 'email',
-      providerEventId: signatureVerified ? extractProviderEventId(payload) : null,
-      payload,
-      headers,
-      signatureVerified,
-      // Why it was refused, on the row: a missing secret and a forgery both
-      // arrive as unverified, and the console line that tells them apart is
-      // gone once Render's log retention passes it.
-      error: verdict.verified ? null : verdict.reason,
-    })
-    .onConflictDoNothing({
-      target: [webhookEvents.provider, webhookEvents.providerEventId],
-    })
-    .returning({ id: webhookEvents.id });
+  // Stored whether or not it verified. An unverified one goes in under no
+  // delivery id, which `storeDelivery` enforces and explains.
+  const eventId = await storeDelivery({
+    provider: provider.name,
+    channel: 'email',
+    deliveryId: extractProviderEventId(payload),
+    payload,
+    headers,
+    signatureVerified,
+    // Why it was refused, on the row: a missing secret and a forgery both
+    // arrive as unverified, and the console line that tells them apart is
+    // gone once Render's log retention passes it.
+    error: verdict.verified ? null : verdict.reason,
+  });
 
   // Refused before the duplicate check, never after it. Postmark retries any
   // answer but a 200 or a 403, ten times over about ten hours, so with a wrong
@@ -122,24 +96,17 @@ export async function POST(request: Request, context: { params: Promise<{ provid
   // (UNVERIFIED_WEBHOOK_DAYS); a jump in `webhook_events` during an incident is
   // this, not a leak.
   if (!signatureVerified) {
-    console.warn(`[webhook:${provider.name}] stored unverified payload ${inserted[0]?.id}`);
+    console.warn(`[webhook:${provider.name}] stored unverified payload ${eventId}`);
     return NextResponse.json({ error: 'signature verification failed' }, { status: 401 });
   }
 
   // Conflict means we already have this delivery; acknowledge so the provider
   // stops retrying, but do not queue it a second time.
-  if (inserted.length === 0) {
+  if (eventId === null) {
     return NextResponse.json({ status: 'duplicate' }, { status: 200 });
   }
 
-  const eventId = inserted[0]!.id;
-
-  await enqueue(
-    'process_webhook',
-    { webhookEventId: eventId },
-    // Ahead of the default 100: a customer waiting on a reply beats bulk work.
-    { priority: 10, dedupeKey: `process_webhook:${eventId}` },
-  );
+  await queueDelivery(eventId);
 
   return NextResponse.json({ status: 'queued', eventId }, { status: 200 });
 }
