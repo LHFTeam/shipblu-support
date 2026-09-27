@@ -25,7 +25,14 @@ vi.mock('@/db/client', () => ({ db }));
 vi.mock('@/lib/auth/guard', () => ({ requirePermission: async () => ({ id: 'admin-1' }) }));
 vi.mock('next/cache', () => ({ revalidatePath: () => {} }));
 
-const actions = await import('./settings-actions');
+// The settings actions live beside the pages they serve now; this reads them
+// as one set, so each case below names an action the way it always has.
+const actions = {
+  ...(await import('./settings-actions')),
+  ...(await import('./groups/actions')),
+  ...(await import('./locations/actions')),
+  ...(await import('./statuses/actions')),
+};
 
 function form(fields: Record<string, string>): FormData {
   const data = new FormData();
