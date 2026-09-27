@@ -1,4 +1,4 @@
-import { and, asc, eq, exists, gt, gte, inArray, isNull, lte, notInArray, sql } from 'drizzle-orm';
+import { and, asc, eq, exists, gte, inArray, isNull, lte, notInArray, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { aiCategoryRuns, conversationCategories, conversations, messages } from '@/db/schema';
@@ -8,6 +8,7 @@ import { runOne, type MessageToRun, type RunSettings } from '@/lib/categorise-ai
 import { categorisationRequest } from '@/lib/categorise-ai/request';
 import { UNCLASSIFIED_KEY } from '@/lib/categorise/taxonomy';
 import type { ClaimedJob } from '@/lib/queue';
+import { scanMessagesInKeysetOrder } from '@/lib/queue/backfill';
 import { CONVERSATION_CHANNELS, readOnlyChannels } from '@/lib/tickets/channel-policy';
 import type { ConversationChannel } from '@/lib/tickets/channel-policy';
 import { typesafeConfigured, typesafeModel } from '@/lib/typesafe/client';
@@ -114,38 +115,27 @@ export async function backfillCategoriseAi(job: ClaimedJob): Promise<void> {
 
   const where = await candidateFilter(payload, runLabel);
 
-  let cursor: string | null = null;
-  let scanned = 0;
   let predicted = 0;
   let failed = 0;
 
-  for (;;) {
-    const remaining = payload.limit ? payload.limit - scanned : BATCH;
-    if (remaining <= 0) break;
-
-    // Keyset paging on the primary key, for the reason spelled out in
-    // `backfill-shipment-links.ts`: a timestamp cursor read back through JS loses
-    // microseconds and never terminates.
-    const batch = await db
-      .select({
-        id: messages.id,
-        conversationId: messages.conversationId,
-        bodyText: messages.bodyText,
-        createdAt: messages.createdAt,
-        channel: conversations.channel,
-      })
-      .from(messages)
-      .innerJoin(conversations, eq(conversations.id, messages.conversationId))
-      .where(cursor ? and(...where, gt(messages.id, cursor)) : and(...where))
-      .orderBy(asc(messages.id))
-      .limit(Math.min(BATCH, remaining));
-
-    if (batch.length === 0) break;
-
-    for (const row of batch) {
-      scanned += 1;
-      cursor = row.id;
-      if (!row.bodyText.trim()) continue;
+  const scanned = await scanMessagesInKeysetOrder(
+    { batchSize: BATCH, limit: payload.limit },
+    (after, size) =>
+      db
+        .select({
+          id: messages.id,
+          conversationId: messages.conversationId,
+          bodyText: messages.bodyText,
+          createdAt: messages.createdAt,
+          channel: conversations.channel,
+        })
+        .from(messages)
+        .innerJoin(conversations, eq(conversations.id, messages.conversationId))
+        .where(and(...where, after))
+        .orderBy(asc(messages.id))
+        .limit(size),
+    async (row) => {
+      if (!row.bodyText.trim()) return;
 
       const message: MessageToRun = {
         conversationId: row.conversationId,
@@ -164,14 +154,14 @@ export async function backfillCategoriseAi(job: ClaimedJob): Promise<void> {
         if (settings.options.length > 0) {
           categorisationRequest(message, settings.options, settings.model, settings.withContext);
         }
-        continue;
+        return;
       }
 
       const result = await runOne(message, settings);
       if (result.outcome === 'predicted') predicted += 1;
       else failed += 1;
-    }
-  }
+    },
+  );
 
   console.log(
     `${TAG} run="${runLabel}" scanned=${scanned} predicted=${predicted} failed=${failed} ` +
