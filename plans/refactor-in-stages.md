@@ -246,8 +246,7 @@ This replaces three of the rules in the handoff above.
 **State at 23:55 UTC.** #258–#275, #278 and #279 are merged. Open, each
 holding its files until it merges:
 
-- #277 (5.4, the `page-db` rule: no module under `app/` but an action, a
-  route handler or a test imports `db/client`): `scripts/ci/rules.mjs`,
+- #277 (5.4, the `page-db` rule): `scripts/ci/rules.mjs`,
   `scripts/ci/rules/page-db*.mjs` and `AGENTS.md`.
 - #280 (5.2, `meta-actions.ts`): `(console)/actions.ts`, and
   `profile-refresh.tsx`, `comment-moderation.tsx` and `thread-control.tsx`
