@@ -29,6 +29,7 @@ import type { SlaTargets, TicketFieldValidation, WeeklySchedule } from '@/db/sch
 import { requirePermission } from '@/lib/auth/guard';
 import { textToHtml } from '@/lib/html/sanitize';
 import { ok, type ActionState } from '@/lib/http/action-state';
+import { int, optionalMinutes, optionalNumber, text, uuidField } from '@/lib/http/form-data';
 import { looksLikeEmail, normaliseEmail } from '@/lib/auth/normalise';
 import { parseActions } from '@/lib/automations/actions';
 import {
@@ -73,29 +74,6 @@ function refresh(path: string) {
   revalidatePath(path);
 }
 
-function text(formData: FormData, key: string): string {
-  return String(formData.get(key) ?? '').trim();
-}
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/**
- * A uuid out of a form field: the value, `null` for "not set", `undefined` for
- * "that is not a uuid".
- *
- * The shape is checked before the value reaches a query because Postgres raises
- * 22P02 on a malformed uuid, and an action that throws returns no state at all —
- * the admin gets a blank crash where the form promises a sentence. The three
- * outcomes are kept distinct on purpose: treating a malformed id as "not set"
- * would quietly widen a rule scoped to one group into one that covers all of
- * them.
- */
-function uuidField(formData: FormData, key: string): string | null | undefined {
-  const value = text(formData, key);
-  if (!value) return null;
-  return UUID.test(value) ? value : undefined;
-}
-
 /**
  * What a save answers when the row it names cannot exist. Every save and delete
  * below takes the row's `id` from the form, and passing it straight to a query
@@ -103,19 +81,6 @@ function uuidField(formData: FormData, key: string): string | null | undefined {
  * where the form promises a sentence. An empty id on a save still means "create".
  */
 const GONE = 'That no longer exists — reload the page and try again';
-
-function int(formData: FormData, key: string, fallback = 0): number {
-  const value = Number(formData.get(key));
-  return Number.isFinite(value) ? Math.trunc(value) : fallback;
-}
-
-function optionalMinutes(formData: FormData, key: string): number | null {
-  const raw = text(formData, key);
-  if (!raw) return null;
-  const value = Number(raw);
-  if (!Number.isFinite(value) || value < 0) return null;
-  return Math.trunc(value);
-}
 
 // --- Groups -----------------------------------------------------------------
 
@@ -533,20 +498,6 @@ export async function saveField(_state: SettingsState, formData: FormData): Prom
 
   refresh('/admin/fields');
   return ok();
-}
-
-/**
- * A number the admin typed, or null. Rejects the shapes a number input still
- * lets through — an empty box is "no rule", `abc` is a mistake worth naming.
- */
-function optionalNumber(
-  formData: FormData,
-  key: string,
-): { ok: true; value: number | null } | null {
-  const raw = text(formData, key);
-  if (!raw) return { ok: true, value: null };
-  const value = Number(raw);
-  return Number.isFinite(value) ? { ok: true, value } : null;
 }
 
 /** An admin's regular expression is compiled here so a broken one never ships. */
