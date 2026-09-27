@@ -131,13 +131,13 @@ and two sessions claiming different rows then conflict on all of them.
 | 3.10  | HTTP helpers: `readJsonBody`                     | #230            | merged  |
 | 3.11  | Vocabulary: priorities, categories, roles        | #231            | merged  |
 | 3.12  | Action state: one `ok()`                         | #240            | merged  |
-| 3.13  | FormData readers move to `lib/http/form-data.ts` | #241            | open    |
-| 3.13  | FormData readers: adoption in the action files   | #244–#246       | open    |
-| 3.14  | Logger: `lib/log.ts` and the first worker files  | #249            | open    |
+| 3.13  | FormData readers move to `lib/http/form-data.ts` | #241            | merged  |
+| 3.13  | FormData readers: adoption in the action files   | #244–#246       | merged  |
+| 3.14  | Logger: `lib/log.ts` and the first worker files  | #249            | merged  |
 | 4.1   | Split `lib/tickets/queries.ts`                   | #224            | merged  |
 | 4.2   | Shared ingest steps                              | #232–#233, #235 | merged  |
 | 4.3   | Meta Graph transport                             | #228            | merged  |
-| 4.4   | Worker: typed payloads, backfill, KB import      | #236–9, #247–8  | open    |
+| 4.4   | Worker: typed payloads, backfill, KB import      | #236–9, #247–8  | merged  |
 | ⛳    | Gate: check in with the requester                |                 | pending |
 | 5.x   | Server side of `app/`                            |                 | pending |
 | 6.x   | Client components                                |                 | pending |
