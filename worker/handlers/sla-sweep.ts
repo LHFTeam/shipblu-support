@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, eq, exists, isNotNull, isNull, lt, not, or, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   conversationEvents,
@@ -34,17 +34,31 @@ export async function slaSweep(): Promise<void> {
   let escalated = 0;
 
   for (const row of breaches) {
-    const policy = row.slaPolicyId ? byId.get(row.slaPolicyId) : undefined;
-
     if (row.firstResponseOverdue) {
       await recordBreach(row.id, 'first_response', row.firstResponseDueAt, now);
       firstResponse += 1;
-      escalated += await escalate(row.id, policy, 'first_response', row.firstResponseDueAt, now);
     }
 
     if (row.resolutionOverdue) {
       await recordBreach(row.id, 'resolution', row.resolutionDueAt, now);
       resolution += 1;
+    }
+  }
+
+  // A second pass rather than an escalation attempt on the breach itself. The
+  // breach flag takes a ticket out of `findBreaches` on the run that sets it,
+  // and that run is at most five minutes after the due date — so an escalation
+  // tried only there fired for a wait of under five minutes and never for the
+  // twenty or sixty an admin actually sets. After the breaches, so a target
+  // missed by more than its wait is still escalated on the run that finds it.
+  for (const row of await findUnescalated(now)) {
+    const policy = row.slaPolicyId ? byId.get(row.slaPolicyId) : undefined;
+
+    if (row.firstResponseAwaiting) {
+      escalated += await escalate(row.id, policy, 'first_response', row.firstResponseDueAt, now);
+    }
+
+    if (row.resolutionAwaiting) {
       escalated += await escalate(row.id, policy, 'resolution', row.resolutionDueAt, now);
     }
   }
@@ -92,6 +106,91 @@ async function findBreaches(now: Date): Promise<BreachRow[]> {
     .where(and(liveTicketsFilter(), or(overdueFirstResponse, overdueResolution)));
 
   return rows;
+}
+
+type UnescalatedRow = {
+  id: string;
+  slaPolicyId: string | null;
+  firstResponseDueAt: Date | null;
+  resolutionDueAt: Date | null;
+  firstResponseAwaiting: boolean;
+  resolutionAwaiting: boolean;
+};
+
+/**
+ * Breaches still owed an escalation: reported, not yet escalated, and still
+ * unmet. Whether the wait is over, and whether the policy escalates at all, is
+ * left to `escalate`, which reads the policy the sweep already loaded.
+ *
+ * The same clock-running population as the breach query, so a ticket whose
+ * clock stopped after the breach — resolved, or waiting on the customer — is
+ * not escalated for a target it no longer has. And a first response that
+ * arrived after the breach but inside the wait ends it: the escalation is for
+ * a customer still waiting.
+ *
+ * The event row is excluded here as well as checked in `escalate`, so an
+ * escalated ticket stops being read at all rather than being re-read every
+ * five minutes for as long as it stays open. A breach with nothing to escalate
+ * to — its policy has no rule for that kind, or it has no active policy — is
+ * still read on every run until its clock stops; `escalate` returns before any
+ * query for it, so what that costs is the row.
+ *
+ * The due dates are there for the planner, not for the answer: a breach always
+ * has a due date in the past, and `escalate` refuses one that does not. Without
+ * them nothing here is indexed, and the query reads every ticket ever received
+ * to find the hundred or so it wants: 620 ms against production's 36,000
+ * tickets, and 3 ms with the two due-date indexes that `findBreaches` uses too.
+ */
+async function findUnescalated(now: Date): Promise<UnescalatedRow[]> {
+  const awaitingFirstResponse = and(
+    isNotNull(conversations.firstResponseDueAt),
+    lt(conversations.firstResponseDueAt, now),
+    eq(conversations.firstResponseBreached, true),
+    isNull(conversations.firstRespondedAt),
+    not(escalationRecorded('first_response')),
+  )!;
+
+  const awaitingResolution = and(
+    isNotNull(conversations.resolutionDueAt),
+    lt(conversations.resolutionDueAt, now),
+    eq(conversations.resolutionBreached, true),
+    isNull(conversations.resolvedAt),
+    not(escalationRecorded('resolution')),
+  )!;
+
+  return db
+    .select({
+      id: conversations.id,
+      slaPolicyId: conversations.slaPolicyId,
+      firstResponseDueAt: conversations.firstResponseDueAt,
+      resolutionDueAt: conversations.resolutionDueAt,
+      firstResponseAwaiting: sql<boolean>`(${awaitingFirstResponse})`,
+      resolutionAwaiting: sql<boolean>`(${awaitingResolution})`,
+    })
+    .from(conversations)
+    .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
+    .where(
+      and(
+        liveTicketsFilter(),
+        isNotNull(conversations.slaPolicyId),
+        or(awaitingFirstResponse, awaitingResolution),
+      ),
+    );
+}
+
+function escalationRecorded(kind: 'first_response' | 'resolution') {
+  return exists(
+    db
+      .select({ one: sql`1` })
+      .from(conversationEvents)
+      .where(
+        and(
+          eq(conversationEvents.conversationId, conversations.id),
+          eq(conversationEvents.type, 'sla_escalated'),
+          sql`${conversationEvents.data}->>'kind' = ${kind}`,
+        ),
+      ),
+  );
 }
 
 async function recordBreach(
