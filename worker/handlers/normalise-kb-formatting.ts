@@ -1,7 +1,8 @@
-import { asc, eq, sql } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { kbArticleVersions, kbArticles } from '@/db/schema';
+import { kbArticles } from '@/db/schema';
 import { htmlToText, preview } from '@/lib/html/sanitize';
+import { cutArticleVersion } from '@/lib/kb/article-write';
 import { normaliseArticleHtml, rewriteLegacyArticleLinks } from '@/lib/kb/format';
 import { DEFAULT_LOCALE } from '@/lib/kb/locale';
 import type { ClaimedJob } from '@/lib/queue';
@@ -150,14 +151,8 @@ export async function normaliseKbFormatting(job: ClaimedJob): Promise<void> {
       // keeps it, so this pass is undoable article by article from the UI
       // rather than only from a database backup. `edited_by_agent_id` stays
       // null: no agent made this edit.
-      const next = await tx
-        .select({ version: sql<number>`coalesce(max(${kbArticleVersions.version}), 0) + 1` })
-        .from(kbArticleVersions)
-        .where(eq(kbArticleVersions.articleId, article.id));
-
-      await tx.insert(kbArticleVersions).values({
+      await cutArticleVersion(tx, {
         articleId: article.id,
-        version: next[0]?.version ?? 1,
         title: article.title,
         bodyHtml: article.bodyHtml,
       });

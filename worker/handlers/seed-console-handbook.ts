@@ -1,8 +1,7 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { kbArticleVersions, kbArticles, kbCategories, kbFolders } from '@/db/schema';
-import { htmlToText, preview, sanitiseArticleHtml } from '@/lib/html/sanitize';
-import { normaliseArticleHtml } from '@/lib/kb/format';
+import { kbArticles, kbCategories, kbFolders } from '@/db/schema';
+import { articleBody, cutArticleVersion } from '@/lib/kb/article-write';
 import { HANDBOOK, HANDBOOK_CATEGORY, HANDBOOK_LOCALE } from '@/lib/kb/handbook';
 import type { AgentRole } from '@/lib/auth/permissions';
 import type { ClaimedJob } from '@/lib/queue';
@@ -260,10 +259,9 @@ async function upsertArticle(
   // The same pair, in the same order, as every other write path: sanitising is
   // the security boundary and normalising is the formatting pass that relies on
   // being handed the sanitiser's canonical output. `handbook.test.ts` asserts
-  // each body is already a fixed point of this, so on a healthy run these two
-  // calls change nothing — which is what makes the comparison below meaningful.
-  const bodyHtml = normaliseArticleHtml(sanitiseArticleHtml(article.bodyHtml));
-  const bodyText = htmlToText(bodyHtml);
+  // each body is already a fixed point of this, so on a healthy run the pair
+  // changes nothing — which is what makes the comparison below meaningful.
+  const { bodyHtml, bodyText, excerpt } = articleBody(article.bodyHtml);
 
   const existing = await db
     .select({
@@ -297,7 +295,7 @@ async function upsertArticle(
       slug: article.slug,
       bodyHtml,
       bodyText,
-      excerpt: preview(bodyText, 200),
+      excerpt,
       locale: HANDBOOK_LOCALE,
       // Published, because a draft is invisible to the one surface an agent
       // reaches this content from while working: the composer's knowledge
@@ -343,26 +341,14 @@ async function upsertArticle(
       // keeps it, so a content push from this repository is undoable from the
       // UI rather than only from a database backup. `edited_by_agent_id` stays
       // null: no agent made this edit.
-      const next = await tx
-        .select({ version: sql<number>`coalesce(max(${kbArticleVersions.version}), 0) + 1` })
-        .from(kbArticleVersions)
-        .where(eq(kbArticleVersions.articleId, row.id));
-
-      await tx.insert(kbArticleVersions).values({
-        articleId: row.id,
-        version: next[0]?.version ?? 1,
-        title: row.title,
-        bodyHtml: row.bodyHtml,
-      });
+      await cutArticleVersion(tx, { articleId: row.id, title: row.title, bodyHtml: row.bodyHtml });
     }
 
     await tx
       .update(kbArticles)
       .set({
         ...(misfiled ? { folderId: folderId!, visibility: 'agents_only' as const, position } : {}),
-        ...(rewriting
-          ? { title: article.title, bodyHtml, bodyText, excerpt: preview(bodyText, 200) }
-          : {}),
+        ...(rewriting ? { title: article.title, bodyHtml, bodyText, excerpt } : {}),
       })
       .where(eq(kbArticles.id, row.id));
   });
