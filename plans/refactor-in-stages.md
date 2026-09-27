@@ -132,14 +132,21 @@ and two sessions claiming different rows then conflict on all of them.
 | 3.11  | Vocabulary: priorities, categories, roles        | #231            | merged  |
 | 3.12  | Action state: one `ok()`                         | #240            | merged  |
 | 3.13  | FormData readers move to `lib/http/form-data.ts` | #241            | merged  |
-| 3.13  | FormData readers: adoption in the action files   | #244–#246       | merged  |
-| 3.14  | Logger: `lib/log.ts` and the first worker files  | #249            | merged  |
+| 3.13  | FormData readers: adoption in the action files   | #244–#246, #250 | merged  |
+| 3.14  | Logger: `lib/log.ts` and the first worker files  | #249, #253      | merged  |
+| 3.14  | Logger: the last eight worker handlers           | #261            | open    |
 | 4.1   | Split `lib/tickets/queries.ts`                   | #224            | merged  |
 | 4.2   | Shared ingest steps                              | #232–#233, #235 | merged  |
 | 4.3   | Meta Graph transport                             | #228            | merged  |
 | 4.4   | Worker: typed payloads, backfill, KB import      | #236–9, #247–8  | merged  |
-| ⛳    | Gate: check in with the requester                |                 | pending |
-| 5.x   | Server side of `app/`                            |                 | pending |
+| 4.4   | Worker: payloads of the five hand-run backfills  | #252            | merged  |
+| ⛳    | Gate: check in with the requester                |                 | done    |
+| 5.1   | `settings-actions.ts`: groups to canned          | #255, #257      | merged  |
+| 5.1   | `settings-actions.ts`: auto-responses to SLA     | #258            | open    |
+| 5.2   | Console guards move to `lib/tickets`             | #260            | open    |
+| 5.4   | Admin pages stop importing `db`: first batches   | #254, #256      | merged  |
+| 5.4   | Admin pages: agents, auto-responses, automations | #259            | open    |
+| 5.6   | One `localeOf` and one `requestMeta`             | #251            | merged  |
 | 6.x   | Client components                                |                 | pending |
 | 7     | Lint tightening, finish logging                  |                 | pending |
 
@@ -206,6 +213,47 @@ requester, and neither is fixed.
 - Keeping the cluster's data directory out of `/tmp/claude-0` altogether
   (for example under `/var/lib/postgresql`, owned by `postgres`) avoids the
   permission trap above.
+
+### State at 22:10 UTC, 2026-09-27
+
+This replaces three of the rules in the handoff above.
+
+- **Merging.** The requester now allows a merge when another agent has
+  reviewed the PR and its findings are fixed on the PR's branch.
+- **Deploys.** The requester asked for one, and all six production services
+  now run `2340f15`. Migration 0028 is applied. The first `sla_sweep` on it
+  escalated 261 breaches (124 first response, 137 resolution), as #242
+  expected. Staging stays suspended.
+- **The ⛳ gate is passed.** The requester said to start Stage 5.
+
+**Open, each on its own files:** #258 (5.1), #259 (5.4), #260 (5.2 guards) and
+#261 (3.14 logger). #258 and #259 hold `admin/settings-actions.ts` and
+`lib/admin/settings.ts`. The next batch of each stage waits for that PR to
+merge.
+
+**Next work.**
+
+1. 5.1: skills, automations, recipients, WhatsApp accounts and tracking, then
+   the header of `settings-actions.ts`. Presence moves with the
+   `admin/actions.ts` split into `agents/`.
+2. 5.4: categories, channels, import, the `(auth)` invite page and
+   `admin/field-options.ts`. Then the repo rule against `db/client` in a
+   `page.tsx`.
+3. 5.2: the seven sibling files, one PR each, after #260.
+4. Logger: `check-meta-permissions` and `test-comment-permission` stay on
+   `console`. Their lines start with `\n` or have no tag, so a move changes
+   their output. Stage 7's `no-console` must list them as exceptions, or a PR
+   must change their output on purpose. Then `lib/`, then `app/`.
+
+**Traps found since.**
+
+- `repo-rules.mjs` reads its file list from git. A new file that is not staged
+  is not seen, so an export that only it imports is reported as dead. Run
+  `git add` before the rules.
+- Join check commands with `&&`, not `;`. One push went out after a failed
+  typecheck because the next command still ran.
+- The local cluster now lives at `/var/lib/postgresql/sb/data`, port 55432,
+  which avoids the `/tmp/claude-0` permission trap.
 
 ## Ground rules for every PR
 
