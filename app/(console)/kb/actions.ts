@@ -8,6 +8,7 @@ import { kbArticleVersions, kbArticles, kbCategories, kbFolders } from '@/db/sch
 import { requirePermission } from '@/lib/auth/guard';
 import { ok, type ActionState } from '@/lib/http/action-state';
 import { canonicalUuid, isUuid } from '@/lib/http/uuid';
+import { text } from '@/lib/http/form-data';
 import type { AgentRole } from '@/lib/auth/permissions';
 import { htmlToText, sanitiseArticleHtml } from '@/lib/html/sanitize';
 import {
@@ -101,15 +102,15 @@ export async function saveArticle(_state: KbState, formData: FormData): Promise<
   // An empty id creates; a malformed one names an article that cannot exist.
   const rawId = String(formData.get('id') ?? '');
   const id = canonicalUuid(rawId);
-  const title = String(formData.get('title') ?? '').trim();
+  const title = text(formData, 'title');
   const folderId = canonicalUuid(formData.get('folderId'));
   const locale = String(formData.get('locale') ?? 'en');
   const rawBody = String(formData.get('bodyHtml') ?? '');
   const visibility = String(formData.get('visibility') ?? 'public');
   const minRole = parseMinRole(formData.get('minRole'));
-  const requestedSlug = String(formData.get('slug') ?? '').trim();
-  const seoTitle = String(formData.get('seoTitle') ?? '').trim();
-  const seoDescription = String(formData.get('seoDescription') ?? '').trim();
+  const requestedSlug = text(formData, 'slug');
+  const seoTitle = text(formData, 'seoTitle');
+  const seoDescription = text(formData, 'seoDescription');
   const tags = String(formData.get('tags') ?? '')
     .split(',')
     .map((tag) => tag.trim())
@@ -287,9 +288,9 @@ export async function deleteArticle(_state: KbState, formData: FormData): Promis
 export async function createCategory(_state: KbState, formData: FormData): Promise<KbState> {
   await requirePermission('kb.edit');
 
-  const name = String(formData.get('name') ?? '').trim();
+  const name = text(formData, 'name');
   const locale = String(formData.get('locale') ?? 'en');
-  const description = String(formData.get('description') ?? '').trim() || null;
+  const description = text(formData, 'description') || null;
 
   if (!name) return { error: 'Give the category a name' };
   if (!isLocale(locale)) return { error: 'Unknown locale' };
@@ -313,7 +314,7 @@ export async function createCategory(_state: KbState, formData: FormData): Promi
 export async function createFolder(_state: KbState, formData: FormData): Promise<KbState> {
   const agent = await requirePermission('kb.edit');
 
-  const name = String(formData.get('name') ?? '').trim();
+  const name = text(formData, 'name');
   const categoryId = canonicalUuid(formData.get('categoryId'));
   const visibility = String(formData.get('visibility') ?? 'public');
   const minRole = parseMinRole(formData.get('minRole'));
