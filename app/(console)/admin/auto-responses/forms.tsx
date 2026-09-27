@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Badge, Button, Field, Select, Textarea, Toggle } from '@/components/ui';
 import { PLACEHOLDERS } from '@/lib/auto-response/resolve';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
-import { deleteAutoResponse, saveAutoResponse } from '../settings-actions';
+import { deleteAutoResponse, saveAutoResponse } from './actions';
 
 type Group = { id: string; name: string };
 

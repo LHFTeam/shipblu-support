@@ -75,7 +75,7 @@ describe('loadHoursCatalog', () => {
     await loadHoursCatalog();
     expect(selects.count).toBe(3);
 
-    // What `settings-actions.ts` calls beside every `refresh('/admin/hours')`.
+    // What `admin/hours/actions.ts` calls beside every `refresh('/admin/hours')`.
     // Without it an admin who edits a schedule watches the old one apply for
     // another thirty seconds, on a page whose whole purpose is that schedule.
     forgetHoursCatalog();

@@ -35,6 +35,9 @@ const actions = {
   ...(await import('./fields/actions')),
   ...(await import('./forms/actions')),
   ...(await import('./canned/actions')),
+  ...(await import('./auto-responses/actions')),
+  ...(await import('./hours/actions')),
+  ...(await import('./sla/actions')),
 };
 
 function form(fields: Record<string, string>): FormData {
