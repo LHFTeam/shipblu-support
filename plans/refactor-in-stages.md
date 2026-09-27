@@ -153,7 +153,8 @@ and two sessions claiming different rows then conflict on all of them.
 | 5.2   | `availability-actions.ts`                        | #268            | merged  |
 | 5.2   | `category-actions.ts`                            | #271            | merged  |
 | 5.2   | `shipment-actions.ts`                            | #274            | merged  |
-| 5.2   | `side-conversation-actions.ts`                   | #278            | open    |
+| 5.2   | `side-conversation-actions.ts`                   | #278            | merged  |
+| 5.2   | `meta-actions.ts`                                | #280            | open    |
 | 5.4   | Admin pages stop importing `db`: first batches   | #254, #256      | merged  |
 | 5.4   | Admin pages: agents, auto-responses, automations | #259            | merged  |
 | 5.4   | Categories, channels, invite, field options      | #266            | merged  |
@@ -242,19 +243,21 @@ This replaces three of the rules in the handoff above.
   expected. Staging stays suspended.
 - **The ⛳ gate is passed.** The requester said to start Stage 5.
 
-**State at 23:45 UTC.** #258–#275 are merged. Open, each holding its files
-until it merges: #277 (5.4: the `page-db` rule, which holds
-`scripts/ci/rules.mjs`, `scripts/ci/rules/page-db*.mjs` and `AGENTS.md`) and
-#278 (5.2: `side-conversation-actions.ts`, which holds `(console)/actions.ts`
-and `inbox/[number]/side-conversations.tsx`) and #279 (5.1: which holds
-`admin/forms-shared.tsx` and `admin/agents/forms.tsx`).
+**State at 23:55 UTC.** #258–#275 and #278 are merged. Open, each holding
+its files until it merges:
+
+- #277 (5.4, the `page-db` rule): `scripts/ci/rules.mjs`,
+  `scripts/ci/rules/page-db*.mjs` and `AGENTS.md`.
+- #279 (5.1): `admin/forms-shared.tsx` and `admin/agents/forms.tsx`.
+- #280 (5.2, `meta-actions.ts`): `(console)/actions.ts`, and
+  `profile-refresh.tsx`, `comment-moderation.tsx` and `thread-control.tsx`
+  under `inbox/[number]/`.
 
 **Next work.**
 
 1. 5.1: done once #279 merges.
 2. 5.4: done once #277 merges.
-3. 5.2: the two siblings left after #278 (`meta-actions.ts`,
-   `reply-actions.ts`),
+3. 5.2: the one sibling left after #280 (`reply-actions.ts`),
    then `ticket-actions.ts` for what remains, one PR each. Each one edits
    `(console)/actions.ts`, so start the next when the one before it merges.
 4. Logger. Three places in `worker/` stay on `console`, because a move would
