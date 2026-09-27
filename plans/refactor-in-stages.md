@@ -134,7 +134,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 3.13  | FormData readers move to `lib/http/form-data.ts` | #241            | merged  |
 | 3.13  | FormData readers: adoption in the action files   | #244–#246, #250 | merged  |
 | 3.14  | Logger: `lib/log.ts` and the first worker files  | #249, #253      | merged  |
-| 3.14  | Logger: the last eight worker handlers           | #261            | open    |
+| 3.14  | Logger: eight more files in `worker/` and `lib/` | #261            | merged  |
 | 4.1   | Split `lib/tickets/queries.ts`                   | #224            | merged  |
 | 4.2   | Shared ingest steps                              | #232–#233, #235 | merged  |
 | 4.3   | Meta Graph transport                             | #228            | merged  |
@@ -142,10 +142,11 @@ and two sessions claiming different rows then conflict on all of them.
 | 4.4   | Worker: payloads of the five hand-run backfills  | #252            | merged  |
 | ⛳    | Gate: check in with the requester                |                 | done    |
 | 5.1   | `settings-actions.ts`: groups to canned          | #255, #257      | merged  |
-| 5.1   | `settings-actions.ts`: auto-responses to SLA     | #258            | open    |
-| 5.2   | Console guards move to `lib/tickets`             | #260            | open    |
+| 5.1   | `settings-actions.ts`: auto-responses to SLA     | #258            | merged  |
+| 5.1   | `settings-actions.ts`: skills to recipients      | #265            | open    |
+| 5.2   | Console guards move to `lib/tickets`             | #260            | merged  |
 | 5.4   | Admin pages stop importing `db`: first batches   | #254, #256      | merged  |
-| 5.4   | Admin pages: agents, auto-responses, automations | #259            | open    |
+| 5.4   | Admin pages: agents, auto-responses, automations | #259            | merged  |
 | 5.5   | One receive path for webhooks                    | #263            | open    |
 | 5.6   | One `localeOf` and one `requestMeta`             | #251            | merged  |
 | 5.6   | One sign-in sequence for both forms              | #264            | merged  |
@@ -228,24 +229,30 @@ This replaces three of the rules in the handoff above.
   expected. Staging stays suspended.
 - **The ⛳ gate is passed.** The requester said to start Stage 5.
 
-**Open, each on its own files:** #258 (5.1), #259 (5.4), #260 (5.2 guards),
-#261 (3.14 logger) and #263 (5.5). #264 (5.6) merged. #258 and #259 hold `admin/settings-actions.ts` and
-`lib/admin/settings.ts`. The next batch of each stage waits for that PR to
-merge.
+**State at 23:00 UTC.** #258–#261 and #264 are merged. Open: #263 (5.5) and
+#265 (5.1: skills, automations, recipients). #265 holds
+`admin/settings-actions.ts`, so the last 5.1 batch waits for it.
 
 **Next work.**
 
-1. 5.1: skills, automations, recipients, WhatsApp accounts and tracking, then
-   the header of `settings-actions.ts`. Presence moves with the
+1. 5.1: WhatsApp accounts and tracking, then the header of
+   `settings-actions.ts`. Presence moves with the
    `admin/actions.ts` split into `agents/`.
 2. 5.4: categories, channels, import, the `(auth)` invite page and
    `admin/field-options.ts`. Then the repo rule against `db/client` in a
    `page.tsx`.
-3. 5.2: the seven sibling files, one PR each, after #260.
-4. Logger: `check-meta-permissions` and `test-comment-permission` stay on
-   `console`. Their lines start with `\n` or have no tag, so a move changes
-   their output. Stage 7's `no-console` must list them as exceptions, or a PR
-   must change their output on purpose. Then `lib/`, then `app/`.
+3. 5.2: the seven sibling files, one PR each. #260 is merged, so they can start.
+4. Logger. Three places in `worker/` stay on `console`, because a move would
+   change what they print:
+   - `check-meta-permissions` and `test-comment-permission`: their lines start
+     with `\n` or have no tag;
+   - the two `console.log(formatReport(...))` calls in
+     `backfill-categorise-ai.ts`: the report block has no tag.
+
+   Stage 7's `no-console` must list them as exceptions, or a PR must change
+   their output on purpose. `worker/run-job.ts` is the exception Stage 7
+   already names. Those four files are every `console` call left in
+   `worker/`. Then `lib/`, then `app/`.
 
 **Traps found since.**
 
