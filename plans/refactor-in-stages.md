@@ -159,7 +159,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 5.4   | Admin pages: agents, auto-responses, automations | #259            | merged  |
 | 5.4   | Categories, channels, invite, field options      | #266            | merged  |
 | 5.4   | The import page, with db tests                   | #272            | merged  |
-| 5.4   | Repo rule `page-db`: no `db/client` in page code | #277            | open    |
+| 5.4   | Repo rule `page-db`: no `db/client` in page code | #277            | merged  |
 | 5.5   | One receive path for webhooks                    | #263            | merged  |
 | 5.6   | One `localeOf` and one `requestMeta`             | #251            | merged  |
 | 5.6   | One sign-in sequence for both forms              | #264            | merged  |
@@ -243,19 +243,15 @@ This replaces three of the rules in the handoff above.
   expected. Staging stays suspended.
 - **The ⛳ gate is passed.** The requester said to start Stage 5.
 
-**State at 23:55 UTC.** #258–#275, #278 and #279 are merged. Open, each
-holding its files until it merges:
-
-- #277 (5.4, the `page-db` rule): `scripts/ci/rules.mjs`,
-  `scripts/ci/rules/page-db*.mjs` and `AGENTS.md`.
-- #280 (5.2, `meta-actions.ts`): `(console)/actions.ts`, and
-  `profile-refresh.tsx`, `comment-moderation.tsx` and `thread-control.tsx`
-  under `inbox/[number]/`.
+**State at 23:58 UTC.** #258–#275 and #277–#279 are merged. Open, holding its
+files until it merges: #280 (5.2, `meta-actions.ts`): `(console)/actions.ts`,
+`docs/meta-endpoints.md`, and `profile-refresh.tsx`, `comment-moderation.tsx`
+and `thread-control.tsx` under `inbox/[number]/`.
 
 **Next work.**
 
 1. 5.1: done.
-2. 5.4: done once #277 merges.
+2. 5.4: done.
 3. 5.2: the one sibling left after #280 (`reply-actions.ts`),
    then `ticket-actions.ts` for what remains, one PR each. Each one edits
    `(console)/actions.ts`, so start the next when the one before it merges.
