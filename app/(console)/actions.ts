@@ -33,6 +33,7 @@ import { refreshPrimary } from '@/lib/categorise/apply';
 import { CAUSE_REQUIRED_AREAS } from '@/lib/categorise/taxonomy';
 import { requestAssignmentSweep, setAccepting } from '@/lib/assignment/presence';
 import { requireAgent, requirePermission } from '@/lib/auth/guard';
+import { text } from '@/lib/http/form-data';
 import { ok, type ActionState as BaseActionState } from '@/lib/http/action-state';
 import { isUuid } from '@/lib/http/uuid';
 import { env } from '@/lib/env';
@@ -242,7 +243,7 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
   if (!can(agent, 'ticket.reply')) return { error: 'You do not have permission to reply' };
 
   const conversationId = String(formData.get('conversationId') ?? '');
-  const body = String(formData.get('body') ?? '').trim();
+  const body = text(formData, 'body');
   const resolveAfter = formData.get('resolveAfter') === 'on';
   const cannedResponseId = String(formData.get('cannedResponseId') ?? '');
 
@@ -428,7 +429,7 @@ export async function addNote(_state: ActionState, formData: FormData): Promise<
   if (!can(agent, 'ticket.note')) return { error: 'You do not have permission to add notes' };
 
   const conversationId = String(formData.get('conversationId') ?? '');
-  const body = String(formData.get('body') ?? '').trim();
+  const body = text(formData, 'body');
   if (!body) return { error: 'Write something first' };
 
   const row = await loadConversation(agent, conversationId);
@@ -1441,7 +1442,7 @@ export async function startSideConversation(
   }
 
   const conversationId = String(formData.get('conversationId') ?? '');
-  const body = String(formData.get('body') ?? '').trim();
+  const body = text(formData, 'body');
   if (!body) return { error: 'Write your question first' };
 
   const row = await loadConversation(agent, conversationId);
@@ -1519,8 +1520,7 @@ export async function startSideConversation(
 
   // --- What it says --------------------------------------------------------
 
-  const subject =
-    String(formData.get('subject') ?? '').trim() || (conversation.subject ?? '(no subject)');
+  const subject = text(formData, 'subject') || (conversation.subject ?? '(no subject)');
 
   const anchorMessageId = String(formData.get('anchorMessageId') ?? '') || null;
 
@@ -1600,7 +1600,7 @@ export async function replyToSideConversation(
   }
 
   const sideConversationId = String(formData.get('sideConversationId') ?? '');
-  const body = String(formData.get('body') ?? '').trim();
+  const body = text(formData, 'body');
   if (!body) return { error: 'Write something first' };
 
   const side = await loadSideConversation(sideConversationId);
