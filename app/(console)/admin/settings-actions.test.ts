@@ -28,7 +28,6 @@ vi.mock('next/cache', () => ({ revalidatePath: () => {} }));
 // The settings actions live beside the pages they serve now; this reads them
 // as one set, so each case below names an action the way it always has.
 const actions = {
-  ...(await import('./settings-actions')),
   ...(await import('./groups/actions')),
   ...(await import('./locations/actions')),
   ...(await import('./statuses/actions')),
@@ -41,6 +40,9 @@ const actions = {
   ...(await import('./skills/actions')),
   ...(await import('./automations/actions')),
   ...(await import('./recipients/actions')),
+  ...(await import('./agents/actions')),
+  ...(await import('./channels/actions')),
+  ...(await import('./tracking/actions')),
 };
 
 function form(fields: Record<string, string>): FormData {

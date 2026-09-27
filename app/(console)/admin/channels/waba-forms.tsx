@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Badge, Field, Button, Input, Toggle } from '@/components/ui';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
-import { deleteWhatsAppAccount, saveWhatsAppAccount } from '../settings-actions';
+import { deleteWhatsAppAccount, saveWhatsAppAccount } from './actions';
 
 /**
  * Connecting a WhatsApp Business Account.
