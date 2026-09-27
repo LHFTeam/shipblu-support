@@ -30,6 +30,56 @@ const JOB_PAYLOADS = {
     textBody: z.string().min(1),
     htmlBody: z.string().min(1),
   }),
+
+  process_webhook: z.object({ webhookEventId: z.string() }),
+  send_csat: z.object({ conversationId: z.string().min(1) }),
+  // Facebook and Instagram hand over a URL, WhatsApp an id to exchange for one.
+  // The WhatsApp half names no source, so a Meta payload that lost its URL
+  // matches neither half rather than being read as WhatsApp media.
+  download_media: z.union([
+    z.object({
+      source: z.literal('meta'),
+      messageId: z.string(),
+      url: z.string().min(1),
+      index: z.number().optional(),
+    }),
+    z.object({
+      source: z.undefined().optional(),
+      messageId: z.string(),
+      mediaId: z.string(),
+    }),
+  ]),
+  moderate_meta_comment: z.object({
+    messageId: z.string(),
+    action: z.enum(['hide', 'unhide', 'delete']),
+    // Absent when the system moderates rather than an agent.
+    agentId: z.string().nullish(),
+  }),
+  fetch_meta_profile: z.object({
+    contactId: z.string(),
+    platform: z.enum(['facebook', 'instagram']),
+    userId: z.string(),
+    /** Re-read a profile already on file. Used by the backfill, never by ingest. */
+    force: z.boolean().optional(),
+  }),
+  sync_shipment: z
+    .object({
+      shipmentId: z.string().optional(),
+      /*
+       * A number as well as a string, because `npm run job -- sync_shipment
+       * trackingNumber=1755021358719` never reaches here as a string: `parsePayload`
+       * coerces anything numeric-looking, and every real ShipBlu number is thirteen
+       * digits of exactly that shape. It survives the round trip intact — thirteen
+       * digits is well inside `Number.MAX_SAFE_INTEGER` — but it arrives typed as a
+       * number, and a bare `typeof === 'string'` check would reject the one form an
+       * operator is most likely to type.
+       */
+      trackingNumber: z.union([z.string(), z.number().transform(String)]).optional(),
+      force: z.boolean().optional(),
+    })
+    .refine((payload) => payload.shipmentId || payload.trackingNumber, {
+      message: 'requires a shipmentId or a trackingNumber',
+    }),
 } satisfies Partial<Record<JobType, z.ZodType>>;
 
 type CheckedJob = keyof typeof JOB_PAYLOADS;

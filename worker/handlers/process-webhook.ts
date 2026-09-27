@@ -3,6 +3,7 @@ import { db } from '@/db/client';
 import { webhookEvents } from '@/db/schema';
 import { emailProvider } from '@/lib/email/providers';
 import type { ClaimedJob } from '@/lib/queue';
+import { parseJobPayload } from '@/lib/queue/payloads';
 import { ingestInboundEmail } from '@/lib/tickets/ingest';
 import { processMetaWebhook } from './process-meta-webhook';
 import { processWhatsAppWebhook } from './process-whatsapp-webhook';
@@ -16,10 +17,7 @@ import { errorMessage } from '@/lib/errors';
  * the email's Message-ID, so even a double-run cannot duplicate a message.
  */
 export async function processWebhook(job: ClaimedJob): Promise<void> {
-  const webhookEventId = job.payload.webhookEventId;
-  if (typeof webhookEventId !== 'string') {
-    throw new Error('process_webhook requires a webhookEventId');
-  }
+  const { webhookEventId } = parseJobPayload(job, 'process_webhook');
 
   const rows = await db
     .select()

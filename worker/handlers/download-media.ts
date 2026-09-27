@@ -2,6 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { attachments, messages } from '@/db/schema';
 import type { ClaimedJob } from '@/lib/queue';
+import { parseJobPayload } from '@/lib/queue/payloads';
 import { buildAttachmentPath, removeObjects, uploadObject } from '@/lib/storage';
 import { downloadAttachment, MetaApiError } from '@/lib/meta/client';
 import { credentialsForPhoneNumberId } from '@/lib/whatsapp/accounts';
@@ -37,24 +38,19 @@ const EXTENSIONS: Record<string, string> = {
 };
 
 export async function downloadMediaJob(job: ClaimedJob): Promise<void> {
-  const messageId = job.payload.messageId;
-  if (typeof messageId !== 'string') {
-    throw new Error('download_media requires a messageId');
-  }
+  const payload = parseJobPayload(job, 'download_media');
+  const { messageId } = payload;
 
   // Facebook and Instagram hand over a URL directly; WhatsApp hands over an id
   // that has to be exchanged for one. Same job, because what happens after —
   // download, store, attach, mark — is identical, and two jobs would mean two
   // places to fix when storage changes.
-  if (job.payload.source === 'meta') {
-    await downloadMetaAttachment(job, messageId);
+  if (payload.source === 'meta') {
+    await downloadMetaAttachment(messageId, payload.url, payload.index ?? 0);
     return;
   }
 
-  const mediaId = job.payload.mediaId;
-  if (typeof mediaId !== 'string') {
-    throw new Error('download_media requires a mediaId for WhatsApp media');
-  }
+  const { mediaId } = payload;
 
   const rows = await db
     .select({ id: messages.id, conversationId: messages.conversationId, meta: messages.meta })
@@ -155,14 +151,11 @@ export async function downloadMediaJob(job: ClaimedJob): Promise<void> {
  * each gets its own job keyed on its index, so one failed photo does not cost
  * the others.
  */
-async function downloadMetaAttachment(job: ClaimedJob, messageId: string): Promise<void> {
-  const url = job.payload.url;
-  const index = typeof job.payload.index === 'number' ? job.payload.index : 0;
-
-  if (typeof url !== 'string' || !url) {
-    throw new Error('download_media requires a url for Meta attachments');
-  }
-
+async function downloadMetaAttachment(
+  messageId: string,
+  url: string,
+  index: number,
+): Promise<void> {
   const rows = await db
     .select({ id: messages.id, conversationId: messages.conversationId })
     .from(messages)
