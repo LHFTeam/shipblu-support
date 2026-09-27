@@ -5,6 +5,9 @@ import {
 } from '@/lib/meta/profile-refresh';
 import type { ClaimedJob } from '@/lib/queue';
 import { parseJobPayload } from '@/lib/queue/payloads';
+import { logger } from '@/lib/log';
+
+const log = logger('fetch_meta_profile');
 
 /**
  * Puts a name and a face on a Facebook or Instagram customer.
@@ -64,34 +67,34 @@ export async function fetchMetaProfile(job: ClaimedJob): Promise<void> {
  * failed sends and a guess.
  */
 function report(platform: string, userId: string, result: ProfileRefreshResult): void {
-  const prefix = `[fetch_meta_profile] ${platform} ${userId}`;
+  const subject = `${platform} ${userId}`;
 
   switch (result.kind) {
     case 'gone':
-      console.log(`${prefix} no longer resolves to a contact`);
+      log.info(`${subject} no longer resolves to a contact`);
       return;
     case 'skipped':
-      console.log(`${prefix} already looked up, skipping`);
+      log.info(`${subject} already looked up, skipping`);
       return;
     case 'unconfigured':
-      console.warn(`${prefix}: ${platform} is not configured (${result.detail}), skipping`);
+      log.warn(`${subject}: ${platform} is not configured (${result.detail}), skipping`);
       return;
     case 'refused':
-      console.error(`${prefix} refused: ${result.reason}`);
+      log.error(`${subject} refused: ${result.reason}`);
       if (result.permission) {
-        console.error(
-          `[fetch_meta_profile] this is the refusal that means the Meta app may not hold ` +
+        log.error(
+          `this is the refusal that means the Meta app may not hold ` +
             `Business Asset User Profile Access — check App Review before treating it as a ` +
             `property of this one customer`,
         );
       }
       return;
     case 'transient':
-      console.warn(`${prefix} could not be read this time: ${result.error.message}`);
+      log.warn(`${subject} could not be read this time: ${result.error.message}`);
       return;
     case 'applied':
-      console.log(
-        `${prefix} → ${describeProfileRefresh(result)}` +
+      log.info(
+        `${subject} → ${describeProfileRefresh(result)}` +
           `${result.locale ? ` locale ${result.locale}.` : ''}` +
           // Whether one arrived, never which. Gender is special-category
           // personal data, nothing in this system branches on it, and a
@@ -116,8 +119,8 @@ function report(platform: string, userId: string, result: ProfileRefreshResult):
         does are the two unambiguous answers.
       */
       if (result.extendedFieldsRefused) {
-        console.warn(
-          `${prefix}: locale and gender were refused, the rest was not — the Meta app holds ` +
+        log.warn(
+          `${subject}: locale and gender were refused, the rest was not — the Meta app holds ` +
             `Business Asset User Profile Access but not pages_user_locale / ` +
             `pages_user_gender. Check those two under App Review. The name and picture are ` +
             `saved and the identity is stamped, so once they are granted this contact is only ` +

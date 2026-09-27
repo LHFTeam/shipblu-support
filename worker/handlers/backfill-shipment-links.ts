@@ -7,6 +7,7 @@ import { logChannelTable, scanMessagesInKeysetOrder } from '@/lib/queue/backfill
 import { detectShipmentRefs, shipmentPatterns } from '@/lib/shipments/detect';
 import { isLinkableMessage, linkShipmentsFromMessage } from '@/lib/shipments/links';
 import { errorMessage } from '@/lib/errors';
+import { logger } from '@/lib/log';
 
 /**
  * Finds the tracking numbers and SBIDs already sitting in the archive.
@@ -122,10 +123,10 @@ function report(
   failures: string[],
   dryRun: boolean,
 ): void {
-  const tag = '[backfill_shipment_links]';
-  console.log(`${tag} scanned ${scanned} messages (dry_run=${dryRun})`);
+  const log = logger('backfill_shipment_links');
+  log.info(`scanned ${scanned} messages (dry_run=${dryRun})`);
 
-  logChannelTable(tag, tallies, [
+  logChannelTable(log, tallies, [
     { heading: 'messages', width: 9, value: (tally) => tally.messages },
     { heading: 'with_body', width: 10, value: (tally) => tally.withBody },
     { heading: 'tracking', width: 9, value: (tally) => tally.trackingHits },
@@ -147,11 +148,11 @@ function report(
   // tracking number, or a pattern that does not fit how that channel writes them
   // — and only one of those is fine.
   if (silent.length > 0) {
-    console.warn(`${tag} channels with message bodies but no matches at all: ${silent.join(', ')}`);
+    log.warn(`channels with message bodies but no matches at all: ${silent.join(', ')}`);
   }
 
   if (failures.length > 0) {
-    console.error(`${tag} ${failures.length} failure(s); first 20:`);
-    for (const failure of failures.slice(0, 20)) console.error(`${tag}   ${failure}`);
+    log.error(`${failures.length} failure(s); first 20:`);
+    for (const failure of failures.slice(0, 20)) log.error(`  ${failure}`);
   }
 }

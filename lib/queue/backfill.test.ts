@@ -4,6 +4,7 @@ import { db } from '@/db/client';
 import { messages } from '@/db/schema';
 import { withTestEnv } from '@/lib/testing/env';
 import { logChannelTable, scanMessagesInKeysetOrder } from './backfill';
+import { logger } from '@/lib/log';
 
 // Building a query validates the environment but never opens a connection.
 withTestEnv();
@@ -83,7 +84,7 @@ describe('logChannelTable', () => {
       ['email', { seen: 4, kept: 0 }],
     ]);
 
-    logChannelTable('[tag]', tallies, [
+    logChannelTable(logger('tag'), tallies, [
       { heading: 'seen', width: 6, value: (tally) => tally.seen },
       { heading: 'kept', width: 6, value: (tally) => tally.kept },
     ]);

@@ -1,6 +1,9 @@
 import type { ClaimedJob } from '@/lib/queue';
 import { parseJobPayload } from '@/lib/queue/payloads';
 import { describeShipmentSync, syncShipment } from '@/lib/shipments/sync';
+import { logger } from '@/lib/log';
+
+const log = logger('sync_shipment');
 
 /**
  * Fills in one parcel's real status from the delivery platform.
@@ -31,11 +34,11 @@ export async function syncShipmentJob(job: ClaimedJob): Promise<void> {
   const result = await syncShipment({ shipmentId, trackingNumber, force: force === true });
 
   const subject = shipmentId ?? trackingNumber;
-  const line = `[sync_shipment] ${subject} → ${describeShipmentSync(result)}`;
+  const line = `${subject} → ${describeShipmentSync(result)}`;
 
-  if (result.kind === 'refused') console.error(line);
-  else if (result.kind === 'transient' || result.kind === 'gone') console.warn(line);
-  else console.log(line);
+  if (result.kind === 'refused') log.error(line);
+  else if (result.kind === 'transient' || result.kind === 'gone') log.warn(line);
+  else log.info(line);
 
   // The one reaction a queue can have and a person watching a page cannot.
   // Thrown after everything durable is written, so a retry only re-reads.

@@ -1,5 +1,6 @@
 import { gt, type SQL } from 'drizzle-orm';
 import { messages } from '@/db/schema';
+import type { Logger } from '@/lib/log';
 
 /**
  * Visit every message a backfill selects, a batch at a time.
@@ -66,7 +67,7 @@ export type TallyColumn<T> = { heading: string; width: number; value: (tally: T)
  * the lines line up in Render's log view, which is where these are read.
  */
 export function logChannelTable<T>(
-  tag: string,
+  log: Logger,
   tallies: Map<string, T>,
   columns: TallyColumn<T>[],
 ): void {
@@ -74,15 +75,14 @@ export function logChannelTable<T>(
     'channel'.padEnd(14),
     ...columns.map((column) => column.heading.padStart(column.width)),
   ].join('');
-  console.log(`${tag} ${header}`);
+  log.info(header);
 
   for (const [channel, tally] of [...tallies.entries()].sort()) {
-    console.log(
-      `${tag} ` +
-        [
-          channel.padEnd(14),
-          ...columns.map((column) => String(column.value(tally)).padStart(column.width)),
-        ].join(''),
+    log.info(
+      [
+        channel.padEnd(14),
+        ...columns.map((column) => String(column.value(tally)).padStart(column.width)),
+      ].join(''),
     );
   }
 }

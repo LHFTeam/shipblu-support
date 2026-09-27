@@ -7,6 +7,7 @@ import { normaliseArticleHtml, rewriteLegacyArticleLinks } from '@/lib/kb/format
 import { DEFAULT_LOCALE } from '@/lib/kb/locale';
 import type { ClaimedJob } from '@/lib/queue';
 import { parseJobPayload } from '@/lib/queue/payloads';
+import { logger } from '@/lib/log';
 
 /**
  * Brings every article already in the database up to the formatting standard.
@@ -164,10 +165,10 @@ function countLegacyLinks(html: string): number {
 }
 
 function report(tallies: Map<string, Tally>, changedSlugs: string[], dryRun: boolean): void {
-  const tag = '[normalise_kb_formatting]';
+  const log = logger('normalise_kb_formatting');
 
-  console.log(
-    `${tag} ${[...tallies.values()].reduce((sum, t) => sum + t.articles, 0)} articles ` +
+  log.info(
+    `${[...tallies.values()].reduce((sum, t) => sum + t.articles, 0)} articles ` +
       `(dry_run=${dryRun})`,
   );
 
@@ -177,21 +178,21 @@ function report(tallies: Map<string, Tally>, changedSlugs: string[], dryRun: boo
   // formatting problems — a `dir="ltr"` in the middle of a right-to-left page,
   // a callout forced into a left-to-right code block — do not show up in an
   // English spot check.
-  console.log(
-    `${tag} ${'locale'.padEnd(8)}${'articles'.padStart(9)}${'changed'.padStart(8)}` +
+  log.info(
+    `${'locale'.padEnd(8)}${'articles'.padStart(9)}${'changed'.padStart(8)}` +
       `${'bytes'.padStart(12)}${'links'.padStart(7)}`,
   );
 
   for (const [locale, tally] of [...tallies.entries()].sort()) {
     const bytes = `${tally.bytesBefore}→${tally.bytesAfter}`;
-    console.log(
-      `${tag} ${locale.padEnd(8)}${String(tally.articles).padStart(9)}` +
+    log.info(
+      `${locale.padEnd(8)}${String(tally.articles).padStart(9)}` +
         `${String(tally.changed).padStart(8)}${bytes.padStart(12)}` +
         `${String(tally.linksRewritten).padStart(7)}`,
     );
   }
 
   if (changedSlugs.length > 0) {
-    console.log(`${tag} changed: ${changedSlugs.join(', ')}`);
+    log.info(`changed: ${changedSlugs.join(', ')}`);
   }
 }
