@@ -1,6 +1,6 @@
-import { z } from 'zod';
 import { sendTransactionalEmail } from '@/lib/email/transactional';
-import { PermanentJobError, type ClaimedJob } from '@/lib/queue';
+import type { ClaimedJob } from '@/lib/queue';
+import { parseJobPayload } from '@/lib/queue/payloads';
 
 /**
  * Sends one transactional email that does not belong to a ticket — today, the
@@ -17,22 +17,10 @@ import { PermanentJobError, type ClaimedJob } from '@/lib/queue';
  * emails across is worth doing and is not this change.
  */
 
-const payloadSchema = z.object({
-  to: z.email(),
-  subject: z.string().min(1),
-  textBody: z.string().min(1),
-  htmlBody: z.string().min(1),
-});
-
 export async function sendNotificationEmail(job: ClaimedJob): Promise<void> {
-  const payload = payloadSchema.safeParse(job.payload);
-  if (!payload.success) {
-    // A malformed payload will never succeed on retry, so fail it here with a
-    // message naming the field rather than burning five attempts on it.
-    throw new PermanentJobError(
-      `send_notification_email: invalid payload — ${payload.error.message}`,
-    );
-  }
+  // A malformed payload will never succeed on retry, so fail it here with a
+  // message naming the field rather than burning five attempts on it.
+  const payload = parseJobPayload(job, 'send_notification_email');
 
-  await sendTransactionalEmail(payload.data, 'send_notification_email');
+  await sendTransactionalEmail(payload, 'send_notification_email');
 }

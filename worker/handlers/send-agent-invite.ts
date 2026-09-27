@@ -1,4 +1,3 @@
-import { z } from 'zod';
 import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agents, invites } from '@/db/schema';
@@ -7,6 +6,7 @@ import { unsealInviteToken } from '@/lib/auth/invite-token';
 import { sendTransactionalEmail } from '@/lib/email/transactional';
 import { appUrl, env } from '@/lib/env';
 import { PermanentJobError, type ClaimedJob } from '@/lib/queue';
+import { parseJobPayload } from '@/lib/queue/payloads';
 
 /**
  * Emails an invited agent their activation link.
@@ -27,13 +27,8 @@ import { PermanentJobError, type ClaimedJob } from '@/lib/queue';
  * the portal's mail there is no locale the worker would have to be told.
  */
 
-const payloadSchema = z.object({ inviteId: z.uuid() });
-
 export async function sendAgentInvite(job: ClaimedJob): Promise<void> {
-  const payload = payloadSchema.safeParse(job.payload);
-  if (!payload.success) {
-    throw new PermanentJobError(`send_agent_invite: invalid payload — ${payload.error.message}`);
-  }
+  const { inviteId } = parseJobPayload(job, 'send_agent_invite');
 
   const rows = await db
     .select({
@@ -46,7 +41,7 @@ export async function sendAgentInvite(job: ClaimedJob): Promise<void> {
     })
     .from(invites)
     .leftJoin(agents, eq(agents.id, invites.invitedByAgentId))
-    .where(eq(invites.id, payload.data.inviteId))
+    .where(eq(invites.id, inviteId))
     .limit(1);
 
   const invite = rows[0];
@@ -56,7 +51,7 @@ export async function sendAgentInvite(job: ClaimedJob): Promise<void> {
   // lapse before the worker got here. Returning rather than throwing keeps a
   // normal sequence of events out of the dead queue.
   if (!invite) {
-    console.log(`[send_agent_invite] ${payload.data.inviteId} is gone — superseded or withdrawn`);
+    console.log(`[send_agent_invite] ${inviteId} is gone — superseded or withdrawn`);
     return;
   }
   if (invite.acceptedAt) {
@@ -76,15 +71,13 @@ export async function sendAgentInvite(job: ClaimedJob): Promise<void> {
   // the job there on its first attempt instead of after four retries that
   // cannot change the row.
   if (!invite.tokenCiphertext) {
-    throw new PermanentJobError(
-      `send_agent_invite: ${payload.data.inviteId} has no retained token`,
-    );
+    throw new PermanentJobError(`send_agent_invite: ${inviteId} has no retained token`);
   }
 
   const token = unsealInviteToken(invite.tokenCiphertext, env().APP_SECRET);
   if (!token) {
     throw new PermanentJobError(
-      `send_agent_invite: the token for ${payload.data.inviteId} cannot be unsealed — APP_SECRET may have been rotated`,
+      `send_agent_invite: the token for ${inviteId} cannot be unsealed — APP_SECRET may have been rotated`,
     );
   }
 

@@ -10,6 +10,7 @@ import { textToEscapedHtml } from '@/lib/email/html';
 import { buildReferences, buildSideSubjectTag, formatMessageId } from '@/lib/email/threading';
 import type { OutboundEmail } from '@/lib/email/types';
 import type { ClaimedJob } from '@/lib/queue';
+import { parseJobPayload } from '@/lib/queue/payloads';
 import { alreadySent } from './already-sent';
 import { subjectGone } from './subject-gone';
 import {
@@ -32,10 +33,7 @@ import { errorMessage } from '@/lib/errors';
  * one that emails the customer.
  */
 export async function sendSideEmail(job: ClaimedJob): Promise<void> {
-  const messageId = job.payload.messageId;
-  if (typeof messageId !== 'string') {
-    throw new Error('send_side_email requires a messageId');
-  }
+  const { messageId } = parseJobPayload(job, 'send_side_email');
 
   const rows = await db
     .select({
