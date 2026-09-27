@@ -1,8 +1,6 @@
-import { asc } from 'drizzle-orm';
-import { db } from '@/db/client';
-import { ticketStatuses } from '@/db/schema';
 import { Badge, Cell, PageHeader, Row, Table } from '@/components/ui';
 import { InfoTip } from '@/components/tooltip';
+import { listTicketStatuses } from '@/lib/admin/settings';
 import { requirePermission } from '@/lib/auth/guard';
 import { NewStatus, StatusEditor } from './forms';
 
@@ -20,10 +18,7 @@ export const dynamic = 'force-dynamic';
 export default async function StatusesPage() {
   await requirePermission('admin.fields');
 
-  const rows = await db
-    .select()
-    .from(ticketStatuses)
-    .orderBy(asc(ticketStatuses.position), asc(ticketStatuses.name));
+  const rows = await listTicketStatuses();
 
   return (
     <>

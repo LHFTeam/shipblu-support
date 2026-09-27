@@ -1,7 +1,5 @@
-import { asc } from 'drizzle-orm';
-import { db } from '@/db/client';
-import { locations } from '@/db/schema';
 import { Badge, Cell, PageHeader, Row, Table } from '@/components/ui';
+import { listLocations } from '@/lib/admin/settings';
 import { requirePermission } from '@/lib/auth/guard';
 import { LocationEditor, NewLocation } from './forms';
 
@@ -24,16 +22,7 @@ const EXPECTED = 16;
 export default async function LocationsPage() {
   await requirePermission('admin.locations');
 
-  const rows = await db
-    .select({
-      id: locations.id,
-      name: locations.name,
-      code: locations.code,
-      email: locations.email,
-      isActive: locations.isActive,
-    })
-    .from(locations)
-    .orderBy(asc(locations.code));
+  const rows = await listLocations();
 
   const operating = rows.filter((row) => row.isActive).length;
 

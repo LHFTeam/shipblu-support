@@ -1,8 +1,6 @@
-import { asc } from 'drizzle-orm';
-import { db } from '@/db/client';
-import { cannedResponses } from '@/db/schema';
 import { Cell, PageHeader, Row, Table } from '@/components/ui';
 import { InfoTip } from '@/components/tooltip';
+import { listCannedResponses } from '@/lib/admin/settings';
 import { requirePermission } from '@/lib/auth/guard';
 import { CannedEditor, NewCanned } from './forms';
 
@@ -18,10 +16,7 @@ export const dynamic = 'force-dynamic';
 export default async function CannedPage() {
   await requirePermission('admin.fields');
 
-  const rows = await db
-    .select()
-    .from(cannedResponses)
-    .orderBy(asc(cannedResponses.folder), asc(cannedResponses.title));
+  const rows = await listCannedResponses();
 
   return (
     <>
