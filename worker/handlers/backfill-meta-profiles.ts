@@ -2,6 +2,7 @@ import { and, eq, exists, inArray, isNull, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { contactIdentities, contacts, messages } from '@/db/schema';
 import { enqueueMany, type ClaimedJob } from '@/lib/queue';
+import { parseJobPayload } from '@/lib/queue/payloads';
 
 /**
  * Names the Facebook and Instagram customers already in the archive.
@@ -21,17 +22,10 @@ import { enqueueMany, type ClaimedJob } from '@/lib/queue';
  * different answer from the live path is a discrepancy nobody would explain.
  */
 
-type Payload = {
-  /** Re-read profiles already on file, rather than only the ones never asked. */
-  force?: unknown;
-  /** Stop after this many contacts. Absent means all of them. */
-  limit?: unknown;
-};
-
 export async function backfillMetaProfiles(job: ClaimedJob): Promise<void> {
-  const payload = (job.payload ?? {}) as Payload;
+  const payload = parseJobPayload(job, 'backfill_meta_profiles');
   const force = payload.force === true;
-  const limit = typeof payload.limit === 'number' && payload.limit > 0 ? payload.limit : null;
+  const limit = payload.limit ?? null;
 
   /*
     Direct-message senders only, which is why this reaches into `messages`
