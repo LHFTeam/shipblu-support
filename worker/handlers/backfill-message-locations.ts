@@ -1,7 +1,8 @@
-import { and, asc, eq, gt, gte, lte, sql, type SQL } from 'drizzle-orm';
+import { and, asc, eq, gte, lte, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversations, messages } from '@/db/schema';
 import type { ClaimedJob } from '@/lib/queue';
+import { logChannelTable, scanMessagesInKeysetOrder } from '@/lib/queue/backfill';
 import { parseCoordinates, readSharedLocation } from '@/lib/tickets/shared-location';
 import { errorMessage } from '@/lib/errors';
 
@@ -68,48 +69,22 @@ export async function backfillMessageLocations(job: ClaimedJob): Promise<void> {
   const tallies = new Map<string, ChannelTally>();
   const failures: string[] = [];
 
-  let cursor: string | null = null;
-  let scanned = 0;
-
-  for (;;) {
-    const remaining = payload.limit ? payload.limit - scanned : BATCH;
-    if (remaining <= 0) break;
-
-    const where = [...bounds];
-    // Keyset paging on the primary key alone, served by its own index.
-    //
-    // Not on (created_at, id), which is the obvious choice and is broken here.
-    // postgres.js hands a timestamptz back as a JS Date, which holds
-    // milliseconds, while the column holds microseconds — so a cursor taken
-    // from a row read back through JS is *earlier* than the row itself, the row
-    // matches its own `created_at > cursor`, and the same batch is returned for
-    // ever. Verified against Postgres 16: every row in a seeded table reported
-    // `created_at > date_trunc('milliseconds', created_at)` as true.
-    //
-    // The id is a uuid, so this orders the scan arbitrarily rather than by
-    // time. That costs nothing — a backfill has no reason to prefer one order —
-    // and it removes the whole class of bug rather than patching around it.
-    if (cursor) where.push(gt(messages.id, cursor));
-
-    const batch = await db
-      .select({
-        id: messages.id,
-        meta: messages.meta,
-        rawBody: messages.rawBody,
-        channel: conversations.channel,
-      })
-      .from(messages)
-      .innerJoin(conversations, eq(conversations.id, messages.conversationId))
-      .where(and(...where))
-      .orderBy(asc(messages.id))
-      .limit(Math.min(BATCH, remaining));
-
-    if (batch.length === 0) break;
-
-    for (const message of batch) {
-      scanned += 1;
-      cursor = message.id;
-
+  const scanned = await scanMessagesInKeysetOrder(
+    { batchSize: BATCH, limit: payload.limit },
+    (after, size) =>
+      db
+        .select({
+          id: messages.id,
+          meta: messages.meta,
+          rawBody: messages.rawBody,
+          channel: conversations.channel,
+        })
+        .from(messages)
+        .innerJoin(conversations, eq(conversations.id, messages.conversationId))
+        .where(and(...bounds, after))
+        .orderBy(asc(messages.id))
+        .limit(size),
+    async (message) => {
       const tally = tallies.get(message.channel) ?? emptyTally();
       tallies.set(message.channel, tally);
       tally.candidates += 1;
@@ -117,7 +92,7 @@ export async function backfillMessageLocations(job: ClaimedJob): Promise<void> {
       // Already carries one: nothing to do, and this is what makes a re-run free.
       if (readSharedLocation(message.meta)) {
         tally.alreadyDone += 1;
-        continue;
+        return;
       }
 
       const location = locationFromRawBody(message.rawBody);
@@ -127,12 +102,12 @@ export async function backfillMessageLocations(job: ClaimedJob): Promise<void> {
         // malformed coordinate. Counted rather than logged per row: at this
         // volume a line each would bury the figures that matter.
         tally.unreadable += 1;
-        continue;
+        return;
       }
 
       if (dryRun) {
         tally.recovered += 1;
-        continue;
+        return;
       }
 
       try {
@@ -151,8 +126,8 @@ export async function backfillMessageLocations(job: ClaimedJob): Promise<void> {
         // worth repairing, and the job fails at the end with the list.
         failures.push(`${message.id}: ${errorMessage(error)}`);
       }
-    }
-  }
+    },
+  );
 
   report(scanned, tallies, failures, dryRun);
 
@@ -214,27 +189,12 @@ function report(
   const tag = '[backfill_message_locations]';
   console.log(`${tag} scanned ${scanned} candidate messages (dry_run=${dryRun})`);
 
-  const header = [
-    'channel'.padEnd(14),
-    'candidates'.padStart(11),
-    'already'.padStart(9),
-    'recovered'.padStart(10),
-    'unreadable'.padStart(11),
-  ].join('');
-  console.log(`${tag} ${header}`);
-
-  for (const [channel, tally] of [...tallies.entries()].sort()) {
-    console.log(
-      `${tag} ` +
-        [
-          channel.padEnd(14),
-          String(tally.candidates).padStart(11),
-          String(tally.alreadyDone).padStart(9),
-          String(tally.recovered).padStart(10),
-          String(tally.unreadable).padStart(11),
-        ].join(''),
-    );
-  }
+  logChannelTable(tag, tallies, [
+    { heading: 'candidates', width: 11, value: (tally) => tally.candidates },
+    { heading: 'already', width: 9, value: (tally) => tally.alreadyDone },
+    { heading: 'recovered', width: 10, value: (tally) => tally.recovered },
+    { heading: 'unreadable', width: 11, value: (tally) => tally.unreadable },
+  ]);
 
   // Broken down per channel above, and called out here, for the reason in trap
   // 14: "recovered 806" reads as a clean run even when every pin on one channel
