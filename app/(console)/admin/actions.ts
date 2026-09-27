@@ -12,6 +12,7 @@ import {
   ticketRootCauses,
   whatsappAccounts,
 } from '@/db/schema';
+import { text } from '@/lib/http/form-data';
 import { requirePermission } from '@/lib/auth/guard';
 import { isAgentRole } from '@/lib/auth/permissions';
 import { canonicalUuid } from '@/lib/http/uuid';
@@ -71,7 +72,7 @@ export async function createInvite(_state: AdminState, formData: FormData): Prom
   const admin = await requirePermission('admin.agents');
 
   const email = normaliseEmail(String(formData.get('email') ?? ''));
-  const name = String(formData.get('name') ?? '').trim();
+  const name = text(formData, 'name');
   const role = String(formData.get('role') ?? 'agent');
 
   // `looksLikeEmail`, not `includes('@')`: the send path validates with
@@ -233,7 +234,7 @@ export async function setAgentCapacity(
 
   const agentId = canonicalUuid(formData.get('agentId'));
   if (!agentId) return { error: 'Unknown agent' };
-  const raw = String(formData.get('maxOpenTickets') ?? '').trim();
+  const raw = text(formData, 'maxOpenTickets');
 
   let maxOpenTickets: number | null = null;
   if (raw) {
@@ -262,7 +263,7 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
 
   const rawId = String(formData.get('id') ?? '');
   const id = canonicalUuid(rawId);
-  const name = String(formData.get('name') ?? '').trim();
+  const name = text(formData, 'name');
 
   // On an edit the type is the stored row's, never the form's. Everything
   // below rebuilds `config` and the account link from the type, so a request
@@ -299,8 +300,8 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
       .limit(1);
     if (!group) return { error: 'That default group no longer exists — reload the page' };
   }
-  const phoneNumberId = String(formData.get('phoneNumberId') ?? '').trim();
-  const address = String(formData.get('address') ?? '').trim();
+  const phoneNumberId = text(formData, 'phoneNumberId');
+  const address = text(formData, 'address');
   const whatsappAccountId = String(formData.get('whatsappAccountId') ?? '') || null;
 
   if (!name) return { error: 'Give the channel a name' };
@@ -536,8 +537,8 @@ export async function saveCategory(_state: AdminState, formData: FormData): Prom
   await requirePermission('admin.categories');
 
   const id = canonicalUuid(formData.get('id'));
-  const labelEn = String(formData.get('labelEn') ?? '').trim();
-  const labelAr = String(formData.get('labelAr') ?? '').trim();
+  const labelEn = text(formData, 'labelEn');
+  const labelAr = text(formData, 'labelAr');
 
   if (!id) return { error: 'Unknown category' };
   if (!labelEn || !labelAr) {
@@ -590,8 +591,8 @@ export async function saveRootCause(_state: AdminState, formData: FormData): Pro
   await requirePermission('admin.categories');
 
   const id = canonicalUuid(formData.get('id'));
-  const labelEn = String(formData.get('labelEn') ?? '').trim();
-  const labelAr = String(formData.get('labelAr') ?? '').trim();
+  const labelEn = text(formData, 'labelEn');
+  const labelAr = text(formData, 'labelAr');
 
   if (!id) return { error: 'Unknown cause' };
   if (!labelEn || !labelAr) {
