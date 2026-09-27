@@ -682,6 +682,26 @@ stays with the one client that uses it.
 - **Send guards.** The "already delivered" guard (four copies) and the
   mark-failed update (two copies) become shared helpers.
 
+**KB import, narrowed in #238.** The two upserts have the same shape but share
+no logic, so they stay with their writers:
+
+- Each keys its rows on a different identity. The import uses `freshdesk` and a
+  locale-scoped id, and falls back to the bare id. The handbook uses `native`
+  and a fixed key.
+- Each decides its slug differently.
+- Each has its own rule for when to write. The import overwrites every run. The
+  handbook compares first, and on a run with nothing to do it must issue no
+  UPDATE at all.
+
+A shared upsert would take all of this as parameters. That is the general
+pipeline that 4.2 declined for ingest. What every KB writer does share — the
+import, the handbook, the console editor and the formatting pass — is two
+steps. They moved to `lib/kb/article-write.ts`, not to `lib/kb/import.ts`,
+because two of their callers are not imports:
+
+- `articleBody()`: three copies;
+- `cutArticleVersion()`: four copies.
+
 ### ⛳ Gate
 
 Check in with the requester before Stage 5:
