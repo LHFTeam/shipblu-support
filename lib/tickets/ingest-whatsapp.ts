@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { channels, conversationEvents, conversations, messages, ticketStatuses } from '@/db/schema';
+import { channels, conversations, messages, ticketStatuses } from '@/db/schema';
 import { enqueue } from '@/lib/queue';
 import { afterInboundMessage, afterMessageStored } from '@/lib/tickets/lifecycle';
 import { explainDeliveryError } from '@/lib/whatsapp/errors';
@@ -12,7 +12,8 @@ import type {
 import { windowState } from '@/lib/whatsapp/window';
 import { isReadOnlyChannel } from './channel-policy';
 import { resolveContact } from './contacts';
-import { defaultOpenStatusId, requireDefaultOpenStatusId } from './statuses';
+import { reopenResolved } from './reopen';
+import { requireDefaultOpenStatusId } from './statuses';
 
 /**
  * Inbound WhatsApp → conversation.
@@ -77,25 +78,11 @@ export async function ingestWhatsAppMessage(
       conversationNumber = existing.number;
 
       if (existing.statusCategory === 'resolved') {
-        const reopenTo = await defaultOpenStatusId(tx);
-        if (reopenTo) {
-          const reopened = await tx
-            .update(conversations)
-            .set({
-              statusId: reopenTo,
-              resolvedAt: null,
-              reopenCount: existing.reopenCount + 1,
-            })
-            .where(eq(conversations.id, conversationId))
-            .returning({ resolvedBy: conversations.resolvedByAgentId });
-
-          await tx.insert(conversationEvents).values({
-            conversationId,
-            type: 'reopened',
-            actorLabel: 'inbound_whatsapp',
-            data: { reason: 'customer_replied', resolvedBy: reopened[0]?.resolvedBy ?? null },
-          });
-        }
+        await reopenResolved(
+          tx,
+          { id: conversationId, reopenCount: existing.reopenCount },
+          { actorLabel: 'inbound_whatsapp', reason: 'customer_replied' },
+        );
       }
     } else {
       const statusId = await requireDefaultOpenStatusId(tx);
