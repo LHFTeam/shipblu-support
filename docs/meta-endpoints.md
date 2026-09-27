@@ -72,7 +72,7 @@ us.
 | #   | Graph request                                             | What it does                        | Called from                                                                                    |
 | --- | --------------------------------------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------- |
 | 1   | `POST /{account-id}/messages`                             | Send a direct message               | `worker/handlers/send-meta.ts:217`                                                             |
-| 2   | `POST /{page-id}/take_thread_control`                     | Take a thread back from another app | `app/(console)/actions.ts:706`                                                                 |
+| 2   | `POST /{page-id}/take_thread_control`                     | Take a thread back from another app | `app/(console)/meta-actions.ts:260`                                                            |
 | 3   | `POST /{comment-id}/comments` (FB) · `/replies` (IG)      | Public reply under a comment        | `worker/handlers/send-meta.ts:152`, `worker/handlers/test-comment-permission.ts:64`            |
 | 4   | `POST /{account-id}/messages` with `recipient.comment_id` | Private reply to a commenter        | `worker/handlers/send-meta.ts:164`                                                             |
 | 5   | `POST /{comment-id}?is_hidden=` (FB) · `?hide=` (IG)      | Hide / unhide a comment             | `worker/handlers/moderate-meta-comment.ts:87`                                                  |
