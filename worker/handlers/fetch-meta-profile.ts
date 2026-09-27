@@ -4,6 +4,7 @@ import {
   type ProfileRefreshResult,
 } from '@/lib/meta/profile-refresh';
 import type { ClaimedJob } from '@/lib/queue';
+import { parseJobPayload } from '@/lib/queue/payloads';
 
 /**
  * Puts a name and a face on a Facebook or Instagram customer.
@@ -27,31 +28,13 @@ import type { ClaimedJob } from '@/lib/queue';
  * agent watching a page cannot: rethrowing so the job is tried again.
  */
 
-type Payload = {
-  contactId?: unknown;
-  platform?: unknown;
-  userId?: unknown;
-  /** Re-read a profile already on file. Used by the backfill, never by ingest. */
-  force?: unknown;
-};
-
 export async function fetchMetaProfile(job: ClaimedJob): Promise<void> {
-  const payload = (job.payload ?? {}) as Payload;
-  const platform = payload.platform;
-
-  if (platform !== 'facebook' && platform !== 'instagram') {
-    throw new Error('fetch_meta_profile requires a platform of "facebook" or "instagram"');
-  }
-  if (typeof payload.contactId !== 'string' || typeof payload.userId !== 'string') {
-    throw new Error('fetch_meta_profile requires a contactId and a userId');
-  }
-
-  const userId = payload.userId;
+  const { contactId, platform, userId, force } = parseJobPayload(job, 'fetch_meta_profile');
   const result = await refreshChannelProfile({
-    contactId: payload.contactId,
+    contactId,
     platform,
     userId,
-    force: payload.force === true,
+    force: force === true,
   });
 
   report(platform, userId, result);

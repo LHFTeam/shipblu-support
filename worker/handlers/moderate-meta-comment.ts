@@ -13,6 +13,7 @@ import {
   settled,
 } from '@/lib/meta/moderation';
 import type { ClaimedJob } from '@/lib/queue';
+import { parseJobPayload } from '@/lib/queue/payloads';
 import { subjectGone } from './subject-gone';
 import { errorMessage } from '@/lib/errors';
 
@@ -35,19 +36,11 @@ import { errorMessage } from '@/lib/errors';
  * being safe to run twice.
  */
 
-const ACTIONS = new Set<ModerationAction>(['hide', 'unhide', 'delete']);
-
 export async function moderateMetaComment(job: ClaimedJob): Promise<void> {
-  const messageId = job.payload.messageId;
-  const action = job.payload.action;
-  const agentId = typeof job.payload.agentId === 'string' ? job.payload.agentId : null;
-
-  if (typeof messageId !== 'string') {
-    throw new Error('moderate_meta_comment requires a messageId');
-  }
-  if (typeof action !== 'string' || !ACTIONS.has(action as ModerationAction)) {
-    throw new Error(`moderate_meta_comment cannot do "${String(action)}"`);
-  }
+  const payload = parseJobPayload(job, 'moderate_meta_comment');
+  const { messageId } = payload;
+  const action: ModerationAction = payload.action;
+  const agentId = payload.agentId ?? null;
 
   const rows = await db
     .select({

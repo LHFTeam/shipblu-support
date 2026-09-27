@@ -1,4 +1,5 @@
 import type { ClaimedJob } from '@/lib/queue';
+import { parseJobPayload } from '@/lib/queue/payloads';
 import { describeShipmentSync, syncShipment } from '@/lib/shipments/sync';
 
 /**
@@ -22,37 +23,12 @@ import { describeShipmentSync, syncShipment } from '@/lib/shipments/sync';
  *     npm run job -- sync_shipment shipmentId=<uuid> force=true
  */
 
-type Payload = {
-  shipmentId?: unknown;
-  trackingNumber?: unknown;
-  force?: unknown;
-};
-
 export async function syncShipmentJob(job: ClaimedJob): Promise<void> {
-  const payload = (job.payload ?? {}) as Payload;
+  // The tracking number arrives as a string whichever way it was enqueued; the
+  // schema says why a number is accepted too.
+  const { shipmentId, trackingNumber, force } = parseJobPayload(job, 'sync_shipment');
 
-  const shipmentId = typeof payload.shipmentId === 'string' ? payload.shipmentId : undefined;
-  /*
-   * A number as well as a string, because `npm run job -- sync_shipment
-   * trackingNumber=1755021358719` never reaches here as a string: `parsePayload`
-   * coerces anything numeric-looking, and every real ShipBlu number is thirteen
-   * digits of exactly that shape. It survives the round trip intact — thirteen
-   * digits is well inside `Number.MAX_SAFE_INTEGER` — but it arrives typed as a
-   * number, and a bare `typeof === 'string'` check would reject the one form an
-   * operator is most likely to type.
-   */
-  const trackingNumber =
-    typeof payload.trackingNumber === 'string'
-      ? payload.trackingNumber
-      : typeof payload.trackingNumber === 'number'
-        ? String(payload.trackingNumber)
-        : undefined;
-
-  if (!shipmentId && !trackingNumber) {
-    throw new Error('sync_shipment requires a shipmentId or a trackingNumber');
-  }
-
-  const result = await syncShipment({ shipmentId, trackingNumber, force: payload.force === true });
+  const result = await syncShipment({ shipmentId, trackingNumber, force: force === true });
 
   const subject = shipmentId ?? trackingNumber;
   const line = `[sync_shipment] ${subject} → ${describeShipmentSync(result)}`;

@@ -106,7 +106,8 @@ export async function backfillMetaProfiles(job: ClaimedJob): Promise<void> {
     'fetch_meta_profile',
     rows.map((row) => ({
       contactId: row.contactId,
-      platform: row.channel,
+      // Narrowed by the `inArray` above; the column is typed for every channel.
+      platform: row.channel as 'facebook' | 'instagram',
       userId: row.identifier,
       force,
     })),

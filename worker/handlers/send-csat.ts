@@ -10,6 +10,7 @@ import {
   sendsByEmail,
 } from '@/lib/tickets/outbound';
 import { enqueue, type ClaimedJob } from '@/lib/queue';
+import { parseJobPayload } from '@/lib/queue/payloads';
 
 /**
  * Sends one satisfaction survey, half an hour after a ticket was resolved.
@@ -36,11 +37,7 @@ const HTML = {
 };
 
 export async function sendCsat(job: ClaimedJob): Promise<void> {
-  const conversationId = (job.payload as { conversationId?: string }).conversationId;
-  if (!conversationId) {
-    console.warn('[send_csat] job had no conversationId');
-    return;
-  }
+  const { conversationId } = parseJobPayload(job, 'send_csat');
 
   const rows = await db
     .select({
