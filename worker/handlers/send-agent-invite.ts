@@ -7,6 +7,9 @@ import { sendTransactionalEmail } from '@/lib/email/transactional';
 import { appUrl, env } from '@/lib/env';
 import { PermanentJobError, type ClaimedJob } from '@/lib/queue';
 import { parseJobPayload } from '@/lib/queue/payloads';
+import { logger } from '@/lib/log';
+
+const log = logger('send_agent_invite');
 
 /**
  * Emails an invited agent their activation link.
@@ -51,15 +54,15 @@ export async function sendAgentInvite(job: ClaimedJob): Promise<void> {
   // lapse before the worker got here. Returning rather than throwing keeps a
   // normal sequence of events out of the dead queue.
   if (!invite) {
-    console.log(`[send_agent_invite] ${inviteId} is gone — superseded or withdrawn`);
+    log.info(`${inviteId} is gone — superseded or withdrawn`);
     return;
   }
   if (invite.acceptedAt) {
-    console.log(`[send_agent_invite] ${invite.email} has already activated`);
+    log.info(`${invite.email} has already activated`);
     return;
   }
   if (invite.expiresAt.getTime() <= Date.now()) {
-    console.log(`[send_agent_invite] the invite for ${invite.email} expired before it was sent`);
+    log.info(`the invite for ${invite.email} expired before it was sent`);
     return;
   }
 

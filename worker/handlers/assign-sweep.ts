@@ -11,6 +11,9 @@ import {
 import { assignConversation } from '@/lib/assignment';
 import { reclaimDue } from '@/lib/assignment/reclaim';
 import { openBacklog } from '@/lib/tickets/backlog';
+import { logger } from '@/lib/log';
+
+const log = logger('assign_sweep');
 
 /**
  * The unassigned queue, drained. Cron, every five minutes, alongside the SLA
@@ -34,7 +37,7 @@ export async function assignSweep(): Promise<void> {
   const assigned = await assignWaiting();
   const escalated = await escalateStale();
 
-  console.log(`[assign_sweep] reclaimed=${reclaimed} assigned=${assigned} escalated=${escalated}`);
+  log.info(`reclaimed=${reclaimed} assigned=${assigned} escalated=${escalated}`);
 }
 
 /** Groups that hand tickets out on their own. Nothing runs for a manual group. */
@@ -71,7 +74,7 @@ async function assignWaiting(): Promise<number> {
       if (outcome.assignedTo) assigned += 1;
     } catch (error) {
       // One bad ticket must not end the sweep for the rest of the queue.
-      console.error(`[assign_sweep] could not assign conversation ${row.id}`, error);
+      log.error(`could not assign conversation ${row.id}`, error);
     }
   }
 

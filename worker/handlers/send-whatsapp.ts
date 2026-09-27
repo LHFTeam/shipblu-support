@@ -11,6 +11,9 @@ import { WhatsAppApiError, sendTemplate, sendText } from '@/lib/whatsapp/client'
 import type { WhatsAppTemplateComponent } from '@/lib/whatsapp/templates';
 import { windowState } from '@/lib/whatsapp/window';
 import { errorMessage } from '@/lib/errors';
+import { logger } from '@/lib/log';
+
+const log = logger('send_whatsapp');
 
 /**
  * Delivers an agent's WhatsApp reply.
@@ -129,8 +132,8 @@ export async function sendWhatsApp(job: ClaimedJob): Promise<void> {
       })
       .where(eq(conversations.id, row.conversation.id));
 
-    console.log(
-      `[send_whatsapp] ${messageId} sent as ${result.wamid ?? 'an unknown wamid: Meta accepted it and its answer was lost'}`,
+    log.info(
+      `${messageId} sent as ${result.wamid ?? 'an unknown wamid: Meta accepted it and its answer was lost'}`,
     );
   } catch (error) {
     await markFailed(messageId, row.message.meta, errorMessage(error));
@@ -139,9 +142,7 @@ export async function sendWhatsApp(job: ClaimedJob): Promise<void> {
     // number fails identically every time, and retrying it four more times just
     // delays the agent seeing the reason.
     if (error instanceof WhatsAppApiError && !error.isTransient) {
-      console.error(
-        `[send_whatsapp] ${messageId} permanently rejected (code ${error.code}): ${error.message}`,
-      );
+      log.error(`${messageId} permanently rejected (code ${error.code}): ${error.message}`);
       return;
     }
     throw error;

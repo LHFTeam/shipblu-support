@@ -8,6 +8,9 @@ import { downloadAttachment, MetaApiError } from '@/lib/meta/client';
 import { credentialsForPhoneNumberId } from '@/lib/whatsapp/accounts';
 import { WhatsAppApiError, downloadMedia, getMediaUrl } from '@/lib/whatsapp/client';
 import { subjectGone } from './subject-gone';
+import { logger } from '@/lib/log';
+
+const log = logger('download_media');
 
 /**
  * Copies a WhatsApp media file into Supabase Storage.
@@ -65,7 +68,7 @@ export async function downloadMediaJob(job: ClaimedJob): Promise<void> {
 
   const meta = message.meta as { media?: Record<string, unknown>; phoneNumberId?: unknown };
   if (meta.media?.downloaded === true) {
-    console.log(`[download_media] ${mediaId} already stored, skipping`);
+    log.info(`${mediaId} already stored, skipping`);
     return;
   }
 
@@ -103,7 +106,7 @@ export async function downloadMediaJob(job: ClaimedJob): Promise<void> {
         })
         .where(eq(messages.id, messageId));
 
-      console.error(`[download_media] ${mediaId} unrecoverable: ${error.message}`);
+      log.error(`${mediaId} unrecoverable: ${error.message}`);
       return;
     }
     throw error;
@@ -140,7 +143,7 @@ export async function downloadMediaJob(job: ClaimedJob): Promise<void> {
       .where(eq(messages.id, messageId));
   });
 
-  console.log(`[download_media] ${mediaId} → ${stored.path} (${stored.sizeBytes} bytes)`);
+  log.info(`${mediaId} → ${stored.path} (${stored.sizeBytes} bytes)`);
 }
 
 /**
@@ -174,7 +177,7 @@ async function downloadMetaAttachment(
     .limit(1);
 
   if (existing[0]) {
-    console.log(`[download_media] meta attachment ${index} of ${messageId} already stored`);
+    log.info(`meta attachment ${index} of ${messageId} already stored`);
     return;
   }
 
@@ -187,7 +190,7 @@ async function downloadMetaAttachment(
     contentType = downloaded.contentType;
   } catch (error) {
     if (error instanceof MetaApiError && !error.isTransient) {
-      console.error(`[download_media] meta attachment ${index} unrecoverable: ${error.message}`);
+      log.error(`meta attachment ${index} unrecoverable: ${error.message}`);
       return;
     }
     throw error;
@@ -213,7 +216,7 @@ async function downloadMetaAttachment(
     });
   });
 
-  console.log(`[download_media] meta ${index} → ${stored.path} (${stored.sizeBytes} bytes)`);
+  log.info(`meta ${index} → ${stored.path} (${stored.sizeBytes} bytes)`);
 }
 
 /**
@@ -244,7 +247,7 @@ async function lockMessageOrDiscard(tx: typeof db, messageId: string, path: stri
 
   const { failed } = await removeObjects([path]);
   if (failed.length > 0) {
-    console.error(`[download_media] ${path} is orphaned: its message went mid-download`);
+    log.error(`${path} is orphaned: its message went mid-download`);
   }
   throw subjectGone('download_media', `message ${messageId}`);
 }

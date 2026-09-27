@@ -16,6 +16,9 @@ import {
   resolveObject,
 } from '@/lib/meta/subscriptions';
 import type { ClaimedJob } from '@/lib/queue';
+import { logger } from '@/lib/log';
+
+const log = logger('subscribe_meta_webhooks');
 
 /**
  * Bring one webhook object's field subscription up to what the pipeline needs.
@@ -96,8 +99,8 @@ export async function subscribeMetaWebhooks(job?: ClaimedJob): Promise<void> {
   if (object === INSTAGRAM_OBJECT && instagramLoginConfigured()) {
     await subscribeInstagramLogin(want);
   } else if (object === INSTAGRAM_OBJECT) {
-    console.log(
-      '[subscribe_meta_webhooks] INSTAGRAM_ACCESS_TOKEN is unset, so there is no direct ' +
+    log.info(
+      'INSTAGRAM_ACCESS_TOKEN is unset, so there is no direct ' +
         'Instagram connection to subscribe — the Page half is written by object=page',
     );
   }
@@ -119,11 +122,11 @@ async function subscribeApp(object: string, want: readonly string[]): Promise<vo
 
   const plan = planFieldSubscription(existing, want);
 
-  console.log(`[subscribe_meta_webhooks] callback ${plan.callbackUrl}`);
-  console.log(`[subscribe_meta_webhooks] subscribed now: ${plan.current.join(', ') || '(none)'}`);
+  log.info(`callback ${plan.callbackUrl}`);
+  log.info(`subscribed now: ${plan.current.join(', ') || '(none)'}`);
 
   if (plan.adding.length === 0) {
-    console.log('[subscribe_meta_webhooks] app-level nothing to add — already subscribed');
+    log.info('app-level nothing to add — already subscribed');
     return;
   }
 
@@ -131,17 +134,14 @@ async function subscribeApp(object: string, want: readonly string[]): Promise<vo
     // Worth saying out loud rather than refusing: the field list is still worth
     // fixing, but an inactive subscription delivers nothing, and that would
     // otherwise look like the echoes never being enabled.
-    console.warn(
-      '[subscribe_meta_webhooks] the subscription is marked inactive — Meta ' +
+    log.warn(
+      'the subscription is marked inactive — Meta ' +
         'disables one whose callback has been failing. Fields will be updated, ' +
         'but nothing is delivered until it is active again.',
     );
   }
 
-  console.log(
-    `[subscribe_meta_webhooks] adding ${plan.adding.join(', ')} → writing ` +
-      `${plan.merged.join(', ')}`,
-  );
+  log.info(`adding ${plan.adding.join(', ')} → writing ${plan.merged.join(', ')}`);
 
   await applyFieldSubscription(plan);
 
@@ -160,7 +160,7 @@ async function subscribeApp(object: string, want: readonly string[]): Promise<vo
     );
   }
 
-  console.log(`[subscribe_meta_webhooks] app-level done — subscribed: ${now.join(', ')}`);
+  log.info(`app-level done — subscribed: ${now.join(', ')}`);
 }
 
 /**
@@ -212,23 +212,20 @@ async function subscribePage(want: readonly string[]): Promise<void> {
   if (!plan.installed) {
     // Worth its own line: this is the state that explains a Page field which has
     // been subscribed at the app level for months and never delivered anything.
-    console.warn(
-      `[subscribe_meta_webhooks] this app is not installed on Page ${pageId} — no Page ` +
+    log.warn(
+      `this app is not installed on Page ${pageId} — no Page ` +
         `event has ever been deliverable. Installing it now.`,
     );
   } else {
-    console.log(
-      `[subscribe_meta_webhooks] page ${pageId} subscribed now: ` +
-        `${plan.current.join(', ') || '(none)'}`,
-    );
+    log.info(`page ${pageId} subscribed now: ${plan.current.join(', ') || '(none)'}`);
   }
 
   if (plan.installed && plan.adding.length === 0) {
-    console.log('[subscribe_meta_webhooks] page-level nothing to add — already subscribed');
+    log.info('page-level nothing to add — already subscribed');
     return;
   }
 
-  console.log(`[subscribe_meta_webhooks] page-level writing ${plan.merged.join(', ')}`);
+  log.info(`page-level writing ${plan.merged.join(', ')}`);
   await applyPageSubscription(plan);
 
   // Read back, for the same reason the app-level write does: Graph accepting a
@@ -244,9 +241,7 @@ async function subscribePage(want: readonly string[]): Promise<void> {
     );
   }
 
-  console.log(
-    `[subscribe_meta_webhooks] page-level done — subscribed: ${(after ?? []).join(', ')}`,
-  );
+  log.info(`page-level done — subscribed: ${(after ?? []).join(', ')}`);
 }
 
 /**
@@ -280,23 +275,20 @@ async function subscribeInstagramLogin(want: readonly string[]): Promise<void> {
   if (!plan.subscribed) {
     // The state that explains an account delivering nothing while every
     // permission reads as granted.
-    console.warn(
-      `[subscribe_meta_webhooks] the direct connection has no subscription on account ` +
+    log.warn(
+      `the direct connection has no subscription on account ` +
         `${accountId} — no event has ever been deliverable over it. Subscribing now.`,
     );
   } else {
-    console.log(
-      `[subscribe_meta_webhooks] instagram_login ${accountId} subscribed now: ` +
-        `${plan.current.join(', ') || '(none)'}`,
-    );
+    log.info(`instagram_login ${accountId} subscribed now: ${plan.current.join(', ') || '(none)'}`);
   }
 
   if (plan.subscribed && plan.adding.length === 0) {
-    console.log('[subscribe_meta_webhooks] instagram_login nothing to add — already subscribed');
+    log.info('instagram_login nothing to add — already subscribed');
     return;
   }
 
-  console.log(`[subscribe_meta_webhooks] instagram_login writing ${plan.merged.join(', ')}`);
+  log.info(`instagram_login writing ${plan.merged.join(', ')}`);
   await applyInstagramLoginSubscription(plan);
 
   // Read back, as both other levels do. Meta answers this POST with
@@ -312,7 +304,5 @@ async function subscribeInstagramLogin(want: readonly string[]): Promise<void> {
     );
   }
 
-  console.log(
-    `[subscribe_meta_webhooks] instagram_login done — subscribed: ${(after ?? []).join(', ')}`,
-  );
+  log.info(`instagram_login done — subscribed: ${(after ?? []).join(', ')}`);
 }

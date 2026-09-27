@@ -3,6 +3,9 @@ import { db } from '@/db/client';
 import { contactIdentities, contacts, messages } from '@/db/schema';
 import { enqueueMany, type ClaimedJob } from '@/lib/queue';
 import { parseJobPayload } from '@/lib/queue/payloads';
+import { logger } from '@/lib/log';
+
+const log = logger('backfill_meta_profiles');
 
 /**
  * Names the Facebook and Instagram customers already in the archive.
@@ -113,8 +116,8 @@ export async function backfillMetaProfiles(job: ClaimedJob): Promise<void> {
   const breakdown =
     [...tally.entries()].map(([channel, count]) => `${channel} ${count}`).join(', ') || 'none';
 
-  console.log(
-    `[backfill_meta_profiles] ${rows.length} candidate(s), ${enqueued} enqueued (${breakdown})` +
+  log.info(
+    `${rows.length} candidate(s), ${enqueued} enqueued (${breakdown})` +
       `${force ? ' — forced refresh' : ''}`,
   );
 }
