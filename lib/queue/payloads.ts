@@ -132,7 +132,11 @@ const JOB_PAYLOADS = {
   // options by an admin button. `dryRun` is the option these exist to get
   // right. Each handler tested `payload.dryRun === true`, so `dryRun=1` or
   // `dryRun=yes` — both meant as "do not write" — did a real run.
-  backfill_shipment_links: z.object({
+  //
+  // And these five refuse a key they do not know, where every other schema
+  // here drops it. A dropped key is harmless on a payload code writes; on one
+  // an operator types, `dryrun=true` would be dropped and the run would write.
+  backfill_shipment_links: z.strictObject({
     /** ISO timestamps bounding which messages are scanned. */
     since: instant.optional(),
     until: instant.optional(),
@@ -141,7 +145,7 @@ const JOB_PAYLOADS = {
     /** Stop after this many messages. Absent means the whole archive. */
     limit: z.number().int().positive().optional(),
   }),
-  backfill_message_locations: z.object({
+  backfill_message_locations: z.strictObject({
     /** ISO timestamps bounding which messages are scanned. */
     since: instant.optional(),
     until: instant.optional(),
@@ -150,7 +154,7 @@ const JOB_PAYLOADS = {
     /** Stop after this many candidate messages. Absent means the whole archive. */
     limit: z.number().int().positive().optional(),
   }),
-  backfill_categorise_ai: z.object({
+  backfill_categorise_ai: z.strictObject({
     /**
      * Which experiment these rows belong to. Re-running one fills its gaps only.
      * A label of digits arrives from `npm run job` as a number, and was read as
@@ -172,7 +176,7 @@ const JOB_PAYLOADS = {
     /** Skip the run; print the report for `runLabel` as it stands. */
     reportOnly: z.boolean().optional(),
   }),
-  normalise_kb_formatting: z.object({
+  normalise_kb_formatting: z.strictObject({
     /** Count and report what would change, write nothing. */
     dryRun: z.boolean().optional(),
     /** Stop after this many articles. Absent means all of them. */
@@ -180,7 +184,7 @@ const JOB_PAYLOADS = {
     /** One locale only, for a cautious first run. */
     locale: z.enum(LOCALES).optional(),
   }),
-  seed_console_handbook: z.object({
+  seed_console_handbook: z.strictObject({
     /** Report what would change, write nothing. */
     dryRun: z.boolean().optional(),
     /** Also replace the title and body of articles that already exist. */

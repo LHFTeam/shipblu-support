@@ -161,6 +161,12 @@ describe('the backfills and the knowledge-base passes', () => {
     );
   });
 
+  // Review on #252: a misspelt option was dropped, and the job ran for real.
+  it('refuses an option it does not know, so a misspelt dryRun does not write', () => {
+    expect(() => parse('normalise_kb_formatting', { dryrun: true })).toThrow(PermanentJobError);
+    expect(() => parse('seed_console_handbook', { overWrite: true })).toThrow(PermanentJobError);
+  });
+
   it('keeps a run label of digits as the text it was typed as', () => {
     expect(parse('backfill_categorise_ai', { runLabel: 2026 })).toEqual({ runLabel: '2026' });
   });
