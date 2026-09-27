@@ -13,6 +13,7 @@ import { explainMetaSendError, MetaSendRefusal } from '@/lib/meta/errors';
 import type { MetaPlatform } from '@/lib/meta/types';
 import { messagingTag, metaWindowState, type MetaSendAuthor } from '@/lib/meta/window';
 import type { ClaimedJob } from '@/lib/queue';
+import { alreadySent } from './already-sent';
 import { subjectGone } from './subject-gone';
 import { metaReplyTarget } from '@/lib/tickets/meta-thread';
 import { errorMessage } from '@/lib/errors';
@@ -57,10 +58,7 @@ export async function sendMeta(job: ClaimedJob): Promise<void> {
   if (!row) throw subjectGone('send_meta', `message ${messageId}`);
 
   // A retry after a partial failure must not send the customer a second copy.
-  if (row.message.deliveryStatus !== 'pending' && row.message.deliveryStatus !== 'failed') {
-    console.log(`[send_meta] ${messageId} is ${row.message.deliveryStatus}, skipping`);
-    return;
-  }
+  if (alreadySent('send_meta', messageId, row.message.deliveryStatus)) return;
 
   const meta = (row.message.meta ?? {}) as SendMeta;
   const platform = (meta.platform ?? row.conversation.channel) as MetaPlatform;
