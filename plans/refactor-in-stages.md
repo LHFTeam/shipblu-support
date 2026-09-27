@@ -148,7 +148,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 5.1   | `settings-actions.ts`: skills to recipients      | #265            | merged  |
 | 5.1   | `settings-actions.ts`: the last three, deleted   | #270            | merged  |
 | 5.1   | `admin/actions.ts` split by domain, deleted      | #275            | merged  |
-| 5.1   | `forms-shared.tsx` onto `lib/http/action-state`  | #279            | open    |
+| 5.1   | `forms-shared.tsx` onto `lib/http/action-state`  | #279            | merged  |
 | 5.2   | Console guards move to `lib/tickets`             | #260            | merged  |
 | 5.2   | `availability-actions.ts`                        | #268            | merged  |
 | 5.2   | `category-actions.ts`                            | #271            | merged  |
@@ -159,7 +159,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 5.4   | Admin pages: agents, auto-responses, automations | #259            | merged  |
 | 5.4   | Categories, channels, invite, field options      | #266            | merged  |
 | 5.4   | The import page, with db tests                   | #272            | merged  |
-| 5.4   | Repo rule: no `db/client` in a `page.tsx`        | #277            | open    |
+| 5.4   | Repo rule `page-db`: no `db/client` in page code | #277            | open    |
 | 5.5   | One receive path for webhooks                    | #263            | merged  |
 | 5.6   | One `localeOf` and one `requestMeta`             | #251            | merged  |
 | 5.6   | One sign-in sequence for both forms              | #264            | merged  |
@@ -243,19 +243,19 @@ This replaces three of the rules in the handoff above.
   expected. Staging stays suspended.
 - **The ⛳ gate is passed.** The requester said to start Stage 5.
 
-**State at 23:55 UTC.** #258–#275 and #278 are merged. Open, each holding
-its files until it merges:
+**State at 23:55 UTC.** #258–#275, #278 and #279 are merged. Open, each
+holding its files until it merges:
 
-- #277 (5.4, the `page-db` rule): `scripts/ci/rules.mjs`,
+- #277 (5.4, the `page-db` rule: no module under `app/` but an action, a
+  route handler or a test imports `db/client`): `scripts/ci/rules.mjs`,
   `scripts/ci/rules/page-db*.mjs` and `AGENTS.md`.
-- #279 (5.1): `admin/forms-shared.tsx` and `admin/agents/forms.tsx`.
 - #280 (5.2, `meta-actions.ts`): `(console)/actions.ts`, and
   `profile-refresh.tsx`, `comment-moderation.tsx` and `thread-control.tsx`
   under `inbox/[number]/`.
 
 **Next work.**
 
-1. 5.1: done once #279 merges.
+1. 5.1: done.
 2. 5.4: done once #277 merges.
 3. 5.2: the one sibling left after #280 (`reply-actions.ts`),
    then `ticket-actions.ts` for what remains, one PR each. Each one edits
