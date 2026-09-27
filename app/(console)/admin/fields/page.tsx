@@ -1,8 +1,6 @@
-import { asc } from 'drizzle-orm';
-import { db } from '@/db/client';
-import { ticketFields } from '@/db/schema';
 import { Badge, Cell, PageHeader, Row, Table } from '@/components/ui';
 import { InfoTip } from '@/components/tooltip';
+import { listTicketFields } from '@/lib/admin/settings';
 import { requirePermission } from '@/lib/auth/guard';
 import { FieldEditor, NewField } from './forms';
 
@@ -18,10 +16,7 @@ export const dynamic = 'force-dynamic';
 export default async function FieldsPage() {
   await requirePermission('admin.fields');
 
-  const rows = await db
-    .select()
-    .from(ticketFields)
-    .orderBy(asc(ticketFields.position), asc(ticketFields.label));
+  const rows = await listTicketFields();
 
   return (
     <>

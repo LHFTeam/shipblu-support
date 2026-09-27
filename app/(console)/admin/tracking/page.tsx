@@ -1,7 +1,6 @@
-import { db } from '@/db/client';
-import { shipmentPhrases } from '@/db/schema';
 import { Cell, PageHeader, Row, Table } from '@/components/ui';
 import { InfoTip } from '@/components/tooltip';
+import { listSavedPhrases } from '@/lib/admin/settings';
 import { requirePermission } from '@/lib/auth/guard';
 import { PHRASE_GROUPS } from '@/lib/shipments/status';
 import { PhraseEditor } from './forms';
@@ -49,9 +48,7 @@ const GROUPS = {
 export default async function TrackingWordingPage() {
   await requirePermission('admin.fields');
 
-  const saved = await db
-    .select({ key: shipmentPhrases.key, ar: shipmentPhrases.ar })
-    .from(shipmentPhrases);
+  const saved = await listSavedPhrases();
   const overrides = new Map(saved.map((row) => [row.key, row.ar]));
 
   return (
