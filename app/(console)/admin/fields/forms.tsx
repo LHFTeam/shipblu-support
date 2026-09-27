@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Field, Input, Select, Textarea, Toggle } from '@/components/ui';
 import { formatOptionLines } from '@/lib/tickets/custom-fields';
 import { Collapsible, DangerAction, Disclosure, EditorForm } from '../forms-shared';
-import { deleteField, saveField } from '../settings-actions';
+import { deleteField, saveField } from './actions';
 
 type TicketField = {
   id: string;
