@@ -3,7 +3,7 @@
 import { useActionState } from 'react';
 import { ErrorText, Input } from '@/components/ui';
 import { INITIAL, SubmitButton, useRefreshOnSuccess } from '../forms-shared';
-import { saveTrackingPhrase } from '../settings-actions';
+import { saveTrackingPhrase } from './actions';
 
 /**
  * One phrase, editable in place.

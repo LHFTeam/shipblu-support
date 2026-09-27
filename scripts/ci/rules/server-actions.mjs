@@ -12,13 +12,14 @@ import {
  * Where a server action may live: `actions.ts`, or a `<domain>-actions.ts`
  * sibling, anywhere under app/.
  *
- * The second spelling is not hypothetical. `admin/settings-actions.ts` has used
- * it since it was written, and the first version of this check matched only
- * `actions.ts`, so that file's directive was never checked. Deleting it was
- * still caught, but only by accident: client-bundle fired because the admin
- * forms that import the file then reached `db/schema`, and it said so in terms
- * of the bundle rather than the directive. An action file no client form
- * imports would have gone through clean. `plans/refactor-in-stages.md` splits
+ * The second spelling is not hypothetical. `admin/settings-actions.ts` used it
+ * from the day it was written until Stage 5.1 split it, and the first version
+ * of this check matched only `actions.ts`, so that file's directive was never
+ * checked. Deleting it was still caught, but only by accident: client-bundle
+ * fired because the admin forms that import the file then reached
+ * `db/schema`, and it said so in terms of the bundle rather than the
+ * directive. An action file no client form imports would have gone through
+ * clean. `plans/refactor-in-stages.md` splits
  * the two large action files into more `*-actions.ts` siblings, which would
  * have widened that gap one file at a time.
  */

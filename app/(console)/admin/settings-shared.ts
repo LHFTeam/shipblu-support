@@ -6,6 +6,16 @@ import type { ActionState } from '@/lib/http/action-state';
  * not actions: a `'use server'` file may export only async functions, each of
  * them a public endpoint, so neither a helper nor a constant can live in one
  * and be imported by another.
+ *
+ * The actions themselves live beside the page each one serves, in that
+ * directory's `actions.ts`. They were one file, `settings-actions.ts`, until
+ * the refactor's Stage 5.1 split it by domain, and two rules ran through all
+ * of it that still run through every one of them. Conditions and actions are
+ * validated with the same parsers the engines use, so a rule that saves is a
+ * rule that will run — the alternative is an admin form that accepts something
+ * the sweep then silently ignores. And anything a ticket points at is
+ * deactivated rather than deleted when it is in use, because deleting it would
+ * either orphan the ticket or take it with it.
  */
 
 export type SettingsState = ActionState;
