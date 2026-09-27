@@ -135,7 +135,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 3.13  | FormData readers: adoption in the action files   | #244–#246, #250 | merged  |
 | 3.14  | Logger: `lib/log.ts` and the first worker files  | #249, #253      | merged  |
 | 3.14  | Logger: nine more files in `worker/` and `lib/`  | #261            | merged  |
-| 3.14  | Logger: `lib/`                                   | #269            | open    |
+| 3.14  | Logger: `lib/`                                   | #269            | merged  |
 | 4.1   | Split `lib/tickets/queries.ts`                   | #224            | merged  |
 | 4.2   | Shared ingest steps                              | #232–#233, #235 | merged  |
 | 4.3   | Meta Graph transport                             | #228            | merged  |
@@ -145,14 +145,15 @@ and two sessions claiming different rows then conflict on all of them.
 | 5.1   | `settings-actions.ts`: groups to canned          | #255, #257      | merged  |
 | 5.1   | `settings-actions.ts`: auto-responses to SLA     | #258            | merged  |
 | 5.1   | `settings-actions.ts`: skills to recipients      | #265            | merged  |
-| 5.1   | `settings-actions.ts`: the last three, deleted   | #270            | open    |
+| 5.1   | `settings-actions.ts`: the last three, deleted   | #270            | merged  |
 | 5.2   | Console guards move to `lib/tickets`             | #260            | merged  |
 | 5.2   | `availability-actions.ts`                        | #268            | merged  |
-| 5.2   | `category-actions.ts`                            | #271            | open    |
+| 5.2   | `category-actions.ts`                            | #271            | merged  |
 | 5.4   | Admin pages stop importing `db`: first batches   | #254, #256      | merged  |
 | 5.4   | Admin pages: agents, auto-responses, automations | #259            | merged  |
 | 5.4   | Categories, channels, invite, field options      | #266            | merged  |
 | 5.4   | The import page, with db tests                   | #272            | open    |
+| 3.13  | The recipient's email through `text()`           | #273            | open    |
 | 5.5   | One receive path for webhooks                    | #263            | merged  |
 | 5.6   | One `localeOf` and one `requestMeta`             | #251            | merged  |
 | 5.6   | One sign-in sequence for both forms              | #264            | merged  |
@@ -194,10 +195,10 @@ narrowed; what remains of each is below.
 2. **4.4 sweeps** is done: see "Sweeps, narrowed in #242 and #243".
 3. **3.13 adoption** merged as #244–#246. The counts in the old list were of
    every inline read; only the exact `String(formData.get(k) ?? '').trim()`
-   reads change, and two files still have some:
-   - `(console)/actions.ts`: 5. A hot file, so a PR of its own.
-   - `admin/recipients/actions.ts`: 2, in `saveInternalRecipient` (moved from
-     `admin/settings-actions.ts` by #265).
+   reads change. Two are left, both in `(console)/actions.ts` (the
+   `body_${n}` and `header_${n}` template keys), for after the 5.2 splits.
+   `saveInternalRecipient` had one, its `email`, which also lower-cases; #273
+   moves it to `text()`.
 4. **Stage 3 logger.** `lib/log.ts` merged as #249, with `worker/index.ts` and
    seven handlers. The rest of `worker/` follows, then `lib/`, then `app/`,
    each message word for word.
@@ -236,19 +237,18 @@ This replaces three of the rules in the handoff above.
   expected. Staging stays suspended.
 - **The ⛳ gate is passed.** The requester said to start Stage 5.
 
-**State at 23:40 UTC.** #258–#266 and #268 are merged. Open, each holding
-its file until it merges: #269 (3.14: the logger in `lib/`), #270 (5.1: the
-last of `settings-actions.ts`), #271 (5.2: `category-actions.ts`) and #272
-(5.4: the import page).
+**State at 23:40 UTC.** #258–#266 and #268–#271 are merged. Open, each
+holding its file until it merges: #272 (5.4: the import page) and #273 (3.13:
+the recipient's email).
 
 **Next work.**
 
-1. 5.1: after #270, split `admin/actions.ts` into `agents/`, `channels/`,
+1. 5.1: split `admin/actions.ts` into `agents/`, `channels/`,
    `import/` and `categories/`, and move `forms-shared.tsx` onto
    `lib/http/action-state`.
 2. 5.4: after #272, the repo rule against `db/client` in a `page.tsx`, with
    the `app/probe/page.tsx` exception.
-3. 5.2: the four siblings left after #271 (`shipment-actions.ts`,
+3. 5.2: the four siblings left (`shipment-actions.ts`,
    `side-conversation-actions.ts`, `meta-actions.ts`, `reply-actions.ts`),
    then `ticket-actions.ts` for what remains, one PR each. Each one edits
    `(console)/actions.ts`, so start the next when the one before it merges.
