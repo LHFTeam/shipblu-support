@@ -246,7 +246,7 @@ This replaces three of the rules in the handoff above.
    change what they print:
    - `check-meta-permissions` and `test-comment-permission`: their lines start
      with `\n` or have no tag;
-   - the two `console.log(formatReport(...))` calls in
+   - the three `console.log(formatReport(...))` calls in
      `backfill-categorise-ai.ts`: the report block has no tag.
 
    Stage 7's `no-console` must list them as exceptions, or a PR must change
