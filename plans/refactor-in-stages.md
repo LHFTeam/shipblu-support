@@ -502,6 +502,12 @@ that.
 - Adopt them one action file per PR. A specialised state becomes
   `ActionState & {…}`.
 
+**Action state, narrowed in #240.** `ok()` and the shape moved, with seven
+copies of the success object switched over. `INITIAL` did not. In each of about
+thirty client forms it is `{ error: null }`, and the compiler already checks it
+against that form's own state type. A shared constant would change every one of
+those files and prevent nothing.
+
 ### Logging: `lib/log.ts`
 
 An in-house module of about fifty lines, with no new dependency.
