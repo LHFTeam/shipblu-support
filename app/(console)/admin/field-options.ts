@@ -1,6 +1,4 @@
-import { asc, eq } from 'drizzle-orm';
-import { db } from '@/db/client';
-import { ticketFields, ticketForms, ticketStatuses } from '@/db/schema';
+import { listActiveTicketFields, listFormNames } from '@/lib/admin/settings';
 import { formName } from '@/lib/forms/naming';
 import { PRIORITY_CHOICES } from '@/lib/tickets/vocabulary';
 import type { FieldOption } from './condition-builder';
@@ -14,22 +12,7 @@ import type { FieldOption } from './condition-builder';
  * absent, which silently never matches.
  */
 export async function ticketFieldOptions(): Promise<FieldOption[]> {
-  const [custom, statuses, forms] = await Promise.all([
-    db
-      .select()
-      .from(ticketFields)
-      .where(eq(ticketFields.isActive, true))
-      .orderBy(asc(ticketFields.position)),
-    db
-      .select({ name: ticketStatuses.name, category: ticketStatuses.category })
-      .from(ticketStatuses),
-    db
-      .select({ slug: ticketForms.slug, nameEn: ticketForms.nameEn, nameAr: ticketForms.nameAr })
-      .from(ticketForms)
-      .orderBy(asc(ticketForms.position)),
-  ]);
-
-  void statuses;
+  const [custom, forms] = await Promise.all([listActiveTicketFields(), listFormNames()]);
 
   const base: FieldOption[] = [
     {

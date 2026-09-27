@@ -1,9 +1,7 @@
 import Link from 'next/link';
-import { asc } from 'drizzle-orm';
-import { db } from '@/db/client';
-import { ticketCategories, ticketRootCauses } from '@/db/schema';
 import { PageHeader, Table } from '@/components/ui';
 import { InfoTip } from '@/components/tooltip';
+import { listRootCauses, listTicketCategories } from '@/lib/admin/settings';
 import { requirePermission } from '@/lib/auth/guard';
 import { categoryUsage } from '@/lib/categorise/seed';
 import { CategoryRow, RootCauseRow } from './forms';
@@ -28,14 +26,8 @@ export default async function CategoriesPage() {
   await requirePermission('admin.categories');
 
   const [categories, causes, usage] = await Promise.all([
-    db
-      .select()
-      .from(ticketCategories)
-      .orderBy(asc(ticketCategories.position), asc(ticketCategories.key)),
-    db
-      .select()
-      .from(ticketRootCauses)
-      .orderBy(asc(ticketRootCauses.position), asc(ticketRootCauses.key)),
+    listTicketCategories(),
+    listRootCauses(),
     categoryUsage(),
   ]);
 

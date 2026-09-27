@@ -1,7 +1,4 @@
-import { and, eq, gt, isNull } from 'drizzle-orm';
-import { db } from '@/db/client';
-import { invites } from '@/db/schema';
-import { hashToken } from '@/lib/auth/tokens';
+import { findOpenInvite } from '@/lib/auth/invites';
 import { InviteForm } from './form';
 
 export const dynamic = 'force-dynamic';
@@ -9,19 +6,7 @@ export const dynamic = 'force-dynamic';
 export default async function InvitePage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
 
-  const rows = await db
-    .select({ email: invites.email, name: invites.name })
-    .from(invites)
-    .where(
-      and(
-        eq(invites.tokenHash, hashToken(token)),
-        isNull(invites.acceptedAt),
-        gt(invites.expiresAt, new Date()),
-      ),
-    )
-    .limit(1);
-
-  const invite = rows[0];
+  const invite = await findOpenInvite(token, new Date());
 
   if (!invite) {
     return (

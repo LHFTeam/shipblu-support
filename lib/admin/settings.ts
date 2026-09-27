@@ -7,6 +7,7 @@ import {
   autoResponses,
   businessHours,
   cannedResponses,
+  channels,
   conversations,
   groupMembers,
   groups,
@@ -16,9 +17,13 @@ import {
   shipmentPhrases,
   skills,
   slaPolicies,
+  ticketCategories,
   ticketFields,
   ticketForms,
+  ticketRootCauses,
   ticketStatuses,
+  whatsappAccounts,
+  whatsappTemplates,
 } from '@/db/schema';
 import { readOnlyChannels } from '@/lib/tickets/channel-policy';
 
@@ -283,4 +288,77 @@ export function listOpenInvites(now: Date) {
     .from(invites)
     .where(and(isNull(invites.acceptedAt), gt(invites.expiresAt, now)))
     .orderBy(desc(invites.createdAt));
+}
+
+/** Every category, retired ones included, in the order the taxonomy lists them. */
+export function listTicketCategories() {
+  return db
+    .select()
+    .from(ticketCategories)
+    .orderBy(asc(ticketCategories.position), asc(ticketCategories.key));
+}
+
+/** Every root cause, retired ones included, in the order the resolve dialogue lists them. */
+export function listRootCauses() {
+  return db
+    .select()
+    .from(ticketRootCauses)
+    .orderBy(asc(ticketRootCauses.position), asc(ticketRootCauses.key));
+}
+
+/** Every channel, inactive ones included, by name, with the columns the channels page reads. */
+export function listChannelsForAdmin() {
+  return db
+    .select({
+      id: channels.id,
+      type: channels.type,
+      name: channels.name,
+      config: channels.config,
+      createdAt: channels.createdAt,
+      defaultGroupId: channels.defaultGroupId,
+      whatsappAccountId: channels.whatsappAccountId,
+      isActive: channels.isActive,
+    })
+    .from(channels)
+    .orderBy(asc(channels.name));
+}
+
+export function listWhatsAppAccounts() {
+  return db.select().from(whatsappAccounts).orderBy(asc(whatsappAccounts.name));
+}
+
+/**
+ * Per WhatsApp account, how many templates it has and how many are approved.
+ *
+ * Approved and total, because they answer different questions. Approved is
+ * what an agent can actually pick; total is what the sync last read back
+ * from Meta, and zero of it is the difference between "connected" and
+ * "connected to something that is not this WABA".
+ */
+export function countTemplatesByAccount() {
+  return db
+    .select({
+      accountId: whatsappTemplates.whatsappAccountId,
+      approved: sql<number>`count(*) filter (where ${whatsappTemplates.status} = 'APPROVED')::int`,
+      total: sql<number>`count(*)::int`,
+    })
+    .from(whatsappTemplates)
+    .groupBy(whatsappTemplates.whatsappAccountId);
+}
+
+/** Active custom fields, by position: the ones a rule condition can name. */
+export function listActiveTicketFields() {
+  return db
+    .select()
+    .from(ticketFields)
+    .where(eq(ticketFields.isActive, true))
+    .orderBy(asc(ticketFields.position));
+}
+
+/** Form slugs and names for the condition builder's "submitted through form". */
+export function listFormNames() {
+  return db
+    .select({ slug: ticketForms.slug, nameEn: ticketForms.nameEn, nameAr: ticketForms.nameAr })
+    .from(ticketForms)
+    .orderBy(asc(ticketForms.position));
 }
