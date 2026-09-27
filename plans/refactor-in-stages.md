@@ -145,6 +145,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 5.1   | `settings-actions.ts`: auto-responses to SLA     | #258            | merged  |
 | 5.1   | `settings-actions.ts`: skills to recipients      | #265            | open    |
 | 5.2   | Console guards move to `lib/tickets`             | #260            | merged  |
+| 5.2   | `availability-actions.ts`                        | #268            | open    |
 | 5.4   | Admin pages stop importing `db`: first batches   | #254, #256      | merged  |
 | 5.4   | Admin pages: agents, auto-responses, automations | #259            | merged  |
 | 5.4   | Categories, channels, invite, field options      | #266            | open    |
@@ -231,9 +232,10 @@ This replaces three of the rules in the handoff above.
 - **The ⛳ gate is passed.** The requester said to start Stage 5.
 
 **State at 23:10 UTC.** #258–#264 are merged. Open: #265 (5.1: skills,
-automations, recipients) and #266 (5.4: categories, channels, invite, field
-options). #265 holds `admin/settings-actions.ts` and #266 holds
-`lib/admin/settings.ts`, so the next batch of each waits for it.
+automations, recipients), #266 (5.4: categories, channels, invite, field
+options), and #268 (5.2: `availability-actions.ts`). #265 holds
+`admin/settings-actions.ts`, #266 holds `lib/admin/settings.ts` and #268 holds
+`(console)/actions.ts`, so the next batch of each waits for it.
 
 **Next work.**
 
