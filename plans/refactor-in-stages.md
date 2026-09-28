@@ -187,6 +187,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 6.5   | Widget: `useHostBridge`                          | #304            | merged  |
 | 6.5   | Composer: the three forms in their own files     | #305            | merged  |
 | 6.5   | Widget: `useWidgetSession`                       | #306            | open    |
+| 6.3   | List window badges on the shared clock           | #307            | open    |
 | 6.x   | Client components                                |                 | pending |
 | 7     | Lint tightening, finish logging                  |                 | pending |
 
@@ -221,10 +222,12 @@ subscribe to the open PRs again.
   `'*'`. Both are older than #304, which only moved them; the origin allowlist
   is the documented guard, and the outbound payloads carry nothing secret.
 
-**State at 01:52 UTC, 2026-09-28.** #258–#291 and #293–#305 are merged. Open,
-holding its files until it merges, besides this plan's own PR:
+**State at 01:56 UTC, 2026-09-28.** #258–#291 and #293–#305 are merged. Open,
+each holding its files until it merges, besides this plan's own PR:
 
 - #306 (6.5): `app/widget/chat.tsx`, and the new `use-widget-session.ts`.
+- #307 (6.3, behaviour change): `inbox/list.tsx` and
+  `inbox/[number]/window-indicator.tsx`.
 
 **Next work.**
 
@@ -236,14 +239,13 @@ holding its files until it merges, besides this plan's own PR:
    list's `WhatsAppWindow` and `MetaWindow` in `inbox/list.tsx` stay for now:
    they are compact, show nothing while the window is unremarkable, and read
    the clock at render, so folding them into `window-indicator.tsx` changes
-   what the list shows. That is its own PR, marked as a behaviour change.
+   what the list shows. That is #307, marked as a behaviour change.
 4. 3.13: done (#289). 6.5's `SubmitButton`: done (#296). The reports page's
    RTL fix (#298) and the swap to the shared `Stat` and `Table` (#301) merged.
    The widget's `useMessageStream` (#302) and `useHostBridge` (#304) merged;
    `useWidgetSession`, the last of the three, is #306. The dashboard's
    sections (#303) and the composer's forms (#305) merged. Stage 7 starts once
-   #306 merges; the behaviour-change PR for the list's window badges (item 3)
-   is still open work, and can land beside it.
+   #306 merges; #307, the list's window badges (item 3), can land beside it.
 5. Logger. Three places in `worker/` stay on `console`, because a move would
    change what they print:
    - `check-meta-permissions` and `test-comment-permission`: their lines start
