@@ -18,6 +18,56 @@ import { useMemo, useSyncExternalStore } from 'react';
 
 const TICK_MS = 30_000;
 
+type Clock = { listeners: Set<() => void>; stop: (() => void) | null };
+
+/**
+ * One timer per interval, shared by every caller asking for it.
+ *
+ * A timer per component would start each one from the moment it mounted, so
+ * two badges crossing the same boundary could disagree for most of a tick —
+ * one row reading "window closed" beside another still counting down — and a
+ * list of a few hundred rows would run a few hundred intervals. The first tick
+ * waits for the next bucket boundary, so every subscriber reads the new bucket
+ * at the moment it begins.
+ */
+const clocks = new Map<number, Clock>();
+
+export function subscribeClock(tickMs: number, onChange: () => void): () => void {
+  let clock = clocks.get(tickMs);
+  if (!clock) {
+    clock = { listeners: new Set(), stop: null };
+    clocks.set(tickMs, clock);
+  }
+  const shared = clock;
+  shared.listeners.add(onChange);
+
+  if (!shared.stop) {
+    const fire = () => {
+      for (const listener of shared.listeners) listener();
+    };
+    let interval: ReturnType<typeof setInterval> | undefined;
+    const timeout = setTimeout(
+      () => {
+        fire();
+        interval = setInterval(fire, tickMs);
+      },
+      tickMs - (Date.now() % tickMs),
+    );
+    shared.stop = () => {
+      clearTimeout(timeout);
+      clearInterval(interval);
+    };
+  }
+
+  return () => {
+    shared.listeners.delete(onChange);
+    if (shared.listeners.size === 0) {
+      shared.stop?.();
+      clocks.delete(tickMs);
+    }
+  };
+}
+
 function getServerSnapshot(): number | null {
   return null;
 }
@@ -33,8 +83,7 @@ export function useNow(tickMs: number = TICK_MS): Date | null {
   const store = useMemo(
     () => ({
       subscribe(onChange: () => void): () => void {
-        const timer = setInterval(onChange, tickMs);
-        return () => clearInterval(timer);
+        return subscribeClock(tickMs, onChange);
       },
       getSnapshot(): number {
         return Math.floor(Date.now() / tickMs) * tickMs;
