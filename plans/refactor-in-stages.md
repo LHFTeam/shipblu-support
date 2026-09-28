@@ -170,7 +170,8 @@ and two sessions claiming different rows then conflict on all of them.
 | 5.6   | One `localeOf` and one `requestMeta`             | #251            | merged  |
 | 5.6   | One sign-in sequence for both forms              | #264            | merged  |
 | 6.1   | `TemplateOption` into `inbox/[number]/types.ts`  | #286            | merged  |
-| 6.2   | `lib/tickets/event-labels.ts`, with tests        | #288            | open    |
+| 6.2   | `lib/tickets/event-labels.ts`, with tests        | #288            | merged  |
+| 6.3   | `header.tsx` and `window-indicator.tsx`          | #290            | open    |
 | 6.x   | Client components                                |                 | pending |
 | 7     | Lint tightening, finish logging                  |                 | pending |
 
@@ -198,19 +199,22 @@ subscribe to the open PRs again.
   and 1 Arabic excerpt that start that way.
 - `restoreVersion` does not write `excerpt`.
 
-**State at 00:39 UTC, 2026-09-28.** #258–#282, #284–#287 and #289 are
-merged. Open, holding its files until it merges:
+**State at 00:42 UTC, 2026-09-28.** #258–#282 and #284–#289 are merged. Open,
+holding its files until it merges:
 
-- #288 (6.2): `inbox/[number]/view.tsx`, and the new
-  `lib/tickets/event-labels.ts` and `lib/tickets/event-labels.test.ts`.
+- #290 (6.3): `inbox/[number]/view.tsx`, and the new `header.tsx` and
+  `window-indicator.tsx` beside it.
 
 **Next work.**
 
 1. 5.1: done.
 2. 5.4: done.
-3. 5.2 and 5.3: done. 6.1: done. 6.2 is #288. 6.3 (split `view.tsx` into
-   kebab-case siblings, leaves first) waits for #288, because both edit
-   `view.tsx`.
+3. 5.2, 5.3, 6.1 and 6.2: done. 6.3 has started with #290 (`header.tsx`,
+   `window-indicator.tsx`). The next split of `view.tsx` waits for it. The
+   list's `WhatsAppWindow` and `MetaWindow` in `inbox/list.tsx` stay for now:
+   they are compact, show nothing while the window is unremarkable, and read
+   the clock at render, so folding them into `window-indicator.tsx` changes
+   what the list shows. That is its own PR, marked as a behaviour change.
 4. 3.13: done (#289).
 5. Logger. Three places in `worker/` stay on `console`, because a move would
    change what they print:
