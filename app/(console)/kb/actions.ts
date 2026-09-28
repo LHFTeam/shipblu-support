@@ -10,7 +10,6 @@ import { ok, type ActionState } from '@/lib/http/action-state';
 import { canonicalUuid, isUuid } from '@/lib/http/uuid';
 import { text } from '@/lib/http/form-data';
 import type { AgentRole } from '@/lib/auth/permissions';
-import { htmlToText, sanitiseArticleHtml } from '@/lib/html/sanitize';
 import {
   getArticleForEdit,
   takenSlugs,
@@ -19,7 +18,6 @@ import {
 } from '@/lib/kb/admin';
 import { articleBody, cutArticleVersion } from '@/lib/kb/article-write';
 import { FLOOR_LABELS, SELECTABLE_FLOORS, folderFloor, meetsFloor } from '@/lib/kb/floors';
-import { normaliseArticleHtml } from '@/lib/kb/format';
 import { isLocale } from '@/lib/kb/locale';
 import { slugify, uniqueSlug } from '@/lib/kb/slug';
 
@@ -464,17 +462,14 @@ export async function restoreVersion(_state: KbState, formData: FormData): Promi
     // sanitised by whatever rules were in force when it was written, and those
     // may since have tightened — and a version cut before the formatting
     // standard existed still carries the classes and inline styles it took to
-    // restore one and undo the cleanup.
-    const bodyHtml = normaliseArticleHtml(sanitiseArticleHtml(version.bodyHtml));
+    // restore one and undo the cleanup. Through `articleBody`, like every other
+    // writer, so the excerpt is rebuilt with the body: written by hand here it
+    // was left out, and a listing kept showing the replaced body's opening line.
+    const { bodyHtml, bodyText, excerpt } = articleBody(version.bodyHtml);
 
     await tx
       .update(kbArticles)
-      .set({
-        title: version.title,
-        bodyHtml,
-        bodyText: htmlToText(bodyHtml),
-        updatedAt: new Date(),
-      })
+      .set({ title: version.title, bodyHtml, bodyText, excerpt, updatedAt: new Date() })
       .where(eq(kbArticles.id, id));
   });
 
