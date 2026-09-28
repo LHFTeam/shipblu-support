@@ -116,6 +116,17 @@ describe('the hand-run options', () => {
   ] as const)('refuses %s %o rather than running the default', (type, payload) => {
     expect(() => parse(type, payload)).toThrow(PermanentJobError);
   });
+
+  // A key the schema does not know was dropped, and the default ran: the typo
+  // in `limt=50` walked every contact.
+  it.each([
+    ['backfill_meta_profiles', { limt: 50 }],
+    ['sync_stale_shipments', { stale_minutes: 60 }],
+    ['rollup_metrics', { form: '2026-09-01' }],
+    ['sync_shipment', { shipmentId: 's-1', forse: true }],
+  ] as const)('refuses %s %o, a key it does not know', (type, payload) => {
+    expect(() => parse(type, payload)).toThrow(PermanentJobError);
+  });
 });
 
 describe('the backfills and the knowledge-base passes', () => {

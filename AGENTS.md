@@ -354,13 +354,12 @@ wrong shape does not compile, and the handler reads the row with
 `z.strictObject` for any job an operator runs through `npm run job`, and always
 for one with a `dryRun`: a mistyped key is then refused, where `z.object` drops
 it and `dryrun=true` becomes a run that writes. `z.object` is for payloads only
-code writes. Four operator-run schemas are older than that rule and still use
-`z.object` — `backfill_meta_profiles` (the example above),
-`sync_stale_shipments`, `rollup_metrics` and `sync_shipment`; none takes a
-`dryRun`, but a typo there is still dropped, and absent is the default, so
-`backfill_meta_profiles limt=50` walks every contact. None is the one to copy. A
-type with no entry still takes any object, so the entry is a convention the
-compiler does not force.
+code writes. Every operator-run schema is strict now; the last four to move were
+`backfill_meta_profiles`, `sync_stale_shipments`, `rollup_metrics` and
+`sync_shipment`, where a typo was dropped and the default ran, so
+`backfill_meta_profiles limt=50` walked every contact. A type with no entry
+still takes any object, so the entry is a convention the compiler does not
+force.
 
 **`PermanentJobError` is for a failure no retry can fix**, and it sends the job
 to `dead` on its first attempt instead of spending the rest. That means input

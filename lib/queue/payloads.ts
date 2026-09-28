@@ -74,7 +74,7 @@ const JOB_PAYLOADS = {
     force: z.boolean().optional(),
   }),
   sync_shipment: z
-    .object({
+    .strictObject({
       shipmentId: z.string().optional(),
       /*
        * A number as well as a string, because `npm run job -- sync_shipment
@@ -97,13 +97,15 @@ const JOB_PAYLOADS = {
   // number, the rest as strings. An option that is present but wrong is
   // refused rather than read as absent, because absent is always the default
   // and a default is a real run: `limit=abc` would otherwise walk the archive.
-  backfill_meta_profiles: z.object({
+  // A key they do not know is refused for the same reason: `limt=50` was
+  // dropped, the default applied, and the run walked every contact.
+  backfill_meta_profiles: z.strictObject({
     /** Re-read profiles already on file, rather than only the ones never asked. */
     force: z.boolean().optional(),
     /** Stop after this many contacts. Absent means all of them. */
     limit: z.number().int().positive().optional(),
   }),
-  sync_stale_shipments: z.object({
+  sync_stale_shipments: z.strictObject({
     /** Stop after this many parcels. Absent means the handler's `DEFAULT_LIMIT`. */
     limit: z.number().int().positive().optional(),
     /**
@@ -117,7 +119,7 @@ const JOB_PAYLOADS = {
      */
     staleMinutes: z.number().positive().optional(),
   }),
-  rollup_metrics: z.object({
+  rollup_metrics: z.strictObject({
     /** A single day, as `YYYY-MM-DD`. */
     day: z.iso.date().optional(),
     /** Range start, inclusive. Defaults to the oldest day with any data. */
@@ -133,9 +135,10 @@ const JOB_PAYLOADS = {
   // right. Each handler tested `payload.dryRun === true`, so `dryRun=1` or
   // `dryRun=yes` — both meant as "do not write" — did a real run.
   //
-  // And these five refuse a key they do not know, where every other schema
-  // here drops it. A dropped key is harmless on a payload code writes; on one
-  // an operator types, `dryrun=true` would be dropped and the run would write.
+  // And these refuse a key they do not know, as every job an operator types
+  // does, where a schema only code writes drops it. A dropped key is harmless
+  // on a payload code writes; on one an operator types, `dryrun=true` would be
+  // dropped and the run would write.
   backfill_shipment_links: z.strictObject({
     /** ISO timestamps bounding which messages are scanned. */
     since: instant.optional(),
