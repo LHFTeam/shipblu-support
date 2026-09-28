@@ -138,7 +138,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 3.14  | Logger: nine more files in `worker/` and `lib/`  | #261            | merged  |
 | 3.14  | Logger: `lib/`                                   | #269            | merged  |
 | 3.14  | Logger: the `app/` routes and the invite action  | #287            | merged  |
-| 3.14  | `reply-actions.ts`: `text()` and the logger      | #289            | open    |
+| 3.14  | `reply-actions.ts`: `text()` and the logger      | #289            | merged  |
 | 4.1   | Split `lib/tickets/queries.ts`                   | #224            | merged  |
 | 4.2   | Shared ingest steps                              | #232–#233, #235 | merged  |
 | 4.3   | Meta Graph transport                             | #228            | merged  |
@@ -198,12 +198,11 @@ subscribe to the open PRs again.
   and 1 Arabic excerpt that start that way.
 - `restoreVersion` does not write `excerpt`.
 
-**State at 00:35 UTC, 2026-09-28.** #258–#282 and #284–#287 are merged. Open,
-each holding its files until it merges:
+**State at 00:39 UTC, 2026-09-28.** #258–#282, #284–#287 and #289 are
+merged. Open, holding its files until it merges:
 
 - #288 (6.2): `inbox/[number]/view.tsx`, and the new
   `lib/tickets/event-labels.ts` and `lib/tickets/event-labels.test.ts`.
-- #289 (3.13 and 3.14): `(console)/reply-actions.ts`.
 
 **Next work.**
 
@@ -212,8 +211,7 @@ each holding its files until it merges:
 3. 5.2 and 5.3: done. 6.1: done. 6.2 is #288. 6.3 (split `view.tsx` into
    kebab-case siblings, leaves first) waits for #288, because both edit
    `view.tsx`.
-4. 3.13 leftover: the `body_${n}` and `header_${n}` template reads in
-   `reply-actions.ts` move to `text()` in #289.
+4. 3.13: done (#289).
 5. Logger. Three places in `worker/` stay on `console`, because a move would
    change what they print:
    - `check-meta-permissions` and `test-comment-permission`: their lines start
@@ -224,7 +222,7 @@ each holding its files until it merges:
    Stage 7's `no-console` must list them as exceptions, or a PR must change
    their output on purpose. `worker/run-job.ts` is the exception Stage 7
    already names. Those four files are every `console` call left in
-   `worker/`. `lib/` is done. `app/` is done once #289 merges.
+   `worker/`. `lib/` and `app/` are done.
 
 **Traps in this container.**
 
