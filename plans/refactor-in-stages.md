@@ -155,7 +155,8 @@ and two sessions claiming different rows then conflict on all of them.
 | 5.2   | `shipment-actions.ts`                            | #274            | merged  |
 | 5.2   | `side-conversation-actions.ts`                   | #278            | merged  |
 | 5.2   | `meta-actions.ts`                                | #280            | merged  |
-| 5.2   | `reply-actions.ts`                               | #281            | open    |
+| 5.2   | `reply-actions.ts`                               | #281            | merged  |
+| 5.2   | `ticket-actions.ts` and `action-state.ts`        | #282            | open    |
 | 5.4   | Admin pages stop importing `db`: first batches   | #254, #256      | merged  |
 | 5.4   | Admin pages: agents, auto-responses, automations | #259            | merged  |
 | 5.4   | Categories, channels, invite, field options      | #266            | merged  |
@@ -173,89 +174,21 @@ The session that opened #233–#241 stopped here because of its usage limit. It
 unsubscribed from its PRs and deleted its hourly check-in. The next session must
 subscribe to the open PRs again.
 
-**State at 15:20 UTC.** A second session took over at 07:05 and worked
-through the list below. Every PR named in this handoff (#233, #235–#241) is
-merged, and so are #242–#249, which that session opened. No refactor PR is
-open except this one.
-
-**Rules that still hold.**
-
-- Another agent reviews each PR. Fix review comments on that PR's own branch.
-- Merge only when the requester asks.
-- Do not deploy. Production does not deploy on merge, and it still runs #202's
-  commit (`4fcb6fd`).
-- After merges, restart this branch from `main` and mark the rows `merged` in
-  one table-only commit.
-- The requester wants replies in ASD Simplified Technical English (STE100).
-
-**Next work, in this order.** Items 1–4 of the original list are done or
-narrowed; what remains of each is below.
-
-1. **4.4 typed payloads.** The second family merged as #247 and three jobs of
-   the third as #248. Five jobs remain, because #237 and #238 held their files
-   when #248 was written: `backfill_shipment_links`,
-   `backfill_message_locations`, `backfill_categorise_ai`,
-   `normalise_kb_formatting` and `seed_console_handbook`. **The PR must say
-   this:** today a handler tests `payload.dryRun === true`, so `dryRun=1` or
-   `dryRun=yes` does a real run. `z.boolean()` makes those values fail, and
-   nothing is written.
-2. **4.4 sweeps** is done: see "Sweeps, narrowed in #242 and #243".
-3. **3.13 adoption** merged as #244–#246. The counts in the old list were of
-   every inline read; only the exact `String(formData.get(k) ?? '').trim()`
-   reads change. Two are left, both in `(console)/actions.ts` (the
-   `body_${n}` and `header_${n}` template keys), for after the 5.2 splits.
-   `saveInternalRecipient` had one, its `email`, which also lower-cases; #273
-   moves it to `text()`.
-4. **Stage 3 logger.** `lib/log.ts` merged as #249, with `worker/index.ts` and
-   seven handlers. The rest of `worker/` follows, then `lib/`, then `app/`,
-   each message word for word.
-5. Then the **⛳ gate**: the requester was asked on 2026-09-27 whether to start
-   Stage 5, and has not answered yet.
-
-**Findings outside the plan.** Each one is queued as a suggested task for the
-requester, and neither is fixed.
-
-- `htmlToText` writes headings in capitals. Production has 8 English excerpts
-  and 1 Arabic excerpt that start that way.
-- `restoreVersion` does not write `excerpt`.
-
-**Traps in this container.**
-
-- The local Postgres (port 55432, data under the scratchpad) stops when
-  `/tmp/claude-0` loses its `o+x` bit. Run `chmod o+x` on the path, then
-  `pg_ctl … start` as `postgres`.
-- Turbopack refuses a symlinked `node_modules` in a worktree. Build in the main
-  checkout.
-- The DB tier needs `TEST_DATABASE_URL`, and the database must be migrated and
-  seeded first.
-- Keeping the cluster's data directory out of `/tmp/claude-0` altogether
-  (for example under `/var/lib/postgresql`, owned by `postgres`) avoids the
-  permission trap above.
-
-### State at 22:10 UTC, 2026-09-27
-
-This replaces three of the rules in the handoff above.
-
-- **Merging.** The requester now allows a merge when another agent has
-  reviewed the PR and its findings are fixed on the PR's branch.
-- **Deploys.** The requester asked for one, and all six production services
-  now run `2340f15`. Migration 0028 is applied. The first `sla_sweep` on it
-  escalated 261 breaches (124 first response, 137 resolution), as #242
-  expected. Staging stays suspended.
-- **The ⛳ gate is passed.** The requester said to start Stage 5.
-
-**State at 00:02 UTC.** #258–#280 are merged. Open, holding its files until it
-merges: #281 (5.2, `reply-actions.ts`): `(console)/actions.ts` and
-`inbox/[number]/composer.tsx`.
+**State at 00:09 UTC.** #258–#281 are merged. Open, holding its files until it
+merges: #282 (5.2, `ticket-actions.ts` and `action-state.ts`): `(console)/actions.ts`
+(renamed), the five sibling action files, `profile-refresh.tsx`,
+`composer.tsx`, `view.tsx`, `comment-moderation.tsx`, `thread-control.tsx` and
+`side-conversations.tsx` under `inbox/[number]/`, and
+`lib/tickets/console-guards.ts`.
 
 **Next work.**
 
 1. 5.1: done.
 2. 5.4: done.
-3. 5.2: after #281, `ticket-actions.ts` takes what remains of
-   `(console)/actions.ts` (`updateTicket`, `purgeTicket`), and `ActionState`
-   moves to a plain module, since every sibling imports it as a type from an
-   action file.
+3. 5.2: done once #282 merges. Then 5.3: `lib/tickets/agent-reply.ts` for the
+   reply sequence `sendReply` and `sendTemplateReply` share, and
+   `lib/tickets/status.ts` for the two copies of the status-change transaction
+   (`applyStatusCategory` and `updateTicket`'s status case).
 4. Logger. Three places in `worker/` stay on `console`, because a move would
    change what they print:
    - `check-meta-permissions` and `test-comment-permission`: their lines start
