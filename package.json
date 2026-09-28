@@ -25,7 +25,7 @@
     "test:watch": "vitest",
     "test:db": "vitest run -c vitest.db.config.mts",
     "db:seed": "tsx db/seed.ts",
-    "lint:strict": "eslint -c eslint.strict.config.mjs lib worker --max-warnings=0"
+    "lint:strict": "eslint -c eslint.strict.config.mjs lib worker app --max-warnings=0"
   },
   "dependencies": {
     "@node-rs/argon2": "2.1.0",
