@@ -4,6 +4,7 @@ import { agents, conversations, contacts, messages, ticketStatuses } from '@/db/
 import type { SessionAgent } from '@/lib/auth/session';
 import { can } from '@/lib/auth/permissions';
 import { hiddenChannels, restrictedChannels } from './channel-policy';
+import { rootCommentId } from '@/lib/meta/comments';
 import { sbidMatches, trackingMatches } from '@/lib/shipments/queries';
 import { parseSearchTerm } from './search';
 import { type InboxCursor, type InboxFilters, PAGE_SIZE, encodeInboxCursor } from './inbox-filters';
@@ -29,6 +30,13 @@ export type InboxRow = {
   assigneeName: string | null;
   lastMessageAt: Date;
   lastCustomerMessageAt: Date | null;
+  /**
+   * A Facebook or Instagram comment ticket, answered on the comment edge rather
+   * than in a messaging window. The list reads it so it does not badge a window
+   * the ticket has not got; the header asks the same question of the same
+   * `external_id`.
+   */
+  isComment: boolean;
   tags: string[];
   preview: string | null;
   /**
@@ -163,6 +171,7 @@ export async function listInbox(
       assigneeName: agents.name,
       lastMessageAt: conversations.lastMessageAt,
       lastCustomerMessageAt: conversations.lastCustomerMessageAt,
+      externalId: conversations.externalId,
       // The cursor's timestamp, at the precision Postgres stores it. See
       // `InboxCursor` for why the mapped `Date` above cannot serve.
       cursorTime: sql<string>`${conversations.lastMessageAt}::text`,
@@ -220,6 +229,7 @@ export async function listInbox(
       assigneeName: row.assigneeName,
       lastMessageAt: row.lastMessageAt,
       lastCustomerMessageAt: row.lastCustomerMessageAt,
+      isComment: rootCommentId(row.externalId) !== null,
       tags: row.tags,
       preview: row.preview,
       sideState: row.sideState === 'replied' || row.sideState === 'waiting' ? row.sideState : null,
