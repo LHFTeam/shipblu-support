@@ -133,13 +133,28 @@ export function sanitiseEmailHtml(html: string, options: SanitiseOptions = {}): 
 /**
  * Plain-text fallback, used when a message has no text part, and as the source
  * for the search vector and inbox previews.
+ *
+ * Headings keep their own case. html-to-text writes them in capitals by
+ * default, which is a plain-text email's way to show a heading — but this text
+ * is not an email: an article's excerpt is drawn from it, and the excerpt is
+ * the line the help centre lists under a title and the description a search
+ * engine shows. An article opening on its heading therefore shouted it there.
+ * Arabic has no case, so only the Latin half of the corpus showed it.
  */
+const HEADINGS = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].map((selector) => ({
+  selector,
+  // Merged into the library's own entry for the tag, which keeps the heading
+  // format and its line breaks; only the case changes.
+  options: { uppercase: false },
+}));
+
 export function htmlToText(html: string): string {
   return convert(html, {
     wordwrap: false,
     selectors: [
       { selector: 'img', format: 'skip' },
       { selector: 'a', options: { ignoreHref: true } },
+      ...HEADINGS,
     ],
   }).trim();
 }

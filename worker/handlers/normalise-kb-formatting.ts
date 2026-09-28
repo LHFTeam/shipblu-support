@@ -30,6 +30,14 @@ import { logger } from '@/lib/log';
  * silently do nothing, which is the opposite of what an idempotent backfill
  * wants.
  *
+ * It also keeps `body_text` and `excerpt` in step with the body when the body
+ * itself needs nothing. Both are derived from `body_html` by `htmlToText`, so a
+ * change to that function — headings stopped being written in capitals — leaves
+ * every stored copy in the old form until the article is next saved, and a
+ * listing keeps showing it. Rebuilding them cuts no version row: a version holds
+ * the title and the HTML, and the HTML is not touched, so running this again
+ * derives the same text from the same body and there is nothing to undo.
+ *
  * One visible side effect, called out because somebody will ask about it: every
  * table with an `updated_at` carries the `touch_updated_at` trigger from
  * `db/sql/001_extensions_and_triggers.sql`, so an article this changes shows
@@ -46,10 +54,19 @@ type Tally = {
   bytesBefore: number;
   bytesAfter: number;
   linksRewritten: number;
+  /** Body unchanged, only its derived text rebuilt. */
+  textRebuilt: number;
 };
 
 function emptyTally(): Tally {
-  return { articles: 0, changed: 0, bytesBefore: 0, bytesAfter: 0, linksRewritten: 0 };
+  return {
+    articles: 0,
+    changed: 0,
+    bytesBefore: 0,
+    bytesAfter: 0,
+    linksRewritten: 0,
+    textRebuilt: 0,
+  };
 }
 
 /**
@@ -86,6 +103,8 @@ export async function normaliseKbFormatting(job: ClaimedJob): Promise<void> {
       slug: kbArticles.slug,
       title: kbArticles.title,
       bodyHtml: kbArticles.bodyHtml,
+      bodyText: kbArticles.bodyText,
+      excerpt: kbArticles.excerpt,
       externalId: kbArticles.externalId,
     })
     .from(kbArticles)
@@ -97,6 +116,7 @@ export async function normaliseKbFormatting(job: ClaimedJob): Promise<void> {
 
   const tallies = new Map<string, Tally>();
   const changedSlugs: string[] = [];
+  const textSlugs: string[] = [];
 
   for (const article of articles) {
     const tally = tallies.get(article.locale) ?? emptyTally();
@@ -131,13 +151,23 @@ export async function normaliseKbFormatting(job: ClaimedJob): Promise<void> {
     tally.linksRewritten += countLegacyLinks(article.bodyHtml) - countLegacyLinks(bodyHtml);
     tallies.set(article.locale, tally);
 
-    if (bodyHtml === article.bodyHtml) continue;
+    const bodyText = htmlToText(bodyHtml);
+    const excerpt = preview(bodyText, 200);
+
+    if (bodyHtml === article.bodyHtml) {
+      if (bodyText === article.bodyText && excerpt === article.excerpt) continue;
+
+      tally.textRebuilt += 1;
+      textSlugs.push(`${article.locale}/${article.slug}`);
+      if (dryRun) continue;
+
+      await db.update(kbArticles).set({ bodyText, excerpt }).where(eq(kbArticles.id, article.id));
+      continue;
+    }
 
     tally.changed += 1;
     changedSlugs.push(`${article.locale}/${article.slug}`);
     if (dryRun) continue;
-
-    const bodyText = htmlToText(bodyHtml);
 
     await db.transaction(async (tx) => {
       // The body being replaced, kept where the console's own version history
@@ -152,19 +182,24 @@ export async function normaliseKbFormatting(job: ClaimedJob): Promise<void> {
 
       await tx
         .update(kbArticles)
-        .set({ bodyHtml, bodyText, excerpt: preview(bodyText, 200) })
+        .set({ bodyHtml, bodyText, excerpt })
         .where(eq(kbArticles.id, article.id));
     });
   }
 
-  report(tallies, changedSlugs, dryRun);
+  report(tallies, changedSlugs, textSlugs, dryRun);
 }
 
 function countLegacyLinks(html: string): number {
   return (html.match(/solutions\/articles\/\d+/g) ?? []).length;
 }
 
-function report(tallies: Map<string, Tally>, changedSlugs: string[], dryRun: boolean): void {
+function report(
+  tallies: Map<string, Tally>,
+  changedSlugs: string[],
+  textSlugs: string[],
+  dryRun: boolean,
+): void {
   const log = logger('normalise_kb_formatting');
 
   log.info(
@@ -180,7 +215,7 @@ function report(tallies: Map<string, Tally>, changedSlugs: string[], dryRun: boo
   // English spot check.
   log.info(
     `${'locale'.padEnd(8)}${'articles'.padStart(9)}${'changed'.padStart(8)}` +
-      `${'bytes'.padStart(12)}${'links'.padStart(7)}`,
+      `${'bytes'.padStart(12)}${'links'.padStart(7)}${'text'.padStart(6)}`,
   );
 
   for (const [locale, tally] of [...tallies.entries()].sort()) {
@@ -188,11 +223,15 @@ function report(tallies: Map<string, Tally>, changedSlugs: string[], dryRun: boo
     log.info(
       `${locale.padEnd(8)}${String(tally.articles).padStart(9)}` +
         `${String(tally.changed).padStart(8)}${bytes.padStart(12)}` +
-        `${String(tally.linksRewritten).padStart(7)}`,
+        `${String(tally.linksRewritten).padStart(7)}` +
+        `${String(tally.textRebuilt).padStart(6)}`,
     );
   }
 
   if (changedSlugs.length > 0) {
     log.info(`changed: ${changedSlugs.join(', ')}`);
+  }
+  if (textSlugs.length > 0) {
+    log.info(`text rebuilt: ${textSlugs.join(', ')}`);
   }
 }
