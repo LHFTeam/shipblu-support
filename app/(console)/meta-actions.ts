@@ -19,7 +19,7 @@ import { MetaApiError, takeThreadControl } from '@/lib/meta/client';
 import { explainTakeControlError } from '@/lib/meta/errors';
 import { metaReplyTarget, THREAD_CONTROL_TAKEN } from '@/lib/tickets/meta-thread';
 import { loadConversation, refresh, refuseIfReadOnly } from '@/lib/tickets/console-guards';
-import type { ActionState } from './actions';
+import type { ActionState } from './action-state';
 
 /**
  * Hides, unhides or deletes a customer's public comment.

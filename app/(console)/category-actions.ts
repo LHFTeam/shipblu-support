@@ -15,7 +15,7 @@ import { ok } from '@/lib/http/action-state';
 import { can } from '@/lib/auth/permissions';
 import type { SessionAgent } from '@/lib/auth/session';
 import { loadConversation, refresh } from '@/lib/tickets/console-guards';
-import type { ActionState } from './actions';
+import type { ActionState } from './action-state';
 
 // --- Categories and root cause ----------------------------------------------
 

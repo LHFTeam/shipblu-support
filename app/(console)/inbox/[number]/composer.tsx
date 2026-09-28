@@ -20,7 +20,7 @@ import { describeWindow, metaWindowState } from '@/lib/meta/window';
 import { renderTemplatePreview, templateShape } from '@/lib/whatsapp/templates';
 import { formatRemaining, windowState } from '@/lib/whatsapp/window';
 import type { PickerEntry } from '@/lib/side-conversations/queries';
-import type { ActionState } from '../../actions';
+import type { ActionState } from '../../action-state';
 import { addNote, sendReply, sendTemplateReply } from '../../reply-actions';
 import { KnowledgePanel } from './knowledge';
 import { StartSideConversationForm } from './side-conversations';

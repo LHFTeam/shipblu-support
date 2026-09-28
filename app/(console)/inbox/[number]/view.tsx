@@ -27,7 +27,7 @@ import { humaniseStatus, returnStepLabel, stageDisplay } from '@/lib/shipments/s
 import { lostReceiptNote } from '@/lib/whatsapp/receipts';
 import { PRIORITIES } from '@/lib/tickets/vocabulary';
 import { formatRemaining, windowState } from '@/lib/whatsapp/window';
-import { purgeTicket, updateTicket } from '../../actions';
+import { purgeTicket, updateTicket } from '../../ticket-actions';
 import {
   linkShipment,
   linkShippingAccount,

@@ -17,7 +17,7 @@ import {
 import { normaliseSbid, normaliseTrackingNumber } from '@/lib/shipments/format';
 import { syncShipment } from '@/lib/shipments/sync';
 import { loadConversation, refresh } from '@/lib/tickets/console-guards';
-import type { ActionState } from './actions';
+import type { ActionState } from './action-state';
 
 // --- Shipments --------------------------------------------------------------
 

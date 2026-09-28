@@ -32,7 +32,7 @@ import {
   refresh,
   refuseIfReadOnly,
 } from '@/lib/tickets/console-guards';
-import type { ActionState } from './actions';
+import type { ActionState } from './action-state';
 
 // --- Side conversations -----------------------------------------------------
 

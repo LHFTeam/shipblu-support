@@ -9,7 +9,7 @@ import { purgeConversation, type PurgeRefusal } from '@/lib/admin/purge';
 import { hiddenScopeRefusal } from '@/lib/admin/purge-visibility';
 import { assignConversation } from '@/lib/assignment';
 import { requireAgent } from '@/lib/auth/guard';
-import { ok, type ActionState as BaseActionState } from '@/lib/http/action-state';
+import { ok } from '@/lib/http/action-state';
 import { isUuid } from '@/lib/http/uuid';
 import { can } from '@/lib/auth/permissions';
 import { isPriority } from '@/lib/tickets/vocabulary';
@@ -24,24 +24,7 @@ import {
   refuseIfIncomplete,
   refuseIfNoRootCause,
 } from '@/lib/tickets/console-guards';
-
-/**
- * Console write actions.
- *
- * All of them follow the same shape: authorise, write the row, record an audit
- * event, and enqueue any outbound work. Delivery never happens inline — the
- * agent's reply is saved and visible before a provider is contacted, so an
- * outage delays the send instead of losing what they wrote.
- */
-
-export type ActionState = BaseActionState & {
-  /**
-   * What happened, when succeeding quietly would leave the agent guessing.
-   * Most actions change something visible on the page and need none; a profile
-   * refresh whose whole output is Meta's answer needs one.
-   */
-  message?: string;
-};
+import type { ActionState } from './action-state';
 
 // --- Ticket properties ------------------------------------------------------
 
