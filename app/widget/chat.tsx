@@ -10,6 +10,7 @@ import { WidgetHome } from './home';
 import { WidgetThread, type OfflineDetails } from './thread';
 import type { ArticleLink, Message, WidgetView } from '@/lib/widget/types';
 import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
+import { useMessageStream } from './use-message-stream';
 
 /**
  * The widget shell: which screen is showing, and everything that outlives one.
@@ -248,60 +249,15 @@ export function WidgetChat({
 
   // --- Live agent replies --------------------------------------------------
 
-  useEffect(() => {
-    if (!token) return;
-
-    let source: EventSource | null = null;
-    let poll: ReturnType<typeof setInterval> | null = null;
-
-    const refresh = () => {
-      void fetch('/api/widget/session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token }),
-      })
-        .then((response) => (response.ok ? response.json() : null))
-        .then((data) => {
-          // Same reason as the guard in `send`: the interval is cleared when
-          // the token changes, but a request already issued still resolves, and
-          // painting its answer would put the previous person's transcript in
-          // front of the next one.
-          if (data && activeToken.current === token) {
-            setConversationId(data.conversationId);
-            setMessages(data.messages);
-            setOnline(Boolean(data.online));
-            setOpensAt((data.opensAt as string | null) ?? null);
-          }
-        })
-        .catch(() => {});
-    };
-
-    const startPolling = () => {
-      if (!poll) poll = setInterval(refresh, 15_000);
-    };
-
-    try {
-      source = new EventSource(`/api/widget/stream?token=${encodeURIComponent(token)}`);
-      source.addEventListener('messages', (event) => {
-        setMessages(JSON.parse((event as MessageEvent).data) as Message[]);
-      });
-      source.addEventListener('degraded', startPolling);
-      source.onerror = startPolling;
-      source.addEventListener('ready', () => {
-        if (poll) {
-          clearInterval(poll);
-          poll = null;
-        }
-      });
-    } catch {
-      startPolling();
-    }
-
-    return () => {
-      source?.close();
-      if (poll) clearInterval(poll);
-    };
-  }, [token, conversationId]);
+  useMessageStream({
+    token,
+    conversationId,
+    activeToken,
+    setConversationId,
+    setMessages,
+    setOnline,
+    setOpensAt,
+  });
 
   // --- Unread badge on the host page ---------------------------------------
 
