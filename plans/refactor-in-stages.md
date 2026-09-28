@@ -190,8 +190,9 @@ and two sessions claiming different rows then conflict on all of them.
 | 6.3   | List window badges on the shared clock           | #307            | merged  |
 | 6.x   | Client components (6.1–6.5)                      |                 | done    |
 | 7.1   | Type-aware lint over `lib/` and `worker/`        | #308            | merged  |
-| 7.2   | Layering through `no-restricted-imports`         | #309            | open    |
+| 7.2   | Layering through `no-restricted-imports`         | #309            | merged  |
 | 7.1   | Type-aware lint over `app/` too                  | #310            | open    |
+| 7.3   | `no-console` as an error                         | #311            | open    |
 | 7     | Lint tightening, finish logging                  |                 | pending |
 
 ### Handoff, 2026-09-27 07:00 UTC
@@ -232,12 +233,13 @@ subscribe to the open PRs again.
   header does not. `InboxRow` carries no `externalId`, so the fix is in the
   list query. Older than #307, which kept it.
 
-**State at 02:19 UTC, 2026-09-28.** #258–#291 and #293–#308 are merged. Open,
-each holding its files until it merges, besides this plan's own PR:
+**State at 02:24 UTC, 2026-09-28.** #258–#291 and #293–#309 are merged. Open, each
+holding its files until it merges, besides this plan's own PR:
 
-- #309 (7.2): `eslint.config.mjs` and `AGENTS.md`.
 - #310 (7.1, `app/`): `eslint.strict.config.mjs`, `package.json`, `AGENTS.md`,
   `inbox/list.tsx` and `inbox/[number]/knowledge.tsx`.
+- #311 (7.3): `eslint.config.mjs` and
+  `worker/handlers/backfill-categorise-ai.ts`.
 
 **Next work.**
 
@@ -272,8 +274,11 @@ each holding its files until it merges, besides this plan's own PR:
    the rules start at `error` in a blocking job, not as warnings. `app/` had two
    findings, `inbox/[number]/knowledge.tsx:85` and `inbox/list.tsx:470`, both a
    promise that cannot reject left unmarked; #310 marks them with `void` and
-   adds `app/**` to the strict config. 7.2 is #309. 7.3 (`no-console`) edits the
-   same block of `eslint.config.mjs`, so it waits for #309.
+   adds `app/**` to the strict config. 7.2 (#309) merged. 7.3 is #311: besides
+   the plan's exceptions it exempts `lib/webhooks/log.ts`, `db/seed.ts`,
+   `db/baseline.ts`, `db/client.ts` (see Out of scope) and tests, and disables
+   the rule on `backfill-categorise-ai.ts`'s three report lines only. 7.4 edits
+   `AGENTS.md`, which #310 holds, so it waits for #310.
 
 **Traps in this container.**
 
