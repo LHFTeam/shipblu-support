@@ -4,16 +4,16 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { InfoTip, Tooltip } from '@/components/tooltip';
-import { Badge, Select } from '@/components/ui';
+import { Badge } from '@/components/ui';
 import { formatDateTime, formatRelative } from '@/lib/format';
 import type { ConversationDetail } from '@/lib/tickets/conversation';
 import type { CannedResponseOption } from '@/lib/tickets/lookups';
-import { formatForInput, selectedValues, type TicketFieldDef } from '@/lib/tickets/custom-fields';
+import { type TicketFieldDef } from '@/lib/tickets/custom-fields';
 import type { CategoryOption, RootCauseOption } from '@/lib/categorise/queries';
 import { describeRequesterRole } from '@/lib/shipments/roles';
 import { humaniseStatus, returnStepLabel, stageDisplay } from '@/lib/shipments/status';
 import { PRIORITIES } from '@/lib/tickets/vocabulary';
-import { purgeTicket, updateTicket } from '../../ticket-actions';
+import { purgeTicket } from '../../ticket-actions';
 import {
   linkShipment,
   linkShippingAccount,
@@ -38,6 +38,7 @@ import { SideConversationsField } from './side-conversations';
 import type { TemplateOption } from './types';
 import { Header } from './header';
 import { Timeline } from './timeline';
+import { CustomFields, FieldSelect, SidebarField, TagField } from './ticket-fields';
 import { describeEvent } from '@/lib/tickets/event-labels';
 
 /**
@@ -222,7 +223,7 @@ function Sidebar({
 }) {
   return (
     <aside className="app-scroll hidden w-64 shrink-0 overflow-y-auto border-s border-[var(--border)] bg-[var(--surface)] p-3 xl:block">
-      <Field
+      <SidebarField
         label="Status"
         // One line rather than an InfoTip: an agent who used to have Closed in
         // this list needs to know where it went without going looking, and the
@@ -241,9 +242,9 @@ function Sidebar({
             .filter((s) => canClose || s.category !== 'closed' || s.id === conversation.statusId)
             .map((s) => ({ value: s.id, label: s.name }))}
         />
-      </Field>
+      </SidebarField>
 
-      <Field label="Assignee">
+      <SidebarField label="Assignee">
         <FieldSelect
           conversationId={conversation.id}
           field="assignee"
@@ -256,9 +257,9 @@ function Sidebar({
             })),
           ]}
         />
-      </Field>
+      </SidebarField>
 
-      <Field label="Group">
+      <SidebarField label="Group">
         <FieldSelect
           conversationId={conversation.id}
           field="group"
@@ -268,20 +269,20 @@ function Sidebar({
             ...groups.map((g) => ({ value: g.id, label: g.name })),
           ]}
         />
-      </Field>
+      </SidebarField>
 
-      <Field label="Priority">
+      <SidebarField label="Priority">
         <FieldSelect
           conversationId={conversation.id}
           field="priority"
           value={conversation.priority}
           options={PRIORITIES.map((p) => ({ value: p, label: p }))}
         />
-      </Field>
+      </SidebarField>
 
-      <Field label="Tags">
+      <SidebarField label="Tags">
         <TagField conversationId={conversation.id} tags={conversation.tags} />
-      </Field>
+      </SidebarField>
 
       <CustomFields conversation={conversation} fields={fields} />
 
@@ -294,9 +295,9 @@ function Sidebar({
       <ShipmentsField conversation={conversation} />
       <ShippingAccountsField conversation={conversation} />
 
-      <Field label="Side conversations">
+      <SidebarField label="Side conversations">
         <SideConversationsField sides={conversation.sideConversations} />
-      </Field>
+      </SidebarField>
 
       <div className="mt-5 border-t border-[var(--border)] pt-3">
         <h2 className="mb-2 text-xs font-medium opacity-70">Activity</h2>
@@ -333,304 +334,6 @@ function Sidebar({
     </aside>
   );
 }
-
-function Field({
-  label,
-  hint,
-  as = 'block',
-  children,
-}: {
-  label: string;
-  hint?: React.ReactNode;
-  /**
-   * `group` for a set of controls one label cannot belong to — the checkboxes
-   * of a multi-select. Assistive technology reads the label once for the set
-   * rather than leaving each box unnamed.
-   */
-  as?: 'block' | 'group';
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="mb-3" {...(as === 'group' ? { role: 'group', 'aria-label': label } : {})}>
-      <p className="mb-1 text-xs font-medium opacity-60">{label}</p>
-      {children}
-      {hint ? <p className="mt-1 text-xs opacity-60">{hint}</p> : null}
-    </div>
-  );
-}
-
-/**
- * Saves on change with no explicit save button, matching Freshdesk. The router
- * refresh re-reads the server components so the timeline picks up the audit
- * entry the action just wrote.
- */
-function FieldSelect({
-  conversationId,
-  field,
-  value,
-  options,
-}: {
-  conversationId: string;
-  field: string;
-  value: string;
-  options: { value: string; label: string }[];
-}) {
-  const router = useRouter();
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function save(next: string) {
-    setSaving(true);
-    setError(null);
-
-    const formData = new FormData();
-    formData.set('conversationId', conversationId);
-    formData.set('field', field);
-    formData.set('value', next);
-
-    const result = await updateTicket({ error: null }, formData);
-    setSaving(false);
-
-    if (result.error) setError(result.error);
-    else router.refresh();
-  }
-
-  return (
-    <>
-      <Select value={value} disabled={saving} onChange={(e) => save(e.target.value)}>
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </Select>
-      {error ? <p className="mt-1 text-xs text-red-600">{error}</p> : null}
-    </>
-  );
-}
-
-function TagField({ conversationId, tags }: { conversationId: string; tags: string[] }) {
-  const router = useRouter();
-  const [value, setValue] = useState(tags.join(', '));
-  const [saving, setSaving] = useState(false);
-
-  async function save() {
-    if (value === tags.join(', ')) return;
-    setSaving(true);
-
-    const formData = new FormData();
-    formData.set('conversationId', conversationId);
-    formData.set('field', 'tags');
-    formData.set('value', value);
-
-    await updateTicket({ error: null }, formData);
-    setSaving(false);
-    router.refresh();
-  }
-
-  return (
-    <input
-      value={value}
-      disabled={saving}
-      onChange={(e) => setValue(e.target.value)}
-      onBlur={save}
-      placeholder="comma, separated"
-      className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-sm outline-none focus:border-brand-500"
-    />
-  );
-}
-
-/**
- * The admin-defined ticket fields.
- *
- * These are the first controls in the console ever to write
- * `conversations.custom_fields`. Until this existed an admin could define a
- * field, an automation could be written against `custom.<key>`, and the column
- * stayed `{}` on every ticket — so the rule matched nothing and nothing said so.
- *
- * One control per field rather than a single JSON box: the type is what decides
- * whether a stored 12 is a number a rule can order or a string it cannot, and a
- * free-text box would put that decision on whoever is typing.
- */
-function CustomFields({
-  conversation,
-  fields,
-}: {
-  conversation: ConversationDetail;
-  fields: TicketFieldDef[];
-}) {
-  if (fields.length === 0) return null;
-
-  return (
-    <>
-      {fields.map((field) => (
-        <Field
-          key={field.key}
-          label={field.label}
-          as={field.type === 'multi_select' ? 'group' : 'block'}
-          hint={
-            field.requiredOnResolve ? (
-              <span className="opacity-70">Needed before this ticket can be resolved.</span>
-            ) : null
-          }
-        >
-          <CustomFieldControl
-            conversationId={conversation.id}
-            field={field}
-            value={conversation.customFields[field.key]}
-          />
-        </Field>
-      ))}
-    </>
-  );
-}
-
-function CustomFieldControl({
-  conversationId,
-  field,
-  value,
-}: {
-  conversationId: string;
-  field: TicketFieldDef;
-  value: unknown;
-}) {
-  const router = useRouter();
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [draft, setDraft] = useState(() => formatForInput(field, value));
-
-  async function save(next: string | string[]) {
-    setSaving(true);
-    setError(null);
-
-    const formData = new FormData();
-    formData.set('conversationId', conversationId);
-    formData.set('field', `custom:${field.key}`);
-    // `append`, so a multi-select arrives as the several values it is rather
-    // than one comma-joined string the action would have to guess how to split.
-    if (Array.isArray(next)) for (const entry of next) formData.append('value', entry);
-    else formData.set('value', next);
-
-    const result = await updateTicket({ error: null }, formData);
-    setSaving(false);
-
-    if (result.error) setError(result.error);
-    else router.refresh();
-  }
-
-  const control = () => {
-    switch (field.type) {
-      case 'checkbox':
-        return (
-          <input
-            type="checkbox"
-            checked={value === true}
-            disabled={saving}
-            onChange={(e) => save(e.target.checked ? 'on' : '')}
-            className="size-4 accent-brand-500"
-          />
-        );
-
-      case 'dropdown':
-        return (
-          <Select
-            value={String(value ?? '')}
-            disabled={saving}
-            onChange={(e) => save(e.target.value)}
-          >
-            <option value="">—</option>
-            {field.options.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </Select>
-        );
-
-      case 'multi_select': {
-        const chosen = selectedValues(value);
-        return (
-          <div className="flex flex-col gap-1">
-            {field.options.map((option) => (
-              <label key={option.value} className="flex items-center gap-1.5 text-xs">
-                <input
-                  type="checkbox"
-                  checked={chosen.includes(option.value)}
-                  disabled={saving}
-                  onChange={(e) =>
-                    save(
-                      e.target.checked
-                        ? [...chosen, option.value]
-                        : chosen.filter((entry) => entry !== option.value),
-                    )
-                  }
-                  className="size-3.5 accent-brand-500"
-                />
-                {option.label}
-              </label>
-            ))}
-            {field.options.length === 0 ? (
-              <span className="text-xs opacity-50">No options defined.</span>
-            ) : null}
-          </div>
-        );
-      }
-
-      case 'paragraph':
-        return (
-          <textarea
-            rows={3}
-            value={draft}
-            disabled={saving}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={() => draft !== formatForInput(field, value) && save(draft)}
-            className={INPUT_CLASS}
-          />
-        );
-
-      // Date and time controls commit on change: they have no meaningful
-      // intermediate state to protect, and a picker that saved on blur would
-      // lose the choice if the agent clicked straight onto another field.
-      case 'date':
-      case 'datetime':
-        return (
-          <input
-            type={field.type === 'date' ? 'date' : 'datetime-local'}
-            value={draft}
-            disabled={saving}
-            onChange={(e) => {
-              setDraft(e.target.value);
-              void save(e.target.value);
-            }}
-            className={INPUT_CLASS}
-          />
-        );
-
-      default:
-        return (
-          <input
-            type={field.type === 'number' || field.type === 'decimal' ? 'number' : 'text'}
-            step={field.type === 'decimal' ? 'any' : field.type === 'number' ? '1' : undefined}
-            value={draft}
-            disabled={saving}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={() => draft !== formatForInput(field, value) && save(draft)}
-            className={INPUT_CLASS}
-          />
-        );
-    }
-  };
-
-  return (
-    <>
-      {control()}
-      {error ? <p className="mt-1 text-xs text-red-600">{error}</p> : null}
-    </>
-  );
-}
-
-const INPUT_CLASS =
-  'w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-sm outline-none focus:border-brand-500';
 
 /**
  * The parcels a ticket is about.
@@ -683,7 +386,7 @@ function CategoriesField({
   const unseeded = options.length === 0 && conversation.categories.length === 0;
 
   return (
-    <Field
+    <SidebarField
       label="Categories"
       hint={unseeded ? 'No taxonomy yet — run the seed to create the categories.' : undefined}
     >
@@ -798,7 +501,7 @@ function CategoriesField({
           ) : null}
         </>
       )}
-    </Field>
+    </SidebarField>
   );
 }
 
@@ -1040,7 +743,7 @@ function RootCausePicker({
 
 function ShipmentsField({ conversation }: { conversation: ConversationDetail }) {
   return (
-    <Field label="Shipments">
+    <SidebarField label="Shipments">
       <ul className="mb-2 flex flex-col gap-2">
         {conversation.shipments.map((shipment) => (
           <li key={shipment.shipmentId} className="text-xs">
@@ -1131,7 +834,7 @@ function ShipmentsField({ conversation }: { conversation: ConversationDetail }) 
         name="trackingNumber"
         placeholder="Add a tracking number"
       />
-    </Field>
+    </SidebarField>
   );
 }
 
@@ -1144,7 +847,7 @@ function ShipmentsField({ conversation }: { conversation: ConversationDetail }) 
  */
 function ShippingAccountsField({ conversation }: { conversation: ConversationDetail }) {
   return (
-    <Field label="Shipping accounts">
+    <SidebarField label="Shipping accounts">
       <ul className="mb-2 flex flex-col gap-1.5">
         {conversation.shippingAccounts.map((account) => (
           <li key={account.shippingAccountId} className="flex items-center justify-between gap-2">
@@ -1179,7 +882,7 @@ function ShippingAccountsField({ conversation }: { conversation: ConversationDet
         name="sbid"
         placeholder="Add an SBID"
       />
-    </Field>
+    </SidebarField>
   );
 }
 
