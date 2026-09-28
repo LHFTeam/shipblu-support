@@ -1,10 +1,9 @@
 'use client';
 
 import { useActionState, useCallback, useEffect, useRef, useState } from 'react';
-import { useFormStatus } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { ChevronDownIcon, ChevronUpIcon } from '@/components/icons';
-import { Button, ErrorText, Input, Label, Select, Textarea } from '@/components/ui';
+import { ErrorText, Input, Label, Select, Textarea } from '@/components/ui';
 import { useNow } from '@/components/use-now';
 import type { AgentArticleHit } from '@/lib/kb/agent-search';
 import type { ConversationDetail } from '@/lib/tickets/conversation';
@@ -26,6 +25,7 @@ import { KnowledgePanel } from './knowledge';
 import { StartSideConversationForm } from './side-conversations';
 import { ThreadControl } from './thread-control';
 import type { TemplateOption } from './types';
+import { SubmitButton } from '@/components/submit-button';
 
 const INITIAL: ActionState = { error: null };
 
@@ -860,22 +860,5 @@ function VariableInputs({
         );
       })}
     </div>
-  );
-}
-
-function SubmitButton({
-  idle,
-  busy,
-  className,
-}: {
-  idle: string;
-  busy: string;
-  className?: string;
-}) {
-  const { pending } = useFormStatus();
-  return (
-    <Button type="submit" disabled={pending} className={className}>
-      {pending ? busy : idle}
-    </Button>
   );
 }

@@ -1,9 +1,9 @@
 'use client';
 
 import { useActionState } from 'react';
-import { useFormStatus } from 'react-dom';
 import { acceptInvite, type AuthFormState } from '../../actions';
-import { Button, ErrorText, Input, Label } from '@/components/ui';
+import { ErrorText, Input, Label } from '@/components/ui';
+import { SubmitButton } from '@/components/submit-button';
 
 const INITIAL: AuthFormState = { error: null };
 
@@ -74,18 +74,9 @@ export function InviteForm({ token, email, name }: { token: string; email: strin
 
       <ErrorText>{state.error}</ErrorText>
 
-      <SubmitButton />
-    </form>
-  );
-}
-
-function SubmitButton() {
-  const { pending } = useFormStatus();
-  return (
-    <Button type="submit" disabled={pending} className="w-full">
       {/* Matches the call to action in the invitation email, so the button the
           invitee arrives looking for is the one on the page. */}
-      {pending ? 'Activating…' : 'Activate my account'}
-    </Button>
+      <SubmitButton idle="Activate my account" busy="Activating…" className="w-full" />
+    </form>
   );
 }

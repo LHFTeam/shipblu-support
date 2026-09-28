@@ -2,7 +2,8 @@
 
 import { useActionState } from 'react';
 import { ErrorText, Input } from '@/components/ui';
-import { INITIAL, SubmitButton, useRefreshOnSuccess } from '../forms-shared';
+import { SubmitButton } from '@/components/submit-button';
+import { INITIAL, useRefreshOnSuccess } from '../forms-shared';
 import { saveTrackingPhrase } from './actions';
 
 /**

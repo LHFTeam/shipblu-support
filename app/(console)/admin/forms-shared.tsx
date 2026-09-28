@@ -1,10 +1,10 @@
 'use client';
 
 import { useActionState, useEffect, useState, type ReactNode } from 'react';
-import { useFormStatus } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { Button, Card, ErrorText } from '@/components/ui';
 import type { ActionState } from '@/lib/http/action-state';
+import { SubmitButton } from '@/components/submit-button';
 
 /**
  * The shape every admin editor shares: a disclosure that opens a form, submits
@@ -16,26 +16,6 @@ import type { ActionState } from '@/lib/http/action-state';
  */
 
 export const INITIAL: ActionState = { error: null };
-
-export function SubmitButton({
-  idle,
-  busy,
-  variant = 'primary',
-  className = '',
-}: {
-  idle: string;
-  busy?: string;
-  variant?: 'primary' | 'secondary' | 'danger';
-  className?: string;
-}) {
-  const { pending } = useFormStatus();
-  return (
-    <Button type="submit" variant={variant} disabled={pending} className={className}>
-      {pending ? (busy ?? `${idle}…`) : idle}
-    </Button>
-  );
-}
-
 /** Refreshes the server components after a successful write. */
 export function useRefreshOnSuccess(state: ActionState, onSuccess?: () => void) {
   const router = useRouter();

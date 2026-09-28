@@ -1,9 +1,9 @@
 'use client';
 
 import { useActionState } from 'react';
-import { useFormStatus } from 'react-dom';
 import { bootstrapAdmin, type AuthFormState } from '../actions';
-import { Button, ErrorText, Input, Label } from '@/components/ui';
+import { ErrorText, Input, Label } from '@/components/ui';
+import { SubmitButton } from '@/components/submit-button';
 
 const INITIAL: AuthFormState = { error: null };
 
@@ -44,16 +44,7 @@ export function SetupForm() {
 
       <ErrorText>{state.error}</ErrorText>
 
-      <SubmitButton />
+      <SubmitButton idle="Create administrator" busy="Creating…" className="w-full" />
     </form>
-  );
-}
-
-function SubmitButton() {
-  const { pending } = useFormStatus();
-  return (
-    <Button type="submit" disabled={pending} className="w-full">
-      {pending ? 'Creating…' : 'Create administrator'}
-    </Button>
   );
 }

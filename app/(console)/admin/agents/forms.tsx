@@ -1,7 +1,6 @@
 'use client';
 
 import { useActionState, useState } from 'react';
-import { useFormStatus } from 'react-dom';
 import {
   Badge,
   Button,
@@ -17,6 +16,7 @@ import { formatRelative } from '@/lib/format';
 import type { AdminState } from '../settings-shared';
 import { createInvite, savePresenceSettings, setAgentActive, setAgentCapacity } from './actions';
 import type { ActionState } from '@/lib/http/action-state';
+import { SubmitButton } from '@/components/submit-button';
 
 const INITIAL: AdminState = { error: null };
 const SETTINGS_INITIAL: ActionState = { error: null };
@@ -368,22 +368,5 @@ export function AgentRow({
         <span className="text-xs text-red-600">{state.error ?? capacityState.error}</span>
       ) : null}
     </li>
-  );
-}
-
-function SubmitButton({
-  idle,
-  busy,
-  className,
-}: {
-  idle: string;
-  busy: string;
-  className?: string;
-}) {
-  const { pending } = useFormStatus();
-  return (
-    <Button type="submit" disabled={pending} className={className}>
-      {pending ? busy : idle}
-    </Button>
   );
 }
