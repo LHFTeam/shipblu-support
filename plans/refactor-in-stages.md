@@ -189,7 +189,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 6.5   | Widget: `useWidgetSession`                       | #306            | merged  |
 | 6.3   | List window badges on the shared clock           | #307            | open    |
 | 6.x   | Client components (6.1–6.5)                      |                 | done    |
-| 7.1   | Type-aware lint over `lib/` and `worker/`        | #308            | open    |
+| 7.1   | Type-aware lint over `lib/` and `worker/`        | #308            | merged  |
 | 7.2   | Layering through `no-restricted-imports`         | #309            | open    |
 | 7     | Lint tightening, finish logging                  |                 | pending |
 
@@ -231,14 +231,12 @@ subscribe to the open PRs again.
   header does not. `InboxRow` carries no `externalId`, so the fix is in the
   list query. Older than #307, which kept it.
 
-**State at 02:11 UTC, 2026-09-28.** #258–#291 and #293–#306 are merged. Open,
+**State at 02:14 UTC, 2026-09-28.** #258–#291, #293–#306 and #308 are merged. Open,
 each holding its files until it merges, besides this plan's own PR:
 
 - #307 (6.3, behaviour change): `inbox/list.tsx`,
   `inbox/[number]/window-indicator.tsx`, `components/use-now.ts` and the new
   `components/use-now.test.ts`.
-- #308 (7.1): `eslint.strict.config.mjs` (new), `package.json`,
-  `package-lock.json`, `.github/workflows/ci.yml` and `AGENTS.md`.
 - #309 (7.2): `eslint.config.mjs` and `AGENTS.md`.
 
 **Next work.**
@@ -271,13 +269,12 @@ each holding its files until it merges, besides this plan's own PR:
    already names. Those four files are every `console` call left in
    `worker/`. `lib/` and `app/` are done.
 
-6. Stage 7.1 is #308. Measured, `lib/` and `worker/` had no findings, so the
-   rules start at `error` in a blocking job, not as warnings. `app/` has two
+6. Stage 7.1 (#308) merged. Measured, `lib/` and `worker/` had no findings, so
+   the rules start at `error` in a blocking job, not as warnings. `app/` has two
    findings, `inbox/[number]/knowledge.tsx:85` and `inbox/list.tsx:471`; the PR
-   that fixes them and adds `app/**` to the config waits for #307 (which holds
-   `inbox/list.tsx`) and #308 (which adds the config). 7.2 is #309. 7.3
-   (`no-console`) edits the same block of `eslint.config.mjs`, so it waits for
-   #309.
+   that fixes them and adds `app/**` to `eslint.strict.config.mjs` waits for
+   #307, which holds `inbox/list.tsx`. 7.2 is #309. 7.3 (`no-console`) edits the
+   same block of `eslint.config.mjs`, so it waits for #309.
 
 **Traps in this container.**
 
