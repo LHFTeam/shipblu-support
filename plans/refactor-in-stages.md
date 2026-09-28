@@ -249,9 +249,9 @@ it.
   and #316 fixed it there (the history's start has no lower bound); this page
   still has it. Found in #316's review.
 
-**State at 08:02 UTC, 2026-09-28.** #258–#291 and #293–#317 are merged. No PR
-holds a file besides this plan's own. Every stage of the plan is done; of the
-findings outside it, three are open: the two knowledge-base ones and
+**State at 08:02 UTC, 2026-09-28.** #258–#317 are merged. No PR holds a file
+besides this plan's own. Every stage of the plan is done; of the findings
+outside it, three are open: the two knowledge-base ones and
 `/reports/categories`.
 
 **Next work.**
