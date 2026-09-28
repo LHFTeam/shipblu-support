@@ -133,6 +133,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 3.12  | Action state: one `ok()`                         | #240            | merged  |
 | 3.13  | FormData readers move to `lib/http/form-data.ts` | #241            | merged  |
 | 3.13  | FormData readers: adoption in the action files   | #244–#246, #250 | merged  |
+| 3.13  | The recipient's email through `text()`           | #273            | merged  |
 | 3.14  | Logger: `lib/log.ts` and the first worker files  | #249, #253      | merged  |
 | 3.14  | Logger: nine more files in `worker/` and `lib/`  | #261            | merged  |
 | 3.14  | Logger: `lib/`                                   | #269            | merged  |
@@ -146,14 +147,20 @@ and two sessions claiming different rows then conflict on all of them.
 | 5.1   | `settings-actions.ts`: auto-responses to SLA     | #258            | merged  |
 | 5.1   | `settings-actions.ts`: skills to recipients      | #265            | merged  |
 | 5.1   | `settings-actions.ts`: the last three, deleted   | #270            | merged  |
+| 5.1   | `admin/actions.ts` split by domain, deleted      | #275            | merged  |
+| 5.1   | `forms-shared.tsx` onto `lib/http/action-state`  | #279            | merged  |
 | 5.2   | Console guards move to `lib/tickets`             | #260            | merged  |
 | 5.2   | `availability-actions.ts`                        | #268            | merged  |
 | 5.2   | `category-actions.ts`                            | #271            | merged  |
+| 5.2   | `shipment-actions.ts`                            | #274            | merged  |
+| 5.2   | `side-conversation-actions.ts`                   | #278            | merged  |
+| 5.2   | `meta-actions.ts`                                | #280            | merged  |
+| 5.2   | `reply-actions.ts`                               | #281            | open    |
 | 5.4   | Admin pages stop importing `db`: first batches   | #254, #256      | merged  |
 | 5.4   | Admin pages: agents, auto-responses, automations | #259            | merged  |
 | 5.4   | Categories, channels, invite, field options      | #266            | merged  |
-| 5.4   | The import page, with db tests                   | #272            | open    |
-| 3.13  | The recipient's email through `text()`           | #273            | open    |
+| 5.4   | The import page, with db tests                   | #272            | merged  |
+| 5.4   | Repo rule `page-db`: no `db/client` in page code | #277            | merged  |
 | 5.5   | One receive path for webhooks                    | #263            | merged  |
 | 5.6   | One `localeOf` and one `requestMeta`             | #251            | merged  |
 | 5.6   | One sign-in sequence for both forms              | #264            | merged  |
@@ -237,21 +244,18 @@ This replaces three of the rules in the handoff above.
   expected. Staging stays suspended.
 - **The ⛳ gate is passed.** The requester said to start Stage 5.
 
-**State at 23:40 UTC.** #258–#266 and #268–#271 are merged. Open, each
-holding its file until it merges: #272 (5.4: the import page) and #273 (3.13:
-the recipient's email).
+**State at 00:02 UTC.** #258–#280 are merged. Open, holding its files until it
+merges: #281 (5.2, `reply-actions.ts`): `(console)/actions.ts` and
+`inbox/[number]/composer.tsx`.
 
 **Next work.**
 
-1. 5.1: split `admin/actions.ts` into `agents/`, `channels/`,
-   `import/` and `categories/`, and move `forms-shared.tsx` onto
-   `lib/http/action-state`.
-2. 5.4: after #272, the repo rule against `db/client` in a `page.tsx`, with
-   the `app/probe/page.tsx` exception.
-3. 5.2: the four siblings left (`shipment-actions.ts`,
-   `side-conversation-actions.ts`, `meta-actions.ts`, `reply-actions.ts`),
-   then `ticket-actions.ts` for what remains, one PR each. Each one edits
-   `(console)/actions.ts`, so start the next when the one before it merges.
+1. 5.1: done.
+2. 5.4: done.
+3. 5.2: after #281, `ticket-actions.ts` takes what remains of
+   `(console)/actions.ts` (`updateTicket`, `purgeTicket`), and `ActionState`
+   moves to a plain module, since every sibling imports it as a type from an
+   action file.
 4. Logger. Three places in `worker/` stay on `console`, because a move would
    change what they print:
    - `check-meta-permissions` and `test-comment-permission`: their lines start
