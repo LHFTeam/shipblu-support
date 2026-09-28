@@ -172,7 +172,8 @@ and two sessions claiming different rows then conflict on all of them.
 | 6.1   | `TemplateOption` into `inbox/[number]/types.ts`  | #286            | merged  |
 | 6.2   | `lib/tickets/event-labels.ts`, with tests        | #288            | merged  |
 | 6.3   | `header.tsx` and `window-indicator.tsx`          | #290            | merged  |
-| 6.3   | `timeline.tsx`                                   | #291            | open    |
+| 6.3   | `timeline.tsx`                                   | #291            | merged  |
+| 6.3   | `ticket-fields.tsx`, `Field` as `SidebarField`   | #293            | open    |
 | 6.x   | Client components                                |                 | pending |
 | 7     | Lint tightening, finish logging                  |                 | pending |
 
@@ -200,18 +201,22 @@ subscribe to the open PRs again.
   and 1 Arabic excerpt that start that way.
 - `restoreVersion` does not write `excerpt`.
 
-**State at 00:47 UTC, 2026-09-28.** #258–#290 are merged. Open, holding its
+**State at 00:51 UTC, 2026-09-28.** #258–#291 are merged. Open, holding its
 files until it merges:
 
-- #291 (6.3): `inbox/[number]/view.tsx`, and the new `timeline.tsx` beside it.
+- #293 (6.3): `inbox/[number]/view.tsx`, and the new `ticket-fields.tsx` beside
+  it.
 
 **Next work.**
 
 1. 5.1: done.
 2. 5.4: done.
-3. 5.2, 5.3, 6.1 and 6.2: done. 6.3: `header.tsx` and
-   `window-indicator.tsx` merged (#290); `timeline.tsx` is #291. The next split
-   of `view.tsx` (`sidebar.tsx`) waits for it. The
+3. 5.2, 5.3, 6.1 and 6.2: done. 6.3: `header.tsx`,
+   `window-indicator.tsx` (#290) and `timeline.tsx` (#291) are merged;
+   `ticket-fields.tsx` is #293. Then `shipments-field.tsx`,
+   `categories-field.tsx`, and `sidebar.tsx` last: `Sidebar` renders the other
+   blocks, so moving it first would import back into `view.tsx`. Each waits for
+   the one before it, since all of them edit `view.tsx`. The
    list's `WhatsAppWindow` and `MetaWindow` in `inbox/list.tsx` stay for now:
    they are compact, show nothing while the window is unremarkable, and read
    the clock at render, so folding them into `window-indicator.tsx` changes
