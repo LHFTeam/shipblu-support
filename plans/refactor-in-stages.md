@@ -159,7 +159,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 5.2   | `reply-actions.ts`                               | #281            | merged  |
 | 5.2   | `ticket-actions.ts` and `action-state.ts`        | #282            | merged  |
 | 5.3   | `lib/tickets/agent-reply.ts`                     | #284            | open    |
-| 5.3   | `lib/tickets/status.ts`                          | #285            | open    |
+| 5.3   | `lib/tickets/status.ts`                          | #285            | merged  |
 | 5.4   | Admin pages stop importing `db`: first batches   | #254, #256      | merged  |
 | 5.4   | Admin pages: agents, auto-responses, automations | #259            | merged  |
 | 5.4   | Categories, channels, invite, field options      | #266            | merged  |
@@ -178,14 +178,29 @@ The session that opened #233–#241 stopped here because of its usage limit. It
 unsubscribed from its PRs and deleted its hourly check-in. The next session must
 subscribe to the open PRs again.
 
-**State at 00:27 UTC.** #258–#282 are merged. Open, each holding its files until
-it merges:
+**Rules that still hold.** These fold in the 22:10 UTC changes of 2026-09-27.
+
+- Another agent reviews each PR. Fix review comments on that PR's own branch.
+- Merge a PR when another agent has reviewed it, its findings are fixed on its
+  branch, and CI passes.
+- Deploy only when the requester asks. All six production services run
+  `2340f15`, and migration 0028 is applied. Staging stays suspended.
+- The ⛳ gate is passed: the requester said to start Stage 5.
+- Mark each row `merged` when its PR merges. When this branch's own PR has
+  merged, restart the branch from `main` and open a new plan PR.
+- The requester wants replies in ASD Simplified Technical English (STE100).
+
+**Findings outside the plan.** Neither is fixed.
+
+- `htmlToText` writes headings in capitals. Production has 8 English excerpts
+  and 1 Arabic excerpt that start that way.
+- `restoreVersion` does not write `excerpt`.
+
+**State at 00:29 UTC, 2026-09-28.** #258–#282 and #285 are merged. Open, each
+holding its files until it merges:
 
 - #284 (5.3, `lib/tickets/agent-reply.ts`): `(console)/reply-actions.ts`,
   `lib/tickets/agent-reply.ts` and `lib/tickets/agent-reply.db.test.ts`.
-- #285 (5.3, `lib/tickets/status.ts`): `(console)/ticket-actions.ts`,
-  `lib/tickets/console-guards.ts`, `lib/tickets/status.ts` and
-  `lib/tickets/status.db.test.ts`.
 - #286 (6.1): `composer.tsx`, `view.tsx` and the new `types.ts` under
   `inbox/[number]/`.
 - #287 (3.14, logger in `app/`): `api/widget/stream/route.ts`,
@@ -196,10 +211,13 @@ it merges:
 
 1. 5.1: done.
 2. 5.4: done.
-3. 5.2: done. 5.3: done once #284 and #285 merge. 6.1 is #286. 6.2
-   (`describeEvent` and `SKIP_REASONS` into `lib/tickets/event-labels.ts`)
-   waits for #286, because both edit `view.tsx`.
-4. Logger. Three places in `worker/` stay on `console`, because a move would
+3. 5.2: done. 5.3: done once #284 merges. 6.1 is #286. 6.2 (`describeEvent`
+   and `SKIP_REASONS` into `lib/tickets/event-labels.ts`) waits for #286,
+   because both edit `view.tsx`.
+4. 3.13 leftover: the `body_${n}` and `header_${n}` template reads in
+   `reply-actions.ts` (`sendTemplateReply`) move to `text()`. They wait for
+   #284, which holds that file.
+5. Logger. Three places in `worker/` stay on `console`, because a move would
    change what they print:
    - `check-meta-permissions` and `test-comment-permission`: their lines start
      with `\n` or have no tag;
@@ -212,15 +230,21 @@ it merges:
    `worker/`. `lib/` is done. `app/` is #287, except the one call in
    `reply-actions.ts`, which moves once #284 merges.
 
-**Traps found since.**
+**Traps in this container.**
 
 - `repo-rules.mjs` reads its file list from git. A new file that is not staged
   is not seen, so an export that only it imports is reported as dead. Run
   `git add` before the rules.
 - Join check commands with `&&`, not `;`. One push went out after a failed
   typecheck because the next command still ran.
-- The local cluster now lives at `/var/lib/postgresql/sb/data`, port 55432,
-  which avoids the `/tmp/claude-0` permission trap.
+- The local Postgres cluster lives at `/var/lib/postgresql/sb/data`, port
+  55432, owned by `postgres`. Start it with `pg_ctl … start` as `postgres`.
+  Keep it out of `/tmp/claude-0`: a cluster there stops when that directory
+  loses its `o+x` bit.
+- Turbopack refuses a symlinked `node_modules` in a worktree. Build in the main
+  checkout.
+- The DB tier needs `TEST_DATABASE_URL`, and the database must be migrated and
+  seeded first.
 
 ## Ground rules for every PR
 
