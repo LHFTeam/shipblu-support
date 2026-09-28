@@ -183,6 +183,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 6.5   | Reports header: `text-left` to `text-start`      | #298            | merged  |
 | 6.5   | Reports overview: the shared `Stat` and `Table`  | #301            | merged  |
 | 6.5   | Widget: `useMessageStream`                       | #302            | open    |
+| 6.5   | Dashboard: six section components                | #303            | open    |
 | 6.x   | Client components                                |                 | pending |
 | 7     | Lint tightening, finish logging                  |                 | pending |
 
@@ -213,10 +214,13 @@ subscribe to the open PRs again.
   selected, which AGENTS.md asks of a report with a range control (§6.54).
   Older than #301, which kept it.
 
-**State at 01:34 UTC, 2026-09-28.** #258–#291 and #293–#301 are merged. Open,
-holding its files until it merges, besides this plan's own PR:
+**State at 01:38 UTC, 2026-09-28.** #258–#291 and #293–#301 are merged. Open,
+each holding its files until it merges, besides this plan's own PR:
 
 - #302 (6.5): `app/widget/chat.tsx`, and the new `use-message-stream.ts`.
+- #303 (6.5): `admin/dashboard/page.tsx`, and the new `section.tsx`,
+  `right-now.tsx`, `today.tsx`, `history.tsx`, `agents.tsx`, `channels.tsx`
+  and `health.tsx` beside it.
 
 **Next work.**
 
@@ -233,7 +237,7 @@ holding its files until it merges, besides this plan's own PR:
    RTL fix (#298) and the swap to the shared `Stat` and `Table` (#301) merged.
    The widget's first hook, `useMessageStream`, is #302; `use-host-bridge.ts`
    and `use-widget-session.ts` follow it, since all three edit `chat.tsx`.
-   Then the `composer.tsx` and `admin/dashboard/page.tsx` sections.
+   The dashboard's sections are #303. Then the `composer.tsx` sections.
 5. Logger. Three places in `worker/` stay on `console`, because a move would
    change what they print:
    - `check-meta-permissions` and `test-comment-permission`: their lines start
