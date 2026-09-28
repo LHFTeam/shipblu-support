@@ -178,10 +178,10 @@ and two sessions claiming different rows then conflict on all of them.
 | 6.3   | `categories-field.tsx`                           | #295            | merged  |
 | 6.3   | `sidebar.tsx`, the last split                    | #297            | merged  |
 | 6.4   | `useFieldAction` for the sidebar's nine controls | #299            | merged  |
-| 6.4   | `TagField` shows a refused save                  | #300            | open    |
+| 6.4   | `TagField` shows a refused save                  | #300            | merged  |
 | 6.5   | One `SubmitButton` in `components/`              | #296            | merged  |
 | 6.5   | Reports header: `text-left` to `text-start`      | #298            | merged  |
-| 6.5   | Reports overview: the shared `Stat` and `Table`  | #301            | open    |
+| 6.5   | Reports overview: the shared `Stat` and `Table`  | #301            | merged  |
 | 6.5   | Widget: `useMessageStream`                       | #302            | open    |
 | 6.x   | Client components                                |                 | pending |
 | 7     | Lint tightening, finish logging                  |                 | pending |
@@ -204,17 +204,18 @@ subscribe to the open PRs again.
   merged, restart the branch from `main` and open a new plan PR.
 - The requester wants replies in ASD Simplified Technical English (STE100).
 
-**Findings outside the plan.** Neither is fixed.
+**Findings outside the plan.** None is fixed.
 
 - `htmlToText` writes headings in capitals. Production has 8 English excerpts
   and 1 Arabic excerpt that start that way.
 - `restoreVersion` does not write `excerpt`.
+- The reports overview prints "7/30/90 days", not the dates of the window it
+  selected, which AGENTS.md asks of a report with a range control (§6.54).
+  Older than #301, which kept it.
 
-**State at 01:33 UTC, 2026-09-28.** #258–#291 and #293–#299 are merged. Open,
-each holding its files until it merges, besides this plan's own PR:
+**State at 01:34 UTC, 2026-09-28.** #258–#291 and #293–#301 are merged. Open,
+holding its files until it merges, besides this plan's own PR:
 
-- #300 (6.4): `inbox/[number]/ticket-fields.tsx`.
-- #301 (6.5): `reports/page.tsx`.
 - #302 (6.5): `app/widget/chat.tsx`, and the new `use-message-stream.ts`.
 
 **Next work.**
@@ -223,13 +224,13 @@ each holding its files until it merges, besides this plan's own PR:
 2. 5.4: done.
 3. 5.2, 5.3, 6.1, 6.2 and 6.3: done. After 6.3 (#290, #291, #293–#295 and
    #297), `view.tsx` holds only `ConversationView` and `ReadOnlyNotice`. 6.4:
-   `useFieldAction` merged (#299); `TagField` showing its error is #300. The
+   `useFieldAction` (#299) and `TagField` showing its error (#300) merged. The
    list's `WhatsAppWindow` and `MetaWindow` in `inbox/list.tsx` stay for now:
    they are compact, show nothing while the window is unremarkable, and read
    the clock at render, so folding them into `window-indicator.tsx` changes
    what the list shows. That is its own PR, marked as a behaviour change.
 4. 3.13: done (#289). 6.5's `SubmitButton`: done (#296). The reports page's
-   RTL fix merged (#298); the swap to the shared `Stat` and `Table` is #301.
+   RTL fix (#298) and the swap to the shared `Stat` and `Table` (#301) merged.
    The widget's first hook, `useMessageStream`, is #302; `use-host-bridge.ts`
    and `use-widget-session.ts` follow it, since all three edit `chat.tsx`.
    Then the `composer.tsx` and `admin/dashboard/page.tsx` sections.
