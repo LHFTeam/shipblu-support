@@ -192,7 +192,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 7.1   | Type-aware lint over `lib/` and `worker/`        | #308            | merged  |
 | 7.2   | Layering through `no-restricted-imports`         | #309            | merged  |
 | 7.1   | Type-aware lint over `app/` too                  | #310            | merged  |
-| 7.3   | `no-console` as an error                         | #311            | open    |
+| 7.3   | `no-console` as an error                         | #311            | merged  |
 | 7.4   | AGENTS.md conventions                            | #312            | open    |
 | 7     | Lint tightening, finish logging                  |                 | pending |
 
@@ -233,12 +233,16 @@ subscribe to the open PRs again.
   tickets, which are answered on the comment edge and have no window; the
   header does not. `InboxRow` carries no `externalId`, so the fix is in the
   list query. Older than #307, which kept it.
+- Four operator-run job payloads — `backfill_meta_profiles`,
+  `sync_stale_shipments`, `rollup_metrics` and `sync_shipment` — are
+  `z.object`, not `z.strictObject`, so a mistyped option is dropped and the
+  default runs: `backfill_meta_profiles limt=50` walks every contact. Switching
+  them changes what the jobs accept, so it is its own PR. Found in #312's
+  review; #312 records it in AGENTS.md.
 
-**State at 02:34 UTC, 2026-09-28.** #258–#291 and #293–#310 are merged. Open, each
+**State at 02:42 UTC, 2026-09-28.** #258–#291 and #293–#311 are merged. Open, each
 holding its files until it merges, besides this plan's own PR:
 
-- #311 (7.3): `eslint.config.mjs`, `worker/handlers/backfill-categorise-ai.ts`,
-  `db/client.ts`, `db/baseline.ts` and `lib/webhooks/log.test.ts`.
 - #312 (7.4): `AGENTS.md`.
 
 **Next work.**
@@ -274,11 +278,12 @@ holding its files until it merges, besides this plan's own PR:
    the rules start at `error` in a blocking job, not as warnings. `app/` had two
    findings, `inbox/[number]/knowledge.tsx:85` and `inbox/list.tsx:470`, both a
    promise that cannot reject left unmarked; #310 marked them with `void` and
-   added `app/**` to the strict config, and merged. 7.2 (#309) merged. 7.3 is
-   #311; `## Stage 7`, item 3, lists what it exempts, by file and by line. 7.4
-   is #312. The database test tier was already in AGENTS.md, so it adds the
-   other four; its logging paragraph says `npm run lint` refuses `console`, so
-   it merges after #311. Stage 7 is done when both merge.
+   added `app/**` to the strict config, and merged. 7.2 (#309) merged. 7.3
+   (#311) merged; `## Stage 7`, item 3, lists what it exempts, by file and by
+   line. 7.4 is #312. The database test tier was already in AGENTS.md, so it
+   adds the other four; its logging paragraph says `npm run lint` refuses
+   `console`, so it merges after #311, which has. Stage 7 is done when #312
+   merges.
 
 **Traps in this container.**
 
