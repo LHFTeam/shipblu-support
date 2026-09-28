@@ -244,6 +244,17 @@ object with `error: string | null`. Never
 trust an id or address arriving in a `FormData` field — re-read the row
 server-side.
 
+Two shared modules carry that shape, so an action file does not spell it out
+again. `lib/http/form-data.ts` reads the fields — `text()`, `int()`,
+`optionalNumber()`, `localeOf()` and `uuidField()`, which answers `null` for "not
+set" and `undefined` for "not a uuid" because Postgres raises 22P02 on a
+malformed one and an action that throws returns no state at all.
+`lib/http/action-state.ts` is the answer: `ActionState` and `ok()`, whose
+`nonce` changes on every success so a form keyed on it clears twice in a row.
+The console's actions answer with `app/(console)/action-state.ts`, the same
+state plus a `message`, kept outside every `'use server'` file so a component
+can name the type without importing an action module.
+
 **Authorisation lives in code.** `proxy.ts` only checks that a session cookie
 exists; it cannot tell a revoked session from a live one. It runs on Node.js in
 Next 16, not the Edge, so that is a choice rather than a limit — its header says
@@ -325,6 +336,37 @@ return 200 immediately; they never do the work inline.
 `npm run job -- <type>` takes trailing `key=value` pairs as the payload
 (`npm run job -- backfill_meta_profiles force=true limit=50`), so a handler's
 options are reachable without hand-inserting a `jobs` row.
+
+**A payload is a schema, written once.** `jobs.payload` is jsonb, so a handler is
+handed whatever somebody wrote into the row — a caller, a replay, or those
+`key=value` pairs. A new job type gets an entry in `JOB_PAYLOADS` in
+`lib/queue/payloads.ts`; `enqueue` is typed from it, so a caller sending the
+wrong shape does not compile, and the handler reads the row with
+`parseJobPayload(job, type)` rather than checking fields in its own words.
+
+**`PermanentJobError` is for a failure no retry can fix**, and it sends the job
+to `dead` on its first attempt instead of spending the rest. That means input
+that is wrong: a payload failing its schema (which `parseJobPayload` throws), or
+a subject row that is gone — `subjectGone()` in
+`worker/handlers/subject-gone.ts`, since a job is only ever enqueued after its
+row commits, so a missing row is "not any more", not "not yet". It is **not**
+for a provider that said no — that is transient, or it is recorded on the row a
+person reads, as `send_whatsapp` marks the message failed — and not for a job
+type with no handler, because the web service can enqueue a type before the
+worker that runs it is deployed and a retry is what rescues that job.
+
+**Logging goes through `logger(tag)`** from `lib/log.ts`: one line per event,
+`[tag] message key=value`. The tag is usually the job type or the domain
+(`send_whatsapp`, `presence`), and **the prefix is the format** — Render's log
+search and `docs/PROJECT-STATE.md` quote lines by it, so moving a message moves
+it word for word. Success fields are primitives by type, so a request body
+cannot be spread into a line; `warn` and `error` take the caught value as their
+second argument, so the stack and any `cause` still print. It never reads
+`env()`, for the reason `lib/webhooks/log.ts` gives, and that file stays the only
+thing that prints a raw delivery, because it redacts. `npm run lint` refuses a
+bare `console.*`; the files where `console` is the point — the logger, the
+command-line entry points, two hand-run diagnostics — are named one by one in
+`eslint.config.mjs`, each with its reason.
 
 **Environment variables** are declared in `lib/env.ts` (Zod, parsed lazily) and
 in `render.yaml` in the same commit — CI fails a pull request where the two
