@@ -227,7 +227,7 @@ subscribe to the open PRs again.
   third-party iframe with storage blocked, the resume effect, `ensureSession`
   and `startFreshSession` throw. Older than #306, which only moved them.
 
-**State at 02:09 UTC, 2026-09-28.** #258–#291 and #293–#306 are merged. Open,
+**State at 02:07 UTC, 2026-09-28.** #258–#291 and #293–#306 are merged. Open,
 each holding its files until it merges, besides this plan's own PR:
 
 - #307 (6.3, behaviour change): `inbox/list.tsx` and
