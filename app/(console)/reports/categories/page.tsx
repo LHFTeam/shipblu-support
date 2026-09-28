@@ -97,7 +97,9 @@ export default async function CategoryReportPage({
    * no categorised tickets — so a day count short of `days` is the normal state
    * and a warning drawn from it would be permanent furniture. A first day later
    * than the window's start is the real signal: it means a wider range cannot
-   * reach further back, so the three buttons must agree with each other.
+   * reach further back, so the three buttons must agree with each other. `first`
+   * is where the history starts even when that is before the window — a quiet
+   * opening day has no row — which `rolledUpRange` explains.
    */
   const startsLate = rolledUp.first !== null && rolledUp.first > range.from;
 
@@ -162,11 +164,12 @@ export default async function CategoryReportPage({
 
             {startsLate ? (
               <p className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
-                This window opens on {range.from}, but the figures in it{' '}
-                <b>begin on {rolledUp.first}</b> — {rolledUp.days}{' '}
-                {rolledUp.days === 1 ? 'day' : 'days'} of history. Categorisation records forward
-                only and there is no backfill, so a wider range cannot reach further back than that:
-                until more history accumulates, 7, 30 and 90 days will keep answering the same.
+                This window opens on {range.from}, but the categorised history{' '}
+                <b>begins on {rolledUp.first}</b> — {rolledUp.days}{' '}
+                {rolledUp.days === 1 ? 'day' : 'days'} of it in this window. Categorisation records
+                forward only and there is no backfill, so a wider range cannot reach further back
+                than that: until more history accumulates, 7, 30 and 90 days will keep answering the
+                same.
               </p>
             ) : null}
           </div>
