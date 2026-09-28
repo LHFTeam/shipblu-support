@@ -261,6 +261,10 @@ each holding its files until it merges, besides this plan's own PR:
   compiles to a bare `import 'm'`. Write `import type { X }` when every name is
   a type. A script that prunes unused names must switch to that form, or it
   leaves a side-effect import behind (#297 fixed one that #293 left).
+- `text-start` on a `<tr>` alone centres its `<th>` cells. `start` is
+  `text-align`'s initial value, and the browser centres a `th` whose parent
+  computes to the initial value, which `text-left` was not. Put the class on
+  the `th` (#298, measured in Chromium).
 
 ## Ground rules for every PR
 
