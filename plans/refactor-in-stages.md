@@ -178,6 +178,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 6.3   | `categories-field.tsx`                           | #295            | merged  |
 | 6.3   | `sidebar.tsx`, the last split                    | #297            | open    |
 | 6.5   | One `SubmitButton` in `components/`              | #296            | merged  |
+| 6.5   | Reports header: `text-left` to `text-start`      | #298            | open    |
 | 6.x   | Client components                                |                 | pending |
 | 7     | Lint tightening, finish logging                  |                 | pending |
 
@@ -205,10 +206,11 @@ subscribe to the open PRs again.
   and 1 Arabic excerpt that start that way.
 - `restoreVersion` does not write `excerpt`.
 
-**State at 01:09 UTC, 2026-09-28.** #258–#291 and #293–#296 are merged. Open,
-holding its files until it merges, besides this plan's own PR:
+**State at 01:13 UTC, 2026-09-28.** #258–#291 and #293–#296 are merged. Open,
+each holding its files until it merges, besides this plan's own PR:
 
 - #297 (6.3): `inbox/[number]/view.tsx`, and the new `sidebar.tsx` beside it.
+- #298 (6.5): `reports/page.tsx`.
 
 **Next work.**
 
@@ -221,7 +223,9 @@ holding its files until it merges, besides this plan's own PR:
    compact, show nothing while the window is unremarkable, and read the clock
    at render, so folding them into `window-indicator.tsx` changes what the list
    shows. That is its own PR, marked as a behaviour change.
-4. 3.13: done (#289). 6.5's `SubmitButton`: done (#296). 6.4
+4. 3.13: done (#289). 6.5's `SubmitButton`: done (#296). The reports page's
+   RTL fix is #298; swapping its local `Stat` and `Table` for the shared ones
+   waits for it, and changes how the page looks, so it says so. 6.4
    (`useFieldAction`) waits for #297, because it edits the files 6.3 created.
 5. Logger. Three places in `worker/` stay on `console`, because a move would
    change what they print:
