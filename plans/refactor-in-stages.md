@@ -154,7 +154,8 @@ and two sessions claiming different rows then conflict on all of them.
 | 5.2   | `category-actions.ts`                            | #271            | merged  |
 | 5.2   | `shipment-actions.ts`                            | #274            | merged  |
 | 5.2   | `side-conversation-actions.ts`                   | #278            | merged  |
-| 5.2   | `meta-actions.ts`                                | #280            | open    |
+| 5.2   | `meta-actions.ts`                                | #280            | merged  |
+| 5.2   | `reply-actions.ts`                               | #281            | open    |
 | 5.4   | Admin pages stop importing `db`: first batches   | #254, #256      | merged  |
 | 5.4   | Admin pages: agents, auto-responses, automations | #259            | merged  |
 | 5.4   | Categories, channels, invite, field options      | #266            | merged  |
@@ -243,18 +244,18 @@ This replaces three of the rules in the handoff above.
   expected. Staging stays suspended.
 - **The ⛳ gate is passed.** The requester said to start Stage 5.
 
-**State at 23:58 UTC.** #258–#275 and #277–#279 are merged. Open, holding its
-files until it merges: #280 (5.2, `meta-actions.ts`): `(console)/actions.ts`,
-`docs/meta-endpoints.md`, and `profile-refresh.tsx`, `comment-moderation.tsx`
-and `thread-control.tsx` under `inbox/[number]/`.
+**State at 00:02 UTC.** #258–#280 are merged. Open, holding its files until it
+merges: #281 (5.2, `reply-actions.ts`): `(console)/actions.ts` and
+`inbox/[number]/composer.tsx`.
 
 **Next work.**
 
 1. 5.1: done.
 2. 5.4: done.
-3. 5.2: the one sibling left after #280 (`reply-actions.ts`),
-   then `ticket-actions.ts` for what remains, one PR each. Each one edits
-   `(console)/actions.ts`, so start the next when the one before it merges.
+3. 5.2: after #281, `ticket-actions.ts` takes what remains of
+   `(console)/actions.ts` (`updateTicket`, `purgeTicket`), and `ActionState`
+   moves to a plain module, since every sibling imports it as a type from an
+   action file.
 4. Logger. Three places in `worker/` stay on `console`, because a move would
    change what they print:
    - `check-meta-permissions` and `test-comment-permission`: their lines start
