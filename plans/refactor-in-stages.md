@@ -234,11 +234,11 @@ subscribe to the open PRs again.
   header does not. `InboxRow` carries no `externalId`, so the fix is in the
   list query. Older than #307, which kept it.
 
-**State at 02:28 UTC, 2026-09-28.** #258–#291 and #293–#310 are merged. Open, each
+**State at 02:34 UTC, 2026-09-28.** #258–#291 and #293–#310 are merged. Open, each
 holding its files until it merges, besides this plan's own PR:
 
-- #311 (7.3): `eslint.config.mjs` and
-  `worker/handlers/backfill-categorise-ai.ts`.
+- #311 (7.3): `eslint.config.mjs`, `worker/handlers/backfill-categorise-ai.ts`,
+  `db/client.ts`, `db/baseline.ts` and `lib/webhooks/log.test.ts`.
 - #312 (7.4): `AGENTS.md`.
 
 **Next work.**
@@ -275,12 +275,10 @@ holding its files until it merges, besides this plan's own PR:
    findings, `inbox/[number]/knowledge.tsx:85` and `inbox/list.tsx:470`, both a
    promise that cannot reject left unmarked; #310 marked them with `void` and
    added `app/**` to the strict config, and merged. 7.2 (#309) merged. 7.3 is
-   #311: besides the plan's exceptions it exempts `lib/webhooks/log.ts`,
-   `db/seed.ts`, `db/baseline.ts`, `db/client.ts` (see Out of scope) and tests,
-   and disables the rule on `backfill-categorise-ai.ts`'s three report lines
-   only. 7.4 is #312. The database test tier was already in AGENTS.md, so it
-   adds the other four; its logging paragraph says `npm run lint` refuses
-   `console`, so it merges after #311. Stage 7 is done when both merge.
+   #311; `## Stage 7`, item 3, lists what it exempts, by file and by line. 7.4
+   is #312. The database test tier was already in AGENTS.md, so it adds the
+   other four; its logging paragraph says `npm run lint` refuses `console`, so
+   it merges after #311. Stage 7 is done when both merge.
 
 **Traps in this container.**
 
@@ -1031,8 +1029,13 @@ The pieces become kebab-case siblings, the way `comment-moderation.tsx` and
 2. **Layering, through `no-restricted-imports`.**
    - `lib/` and `worker/` may not import `@/app/*`.
    - `components/` may not import `@/db/*`.
-3. **`no-console` as an error.** The exceptions are `lib/log.ts`, `scripts/`,
-   `db/migrate.ts` and `worker/run-job.ts`.
+3. **`no-console` as an error** (#311). The exempt files are `lib/log.ts`,
+   `lib/webhooks/log.ts`, `scripts/**`, `db/migrate.ts`, `db/seed.ts`,
+   `worker/run-job.ts`, `check-meta-permissions.ts` and
+   `test-comment-permission.ts`. A single call site that must stay takes an
+   `eslint-disable-next-line` with its reason instead: the three `formatReport`
+   lines in `backfill-categorise-ai.ts`, the two pool warnings in `db/client.ts`
+   and `seedBaseline`'s default logger. No test is exempt.
 4. **AGENTS.md** records the new conventions:
    - the logger;
    - the form-data and action-state helpers;
