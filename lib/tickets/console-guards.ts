@@ -4,7 +4,6 @@ import { db } from '@/db/client';
 import {
   contacts,
   conversationCategories,
-  conversationEvents,
   conversations,
   ticketCategories,
   ticketStatuses,
@@ -14,11 +13,10 @@ import type { SessionAgent } from '@/lib/auth/session';
 import { CAUSE_REQUIRED_AREAS } from '@/lib/categorise/taxonomy';
 import type { ActionState } from '@/lib/http/action-state';
 import { isUuid } from '@/lib/http/uuid';
-import { onStatusChanged } from '@/lib/sla';
 import { canSeeChannel, readOnlyReason } from '@/lib/tickets/channel-policy';
 import { listLabels, missingRequired } from '@/lib/tickets/custom-fields';
-import { afterTicketResolved } from '@/lib/tickets/lifecycle';
 import { listTicketFields } from '@/lib/tickets/lookups';
+import { changeStatus } from '@/lib/tickets/status';
 
 /**
  * The checks every console ticket action shares: load the ticket as the agent
@@ -190,25 +188,5 @@ export async function applyStatusCategory(
   const status = rows[0];
   if (!status) return;
 
-  await db.transaction(async (tx) => {
-    await tx
-      .update(conversations)
-      .set({
-        statusId: status.id,
-        resolvedAt: category === 'resolved' ? new Date() : null,
-        ...(category === 'resolved' ? { resolvedByAgentId: agent.id } : {}),
-        closedAt: null,
-      })
-      .where(eq(conversations.id, conversationId));
-
-    await tx.insert(conversationEvents).values({
-      conversationId,
-      type: 'status_changed',
-      actorAgentId: agent.id,
-      data: { to: status.name, category, via: 'reply_and_resolve' },
-    });
-  });
-
-  await onStatusChanged(conversationId, status.stopsSlaClock);
-  if (category === 'resolved') await afterTicketResolved(conversationId);
+  await changeStatus(agent.id, conversationId, { ...status, category }, 'reply_and_resolve');
 }

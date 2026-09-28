@@ -13,8 +13,8 @@ import { ok } from '@/lib/http/action-state';
 import { isUuid } from '@/lib/http/uuid';
 import { can } from '@/lib/auth/permissions';
 import { isPriority } from '@/lib/tickets/vocabulary';
-import { onGroupChanged, onStatusChanged } from '@/lib/sla';
-import { afterTicketResolved, afterTicketUpdate } from '@/lib/tickets/lifecycle';
+import { onGroupChanged } from '@/lib/sla';
+import { afterTicketUpdate } from '@/lib/tickets/lifecycle';
 import { isBlank } from '@/lib/tickets/custom-fields';
 import { parseFieldValue } from '@/lib/tickets/custom-fields-parse';
 import { getTicketField } from '@/lib/tickets/lookups';
@@ -24,6 +24,7 @@ import {
   refuseIfIncomplete,
   refuseIfNoRootCause,
 } from '@/lib/tickets/console-guards';
+import { changeStatus } from '@/lib/tickets/status';
 import type { ActionState } from './action-state';
 
 // --- Ticket properties ------------------------------------------------------
@@ -75,30 +76,7 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
         if (uncaused) return uncaused;
       }
 
-      await db.transaction(async (tx) => {
-        await tx
-          .update(conversations)
-          .set({
-            statusId: status.id,
-            resolvedAt: status.category === 'resolved' ? new Date() : null,
-            // Stamped on the way in and left alone otherwise. Moving a ticket
-            // back to Open must not erase who resolved it — that record is what
-            // the reopening about to follow gets attributed to.
-            ...(status.category === 'resolved' ? { resolvedByAgentId: agent.id } : {}),
-            closedAt: status.category === 'closed' ? new Date() : null,
-          })
-          .where(eq(conversations.id, conversationId));
-
-        await tx.insert(conversationEvents).values({
-          conversationId,
-          type: 'status_changed',
-          actorAgentId: agent.id,
-          data: { to: status.name, category: status.category },
-        });
-      });
-
-      await onStatusChanged(conversationId, status.stopsSlaClock);
-      if (status.category === 'resolved') await afterTicketResolved(conversationId);
+      await changeStatus(agent.id, conversationId, status);
       break;
     }
 
