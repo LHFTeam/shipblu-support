@@ -231,8 +231,8 @@ subscribe to the open PRs again.
   header does not. `InboxRow` carries no `externalId`, so the fix is in the
   list query. Older than #307, which kept it.
 
-**State at 02:14 UTC, 2026-09-28.** #258–#291, #293–#306 and #308 are merged. Open,
-each holding its files until it merges, besides this plan's own PR:
+**State at 02:14 UTC, 2026-09-28.** #258–#291, #293–#306 and #308 are merged.
+Open, each holding its files until it merges, besides this plan's own PR:
 
 - #307 (6.3, behaviour change): `inbox/list.tsx`,
   `inbox/[number]/window-indicator.tsx`, `components/use-now.ts` and the new
