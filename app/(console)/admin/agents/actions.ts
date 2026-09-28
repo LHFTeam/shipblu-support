@@ -18,6 +18,9 @@ import { generateToken, hashToken } from '@/lib/auth/tokens';
 import { destroyAllSessionsForAgent } from '@/lib/auth/session';
 import { enqueue } from '@/lib/queue';
 import { appUrl, env } from '@/lib/env';
+import { logger } from '@/lib/log';
+
+const log = logger('createInvite');
 
 // --- Presence policy ---------------------------------------------------------
 
@@ -207,7 +210,7 @@ export async function createInvite(_state: AdminState, formData: FormData): Prom
     } catch (error) {
       // The cause belongs in the logs; the admin only needs to know it is on
       // them to deliver the link, which the response already tells them.
-      console.error(`[createInvite] could not queue the invitation email for ${email}`, error);
+      log.error(`could not queue the invitation email for ${email}`, error);
     }
   }
 

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { emailProvider } from '@/lib/email/providers';
 import { queueDelivery, readDelivery, storeDelivery, storedHeaders } from '@/lib/webhooks/receive';
+import { logger } from '@/lib/log';
 
 export const dynamic = 'force-dynamic';
 
@@ -96,7 +97,7 @@ export async function POST(request: Request, context: { params: Promise<{ provid
   // (UNVERIFIED_WEBHOOK_DAYS); a jump in `webhook_events` during an incident is
   // this, not a leak.
   if (!signatureVerified) {
-    console.warn(`[webhook:${provider.name}] stored unverified payload ${eventId}`);
+    logger(`webhook:${provider.name}`).warn(`stored unverified payload ${eventId}`);
     return NextResponse.json({ error: 'signature verification failed' }, { status: 401 });
   }
 

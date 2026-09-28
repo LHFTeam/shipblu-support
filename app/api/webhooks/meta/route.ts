@@ -10,6 +10,9 @@ import {
 import type { MetaWebhookPayload } from '@/lib/meta/types';
 import { queueDelivery, readDelivery, storeDelivery, storedHeaders } from '@/lib/webhooks/receive';
 import { SIGNATURE_HEADER, verifyChallenge, verifySignature } from '@/lib/whatsapp/verify';
+import { logger } from '@/lib/log';
+
+const log = logger('webhook:meta');
 
 export const dynamic = 'force-dynamic';
 
@@ -43,7 +46,7 @@ export async function GET(request: Request) {
   const token = metaVerifyToken();
 
   if (!token) {
-    console.error('[webhook:meta] META_VERIFY_TOKEN is not configured');
+    log.error('META_VERIFY_TOKEN is not configured');
     return new NextResponse('not configured', { status: 500 });
   }
 
@@ -115,8 +118,8 @@ export async function POST(request: Request) {
   });
 
   if (!signatureVerified) {
-    console.warn(
-      `[webhook:meta] stored unverified ${payload.object ?? 'unknown'} payload from ` +
+    log.warn(
+      `stored unverified ${payload.object ?? 'unknown'} payload from ` +
         `${headers['x-forwarded-for'] ?? 'an unknown source'}: ${unverifiedReason(candidates)}`,
     );
     // 403 rather than 200: an unsigned payload is either a misconfigured app
@@ -136,8 +139,8 @@ export async function POST(request: Request) {
     // reads as a broken pipeline. It cost an afternoon of looking at the parser
     // for a comment the parser had already handled correctly the day before
     // (§6.30). One line naming the key that collided answers it in a log search.
-    console.log(
-      `[webhook:meta] duplicate ${payload.object ?? 'unknown'} delivery on ` +
+    log.info(
+      `duplicate ${payload.object ?? 'unknown'} delivery on ` +
         `${matched.connection}, already stored as ${deliveryId(payload, matched.connection)} ` +
         `— not re-queued`,
     );
