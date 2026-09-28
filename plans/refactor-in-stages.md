@@ -176,6 +176,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 6.3   | `ticket-fields.tsx`, `Field` as `SidebarField`   | #293            | merged  |
 | 6.3   | `shipments-field.tsx` and `unlink-button.tsx`    | #294            | merged  |
 | 6.3   | `categories-field.tsx`                           | #295            | open    |
+| 6.5   | One `SubmitButton` in `components/`              | #296            | open    |
 | 6.x   | Client components                                |                 | pending |
 | 7     | Lint tightening, finish logging                  |                 | pending |
 
@@ -203,11 +204,18 @@ subscribe to the open PRs again.
   and 1 Arabic excerpt that start that way.
 - `restoreVersion` does not write `excerpt`.
 
-**State at 01:00 UTC, 2026-09-28.** #258–#291, #293 and #294 are merged. Open,
-holding its files until it merges, besides this plan's own PR:
+**State at 01:04 UTC, 2026-09-28.** #258–#291, #293 and #294 are merged. Open,
+each holding its files until it merges, besides this plan's own PR:
 
 - #295 (6.3): `inbox/[number]/view.tsx`, and the new `categories-field.tsx`
   beside it.
+- #296 (6.5): the new `components/submit-button.tsx`; the copies it replaces
+  in `admin/forms-shared.tsx`, `admin/agents/forms.tsx`,
+  `admin/channels/forms.tsx`, `kb/structure/forms.tsx`,
+  `inbox/[number]/composer.tsx`, `(auth)/login/form.tsx`,
+  `(auth)/setup/form.tsx` and `(auth)/invite/[token]/form.tsx`; its importers
+  `admin/tracking/forms.tsx` and the four help-centre account forms; and
+  `help/[locale]/account/submit.tsx`, deleted.
 
 **Next work.**
 
@@ -223,7 +231,8 @@ holding its files until it merges, besides this plan's own PR:
    nothing while the window is unremarkable, and read the clock at render, so
    folding them into `window-indicator.tsx` changes what the list shows. That
    is its own PR, marked as a behaviour change.
-4. 3.13: done (#289).
+4. 3.13: done (#289). 6.5's `SubmitButton` is #296. 6.4 (`useFieldAction`)
+   waits for 6.3 to finish, because it edits the files 6.3 is creating.
 5. Logger. Three places in `worker/` stay on `console`, because a move would
    change what they print:
    - `check-meta-permissions` and `test-comment-permission`: their lines start
