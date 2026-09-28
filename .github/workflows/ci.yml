@@ -68,6 +68,10 @@ jobs:
             run: npm run typecheck
           - name: lint
             run: npm run lint
+          - name: lint strict
+            # The type-aware rules in eslint.strict.config.mjs, kept out of
+            # `lint` because reading the whole program is what makes them slow.
+            run: npm run lint:strict
           - name: format
             run: npm run format:check
           - name: test
