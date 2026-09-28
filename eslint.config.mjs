@@ -1,6 +1,30 @@
 import nextCoreWebVitals from 'eslint-config-next/core-web-vitals';
 import nextTypescript from 'eslint-config-next/typescript';
 
+/**
+ * One layering rule: files under `files` may not reach the top-level `dir`.
+ *
+ * `no-restricted-imports` sees only static imports and re-exports, so the same
+ * pattern is also given to `no-restricted-syntax` for the two forms it misses —
+ * a runtime `import()` and the inline type `import('…').Row`, which would
+ * otherwise carry a schema type into a component with the lint job green.
+ */
+function layer(files, dir, message) {
+  const source = `^(@/|(\\.\\./)+)${dir}(/|$)`;
+  const literal = `Literal[value=/${source.replaceAll('/', '\\/')}/]`;
+  return {
+    files,
+    rules: {
+      'no-restricted-imports': ['error', { patterns: [{ regex: source, message }] }],
+      'no-restricted-syntax': [
+        'error',
+        { selector: `ImportExpression > ${literal}`, message },
+        { selector: `TSImportType ${literal}`, message },
+      ],
+    },
+  };
+}
+
 // eslint-config-next v16 ships native flat configs, so these spread directly —
 // no FlatCompat shim (which breaks under ESLint 10).
 const config = [
@@ -24,39 +48,16 @@ const config = [
   // client files import freely, so one reaching `db/` puts the schema — or the
   // pool — in the browser bundle (§6.57, and the `client-bundle` repo rule).
   // Relative spellings are listed beside the alias because either one resolves.
-  {
-    files: ['lib/**', 'worker/**'],
-    rules: {
-      'no-restricted-imports': [
-        'error',
-        {
-          patterns: [
-            {
-              regex: '^(@/|(\\.\\./)+)app(/|$)',
-              message: 'lib/ and worker/ may not import from app/. Move the shared code into lib/.',
-            },
-          ],
-        },
-      ],
-    },
-  },
-  {
-    files: ['components/**'],
-    rules: {
-      'no-restricted-imports': [
-        'error',
-        {
-          patterns: [
-            {
-              regex: '^(@/|(\\.\\./)+)db(/|$)',
-              message:
-                'components/ may not import from db/. Take the data as a prop, or read it in lib/.',
-            },
-          ],
-        },
-      ],
-    },
-  },
+  layer(
+    ['lib/**', 'worker/**'],
+    'app',
+    'lib/ and worker/ may not import from app/. Move the shared code into lib/.',
+  ),
+  layer(
+    ['components/**'],
+    'db',
+    'components/ may not import from db/. Take the data as a prop, or read it in lib/.',
+  ),
 ];
 
 export default config;
