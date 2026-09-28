@@ -214,7 +214,10 @@ export function InboxList({
                   {row.channel === 'whatsapp' ? (
                     <WhatsAppWindowBadge lastCustomerMessageAt={row.lastCustomerMessageAt} />
                   ) : null}
-                  {row.channel === 'facebook' || row.channel === 'instagram' ? (
+                  {/* A comment ticket is answered on the comment edge and has
+                      no messaging window, so it gets no window badge — the
+                      same rule the ticket header applies. */}
+                  {(row.channel === 'facebook' || row.channel === 'instagram') && !row.isComment ? (
                     <MetaWindowBadge lastCustomerMessageAt={row.lastCustomerMessageAt} />
                   ) : null}
 
