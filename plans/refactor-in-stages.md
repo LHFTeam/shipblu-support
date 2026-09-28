@@ -177,9 +177,11 @@ and two sessions claiming different rows then conflict on all of them.
 | 6.3   | `shipments-field.tsx` and `unlink-button.tsx`    | #294            | merged  |
 | 6.3   | `categories-field.tsx`                           | #295            | merged  |
 | 6.3   | `sidebar.tsx`, the last split                    | #297            | merged  |
-| 6.4   | `useFieldAction` for the sidebar's nine controls | #299            | open    |
+| 6.4   | `useFieldAction` for the sidebar's nine controls | #299            | merged  |
+| 6.4   | `TagField` shows a refused save                  | #300            | open    |
 | 6.5   | One `SubmitButton` in `components/`              | #296            | merged  |
-| 6.5   | Reports header: `text-left` to `text-start`      | #298            | open    |
+| 6.5   | Reports header: `text-left` to `text-start`      | #298            | merged  |
+| 6.5   | Reports overview: the shared `Stat` and `Table`  | #301            | open    |
 | 6.x   | Client components                                |                 | pending |
 | 7     | Lint tightening, finish logging                  |                 | pending |
 
@@ -207,29 +209,27 @@ subscribe to the open PRs again.
   and 1 Arabic excerpt that start that way.
 - `restoreVersion` does not write `excerpt`.
 
-**State at 01:18 UTC, 2026-09-28.** #258–#291 and #293–#297 are merged. Open,
+**State at 01:27 UTC, 2026-09-28.** #258–#291 and #293–#299 are merged. Open,
 each holding its files until it merges, besides this plan's own PR:
 
-- #299 (6.4): `categories-field.tsx`, `shipments-field.tsx`, `ticket-fields.tsx`
-  and `unlink-button.tsx` under `inbox/[number]/`, and the new
-  `use-field-action.ts` beside them.
-- #298 (6.5): `reports/page.tsx`.
+- #300 (6.4): `inbox/[number]/ticket-fields.tsx`.
+- #301 (6.5): `reports/page.tsx`.
 
 **Next work.**
 
 1. 5.1: done.
 2. 5.4: done.
 3. 5.2, 5.3, 6.1, 6.2 and 6.3: done. After 6.3 (#290, #291, #293–#295 and
-   #297), `view.tsx` holds only `ConversationView` and `ReadOnlyNotice`. 6.4 is
-   #299. `TagField` showing its error
-   waits for it, as its own behaviour-change PR. The list's `WhatsAppWindow`
-   and `MetaWindow` in `inbox/list.tsx` stay for now: they are compact, show
-   nothing while the window is unremarkable, and read the clock at render, so
-   folding them into `window-indicator.tsx` changes what the list shows. That
-   is its own PR, marked as a behaviour change.
+   #297), `view.tsx` holds only `ConversationView` and `ReadOnlyNotice`. 6.4:
+   `useFieldAction` merged (#299); `TagField` showing its error is #300. The
+   list's `WhatsAppWindow` and `MetaWindow` in `inbox/list.tsx` stay for now:
+   they are compact, show nothing while the window is unremarkable, and read
+   the clock at render, so folding them into `window-indicator.tsx` changes
+   what the list shows. That is its own PR, marked as a behaviour change.
 4. 3.13: done (#289). 6.5's `SubmitButton`: done (#296). The reports page's
-   RTL fix is #298; swapping its local `Stat` and `Table` for the shared ones
-   waits for it, and changes how the page looks, so it says so.
+   RTL fix merged (#298); the swap to the shared `Stat` and `Table` is #301.
+   Left in 6.5: the widget chat hooks, and the `composer.tsx` and
+   `admin/dashboard/page.tsx` sections.
 5. Logger. Three places in `worker/` stay on `console`, because a move would
    change what they print:
    - `check-meta-permissions` and `test-comment-permission`: their lines start
