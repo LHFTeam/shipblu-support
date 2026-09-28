@@ -91,110 +91,110 @@ its column's current width — `this PR` or a PR number, and `open` or `merged` 
 so an update is a one-line diff: a longer value makes Prettier re-pad every row,
 and two sessions claiming different rows then conflict on all of them.
 
-| Stage | Item                                             | Branch / PR     | Status  |
-| ----- | ------------------------------------------------ | --------------- | ------- |
-| 0.1   | Commit this plan                                 | #166            | merged  |
-| 0.2   | Harden `server-actions` and minimum-count guards | #167            | merged  |
-| 0.3   | Split `repo-rules.mjs` into per-rule modules     | #191–#192       | merged  |
-| 0.4   | CI tidy-up                                       | #193–#195       | merged  |
-| 0.5   | Remove Playwright                                | #173            | merged  |
-| 1.1   | `lib/testing/` fixtures                          | #208, #210–#211 | merged  |
-| 1.2   | Database test tier                               | #212–#213       | merged  |
-| 1.3   | Characterise the seven ingest entry points       | #215–#218       | merged  |
-| 1.4   | Webhook route tests                              | #196            | merged  |
-| 1.5   | DB test for the admin overview's raw SQL         | #214            | merged  |
-| 1.x   | Test gaps the 1.1 reviews found                  | #225–#226       | merged  |
-| 2.1   | Email webhook dedupes before it verifies         | #168            | merged  |
-| 2.2   | Portal agent replies bypass `carrierFor()`       | #169            | merged  |
-| 2.3   | Contacts pages cannot scroll                     | #170            | merged  |
-| 2.4   | `PermanentJobError`                              | #174            | merged  |
-| 2.5   | Ids taken from `FormData`                        | #180–#182       | merged  |
-| 2.6   | KB admin search does not escape LIKE             | #176            | merged  |
-| 2.7   | One `GRAPH_VERSION`                              | #175            | merged  |
-| 2.8   | Fetch timeouts, one provider per PR              | #184–#188       | merged  |
-| 2.9   | Replies never get paragraphs (CRLF)              | #171            | merged  |
-| 2.10  | Email webhook fails open without its secret      | #177            | merged  |
-| 2.11  | Staging's `local` email webhook accepts anything | #177            | merged  |
-| 2.12  | SLA escalations after a wait never fire          | #242            | merged  |
-| 2.13  | Away agent with an open tab is never reclaimed   | #243            | merged  |
-| 0–2   | Follow-ups to the reviews of #187–#196           | #203, #205      | merged  |
-| 3     | Shared primitives (one row per PR as opened)     |                 | open    |
-| 3.1   | Queue helper: `hasActiveJob(type)`               | #197            | merged  |
-| 3.2   | Email helpers: `buildReferences`, escaper name   | #198            | merged  |
-| 3.3   | Shared constants: `TEAM_TIME_ZONE`               | #199            | merged  |
-| 3.4   | Shared constants: proxy regex from `LOCALES`     | #200            | merged  |
-| 3.5   | Constant-time compares through `safeEqual`       | #219            | merged  |
-| 3.6   | Widget: shared shapes move to `lib/widget`       | #220            | merged  |
-| 3.7   | Widget: one declaration of the postMessage names | #221            | merged  |
-| 3.8   | `errorMessage()` for caught values               | #222            | merged  |
-| 3.9   | HTTP helpers: rate limiter moves to `lib/http`   | #229            | merged  |
-| 3.10  | HTTP helpers: `readJsonBody`                     | #230            | merged  |
-| 3.11  | Vocabulary: priorities, categories, roles        | #231            | merged  |
-| 3.12  | Action state: one `ok()`                         | #240            | merged  |
-| 3.13  | FormData readers move to `lib/http/form-data.ts` | #241            | merged  |
-| 3.13  | FormData readers: adoption in the action files   | #244–#246, #250 | merged  |
-| 3.13  | The recipient's email through `text()`           | #273            | merged  |
-| 3.14  | Logger: `lib/log.ts` and the first worker files  | #249, #253      | merged  |
-| 3.14  | Logger: nine more files in `worker/` and `lib/`  | #261            | merged  |
-| 3.14  | Logger: `lib/`                                   | #269            | merged  |
-| 3.14  | Logger: the `app/` routes and the invite action  | #287            | merged  |
-| 3.14  | `reply-actions.ts`: `text()` and the logger      | #289            | merged  |
-| 4.1   | Split `lib/tickets/queries.ts`                   | #224            | merged  |
-| 4.2   | Shared ingest steps                              | #232–#233, #235 | merged  |
-| 4.3   | Meta Graph transport                             | #228            | merged  |
-| 4.4   | Worker: typed payloads, backfill, KB import      | #236–9, #247–8  | merged  |
-| 4.4   | Worker: payloads of the five hand-run backfills  | #252            | merged  |
-| ⛳    | Gate: check in with the requester                |                 | done    |
-| 5.1   | `settings-actions.ts`: groups to canned          | #255, #257      | merged  |
-| 5.1   | `settings-actions.ts`: auto-responses to SLA     | #258            | merged  |
-| 5.1   | `settings-actions.ts`: skills to recipients      | #265            | merged  |
-| 5.1   | `settings-actions.ts`: the last three, deleted   | #270            | merged  |
-| 5.1   | `admin/actions.ts` split by domain, deleted      | #275            | merged  |
-| 5.1   | `forms-shared.tsx` onto `lib/http/action-state`  | #279            | merged  |
-| 5.2   | Console guards move to `lib/tickets`             | #260            | merged  |
-| 5.2   | `availability-actions.ts`                        | #268            | merged  |
-| 5.2   | `category-actions.ts`                            | #271            | merged  |
-| 5.2   | `shipment-actions.ts`                            | #274            | merged  |
-| 5.2   | `side-conversation-actions.ts`                   | #278            | merged  |
-| 5.2   | `meta-actions.ts`                                | #280            | merged  |
-| 5.2   | `reply-actions.ts`                               | #281            | merged  |
-| 5.2   | `ticket-actions.ts` and `action-state.ts`        | #282            | merged  |
-| 5.3   | `lib/tickets/agent-reply.ts`                     | #284            | merged  |
-| 5.3   | `lib/tickets/status.ts`                          | #285            | merged  |
-| 5.4   | Admin pages stop importing `db`: first batches   | #254, #256      | merged  |
-| 5.4   | Admin pages: agents, auto-responses, automations | #259            | merged  |
-| 5.4   | Categories, channels, invite, field options      | #266            | merged  |
-| 5.4   | The import page, with db tests                   | #272            | merged  |
-| 5.4   | Repo rule `page-db`: no `db/client` in page code | #277            | merged  |
-| 5.5   | One receive path for webhooks                    | #263            | merged  |
-| 5.6   | One `localeOf` and one `requestMeta`             | #251            | merged  |
-| 5.6   | One sign-in sequence for both forms              | #264            | merged  |
-| 6.1   | `TemplateOption` into `inbox/[number]/types.ts`  | #286            | merged  |
-| 6.2   | `lib/tickets/event-labels.ts`, with tests        | #288            | merged  |
-| 6.3   | `header.tsx` and `window-indicator.tsx`          | #290            | merged  |
-| 6.3   | `timeline.tsx`                                   | #291            | merged  |
-| 6.3   | `ticket-fields.tsx`, `Field` as `SidebarField`   | #293            | merged  |
-| 6.3   | `shipments-field.tsx` and `unlink-button.tsx`    | #294            | merged  |
-| 6.3   | `categories-field.tsx`                           | #295            | merged  |
-| 6.3   | `sidebar.tsx`, the last split                    | #297            | merged  |
-| 6.4   | `useFieldAction` for the sidebar's nine controls | #299            | merged  |
-| 6.4   | `TagField` shows a refused save                  | #300            | merged  |
-| 6.5   | One `SubmitButton` in `components/`              | #296            | merged  |
-| 6.5   | Reports header: `text-left` to `text-start`      | #298            | merged  |
-| 6.5   | Reports overview: the shared `Stat` and `Table`  | #301            | merged  |
-| 6.5   | Widget: `useMessageStream`                       | #302            | merged  |
-| 6.5   | Dashboard: six section components                | #303            | merged  |
-| 6.5   | Widget: `useHostBridge`                          | #304            | merged  |
-| 6.5   | Composer: the three forms in their own files     | #305            | merged  |
-| 6.5   | Widget: `useWidgetSession`                       | #306            | merged  |
-| 6.3   | List window badges on the shared clock           | #307            | merged  |
-| 6.x   | Client components (6.1–6.5)                      |                 | done    |
-| 7.1   | Type-aware lint over `lib/` and `worker/`        | #308            | merged  |
-| 7.2   | Layering through `no-restricted-imports`         | #309            | merged  |
-| 7.1   | Type-aware lint over `app/` too                  | #310            | merged  |
-| 7.3   | `no-console` as an error                         | #311            | merged  |
-| 7.4   | AGENTS.md conventions                            | #312            | open    |
-| 7     | Lint tightening, finish logging                  |                 | pending |
+| Stage | Item                                             | Branch / PR     | Status |
+| ----- | ------------------------------------------------ | --------------- | ------ |
+| 0.1   | Commit this plan                                 | #166            | merged |
+| 0.2   | Harden `server-actions` and minimum-count guards | #167            | merged |
+| 0.3   | Split `repo-rules.mjs` into per-rule modules     | #191–#192       | merged |
+| 0.4   | CI tidy-up                                       | #193–#195       | merged |
+| 0.5   | Remove Playwright                                | #173            | merged |
+| 1.1   | `lib/testing/` fixtures                          | #208, #210–#211 | merged |
+| 1.2   | Database test tier                               | #212–#213       | merged |
+| 1.3   | Characterise the seven ingest entry points       | #215–#218       | merged |
+| 1.4   | Webhook route tests                              | #196            | merged |
+| 1.5   | DB test for the admin overview's raw SQL         | #214            | merged |
+| 1.x   | Test gaps the 1.1 reviews found                  | #225–#226       | merged |
+| 2.1   | Email webhook dedupes before it verifies         | #168            | merged |
+| 2.2   | Portal agent replies bypass `carrierFor()`       | #169            | merged |
+| 2.3   | Contacts pages cannot scroll                     | #170            | merged |
+| 2.4   | `PermanentJobError`                              | #174            | merged |
+| 2.5   | Ids taken from `FormData`                        | #180–#182       | merged |
+| 2.6   | KB admin search does not escape LIKE             | #176            | merged |
+| 2.7   | One `GRAPH_VERSION`                              | #175            | merged |
+| 2.8   | Fetch timeouts, one provider per PR              | #184–#188       | merged |
+| 2.9   | Replies never get paragraphs (CRLF)              | #171            | merged |
+| 2.10  | Email webhook fails open without its secret      | #177            | merged |
+| 2.11  | Staging's `local` email webhook accepts anything | #177            | merged |
+| 2.12  | SLA escalations after a wait never fire          | #242            | merged |
+| 2.13  | Away agent with an open tab is never reclaimed   | #243            | merged |
+| 0–2   | Follow-ups to the reviews of #187–#196           | #203, #205      | merged |
+| 3     | Shared primitives (one row per PR as opened)     |                 | done   |
+| 3.1   | Queue helper: `hasActiveJob(type)`               | #197            | merged |
+| 3.2   | Email helpers: `buildReferences`, escaper name   | #198            | merged |
+| 3.3   | Shared constants: `TEAM_TIME_ZONE`               | #199            | merged |
+| 3.4   | Shared constants: proxy regex from `LOCALES`     | #200            | merged |
+| 3.5   | Constant-time compares through `safeEqual`       | #219            | merged |
+| 3.6   | Widget: shared shapes move to `lib/widget`       | #220            | merged |
+| 3.7   | Widget: one declaration of the postMessage names | #221            | merged |
+| 3.8   | `errorMessage()` for caught values               | #222            | merged |
+| 3.9   | HTTP helpers: rate limiter moves to `lib/http`   | #229            | merged |
+| 3.10  | HTTP helpers: `readJsonBody`                     | #230            | merged |
+| 3.11  | Vocabulary: priorities, categories, roles        | #231            | merged |
+| 3.12  | Action state: one `ok()`                         | #240            | merged |
+| 3.13  | FormData readers move to `lib/http/form-data.ts` | #241            | merged |
+| 3.13  | FormData readers: adoption in the action files   | #244–#246, #250 | merged |
+| 3.13  | The recipient's email through `text()`           | #273            | merged |
+| 3.14  | Logger: `lib/log.ts` and the first worker files  | #249, #253      | merged |
+| 3.14  | Logger: nine more files in `worker/` and `lib/`  | #261            | merged |
+| 3.14  | Logger: `lib/`                                   | #269            | merged |
+| 3.14  | Logger: the `app/` routes and the invite action  | #287            | merged |
+| 3.14  | `reply-actions.ts`: `text()` and the logger      | #289            | merged |
+| 4.1   | Split `lib/tickets/queries.ts`                   | #224            | merged |
+| 4.2   | Shared ingest steps                              | #232–#233, #235 | merged |
+| 4.3   | Meta Graph transport                             | #228            | merged |
+| 4.4   | Worker: typed payloads, backfill, KB import      | #236–9, #247–8  | merged |
+| 4.4   | Worker: payloads of the five hand-run backfills  | #252            | merged |
+| ⛳    | Gate: check in with the requester                |                 | done   |
+| 5.1   | `settings-actions.ts`: groups to canned          | #255, #257      | merged |
+| 5.1   | `settings-actions.ts`: auto-responses to SLA     | #258            | merged |
+| 5.1   | `settings-actions.ts`: skills to recipients      | #265            | merged |
+| 5.1   | `settings-actions.ts`: the last three, deleted   | #270            | merged |
+| 5.1   | `admin/actions.ts` split by domain, deleted      | #275            | merged |
+| 5.1   | `forms-shared.tsx` onto `lib/http/action-state`  | #279            | merged |
+| 5.2   | Console guards move to `lib/tickets`             | #260            | merged |
+| 5.2   | `availability-actions.ts`                        | #268            | merged |
+| 5.2   | `category-actions.ts`                            | #271            | merged |
+| 5.2   | `shipment-actions.ts`                            | #274            | merged |
+| 5.2   | `side-conversation-actions.ts`                   | #278            | merged |
+| 5.2   | `meta-actions.ts`                                | #280            | merged |
+| 5.2   | `reply-actions.ts`                               | #281            | merged |
+| 5.2   | `ticket-actions.ts` and `action-state.ts`        | #282            | merged |
+| 5.3   | `lib/tickets/agent-reply.ts`                     | #284            | merged |
+| 5.3   | `lib/tickets/status.ts`                          | #285            | merged |
+| 5.4   | Admin pages stop importing `db`: first batches   | #254, #256      | merged |
+| 5.4   | Admin pages: agents, auto-responses, automations | #259            | merged |
+| 5.4   | Categories, channels, invite, field options      | #266            | merged |
+| 5.4   | The import page, with db tests                   | #272            | merged |
+| 5.4   | Repo rule `page-db`: no `db/client` in page code | #277            | merged |
+| 5.5   | One receive path for webhooks                    | #263            | merged |
+| 5.6   | One `localeOf` and one `requestMeta`             | #251            | merged |
+| 5.6   | One sign-in sequence for both forms              | #264            | merged |
+| 6.1   | `TemplateOption` into `inbox/[number]/types.ts`  | #286            | merged |
+| 6.2   | `lib/tickets/event-labels.ts`, with tests        | #288            | merged |
+| 6.3   | `header.tsx` and `window-indicator.tsx`          | #290            | merged |
+| 6.3   | `timeline.tsx`                                   | #291            | merged |
+| 6.3   | `ticket-fields.tsx`, `Field` as `SidebarField`   | #293            | merged |
+| 6.3   | `shipments-field.tsx` and `unlink-button.tsx`    | #294            | merged |
+| 6.3   | `categories-field.tsx`                           | #295            | merged |
+| 6.3   | `sidebar.tsx`, the last split                    | #297            | merged |
+| 6.4   | `useFieldAction` for the sidebar's nine controls | #299            | merged |
+| 6.4   | `TagField` shows a refused save                  | #300            | merged |
+| 6.5   | One `SubmitButton` in `components/`              | #296            | merged |
+| 6.5   | Reports header: `text-left` to `text-start`      | #298            | merged |
+| 6.5   | Reports overview: the shared `Stat` and `Table`  | #301            | merged |
+| 6.5   | Widget: `useMessageStream`                       | #302            | merged |
+| 6.5   | Dashboard: six section components                | #303            | merged |
+| 6.5   | Widget: `useHostBridge`                          | #304            | merged |
+| 6.5   | Composer: the three forms in their own files     | #305            | merged |
+| 6.5   | Widget: `useWidgetSession`                       | #306            | merged |
+| 6.3   | List window badges on the shared clock           | #307            | merged |
+| 6.x   | Client components (6.1–6.5)                      |                 | done   |
+| 7.1   | Type-aware lint over `lib/` and `worker/`        | #308            | merged |
+| 7.2   | Layering through `no-restricted-imports`         | #309            | merged |
+| 7.1   | Type-aware lint over `app/` too                  | #310            | merged |
+| 7.3   | `no-console` as an error                         | #311            | merged |
+| 7.4   | AGENTS.md conventions                            | #312            | merged |
+| 7     | Lint tightening, finish logging (7.1–7.4)        |                 | done   |
 
 ### Handoff, 2026-09-27 07:00 UTC
 
@@ -240,10 +240,9 @@ subscribe to the open PRs again.
   them changes what the jobs accept, so it is its own PR. Found in #312's
   review; #312 records it in AGENTS.md.
 
-**State at 02:42 UTC, 2026-09-28.** #258–#291 and #293–#311 are merged. Open, each
-holding its files until it merges, besides this plan's own PR:
-
-- #312 (7.4): `AGENTS.md`.
+**State at 02:44 UTC, 2026-09-28.** #258–#291 and #293–#312 are merged. No PR
+holds a file besides this plan's own. Every stage of the plan is done; what is
+left is the findings outside the plan, above, each its own PR.
 
 **Next work.**
 
@@ -280,10 +279,9 @@ holding its files until it merges, besides this plan's own PR:
    promise that cannot reject left unmarked; #310 marked them with `void` and
    added `app/**` to the strict config, and merged. 7.2 (#309) merged. 7.3
    (#311) merged; `## Stage 7`, item 3, lists what it exempts, by file and by
-   line. 7.4 is #312. The database test tier was already in AGENTS.md, so it
-   adds the other four; its logging paragraph says `npm run lint` refuses
-   `console`, so it merges after #311, which has. Stage 7 is done when #312
-   merges.
+   line. 7.4 (#312) merged. The database test tier was already in AGENTS.md, so
+   it adds the other four; its logging paragraph says `npm run lint` refuses
+   `console`, so it merged after #311. Stage 7 is done.
 
 **Traps in this container.**
 
