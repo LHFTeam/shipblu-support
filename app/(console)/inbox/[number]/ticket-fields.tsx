@@ -77,10 +77,12 @@ export function FieldSelect({
 
 export function TagField({ conversationId, tags }: { conversationId: string; tags: string[] }) {
   const [value, setValue] = useState(tags.join(', '));
-  // Still re-read on a refusal, as it always has been: the one change here is
-  // that the refusal is shown. It used to be dropped, so a save that failed on
+  // Re-read on success only, like the other fields. The one refusal a tag save
+  // can meet is "Ticket not found", and the page's own read fails on the same
+  // conditions — re-reading on it would swap the page for a 404 before the
+  // line below could be read. It used to be dropped, so a save that failed on
   // blur looked exactly like one that worked.
-  const { pending: saving, error, run } = useFieldAction(updateTicket, { refresh: 'always' });
+  const { pending: saving, error, run } = useFieldAction(updateTicket);
 
   async function save() {
     if (value === tags.join(', ')) return;
