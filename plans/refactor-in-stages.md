@@ -219,9 +219,9 @@ it.
 
 - `htmlToText` writes headings in capitals. Production has 8 English excerpts
   and 1 Arabic excerpt that start that way. Fixed in #321. The stored text
-  changes only when `normalise_kb_formatting` runs after the deploy, which now
-  also rebuilds `body_text` and `excerpt` when the body needs nothing: run it
-  with `dryRun=true` first.
+  changes only when `normalise_kb_formatting` runs after the deploy. #321 made
+  that job also rebuild `body_text` and `excerpt` when the body needs no
+  change. Run it with `dryRun=true` first.
 - `restoreVersion` does not write `excerpt`. Fixed in #320. Production had no
   stale excerpt, so there was nothing to repair.
 - The reports overview prints "7/30/90 days", not the dates of the window it
@@ -253,7 +253,7 @@ it.
   and #316 fixed it there (the history's start has no lower bound); this page
   still has it. Found in #316's review. Fixed in #319.
 
-**State at 09:00 UTC, 2026-09-28.** #258–#321 are merged. No PR holds a file
+**State at 08:58 UTC, 2026-09-28.** #258–#321 are merged. No PR holds a file
 besides this plan's own. Every stage of the plan is done, and every finding
 outside it is fixed. #319–#321 are not deployed by this session; the one step
 left after their deploy is the `normalise_kb_formatting` run for #321.
