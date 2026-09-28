@@ -82,7 +82,7 @@ export function KnowledgePanel({
   useEffect(() => {
     if (!open || !searchable || current) return;
 
-    const timer = setTimeout(async () => {
+    const search = async () => {
       inFlight.current?.abort();
       const controller = new AbortController();
       inFlight.current = controller;
@@ -105,7 +105,11 @@ export function KnowledgePanel({
         if ((error as Error).name === 'AbortError') return;
         setAnswer({ key, hits: [], failed: true });
       }
-    }, DEBOUNCE_MS);
+    };
+
+    // `void` because the promise cannot reject: every failure is caught above
+    // and becomes state.
+    const timer = setTimeout(() => void search(), DEBOUNCE_MS);
 
     return () => clearTimeout(timer);
   }, [open, searchable, current, key, trimmed, locale]);

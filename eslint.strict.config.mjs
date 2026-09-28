@@ -12,12 +12,13 @@ import base from './eslint.config.mjs';
 //
 // The plan started them as warnings, to be promoted a directory at a time once
 // each was clean (plans/refactor-in-stages.md, Stage 7). Measured, `lib/**` and
-// `worker/**` had nothing to report, so they start at `error`. `app/**` joins
-// once its two findings are fixed.
+// `worker/**` had nothing to report, so they start at `error`. `app/**` joined
+// once its two findings — both a promise that cannot reject, left unmarked — were
+// fixed.
 const config = [
   ...base,
   {
-    files: ['lib/**/*.ts', 'lib/**/*.tsx', 'worker/**/*.ts'],
+    files: ['lib/**/*.ts', 'lib/**/*.tsx', 'worker/**/*.ts', 'app/**/*.ts', 'app/**/*.tsx'],
     languageOptions: {
       parserOptions: {
         projectService: true,

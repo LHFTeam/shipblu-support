@@ -61,7 +61,7 @@ npm run job -- cleanup         # run one scheduled job by hand
 | `npm run test:db`                 | The database tier, `*.db.test.ts`        |
 | `npm run typecheck`               | `tsc --noEmit`                           |
 | `npm run lint`                    | ESLint (flat config)                     |
-| `npm run lint:strict`             | Type-aware ESLint over `lib/`, `worker/` |
+| `npm run lint:strict`             | Type-aware ESLint over the source tree   |
 | `npm run format` / `format:check` | Prettier                                 |
 | `npm run build`                   | Next production build                    |
 | `npm run db:generate`             | Generate a migration from schema changes |
@@ -99,9 +99,9 @@ npm run lint:strict
 node scripts/ci/repo-rules.mjs
 ```
 
-`lint:strict` is `eslint.strict.config.mjs`: the type-aware rules — floating
-and misused promises, `await` on a non-promise, a switch that no longer covers
-its union — over `lib/` and `worker/`. They are kept out of `lint` because
+`lint:strict` is `eslint.strict.config.mjs`: the type-aware rules — floating and
+misused promises, `await` on a non-promise, a switch that no longer covers its
+union — over `lib/`, `worker/` and `app/`. They are kept out of `lint` because
 reading the whole program is what makes them slow. A `default` arm counts as
 covering a switch, because it is somebody's decision about the unknown case.
 

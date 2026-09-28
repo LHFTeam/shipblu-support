@@ -467,7 +467,9 @@ function useOlderPages({
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) latest.current();
+        // `void` because `loadMore` cannot reject: a failed page becomes the
+        // list's error state.
+        if (entries.some((entry) => entry.isIntersecting)) void latest.current();
       },
       // Fires before the sentinel is actually on screen, so the next page is
       // usually already there by the time the agent scrolls to it.
