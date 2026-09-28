@@ -77,7 +77,12 @@ export function FieldSelect({
 
 export function TagField({ conversationId, tags }: { conversationId: string; tags: string[] }) {
   const [value, setValue] = useState(tags.join(', '));
-  const { pending: saving, run } = useFieldAction(updateTicket, { refresh: 'always' });
+  // Re-read on success only, like the other fields. The one refusal a tag save
+  // can meet is "Ticket not found", and the page's own read fails on the same
+  // conditions — re-reading on it would swap the page for a 404 before the
+  // line below could be read. It used to be dropped, so a save that failed on
+  // blur looked exactly like one that worked.
+  const { pending: saving, error, run } = useFieldAction(updateTicket);
 
   async function save() {
     if (value === tags.join(', ')) return;
@@ -85,14 +90,17 @@ export function TagField({ conversationId, tags }: { conversationId: string; tag
   }
 
   return (
-    <input
-      value={value}
-      disabled={saving}
-      onChange={(e) => setValue(e.target.value)}
-      onBlur={save}
-      placeholder="comma, separated"
-      className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-sm outline-none focus:border-brand-500"
-    />
+    <>
+      <input
+        value={value}
+        disabled={saving}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={save}
+        placeholder="comma, separated"
+        className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-sm outline-none focus:border-brand-500"
+      />
+      {error ? <p className="mt-1 text-xs text-red-600">{error}</p> : null}
+    </>
   );
 }
 
