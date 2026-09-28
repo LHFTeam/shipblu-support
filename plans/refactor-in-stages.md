@@ -187,10 +187,11 @@ and two sessions claiming different rows then conflict on all of them.
 | 6.5   | Widget: `useHostBridge`                          | #304            | merged  |
 | 6.5   | Composer: the three forms in their own files     | #305            | merged  |
 | 6.5   | Widget: `useWidgetSession`                       | #306            | merged  |
-| 6.3   | List window badges on the shared clock           | #307            | open    |
+| 6.3   | List window badges on the shared clock           | #307            | merged  |
 | 6.x   | Client components (6.1–6.5)                      |                 | done    |
 | 7.1   | Type-aware lint over `lib/` and `worker/`        | #308            | merged  |
 | 7.2   | Layering through `no-restricted-imports`         | #309            | open    |
+| 7.1   | Type-aware lint over `app/` too                  | #310            | open    |
 | 7     | Lint tightening, finish logging                  |                 | pending |
 
 ### Handoff, 2026-09-27 07:00 UTC
@@ -231,13 +232,12 @@ subscribe to the open PRs again.
   header does not. `InboxRow` carries no `externalId`, so the fix is in the
   list query. Older than #307, which kept it.
 
-**State at 02:14 UTC, 2026-09-28.** #258–#291, #293–#306 and #308 are merged.
-Open, each holding its files until it merges, besides this plan's own PR:
+**State at 02:19 UTC, 2026-09-28.** #258–#291 and #293–#308 are merged. Open,
+each holding its files until it merges, besides this plan's own PR:
 
-- #307 (6.3, behaviour change): `inbox/list.tsx`,
-  `inbox/[number]/window-indicator.tsx`, `components/use-now.ts` and the new
-  `components/use-now.test.ts`.
 - #309 (7.2): `eslint.config.mjs` and `AGENTS.md`.
+- #310 (7.1, `app/`): `eslint.strict.config.mjs`, `package.json`, `AGENTS.md`,
+  `inbox/list.tsx` and `inbox/[number]/knowledge.tsx`.
 
 **Next work.**
 
@@ -249,14 +249,13 @@ Open, each holding its files until it merges, besides this plan's own PR:
    list's `WhatsAppWindow` and `MetaWindow` in `inbox/list.tsx` stay for now:
    they are compact, show nothing while the window is unremarkable, and read
    the clock at render, so folding them into `window-indicator.tsx` changes
-   what the list shows. That is #307, marked as a behaviour change.
+   what the list shows. That was #307, a behaviour change, now merged.
 4. 3.13: done (#289). 6.5's `SubmitButton`: done (#296). The reports page's
    RTL fix (#298) and the swap to the shared `Stat` and `Table` (#301) merged.
    The widget's `useMessageStream` (#302) and `useHostBridge` (#304) merged;
    so did `useWidgetSession` (#306), the last of the three. The dashboard's
    sections (#303) and the composer's forms (#305) merged. So Stage 6 is done,
-   and Stage 7 has started; #307, the list's window badges (item 3), can land
-   beside it.
+   and Stage 7 has started.
 5. Logger. Three places in `worker/` stay on `console`, because a move would
    change what they print:
    - `check-meta-permissions` and `test-comment-permission`: their lines start
@@ -270,10 +269,10 @@ Open, each holding its files until it merges, besides this plan's own PR:
    `worker/`. `lib/` and `app/` are done.
 
 6. Stage 7.1 (#308) merged. Measured, `lib/` and `worker/` had no findings, so
-   the rules start at `error` in a blocking job, not as warnings. `app/` has two
-   findings, `inbox/[number]/knowledge.tsx:85` and `inbox/list.tsx:471`; the PR
-   that fixes them and adds `app/**` to `eslint.strict.config.mjs` waits for
-   #307, which holds `inbox/list.tsx`. 7.2 is #309. 7.3 (`no-console`) edits the
+   the rules start at `error` in a blocking job, not as warnings. `app/` had two
+   findings, `inbox/[number]/knowledge.tsx:85` and `inbox/list.tsx:471`, both a
+   promise that cannot reject left unmarked; #310 marks them with `void` and
+   adds `app/**` to the strict config. 7.2 is #309. 7.3 (`no-console`) edits the
    same block of `eslint.config.mjs`, so it waits for #309.
 
 **Traps in this container.**
@@ -1020,8 +1019,8 @@ The pieces become kebab-case siblings, the way `comment-moderation.tsx` and
      `switch-exhaustiveness-check`.
    - The first plan was warnings in a non-blocking job, promoted a directory at
      a time. Measured, `lib/**` and `worker/**` were clean, so they start at
-     `error` as a step of the blocking `verify` job (#308). `app/**` joins once
-     its two findings are fixed.
+     `error` as a step of the blocking `verify` job (#308). `app/**` joins in
+     #310, which fixes its two findings.
 2. **Layering, through `no-restricted-imports`.**
    - `lib/` and `worker/` may not import `@/app/*`.
    - `components/` may not import `@/db/*`.
