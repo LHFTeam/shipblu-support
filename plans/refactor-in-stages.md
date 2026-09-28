@@ -137,6 +137,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 3.14  | Logger: `lib/log.ts` and the first worker files  | #249, #253      | merged  |
 | 3.14  | Logger: nine more files in `worker/` and `lib/`  | #261            | merged  |
 | 3.14  | Logger: `lib/`                                   | #269            | merged  |
+| 3.14  | Logger: the `app/` routes and the invite action  | #287            | open    |
 | 4.1   | Split `lib/tickets/queries.ts`                   | #224            | merged  |
 | 4.2   | Shared ingest steps                              | #232–#233, #235 | merged  |
 | 4.3   | Meta Graph transport                             | #228            | merged  |
@@ -167,6 +168,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 5.5   | One receive path for webhooks                    | #263            | merged  |
 | 5.6   | One `localeOf` and one `requestMeta`             | #251            | merged  |
 | 5.6   | One sign-in sequence for both forms              | #264            | merged  |
+| 6.1   | `TemplateOption` into `inbox/[number]/types.ts`  | #286            | open    |
 | 6.x   | Client components                                |                 | pending |
 | 7     | Lint tightening, finish logging                  |                 | pending |
 
@@ -176,7 +178,7 @@ The session that opened #233–#241 stopped here because of its usage limit. It
 unsubscribed from its PRs and deleted its hourly check-in. The next session must
 subscribe to the open PRs again.
 
-**State at 00:22 UTC.** #258–#282 are merged. Open, each holding its files until
+**State at 00:27 UTC.** #258–#282 are merged. Open, each holding its files until
 it merges:
 
 - #284 (5.3, `lib/tickets/agent-reply.ts`): `(console)/reply-actions.ts`,
@@ -184,13 +186,19 @@ it merges:
 - #285 (5.3, `lib/tickets/status.ts`): `(console)/ticket-actions.ts`,
   `lib/tickets/console-guards.ts`, `lib/tickets/status.ts` and
   `lib/tickets/status.db.test.ts`.
+- #286 (6.1): `composer.tsx`, `view.tsx` and the new `types.ts` under
+  `inbox/[number]/`.
+- #287 (3.14, logger in `app/`): `api/widget/stream/route.ts`,
+  `api/events/route.ts`, `api/presence/route.ts`, the `meta`, `whatsapp` and
+  `email/[provider]` webhook routes, and `admin/agents/actions.ts`.
 
 **Next work.**
 
 1. 5.1: done.
 2. 5.4: done.
-3. 5.2: done. 5.3: done once #284 and #285 merge. Then Stage 6, starting with
-   6.1 (`TemplateOption` into `inbox/[number]/types.ts`).
+3. 5.2: done. 5.3: done once #284 and #285 merge. 6.1 is #286. 6.2
+   (`describeEvent` and `SKIP_REASONS` into `lib/tickets/event-labels.ts`)
+   waits for #286, because both edit `view.tsx`.
 4. Logger. Three places in `worker/` stay on `console`, because a move would
    change what they print:
    - `check-meta-permissions` and `test-comment-permission`: their lines start
@@ -201,7 +209,8 @@ it merges:
    Stage 7's `no-console` must list them as exceptions, or a PR must change
    their output on purpose. `worker/run-job.ts` is the exception Stage 7
    already names. Those four files are every `console` call left in
-   `worker/`. Then `lib/`, then `app/`.
+   `worker/`. `lib/` is done. `app/` is #287, except the one call in
+   `reply-actions.ts`, which moves once #284 merges.
 
 **Traps found since.**
 
