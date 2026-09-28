@@ -1,15 +1,32 @@
 'use client';
 
 import { useEffect, type Dispatch, type RefObject, type SetStateAction } from 'react';
+import { isFromHost } from '@/lib/widget/host-message';
 import { HOST_SAYS, SOURCE, WIDGET_SAYS } from '@/lib/widget/protocol';
 import type { Message, WidgetView } from '@/lib/widget/types';
 
+/**
+ * The host page's origin, once it has said something that passed
+ * `isFromHost`. Null until then.
+ *
+ * Learned rather than guessed. The widget cannot know which of its allowed
+ * origins framed it, and reading it off `document.referrer` or
+ * `location.ancestorOrigins` is a guess that fails silently — a referrer
+ * policy strips one and Firefox has not got the other, and a message posted to
+ * the wrong origin is simply dropped, taking the unread badge with it. The host
+ * answers `hello` straight away, so this is known within one round trip.
+ */
+let hostOrigin: string | null = null;
+
 /** A message to the page that embeds the widget. */
 export function postToHost(message: Record<string, unknown>) {
-  // '*' is correct here and only here: the widget does not know which origin
-  // embedded it, and the payload carries nothing secret — an unread count.
-  // The host's listener checks *our* origin, which is the half that matters.
-  window.parent?.postMessage({ source: SOURCE.widget, ...message }, '*');
+  // To the origin the host spoke from, once it has; before that — the `hello`
+  // that asks it to, and any unread count posted while that is in flight —
+  // to '*'. That was never a leak: nothing sent is secret, `frame-ancestors`
+  // keeps the frame out of pages not on the list, and the host's listener
+  // checks *our* origin. Naming the origin is defence in depth: once known, a
+  // message goes only to the page that proved it is the host.
+  window.parent?.postMessage({ source: SOURCE.widget, ...message }, hostOrigin ?? '*');
 }
 
 /**
@@ -66,16 +83,19 @@ export function useHostBridge({
 
   useEffect(() => {
     const onHostMessage = (event: MessageEvent) => {
-      /*
-       * The origin check, not the `source` tag, is what makes the rest of this
-       * safe: `parent.frames` is reachable from any other frame on the host
-       * page, so anything embedded alongside us could otherwise identify the
-       * visitor as somebody else or wipe their session. Our own origin is
-       * allowed because the help centre serves the snippet itself and frames
-       * itself.
-       */
-      if (event.origin !== window.location.origin && !hostOrigins.includes(event.origin)) return;
-      if (event.data?.source !== SOURCE.host) return;
+      // The origin, the sender and the tag — `isFromHost` says why each. Any
+      // other frame on the host page could otherwise identify the visitor as
+      // somebody else or wipe their session.
+      if (
+        !isFromHost(event, {
+          parent: window.parent,
+          ownOrigin: window.location.origin,
+          hostOrigins,
+        })
+      ) {
+        return;
+      }
+      hostOrigin = event.origin;
 
       if (event.data.type === HOST_SAYS.opened) setPanelOpen(true);
       if (event.data.type === HOST_SAYS.closed) setPanelOpen(false);
