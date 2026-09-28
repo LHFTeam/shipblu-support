@@ -66,6 +66,7 @@ export async function backfillCategoriseAi(job: ClaimedJob): Promise<void> {
   const withContext = payload.context !== false;
 
   if (payload.reportOnly === true) {
+    // eslint-disable-next-line no-console -- the report is a multi-line block with no tag
     console.log(formatReport(await reportFor(runLabel)));
     return;
   }
@@ -88,6 +89,7 @@ export async function backfillCategoriseAi(job: ClaimedJob): Promise<void> {
     // taxonomy, so bailing out here would skip exactly the SQL it is there to
     // prove. `tsc` type-checks the drizzle builder, not the statement it emits.
     log.info(`no active detectable categories in ticket_categories — nothing to ask`);
+    // eslint-disable-next-line no-console -- the report is a multi-line block with no tag
     console.log(formatReport(await reportFor(runLabel)));
     return;
   }
@@ -154,6 +156,7 @@ export async function backfillCategoriseAi(job: ClaimedJob): Promise<void> {
     `run="${runLabel}" scanned=${scanned} predicted=${predicted} failed=${failed} ` +
       `context=${withContext} dry_run=${dryRun}`,
   );
+  // eslint-disable-next-line no-console -- the report is a multi-line block with no tag
   console.log(formatReport(await reportFor(runLabel)));
 
   if (failed > 0) {

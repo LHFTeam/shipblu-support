@@ -39,7 +39,34 @@ const config = [
         'error',
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
       ],
+      // Everything logs through `logger(tag)` in lib/log.ts, whose `[tag]`
+      // prefix is what Render's log search and docs/PROJECT-STATE.md quote. A
+      // bare `console.*` is a line nobody can find by its tag.
+      'no-console': 'error',
     },
+  },
+  // Where `console` is the point, not a shortcut. Each entry names a file, so a
+  // new module beside one of them is still checked; `scripts/**` is the one
+  // directory, because everything in it is a command-line script. A single
+  // call site that must stay takes an `eslint-disable-next-line` with its reason
+  // instead of putting its whole file here.
+  {
+    files: [
+      // The logger itself.
+      'lib/log.ts',
+      // Prints a raw delivery, redacted, in its own multi-line-safe shape.
+      'lib/webhooks/log.ts',
+      // Command-line entry points: their output is the terminal's.
+      'scripts/**',
+      'db/migrate.ts',
+      'db/seed.ts',
+      'worker/run-job.ts',
+      // Hand-run diagnostics whose output is a report, with untagged and
+      // blank-line-led lines that a logger would change.
+      'worker/handlers/check-meta-permissions.ts',
+      'worker/handlers/test-comment-permission.ts',
+    ],
+    rules: { 'no-console': 'off' },
   },
   // Layering. `lib/` is where the logic lives so that a page, an action and a
   // job all reach the same code; a `lib/` or `worker/` module importing from

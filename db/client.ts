@@ -160,6 +160,7 @@ function deadline<T>(query: T, timeoutMs: number): T {
   // recovery is another.
   if (inFlight >= POOL_MAX && !atCeiling) {
     atCeiling = true;
+    // eslint-disable-next-line no-console -- moves with the pool instrumentation fix (plans/refactor-in-stages.md, Out of scope)
     console.warn(`[db] ${inFlight} queries in flight against max ${POOL_MAX}`);
   }
 
@@ -170,6 +171,7 @@ function deadline<T>(query: T, timeoutMs: number): T {
     inFlight -= 1;
     if (atCeiling && inFlight < POOL_MAX) {
       atCeiling = false;
+      // eslint-disable-next-line no-console -- moves with the pool instrumentation fix (plans/refactor-in-stages.md, Out of scope)
       console.warn(`[db] pool pressure cleared, ${inFlight} in flight`);
     }
   };

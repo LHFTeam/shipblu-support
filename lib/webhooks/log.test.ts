@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { setTestEnv, withTestEnv } from '@/lib/testing/env';
 import { describeIncomingWebhook, logIncomingWebhook, shouldLogIncomingWebhooks } from './log';
 
@@ -34,16 +34,13 @@ describe('shouldLogIncomingWebhooks', () => {
   it('prints nothing while off, whatever it is handed', () => {
     setTestEnv({ LOG_ALL_INCOMING_WEBHOOKS: undefined });
 
-    const written: unknown[] = [];
-    const original = console.log;
-    console.log = (...args: unknown[]) => void written.push(args);
+    const print = vi.spyOn(console, 'log').mockImplementation(() => {});
     try {
       logIncomingWebhook(delivery());
+      expect(print).not.toHaveBeenCalled();
     } finally {
-      console.log = original;
+      print.mockRestore();
     }
-
-    expect(written).toEqual([]);
   });
 });
 
