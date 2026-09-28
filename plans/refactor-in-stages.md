@@ -214,7 +214,8 @@ subscribe to the open PRs again.
   merged, restart the branch from `main` and open a new plan PR.
 - The requester wants replies in ASD Simplified Technical English (STE100).
 
-**Findings outside the plan.** None is fixed.
+**Findings outside the plan.** Each is open unless it names the PR that fixed
+it.
 
 - `htmlToText` writes headings in capitals. Production has 8 English excerpts
   and 1 Arabic excerpt that start that way.
@@ -238,7 +239,7 @@ subscribe to the open PRs again.
   `z.object`, not `z.strictObject`, so a mistyped option is dropped and the
   default runs: `backfill_meta_profiles limt=50` walks every contact. Switching
   them changes what the jobs accept, so it is its own PR. Found in #312's
-  review; #312 records it in AGENTS.md.
+  review. Fixed in #313.
 
 **State at 02:44 UTC, 2026-09-28.** #258–#291 and #293–#312 are merged. No PR
 holds a file besides this plan's own. Every stage of the plan is done; what is
