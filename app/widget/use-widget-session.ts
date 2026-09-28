@@ -9,10 +9,9 @@ import {
   type RefObject,
   type SetStateAction,
 } from 'react';
+import { clearToken, readToken, writeToken } from '@/lib/widget/token-store';
 import { initialView } from '@/lib/widget/view';
 import type { Message, WidgetView } from '@/lib/widget/types';
-
-const STORAGE_KEY = 'shipblu.widget.token';
 
 /**
  * The visitor's session with the widget: the token, the transcript it owns, and
@@ -88,7 +87,7 @@ export function useWidgetSession({
    * the moment they choose to talk to somebody, which is `ensureSession` below.
    */
   useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY);
+    const stored = readToken();
     if (!stored) return;
 
     void fetch('/api/widget/session', {
@@ -99,7 +98,7 @@ export function useWidgetSession({
       .then((response) => (response.ok ? response.json() : null))
       .then((data) => {
         if (!data) return;
-        localStorage.setItem(STORAGE_KEY, data.token);
+        writeToken(data.token);
         activeTokenRef.current = data.token;
         setToken(data.token);
         setConversationId(data.conversationId);
@@ -145,7 +144,7 @@ export function useWidgetSession({
     if (minting.current) return minting.current;
 
     const request = (async () => {
-      const stored = localStorage.getItem(STORAGE_KEY) ?? '';
+      const stored = readToken() ?? '';
 
       const data = await fetch('/api/widget/session', {
         method: 'POST',
@@ -157,7 +156,7 @@ export function useWidgetSession({
 
       if (!data) return null;
 
-      localStorage.setItem(STORAGE_KEY, data.token);
+      writeToken(data.token);
       activeTokenRef.current = data.token;
       setToken(data.token);
       setConversationId(data.conversationId);
@@ -192,7 +191,7 @@ export function useWidgetSession({
    * `sendIdentity` attaches it to whatever token comes next.
    */
   const startFreshSession = useCallback(() => {
-    localStorage.removeItem(STORAGE_KEY);
+    clearToken();
     activeTokenRef.current = null;
     identified.current = null;
     seenCountRef.current = 0;
