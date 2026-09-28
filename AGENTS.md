@@ -184,6 +184,11 @@ under `app/` except server actions, `route.ts` handlers and tests (`page-db`).
 `app/probe/page.tsx` is the one exception, because reaching the database from a
 page is what the render probe tests.
 
+The layers point one way, and `npm run lint` holds them: `lib/` and `worker/`
+never import from `app/`, and `components/` never import from `db/` — not even a
+type, since a component that needs a row's shape can take it from the `lib/`
+function that reads it.
+
 **A page under `(console)` outside `admin/` brings its own scroll container.**
 The shell is `h-dvh overflow-hidden` so the inbox can own the full height and
 manage its own panes, which means a page that does not open an
