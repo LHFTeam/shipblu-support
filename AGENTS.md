@@ -256,7 +256,9 @@ beside it — answer with `app/(console)/action-state.ts`, the same state plus a
 `message`, kept outside every `'use server'` file so a component can name the
 type without importing an action module. Admin settings actions answer with
 `SettingsState` / `AdminState` from `admin/settings-shared.ts`, a plain module
-for the same reason; anything else uses `lib/http/action-state.ts` directly.
+for the same reason. The rest define a state of their own: `contacts/` and `kb/`
+build theirs on `lib/http`'s `ActionState`, and the sign-in, availability and
+new-ticket forms and the three help-centre forms have shapes of their own.
 
 **Authorisation lives in code.** `proxy.ts` only checks that a session cookie
 exists; it cannot tell a revoked session from a live one. It runs on Node.js in
@@ -349,8 +351,11 @@ wrong shape does not compile, and the handler reads the row with
 `z.strictObject` for any job an operator runs through `npm run job`, and always
 for one with a `dryRun`: a mistyped key is then refused, where `z.object` drops
 it and `dryrun=true` becomes a run that writes. `z.object` is for payloads only
-code writes. A type with no entry still takes any object, so the entry is a
-convention the compiler does not force.
+code writes. Four operator-run schemas are older than that rule and still use
+`z.object` — `backfill_meta_profiles` (the example above),
+`sync_stale_shipments`, `rollup_metrics` and `sync_shipment`; none takes a
+`dryRun`, and none is the one to copy. A type with no entry still takes any
+object, so the entry is a convention the compiler does not force.
 
 **`PermanentJobError` is for a failure no retry can fix**, and it sends the job
 to `dead` on its first attempt instead of spending the rest. That means input
