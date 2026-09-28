@@ -1,7 +1,8 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { ChannelBadge } from '@/components/channel';
-import { EmptyState } from '@/components/ui';
+import { Stat } from '@/components/charts';
+import { Cell, EmptyState, Row, Table } from '@/components/ui';
 import { requireAgent } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
 import { channelLabel } from '@/lib/format';
@@ -15,7 +16,7 @@ import {
   formatDuration,
   metPercentage,
   totals,
-  type Row,
+  type Row as ReportRow,
 } from '@/lib/reports/queries';
 
 export const dynamic = 'force-dynamic';
@@ -165,17 +166,26 @@ export default async function ReportsPage({
 
           <section className="mb-8">
             <h2 className="mb-2 text-sm font-medium opacity-70">By day</h2>
-            <Table
-              head={['Day', 'Created', 'Resolved', 'First response', 'Resolution', 'CSAT']}
-              rows={series.map((row) => [
-                row.day,
-                row.ticketsCreated.toLocaleString(),
-                row.ticketsResolved.toLocaleString(),
-                formatDuration(averageSeconds(row.firstResponseSecondsSum, row.firstResponseCount)),
-                formatDuration(averageSeconds(row.resolutionSecondsSum, row.resolutionCount)),
-                averageRating(row.csatRatingSum, row.csatResponseCount)?.toFixed(1) ?? '—',
-              ])}
-            />
+            <Table head={['Day', 'Created', 'Resolved', 'First response', 'Resolution', 'CSAT']}>
+              {series.map((row) => (
+                <Row key={row.day}>
+                  <Cell className="font-medium">{row.day}</Cell>
+                  <Cell>{row.ticketsCreated.toLocaleString()}</Cell>
+                  <Cell>{row.ticketsResolved.toLocaleString()}</Cell>
+                  <Cell>
+                    {formatDuration(
+                      averageSeconds(row.firstResponseSecondsSum, row.firstResponseCount),
+                    )}
+                  </Cell>
+                  <Cell>
+                    {formatDuration(averageSeconds(row.resolutionSecondsSum, row.resolutionCount))}
+                  </Cell>
+                  <Cell>
+                    {averageRating(row.csatRatingSum, row.csatResponseCount)?.toFixed(1) ?? '—'}
+                  </Cell>
+                </Row>
+              ))}
+            </Table>
           </section>
         </>
       )}
@@ -187,23 +197,13 @@ function percentage(value: number | null): string {
   return value === null ? '—' : `${value}%`;
 }
 
-function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
-  return (
-    <div className="rounded-lg border border-[var(--border)] p-4">
-      <p className="text-xs opacity-60">{label}</p>
-      <p className="mt-1 text-2xl font-semibold">{value}</p>
-      {hint ? <p className="mt-0.5 text-xs opacity-40">{hint}</p> : null}
-    </div>
-  );
-}
-
 function Breakdown({
   title,
   rows,
   marks,
 }: {
   title: string;
-  rows: Row[];
+  rows: ReportRow[];
   /** Optional per-row element shown instead of the plain label. */
   marks?: Record<string, React.ReactNode>;
 }) {
@@ -212,49 +212,26 @@ function Breakdown({
   return (
     <section className="mb-8">
       <h2 className="mb-2 text-sm font-medium opacity-70">{title}</h2>
-      <Table
-        head={['', 'Created', 'Resolved', 'First response', 'Within SLA', 'CSAT']}
-        rows={rows.map((row) => [
-          marks?.[row.label] ?? row.label,
-          row.ticketsCreated.toLocaleString(),
-          row.ticketsResolved.toLocaleString(),
-          formatDuration(averageSeconds(row.firstResponseSecondsSum, row.firstResponseCount)),
-          percentage(metPercentage(row.slaFirstResponseMet, row.slaFirstResponseBreached)),
-          averageRating(row.csatRatingSum, row.csatResponseCount)?.toFixed(1) ?? '—',
-        ])}
-      />
+      <Table head={['', 'Created', 'Resolved', 'First response', 'Within SLA', 'CSAT']}>
+        {/* Keyed by position, as the page always was: a label is a display name,
+            and two agents can share one. */}
+        {rows.map((row, index) => (
+          <Row key={index}>
+            <Cell className="font-medium">{marks?.[row.label] ?? row.label}</Cell>
+            <Cell>{row.ticketsCreated.toLocaleString()}</Cell>
+            <Cell>{row.ticketsResolved.toLocaleString()}</Cell>
+            <Cell>
+              {formatDuration(averageSeconds(row.firstResponseSecondsSum, row.firstResponseCount))}
+            </Cell>
+            <Cell>
+              {percentage(metPercentage(row.slaFirstResponseMet, row.slaFirstResponseBreached))}
+            </Cell>
+            <Cell>
+              {averageRating(row.csatRatingSum, row.csatResponseCount)?.toFixed(1) ?? '—'}
+            </Cell>
+          </Row>
+        ))}
+      </Table>
     </section>
-  );
-}
-
-function Table({ head, rows }: { head: string[]; rows: React.ReactNode[][] }) {
-  return (
-    <div className="overflow-x-auto rounded-lg border border-[var(--border)]">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-[var(--border)] text-start">
-            {head.map((cell, index) => (
-              <th
-                key={cell || index}
-                className="px-3 py-2 text-start text-xs font-medium opacity-60"
-              >
-                {cell}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, index) => (
-            <tr key={index} className="border-b border-[var(--border)] last:border-0">
-              {row.map((cell, index) => (
-                <td key={index} className={`px-3 py-2 ${index === 0 ? 'font-medium' : ''}`}>
-                  {cell}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
   );
 }
