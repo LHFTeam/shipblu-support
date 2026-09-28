@@ -226,12 +226,17 @@ subscribe to the open PRs again.
 - The widget reads and writes `localStorage` with no `try/catch`. In a
   third-party iframe with storage blocked, the resume effect, `ensureSession`
   and `startFreshSession` throw. Older than #306, which only moved them.
+- The inbox list shows the Meta window badge on Facebook and Instagram comment
+  tickets, which are answered on the comment edge and have no window; the
+  header does not. `InboxRow` carries no `externalId`, so the fix is in the
+  list query. Older than #307, which kept it.
 
-**State at 02:07 UTC, 2026-09-28.** #258–#291 and #293–#306 are merged. Open,
+**State at 02:10 UTC, 2026-09-28.** #258–#291 and #293–#306 are merged. Open,
 each holding its files until it merges, besides this plan's own PR:
 
-- #307 (6.3, behaviour change): `inbox/list.tsx` and
-  `inbox/[number]/window-indicator.tsx`.
+- #307 (6.3, behaviour change): `inbox/list.tsx`,
+  `inbox/[number]/window-indicator.tsx`, `components/use-now.ts` and the new
+  `components/use-now.test.ts`.
 - #308 (7.1): `eslint.strict.config.mjs` (new), `package.json`,
   `package-lock.json`, `.github/workflows/ci.yml` and `AGENTS.md`.
 - #309 (7.2): `eslint.config.mjs` and `AGENTS.md`.
