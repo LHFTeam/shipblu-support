@@ -231,7 +231,7 @@ subscribe to the open PRs again.
   header does not. `InboxRow` carries no `externalId`, so the fix is in the
   list query. Older than #307, which kept it.
 
-**State at 02:10 UTC, 2026-09-28.** #258–#291 and #293–#306 are merged. Open,
+**State at 02:11 UTC, 2026-09-28.** #258–#291 and #293–#306 are merged. Open,
 each holding its files until it merges, besides this plan's own PR:
 
 - #307 (6.3, behaviour change): `inbox/list.tsx`,
@@ -274,8 +274,8 @@ each holding its files until it merges, besides this plan's own PR:
 6. Stage 7.1 is #308. Measured, `lib/` and `worker/` had no findings, so the
    rules start at `error` in a blocking job, not as warnings. `app/` has two
    findings, `inbox/[number]/knowledge.tsx:85` and `inbox/list.tsx:471`; the
-   PR that fixes them and adds `app/**` to the config waits for #307 and
-   #308, which hold those files. 7.2 is #309. 7.3 (`no-console`) edits the
+   PR that fixes them and adds `app/**` to the config waits for #307 (which
+   holds `inbox/list.tsx`) and #308 (which adds the config). 7.2 is #309. 7.3 (`no-console`) edits the
    same block of `eslint.config.mjs`, so it waits for #309.
 
 **Traps in this container.**
@@ -1020,8 +1020,10 @@ The pieces become kebab-case siblings, the way `comment-moderation.tsx` and
    - Turn on `no-floating-promises`, `no-misused-promises` (with
      `checksVoidReturn.attributes: false`), `await-thenable` and
      `switch-exhaustiveness-check`.
-   - They start as warnings in a non-blocking `lint:strict` job. Each directory
-     is promoted to error once it is clean, and `app/**` comes last.
+   - The first plan was warnings in a non-blocking job, promoted a directory at
+     a time. Measured, `lib/**` and `worker/**` were clean, so they start at
+     `error` as a step of the blocking `verify` job (#308). `app/**` joins once
+     its two findings are fixed.
 2. **Layering, through `no-restricted-imports`.**
    - `lib/` and `worker/` may not import `@/app/*`.
    - `components/` may not import `@/db/*`.
