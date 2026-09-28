@@ -45,8 +45,11 @@ const config = [
       'no-console': 'error',
     },
   },
-  // Where `console` is the point, not a shortcut. Each is a file, not a
-  // directory, so a new module beside one of them is still checked.
+  // Where `console` is the point, not a shortcut. Each entry names a file, so a
+  // new module beside one of them is still checked; `scripts/**` is the one
+  // directory, because everything in it is a command-line script. A single
+  // call site that must stay takes an `eslint-disable-next-line` with its reason
+  // instead of putting its whole file here.
   {
     files: [
       // The logger itself.
@@ -57,18 +60,11 @@ const config = [
       'scripts/**',
       'db/migrate.ts',
       'db/seed.ts',
-      'db/baseline.ts',
       'worker/run-job.ts',
       // Hand-run diagnostics whose output is a report, with untagged and
       // blank-line-led lines that a logger would change.
       'worker/handlers/check-meta-permissions.ts',
       'worker/handlers/test-comment-permission.ts',
-      // Its pool-pressure warnings are left alone with the rest of the pool
-      // instrumentation, which is a separate fix (plans/refactor-in-stages.md).
-      'db/client.ts',
-      // Tests replace `console.*` to capture what a module printed.
-      '**/*.test.ts',
-      '**/*.test.tsx',
     ],
     rules: { 'no-console': 'off' },
   },

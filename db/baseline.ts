@@ -54,7 +54,10 @@ const STATUSES = [
  * Idempotent: every insert is onConflictDoNothing keyed on a natural unique
  * column, so this is safe to re-run after every deploy.
  */
-export async function seedBaseline(log: (...args: unknown[]) => void = console.log): Promise<void> {
+export async function seedBaseline(
+  // eslint-disable-next-line no-console -- run as `npm run db:seed`, whose output is the terminal's
+  log: (...args: unknown[]) => void = console.log,
+): Promise<void> {
   log('Seeding baseline configuration...');
 
   const hours = await db
