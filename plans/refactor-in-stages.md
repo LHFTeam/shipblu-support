@@ -273,10 +273,11 @@ each holding its files until it merges, besides this plan's own PR:
 
 6. Stage 7.1 is #308. Measured, `lib/` and `worker/` had no findings, so the
    rules start at `error` in a blocking job, not as warnings. `app/` has two
-   findings, `inbox/[number]/knowledge.tsx:85` and `inbox/list.tsx:471`; the
-   PR that fixes them and adds `app/**` to the config waits for #307 (which
-   holds `inbox/list.tsx`) and #308 (which adds the config). 7.2 is #309. 7.3 (`no-console`) edits the
-   same block of `eslint.config.mjs`, so it waits for #309.
+   findings, `inbox/[number]/knowledge.tsx:85` and `inbox/list.tsx:471`; the PR
+   that fixes them and adds `app/**` to the config waits for #307 (which holds
+   `inbox/list.tsx`) and #308 (which adds the config). 7.2 is #309. 7.3
+   (`no-console`) edits the same block of `eslint.config.mjs`, so it waits for
+   #309.
 
 **Traps in this container.**
 
