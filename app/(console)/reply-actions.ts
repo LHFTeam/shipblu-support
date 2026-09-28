@@ -30,6 +30,9 @@ import {
   refuseIfReadOnly,
 } from '@/lib/tickets/console-guards';
 import type { ActionState } from './action-state';
+import { logger } from '@/lib/log';
+
+const log = logger('canned');
 
 // --- Replies and notes ------------------------------------------------------
 
@@ -177,7 +180,7 @@ async function countCannedUse(id: string): Promise<void> {
       .set({ usageCount: sql`${cannedResponses.usageCount} + 1` })
       .where(eq(cannedResponses.id, id));
   } catch (error) {
-    console.warn('[canned] could not record a use', error);
+    log.warn('could not record a use', error);
   }
 }
 
@@ -278,10 +281,10 @@ export async function sendTemplateReply(
 
   // Form fields are named body_1, body_2… matching Meta's {{1}} numbering.
   const bodyValues = Array.from({ length: shape.bodyVariableCount }, (_, index) =>
-    String(formData.get(`body_${index + 1}`) ?? '').trim(),
+    text(formData, `body_${index + 1}`),
   );
   const headerValues = Array.from({ length: shape.headerVariableCount }, (_, index) =>
-    String(formData.get(`header_${index + 1}`) ?? '').trim(),
+    text(formData, `header_${index + 1}`),
   );
 
   let components;
