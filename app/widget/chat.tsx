@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { direction, type Locale } from '@/lib/kb/locale';
-import { HOST_SAYS, SOURCE, WIDGET_SAYS } from '@/lib/widget/protocol';
+import { WIDGET_SAYS } from '@/lib/widget/protocol';
 import { initialView } from '@/lib/widget/view';
 import { WidgetArticle } from './article';
 import { copyFor } from './copy';
@@ -10,6 +10,7 @@ import { WidgetHome } from './home';
 import { WidgetThread, type OfflineDetails } from './thread';
 import type { ArticleLink, Message, WidgetView } from '@/lib/widget/types';
 import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
+import { postToHost, useHostBridge } from './use-host-bridge';
 import { useMessageStream } from './use-message-stream';
 
 /**
@@ -259,15 +260,6 @@ export function WidgetChat({
     setOpensAt,
   });
 
-  // --- Unread badge on the host page ---------------------------------------
-
-  const postToHost = useCallback((message: Record<string, unknown>) => {
-    // '*' is correct here and only here: the widget does not know which origin
-    // embedded it, and the payload carries nothing secret — an unread count.
-    // The host's listener checks *our* origin, which is the half that matters.
-    window.parent?.postMessage({ source: SOURCE.widget, ...message }, '*');
-  }, []);
-
   // --- Who the host page says this is --------------------------------------
 
   /**
@@ -341,83 +333,24 @@ export function WidgetChat({
     if (!token) return;
     postToHost({ type: WIDGET_SAYS.ready });
     void sendIdentity(token);
-  }, [token, postToHost, sendIdentity]);
+  }, [token, sendIdentity]);
 
-  /*
-   * A reply is unread until the visitor is actually looking at it.
-   *
-   * Which is two conditions, not one: the panel has to be open — an iframe is
-   * told that by the host, since `display:none` fires no event inside it — and
-   * the thread has to be the screen showing. Someone reading an FAQ with the
-   * panel open is not reading their conversation, and badging them is how they
-   * find out an agent answered.
-   */
-  useEffect(() => {
-    const replies = messages.filter((message) => message.from === 'agent').length;
-    if (panelOpen && view === 'thread') seenCount.current = replies;
-    postToHost({ type: WIDGET_SAYS.unread, count: Math.max(0, replies - seenCount.current) });
-  }, [messages, view, panelOpen, postToHost]);
+  // --- Unread badge, and what the host page says ---------------------------
 
-  useEffect(() => {
-    const onHostMessage = (event: MessageEvent) => {
-      /*
-       * The origin check, not the `source` tag, is what makes the rest of this
-       * safe: `parent.frames` is reachable from any other frame on the host
-       * page, so anything embedded alongside us could otherwise identify the
-       * visitor as somebody else or wipe their session. Our own origin is
-       * allowed because the help centre serves the snippet itself and frames
-       * itself.
-       */
-      if (event.origin !== window.location.origin && !hostOrigins.includes(event.origin)) return;
-      if (event.data?.source !== SOURCE.host) return;
-
-      if (event.data.type === HOST_SAYS.opened) setPanelOpen(true);
-      if (event.data.type === HOST_SAYS.closed) setPanelOpen(false);
-
-      if (event.data.type === HOST_SAYS.identify) {
-        identity.current = {
-          identity: event.data.identity,
-          signature: typeof event.data.signature === 'string' ? event.data.signature : null,
-        };
-        if (token) void sendIdentity(token);
-      }
-
-      /*
-       * A host page opening the chat on a subject of its own.
-       *
-       * Capped well under the composer's own 5,000: this is a draft somebody is
-       * meant to write under, and a host page — or anyone who can post to this
-       * frame from an allowed origin — should not be able to fill the box.
-       */
-      if (event.data.type === HOST_SAYS.compose) {
-        compose(typeof event.data.text === 'string' ? event.data.text.slice(0, 1000) : '');
-      }
-
-      // The host page signing its user out. Not merely an identity of null: the
-      // point is that the next person at this browser starts clean.
-      if (event.data.type === HOST_SAYS.clear) {
-        identity.current = null;
-        resets.current = 0;
-        startFreshSession();
-      }
-    };
-
-    window.addEventListener('message', onHostMessage);
-
-    /*
-     * Ask, rather than assume.
-     *
-     * `toggle` posts to `contentWindow` the instant it creates the iframe, so
-     * that first 'opened' lands on `about:blank` and is lost — as is a 'closed'
-     * from a visitor who shuts the panel before the frame finishes loading, and
-     * every locale switch re-points `src` and starts a fresh document. Any of
-     * those leaves a hidden panel believing it is visible, which silently
-     * swallows the unread badge. The host answers this with its real state.
-     */
-    postToHost({ type: WIDGET_SAYS.hello });
-
-    return () => window.removeEventListener('message', onHostMessage);
-  }, [compose, hostOrigins, postToHost, sendIdentity, startFreshSession, token]);
+  useHostBridge({
+    hostOrigins,
+    token,
+    messages,
+    view,
+    panelOpen,
+    setPanelOpen,
+    seenCountRef: seenCount,
+    identityRef: identity,
+    resetsRef: resets,
+    compose,
+    sendIdentity,
+    startFreshSession,
+  });
 
   // --- Navigation ----------------------------------------------------------
 
