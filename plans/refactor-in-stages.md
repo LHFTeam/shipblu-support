@@ -171,7 +171,8 @@ and two sessions claiming different rows then conflict on all of them.
 | 5.6   | One sign-in sequence for both forms              | #264            | merged  |
 | 6.1   | `TemplateOption` into `inbox/[number]/types.ts`  | #286            | merged  |
 | 6.2   | `lib/tickets/event-labels.ts`, with tests        | #288            | merged  |
-| 6.3   | `header.tsx` and `window-indicator.tsx`          | #290            | open    |
+| 6.3   | `header.tsx` and `window-indicator.tsx`          | #290            | merged  |
+| 6.3   | `timeline.tsx`                                   | #291            | open    |
 | 6.x   | Client components                                |                 | pending |
 | 7     | Lint tightening, finish logging                  |                 | pending |
 
@@ -199,18 +200,18 @@ subscribe to the open PRs again.
   and 1 Arabic excerpt that start that way.
 - `restoreVersion` does not write `excerpt`.
 
-**State at 00:42 UTC, 2026-09-28.** #258–#282 and #284–#289 are merged. Open,
-holding its files until it merges:
+**State at 00:47 UTC, 2026-09-28.** #258–#290 are merged. Open, holding its
+files until it merges:
 
-- #290 (6.3): `inbox/[number]/view.tsx`, and the new `header.tsx` and
-  `window-indicator.tsx` beside it.
+- #291 (6.3): `inbox/[number]/view.tsx`, and the new `timeline.tsx` beside it.
 
 **Next work.**
 
 1. 5.1: done.
 2. 5.4: done.
-3. 5.2, 5.3, 6.1 and 6.2: done. 6.3 has started with #290 (`header.tsx`,
-   `window-indicator.tsx`). The next split of `view.tsx` waits for it. The
+3. 5.2, 5.3, 6.1 and 6.2: done. 6.3: `header.tsx` and
+   `window-indicator.tsx` merged (#290); `timeline.tsx` is #291. The next split
+   of `view.tsx` (`sidebar.tsx`) waits for it. The
    list's `WhatsAppWindow` and `MetaWindow` in `inbox/list.tsx` stay for now:
    they are compact, show nothing while the window is unremarkable, and read
    the clock at render, so folding them into `window-indicator.tsx` changes
