@@ -255,8 +255,8 @@ it.
 
 **State at 09:00 UTC, 2026-09-28.** #258–#321 are merged. No PR holds a file
 besides this plan's own. Every stage of the plan is done, and every finding
-outside it is fixed. Nothing is deployed since 2340f15; the one step left
-after a deploy is the `normalise_kb_formatting` run for #321.
+outside it is fixed. #319–#321 are not deployed by this session; the one step
+left after their deploy is the `normalise_kb_formatting` run for #321.
 
 **Next work.**
 
