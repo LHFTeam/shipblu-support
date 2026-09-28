@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { InfoTip } from '@/components/tooltip';
 import { Badge } from '@/components/ui';
 import type { ConversationDetail } from '@/lib/tickets/conversation';
@@ -14,7 +13,8 @@ import {
   setRootCause,
 } from '../../category-actions';
 import { SidebarField } from './ticket-fields';
-import { type LinkAction, UnlinkButton } from './unlink-button';
+import { UnlinkButton } from './unlink-button';
+import { type LinkAction, useFieldAction } from './use-field-action';
 
 /**
  * What this ticket is about, and why it happened.
@@ -189,17 +189,10 @@ function ReviewButton({
   label: string;
   glyph: string;
 }) {
-  const router = useRouter();
-  const [busy, setBusy] = useState(false);
+  const { pending: busy, run: submit } = useFieldAction(action, { refresh: 'always' });
 
   async function run() {
-    setBusy(true);
-    const formData = new FormData();
-    formData.set('conversationId', conversationId);
-    formData.set('categoryId', categoryId);
-    await action({ error: null }, formData);
-    setBusy(false);
-    router.refresh();
+    await submit({ conversationId, categoryId });
   }
 
   return (
@@ -230,9 +223,7 @@ function CategoryPicker({
   options: CategoryOption[];
   requesterKind: ConversationDetail['requesterKind'];
 }) {
-  const router = useRouter();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { pending: busy, error, run } = useFieldAction(addCategory);
 
   /*
    * The requester's own half of the taxonomy first, everything else after it —
@@ -278,15 +269,7 @@ function CategoryPicker({
 
   async function add(categoryId: string) {
     if (!categoryId) return;
-    setBusy(true);
-    setError(null);
-    const formData = new FormData();
-    formData.set('conversationId', conversationId);
-    formData.set('categoryId', categoryId);
-    const result = await addCategory({ error: null }, formData);
-    setBusy(false);
-    if (result.error) setError(result.error);
-    else router.refresh();
+    await run({ conversationId, categoryId });
   }
 
   return (
@@ -335,9 +318,7 @@ function RootCausePicker({
   value: string | null;
   disabled: boolean;
 }) {
-  const router = useRouter();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { pending: busy, error, run } = useFieldAction(setRootCause);
 
   /*
    * Held locally as well as in the prop, because a `<select>` whose value comes
@@ -360,19 +341,8 @@ function RootCausePicker({
 
   async function save(rootCauseId: string) {
     setChosen(rootCauseId);
-    setBusy(true);
-    setError(null);
-    const formData = new FormData();
-    formData.set('conversationId', conversationId);
-    formData.set('rootCauseId', rootCauseId);
-    const result = await setRootCause({ error: null }, formData);
-    setBusy(false);
-    if (result.error) {
-      setError(result.error);
-      setChosen(value ?? '');
-      return;
-    }
-    router.refresh();
+    const result = await run({ conversationId, rootCauseId });
+    if (result.error) setChosen(value ?? '');
   }
 
   return (

@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Tooltip } from '@/components/tooltip';
 import { Badge } from '@/components/ui';
@@ -17,7 +16,8 @@ import {
   unlinkShippingAccount,
 } from '../../shipment-actions';
 import { SidebarField } from './ticket-fields';
-import { type LinkAction, UnlinkButton } from './unlink-button';
+import { UnlinkButton } from './unlink-button';
+import { type LinkAction, useFieldAction } from './use-field-action';
 
 /**
  * The parcels a ticket is about.
@@ -205,25 +205,16 @@ function RefreshShipmentButton({
   trackingNumber: string;
   lastSyncedAt: Date | null;
 }) {
-  const router = useRouter();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Refreshed even on a refusal: `not_found` is written to the row by the
+  // sync, so the line above this button has changed and needs re-reading.
+  const {
+    pending: busy,
+    error,
+    run: submit,
+  } = useFieldAction(refreshShipment, { refresh: 'always' });
 
   async function run() {
-    setBusy(true);
-    setError(null);
-
-    const formData = new FormData();
-    formData.set('conversationId', conversationId);
-    formData.set('shipmentId', shipmentId);
-
-    const result = await refreshShipment({ error: null }, formData);
-    setBusy(false);
-    setError(result.error);
-
-    // Refreshed even on a refusal: `not_found` is written to the row by the
-    // sync, so the line above this button has changed and needs re-reading.
-    router.refresh();
+    await submit({ conversationId, shipmentId });
   }
 
   return (
@@ -266,31 +257,15 @@ function LinkInput({
   name: string;
   placeholder: string;
 }) {
-  const router = useRouter();
   const [value, setValue] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { pending: saving, error, run } = useFieldAction(action, { clearError: false });
 
   async function save() {
     const trimmed = value.trim();
     if (!trimmed) return;
 
-    setSaving(true);
-    const formData = new FormData();
-    formData.set('conversationId', conversationId);
-    formData.set(name, trimmed);
-
-    const result = await action({ error: null }, formData);
-    setSaving(false);
-
-    if (result.error) {
-      setError(result.error);
-      return;
-    }
-
-    setError(null);
-    setValue('');
-    router.refresh();
+    const result = await run({ conversationId, [name]: trimmed });
+    if (!result.error) setValue('');
   }
 
   return (
