@@ -61,6 +61,7 @@ npm run job -- cleanup         # run one scheduled job by hand
 | `npm run test:db`                 | The database tier, `*.db.test.ts`        |
 | `npm run typecheck`               | `tsc --noEmit`                           |
 | `npm run lint`                    | ESLint (flat config)                     |
+| `npm run lint:strict`             | Type-aware ESLint over `lib/`, `worker/` |
 | `npm run format` / `format:check` | Prettier                                 |
 | `npm run build`                   | Next production build                    |
 | `npm run db:generate`             | Generate a migration from schema changes |
@@ -82,11 +83,11 @@ npx prettier --write AGENTS.md         # one file
 
 `.github/workflows/ci.yml` runs on every pull request, in three jobs:
 
-| Job          | What it runs                                                          |
-| ------------ | --------------------------------------------------------------------- |
-| `verify`     | `tsc`, `eslint`, `format:check`, `vitest`, `knip`, `build` — one each |
-| `repo-rules` | `scripts/ci/repo-rules.mjs`, and migration drift against `db/schema/` |
-| `database`   | migrations, `db/sql/`, DB-only jobs, `*.db.test.ts`, on real Postgres |
+| Job          | What it runs                                                                         |
+| ------------ | ------------------------------------------------------------------------------------ |
+| `verify`     | `tsc`, `eslint`, `lint:strict`, `format:check`, `vitest`, `knip`, `build` — one each |
+| `repo-rules` | `scripts/ci/repo-rules.mjs`, and migration drift against `db/schema/`                |
+| `database`   | migrations, `db/sql/`, DB-only jobs, `*.db.test.ts`, on real Postgres                |
 
 Run the same thing locally when you want the answer sooner — the `verify` job
 calls these same npm scripts, so `npm run lint` fails on a warning here as it
@@ -94,8 +95,15 @@ does there:
 
 ```bash
 npm run typecheck && npm run lint && npm run test && npm run knip && npm run build
+npm run lint:strict
 node scripts/ci/repo-rules.mjs
 ```
+
+`lint:strict` is `eslint.strict.config.mjs`: the type-aware rules — floating
+and misused promises, `await` on a non-promise, a switch that no longer covers
+its union — over `lib/` and `worker/`. They are kept out of `lint` because
+reading the whole program is what makes them slow. A `default` arm counts as
+covering a switch, because it is somebody's decision about the unknown case.
 
 **`npm run build` is not optional, which is why CI runs it separately.** Several
 failure modes in this project — React's export-condition resolution under the
