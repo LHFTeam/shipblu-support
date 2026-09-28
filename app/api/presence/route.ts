@@ -1,5 +1,8 @@
 import { currentSessionHash, getSessionAgent, sessionIsLive } from '@/lib/auth/session';
 import { beat, goOffline, goOnline } from '@/lib/assignment/presence';
+import { logger } from '@/lib/log';
+
+const log = logger('presence');
 
 export const dynamic = 'force-dynamic';
 
@@ -50,7 +53,7 @@ export async function GET(request: Request) {
       };
 
       void goOnline(agent.id).catch((error) => {
-        console.error('[presence] could not record presence', error);
+        log.error('could not record presence', error);
       });
 
       cleanup = () => {

@@ -4,6 +4,9 @@ import { boundedDeliveryKey } from '@/lib/webhooks/delivery-key';
 import { queueDelivery, readDelivery, storeDelivery, storedHeaders } from '@/lib/webhooks/receive';
 import { SIGNATURE_HEADER, verifyChallenge, verifySignature } from '@/lib/whatsapp/verify';
 import type { WhatsAppWebhookPayload } from '@/lib/whatsapp/types';
+import { logger } from '@/lib/log';
+
+const log = logger('webhook:whatsapp');
 
 export const dynamic = 'force-dynamic';
 
@@ -23,7 +26,7 @@ export async function GET(request: Request) {
   const token = metaVerifyToken();
 
   if (!token) {
-    console.error('[webhook:whatsapp] META_VERIFY_TOKEN is not configured');
+    log.error('META_VERIFY_TOKEN is not configured');
     return new NextResponse('not configured', { status: 500 });
   }
 
@@ -68,7 +71,7 @@ export async function POST(request: Request) {
   });
 
   if (!signatureVerified) {
-    console.warn('[webhook:whatsapp] stored an unverified payload');
+    log.warn('stored an unverified payload');
     // 403, not 200: an unsigned payload is either a misconfigured app secret or
     // a forgery, and both should be loud.
     return NextResponse.json({ error: 'signature verification failed' }, { status: 403 });

@@ -2,6 +2,9 @@ import { sessionSql } from '@/db/client';
 import { getSessionAgent } from '@/lib/auth/session';
 import { canSubscribeToConversation } from '@/lib/realtime/authorization';
 import { conversationTopic, parseQueueChannel, queueTopicsForAgent } from '@/lib/realtime/topics';
+import { logger } from '@/lib/log';
+
+const log = logger('sse');
 
 export const dynamic = 'force-dynamic';
 
@@ -61,7 +64,7 @@ export async function GET(request: Request) {
     try {
       await held.end({ timeout: 5 });
     } catch (error) {
-      console.error('[sse] failed to release the LISTEN connection', error);
+      log.error('failed to release the LISTEN connection', error);
     }
   };
 
@@ -142,7 +145,7 @@ export async function GET(request: Request) {
 
         send('ready', '{}');
       } catch (error) {
-        console.error('[sse] could not LISTEN', error);
+        log.error('could not LISTEN', error);
         // The connection may be live even though a LISTEN on it failed, so it
         // is released here rather than left to a cleanup that may never run.
         await releaseListener();
