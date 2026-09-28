@@ -137,6 +137,8 @@ and two sessions claiming different rows then conflict on all of them.
 | 3.14  | Logger: `lib/log.ts` and the first worker files  | #249, #253      | merged  |
 | 3.14  | Logger: nine more files in `worker/` and `lib/`  | #261            | merged  |
 | 3.14  | Logger: `lib/`                                   | #269            | merged  |
+| 3.14  | Logger: the `app/` routes and the invite action  | #287            | merged  |
+| 3.14  | `reply-actions.ts`: `text()` and the logger      | #289            | merged  |
 | 4.1   | Split `lib/tickets/queries.ts`                   | #224            | merged  |
 | 4.2   | Shared ingest steps                              | #232–#233, #235 | merged  |
 | 4.3   | Meta Graph transport                             | #228            | merged  |
@@ -155,7 +157,10 @@ and two sessions claiming different rows then conflict on all of them.
 | 5.2   | `shipment-actions.ts`                            | #274            | merged  |
 | 5.2   | `side-conversation-actions.ts`                   | #278            | merged  |
 | 5.2   | `meta-actions.ts`                                | #280            | merged  |
-| 5.2   | `reply-actions.ts`                               | #281            | open    |
+| 5.2   | `reply-actions.ts`                               | #281            | merged  |
+| 5.2   | `ticket-actions.ts` and `action-state.ts`        | #282            | merged  |
+| 5.3   | `lib/tickets/agent-reply.ts`                     | #284            | merged  |
+| 5.3   | `lib/tickets/status.ts`                          | #285            | merged  |
 | 5.4   | Admin pages stop importing `db`: first batches   | #254, #256      | merged  |
 | 5.4   | Admin pages: agents, auto-responses, automations | #259            | merged  |
 | 5.4   | Categories, channels, invite, field options      | #266            | merged  |
@@ -164,6 +169,9 @@ and two sessions claiming different rows then conflict on all of them.
 | 5.5   | One receive path for webhooks                    | #263            | merged  |
 | 5.6   | One `localeOf` and one `requestMeta`             | #251            | merged  |
 | 5.6   | One sign-in sequence for both forms              | #264            | merged  |
+| 6.1   | `TemplateOption` into `inbox/[number]/types.ts`  | #286            | merged  |
+| 6.2   | `lib/tickets/event-labels.ts`, with tests        | #288            | merged  |
+| 6.3   | `header.tsx` and `window-indicator.tsx`          | #290            | open    |
 | 6.x   | Client components                                |                 | pending |
 | 7     | Lint tightening, finish logging                  |                 | pending |
 
@@ -173,90 +181,42 @@ The session that opened #233–#241 stopped here because of its usage limit. It
 unsubscribed from its PRs and deleted its hourly check-in. The next session must
 subscribe to the open PRs again.
 
-**State at 15:20 UTC.** A second session took over at 07:05 and worked
-through the list below. Every PR named in this handoff (#233, #235–#241) is
-merged, and so are #242–#249, which that session opened. No refactor PR is
-open except this one.
-
-**Rules that still hold.**
+**Rules that still hold.** These fold in the 22:10 UTC changes of 2026-09-27.
 
 - Another agent reviews each PR. Fix review comments on that PR's own branch.
-- Merge only when the requester asks.
-- Do not deploy. Production does not deploy on merge, and it still runs #202's
-  commit (`4fcb6fd`).
-- After merges, restart this branch from `main` and mark the rows `merged` in
-  one table-only commit.
+- Merge a PR when another agent has reviewed it, its findings are fixed on its
+  branch, and CI passes.
+- Deploy only when the requester asks. All six production services run
+  `2340f15`, and migration 0028 is applied. Staging stays suspended.
+- The ⛳ gate is passed: the requester said to start Stage 5.
+- Mark each row `merged` when its PR merges. When this branch's own PR has
+  merged, restart the branch from `main` and open a new plan PR.
 - The requester wants replies in ASD Simplified Technical English (STE100).
 
-**Next work, in this order.** Items 1–4 of the original list are done or
-narrowed; what remains of each is below.
-
-1. **4.4 typed payloads.** The second family merged as #247 and three jobs of
-   the third as #248. Five jobs remain, because #237 and #238 held their files
-   when #248 was written: `backfill_shipment_links`,
-   `backfill_message_locations`, `backfill_categorise_ai`,
-   `normalise_kb_formatting` and `seed_console_handbook`. **The PR must say
-   this:** today a handler tests `payload.dryRun === true`, so `dryRun=1` or
-   `dryRun=yes` does a real run. `z.boolean()` makes those values fail, and
-   nothing is written.
-2. **4.4 sweeps** is done: see "Sweeps, narrowed in #242 and #243".
-3. **3.13 adoption** merged as #244–#246. The counts in the old list were of
-   every inline read; only the exact `String(formData.get(k) ?? '').trim()`
-   reads change. Two are left, both in `(console)/actions.ts` (the
-   `body_${n}` and `header_${n}` template keys), for after the 5.2 splits.
-   `saveInternalRecipient` had one, its `email`, which also lower-cases; #273
-   moves it to `text()`.
-4. **Stage 3 logger.** `lib/log.ts` merged as #249, with `worker/index.ts` and
-   seven handlers. The rest of `worker/` follows, then `lib/`, then `app/`,
-   each message word for word.
-5. Then the **⛳ gate**: the requester was asked on 2026-09-27 whether to start
-   Stage 5, and has not answered yet.
-
-**Findings outside the plan.** Each one is queued as a suggested task for the
-requester, and neither is fixed.
+**Findings outside the plan.** Neither is fixed.
 
 - `htmlToText` writes headings in capitals. Production has 8 English excerpts
   and 1 Arabic excerpt that start that way.
 - `restoreVersion` does not write `excerpt`.
 
-**Traps in this container.**
+**State at 00:42 UTC, 2026-09-28.** #258–#282 and #284–#289 are merged. Open,
+holding its files until it merges:
 
-- The local Postgres (port 55432, data under the scratchpad) stops when
-  `/tmp/claude-0` loses its `o+x` bit. Run `chmod o+x` on the path, then
-  `pg_ctl … start` as `postgres`.
-- Turbopack refuses a symlinked `node_modules` in a worktree. Build in the main
-  checkout.
-- The DB tier needs `TEST_DATABASE_URL`, and the database must be migrated and
-  seeded first.
-- Keeping the cluster's data directory out of `/tmp/claude-0` altogether
-  (for example under `/var/lib/postgresql`, owned by `postgres`) avoids the
-  permission trap above.
-
-### State at 22:10 UTC, 2026-09-27
-
-This replaces three of the rules in the handoff above.
-
-- **Merging.** The requester now allows a merge when another agent has
-  reviewed the PR and its findings are fixed on the PR's branch.
-- **Deploys.** The requester asked for one, and all six production services
-  now run `2340f15`. Migration 0028 is applied. The first `sla_sweep` on it
-  escalated 261 breaches (124 first response, 137 resolution), as #242
-  expected. Staging stays suspended.
-- **The ⛳ gate is passed.** The requester said to start Stage 5.
-
-**State at 00:02 UTC.** #258–#280 are merged. Open, holding its files until it
-merges: #281 (5.2, `reply-actions.ts`): `(console)/actions.ts` and
-`inbox/[number]/composer.tsx`.
+- #290 (6.3): `inbox/[number]/view.tsx`, and the new `header.tsx` and
+  `window-indicator.tsx` beside it.
 
 **Next work.**
 
 1. 5.1: done.
 2. 5.4: done.
-3. 5.2: after #281, `ticket-actions.ts` takes what remains of
-   `(console)/actions.ts` (`updateTicket`, `purgeTicket`), and `ActionState`
-   moves to a plain module, since every sibling imports it as a type from an
-   action file.
-4. Logger. Three places in `worker/` stay on `console`, because a move would
+3. 5.2, 5.3, 6.1 and 6.2: done. 6.3 has started with #290 (`header.tsx`,
+   `window-indicator.tsx`). The next split of `view.tsx` waits for it. The
+   list's `WhatsAppWindow` and `MetaWindow` in `inbox/list.tsx` stay for now:
+   they are compact, show nothing while the window is unremarkable, and read
+   the clock at render, so folding them into `window-indicator.tsx` changes
+   what the list shows. That is its own PR, marked as a behaviour change.
+4. 3.13: done (#289).
+5. Logger. Three places in `worker/` stay on `console`, because a move would
    change what they print:
    - `check-meta-permissions` and `test-comment-permission`: their lines start
      with `\n` or have no tag;
@@ -266,17 +226,23 @@ merges: #281 (5.2, `reply-actions.ts`): `(console)/actions.ts` and
    Stage 7's `no-console` must list them as exceptions, or a PR must change
    their output on purpose. `worker/run-job.ts` is the exception Stage 7
    already names. Those four files are every `console` call left in
-   `worker/`. Then `lib/`, then `app/`.
+   `worker/`. `lib/` and `app/` are done.
 
-**Traps found since.**
+**Traps in this container.**
 
 - `repo-rules.mjs` reads its file list from git. A new file that is not staged
   is not seen, so an export that only it imports is reported as dead. Run
   `git add` before the rules.
 - Join check commands with `&&`, not `;`. One push went out after a failed
   typecheck because the next command still ran.
-- The local cluster now lives at `/var/lib/postgresql/sb/data`, port 55432,
-  which avoids the `/tmp/claude-0` permission trap.
+- The local Postgres cluster lives at `/var/lib/postgresql/sb/data`, port
+  55432, owned by `postgres`. Start it with `pg_ctl … start` as `postgres`.
+  Keep it out of `/tmp/claude-0`: a cluster there stops when that directory
+  loses its `o+x` bit.
+- Turbopack refuses a symlinked `node_modules` in a worktree. Build in the main
+  checkout.
+- The DB tier needs `TEST_DATABASE_URL`, and the database must be migrated and
+  seeded first.
 
 ## Ground rules for every PR
 
