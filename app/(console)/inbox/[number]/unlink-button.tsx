@@ -1,12 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-
-export type LinkAction = (
-  state: { error: string | null },
-  formData: FormData,
-) => Promise<{ error: string | null }>;
+import { type LinkAction, useFieldAction } from './use-field-action';
 
 /**
  * Two-click removal, inline rather than importing `DangerAction` from the admin
@@ -23,18 +18,12 @@ export function UnlinkButton({
   fields: Record<string, string>;
   label: string;
 }) {
-  const router = useRouter();
   const [armed, setArmed] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const { pending: busy, run } = useFieldAction(action, { refresh: 'always' });
 
   async function remove() {
-    setBusy(true);
-    const formData = new FormData();
-    for (const [key, value] of Object.entries(fields)) formData.set(key, value);
-    await action({ error: null }, formData);
-    setBusy(false);
+    await run(fields);
     setArmed(false);
-    router.refresh();
   }
 
   return (

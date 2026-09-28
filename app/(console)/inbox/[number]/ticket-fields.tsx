@@ -1,11 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { Select } from '@/components/ui';
 import type { ConversationDetail } from '@/lib/tickets/conversation';
 import { formatForInput, selectedValues, type TicketFieldDef } from '@/lib/tickets/custom-fields';
 import { updateTicket } from '../../ticket-actions';
+import { useFieldAction } from './use-field-action';
 
 /**
  * A labelled block in the ticket sidebar.
@@ -55,24 +55,10 @@ export function FieldSelect({
   value: string;
   options: { value: string; label: string }[];
 }) {
-  const router = useRouter();
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { pending: saving, error, run } = useFieldAction(updateTicket);
 
   async function save(next: string) {
-    setSaving(true);
-    setError(null);
-
-    const formData = new FormData();
-    formData.set('conversationId', conversationId);
-    formData.set('field', field);
-    formData.set('value', next);
-
-    const result = await updateTicket({ error: null }, formData);
-    setSaving(false);
-
-    if (result.error) setError(result.error);
-    else router.refresh();
+    await run({ conversationId, field, value: next });
   }
 
   return (
@@ -90,22 +76,12 @@ export function FieldSelect({
 }
 
 export function TagField({ conversationId, tags }: { conversationId: string; tags: string[] }) {
-  const router = useRouter();
   const [value, setValue] = useState(tags.join(', '));
-  const [saving, setSaving] = useState(false);
+  const { pending: saving, run } = useFieldAction(updateTicket, { refresh: 'always' });
 
   async function save() {
     if (value === tags.join(', ')) return;
-    setSaving(true);
-
-    const formData = new FormData();
-    formData.set('conversationId', conversationId);
-    formData.set('field', 'tags');
-    formData.set('value', value);
-
-    await updateTicket({ error: null }, formData);
-    setSaving(false);
-    router.refresh();
+    await run({ conversationId, field: 'tags', value });
   }
 
   return (
@@ -174,28 +150,11 @@ function CustomFieldControl({
   field: TicketFieldDef;
   value: unknown;
 }) {
-  const router = useRouter();
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { pending: saving, error, run } = useFieldAction(updateTicket);
   const [draft, setDraft] = useState(() => formatForInput(field, value));
 
   async function save(next: string | string[]) {
-    setSaving(true);
-    setError(null);
-
-    const formData = new FormData();
-    formData.set('conversationId', conversationId);
-    formData.set('field', `custom:${field.key}`);
-    // `append`, so a multi-select arrives as the several values it is rather
-    // than one comma-joined string the action would have to guess how to split.
-    if (Array.isArray(next)) for (const entry of next) formData.append('value', entry);
-    else formData.set('value', next);
-
-    const result = await updateTicket({ error: null }, formData);
-    setSaving(false);
-
-    if (result.error) setError(result.error);
-    else router.refresh();
+    await run({ conversationId, field: `custom:${field.key}`, value: next });
   }
 
   const control = () => {
