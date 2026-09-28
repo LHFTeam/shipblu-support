@@ -255,12 +255,11 @@ left is the findings outside the plan, above, each its own PR.
    they are compact, show nothing while the window is unremarkable, and read
    the clock at render, so folding them into `window-indicator.tsx` changes
    what the list shows. That was #307, a behaviour change, now merged.
-4. 3.13: done (#289). 6.5's `SubmitButton`: done (#296). The reports page's
-   RTL fix (#298) and the swap to the shared `Stat` and `Table` (#301) merged.
-   The widget's `useMessageStream` (#302) and `useHostBridge` (#304) merged;
-   so did `useWidgetSession` (#306), the last of the three. The dashboard's
-   sections (#303) and the composer's forms (#305) merged. So Stage 6 is done,
-   and Stage 7 has started.
+4. 3.13: done (#289). 6.5's `SubmitButton`: done (#296). The reports page's RTL
+   fix (#298) and the swap to the shared `Stat` and `Table` (#301) merged. The
+   widget's `useMessageStream` (#302) and `useHostBridge` (#304) merged; so did
+   `useWidgetSession` (#306), the last of the three. The dashboard's sections
+   (#303) and the composer's forms (#305) merged. So Stage 6 is done.
 5. Logger. Three places in `worker/` stay on `console`, because a move would
    change what they print:
    - `check-meta-permissions` and `test-comment-permission`: their lines start
@@ -268,10 +267,10 @@ left is the findings outside the plan, above, each its own PR.
    - the three `console.log(formatReport(...))` calls in
      `backfill-categorise-ai.ts`: the report block has no tag.
 
-   Stage 7's `no-console` must list them as exceptions, or a PR must change
-   their output on purpose. `worker/run-job.ts` is the exception Stage 7
-   already names. Those four files are every `console` call left in
-   `worker/`. `lib/` and `app/` are done.
+   #311 exempts them: the two diagnostics by file, and the three `formatReport`
+   lines inline (`## Stage 7`, item 3). `worker/run-job.ts` is exempt by file
+   too. Those four files are every `console` call left in `worker/`. `lib/`
+   and `app/` are done.
 
 6. Stage 7.1 (#308) merged. Measured, `lib/` and `worker/` had no findings, so
    the rules start at `error` in a blocking job, not as warnings. `app/` had two
