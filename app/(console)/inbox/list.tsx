@@ -16,8 +16,7 @@ import {
   rememberInboxPages,
   rememberInboxScroll,
 } from '@/lib/tickets/inbox-position';
-import { metaWindowState } from '@/lib/meta/window';
-import { formatRemaining, windowState } from '@/lib/whatsapp/window';
+import { MetaWindowBadge, WhatsAppWindowBadge } from './[number]/window-indicator';
 
 /**
  * The ticket list.
@@ -213,10 +212,10 @@ export function InboxList({
                   <span className="text-xs text-[var(--muted-foreground)]">#{row.number}</span>
 
                   {row.channel === 'whatsapp' ? (
-                    <WhatsAppWindow lastCustomerMessageAt={row.lastCustomerMessageAt} />
+                    <WhatsAppWindowBadge lastCustomerMessageAt={row.lastCustomerMessageAt} />
                   ) : null}
                   {row.channel === 'facebook' || row.channel === 'instagram' ? (
-                    <MetaWindow lastCustomerMessageAt={row.lastCustomerMessageAt} />
+                    <MetaWindowBadge lastCustomerMessageAt={row.lastCustomerMessageAt} />
                   ) : null}
 
                   {row.priority === 'urgent' || row.priority === 'high' ? (
@@ -561,35 +560,4 @@ function SearchBox({ initial, onSearch }: { initial: string; onSearch: (value: s
       />
     </div>
   );
-}
-
-/** The 24-hour window at a glance, so agents can triage by what is expiring. */
-function WhatsAppWindow({
-  lastCustomerMessageAt,
-}: {
-  lastCustomerMessageAt: Date | string | null;
-}) {
-  const state = windowState(lastCustomerMessageAt ? new Date(lastCustomerMessageAt) : null);
-
-  if (!state.isOpen) return <Badge tone="closed">window closed</Badge>;
-  // Under two hours is when it starts mattering; above that it is just noise.
-  if (state.remainingMs < 2 * 60 * 60 * 1000) {
-    return <Badge tone="warning">{formatRemaining(state.remainingMs)}</Badge>;
-  }
-  return null;
-}
-
-/**
- * The Messenger and Instagram equivalent.
- *
- * Only shown once a reply needs the human-agent tag or has become impossible —
- * the first 24 hours are unremarkable and a badge on every row would say
- * nothing.
- */
-function MetaWindow({ lastCustomerMessageAt }: { lastCustomerMessageAt: Date | string | null }) {
-  const state = metaWindowState(lastCustomerMessageAt ? new Date(lastCustomerMessageAt) : null);
-
-  if (state.isClosed) return <Badge tone="closed">window closed</Badge>;
-  if (state.needsHumanAgentTag) return <Badge tone="warning">outside 24h</Badge>;
-  return null;
 }
