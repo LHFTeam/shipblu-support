@@ -15,7 +15,11 @@ import { storeAgentReply } from './agent-reply';
 
 withCleanDatabase();
 
-async function ticket(channel: 'email' | 'whatsapp' | 'webchat') {
+// Far enough back that a stamp left at its default cannot pass for one the
+// reply moved.
+const LAST_MESSAGE_AT = new Date('2026-09-01T09:00:00Z');
+
+async function ticket(channel: 'email' | 'whatsapp' | 'webchat' | 'facebook') {
   const [contact] = await db.insert(contacts).values({ name: 'Amira' }).returning();
   const [agent] = await db
     .insert(agents)
@@ -27,7 +31,12 @@ async function ticket(channel: 'email' | 'whatsapp' | 'webchat') {
     .where(eq(ticketStatuses.name, 'Open'));
   const [row] = await db
     .insert(conversations)
-    .values({ channel, statusId: open!.id, requesterContactId: contact!.id })
+    .values({
+      channel,
+      statusId: open!.id,
+      requesterContactId: contact!.id,
+      lastMessageAt: LAST_MESSAGE_AT,
+    })
     .returning({ id: conversations.id });
   return { id: row!.id, agentId: agent!.id };
 }
@@ -63,7 +72,7 @@ describe('storeAgentReply', () => {
       .from(conversations)
       .where(eq(conversations.id, id));
     expect(row!.lastAgentMessageAt).toBeInstanceOf(Date);
-    expect(row!.lastMessageAt).toBeInstanceOf(Date);
+    expect(row!.lastMessageAt.getTime()).toBeGreaterThan(LAST_MESSAGE_AT.getTime());
     expect(row!.firstRespondedAt).toBeInstanceOf(Date);
 
     expect(
@@ -74,10 +83,13 @@ describe('storeAgentReply', () => {
     ).toEqual([{ type: 'send_whatsapp', payload: { messageId }, priority: 10 }]);
   });
 
-  it('sends an email ticket by send_email', async () => {
-    const { id, agentId } = await ticket('email');
+  it.each([
+    ['email', 'send_email'],
+    ['facebook', 'send_meta'],
+  ] as const)('sends a %s ticket by %s', async (channel, carrier) => {
+    const { id, agentId } = await ticket(channel);
 
-    const messageId = await storeAgentReply(id, 'email', {
+    const messageId = await storeAgentReply(id, channel, {
       authorAgentId: agentId,
       bodyText: 'Thanks for waiting.',
       deliveryStatus: 'pending',
@@ -88,7 +100,7 @@ describe('storeAgentReply', () => {
         .select({ type: jobs.type })
         .from(jobs)
         .where(eq(jobs.dedupeKey, `send:${messageId}`)),
-    ).toEqual([{ type: 'send_email' }]);
+    ).toEqual([{ type: carrier }]);
   });
 
   it('queues nothing on web chat, whose row is its delivery', async () => {
