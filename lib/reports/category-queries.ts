@@ -211,7 +211,8 @@ export async function ownerTotals(range: Range): Promise<OwnerTotal[]> {
 }
 
 /**
- * The days inside the window that actually have rolled-up rows.
+ * Where the rolled-up history starts, and which days inside the window have
+ * rows.
  *
  * Without this the range control is indistinguishable from a broken one. The
  * rollup recomputes three days a night and there is no category backfill, so
@@ -222,6 +223,13 @@ export async function ownerTotals(range: Range): Promise<OwnerTotal[]> {
  * Both tables, because they are counted from different timestamps and can
  * legitimately begin on different days: a category comes off `created_at` and a
  * cause off `resolved_at`.
+ *
+ * `first` has no lower bound, because a day nobody worked has no row. Taken
+ * from inside the window it was later than `from` whenever the window opened on
+ * a quiet day, and the page said the history begins there — and that a wider
+ * range could not reach further back — when it could. `last` and `days` stay
+ * inside the window. The overview's `rolledUpDays` answers the same question
+ * the same way.
  */
 export async function rolledUpRange(range: Range): Promise<{
   first: string | null;
@@ -230,13 +238,14 @@ export async function rolledUpRange(range: Range): Promise<{
 }> {
   const rows = await db.execute<{ first: string | null; last: string | null; days: number }>(sql`
     with covered as (
-      select day from category_metrics_daily
-      where day between ${range.from}::date and ${range.to}::date
+      select day from category_metrics_daily where day <= ${range.to}::date
       union
-      select day from root_cause_metrics_daily
-      where day between ${range.from}::date and ${range.to}::date
+      select day from root_cause_metrics_daily where day <= ${range.to}::date
     )
-    select min(day)::text as first, max(day)::text as last, count(*)::int as days
+    select
+      min(day)::text as first,
+      (max(day) filter (where day >= ${range.from}::date))::text as last,
+      (count(*) filter (where day >= ${range.from}::date))::int as days
     from covered
   `);
 
