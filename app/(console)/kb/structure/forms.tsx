@@ -1,10 +1,10 @@
 'use client';
 
 import { useActionState, useState } from 'react';
-import { useFormStatus } from 'react-dom';
-import { Button, ErrorText, Input, Label, Select } from '@/components/ui';
+import { ErrorText, Input, Label, Select } from '@/components/ui';
 import { FLOOR_LABELS, SELECTABLE_FLOORS } from '@/lib/kb/floors';
 import { createCategory, createFolder, type KbState } from '../actions';
+import { SubmitButton } from '@/components/submit-button';
 
 const INITIAL: KbState = { error: null };
 
@@ -138,14 +138,5 @@ function AudienceFields() {
         </div>
       ) : null}
     </>
-  );
-}
-
-function SubmitButton({ idle, busy }: { idle: string; busy: string }) {
-  const { pending } = useFormStatus();
-  return (
-    <Button type="submit" disabled={pending}>
-      {pending ? busy : idle}
-    </Button>
   );
 }

@@ -4,7 +4,7 @@ import { useActionState } from 'react';
 import { ErrorText, Input, Label, SuccessText } from '@/components/ui';
 import { t, type Locale } from '@/lib/kb/locale';
 import { portalSignIn, type PortalFormState } from '../actions';
-import { SubmitButton } from '../submit';
+import { SubmitButton } from '@/components/submit-button';
 
 const INITIAL: PortalFormState = { error: null };
 
@@ -57,7 +57,7 @@ export function LoginForm({
 
       <ErrorText>{state.error ? t(locale, state.error) : null}</ErrorText>
 
-      <SubmitButton idle={t(locale, 'signIn')} busy={t(locale, 'signingIn')} />
+      <SubmitButton className="w-full" idle={t(locale, 'signIn')} busy={t(locale, 'signingIn')} />
     </form>
   );
 }

@@ -1,10 +1,10 @@
 'use client';
 
 import { useActionState, useState } from 'react';
-import { useFormStatus } from 'react-dom';
 import { Badge, Button, ErrorText, Field, Input, Select } from '@/components/ui';
 import type { AdminState } from '../settings-shared';
 import { saveChannel } from './actions';
+import { SubmitButton } from '@/components/submit-button';
 
 const INITIAL: AdminState = { error: null };
 
@@ -291,24 +291,6 @@ function GroupField({ groups, defaultValue }: { groups: Choice[]; defaultValue?:
     </Field>
   );
 }
-
-function SubmitButton({
-  idle,
-  busy,
-  className,
-}: {
-  idle: string;
-  busy: string;
-  className?: string;
-}) {
-  const { pending } = useFormStatus();
-  return (
-    <Button type="submit" disabled={pending} className={className}>
-      {pending ? busy : idle}
-    </Button>
-  );
-}
-
 export type FaqFolderChoice = {
   id: string;
   name: string;
