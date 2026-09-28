@@ -222,28 +222,37 @@ it.
 - `restoreVersion` does not write `excerpt`.
 - The reports overview prints "7/30/90 days", not the dates of the window it
   selected, which AGENTS.md asks of a report with a range control (§6.54).
-  Older than #301, which kept it.
+  Older than #301, which kept it. Fixed in #316, which also found the window
+  was a UTC date with no upper bound.
 - The widget's host-message listener checks the origin but not
   `event.source === window.parent`, and `postToHost` sends with targetOrigin
   `'*'`. Both are older than #304, which only moved them; the origin allowlist
   is the documented guard, and the outbound payloads carry nothing secret.
+  Fixed in #317.
 - The widget reads and writes `localStorage` with no `try/catch`. In a
   third-party iframe with storage blocked, the resume effect, `ensureSession`
-  and `startFreshSession` throw. Older than #306, which only moved them.
+  and `startFreshSession` throw. Older than #306, which only moved them. Fixed
+  in #314.
 - The inbox list shows the Meta window badge on Facebook and Instagram comment
   tickets, which are answered on the comment edge and have no window; the
   header does not. `InboxRow` carries no `externalId`, so the fix is in the
-  list query. Older than #307, which kept it.
+  list query. Older than #307, which kept it. Fixed in #315.
 - Four operator-run job payloads — `backfill_meta_profiles`,
   `sync_stale_shipments`, `rollup_metrics` and `sync_shipment` — are
   `z.object`, not `z.strictObject`, so a mistyped option is dropped and the
   default runs: `backfill_meta_profiles limt=50` walks every contact. Switching
   them changes what the jobs accept, so it is its own PR. Found in #312's
   review. Fixed in #313.
+- `/reports/categories` says the figures in a window begin late whenever the
+  window opens on a day nobody worked: `rolledUpRange` takes `min(day)` inside
+  the window, and an empty day has no row. The overview had the same shape
+  and #316 fixed it there (the history's start has no lower bound); this page
+  still has it. Found in #316's review.
 
-**State at 02:44 UTC, 2026-09-28.** #258–#291 and #293–#312 are merged. No PR
-holds a file besides this plan's own. Every stage of the plan is done; what is
-left is the findings outside the plan, above, each its own PR.
+**State at 08:02 UTC, 2026-09-28.** #258–#291 and #293–#317 are merged. No PR
+holds a file besides this plan's own. Every stage of the plan is done; of the
+findings outside it, three are open: the two knowledge-base ones and
+`/reports/categories`.
 
 **Next work.**
 
