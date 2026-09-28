@@ -182,6 +182,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 6.5   | One `SubmitButton` in `components/`              | #296            | merged  |
 | 6.5   | Reports header: `text-left` to `text-start`      | #298            | merged  |
 | 6.5   | Reports overview: the shared `Stat` and `Table`  | #301            | open    |
+| 6.5   | Widget: `useMessageStream`                       | #302            | open    |
 | 6.x   | Client components                                |                 | pending |
 | 7     | Lint tightening, finish logging                  |                 | pending |
 
@@ -209,11 +210,12 @@ subscribe to the open PRs again.
   and 1 Arabic excerpt that start that way.
 - `restoreVersion` does not write `excerpt`.
 
-**State at 01:27 UTC, 2026-09-28.** #258–#291 and #293–#299 are merged. Open,
+**State at 01:33 UTC, 2026-09-28.** #258–#291 and #293–#299 are merged. Open,
 each holding its files until it merges, besides this plan's own PR:
 
 - #300 (6.4): `inbox/[number]/ticket-fields.tsx`.
 - #301 (6.5): `reports/page.tsx`.
+- #302 (6.5): `app/widget/chat.tsx`, and the new `use-message-stream.ts`.
 
 **Next work.**
 
@@ -228,8 +230,9 @@ each holding its files until it merges, besides this plan's own PR:
    what the list shows. That is its own PR, marked as a behaviour change.
 4. 3.13: done (#289). 6.5's `SubmitButton`: done (#296). The reports page's
    RTL fix merged (#298); the swap to the shared `Stat` and `Table` is #301.
-   Left in 6.5: the widget chat hooks, and the `composer.tsx` and
-   `admin/dashboard/page.tsx` sections.
+   The widget's first hook, `useMessageStream`, is #302; `use-host-bridge.ts`
+   and `use-widget-session.ts` follow it, since all three edit `chat.tsx`.
+   Then the `composer.tsx` and `admin/dashboard/page.tsx` sections.
 5. Logger. Three places in `worker/` stay on `console`, because a move would
    change what they print:
    - `check-meta-permissions` and `test-comment-permission`: their lines start
