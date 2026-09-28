@@ -1,6 +1,7 @@
-import { and, eq, gte, isNotNull, isNull, sql } from 'drizzle-orm';
+import { and, between, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agents, groups, metricsDaily } from '@/db/schema';
+import type { Range } from './category-queries';
 
 /**
  * Read models for the reports page.
@@ -43,9 +44,17 @@ const SUMS = {
   csatResponseCount: sql<number>`coalesce(sum(${metricsDaily.csatResponseCount}), 0)::int`,
 };
 
-/** The date `days` ago, as the `YYYY-MM-DD` the rollup writes. */
-function since(days: number): string {
-  return new Date(Date.now() - days * 24 * 3_600_000).toISOString().slice(0, 10);
+/**
+ * The window's days, both ends included.
+ *
+ * Every query below takes the range the page resolved through `rangeIn()`
+ * rather than a day count. The count used to become a date here, as the UTC
+ * date `days` ago with no upper bound: a window one day longer than its
+ * label, and a day early for the first hours of every Cairo morning, which is
+ * the `current_date` trap AGENTS.md describes, spelled in JavaScript.
+ */
+function inRange(range: Range) {
+  return between(metricsDaily.day, range.from, range.to);
 }
 
 /**
@@ -55,13 +64,13 @@ function since(days: number): string {
  * the per-agent rows, which would double-count anything attributed to both an
  * agent and a group.
  */
-export async function totals(days: number): Promise<Totals> {
+export async function totals(range: Range): Promise<Totals> {
   const rows = await db
     .select(SUMS)
     .from(metricsDaily)
     .where(
       and(
-        gte(metricsDaily.day, since(days)),
+        inRange(range),
         isNull(metricsDaily.groupId),
         isNull(metricsDaily.agentId),
         isNull(metricsDaily.channel),
@@ -73,35 +82,35 @@ export async function totals(days: number): Promise<Totals> {
 
 export type Row = Totals & { label: string };
 
-export async function byAgent(days: number): Promise<Row[]> {
+export async function byAgent(range: Range): Promise<Row[]> {
   const rows = await db
     .select({ label: sql<string>`coalesce(${agents.name}, ${agents.email})`, ...SUMS })
     .from(metricsDaily)
     .innerJoin(agents, eq(agents.id, metricsDaily.agentId))
-    .where(and(gte(metricsDaily.day, since(days)), isNotNull(metricsDaily.agentId)))
+    .where(and(inRange(range), isNotNull(metricsDaily.agentId)))
     .groupBy(agents.id)
     .orderBy(sql`sum(${metricsDaily.ticketsResolved}) desc`);
 
   return rows.map((row) => ({ ...normalise(row), label: row.label }));
 }
 
-export async function byGroup(days: number): Promise<Row[]> {
+export async function byGroup(range: Range): Promise<Row[]> {
   const rows = await db
     .select({ label: groups.name, ...SUMS })
     .from(metricsDaily)
     .innerJoin(groups, eq(groups.id, metricsDaily.groupId))
-    .where(and(gte(metricsDaily.day, since(days)), isNotNull(metricsDaily.groupId)))
+    .where(and(inRange(range), isNotNull(metricsDaily.groupId)))
     .groupBy(groups.id)
     .orderBy(sql`sum(${metricsDaily.ticketsResolved}) desc`);
 
   return rows.map((row) => ({ ...normalise(row), label: row.label }));
 }
 
-export async function byChannel(days: number): Promise<Row[]> {
+export async function byChannel(range: Range): Promise<Row[]> {
   const rows = await db
     .select({ label: sql<string>`${metricsDaily.channel}`, ...SUMS })
     .from(metricsDaily)
-    .where(and(gte(metricsDaily.day, since(days)), isNotNull(metricsDaily.channel)))
+    .where(and(inRange(range), isNotNull(metricsDaily.channel)))
     .groupBy(metricsDaily.channel)
     .orderBy(sql`sum(${metricsDaily.ticketsCreated}) desc`);
 
@@ -109,13 +118,13 @@ export async function byChannel(days: number): Promise<Row[]> {
 }
 
 /** Daily series for the totals slice, oldest first, for the trend table. */
-export async function daily(days: number): Promise<(Totals & { day: string })[]> {
+export async function daily(range: Range): Promise<(Totals & { day: string })[]> {
   const rows = await db
     .select({ day: metricsDaily.day, ...SUMS })
     .from(metricsDaily)
     .where(
       and(
-        gte(metricsDaily.day, since(days)),
+        inRange(range),
         isNull(metricsDaily.groupId),
         isNull(metricsDaily.agentId),
         isNull(metricsDaily.channel),
@@ -125,6 +134,33 @@ export async function daily(days: number): Promise<(Totals & { day: string })[]>
     .orderBy(metricsDaily.day);
 
   return rows.map((row) => ({ ...normalise(row), day: row.day }));
+}
+
+/**
+ * Where the window's figures start, and on how many days there are any.
+ *
+ * The rollup recomputes three days a night and has no backfill, so a window
+ * wider than the history returns the same rows as a narrower one and the range
+ * control looks broken. The page compares `first` with the window's start to
+ * say so. Read from the totals slice, the one every figure on the page sums.
+ */
+export async function rolledUpDays(range: Range): Promise<{ first: string | null; days: number }> {
+  const [row] = await db
+    .select({
+      first: sql<string | null>`min(${metricsDaily.day})::text`,
+      days: sql<number>`count(distinct ${metricsDaily.day})::int`,
+    })
+    .from(metricsDaily)
+    .where(
+      and(
+        inRange(range),
+        isNull(metricsDaily.groupId),
+        isNull(metricsDaily.agentId),
+        isNull(metricsDaily.channel),
+      ),
+    );
+
+  return { first: row?.first ?? null, days: row?.days ?? 0 };
 }
 
 /**

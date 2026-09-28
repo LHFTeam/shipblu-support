@@ -15,9 +15,11 @@ import {
   daily,
   formatDuration,
   metPercentage,
+  rolledUpDays,
   totals,
   type Row as ReportRow,
 } from '@/lib/reports/queries';
+import { rangeIn, reportingContext } from '@/lib/reports/rollup';
 
 export const dynamic = 'force-dynamic';
 
@@ -44,15 +46,25 @@ export default async function ReportsPage({
     ? Number(requested)
     : 30;
 
-  const [summary, agentRows, groupRows, channelRows, series] = await Promise.all([
-    totals(days),
-    byAgent(days),
-    byGroup(days),
-    byChannel(days),
-    daily(days),
+  // One window, in the team's zone, for every query and for the dates printed
+  // above them, so a figure and its range cannot disagree about where the
+  // window starts (§6.54).
+  const { zone } = await reportingContext();
+  const range = rangeIn(zone, days);
+
+  const [summary, agentRows, groupRows, channelRows, series, rolledUp] = await Promise.all([
+    totals(range),
+    byAgent(range),
+    byGroup(range),
+    byChannel(range),
+    daily(range),
+    rolledUpDays(range),
   ]);
 
   const hasData = series.length > 0;
+  // The history starting inside the window is what makes the range buttons
+  // look broken: every wider window answers the same.
+  const startsLate = rolledUp.first !== null && rolledUp.first > range.from;
 
   return (
     <div className="h-full overflow-y-auto p-6">
@@ -102,8 +114,18 @@ export default async function ReportsPage({
         >
           What tickets are about
         </Link>
-        <p className="ml-auto text-xs opacity-50">Rolled up nightly — today is not included yet.</p>
+        <p className="ml-auto text-xs opacity-50">
+          {range.from} to {range.to}, in {zone}. Rolled up nightly — today is not included yet.
+        </p>
       </div>
+
+      {startsLate ? (
+        <p className="mb-6 max-w-2xl rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+          This window opens on {range.from}, but the figures in it <b>begin on {rolledUp.first}</b>{' '}
+          — {rolledUp.days} {rolledUp.days === 1 ? 'day' : 'days'} of history. A wider range cannot
+          reach further back than that until more history accumulates.
+        </p>
+      ) : null}
 
       {!hasData ? (
         <EmptyState

@@ -61,6 +61,16 @@ export default async function DashboardPage({
   // needs it.
   const context = await reportingContext();
 
+  // The last `days` complete days, ending yesterday in the team's zone: the
+  // days `densify` draws below, and what the history section says it shows
+  // ("Complete days only — today is above"). Not `rangeIn`, which ends today
+  // for the reports, where the page prints that today is not in yet.
+  const midnight = DateTime.now().setZone(context.zone).startOf('day');
+  const history = {
+    from: midnight.minus({ days }).toISODate()!,
+    to: midnight.minus({ days: 1 }).toISODate()!,
+  };
+
   const [queue, today, agentRows, channels, health, hourly, series, window] = await Promise.all([
     queueSnapshot(now),
     todaySoFar(context, now),
@@ -68,8 +78,8 @@ export default async function DashboardPage({
     channelLoad(),
     systemHealth(),
     todayByHour(context.zone, now),
-    daily(days),
-    totals(days),
+    daily(history),
+    totals(history),
   ]);
 
   const online = agentRows.filter((agent) => agent.presence === 'online').length;
