@@ -251,14 +251,17 @@ again. `lib/http/form-data.ts` reads the fields — `text()`, `int()`,
 malformed one and an action that throws returns no state at all.
 `lib/http/action-state.ts` is the answer: `ActionState` and `ok()`, whose
 `nonce` changes on every success so a form keyed on it clears twice in a row.
-The inbox's action files — `reply-actions.ts`, `ticket-actions.ts` and the rest
-beside it — answer with `app/(console)/action-state.ts`, the same state plus a
-`message`, kept outside every `'use server'` file so a component can name the
-type without importing an action module. Admin settings actions answer with
-`SettingsState` / `AdminState` from `admin/settings-shared.ts`, a plain module
-for the same reason. The rest define a state of their own: `contacts/` and `kb/`
-build theirs on `lib/http`'s `ActionState`, and the sign-in, availability and
-new-ticket forms and the three help-centre forms have shapes of their own.
+The inbox's action files — `reply-`, `ticket-`, `meta-`, `shipment-`,
+`side-conversation-` and `category-actions.ts` — answer with
+`app/(console)/action-state.ts`, the same state plus a `message`, kept outside
+every `'use server'` file so a component can name the type without importing an
+action module. Admin settings actions answer with `SettingsState` / `AdminState`
+from `admin/settings-shared.ts`, a plain module for the same reason. `contacts/`
+and `kb/` build theirs on `lib/http`'s `ActionState`. The sign-in, availability
+and new-ticket forms and the three help-centre forms have shapes of their own,
+and the help centre's are not a mistake to tidy: its `error` is a `StringKey`
+the page translates, not a sentence. A new action file anywhere else answers
+with `lib/http/action-state.ts`.
 
 **Authorisation lives in code.** `proxy.ts` only checks that a session cookie
 exists; it cannot tell a revoked session from a live one. It runs on Node.js in
@@ -354,8 +357,10 @@ it and `dryrun=true` becomes a run that writes. `z.object` is for payloads only
 code writes. Four operator-run schemas are older than that rule and still use
 `z.object` — `backfill_meta_profiles` (the example above),
 `sync_stale_shipments`, `rollup_metrics` and `sync_shipment`; none takes a
-`dryRun`, and none is the one to copy. A type with no entry still takes any
-object, so the entry is a convention the compiler does not force.
+`dryRun`, but a typo there is still dropped, and absent is the default, so
+`backfill_meta_profiles limt=50` walks every contact. None is the one to copy. A
+type with no entry still takes any object, so the entry is a convention the
+compiler does not force.
 
 **`PermanentJobError` is for a failure no retry can fix**, and it sends the job
 to `dead` on its first attempt instead of spending the rest. That means input
