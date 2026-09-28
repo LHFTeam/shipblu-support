@@ -25,7 +25,7 @@ import { addNote, sendReply, sendTemplateReply } from '../../reply-actions';
 import { KnowledgePanel } from './knowledge';
 import { StartSideConversationForm } from './side-conversations';
 import { ThreadControl } from './thread-control';
-import type { TemplateOption } from './view';
+import type { TemplateOption } from './types';
 
 const INITIAL: ActionState = { error: null };
 
