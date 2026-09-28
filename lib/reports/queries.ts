@@ -1,4 +1,4 @@
-import { and, between, eq, isNotNull, isNull, sql } from 'drizzle-orm';
+import { and, between, eq, isNotNull, isNull, lte, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agents, groups, metricsDaily } from '@/db/schema';
 import type { Range } from './category-queries';
@@ -137,23 +137,31 @@ export async function daily(range: Range): Promise<(Totals & { day: string })[]>
 }
 
 /**
- * Where the window's figures start, and on how many days there are any.
+ * Where the rollup's history starts, and on how many of the window's days it
+ * has figures.
  *
  * The rollup recomputes three days a night and has no backfill, so a window
  * wider than the history returns the same rows as a narrower one and the range
  * control looks broken. The page compares `first` with the window's start to
- * say so. Read from the totals slice, the one every figure on the page sums.
+ * say so.
+ *
+ * `first` has no lower bound, and that is the point of it. A day nobody worked
+ * has no row — `computeDay` writes nothing for an empty day — so the earliest
+ * row *inside* the window is later than `from` whenever the window opens on a
+ * holiday or a quiet Friday, and the page would say the history begins there
+ * when a wider range reaches further back. `days` stays the count inside the
+ * window. Read from the totals slice, the one every figure on the page sums.
  */
 export async function rolledUpDays(range: Range): Promise<{ first: string | null; days: number }> {
   const [row] = await db
     .select({
       first: sql<string | null>`min(${metricsDaily.day})::text`,
-      days: sql<number>`count(distinct ${metricsDaily.day})::int`,
+      days: sql<number>`(count(distinct ${metricsDaily.day}) filter (where ${metricsDaily.day} >= ${range.from}::date))::int`,
     })
     .from(metricsDaily)
     .where(
       and(
-        inRange(range),
+        lte(metricsDaily.day, range.to),
         isNull(metricsDaily.groupId),
         isNull(metricsDaily.agentId),
         isNull(metricsDaily.channel),

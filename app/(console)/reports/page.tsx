@@ -63,7 +63,9 @@ export default async function ReportsPage({
 
   const hasData = series.length > 0;
   // The history starting inside the window is what makes the range buttons
-  // look broken: every wider window answers the same.
+  // look broken: every wider window answers the same. `first` is the history's
+  // start, not the first row in the window, so a window opening on a quiet
+  // day does not claim the history is younger than it is.
   const startsLate = rolledUp.first !== null && rolledUp.first > range.from;
 
   return (
@@ -121,9 +123,10 @@ export default async function ReportsPage({
 
       {startsLate ? (
         <p className="mb-6 max-w-2xl rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
-          This window opens on {range.from}, but the figures in it <b>begin on {rolledUp.first}</b>{' '}
-          — {rolledUp.days} {rolledUp.days === 1 ? 'day' : 'days'} of history. A wider range cannot
-          reach further back than that until more history accumulates.
+          This window opens on {range.from}, but the rolled-up history{' '}
+          <b>begins on {rolledUp.first}</b> — {rolledUp.days} {rolledUp.days === 1 ? 'day' : 'days'}{' '}
+          of figures in this window. A wider range cannot reach further back than that until more
+          history accumulates.
         </p>
       ) : null}
 

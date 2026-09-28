@@ -36,7 +36,9 @@ export const dynamic = 'force-dynamic';
  *  - **Right now** — the live backlog, one scan over open tickets.
  *  - **Today so far** — computed by the same code the nightly rollup runs, so
  *    the figure here today and the row in `metrics_daily` tomorrow agree.
- *  - **The last N days** — the stored rollups, exactly what Reports reads.
+ *  - **The last N days** — the stored rollups Reports reads, over the last N
+ *    *complete* days. Reports' window follows `rangeIn` and ends on today,
+ *    which has no row yet, so for the same N it sums one day fewer.
  *
  * It refreshes itself, which is what makes the bounded queries in
  * `lib/reports/live` a requirement rather than a preference.
@@ -64,7 +66,8 @@ export default async function DashboardPage({
   // The last `days` complete days, ending yesterday in the team's zone: the
   // days `densify` draws below, and what the history section says it shows
   // ("Complete days only — today is above"). Not `rangeIn`, which ends today
-  // for the reports, where the page prints that today is not in yet.
+  // for the reports, where the page prints that today is not in yet — so
+  // `/reports?days=N` sums N-1 complete days to this page's N.
   const midnight = DateTime.now().setZone(context.zone).startOf('day');
   const history = {
     from: midnight.minus({ days }).toISODate()!,

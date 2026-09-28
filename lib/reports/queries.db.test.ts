@@ -35,7 +35,7 @@ describe('the reports window', () => {
     ]);
   });
 
-  it('says where the figures in the window start, and on how many days', async () => {
+  it('says where the history starts, and on how many days of the window there are figures', async () => {
     await day('2026-09-24', 2);
     await day('2026-09-25', 3);
 
@@ -44,8 +44,28 @@ describe('the reports window', () => {
       days: 2,
     });
     expect(await rolledUpDays({ from: '2026-10-01', to: '2026-10-07' })).toEqual({
+      first: '2026-09-24',
+      days: 0,
+    });
+    expect(await rolledUpDays({ from: '2026-09-01', to: '2026-09-20' })).toEqual({
       first: null,
       days: 0,
     });
+  });
+
+  // A day nobody worked has no row. A window opening on one must not report
+  // the history as starting inside it when it reaches further back.
+  it('takes the start of the history from before the window, past a quiet first day', async () => {
+    await day('2026-08-18', 5);
+    await day('2026-08-19', 5);
+    // Nothing on the 20th: the window below opens on a gap.
+    await day('2026-08-21', 5);
+    await day('2026-08-23', 5);
+
+    const range = { from: '2026-08-20', to: '2026-08-25' };
+    const rolledUp = await rolledUpDays(range);
+
+    expect(rolledUp).toEqual({ first: '2026-08-18', days: 2 });
+    expect(rolledUp.first! > range.from).toBe(false);
   });
 });
