@@ -2,16 +2,15 @@
 
 import { and, eq, sql, desc } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { cannedResponses, conversations, messages, whatsappTemplates } from '@/db/schema';
+import { cannedResponses, messages, whatsappTemplates } from '@/db/schema';
 import { requireAgent } from '@/lib/auth/guard';
 import { text } from '@/lib/http/form-data';
 import { ok } from '@/lib/http/action-state';
 import { can } from '@/lib/auth/permissions';
-import { carrierFor, sendsByEmail } from '@/lib/tickets/outbound';
+import { sendsByEmail } from '@/lib/tickets/outbound';
 import { htmlToText, sanitiseEmailHtml, textToHtml } from '@/lib/html/sanitize';
-import { enqueue } from '@/lib/queue';
-import { onAgentReply } from '@/lib/sla';
 import { afterMessageStored } from '@/lib/tickets/lifecycle';
+import { storeAgentReply } from '@/lib/tickets/agent-reply';
 import {
   buildTemplateComponents,
   renderTemplatePreview,
@@ -122,69 +121,31 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
 
   const parentMessageId = await lastInboundChannelMessageId(conversationId);
 
-  const inserted = await db
-    .insert(messages)
-    .values({
-      conversationId,
-      direction: 'outbound',
-      kind: 'reply',
-      authorAgentId: agent.id,
-      bodyText: isEmail && html ? htmlToText(html) : body,
-      bodyHtml: html,
-      toAddresses: isEmail && row.requesterEmail ? [row.requesterEmail] : [],
-      inReplyTo: parentMessageId,
-      // Web chat has no outbound provider: writing the row *is* delivery,
-      // because the visitor's open stream reads the same table. Marking it
-      // pending would leave a permanent "sending…" badge on a message the
-      // customer is already looking at.
-      deliveryStatus: isWebchat ? 'delivered' : 'pending',
-      ...(isWebchat ? { deliveredAt: new Date() } : {}),
-      meta:
-        conversation.channel === 'whatsapp'
-          ? { sendKind: 'text' }
-          : isMeta
-            ? {
-                metaKind: isCommentThread ? 'comment' : 'direct_message',
-                platform: conversation.channel,
-                sendKind: metaSendKind,
-                // A public reply is on the record for everyone who can see the
-                // post, so the timeline says which of the two this was.
-                isPublic: metaSendKind === 'comment_reply',
-              }
-            : {},
-    })
-    .returning({ id: messages.id });
-
-  const messageId = inserted[0]!.id;
-
-  await db
-    .update(conversations)
-    .set({ lastMessageAt: new Date(), lastAgentMessageAt: new Date() })
-    .where(eq(conversations.id, conversationId));
-
-  // The clock stops when the agent writes, not when the provider accepts the
-  // message: the delay is ours to own, and a send that fails is visible on the
-  // timeline anyway.
-  await onAgentReply(conversationId);
-
-  if (!isWebchat) {
-    await enqueue(
-      carrierFor(conversation.channel),
-      { messageId },
-      // dedupeKey on the message id: a double-submit or a retried action can
-      // never queue the same reply twice.
-      { priority: 10, dedupeKey: `send:${messageId}` },
-    );
-  }
-
-  // An agent looks a parcel up on the shipping platform and pastes the number
-  // into their answer, which is why this runs on outbound as well as inbound.
-  await afterMessageStored({
-    conversationId,
-    messageId,
+  await storeAgentReply(conversationId, conversation.channel, {
+    authorAgentId: agent.id,
     bodyText: isEmail && html ? htmlToText(html) : body,
-    kind: 'reply',
-    direction: 'outbound',
+    bodyHtml: html,
+    toAddresses: isEmail && row.requesterEmail ? [row.requesterEmail] : [],
+    inReplyTo: parentMessageId,
+    // Web chat has no outbound provider: writing the row *is* delivery,
+    // because the visitor's open stream reads the same table. Marking it
+    // pending would leave a permanent "sending…" badge on a message the
+    // customer is already looking at.
+    deliveryStatus: isWebchat ? 'delivered' : 'pending',
+    ...(isWebchat ? { deliveredAt: new Date() } : {}),
+    meta:
+      conversation.channel === 'whatsapp'
+        ? { sendKind: 'text' }
+        : isMeta
+          ? {
+              metaKind: isCommentThread ? 'comment' : 'direct_message',
+              platform: conversation.channel,
+              sendKind: metaSendKind,
+              // A public reply is on the record for everyone who can see the
+              // post, so the timeline says which of the two this was.
+              isPublic: metaSendKind === 'comment_reply',
+            }
+          : {},
   });
 
   if (cannedResponseId) await countCannedUse(cannedResponseId);
@@ -336,43 +297,18 @@ export async function sendTemplateReply(
   // useless when someone asks what we actually told the customer.
   const rendered = renderTemplatePreview(shape.bodyText, bodyValues);
 
-  const inserted = await db
-    .insert(messages)
-    .values({
-      conversationId,
-      direction: 'outbound',
-      kind: 'reply',
-      authorAgentId: agent.id,
-      bodyText: rendered,
-      deliveryStatus: 'pending',
-      meta: {
-        sendKind: 'template',
-        template: { name: template.name, language: template.language, components },
-        templateName: template.name,
-      },
-    })
-    .returning({ id: messages.id });
-
-  const messageId = inserted[0]!.id;
-
-  await db
-    .update(conversations)
-    .set({ lastMessageAt: new Date(), lastAgentMessageAt: new Date() })
-    .where(eq(conversations.id, conversationId));
-
-  await onAgentReply(conversationId);
-
-  await enqueue('send_whatsapp', { messageId }, { priority: 10, dedupeKey: `send:${messageId}` });
-
   // The most predictable source of a tracking number in the whole system: the
   // shipment_update template's body is "Hi {{1}}, your shipment {{2}} is out
   // for delivery today", and {{2}} is filled in above.
-  await afterMessageStored({
-    conversationId,
-    messageId,
+  await storeAgentReply(conversationId, row.conversation.channel, {
+    authorAgentId: agent.id,
     bodyText: rendered,
-    kind: 'reply',
-    direction: 'outbound',
+    deliveryStatus: 'pending',
+    meta: {
+      sendKind: 'template',
+      template: { name: template.name, language: template.language, components },
+      templateName: template.name,
+    },
   });
 
   refresh(row.conversation.number);
