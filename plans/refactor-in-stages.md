@@ -183,8 +183,9 @@ and two sessions claiming different rows then conflict on all of them.
 | 6.5   | Reports header: `text-left` to `text-start`      | #298            | merged  |
 | 6.5   | Reports overview: the shared `Stat` and `Table`  | #301            | merged  |
 | 6.5   | Widget: `useMessageStream`                       | #302            | merged  |
-| 6.5   | Dashboard: six section components                | #303            | open    |
+| 6.5   | Dashboard: six section components                | #303            | merged  |
 | 6.5   | Widget: `useHostBridge`                          | #304            | open    |
+| 6.5   | Composer: the three forms in their own files     | #305            | open    |
 | 6.x   | Client components                                |                 | pending |
 | 7     | Lint tightening, finish logging                  |                 | pending |
 
@@ -215,13 +216,13 @@ subscribe to the open PRs again.
   selected, which AGENTS.md asks of a report with a range control (§6.54).
   Older than #301, which kept it.
 
-**State at 01:42 UTC, 2026-09-28.** #258–#291 and #293–#302 are merged. Open,
+**State at 01:46 UTC, 2026-09-28.** #258–#291 and #293–#303 are merged. Open,
 each holding its files until it merges, besides this plan's own PR:
 
 - #304 (6.5): `app/widget/chat.tsx`, and the new `use-host-bridge.ts`.
-- #303 (6.5): `admin/dashboard/page.tsx`, and the new `section.tsx`,
-  `right-now.tsx`, `today.tsx`, `history.tsx`, `agents.tsx`, `channels.tsx`
-  and `health.tsx` beside it.
+- #305 (6.5): `composer.tsx`, `types.ts` and `view.tsx` under `inbox/[number]/`,
+  and the new `reply-form.tsx`, `note-form.tsx`, `template-form.tsx` and
+  `form-state.ts` beside them.
 
 **Next work.**
 
@@ -238,7 +239,8 @@ each holding its files until it merges, besides this plan's own PR:
    RTL fix (#298) and the swap to the shared `Stat` and `Table` (#301) merged.
    The widget's `useMessageStream` merged (#302) and `useHostBridge` is #304;
    `use-widget-session.ts` follows it, since all three edit `chat.tsx`.
-   The dashboard's sections are #303. Then the `composer.tsx` sections.
+   The dashboard's sections merged (#303); the composer's forms are #305.
+   After those, Stage 7.
 5. Logger. Three places in `worker/` stay on `console`, because a move would
    change what they print:
    - `check-meta-permissions` and `test-comment-permission`: their lines start
