@@ -51,6 +51,7 @@ import { ProfileRefresh } from './profile-refresh';
 import type { CannedLocale } from '@/lib/tickets/canned';
 import { Composer, type KnowledgeContext } from './composer';
 import { SideConversationCard, SideConversationsField } from './side-conversations';
+import type { TemplateOption } from './types';
 
 /**
  * What sits where the composer would be, on a channel we only observe.
@@ -100,14 +101,6 @@ function ReadOnlyNotice({ reason, oneSided }: { reason: string; oneSided: boolea
     </div>
   );
 }
-
-export type TemplateOption = {
-  id: string;
-  name: string;
-  language: string;
-  category: string;
-  components: unknown[];
-};
 
 export function ConversationView({
   conversation,
