@@ -10,12 +10,10 @@ describe('articleBody', () => {
       ),
     ).toEqual({
       bodyHtml: '<h2>Returns</h2><p>Book a pickup.</p>',
-      // Capitals, because `htmlToText` formats a heading the way html-to-text
-      // does by default. Pinned as it is, not endorsed: the excerpt is what the
-      // help centre lists under a title and what the article page gives search
-      // engines as its description.
-      bodyText: 'RETURNS\n\nBook a pickup.',
-      excerpt: 'RETURNS Book a pickup.',
+      // The heading in its own case: the excerpt is what the help centre lists
+      // under a title and what search engines are given as the description.
+      bodyText: 'Returns\n\nBook a pickup.',
+      excerpt: 'Returns Book a pickup.',
     });
   });
 

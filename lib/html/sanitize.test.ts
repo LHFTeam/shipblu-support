@@ -41,4 +41,15 @@ describe('htmlToText', () => {
     const long = 'word '.repeat(40).trim();
     expect(htmlToText(`<p>${long}</p><p>second</p>`)).toBe(`${long}\n\nsecond`);
   });
+
+  it('keeps every heading level in its own case, and still sets it off as a block', () => {
+    for (const level of [1, 2, 3, 4, 5, 6]) {
+      expect(htmlToText(`<h${level}>Track your order</h${level}><p>Open the link.</p>`)).toBe(
+        'Track your order\n\nOpen the link.',
+      );
+    }
+    expect(htmlToText('<p>Intro.</p><h2>Returns</h2><p>Book a pickup.</p>')).toBe(
+      'Intro.\n\n\nReturns\n\nBook a pickup.',
+    );
+  });
 });
