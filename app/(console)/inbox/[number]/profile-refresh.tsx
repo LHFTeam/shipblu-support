@@ -4,7 +4,7 @@ import { useActionState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useFormStatus } from 'react-dom';
 import { Button } from '@/components/ui';
-import type { ActionState } from '../../actions';
+import type { ActionState } from '../../action-state';
 import { refreshRequesterProfile } from '../../meta-actions';
 
 const INITIAL: ActionState = { error: null };

@@ -72,7 +72,7 @@ Iterating on one thing — use these rather than the whole suite:
 npx vitest run lib/kb/slug.test.ts     # one file
 npx vitest run -t 'strips the quote'   # one test, by name
 npx vitest lib/hours                   # watch mode, one directory
-npx eslint app/\(console\)/actions.ts  # one file
+npx eslint app/\(console\)/ticket-actions.ts  # one file
 npx prettier --write AGENTS.md         # one file
 ```
 

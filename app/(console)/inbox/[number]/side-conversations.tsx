@@ -7,7 +7,7 @@ import { formatBytes, formatDateTime, formatRelative } from '@/lib/format';
 import type { PickerEntry, SideConversationView } from '@/lib/side-conversations/queries';
 import { describeRecipient, trackingPrefill } from '@/lib/side-conversations/format';
 import type { ConversationDetail } from '@/lib/tickets/conversation';
-import type { ActionState } from '../../actions';
+import type { ActionState } from '../../action-state';
 import {
   replyToSideConversation,
   setSideConversationState,

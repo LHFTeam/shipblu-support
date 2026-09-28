@@ -25,8 +25,8 @@ import { listTicketFields } from '@/lib/tickets/lookups';
  * may see it, refuse what the ticket's state forbids, and revalidate the pages
  * a write stales.
  *
- * A plain module rather than part of `app/(console)/actions.ts`, because that
- * file is `'use server'` and every export there is a public POST endpoint. These
+ * A plain module rather than part of the console's action files, because those
+ * are `'use server'` and every export there is a public POST endpoint. These
  * are helpers the actions call after they authorise; exported from an action
  * file, each one would be callable on its own, with no `requireAgent()` in
  * front of it. Moving them here is what lets the actions split into sibling
