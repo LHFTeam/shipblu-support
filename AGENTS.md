@@ -246,14 +246,17 @@ server-side.
 
 Two shared modules carry that shape, so an action file does not spell it out
 again. `lib/http/form-data.ts` reads the fields — `text()`, `int()`,
-`optionalNumber()`, `localeOf()` and `uuidField()`, which answers `null` for "not
-set" and `undefined` for "not a uuid" because Postgres raises 22P02 on a
+`optionalNumber()`, `localeOf()` and `uuidField()`, which answers `null` for
+"not set" and `undefined` for "not a uuid" because Postgres raises 22P02 on a
 malformed one and an action that throws returns no state at all.
 `lib/http/action-state.ts` is the answer: `ActionState` and `ok()`, whose
 `nonce` changes on every success so a form keyed on it clears twice in a row.
-The console's actions answer with `app/(console)/action-state.ts`, the same
-state plus a `message`, kept outside every `'use server'` file so a component
-can name the type without importing an action module.
+The inbox's action files — `reply-actions.ts`, `ticket-actions.ts` and the rest
+beside it — answer with `app/(console)/action-state.ts`, the same state plus a
+`message`, kept outside every `'use server'` file so a component can name the
+type without importing an action module. Admin settings actions answer with
+`SettingsState` / `AdminState` from `admin/settings-shared.ts`, a plain module
+for the same reason; anything else uses `lib/http/action-state.ts` directly.
 
 **Authorisation lives in code.** `proxy.ts` only checks that a session cookie
 exists; it cannot tell a revoked session from a live one. It runs on Node.js in
@@ -337,12 +340,17 @@ return 200 immediately; they never do the work inline.
 (`npm run job -- backfill_meta_profiles force=true limit=50`), so a handler's
 options are reachable without hand-inserting a `jobs` row.
 
-**A payload is a schema, written once.** `jobs.payload` is jsonb, so a handler is
-handed whatever somebody wrote into the row — a caller, a replay, or those
+**A payload is a schema, written once.** `jobs.payload` is jsonb, so a handler
+is handed whatever somebody wrote into the row — a caller, a replay, or those
 `key=value` pairs. A new job type gets an entry in `JOB_PAYLOADS` in
 `lib/queue/payloads.ts`; `enqueue` is typed from it, so a caller sending the
 wrong shape does not compile, and the handler reads the row with
-`parseJobPayload(job, type)` rather than checking fields in its own words.
+`parseJobPayload(job, type)` rather than checking fields in its own words. Use
+`z.strictObject` for any job an operator runs through `npm run job`, and always
+for one with a `dryRun`: a mistyped key is then refused, where `z.object` drops
+it and `dryrun=true` becomes a run that writes. `z.object` is for payloads only
+code writes. A type with no entry still takes any object, so the entry is a
+convention the compiler does not force.
 
 **`PermanentJobError` is for a failure no retry can fix**, and it sends the job
 to `dead` on its first attempt instead of spending the rest. That means input
@@ -362,11 +370,15 @@ search and `docs/PROJECT-STATE.md` quote lines by it, so moving a message moves
 it word for word. Success fields are primitives by type, so a request body
 cannot be spread into a line; `warn` and `error` take the caught value as their
 second argument, so the stack and any `cause` still print. It never reads
-`env()`, for the reason `lib/webhooks/log.ts` gives, and that file stays the only
-thing that prints a raw delivery, because it redacts. `npm run lint` refuses a
-bare `console.*`; the files where `console` is the point — the logger, the
-command-line entry points, two hand-run diagnostics — are named one by one in
-`eslint.config.mjs`, each with its reason.
+`env()`, for the reason `lib/webhooks/log.ts` gives, and that file stays the
+only thing that prints a raw delivery. It strips the credential headers and
+nothing else — the body prints verbatim, customer content included — which is
+why `LOG_ALL_INCOMING_WEBHOOKS` is for a debugging session only. `npm run lint`
+refuses a bare `console.*`. The files where `console` is the point — the logger,
+the webhook dump, `scripts/` and the other command-line entry points, and two
+hand-run diagnostics — are named in `eslint.config.mjs`, each with its reason. A
+single call site that must stay a bare `console` takes an
+`eslint-disable-next-line no-console -- <why>`, not a place on that list.
 
 **Environment variables** are declared in `lib/env.ts` (Zod, parsed lazily) and
 in `render.yaml` in the same commit — CI fails a pull request where the two
