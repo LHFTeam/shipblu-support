@@ -190,6 +190,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 6.3   | List window badges on the shared clock           | #307            | open    |
 | 6.x   | Client components (6.1–6.5)                      |                 | done    |
 | 7.1   | Type-aware lint over `lib/` and `worker/`        | #308            | open    |
+| 7.2   | Layering through `no-restricted-imports`         | #309            | open    |
 | 7     | Lint tightening, finish logging                  |                 | pending |
 
 ### Handoff, 2026-09-27 07:00 UTC
@@ -226,13 +227,14 @@ subscribe to the open PRs again.
   third-party iframe with storage blocked, the resume effect, `ensureSession`
   and `startFreshSession` throw. Older than #306, which only moved them.
 
-**State at 02:04 UTC, 2026-09-28.** #258–#291 and #293–#306 are merged. Open,
+**State at 02:09 UTC, 2026-09-28.** #258–#291 and #293–#306 are merged. Open,
 each holding its files until it merges, besides this plan's own PR:
 
 - #307 (6.3, behaviour change): `inbox/list.tsx` and
   `inbox/[number]/window-indicator.tsx`.
 - #308 (7.1): `eslint.strict.config.mjs` (new), `package.json`,
   `package-lock.json`, `.github/workflows/ci.yml` and `AGENTS.md`.
+- #309 (7.2): `eslint.config.mjs` and `AGENTS.md`.
 
 **Next work.**
 
@@ -268,7 +270,8 @@ each holding its files until it merges, besides this plan's own PR:
    rules start at `error` in a blocking job, not as warnings. `app/` has two
    findings, `inbox/[number]/knowledge.tsx:85` and `inbox/list.tsx:471`; the
    PR that fixes them and adds `app/**` to the config waits for #307 and
-   #308, which hold those files. 7.2 (layering) is next.
+   #308, which hold those files. 7.2 is #309. 7.3 (`no-console`) edits the
+   same block of `eslint.config.mjs`, so it waits for #309.
 
 **Traps in this container.**
 
