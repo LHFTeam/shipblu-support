@@ -189,6 +189,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 6.5   | Widget: `useWidgetSession`                       | #306            | merged  |
 | 6.3   | List window badges on the shared clock           | #307            | open    |
 | 6.x   | Client components (6.1–6.5)                      |                 | done    |
+| 7.1   | Type-aware lint over `lib/` and `worker/`        | #308            | open    |
 | 7     | Lint tightening, finish logging                  |                 | pending |
 
 ### Handoff, 2026-09-27 07:00 UTC
@@ -225,11 +226,13 @@ subscribe to the open PRs again.
   third-party iframe with storage blocked, the resume effect, `ensureSession`
   and `startFreshSession` throw. Older than #306, which only moved them.
 
-**State at 01:57 UTC, 2026-09-28.** #258–#291 and #293–#306 are merged. Open,
-holding its files until it merges, besides this plan's own PR:
+**State at 02:04 UTC, 2026-09-28.** #258–#291 and #293–#306 are merged. Open,
+each holding its files until it merges, besides this plan's own PR:
 
 - #307 (6.3, behaviour change): `inbox/list.tsx` and
   `inbox/[number]/window-indicator.tsx`.
+- #308 (7.1): `eslint.strict.config.mjs` (new), `package.json`,
+  `package-lock.json`, `.github/workflows/ci.yml` and `AGENTS.md`.
 
 **Next work.**
 
@@ -247,7 +250,7 @@ holding its files until it merges, besides this plan's own PR:
    The widget's `useMessageStream` (#302) and `useHostBridge` (#304) merged;
    so did `useWidgetSession` (#306), the last of the three. The dashboard's
    sections (#303) and the composer's forms (#305) merged. So Stage 6 is done,
-   and Stage 7 starts now; #307, the list's window badges (item 3), can land
+   and Stage 7 has started; #307, the list's window badges (item 3), can land
    beside it.
 5. Logger. Three places in `worker/` stay on `console`, because a move would
    change what they print:
@@ -260,6 +263,12 @@ holding its files until it merges, besides this plan's own PR:
    their output on purpose. `worker/run-job.ts` is the exception Stage 7
    already names. Those four files are every `console` call left in
    `worker/`. `lib/` and `app/` are done.
+
+6. Stage 7.1 is #308. Measured, `lib/` and `worker/` had no findings, so the
+   rules start at `error` in a blocking job, not as warnings. `app/` has two
+   findings, `inbox/[number]/knowledge.tsx:85` and `inbox/list.tsx:471`; the
+   PR that fixes them and adds `app/**` to the config waits for #307 and
+   #308, which hold those files. 7.2 (layering) is next.
 
 **Traps in this container.**
 
