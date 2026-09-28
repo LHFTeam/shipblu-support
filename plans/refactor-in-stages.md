@@ -927,13 +927,20 @@ The pieces become kebab-case siblings, the way `comment-moderation.tsx` and
 `side-conversations.tsx` already are. Leaves go first, one or two files per PR:
 
 - `header.tsx`
-- `window-indicator.tsx`, after which the copy in `inbox/list.tsx:566-594` goes
+- `window-indicator.tsx`. The list's `WhatsAppWindow` and `MetaWindow` in
+  `inbox/list.tsx` are not copies of it: they are compact, show nothing while
+  the window is unremarkable, and read the clock at render. Folding them in
+  changes what the list shows, so it is a separate PR marked as a behaviour
+  change.
 - `timeline.tsx`
-- `sidebar.tsx`
 - `ticket-fields.tsx`, where the local `Field` becomes `SidebarField` so it no
   longer shadows the one in `components/ui.tsx`
+- `shipments-field.tsx`, with `ShippingAccountsField`. `UnlinkButton` and
+  `LinkAction` go to `unlink-button.tsx`, because the categories block uses
+  them too.
 - `categories-field.tsx`
-- `shipments-field.tsx`
+- `sidebar.tsx`, last: `Sidebar` renders the blocks above, so moving it before
+  them would make `sidebar.tsx` import back from `view.tsx`.
 
 ### 6.4 `useFieldAction`
 
