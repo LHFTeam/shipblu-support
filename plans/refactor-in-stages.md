@@ -158,6 +158,7 @@ and two sessions claiming different rows then conflict on all of them.
 | 5.2   | `reply-actions.ts`                               | #281            | merged  |
 | 5.2   | `ticket-actions.ts` and `action-state.ts`        | #282            | merged  |
 | 5.3   | `lib/tickets/agent-reply.ts`                     | #284            | open    |
+| 5.3   | `lib/tickets/status.ts`                          | #285            | open    |
 | 5.4   | Admin pages stop importing `db`: first batches   | #254, #256      | merged  |
 | 5.4   | Admin pages: agents, auto-responses, automations | #259            | merged  |
 | 5.4   | Categories, channels, invite, field options      | #266            | merged  |
@@ -175,17 +176,21 @@ The session that opened #233–#241 stopped here because of its usage limit. It
 unsubscribed from its PRs and deleted its hourly check-in. The next session must
 subscribe to the open PRs again.
 
-**State at 00:18 UTC.** #258–#282 are merged. Open, holding its files until it
-merges: #284 (5.3, `lib/tickets/agent-reply.ts`): `(console)/reply-actions.ts`,
-`lib/tickets/agent-reply.ts` and `lib/tickets/agent-reply.db.test.ts`.
+**State at 00:22 UTC.** #258–#282 are merged. Open, each holding its files until
+it merges:
+
+- #284 (5.3, `lib/tickets/agent-reply.ts`): `(console)/reply-actions.ts`,
+  `lib/tickets/agent-reply.ts` and `lib/tickets/agent-reply.db.test.ts`.
+- #285 (5.3, `lib/tickets/status.ts`): `(console)/ticket-actions.ts`,
+  `lib/tickets/console-guards.ts`, `lib/tickets/status.ts` and
+  `lib/tickets/status.db.test.ts`.
 
 **Next work.**
 
 1. 5.1: done.
 2. 5.4: done.
-3. 5.2: done. 5.3: `lib/tickets/agent-reply.ts` is #284. Next,
-   `lib/tickets/status.ts` for the two copies of the status-change transaction
-   (`applyStatusCategory` and `updateTicket`'s status case).
+3. 5.2: done. 5.3: done once #284 and #285 merge. Then Stage 6, starting with
+   6.1 (`TemplateOption` into `inbox/[number]/types.ts`).
 4. Logger. Three places in `worker/` stay on `console`, because a move would
    change what they print:
    - `check-meta-permissions` and `test-comment-permission`: their lines start
