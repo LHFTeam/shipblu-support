@@ -91,89 +91,110 @@ its column's current width — `this PR` or a PR number, and `open` or `merged` 
 so an update is a one-line diff: a longer value makes Prettier re-pad every row,
 and two sessions claiming different rows then conflict on all of them.
 
-| Stage | Item                                             | Branch / PR     | Status  |
-| ----- | ------------------------------------------------ | --------------- | ------- |
-| 0.1   | Commit this plan                                 | #166            | merged  |
-| 0.2   | Harden `server-actions` and minimum-count guards | #167            | merged  |
-| 0.3   | Split `repo-rules.mjs` into per-rule modules     | #191–#192       | merged  |
-| 0.4   | CI tidy-up                                       | #193–#195       | merged  |
-| 0.5   | Remove Playwright                                | #173            | merged  |
-| 1.1   | `lib/testing/` fixtures                          | #208, #210–#211 | merged  |
-| 1.2   | Database test tier                               | #212–#213       | merged  |
-| 1.3   | Characterise the seven ingest entry points       | #215–#218       | merged  |
-| 1.4   | Webhook route tests                              | #196            | merged  |
-| 1.5   | DB test for the admin overview's raw SQL         | #214            | merged  |
-| 1.x   | Test gaps the 1.1 reviews found                  | #225–#226       | merged  |
-| 2.1   | Email webhook dedupes before it verifies         | #168            | merged  |
-| 2.2   | Portal agent replies bypass `carrierFor()`       | #169            | merged  |
-| 2.3   | Contacts pages cannot scroll                     | #170            | merged  |
-| 2.4   | `PermanentJobError`                              | #174            | merged  |
-| 2.5   | Ids taken from `FormData`                        | #180–#182       | merged  |
-| 2.6   | KB admin search does not escape LIKE             | #176            | merged  |
-| 2.7   | One `GRAPH_VERSION`                              | #175            | merged  |
-| 2.8   | Fetch timeouts, one provider per PR              | #184–#188       | merged  |
-| 2.9   | Replies never get paragraphs (CRLF)              | #171            | merged  |
-| 2.10  | Email webhook fails open without its secret      | #177            | merged  |
-| 2.11  | Staging's `local` email webhook accepts anything | #177            | merged  |
-| 2.12  | SLA escalations after a wait never fire          | #242            | merged  |
-| 2.13  | Away agent with an open tab is never reclaimed   | #243            | merged  |
-| 0–2   | Follow-ups to the reviews of #187–#196           | #203, #205      | merged  |
-| 3     | Shared primitives (one row per PR as opened)     |                 | open    |
-| 3.1   | Queue helper: `hasActiveJob(type)`               | #197            | merged  |
-| 3.2   | Email helpers: `buildReferences`, escaper name   | #198            | merged  |
-| 3.3   | Shared constants: `TEAM_TIME_ZONE`               | #199            | merged  |
-| 3.4   | Shared constants: proxy regex from `LOCALES`     | #200            | merged  |
-| 3.5   | Constant-time compares through `safeEqual`       | #219            | merged  |
-| 3.6   | Widget: shared shapes move to `lib/widget`       | #220            | merged  |
-| 3.7   | Widget: one declaration of the postMessage names | #221            | merged  |
-| 3.8   | `errorMessage()` for caught values               | #222            | merged  |
-| 3.9   | HTTP helpers: rate limiter moves to `lib/http`   | #229            | merged  |
-| 3.10  | HTTP helpers: `readJsonBody`                     | #230            | merged  |
-| 3.11  | Vocabulary: priorities, categories, roles        | #231            | merged  |
-| 3.12  | Action state: one `ok()`                         | #240            | merged  |
-| 3.13  | FormData readers move to `lib/http/form-data.ts` | #241            | merged  |
-| 3.13  | FormData readers: adoption in the action files   | #244–#246, #250 | merged  |
-| 3.13  | The recipient's email through `text()`           | #273            | merged  |
-| 3.14  | Logger: `lib/log.ts` and the first worker files  | #249, #253      | merged  |
-| 3.14  | Logger: nine more files in `worker/` and `lib/`  | #261            | merged  |
-| 3.14  | Logger: `lib/`                                   | #269            | merged  |
-| 3.14  | Logger: the `app/` routes and the invite action  | #287            | merged  |
-| 3.14  | `reply-actions.ts`: `text()` and the logger      | #289            | merged  |
-| 4.1   | Split `lib/tickets/queries.ts`                   | #224            | merged  |
-| 4.2   | Shared ingest steps                              | #232–#233, #235 | merged  |
-| 4.3   | Meta Graph transport                             | #228            | merged  |
-| 4.4   | Worker: typed payloads, backfill, KB import      | #236–9, #247–8  | merged  |
-| 4.4   | Worker: payloads of the five hand-run backfills  | #252            | merged  |
-| ⛳    | Gate: check in with the requester                |                 | done    |
-| 5.1   | `settings-actions.ts`: groups to canned          | #255, #257      | merged  |
-| 5.1   | `settings-actions.ts`: auto-responses to SLA     | #258            | merged  |
-| 5.1   | `settings-actions.ts`: skills to recipients      | #265            | merged  |
-| 5.1   | `settings-actions.ts`: the last three, deleted   | #270            | merged  |
-| 5.1   | `admin/actions.ts` split by domain, deleted      | #275            | merged  |
-| 5.1   | `forms-shared.tsx` onto `lib/http/action-state`  | #279            | merged  |
-| 5.2   | Console guards move to `lib/tickets`             | #260            | merged  |
-| 5.2   | `availability-actions.ts`                        | #268            | merged  |
-| 5.2   | `category-actions.ts`                            | #271            | merged  |
-| 5.2   | `shipment-actions.ts`                            | #274            | merged  |
-| 5.2   | `side-conversation-actions.ts`                   | #278            | merged  |
-| 5.2   | `meta-actions.ts`                                | #280            | merged  |
-| 5.2   | `reply-actions.ts`                               | #281            | merged  |
-| 5.2   | `ticket-actions.ts` and `action-state.ts`        | #282            | merged  |
-| 5.3   | `lib/tickets/agent-reply.ts`                     | #284            | merged  |
-| 5.3   | `lib/tickets/status.ts`                          | #285            | merged  |
-| 5.4   | Admin pages stop importing `db`: first batches   | #254, #256      | merged  |
-| 5.4   | Admin pages: agents, auto-responses, automations | #259            | merged  |
-| 5.4   | Categories, channels, invite, field options      | #266            | merged  |
-| 5.4   | The import page, with db tests                   | #272            | merged  |
-| 5.4   | Repo rule `page-db`: no `db/client` in page code | #277            | merged  |
-| 5.5   | One receive path for webhooks                    | #263            | merged  |
-| 5.6   | One `localeOf` and one `requestMeta`             | #251            | merged  |
-| 5.6   | One sign-in sequence for both forms              | #264            | merged  |
-| 6.1   | `TemplateOption` into `inbox/[number]/types.ts`  | #286            | merged  |
-| 6.2   | `lib/tickets/event-labels.ts`, with tests        | #288            | merged  |
-| 6.3   | `header.tsx` and `window-indicator.tsx`          | #290            | open    |
-| 6.x   | Client components                                |                 | pending |
-| 7     | Lint tightening, finish logging                  |                 | pending |
+| Stage | Item                                             | Branch / PR     | Status |
+| ----- | ------------------------------------------------ | --------------- | ------ |
+| 0.1   | Commit this plan                                 | #166            | merged |
+| 0.2   | Harden `server-actions` and minimum-count guards | #167            | merged |
+| 0.3   | Split `repo-rules.mjs` into per-rule modules     | #191–#192       | merged |
+| 0.4   | CI tidy-up                                       | #193–#195       | merged |
+| 0.5   | Remove Playwright                                | #173            | merged |
+| 1.1   | `lib/testing/` fixtures                          | #208, #210–#211 | merged |
+| 1.2   | Database test tier                               | #212–#213       | merged |
+| 1.3   | Characterise the seven ingest entry points       | #215–#218       | merged |
+| 1.4   | Webhook route tests                              | #196            | merged |
+| 1.5   | DB test for the admin overview's raw SQL         | #214            | merged |
+| 1.x   | Test gaps the 1.1 reviews found                  | #225–#226       | merged |
+| 2.1   | Email webhook dedupes before it verifies         | #168            | merged |
+| 2.2   | Portal agent replies bypass `carrierFor()`       | #169            | merged |
+| 2.3   | Contacts pages cannot scroll                     | #170            | merged |
+| 2.4   | `PermanentJobError`                              | #174            | merged |
+| 2.5   | Ids taken from `FormData`                        | #180–#182       | merged |
+| 2.6   | KB admin search does not escape LIKE             | #176            | merged |
+| 2.7   | One `GRAPH_VERSION`                              | #175            | merged |
+| 2.8   | Fetch timeouts, one provider per PR              | #184–#188       | merged |
+| 2.9   | Replies never get paragraphs (CRLF)              | #171            | merged |
+| 2.10  | Email webhook fails open without its secret      | #177            | merged |
+| 2.11  | Staging's `local` email webhook accepts anything | #177            | merged |
+| 2.12  | SLA escalations after a wait never fire          | #242            | merged |
+| 2.13  | Away agent with an open tab is never reclaimed   | #243            | merged |
+| 0–2   | Follow-ups to the reviews of #187–#196           | #203, #205      | merged |
+| 3     | Shared primitives (one row per PR as opened)     |                 | done   |
+| 3.1   | Queue helper: `hasActiveJob(type)`               | #197            | merged |
+| 3.2   | Email helpers: `buildReferences`, escaper name   | #198            | merged |
+| 3.3   | Shared constants: `TEAM_TIME_ZONE`               | #199            | merged |
+| 3.4   | Shared constants: proxy regex from `LOCALES`     | #200            | merged |
+| 3.5   | Constant-time compares through `safeEqual`       | #219            | merged |
+| 3.6   | Widget: shared shapes move to `lib/widget`       | #220            | merged |
+| 3.7   | Widget: one declaration of the postMessage names | #221            | merged |
+| 3.8   | `errorMessage()` for caught values               | #222            | merged |
+| 3.9   | HTTP helpers: rate limiter moves to `lib/http`   | #229            | merged |
+| 3.10  | HTTP helpers: `readJsonBody`                     | #230            | merged |
+| 3.11  | Vocabulary: priorities, categories, roles        | #231            | merged |
+| 3.12  | Action state: one `ok()`                         | #240            | merged |
+| 3.13  | FormData readers move to `lib/http/form-data.ts` | #241            | merged |
+| 3.13  | FormData readers: adoption in the action files   | #244–#246, #250 | merged |
+| 3.13  | The recipient's email through `text()`           | #273            | merged |
+| 3.14  | Logger: `lib/log.ts` and the first worker files  | #249, #253      | merged |
+| 3.14  | Logger: nine more files in `worker/` and `lib/`  | #261            | merged |
+| 3.14  | Logger: `lib/`                                   | #269            | merged |
+| 3.14  | Logger: the `app/` routes and the invite action  | #287            | merged |
+| 3.14  | `reply-actions.ts`: `text()` and the logger      | #289            | merged |
+| 4.1   | Split `lib/tickets/queries.ts`                   | #224            | merged |
+| 4.2   | Shared ingest steps                              | #232–#233, #235 | merged |
+| 4.3   | Meta Graph transport                             | #228            | merged |
+| 4.4   | Worker: typed payloads, backfill, KB import      | #236–9, #247–8  | merged |
+| 4.4   | Worker: payloads of the five hand-run backfills  | #252            | merged |
+| ⛳    | Gate: check in with the requester                |                 | done   |
+| 5.1   | `settings-actions.ts`: groups to canned          | #255, #257      | merged |
+| 5.1   | `settings-actions.ts`: auto-responses to SLA     | #258            | merged |
+| 5.1   | `settings-actions.ts`: skills to recipients      | #265            | merged |
+| 5.1   | `settings-actions.ts`: the last three, deleted   | #270            | merged |
+| 5.1   | `admin/actions.ts` split by domain, deleted      | #275            | merged |
+| 5.1   | `forms-shared.tsx` onto `lib/http/action-state`  | #279            | merged |
+| 5.2   | Console guards move to `lib/tickets`             | #260            | merged |
+| 5.2   | `availability-actions.ts`                        | #268            | merged |
+| 5.2   | `category-actions.ts`                            | #271            | merged |
+| 5.2   | `shipment-actions.ts`                            | #274            | merged |
+| 5.2   | `side-conversation-actions.ts`                   | #278            | merged |
+| 5.2   | `meta-actions.ts`                                | #280            | merged |
+| 5.2   | `reply-actions.ts`                               | #281            | merged |
+| 5.2   | `ticket-actions.ts` and `action-state.ts`        | #282            | merged |
+| 5.3   | `lib/tickets/agent-reply.ts`                     | #284            | merged |
+| 5.3   | `lib/tickets/status.ts`                          | #285            | merged |
+| 5.4   | Admin pages stop importing `db`: first batches   | #254, #256      | merged |
+| 5.4   | Admin pages: agents, auto-responses, automations | #259            | merged |
+| 5.4   | Categories, channels, invite, field options      | #266            | merged |
+| 5.4   | The import page, with db tests                   | #272            | merged |
+| 5.4   | Repo rule `page-db`: no `db/client` in page code | #277            | merged |
+| 5.5   | One receive path for webhooks                    | #263            | merged |
+| 5.6   | One `localeOf` and one `requestMeta`             | #251            | merged |
+| 5.6   | One sign-in sequence for both forms              | #264            | merged |
+| 6.1   | `TemplateOption` into `inbox/[number]/types.ts`  | #286            | merged |
+| 6.2   | `lib/tickets/event-labels.ts`, with tests        | #288            | merged |
+| 6.3   | `header.tsx` and `window-indicator.tsx`          | #290            | merged |
+| 6.3   | `timeline.tsx`                                   | #291            | merged |
+| 6.3   | `ticket-fields.tsx`, `Field` as `SidebarField`   | #293            | merged |
+| 6.3   | `shipments-field.tsx` and `unlink-button.tsx`    | #294            | merged |
+| 6.3   | `categories-field.tsx`                           | #295            | merged |
+| 6.3   | `sidebar.tsx`, the last split                    | #297            | merged |
+| 6.4   | `useFieldAction` for the sidebar's nine controls | #299            | merged |
+| 6.4   | `TagField` shows a refused save                  | #300            | merged |
+| 6.5   | One `SubmitButton` in `components/`              | #296            | merged |
+| 6.5   | Reports header: `text-left` to `text-start`      | #298            | merged |
+| 6.5   | Reports overview: the shared `Stat` and `Table`  | #301            | merged |
+| 6.5   | Widget: `useMessageStream`                       | #302            | merged |
+| 6.5   | Dashboard: six section components                | #303            | merged |
+| 6.5   | Widget: `useHostBridge`                          | #304            | merged |
+| 6.5   | Composer: the three forms in their own files     | #305            | merged |
+| 6.5   | Widget: `useWidgetSession`                       | #306            | merged |
+| 6.3   | List window badges on the shared clock           | #307            | merged |
+| 6.x   | Client components (6.1–6.5)                      |                 | done   |
+| 7.1   | Type-aware lint over `lib/` and `worker/`        | #308            | merged |
+| 7.2   | Layering through `no-restricted-imports`         | #309            | merged |
+| 7.1   | Type-aware lint over `app/` too                  | #310            | merged |
+| 7.3   | `no-console` as an error                         | #311            | merged |
+| 7.4   | AGENTS.md conventions                            | #312            | merged |
+| 7     | Lint tightening, finish logging (7.1–7.4)        |                 | done   |
 
 ### Handoff, 2026-09-27 07:00 UTC
 
@@ -193,29 +214,52 @@ subscribe to the open PRs again.
   merged, restart the branch from `main` and open a new plan PR.
 - The requester wants replies in ASD Simplified Technical English (STE100).
 
-**Findings outside the plan.** Neither is fixed.
+**Findings outside the plan.** None is fixed.
 
 - `htmlToText` writes headings in capitals. Production has 8 English excerpts
   and 1 Arabic excerpt that start that way.
 - `restoreVersion` does not write `excerpt`.
+- The reports overview prints "7/30/90 days", not the dates of the window it
+  selected, which AGENTS.md asks of a report with a range control (§6.54).
+  Older than #301, which kept it.
+- The widget's host-message listener checks the origin but not
+  `event.source === window.parent`, and `postToHost` sends with targetOrigin
+  `'*'`. Both are older than #304, which only moved them; the origin allowlist
+  is the documented guard, and the outbound payloads carry nothing secret.
+- The widget reads and writes `localStorage` with no `try/catch`. In a
+  third-party iframe with storage blocked, the resume effect, `ensureSession`
+  and `startFreshSession` throw. Older than #306, which only moved them.
+- The inbox list shows the Meta window badge on Facebook and Instagram comment
+  tickets, which are answered on the comment edge and have no window; the
+  header does not. `InboxRow` carries no `externalId`, so the fix is in the
+  list query. Older than #307, which kept it.
+- Four operator-run job payloads — `backfill_meta_profiles`,
+  `sync_stale_shipments`, `rollup_metrics` and `sync_shipment` — are
+  `z.object`, not `z.strictObject`, so a mistyped option is dropped and the
+  default runs: `backfill_meta_profiles limt=50` walks every contact. Switching
+  them changes what the jobs accept, so it is its own PR. Found in #312's
+  review; #312 records it in AGENTS.md.
 
-**State at 00:42 UTC, 2026-09-28.** #258–#282 and #284–#289 are merged. Open,
-holding its files until it merges:
-
-- #290 (6.3): `inbox/[number]/view.tsx`, and the new `header.tsx` and
-  `window-indicator.tsx` beside it.
+**State at 02:44 UTC, 2026-09-28.** #258–#291 and #293–#312 are merged. No PR
+holds a file besides this plan's own. Every stage of the plan is done; what is
+left is the findings outside the plan, above, each its own PR.
 
 **Next work.**
 
 1. 5.1: done.
 2. 5.4: done.
-3. 5.2, 5.3, 6.1 and 6.2: done. 6.3 has started with #290 (`header.tsx`,
-   `window-indicator.tsx`). The next split of `view.tsx` waits for it. The
+3. 5.2, 5.3, 6.1, 6.2 and 6.3: done. After 6.3 (#290, #291, #293–#295 and
+   #297), `view.tsx` holds only `ConversationView` and `ReadOnlyNotice`. 6.4:
+   `useFieldAction` (#299) and `TagField` showing its error (#300) merged. The
    list's `WhatsAppWindow` and `MetaWindow` in `inbox/list.tsx` stay for now:
    they are compact, show nothing while the window is unremarkable, and read
    the clock at render, so folding them into `window-indicator.tsx` changes
-   what the list shows. That is its own PR, marked as a behaviour change.
-4. 3.13: done (#289).
+   what the list shows. That was #307, a behaviour change, now merged.
+4. 3.13: done (#289). 6.5's `SubmitButton`: done (#296). The reports page's RTL
+   fix (#298) and the swap to the shared `Stat` and `Table` (#301) merged. The
+   widget's `useMessageStream` (#302) and `useHostBridge` (#304) merged; so did
+   `useWidgetSession` (#306), the last of the three. The dashboard's sections
+   (#303) and the composer's forms (#305) merged. So Stage 6 is done.
 5. Logger. Three places in `worker/` stay on `console`, because a move would
    change what they print:
    - `check-meta-permissions` and `test-comment-permission`: their lines start
@@ -223,10 +267,20 @@ holding its files until it merges:
    - the three `console.log(formatReport(...))` calls in
      `backfill-categorise-ai.ts`: the report block has no tag.
 
-   Stage 7's `no-console` must list them as exceptions, or a PR must change
-   their output on purpose. `worker/run-job.ts` is the exception Stage 7
-   already names. Those four files are every `console` call left in
-   `worker/`. `lib/` and `app/` are done.
+   #311 exempts them: the two diagnostics by file, and the three `formatReport`
+   lines inline (`## Stage 7`, item 3). `worker/run-job.ts` is exempt by file
+   too. Those four files are every `console` call left in `worker/`. `lib/`
+   and `app/` are done.
+
+6. Stage 7.1 (#308) merged. Measured, `lib/` and `worker/` had no findings, so
+   the rules start at `error` in a blocking job, not as warnings. `app/` had two
+   findings, `inbox/[number]/knowledge.tsx:85` and `inbox/list.tsx:470`, both a
+   promise that cannot reject left unmarked; #310 marked them with `void` and
+   added `app/**` to the strict config, and merged. 7.2 (#309) merged. 7.3
+   (#311) merged; `## Stage 7`, item 3, lists what it exempts, by file and by
+   line. 7.4 (#312) merged. The database test tier was already in AGENTS.md, so
+   it adds the other four; its logging paragraph says `npm run lint` refuses
+   `console`, so it merged after #311. Stage 7 is done.
 
 **Traps in this container.**
 
@@ -243,6 +297,14 @@ holding its files until it merges:
   checkout.
 - The DB tier needs `TEST_DATABASE_URL`, and the database must be migrated and
   seeded first.
+- `import { type X } from 'm'` is not erased: under `verbatimModuleSyntax` it
+  compiles to a bare `import 'm'`. Write `import type { X }` when every name is
+  a type. A script that prunes unused names must switch to that form, or it
+  leaves a side-effect import behind (#297 fixed one that #293 left).
+- `text-start` on a `<tr>` alone centres its `<th>` cells. `start` is
+  `text-align`'s initial value, and the browser centres a `th` whose parent
+  computes to the initial value, which `text-left` was not. Put the class on
+  the `th` (#298, measured in Chromium).
 
 ## Ground rules for every PR
 
@@ -920,13 +982,20 @@ The pieces become kebab-case siblings, the way `comment-moderation.tsx` and
 `side-conversations.tsx` already are. Leaves go first, one or two files per PR:
 
 - `header.tsx`
-- `window-indicator.tsx`, after which the copy in `inbox/list.tsx:566-594` goes
+- `window-indicator.tsx`. The list's `WhatsAppWindow` and `MetaWindow` in
+  `inbox/list.tsx` are not copies of it: they are compact, show nothing while
+  the window is unremarkable, and read the clock at render. Folding them in
+  changes what the list shows, so it is a separate PR marked as a behaviour
+  change.
 - `timeline.tsx`
-- `sidebar.tsx`
 - `ticket-fields.tsx`, where the local `Field` becomes `SidebarField` so it no
   longer shadows the one in `components/ui.tsx`
+- `shipments-field.tsx`, with `ShippingAccountsField`. `UnlinkButton` and
+  `LinkAction` go to `unlink-button.tsx`, because the categories block uses
+  them too.
 - `categories-field.tsx`
-- `shipments-field.tsx`
+- `sidebar.tsx`, last: `Sidebar` renders the blocks above, so moving it before
+  them would make `sidebar.tsx` import back from `view.tsx`.
 
 ### 6.4 `useFieldAction`
 
@@ -942,7 +1011,8 @@ The pieces become kebab-case siblings, the way `comment-moderation.tsx` and
 - **The embed script.** `embed.js` stays a template literal.
 - **Large pages.** `composer.tsx` and `admin/dashboard/page.tsx` split into
   section components.
-- **`SubmitButton`.** Its seven copies become one in the shared UI.
+- **`SubmitButton`.** Its nine copies become one, in
+  `components/submit-button.tsx` (#296).
 - **The reports page.** Its local `Stat` and `Table` give way to `components/`.
   The RTL fix from `text-left` to `text-start` is its own PR.
 
@@ -954,13 +1024,20 @@ The pieces become kebab-case siblings, the way `comment-moderation.tsx` and
    - Turn on `no-floating-promises`, `no-misused-promises` (with
      `checksVoidReturn.attributes: false`), `await-thenable` and
      `switch-exhaustiveness-check`.
-   - They start as warnings in a non-blocking `lint:strict` job. Each directory
-     is promoted to error once it is clean, and `app/**` comes last.
+   - The first plan was warnings in a non-blocking job, promoted a directory at
+     a time. Measured, `lib/**` and `worker/**` were clean, so they start at
+     `error` as a step of the blocking `verify` job (#308). `app/**` joins in
+     #310, which fixes its two findings.
 2. **Layering, through `no-restricted-imports`.**
    - `lib/` and `worker/` may not import `@/app/*`.
    - `components/` may not import `@/db/*`.
-3. **`no-console` as an error.** The exceptions are `lib/log.ts`, `scripts/`,
-   `db/migrate.ts` and `worker/run-job.ts`.
+3. **`no-console` as an error** (#311). The exempt files are `lib/log.ts`,
+   `lib/webhooks/log.ts`, `scripts/**`, `db/migrate.ts`, `db/seed.ts`,
+   `worker/run-job.ts`, `check-meta-permissions.ts` and
+   `test-comment-permission.ts`. A single call site that must stay takes an
+   `eslint-disable-next-line` with its reason instead: the three `formatReport`
+   lines in `backfill-categorise-ai.ts`, the two pool warnings in `db/client.ts`
+   and `seedBaseline`'s default logger. No test is exempt.
 4. **AGENTS.md** records the new conventions:
    - the logger;
    - the form-data and action-state helpers;
