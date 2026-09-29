@@ -4296,6 +4296,21 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
   by title and by nothing else, and a screen reader gets nothing. Five other
   articles link to that page for the detail it is supposed to carry.
 
+- **Derived article text rebuilt after the heading fix (#321).**
+  _2026-09-29._ With `6c59889` live on all six services, `normalise_kb_formatting`
+  ran three times through a `jobs` row: a dry run, the write, and a second dry
+  run. The first reported `changed 0` and `text 3` Arabic, `22` English — the
+  same 25 articles a read-only count of headings holding lower-case Latin text
+  had found beforehand; the three Arabic ones are integration pages
+  (`زامت`, `ماجنتو`, `ماي-بلو`) whose headings are English product names. The
+  write rebuilt `body_text` and `excerpt` on exactly those 25 rows. Checked on
+  the database before and after: the per-locale `md5` fingerprint over every
+  `body_html` is unchanged (`4cceb4fe…` ar, `73fe9524…` en), the one over
+  `body_text` moved, `kb_article_versions` stayed at 108 rows, and no excerpt
+  opens on a capitalised heading any more. The second dry run reported `text 0`
+  in both locales. The way back is to revert #321 and run the job again: both
+  columns are derived from `body_html`, which this never touched.
+
 - **WhatsApp, end to end on production.** A synthetic webhook was enqueued; the
   job completed in 170 ms on the first attempt. The same `wamid` redelivered
   under a different event id was logged as a duplicate and wrote nothing. Every
