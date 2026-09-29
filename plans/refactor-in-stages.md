@@ -208,7 +208,8 @@ subscribe to the open PRs again.
 - Merge a PR when another agent has reviewed it, its findings are fixed on its
   branch, and CI passes.
 - Deploy only when the requester asks. All six production services run
-  `2340f15`, and migration 0028 is applied. Staging stays suspended.
+  `6c59889` (deployed 2026-09-28/29 on request, #319–#322 included), and
+  migration 0028 is applied. Staging stays suspended.
 - The ⛳ gate is passed: the requester said to start Stage 5.
 - Mark each row `merged` when its PR merges. When this branch's own PR has
   merged, restart the branch from `main` and open a new plan PR.
@@ -252,11 +253,19 @@ it.
   the window, and an empty day has no row. The overview had the same shape
   and #316 fixed it there (the history's start has no lower bound); this page
   still has it. Found in #316's review. Fixed in #319.
+- About 0.3% of WhatsApp webhook deliveries fail the signature check and get
+  a 403: 237 in the ten days to 2026-09-28 (205 status updates, 32 messages),
+  all from the one business account, starting 2026-09-26 (9 on 09-21 before
+  that). None is lost: every one arrived again, signed correctly, and is
+  stored under its `provider_event_id`. Not caused by a deploy — the old code
+  returned them all afternoon on 09-28. The cause is not known yet; the next
+  step is to compare a failing delivery's raw bytes with its retry's. Open.
 
-**State at 08:58 UTC, 2026-09-28.** #258–#321 are merged. No PR holds a file
-besides this plan's own. Every stage of the plan is done, and every finding
-outside it is fixed. #319–#321 are not deployed by this session; the one step
-left after their deploy is the `normalise_kb_formatting` run for #321.
+**State at 08:39 UTC, 2026-09-29.** #258–#322 are merged. No PR holds a file
+besides this plan's own. Every stage of the plan is done. Every finding outside
+it is fixed except the WhatsApp signature one, which loses nothing. All six
+production services run `6c59889`, and the `normalise_kb_formatting` run for
+#321 is done (`docs/PROJECT-STATE.md` §7).
 
 **Next work.**
 
