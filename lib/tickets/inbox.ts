@@ -4,6 +4,7 @@ import { agents, conversations, contacts, messages, ticketStatuses } from '@/db/
 import type { SessionAgent } from '@/lib/auth/session';
 import { can } from '@/lib/auth/permissions';
 import { hiddenChannels, restrictedChannels } from './channel-policy';
+import { sendsByEmail } from './outbound';
 import { rootCommentId } from '@/lib/meta/comments';
 import { sbidMatches, trackingMatches } from '@/lib/shipments/queries';
 import { parseSearchTerm } from './search';
@@ -21,6 +22,18 @@ export type InboxRow = {
   id: string;
   number: number;
   subject: string | null;
+  /**
+   * Whether `subject` was written as one — an email's subject line, or a portal
+   * ticket's, typed by the customer or rendered from its form — rather than
+   * being the opening message's text, which is what every messaging channel
+   * stores there. Only the first kind is worth a line on the card: the second
+   * repeats a message.
+   *
+   * Asked as `sendsByEmail`, not `channel === 'email'`, because a portal ticket
+   * has a written subject too and is answered by email, and testing the channel
+   * name is how portal tickets have been left out before (`lib/tickets/outbound.ts`).
+   */
+  hasOwnSubject: boolean;
   channel: string;
   priority: string;
   statusName: string;
@@ -242,6 +255,7 @@ export async function listInbox(
       id: row.id,
       number: row.number,
       subject: row.subject,
+      hasOwnSubject: sendsByEmail(row.channel),
       channel: row.channel,
       priority: row.priority,
       statusName: row.statusName,

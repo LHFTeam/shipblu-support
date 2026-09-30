@@ -197,20 +197,39 @@ export function InboxList({
                   </span>
                 </div>
 
-                {/* The last thing said, by either side, and not the subject: on
-                    every channel but email the subject is the opening message's
-                    text, so showing both put the first and the latest message
-                    on one card. The arrow below says whose this one is. Only a
-                    ticket with no message yet falls back to its subject, rather
-                    than to an empty line.
+                {/* The last thing said, by either side. The arrow below says
+                    whose it is.
 
-                    `dir="auto"` because the console is LTR and most of these
-                    are Arabic: an RTL sentence truncated in an LTR box is cut
-                    at the wrong end, so the card showed the last words of a
-                    long reply and lost the ones that say what it is about. */}
-                <p dir="auto" className="mt-0.5 truncate text-sm">
-                  {row.preview ?? row.subject ?? '(no subject)'}
-                </p>
+                    Under a subject only where the ticket has one of its own —
+                    email and the portal. Everywhere else the subject is the
+                    opening message's text, and showing it put the first and the
+                    latest message on one card; there a ticket with no message
+                    yet falls back to it rather than to an empty line.
+
+                    `dir="auto"` on both lines because the console is LTR and
+                    most of this text is Arabic: an RTL sentence truncated in an
+                    LTR box is cut at the wrong end, so the card showed the last
+                    words of a long reply and lost the ones that say what it is
+                    about. */}
+                {row.hasOwnSubject ? (
+                  <>
+                    <p dir="auto" className="mt-0.5 truncate text-sm">
+                      {row.subject ?? '(no subject)'}
+                    </p>
+                    {row.preview ? (
+                      <p
+                        dir="auto"
+                        className="mt-0.5 truncate text-xs text-[var(--muted-foreground)]"
+                      >
+                        {row.preview}
+                      </p>
+                    ) : null}
+                  </>
+                ) : (
+                  <p dir="auto" className="mt-0.5 truncate text-sm">
+                    {row.preview ?? row.subject ?? '(no subject)'}
+                  </p>
+                )}
 
                 <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                   <ChannelBadge channel={row.channel} showLabel={false} />

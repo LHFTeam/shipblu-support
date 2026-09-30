@@ -35,7 +35,7 @@ async function admin(): Promise<SessionAgent> {
 }
 
 async function ticket(
-  channel: 'facebook' | 'instagram',
+  channel: 'facebook' | 'instagram' | 'whatsapp' | 'webchat' | 'email' | 'portal',
   externalId: string | null,
   assigneeAgentId: string | null = null,
 ) {
@@ -143,5 +143,22 @@ describe('listInbox', () => {
       assigneeName: null,
       assigneeAvatarUrl: null,
     });
+  });
+
+  it('keeps a subject on the card only where somebody wrote one', async () => {
+    const agent = await admin();
+    const written = [await ticket('email', null), await ticket('portal', null)];
+    const fromFirstMessage = [
+      await ticket('whatsapp', null),
+      await ticket('webchat', null),
+      await ticket('facebook', null),
+      await ticket('instagram', null),
+    ];
+
+    const { rows } = await listInbox(agent, parseFilters({}));
+    const byId = new Map(rows.map((row) => [row.id, row.hasOwnSubject]));
+
+    for (const id of written) expect(byId.get(id)).toBe(true);
+    for (const id of fromFirstMessage) expect(byId.get(id)).toBe(false);
   });
 });
