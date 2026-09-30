@@ -24,7 +24,7 @@ export function checkLikePatternsUseTheBuilder() {
     fail(
       rule,
       `${file}:${line}`,
-      "a hand-built LIKE pattern takes `%` and `_` in the value as wildcards — use containing() from '@/lib/search/like'",
+      "a hand-built LIKE pattern takes `%` and `_` in the value as wildcards — use textMatches() from '@/lib/search/text' for a column people write in, or containing() from '@/lib/search/like'",
     );
   });
 

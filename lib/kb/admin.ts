@@ -1,11 +1,11 @@
-import { and, asc, desc, eq, ilike, ne, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, ne, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agents, kbArticleVersions, kbArticles, kbCategories, kbFolders } from '@/db/schema';
 import type { AgentRole } from '@/lib/auth/permissions';
 import { folderFloor, meetsFloor } from './floors';
 import type { ArticleVisibility } from './floors';
 import { effectiveFloor, effectiveVisibility, readableByRole } from './internal';
-import { containing } from '@/lib/search/like';
+import { cleanQuery, textMatches, textPatterns } from '@/lib/search/text';
 
 /**
  * Read models for KB authoring.
@@ -79,9 +79,11 @@ export async function listArticlesForAdmin(
 
   if (filters.status !== 'all') where.push(eq(kbArticles.status, filters.status));
   if (filters.locale !== 'all') where.push(eq(kbArticles.locale, filters.locale));
-  if (filters.q) {
-    const term = containing(filters.q);
-    where.push(or(ilike(kbArticles.title, term), ilike(kbArticles.slug, term))!);
+  const q = cleanQuery(filters.q);
+  if (q) {
+    // Titles are mostly Arabic, and one article's إلغاء is the next one's الغاء.
+    const text = textPatterns(q);
+    where.push(or(textMatches(kbArticles.title, text), textMatches(kbArticles.slug, text))!);
   }
 
   return db

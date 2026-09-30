@@ -9,8 +9,8 @@
  *
  * One table for the two places text is matched against what somebody typed.
  * `lib/categorise/normalise.ts` folds each variant down to its letter, because
- * it owns both sides of the comparison; the inbox search owns only the query,
- * so it widens each letter out to the whole group instead (below). One list
+ * it owns both sides of the comparison; a search owns only the query, so it
+ * widens each letter out to the whole group instead (below). One list
  * keeps the two agreeing on which letters are one letter, and on no more than
  * that: the categoriser also strips tatweel and tashkeel from the message, and
  * a search can strip them only from the query (`cleanQuery`). So a stored
@@ -47,9 +47,9 @@ const REGEX_SYNTAX = /[\\^$.|?*+()[\]{}]/;
  *
  * Why the query is widened rather than the column folded: `translate(body_text,
  * …)` is a different expression from `body_text`, so none of the trigram
- * indexes under the inbox search could serve it, and matching one would take a
- * new expression index over `messages` — which a migration builds inside a
- * transaction, blocking every write to the table while it does. pg_trgm reads a
+ * indexes under the console's searches could serve it, and matching one would
+ * take a new expression index over `messages` — which a migration builds inside
+ * a transaction, blocking every write to the table while it does. pg_trgm reads a
  * regular expression's trigrams straight out of its bracket expressions, so
  * `[اأإآٱ]حمد` is served by the index that already exists. Measured against
  * production: the inbox query ran on the same plan in the same time as the ILIKE

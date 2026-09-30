@@ -9,7 +9,6 @@ import {
   notInArray,
   or,
   sql,
-  type AnyColumn,
   type SQL,
 } from 'drizzle-orm';
 import { db } from '@/db/client';
@@ -19,7 +18,7 @@ import { can } from '@/lib/auth/permissions';
 import { hiddenChannels, restrictedChannels } from './channel-policy';
 import { rootCommentId } from '@/lib/meta/comments';
 import { sbidMatches, trackingMatches } from '@/lib/shipments/queries';
-import { cleanQuery } from '@/lib/search/text';
+import { cleanQuery, textMatches } from '@/lib/search/text';
 import { parseSearchTerm } from './search';
 import { type InboxCursor, type InboxFilters, PAGE_SIZE, encodeInboxCursor } from './inbox-filters';
 
@@ -176,8 +175,8 @@ export async function listInbox(
   const query = cleanQuery(filters.q);
 
   if (query) {
-    const { pattern, arabicPattern, number, phonePattern, trackingNumber, sbid, scope } =
-      parseSearchTerm(query);
+    const term = parseSearchTerm(query);
+    const { pattern, number, phonePattern, trackingNumber, sbid, scope } = term;
 
     // A prefixed query is narrowed to its one clause. That is what makes typing
     // `track:` worth doing — the alternative ORs it into a list that still has
@@ -187,16 +186,11 @@ export async function listInbox(
     } else if (scope === 'sbid' && sbid) {
       where.push(sbidMatches(sbid));
     } else {
-      // The columns people write Arabic in. A query holding a letter Arabic
-      // spells several ways is matched as a regular expression widened to all of
-      // them, and anything else keeps the ILIKE it always had; the same trigram
-      // index serves both. Email and phone never hold Arabic, so they stay ILIKE.
-      const written = (column: AnyColumn | SQL): SQL =>
-        arabicPattern ? sql`${column} ~* ${arabicPattern}` : sql`${column} ILIKE ${pattern}`;
-
+      // `textMatches` on the columns people write Arabic in, so احمد finds
+      // أحمد; email and phone never hold Arabic, so they stay a plain ILIKE.
       const clauses: SQL[] = [
-        written(conversations.subject),
-        written(contacts.name),
+        textMatches(conversations.subject, term),
+        textMatches(contacts.name, term),
         ilike(contacts.primaryEmail, pattern),
         ilike(contacts.primaryPhone, pattern),
         // What was actually said. Subjects on the messaging channels are picked
@@ -206,7 +200,7 @@ export async function listInbox(
         // messages, which is where a search of a chat has to look.
         sql`EXISTS (
           SELECT 1 FROM ${messages} m
-          WHERE m.conversation_id = ${conversations.id} AND ${written(sql`m.body_text`)}
+          WHERE m.conversation_id = ${conversations.id} AND ${textMatches(sql`m.body_text`, term)}
         )`,
         // And what the hub said. Often the only place the actual explanation
         // lives — "driver attempted twice, phone off" is written by somebody who
@@ -216,7 +210,7 @@ export async function listInbox(
         sql`EXISTS (
           SELECT 1 FROM side_conversations sc
           JOIN side_conversation_messages sm ON sm.side_conversation_id = sc.id
-          WHERE sc.conversation_id = ${conversations.id} AND ${written(sql`sm.body_text`)}
+          WHERE sc.conversation_id = ${conversations.id} AND ${textMatches(sql`sm.body_text`, term)}
         )`,
       ];
 

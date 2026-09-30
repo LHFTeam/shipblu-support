@@ -736,8 +736,17 @@ expression, so it would need a new index on every table it touched, `messages`
 included. The letter table is the categoriser's too, so the two agree on which
 letters are one letter — and on no more: the categoriser also strips tatweel
 and tashkeel from the text it reads, which a search can do to the query
-(`cleanQuery` in `lib/search/text.ts`, before its empty-query check) but not to
-the column. The inbox is the only search using it so far.
+(`cleanQuery`) but not to the column.
+
+Every free-text search in the console — the inbox, the contacts page, the merge
+picker and the knowledge base list — goes through `lib/search/text.ts`:
+`cleanQuery` first, and an empty-query check on its answer rather than on the
+input, because a query that was only a pasted U+200F, a tatweel or a fatha
+cleans to `''` and `%%` matches every row with any text; then `textPatterns`
+once, and `textMatches(column, …)` on each column people write in. Email, phone
+and tracking columns stay `ilike(column, patterns.pattern)`. A new search box
+that builds its own ILIKE for a name is how the same agent came to find a
+customer in one box and not in the next.
 
 **Anything a customer reads is a `*_ar` / `*_en` pair, and either side covers
 the other.** Auto-response bodies, ticket field labels, form names, canned

@@ -13,7 +13,7 @@ import {
   type MergedCounts,
 } from '@/db/schema';
 import { DEFAULT_CONTACT_LOCALE as DEFAULT_LOCALE } from './locale';
-import { containing } from '@/lib/search/like';
+import { cleanQuery, textMatches, textPatterns } from '@/lib/search/text';
 
 /**
  * Merging two contacts.
@@ -477,10 +477,10 @@ export async function searchMergeCandidates(
   query: string,
   limit = 10,
 ): Promise<MergeCandidate[]> {
-  const q = query.trim();
+  const q = cleanQuery(query);
   if (!q) return [];
 
-  const pattern = containing(q);
+  const text = textPatterns(q);
 
   return db
     .select({ ...CANDIDATE_COLUMNS })
@@ -489,9 +489,11 @@ export async function searchMergeCandidates(
       and(
         ...mergeable(contactId),
         or(
-          sql`${contacts.name} ilike ${pattern}`,
-          sql`${contacts.primaryEmail} ilike ${pattern}`,
-          sql`${contacts.primaryPhone} ilike ${pattern}`,
+          // The name the same way every other search reads one, so a duplicate
+          // spelled أحمد is offered to an agent who typed احمد.
+          textMatches(contacts.name, text),
+          sql`${contacts.primaryEmail} ilike ${text.pattern}`,
+          sql`${contacts.primaryPhone} ilike ${text.pattern}`,
         ),
       ),
     )
