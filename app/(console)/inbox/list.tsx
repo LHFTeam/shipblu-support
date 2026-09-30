@@ -10,11 +10,8 @@ import { Badge, Select } from '@/components/ui';
 import { formatRelative } from '@/lib/format';
 import type { InboxRow } from '@/lib/tickets/inbox';
 import type { InboxFilters } from '@/lib/tickets/inbox-filters';
-import {
-  FILTERABLE_CHANNELS,
-  hasWrittenSubject,
-  isRestrictedChannel,
-} from '@/lib/tickets/channel-policy';
+import { FILTERABLE_CHANNELS, isRestrictedChannel } from '@/lib/tickets/channel-policy';
+import { messageLines } from '@/lib/tickets/inbox-lines';
 import {
   inboxSignature,
   readInboxPosition,
@@ -177,6 +174,7 @@ export function InboxList({
 
         {visible.map((row) => {
           const active = row.number === activeNumber;
+          const { headline, secondary } = messageLines(row);
 
           return (
             <li key={row.id}>
@@ -201,19 +199,7 @@ export function InboxList({
                   </span>
                 </div>
 
-                {/* The last thing said, by either side. The arrow below says
-                    whose it is.
-
-                    Under a subject only where the ticket has one of its own —
-                    email and the portal — and not repeated when the message is
-                    only the subject again, as mail from a phone often is.
-                    Everywhere else the subject is the opening message's text,
-                    and showing it put the first and the latest message on one
-                    card; there a ticket with no text to show yet falls back to
-                    it rather than to an empty line. `||` rather than `??` for
-                    that reason: `body_text` is never null, only empty.
-
-                    `dir="auto"` because the console is LTR and most of this
+                {/* `dir="auto"` because the console is LTR and most of this
                     text is Arabic: an RTL sentence truncated in an LTR box is
                     cut at the wrong end, so the card showed the last words of a
                     long reply and lost the ones that say what it is about. And
@@ -221,25 +207,17 @@ export function InboxList({
                     rather than zig-zagging to the right edge: a line that
                     overflows is laid out from its own start whatever the
                     alignment, so it is still the sentence's end that is cut. */}
-                {hasWrittenSubject(row.channel) ? (
-                  <>
-                    <p dir="auto" className="mt-0.5 truncate text-left text-sm">
-                      {row.subject || '(no subject)'}
-                    </p>
-                    {row.preview && row.preview !== row.subject ? (
-                      <p
-                        dir="auto"
-                        className="mt-0.5 truncate text-left text-xs text-[var(--muted-foreground)]"
-                      >
-                        {row.preview}
-                      </p>
-                    ) : null}
-                  </>
-                ) : (
-                  <p dir="auto" className="mt-0.5 truncate text-left text-sm">
-                    {row.preview || row.subject || '(no subject)'}
+                <p dir="auto" className="mt-0.5 truncate text-left text-sm">
+                  {headline}
+                </p>
+                {secondary ? (
+                  <p
+                    dir="auto"
+                    className="mt-0.5 truncate text-left text-xs text-[var(--muted-foreground)]"
+                  >
+                    {secondary}
                   </p>
-                )}
+                ) : null}
 
                 <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                   <ChannelBadge channel={row.channel} showLabel={false} />
