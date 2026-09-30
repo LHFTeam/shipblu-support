@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useEffect, useRef, useState, type UIEvent } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type UIEvent } from 'react';
 import { ChannelBadge, channelInfo } from '@/components/channel';
 import { BookIcon, SearchIcon } from '@/components/icons';
 import { InfoTip } from '@/components/tooltip';
@@ -99,10 +99,11 @@ export function InboxList({
           capability, and gating it on `kb.view` hid nothing.
 
           Its own line rather than a third control in either row below, because
-          both of those are measured against this column's width and the
-          filters are native selects, which clip their longest option rather
-          than wrap. One line of a column that scrolls anyway is the cheaper
-          side of that trade.
+          both of those are measured against this column's width: the search
+          box already shares its row with New and its own ⓘ (see `SearchBox`)
+          and the filters are native selects, which clip their longest option
+          rather than wrap. One line of a column that scrolls anyway is the
+          cheaper side of that trade.
         */}
         <a
           href={`/${DEFAULT_LOCALE}`}
@@ -523,6 +524,16 @@ function reviveRow(row: SerialisedRow): InboxRow {
 }
 
 /**
+ * What the search box matches, in one place because it is said twice: in the ⓘ
+ * a reader opens and as the input's description a screen reader announces. It
+ * names what is not searched too, since "anything" is a claim: an agent typing a
+ * colleague's name or a tag gets an empty list, which otherwise reads as "no
+ * such tickets" rather than "not searchable".
+ */
+const SEARCH_HINT =
+  "Matches a ticket's number (#812) and subject, the requester's name, email or phone, and any words in a message or side conversation. Arabic spellings of the same letter match each other, so احمد finds أحمد. A pasted tracking number or SBID finds that shipment's tickets; start with track: or sbid: to search only those. A ticket number finds its ticket whatever the Status filter says; everything else follows it, and the Channel filter applies to all of it. Tags, custom fields and the assignee are not searched.";
+
+/**
  * Debounced so typing a ticket number does not fire a query per keystroke —
  * each one is a full server render of the list.
  *
@@ -536,6 +547,7 @@ function reviveRow(row: SerialisedRow): InboxRow {
  */
 function SearchBox({ initial, onSearch }: { initial: string; onSearch: (value: string) => void }) {
   const [value, setValue] = useState(initial);
+  const hintId = useId();
 
   const latest = useRef(onSearch);
   useEffect(() => {
@@ -553,32 +565,45 @@ function SearchBox({ initial, onSearch }: { initial: string; onSearch: (value: s
       <span className="pointer-events-none absolute inset-y-0 start-2 flex items-center text-[var(--muted-foreground)]">
         <SearchIcon size={15} />
       </span>
-      {/* A claim rather than a list. The box is 327px wide, and every list
-          that has sat here was either cut off or read as the whole of it: the
-          first rendered 373px and stopped at `sbid:`, and the three-item one
-          after it said nothing about tracking numbers, which work pasted bare.
-          "Anything" stands for what `listInbox` matches, and the ⓘ at the
-          box's end names exactly what that is — including what it is not, so
-          a search by assignee that finds nothing says why. An `InfoTip` rather
-          than the `title` this used to carry, which no phone ever shows; inside
-          the box rather than beside it, because the row is measured against the
-          column's width and already holds the New button. */}
+      {/* A claim rather than a list. The row is 327px on a phone and shares it
+          with "New", which leaves the box about 276px: the first list that sat
+          here rendered 373px and stopped at `sbid:`, and the three-item one
+          after it used the last pixel of the room and still said nothing about
+          tracking numbers, which work pasted bare.
+
+          What "anything" stands for — what `listInbox` matches, and the three
+          things it does not — is one tap away in the ⓘ at the end of the
+          field, and is the input's accessible description. It used to be a
+          `title=`, which a phone never shows. The ⓘ costs the text 18px, so it
+          fits only because the placeholder is short. */}
       <input
         value={value}
         onChange={(e) => setValue(e.target.value)}
         placeholder="Search for anything"
         aria-label="Search tickets and chats"
+        aria-describedby={hintId}
         className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] py-1.5 pe-7 ps-7 text-sm outline-none focus:border-brand-500"
       />
-      <span className="absolute inset-y-0 end-1.5 flex items-center text-[var(--muted-foreground)]">
-        <InfoTip label="search">
-          Finds a ticket by its number (#812) or subject, a contact by name, email or phone, and any
-          words said in a message or a side conversation. Arabic spellings of the same letter match
-          each other, so احمد finds أحمد. A pasted tracking number or SBID finds that
-          shipment&apos;s tickets; track: or sbid: narrows the search to only those. Tags, custom
-          fields and the assignee are not searched. A ticket number finds its ticket whatever the
-          Status filter says; everything else follows it, and the Channel filter applies to all of
-          it.
+      {/* The description the `title=` used to give a screen reader. The ⓘ
+          cannot stand in for it: its tip describes the ⓘ, and only while
+          open. */}
+      <span id={hintId} className="sr-only">
+        {SEARCH_HINT}
+      </span>
+      {/* Padded so a thumb has 22px to find rather than the 14px glyph, and
+          inset by the padding so the glyph itself sits where the search icon's
+          mirror would.
+
+          A pointer pressing it leaves focus in the field. The ⓘ is a button,
+          so a tap mid-query moved focus to it, and on a phone that closed the
+          keyboard under an agent who only wanted to check the syntax. Tab
+          still reaches it, since only a pointer's default is prevented. */}
+      <span
+        className="absolute inset-y-0 end-1 flex items-center"
+        onMouseDown={(e) => e.preventDefault()}
+      >
+        <InfoTip label="search" className="p-1">
+          {SEARCH_HINT}
         </InfoTip>
       </span>
     </div>

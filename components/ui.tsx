@@ -1,4 +1,4 @@
-import type { ComponentProps, ReactNode } from 'react';
+import type { ComponentProps, JSX, ReactNode } from 'react';
 import { InfoTip } from './tooltip';
 
 /**
@@ -10,12 +10,24 @@ import { InfoTip } from './tooltip';
  * the feature that needs it.
  */
 
+/**
+ * A native element's props, minus `title`.
+ *
+ * The primitives here spread what they are given onto the element they wrap, so
+ * a `title` handed to `<Button>` lands on a `<button>` as the tooltip a phone
+ * never shows. The `dom-title` repo rule refuses that on a lowercase tag and
+ * cannot see through a capitalised one, so the type refuses it instead, at the
+ * call site, in `tsc`. `ComponentProps<'svg'>` has no `title` to begin with,
+ * which is why the icons need nothing.
+ */
+type NativeProps<T extends keyof JSX.IntrinsicElements> = Omit<ComponentProps<T>, 'title'>;
+
 export function Button({
   variant = 'primary',
   size = 'md',
   className = '',
   ...props
-}: ComponentProps<'button'> & {
+}: NativeProps<'button'> & {
   variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'accent';
   size?: 'sm' | 'md';
 }) {
@@ -75,7 +87,7 @@ const FIELD_BASE =
  */
 const FIELD_SURFACE = 'bg-[var(--surface)]';
 
-export function Input({ className = '', ...props }: ComponentProps<'input'>) {
+export function Input({ className = '', ...props }: NativeProps<'input'>) {
   /*
    * A read-only field is not a disabled one — it stays focusable, announced and
    * copyable, which is what a prefilled identity on the invite-activation page
@@ -92,7 +104,7 @@ export function Input({ className = '', ...props }: ComponentProps<'input'>) {
   return <input {...props} className={`${FIELD_BASE} ${surface} px-3 py-2 ${className}`} />;
 }
 
-export function Textarea({ className = '', ...props }: ComponentProps<'textarea'>) {
+export function Textarea({ className = '', ...props }: NativeProps<'textarea'>) {
   return (
     <textarea
       {...props}
@@ -101,7 +113,7 @@ export function Textarea({ className = '', ...props }: ComponentProps<'textarea'
   );
 }
 
-export function Select({ className = '', ...props }: ComponentProps<'select'>) {
+export function Select({ className = '', ...props }: NativeProps<'select'>) {
   // Taller on a phone, where 1.5 of padding around 14px text is a 34px tap
   // target sat next to a 42px input in the same row.
   return (
@@ -257,7 +269,7 @@ export function Card({
   className = '',
   padded = true,
   ...props
-}: ComponentProps<'div'> & { padded?: boolean }) {
+}: NativeProps<'div'> & { padded?: boolean }) {
   return (
     <div
       {...props}

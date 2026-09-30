@@ -1,23 +1,34 @@
 import ts from 'typescript';
-import { fail, read, scannable } from '../lib.mjs';
+import { fail, read, requireAtLeast, scannable } from '../lib.mjs';
 
 /**
  * `title=` on a DOM element never appears on a phone, which is where the console
  * is read. components/tooltip.tsx answers hover, focus and tap alike.
  *
  * Only lowercase JSX elements are DOM elements — `<Section title="...">` is a
- * component prop and perfectly fine.
+ * component prop and perfectly fine. A component that forwards its props to a
+ * DOM element is the one case this cannot see, so those refuse `title` in their
+ * types instead: `NativeProps` in components/ui.tsx, which `tsc` enforces at
+ * the call site.
  *
- * Read off the syntax tree rather than matched as text. A pattern has to guess
- * where a tag ends, and every guess was wrong somewhere: the first took the `=>`
- * of `onChange={(e) => …}` for the end of the tag, so the inbox search box
- * carried a phone-invisible tooltip through every run of this check, and
- * letting `=>` through still stopped at `count > 0` or `ChangeEvent<Input>`.
- * The parser knows where the attributes are, so there is nothing left to guess.
- * TypeScript is already how the repository is type-checked, so this adds no
- * dependency.
+ * Read from the syntax tree the TypeScript compiler builds, not from the text.
+ * This rule was a pattern that stopped at the first `>`, so an arrow function in
+ * an earlier attribute — `onChange={(e) => …}` — ended the tag at `=>`, and the
+ * inbox search box carried a `title=` past it with the check green. Letting
+ * `=>` through, as one fix did, still stopped at a comparison
+ * (`disabled={count > 0}`) or a type argument (`ChangeEvent<HTMLInputElement>`).
+ * The hand-written walker that replaced the pattern closed that and opened three
+ * more in review: an element straight after JSX text (`Hours<abbr title>`), a
+ * brace inside a quoted string inside an expression, and `stripComments`
+ * blanking a `//` or `/*` inside an attribute value (`href="//cdn…"`,
+ * `accept="image/*"`). Each was one more approximation of a lexer the repo
+ * already has, exactly, in the compiler `tsc` runs: comments are trivia in the
+ * tree rather than text to blank, and an attribute is a node rather than a
+ * guess about where a tag ends.
  */
 export function checkNoDomTitleAttribute() {
+  const rule = 'dom-title';
+
   /**
    * Three uses that predate this check and are not mechanical swaps.
    *
@@ -37,6 +48,7 @@ export function checkNoDomTitleAttribute() {
     'components/channel.tsx',
   ]);
 
+  let elements = 0;
   for (const file of scannable.filter((f) => f.endsWith('.tsx') && !predating.has(f))) {
     const source = ts.createSourceFile(
       file,
@@ -49,22 +61,39 @@ export function checkNoDomTitleAttribute() {
     const visit = (node) => {
       if (
         (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) &&
-        ts.isIdentifier(node.tagName) &&
-        /^[a-z]/.test(node.tagName.text)
+        isDomElement(node.tagName)
       ) {
+        elements++;
         for (const attribute of node.attributes.properties) {
-          if (ts.isJsxAttribute(attribute) && attribute.name.getText(source) === 'title') {
-            const { line } = source.getLineAndCharacterOfPosition(node.getStart(source));
-            fail(
-              'dom-title',
-              `${file}:${line + 1}`,
-              'title= on a DOM element never appears on a phone — use Tooltip or InfoTip from components/tooltip.tsx',
-            );
-          }
+          if (!ts.isJsxAttribute(attribute) || !ts.isIdentifier(attribute.name)) continue;
+          if (attribute.name.text !== 'title') continue;
+          const { line } = source.getLineAndCharacterOfPosition(attribute.getStart(source));
+          fail(
+            rule,
+            `${file}:${line + 1}`,
+            'title= on a DOM element never appears on a phone — use Tooltip or InfoTip from components/tooltip.tsx',
+          );
         }
       }
       ts.forEachChild(node, visit);
     };
     visit(source);
   }
+
+  // A rule that passes by finding nothing needs to know it looked. Today's
+  // tree has about 2,000 DOM elements outside the three files above.
+  requireAtLeast(rule, '*.tsx', elements, 500, 'DOM elements in JSX');
+}
+
+/**
+ * What React renders as a DOM element rather than calling as a component: a
+ * lowercase name, a hyphenated custom element (`<relative-time>`), or a
+ * namespaced one (`<svg:rect>`). The compiler's own test, `isIntrinsicJsxName`,
+ * is not in its public API, so it is spelled out here. `<motion.div>` is a
+ * property access and so a component, whatever its case.
+ */
+function isDomElement(tagName) {
+  if (ts.isJsxNamespacedName(tagName)) return true;
+  if (!ts.isIdentifier(tagName)) return false;
+  return /^[a-z]/.test(tagName.text) || tagName.text.includes('-');
 }
