@@ -47,10 +47,12 @@ describe('arabicVariantPattern', () => {
 });
 
 describe('ARABIC_LETTER_VARIANTS', () => {
-  // The categoriser folds by this table and the search widens by it. If the two
-  // ever disagreed, a message the categoriser filed under a spelling would be
-  // one an agent searching that spelling could not find.
-  it('widens to exactly the spellings the categoriser folds together', () => {
+  // The categoriser folds by this table and the search widens by it, so each
+  // letter's search reaches every spelling the categoriser treats as it. Only
+  // that direction: the categoriser also strips tatweel and tashkeel from the
+  // text it reads, which a search cannot do to a column, so text it calls equal
+  // is not always text a search finds.
+  it('widens each letter to every spelling the categoriser folds into it', () => {
     for (const { letter, variants } of ARABIC_LETTER_VARIANTS) {
       for (const spelling of [letter, ...variants]) {
         expect(normaliseForMatch(spelling), spelling).toBe(letter);

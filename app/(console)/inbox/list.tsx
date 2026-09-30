@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, type UIEvent } from 'react';
 import { ChannelBadge, channelInfo } from '@/components/channel';
 import { BookIcon, SearchIcon } from '@/components/icons';
+import { InfoTip } from '@/components/tooltip';
 import { Badge, Select } from '@/components/ui';
 import { formatRelative } from '@/lib/format';
 import { DEFAULT_LOCALE } from '@/lib/kb/locale';
@@ -556,18 +557,28 @@ function SearchBox({ initial, onSearch }: { initial: string; onSearch: (value: s
           that has sat here was either cut off or read as the whole of it: the
           first rendered 373px and stopped at `sbid:`, and the three-item one
           after it said nothing about tracking numbers, which work pasted bare.
-          "Anything" stands for what `listInbox` matches — the ticket's number
-          and subject, the requester's name, email and phone, the words of every
-          message and side conversation, and a tracking number or SBID — and the
-          title below names them. It is not tags, custom fields or the assignee. */}
+          "Anything" stands for what `listInbox` matches, and the ⓘ at the
+          box's end names exactly what that is — including what it is not, so
+          a search by assignee that finds nothing says why. An `InfoTip` rather
+          than the `title` this used to carry, which no phone ever shows; inside
+          the box rather than beside it, because the row is measured against the
+          column's width and already holds the New button. */}
       <input
         value={value}
         onChange={(e) => setValue(e.target.value)}
         placeholder="Search for anything"
-        title="Finds a ticket by its number, a contact by name, email or phone, and any words said in a message or a side conversation. A pasted tracking number or SBID finds that shipment's tickets; track: or sbid: narrows the search to only those."
         aria-label="Search tickets and chats"
-        className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] py-1.5 pe-2.5 ps-7 text-sm outline-none focus:border-brand-500"
+        className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] py-1.5 pe-7 ps-7 text-sm outline-none focus:border-brand-500"
       />
+      <span className="absolute inset-y-0 end-1.5 flex items-center text-[var(--muted-foreground)]">
+        <InfoTip label="search">
+          Finds a ticket by its number (#812) or subject, a contact by name, email or phone, and any
+          words said in a message or a side conversation. Arabic spellings of the same letter match
+          each other, so احمد finds أحمد. A pasted tracking number or SBID finds that
+          shipment&apos;s tickets; track: or sbid: narrows the search to only those. Tags, custom
+          fields and the assignee are not searched.
+        </InfoTip>
+      </span>
     </div>
   );
 }

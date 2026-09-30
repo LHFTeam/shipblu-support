@@ -733,8 +733,11 @@ turns each letter Arabic spells several ways (ا/أ/إ/آ, ي/ى/ئ, ه/ة, و/�
 bracket expression for `~*`, which the trigram indexes that already exist
 serve. Folding the column through `translate()` instead is a different
 expression, so it would need a new index on every table it touched, `messages`
-included. The letter table is the categoriser's too, so a spelling it files
-under is one an agent can find. The inbox is the only search using it so far.
+included. The letter table is the categoriser's too, so the two agree on which
+letters are one letter — and on no more: the categoriser also strips tatweel
+and tashkeel from the text it reads, which a search can do to the query
+(`parseSearchTerm`) but not to the column. The inbox is the only search using
+it so far.
 
 **Anything a customer reads is a `*_ar` / `*_en` pair, and either side covers
 the other.** Auto-response bodies, ticket field labels, form names, canned

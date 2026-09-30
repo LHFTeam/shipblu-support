@@ -10,9 +10,12 @@
  * One table for the two places text is matched against what somebody typed.
  * `lib/categorise/normalise.ts` folds each variant down to its letter, because
  * it owns both sides of the comparison; the inbox search owns only the query,
- * so it widens each letter out to the whole group instead (below). Two copies of
- * the list would let a spelling the categoriser recognises be one the search
- * cannot find.
+ * so it widens each letter out to the whole group instead (below). One list
+ * keeps the two agreeing on which letters are one letter, and on no more than
+ * that: the categoriser also strips tatweel and tashkeel from the message, and
+ * a search can strip them only from the query (`parseSearchTerm`). So a stored
+ * الشحنـة is one the categoriser files as الشحنه and a search for الشحنه does
+ * not find.
  */
 export const ARABIC_LETTER_VARIANTS: ReadonlyArray<{ letter: string; variants: string }> = [
   { letter: 'ا', variants: 'أإآٱ' },

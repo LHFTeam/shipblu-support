@@ -37,17 +37,21 @@ async function admin(): Promise<SessionAgent> {
   };
 }
 
-async function ticket(channel: 'facebook' | 'instagram', externalId: string | null) {
-  const [contact] = await db.insert(contacts).values({ name: 'Amira' }).returning();
+async function openStatusId(): Promise<string> {
   const [open] = await db
     .select({ id: ticketStatuses.id })
     .from(ticketStatuses)
     .where(eq(ticketStatuses.name, 'Open'));
+  return open!.id;
+}
+
+async function ticket(channel: 'facebook' | 'instagram', externalId: string | null) {
+  const [contact] = await db.insert(contacts).values({ name: 'Amira' }).returning();
   const [row] = await db
     .insert(conversations)
     .values({
       channel,
-      statusId: open!.id,
+      statusId: await openStatusId(),
       requesterContactId: contact!.id,
       externalId,
     })
@@ -71,14 +75,6 @@ describe('listInbox', () => {
   });
 });
 
-async function openStatusId(): Promise<string> {
-  const [open] = await db
-    .select({ id: ticketStatuses.id })
-    .from(ticketStatuses)
-    .where(eq(ticketStatuses.name, 'Open'));
-  return open!.id;
-}
-
 /** Tickets for the search tests, one requester each. */
 async function tickets(
   specs: Array<{ name?: string; phone?: string; body?: string; lastMessageAt?: Date }>,
@@ -98,7 +94,11 @@ async function tickets(
         ...(spec.lastMessageAt ? { lastMessageAt: spec.lastMessageAt } : {}),
       })),
     )
-    .returning({ id: conversations.id, number: conversations.number });
+    .returning({
+      id: conversations.id,
+      number: conversations.number,
+      contactId: conversations.requesterContactId,
+    });
 
   const bodies = specs.flatMap((spec, i) =>
     spec.body
@@ -138,6 +138,14 @@ describe('listInbox search', () => {
       { name: 'Old', lastMessageAt: new Date('2026-01-01T09:00:00Z') },
     ]);
     const n = named!.number;
+    // Its own phone holds its number too, so the text search matches it as well
+    // as the lookup does. Without that, the paged query would leave it out
+    // whether or not it excludes the named ticket, and the assertions below
+    // that nothing is shown twice would pass on a query that shows it twice.
+    await db
+      .update(contacts)
+      .set({ primaryPhone: `2010${n}9999` })
+      .where(eq(contacts.id, named!.contactId));
 
     // A page and one more of newer tickets whose phones hold the same digits, so
     // a bare number matches them all and recency alone would bury the named one.

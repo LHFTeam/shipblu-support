@@ -6,6 +6,14 @@ import { fail, scannable, scan } from '../lib.mjs';
  *
  * Only lowercase JSX elements are DOM elements — `<Section title="...">` is a
  * component prop and perfectly fine.
+ *
+ * The attributes before `title=` may hold an arrow function, whose `=>` the
+ * first version of this pattern took for the end of the tag: `[^<>]` stopped
+ * at the `>`, so `<input onChange={(e) => …} title="…">` passed, and the inbox
+ * search box carried a phone-invisible tooltip through every run of this check.
+ * `=>` is the one `>` an attribute routinely holds, so it is the one allowed
+ * through; a bare `>` still ends the tag, which is what keeps a match from
+ * running on into the element's children and the next tag.
  */
 export function checkNoDomTitleAttribute() {
   /**
@@ -29,7 +37,7 @@ export function checkNoDomTitleAttribute() {
 
   scan(
     scannable.filter((f) => f.endsWith('.tsx') && !predating.has(f)),
-    /<[a-z][a-zA-Z0-9]*(?:\s+[^<>]*?)?\stitle=/g,
+    /<[a-z][a-zA-Z0-9]*(?:\s(?:[^<>]|=>)*?)?\stitle=/g,
     (file, line) => {
       fail(
         'dom-title',
