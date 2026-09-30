@@ -11,10 +11,11 @@ import { env } from '@/lib/env';
 import { readEmailBody } from '@/lib/email/body';
 import { classifyAutomation, isSelfAddressed } from '@/lib/email/loop-protection';
 import { resolveThread, stripSubjectPrefixes } from '@/lib/email/threading';
-import type { ParsedInboundEmail } from '@/lib/email/types';
+import type { InboundDelivery, ParsedInboundEmail } from '@/lib/email/types';
 import { ingestSideReply, resolveSideConversation } from '@/lib/side-conversations/ingest';
 import { buildAttachmentPath, uploadObject } from '@/lib/storage';
 import { resolveContact } from './contacts';
+import { latest } from './latest';
 import { afterInboundMessage, afterMessageStored } from './lifecycle';
 import { reopenResolved } from './reopen';
 import { requireDefaultOpenStatusId } from './statuses';
@@ -43,8 +44,15 @@ export type IngestResult = {
  *
  * Runs on the worker rather than in the webhook handler, so a slow attachment
  * upload can never cause the provider to time out and redeliver.
+ *
+ * Every instant this writes is `receivedAt`, when the delivery reached us, and
+ * never the mail's `Date` header, which is the sender's clock and is only
+ * recorded (`InboundDelivery`).
  */
-export async function ingestInboundEmail(email: ParsedInboundEmail): Promise<IngestResult | null> {
+export async function ingestInboundEmail(
+  email: ParsedInboundEmail,
+  { receivedAt }: InboundDelivery,
+): Promise<IngestResult | null> {
   const secret = env().APP_SECRET;
 
   // A forwarding loop that makes us the sender would otherwise create tickets
@@ -73,7 +81,7 @@ export async function ingestInboundEmail(email: ParsedInboundEmail): Promise<Ing
    */
   const side = await resolveSideConversation(email);
   if (side) {
-    const result = await ingestSideReply(side, email);
+    const result = await ingestSideReply(side, email, { receivedAt });
     return {
       conversationId: result.conversationId,
       conversationNumber: result.conversationNumber,
@@ -159,8 +167,14 @@ export async function ingestInboundEmail(email: ParsedInboundEmail): Promise<Ing
           groupId: emailChannel?.defaultGroupId ?? null,
           // A bounce or autoresponder is filed but kept out of the working queue.
           isSpam: automation.isBounce || automation.isAutoReply,
-          lastMessageAt: email.receivedAt,
-          lastCustomerMessageAt: email.receivedAt,
+          // The ticket began when the mail reached us, however late the worker
+          // got to it. The first-response and resolution targets count from
+          // this column, so leaving it on the insert's `now()` would excuse a
+          // backlog on a new ticket while a reply in the same backlog is
+          // charged from its arrival.
+          createdAt: receivedAt,
+          lastMessageAt: receivedAt,
+          lastCustomerMessageAt: receivedAt,
         })
         .returning({ id: conversations.id, number: conversations.number });
 
@@ -194,8 +208,12 @@ export async function ingestInboundEmail(email: ParsedInboundEmail): Promise<Ing
           strippedBy: body.strippedBy,
           spfPass: email.spfPass,
           spamScore: email.spamScore,
+          dateHeader: email.dateHeader?.toISOString() ?? null,
         },
-        createdAt: email.receivedAt,
+        // When it reached us, not the `Date` header beside it in `meta`: the
+        // timeline, the inbox card and the list all order by this instant, and
+        // the sender's clock would file an answer above the reply it answers.
+        createdAt: receivedAt,
       })
       .returning({ id: messages.id });
 
@@ -205,12 +223,19 @@ export async function ingestInboundEmail(email: ParsedInboundEmail): Promise<Ing
     // exists it does not move the time the customer last wrote — only the time
     // anything last arrived. A new ticket from one keeps the insert's value: it
     // is filed as spam, which the reports and the portal leave out.
+    //
+    // Forward only: a mail that reached us earlier can be processed after a
+    // later one, and must not pull either column back (`latest`).
+    const lastMessageAt = latest(conversations.lastMessageAt, receivedAt);
     await tx
       .update(conversations)
       .set(
         automation.isAutoReply
-          ? { lastMessageAt: email.receivedAt }
-          : { lastMessageAt: email.receivedAt, lastCustomerMessageAt: email.receivedAt },
+          ? { lastMessageAt }
+          : {
+              lastMessageAt,
+              lastCustomerMessageAt: latest(conversations.lastCustomerMessageAt, receivedAt),
+            },
       )
       .where(eq(conversations.id, conversationId));
 
@@ -229,7 +254,7 @@ export async function ingestInboundEmail(email: ParsedInboundEmail): Promise<Ing
     direction: 'inbound',
   });
 
-  await afterInboundMessage(result.conversationId, result.createdConversation, email.receivedAt, {
+  await afterInboundMessage(result.conversationId, result.createdConversation, receivedAt, {
     autoReply: automation.isAutoReply,
   });
 

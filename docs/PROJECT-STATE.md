@@ -4231,6 +4231,74 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     side: a Blueprint that cannot sync is not documentation, it is a list of
     changes queued to land all at once on the day somebody fixes the branch.
 
+77. **An inbound email's time was the sender's clock.** _2026-09-30, raised in
+    review on #324 and fixed before it bit._ `ParsedInboundEmail.receivedAt`
+    was Postmark's `Date` field, which is the mail's own header, so
+    `messages.created_at`, `last_message_at`, `last_customer_message_at` and the
+    next-response SLA all ran on whatever the customer's machine thought the
+    time was. Two hours slow, and an answer to our 10:00 reply was stored at
+    08:30. It sorted above that reply on the timeline, the card previewed our
+    older message, the list ranked the ticket by 08:30, and a one-hour
+    next-response target was breached before the mail arrived. Twelve hours
+    fast, and the ticket sat at the top of the list all day. A header that did
+    not parse became an Invalid Date, which throws on insert. The job went to
+    `dead`, and a hand replay of the stored delivery parsed the same bytes and
+    failed the same way, so the mail could not be ingested until the parser
+    changed. The delivery row is kept for 30 days, so once the fix is deployed a
+    replay (`npm run job -- process_webhook webhookEventId=<id>`) lands it at its
+    original arrival.
+
+    Sized before fixing, read-only: **5** inbound email replies in production
+    ever (email is not live) and **0** of them sort before an outbound message
+    that preceded them. The two that can be matched to their Postmark delivery
+    carry a header **20 s** before `webhook_events.received_at`, which is the
+    whole Zoho-forward-to-Postmark transit. So for an honest clock the fix moves
+    the stamp by seconds, and for a wrong one it removes however wrong the clock
+    was. The five stored rows were left alone, since they are already in order.
+
+    The instant is now `webhook_events.received_at`, which `process_webhook`
+    passes to ingest as `InboundDelivery`. That is our clock, and a late run or
+    a replay does not move it. It is a separate argument rather than a field on
+    `ParsedInboundEmail`, so nothing a provider returns can carry it. The header
+    is kept as `meta.dateHeader` and nothing reads it.
+
+    Review on #328 found three more places the same rule had to reach:
+    - **A new ticket's `created_at`** was the insert's `now()`, and its
+      first-response and resolution targets count from it. So a backlog was
+      excused on a new ticket and charged on a reply. It is now the receipt
+      too.
+    - **The "last" columns moved backwards.** Each delivery keeps the instant
+      it arrived, so the one processed last is not always the newest. The worker
+      claims several jobs at once, and a failed attempt retries behind a later
+      mail. `latest()` moves them forward only, as `interactionWindowSet`
+      already did for Meta.
+    - **The fallback Message-ID** for a payload carrying none was minted from
+      `Date.now()`. A retry after the message had committed got a new id,
+      missed the duplicate check, and stored the mail twice. It is now derived
+      from the payload.
+
+    A `stored_at` column beside `created_at` was the alternative, and it was
+    rejected. It fixes only the readers that are moved onto it, leaving
+    `last_message_at`, the SLA, `requesterLocale()` and volume-by-hour on the old
+    value. It also puts two clocks on one row for every future query to choose
+    between, and it needs a backfill and an index build on `messages` (§6.64).
+
+    Left open:
+    - **Receipt is not when anybody could read the mail.** During a worker
+      backlog an agent can write after the mail arrived but before it was
+      processed. `last_agent_message_at` is then later than
+      `last_customer_message_at`, so `AWAITING_US` in `lib/reports/live.ts`,
+      the hourly backlog snapshot and `assign_sweep`'s reclaim all read the
+      ticket as answered, and the card previews our message, while
+      `next_response_due_at` says a reply is owed. Any arrival instant has
+      this property, and the header, seconds earlier still, had it too.
+      Closing it means deciding what "awaiting us" is measured from, which is
+      its own change.
+    - **WhatsApp and Meta** stamp inbound rows with the provider's
+      whole-second `sentAt` and ours with `now()`, so an answer landing in the
+      same second as our reply can still sort before it. Their new tickets
+      also still take `created_at` from the insert.
+
 ## 7. Verification already done
 
 - **The knowledge-base role floor, against a real Postgres.** _2026-09-04._ The

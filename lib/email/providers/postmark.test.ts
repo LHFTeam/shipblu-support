@@ -181,6 +181,40 @@ describe('PostmarkEmailProvider.parseInbound', () => {
     expect(parsed.spfPass).toBe(true);
   });
 
+  // When the mail arrived is the stored delivery's fact, added by the worker;
+  // the header is the sender's clock and only ever recorded.
+  it("reads the Date header as the sender's claim, and nothing as the arrival", async () => {
+    const parsed = await provider.parseInbound({
+      ...payload,
+      Date: 'Sun, 20 Sep 2026 08:30:00 +0300',
+    });
+    expect(parsed.dateHeader).toEqual(new Date('2026-09-20T08:30:00+03:00'));
+    expect(parsed).not.toHaveProperty('receivedAt');
+  });
+
+  // An Invalid Date throws on insert, which lost the message on every retry.
+  it.each([['not a date'], [''], [undefined]])(
+    'records a Date header of %j as absent, not as an invalid instant',
+    async (date) => {
+      const parsed = await provider.parseInbound({ ...payload, Date: date });
+      expect(parsed.dateHeader).toBeNull();
+    },
+  );
+
+  // Ingest's idempotency is keyed on the id, and a retried job parses the same
+  // stored payload again: a clock-minted fallback stored the mail twice.
+  it('derives an id for a payload that carries none, so a re-parse agrees', async () => {
+    const bare = { FromFull: { Email: 'a@b.com' }, TextBody: 'hello' };
+    const first = await provider.parseInbound(bare);
+    const again = await provider.parseInbound(bare);
+
+    expect(first.messageId).toMatch(/^pm-[0-9a-f]{32}$/);
+    expect(again.messageId).toBe(first.messageId);
+    expect((await provider.parseInbound({ ...bare, TextBody: 'bye' })).messageId).not.toBe(
+      first.messageId,
+    );
+  });
+
   it('throws when there is no sender rather than inventing one', async () => {
     await expect(provider.parseInbound({ Subject: 'x' })).rejects.toThrow(/no sender/i);
   });

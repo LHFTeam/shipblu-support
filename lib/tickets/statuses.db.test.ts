@@ -55,18 +55,21 @@ describe('requireDefaultOpenStatusId', () => {
     await db.delete(ticketStatuses).where(eq(ticketStatuses.category, 'open'));
 
     await expect(
-      ingestInboundEmail({
-        messageId: 'no-status@customer.example',
-        references: [],
-        from: { address: 'amira@customer.example', name: 'Amira' },
-        to: [{ address: 'support@shipblu.test' }],
-        cc: [],
-        subject: 'Where is my parcel?',
-        textBody: 'Hello.',
-        attachments: [],
-        headers: {},
-        receivedAt: new Date('2026-09-20T10:00:00Z'),
-      }),
+      ingestInboundEmail(
+        {
+          messageId: 'no-status@customer.example',
+          references: [],
+          from: { address: 'amira@customer.example', name: 'Amira' },
+          to: [{ address: 'support@shipblu.test' }],
+          cc: [],
+          subject: 'Where is my parcel?',
+          textBody: 'Hello.',
+          attachments: [],
+          headers: {},
+          dateHeader: null,
+        },
+        { receivedAt: new Date('2026-09-20T10:00:00Z') },
+      ),
     ).rejects.toThrow(NO_STATUS);
     expect(await db.$count(conversations)).toBe(0);
     expect(await db.$count(messages)).toBe(0);
