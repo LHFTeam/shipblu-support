@@ -1,4 +1,4 @@
-import { fail, scannable, scan } from '../lib.mjs';
+import { fail, lineOf, scannable, scan } from '../lib.mjs';
 
 /**
  * `title=` on a DOM element never appears on a phone, which is where the console
@@ -29,13 +29,76 @@ export function checkNoDomTitleAttribute() {
 
   scan(
     scannable.filter((f) => f.endsWith('.tsx') && !predating.has(f)),
-    /<[a-z][a-zA-Z0-9]*(?:\s+[^<>]*?)?\stitle=/g,
-    (file, line) => {
+    DOM_OPENING_TAG,
+    (file, _line, match, contents) => {
+      const at = ownTitleAttribute(contents, match.index + match[0].length);
+      if (at === -1) return;
       fail(
         'dom-title',
-        `${file}:${line}`,
+        `${file}:${lineOf(contents, at)}`,
         'title= on a DOM element never appears on a phone — use Tooltip or InfoTip from components/tooltip.tsx',
       );
     },
   );
+}
+
+/**
+ * The start of a lowercase JSX element: `<div`, `<input`, but not `<motion.div`
+ * (a member expression, so a component) nor the `<string` of `useState<string>`,
+ * which follows an identifier where no element can.
+ */
+const DOM_OPENING_TAG = /(?<![\w$.)\]])<[a-z][a-zA-Z0-9]*(?=[\s/>])/g;
+
+/** An attribute named exactly `title`, from the whitespace in front of it. */
+const TITLE_ATTRIBUTE = /\stitle\s*=/y;
+
+/**
+ * Where the opening tag that continues at `from` names a `title` attribute of
+ * its own, or -1.
+ *
+ * Walked rather than matched, because the tag's `>` is not the first `>` after
+ * its name. This rule was a single pattern that stopped at any `>`, so an arrow
+ * function in an earlier attribute — `onChange={(e) => …}` — ended the tag at
+ * `=>`, and the inbox search box carried a `title=` past it with the check
+ * green. So: a quoted attribute value is skipped whole, a `{…}` expression is
+ * skipped by counting braces, and only a `>` outside both closes the tag. A
+ * `title` inside an expression belongs to something else — a variable, or an
+ * element nested there, which is matched as its own opening tag.
+ *
+ * What it does not see: inside `{…}` it counts braces and nothing else, so a
+ * string holding a lone brace (`{'}'}`) throws the count off and the rest of that
+ * one tag goes unread. Knowing the brace is quoted would mean lexing JavaScript,
+ * and a check that misses one freak tag is better than one that guesses. A `<`
+ * outside an expression ends the walk too — it cannot occur inside an opening
+ * tag, so what started the walk was never an element.
+ */
+function ownTitleAttribute(source, from) {
+  let i = from;
+  while (i < source.length) {
+    const c = source[i];
+    if (c === '>' || c === '<') return -1;
+
+    if (c === '"' || c === "'") {
+      const close = source.indexOf(c, i + 1);
+      if (close === -1) return -1;
+      i = close + 1;
+      continue;
+    }
+
+    if (c === '{') {
+      let depth = 1;
+      i++;
+      while (i < source.length && depth > 0) {
+        if (source[i] === '{') depth++;
+        else if (source[i] === '}') depth--;
+        i++;
+      }
+      continue;
+    }
+
+    TITLE_ATTRIBUTE.lastIndex = i;
+    if (TITLE_ATTRIBUTE.test(source)) return i + 1;
+    i++;
+  }
+  return -1;
 }

@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, type UIEvent } from 'react';
 import { ChannelBadge, channelInfo } from '@/components/channel';
 import { BookIcon, SearchIcon } from '@/components/icons';
+import { InfoTip } from '@/components/tooltip';
 import { Badge, Select } from '@/components/ui';
 import { formatRelative } from '@/lib/format';
 import type { InboxRow } from '@/lib/tickets/inbox';
@@ -544,25 +545,34 @@ function SearchBox({ initial, onSearch }: { initial: string; onSearch: (value: s
       <span className="pointer-events-none absolute inset-y-0 start-2 flex items-center text-[var(--muted-foreground)]">
         <SearchIcon size={15} />
       </span>
-      {/* Three words, because the box is 327px wide and the previous
-          placeholder rendered 373px of text — it was cut off mid-list, which is
-          why it advertised `sbid:` and stopped there.
+      {/* A claim rather than a list. The row is 327px on a phone and shares it
+          with "New", which leaves the box about 276px: the first list that sat
+          here rendered 373px and stopped at `sbid:`, and the three-item one
+          after it used the last pixel of the room and still said nothing about
+          tracking numbers, which work pasted bare.
 
-          They are also the right three. Message text is the half nobody guesses
-          and the half that finds things: subjects on the messaging channels are
-          canned categories hundreds of tickets share, so the sentence an agent
-          half-remembers is only in the messages. It went missing when `track:`
-          and `sbid:` were added, and those two never needed the room — a pasted
-          tracking number or SBID is recognised on its own. The syntax lives in
-          the tooltip instead. */}
+          What "anything" stands for — what `listInbox` matches — is one tap
+          away in the ⓘ at the end of the field. It used to be a `title=`, which
+          a phone never shows. The ⓘ costs the text 18px, so it fits only
+          because the placeholder is short. Search does not cover tags, custom
+          fields or the assignee. */}
       <input
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        placeholder="Search #number, contact, message…"
-        title="Finds a ticket by its number, a contact by name, email or phone, and any words said in a message or a side conversation. A pasted tracking number or SBID finds that shipment's tickets; track: or sbid: narrows the search to only those."
+        placeholder="Search for anything"
         aria-label="Search tickets and chats"
-        className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] py-1.5 pe-2.5 ps-7 text-sm outline-none focus:border-brand-500"
+        className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] py-1.5 pe-7 ps-7 text-sm outline-none focus:border-brand-500"
       />
+      {/* Padded so a thumb has 22px to find rather than the 14px glyph, and
+          inset by the padding so the glyph itself sits where the search icon's
+          mirror would. */}
+      <span className="absolute inset-y-0 end-1 flex items-center">
+        <InfoTip label="search" className="p-1">
+          Matches a ticket&apos;s number and subject, the requester&apos;s name, email or phone, and
+          any words in a message or side conversation. A pasted tracking number or SBID finds that
+          shipment&apos;s tickets; start with track: or sbid: to search only those.
+        </InfoTip>
+      </span>
     </div>
   );
 }
