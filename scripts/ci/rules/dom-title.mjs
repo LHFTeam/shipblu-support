@@ -1,4 +1,5 @@
-import { fail, lineOf, scannable, scan } from '../lib.mjs';
+import ts from 'typescript';
+import { fail, read, requireAtLeast, scannable } from '../lib.mjs';
 
 /**
  * `title=` on a DOM element never appears on a phone, which is where the console
@@ -6,8 +7,23 @@ import { fail, lineOf, scannable, scan } from '../lib.mjs';
  *
  * Only lowercase JSX elements are DOM elements — `<Section title="...">` is a
  * component prop and perfectly fine.
+ *
+ * Read from the syntax tree the TypeScript compiler builds, not from the text.
+ * This rule was a pattern that stopped at the first `>`, so an arrow function in
+ * an earlier attribute — `onChange={(e) => …}` — ended the tag at `=>`, and the
+ * inbox search box carried a `title=` past it with the check green. The
+ * hand-written walker that replaced the pattern closed that and opened three
+ * more in review: an element straight after JSX text (`Hours<abbr title>`), a
+ * brace inside a quoted string inside an expression, and `stripComments`
+ * blanking a `//` or `/*` inside an attribute value (`href="//cdn…"`,
+ * `accept="image/*"`). Each was one more approximation of a lexer the repo
+ * already has, exactly, in the compiler `tsc` runs: comments are trivia in the
+ * tree rather than text to blank, and an attribute is a node rather than a
+ * guess about where a tag ends.
  */
 export function checkNoDomTitleAttribute() {
+  const rule = 'dom-title';
+
   /**
    * Three uses that predate this check and are not mechanical swaps.
    *
@@ -27,78 +43,52 @@ export function checkNoDomTitleAttribute() {
     'components/channel.tsx',
   ]);
 
-  scan(
-    scannable.filter((f) => f.endsWith('.tsx') && !predating.has(f)),
-    DOM_OPENING_TAG,
-    (file, _line, match, contents) => {
-      const at = ownTitleAttribute(contents, match.index + match[0].length);
-      if (at === -1) return;
-      fail(
-        'dom-title',
-        `${file}:${lineOf(contents, at)}`,
-        'title= on a DOM element never appears on a phone — use Tooltip or InfoTip from components/tooltip.tsx',
-      );
-    },
-  );
+  let elements = 0;
+  for (const file of scannable.filter((f) => f.endsWith('.tsx') && !predating.has(f))) {
+    const source = ts.createSourceFile(
+      file,
+      read(file),
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TSX,
+    );
+
+    const visit = (node) => {
+      if (
+        (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) &&
+        isDomElement(node.tagName)
+      ) {
+        elements++;
+        for (const attribute of node.attributes.properties) {
+          if (!ts.isJsxAttribute(attribute) || !ts.isIdentifier(attribute.name)) continue;
+          if (attribute.name.text !== 'title') continue;
+          const { line } = source.getLineAndCharacterOfPosition(attribute.getStart(source));
+          fail(
+            rule,
+            `${file}:${line + 1}`,
+            'title= on a DOM element never appears on a phone — use Tooltip or InfoTip from components/tooltip.tsx',
+          );
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+  }
+
+  // A rule that passes by finding nothing needs to know it looked. Today's
+  // tree has about 2,000 DOM elements outside the three files above.
+  requireAtLeast(rule, '*.tsx', elements, 500, 'DOM elements in JSX');
 }
 
 /**
- * The start of a lowercase JSX element: `<div`, `<input`, but not `<motion.div`
- * (a member expression, so a component) nor the `<string` of `useState<string>`,
- * which follows an identifier where no element can.
+ * What React renders as a DOM element rather than calling as a component: a
+ * lowercase name, a hyphenated custom element (`<relative-time>`), or a
+ * namespaced one (`<svg:rect>`). The compiler's own test, `isIntrinsicJsxName`,
+ * is not in its public API, so it is spelled out here. `<motion.div>` is a
+ * property access and so a component, whatever its case.
  */
-const DOM_OPENING_TAG = /(?<![\w$.)\]])<[a-z][a-zA-Z0-9]*(?=[\s/>])/g;
-
-/** An attribute named exactly `title`, from the whitespace in front of it. */
-const TITLE_ATTRIBUTE = /\stitle\s*=/y;
-
-/**
- * Where the opening tag that continues at `from` names a `title` attribute of
- * its own, or -1.
- *
- * Walked rather than matched, because the tag's `>` is not the first `>` after
- * its name. This rule was a single pattern that stopped at any `>`, so an arrow
- * function in an earlier attribute — `onChange={(e) => …}` — ended the tag at
- * `=>`, and the inbox search box carried a `title=` past it with the check
- * green. So: a quoted attribute value is skipped whole, a `{…}` expression is
- * skipped by counting braces, and only a `>` outside both closes the tag. A
- * `title` inside an expression belongs to something else — a variable, or an
- * element nested there, which is matched as its own opening tag.
- *
- * What it does not see: inside `{…}` it counts braces and nothing else, so a
- * string holding a lone brace (`{'}'}`) throws the count off and the rest of that
- * one tag goes unread. Knowing the brace is quoted would mean lexing JavaScript,
- * and a check that misses one freak tag is better than one that guesses. A `<`
- * outside an expression ends the walk too — it cannot occur inside an opening
- * tag, so what started the walk was never an element.
- */
-function ownTitleAttribute(source, from) {
-  let i = from;
-  while (i < source.length) {
-    const c = source[i];
-    if (c === '>' || c === '<') return -1;
-
-    if (c === '"' || c === "'") {
-      const close = source.indexOf(c, i + 1);
-      if (close === -1) return -1;
-      i = close + 1;
-      continue;
-    }
-
-    if (c === '{') {
-      let depth = 1;
-      i++;
-      while (i < source.length && depth > 0) {
-        if (source[i] === '{') depth++;
-        else if (source[i] === '}') depth--;
-        i++;
-      }
-      continue;
-    }
-
-    TITLE_ATTRIBUTE.lastIndex = i;
-    if (TITLE_ATTRIBUTE.test(source)) return i + 1;
-    i++;
-  }
-  return -1;
+function isDomElement(tagName) {
+  if (ts.isJsxNamespacedName(tagName)) return true;
+  if (!ts.isIdentifier(tagName)) return false;
+  return /^[a-z]/.test(tagName.text) || tagName.text.includes('-');
 }

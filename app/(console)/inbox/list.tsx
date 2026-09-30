@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useEffect, useRef, useState, type UIEvent } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type UIEvent } from 'react';
 import { ChannelBadge, channelInfo } from '@/components/channel';
 import { BookIcon, SearchIcon } from '@/components/icons';
 import { InfoTip } from '@/components/tooltip';
@@ -91,10 +91,10 @@ export function InboxList({
 
           Its own line rather than a third control in either row below, because
           both of those are measured against this column's width: the search
-          placeholder is trimmed to the pixel it has (see `SearchBox`) and the
-          filters are native selects, which clip their longest option rather
-          than wrap. One line of a column that scrolls anyway is the cheaper
-          side of that trade.
+          box already shares its row with New and its own ⓘ (see `SearchBox`)
+          and the filters are native selects, which clip their longest option
+          rather than wrap. One line of a column that scrolls anyway is the
+          cheaper side of that trade.
         */}
         {canViewKb ? (
           <Link
@@ -515,6 +515,16 @@ function reviveRow(row: SerialisedRow): InboxRow {
 }
 
 /**
+ * What the search box matches, in one place because it is said twice: in the ⓘ
+ * a reader opens and as the input's description a screen reader announces. It
+ * names what is not searched too, since "anything" is a claim: an agent typing a
+ * colleague's name or a tag gets an empty list, which otherwise reads as "no
+ * such tickets" rather than "not searchable".
+ */
+const SEARCH_HINT =
+  "Matches a ticket's number (#812) and subject, the requester's name, email or phone, and any words in a message or side conversation. A pasted tracking number or SBID finds that shipment's tickets; start with track: or sbid: to search only those. Tags, custom fields and the assignee are not searched.";
+
+/**
  * Debounced so typing a ticket number does not fire a query per keystroke —
  * each one is a full server render of the list.
  *
@@ -528,6 +538,7 @@ function reviveRow(row: SerialisedRow): InboxRow {
  */
 function SearchBox({ initial, onSearch }: { initial: string; onSearch: (value: string) => void }) {
   const [value, setValue] = useState(initial);
+  const hintId = useId();
 
   const latest = useRef(onSearch);
   useEffect(() => {
@@ -551,26 +562,39 @@ function SearchBox({ initial, onSearch }: { initial: string; onSearch: (value: s
           after it used the last pixel of the room and still said nothing about
           tracking numbers, which work pasted bare.
 
-          What "anything" stands for — what `listInbox` matches — is one tap
-          away in the ⓘ at the end of the field. It used to be a `title=`, which
-          a phone never shows. The ⓘ costs the text 18px, so it fits only
-          because the placeholder is short. Search does not cover tags, custom
-          fields or the assignee. */}
+          What "anything" stands for — what `listInbox` matches, and the three
+          things it does not — is one tap away in the ⓘ at the end of the
+          field, and is the input's accessible description. It used to be a
+          `title=`, which a phone never shows. The ⓘ costs the text 18px, so it
+          fits only because the placeholder is short. */}
       <input
         value={value}
         onChange={(e) => setValue(e.target.value)}
         placeholder="Search for anything"
         aria-label="Search tickets and chats"
+        aria-describedby={hintId}
         className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] py-1.5 pe-7 ps-7 text-sm outline-none focus:border-brand-500"
       />
+      {/* The description the `title=` used to give a screen reader. The ⓘ
+          cannot stand in for it: its tip describes the ⓘ, and only while
+          open. */}
+      <span id={hintId} className="sr-only">
+        {SEARCH_HINT}
+      </span>
       {/* Padded so a thumb has 22px to find rather than the 14px glyph, and
           inset by the padding so the glyph itself sits where the search icon's
-          mirror would. */}
-      <span className="absolute inset-y-0 end-1 flex items-center">
+          mirror would.
+
+          A pointer pressing it leaves focus in the field. The ⓘ is a button,
+          so a tap mid-query moved focus to it, and on a phone that closed the
+          keyboard under an agent who only wanted to check the syntax. Tab
+          still reaches it, since only a pointer's default is prevented. */}
+      <span
+        className="absolute inset-y-0 end-1 flex items-center"
+        onMouseDown={(e) => e.preventDefault()}
+      >
         <InfoTip label="search" className="p-1">
-          Matches a ticket&apos;s number and subject, the requester&apos;s name, email or phone, and
-          any words in a message or side conversation. A pasted tracking number or SBID finds that
-          shipment&apos;s tickets; start with track: or sbid: to search only those.
+          {SEARCH_HINT}
         </InfoTip>
       </span>
     </div>
