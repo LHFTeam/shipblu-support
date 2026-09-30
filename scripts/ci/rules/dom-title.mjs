@@ -6,7 +6,10 @@ import { fail, read, requireAtLeast, scannable } from '../lib.mjs';
  * is read. components/tooltip.tsx answers hover, focus and tap alike.
  *
  * Only lowercase JSX elements are DOM elements — `<Section title="...">` is a
- * component prop and perfectly fine.
+ * component prop and perfectly fine. A component that forwards its props to a
+ * DOM element is the one case this cannot see, so those refuse `title` in their
+ * types instead: `NativeProps` in components/ui.tsx, which `tsc` enforces at
+ * the call site.
  *
  * Read from the syntax tree the TypeScript compiler builds, not from the text.
  * This rule was a pattern that stopped at the first `>`, so an arrow function in

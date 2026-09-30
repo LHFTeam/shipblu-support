@@ -156,6 +156,21 @@ describe('dom-title', () => {
     expect(found).toEqual([]);
   });
 
+  // Review on #325: the walker's quote skip ran from `don't` to the next
+  // apostrophe in the file and reported the module-level `title` below it.
+  it('does not read an angle bracket inside a string as an element', async () => {
+    const found = await run({
+      'components/x.tsx': [
+        'const hint = "n <m don\'t";',
+        "const y = `it's`;",
+        'export let title = 1;',
+        '',
+      ].join('\n'),
+    });
+
+    expect(found).toEqual([]);
+  });
+
   it('does not read a title in a comment', async () => {
     const found = await run({
       'components/note.tsx': [
