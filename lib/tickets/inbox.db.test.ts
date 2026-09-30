@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import { agents, contacts, conversations, messages, ticketStatuses } from '@/db/schema';
@@ -21,10 +21,11 @@ import { PAGE_SIZE, parseFilters, parseInboxCursor } from './inbox-filters';
 withCleanDatabase();
 
 async function admin(): Promise<SessionAgent> {
-  const [row] = await db
-    .insert(agents)
-    .values({ name: 'Omar', email: 'omar@shipblu.test', role: 'admin' })
-    .returning();
+  return signedIn('admin', 'omar@shipblu.test');
+}
+
+async function signedIn(role: 'admin' | 'agent', email: string): Promise<SessionAgent> {
+  const [row] = await db.insert(agents).values({ name: email, email, role }).returning();
   return {
     id: row!.id,
     email: row!.email,
@@ -190,5 +191,41 @@ describe('listInbox search', () => {
         JSON.stringify(q),
       ).toEqual(unsearched.rows.map((row) => row.id));
     }
+  });
+
+  it('finds a resolved ticket by its number under the default status filter, and only that one', async () => {
+    const agent = await admin();
+    const [named, other] = await tickets([{ name: 'Old' }, { name: 'Also resolved' }]);
+    const [resolved] = await db
+      .select({ id: ticketStatuses.id })
+      .from(ticketStatuses)
+      .where(eq(ticketStatuses.category, 'resolved'))
+      .limit(1);
+    await db
+      .update(conversations)
+      .set({ statusId: resolved!.id })
+      .where(inArray(conversations.id, [named!.id, other!.id]));
+    // The other resolved ticket holds the same digits, so the text search
+    // reaches it — and the status filter, which the number skips and the text
+    // search does not, is what keeps it out.
+    await db
+      .update(contacts)
+      .set({ primaryPhone: `2010${named!.number}9999` })
+      .where(eq(contacts.id, other!.contactId));
+
+    const { rows } = await listInbox(agent, parseFilters({ q: String(named!.number) }));
+
+    expect(rows.map((row) => row.id)).toEqual([named!.id]);
+    expect(rows[0]!.statusCategory).toBe('resolved');
+  });
+
+  it('does not reach a ticket by number that the agent could not open from the list', async () => {
+    const agent = await signedIn('agent', 'sara@shipblu.test');
+    // Unassigned, and an agent without ticket.view.all sees only their own.
+    const [theirs] = await tickets([{ name: 'Not yours' }]);
+
+    const { rows } = await listInbox(agent, parseFilters({ q: `#${theirs!.number}` }));
+
+    expect(rows).toEqual([]);
   });
 });

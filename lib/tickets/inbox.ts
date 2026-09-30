@@ -149,21 +149,25 @@ export async function listInbox(
   if (filters.view === 'mine') where.push(eq(conversations.assigneeAgentId, agent.id));
   if (filters.view === 'unassigned') where.push(isNull(conversations.assigneeAgentId));
 
+  if (filters.channel !== 'all') {
+    where.push(eq(conversations.channel, filters.channel));
+  }
+
+  // Everything but the status and the search: what the ticket a query names by
+  // number is read under. A ticket number is an address, and an agent typing
+  // #812 means that ticket whether it was resolved last week or is open now —
+  // under the default "Open + pending" a resolved one answered "Nothing matches
+  // those filters", which reads as "no such ticket". Visibility, the restricted
+  // channels, the view and the channel filter all still hold, so naming a
+  // ticket reaches nothing the agent could not already open from the list.
+  const namedScope = [...where];
+  let namedNumber: number | null = null;
+
   if (filters.statusCategory === 'unresolved') {
     where.push(inArray(ticketStatuses.category, ['open', 'pending']));
   } else if (filters.statusCategory !== 'all') {
     where.push(eq(ticketStatuses.category, filters.statusCategory));
   }
-
-  if (filters.channel !== 'all') {
-    where.push(eq(conversations.channel, filters.channel));
-  }
-
-  // Everything but the search. The ticket a query names by number is read under
-  // exactly these, so naming it cannot reach one the filters or visibility keep
-  // out of the list.
-  const filtered = [...where];
-  let namedNumber: number | null = null;
 
   // Cleaned before the check rather than after: a query that is only a pasted
   // U+200F, a tatweel or a fatha cleans to '', and searching for '' matched
@@ -262,7 +266,7 @@ export async function listInbox(
     // For the first page, which it leads. The paged query excludes it on every
     // page, so no later one brings it back.
     namedNumber !== null && !cursor
-      ? selectInboxRows(and(...filtered, eq(conversations.number, namedNumber))).limit(1)
+      ? selectInboxRows(and(...namedScope, eq(conversations.number, namedNumber))).limit(1)
       : [],
   ]);
 
