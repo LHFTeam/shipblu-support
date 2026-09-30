@@ -235,11 +235,14 @@ describe('processWebhook — when an inbound email happened', () => {
     // The header is kept as what the sender claimed, and read by nothing.
     expect(answer.meta.dateHeader).toBe(deviceClock.toJSDate().toISOString());
 
-    // The list: above the ticket touched at 10:15, previewing the answer.
+    // The list: above the ticket touched at 10:15, previewing the answer, and
+    // with no reply arrow, because the answer is the customer's. On the header
+    // the card would have previewed our reply and shown the arrow, and an agent
+    // scanning for tickets that need a move would have skipped this one.
     const { rows } = await listInbox(agent, parseFilters({}));
-    expect(rows.map((row) => [row.id, row.preview])).toEqual([
-      [ticket.id, 'Nobody came.'],
-      [other.id, 'Can I change my address?'],
+    expect(rows.map((row) => [row.id, row.preview, row.lastFromUs])).toEqual([
+      [ticket.id, 'Nobody came.', false],
+      [other.id, 'Can I change my address?', false],
     ]);
 
     // The clocks: a reply is owed an hour from when it reached us. From the
