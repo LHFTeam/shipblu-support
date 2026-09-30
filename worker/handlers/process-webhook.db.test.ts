@@ -311,6 +311,43 @@ describe('processWebhook — when an inbound email happened', () => {
     ]);
   });
 
+  // The same order, on a ticket we have already answered, so the next-response
+  // clock is running. It counts from the newest customer mail, not from the one
+  // processed last: restarting it from the older mail's instant would move a
+  // due date the newer mail had already set five minutes earlier.
+  it('does not pull the next-response target back when an older mail is processed last', async () => {
+    const agent = await admin();
+    await hourlyPolicy();
+    await deliver({
+      messageId: 'first@customer.example',
+      text: 'My parcel has not arrived.',
+      receivedAt: cairo('09:00'),
+    });
+    const ticket = await ticketOf('first@customer.example');
+    await agentReplies(ticket.id, agent.id, cairo('09:30'), 'It is out for delivery today.');
+
+    const older = await store({
+      messageId: 'second@customer.example',
+      references: ['first@customer.example'],
+      text: 'Any news?',
+      receivedAt: cairo('10:00'),
+    });
+    const newer = await store({
+      messageId: 'third@customer.example',
+      references: ['first@customer.example'],
+      text: 'Hello?',
+      receivedAt: cairo('10:05'),
+    });
+
+    await run(newer);
+    await run(older);
+
+    expect(await clocksOf(ticket.id)).toMatchObject({
+      lastCustomerMessageAt: cairo('10:05').toJSDate(),
+      nextResponseDueAt: cairo('10:05').plus({ hours: 1 }).toJSDate(),
+    });
+  });
+
   // The other direction, and the example `lifecycle.ts` gives: a clock reading
   // 23:00 at 11:00 Cairo. From the header the ticket would sit at the top of
   // the list for twelve hours, above everything that arrived after it.

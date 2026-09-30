@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels, conversationEvents, conversations, messages, ticketStatuses } from '@/db/schema';
 import type {
@@ -11,6 +11,7 @@ import type {
 import { enqueue } from '@/lib/queue';
 import { onCustomerReply } from '@/lib/sla';
 import { findContactByIdentity, needsChannelProfile, resolveContact } from './contacts';
+import { latest } from './latest';
 import { afterInboundMessage, afterMessageStored } from './lifecycle';
 import { reopenResolved } from './reopen';
 import { requireDefaultOpenStatusId } from './statuses';
@@ -320,11 +321,9 @@ export async function ingestMetaComment(comment: NormalisedComment): Promise<Met
  * never written takes the interaction's own instant.
  */
 export function interactionWindowSet(at: Date) {
-  const iso = at.toISOString();
-
   return {
-    lastMessageAt: sql`greatest(${conversations.lastMessageAt}, ${iso}::timestamptz)`,
-    lastCustomerMessageAt: sql`greatest(${conversations.lastCustomerMessageAt}, ${iso}::timestamptz)`,
+    lastMessageAt: latest(conversations.lastMessageAt, at),
+    lastCustomerMessageAt: latest(conversations.lastCustomerMessageAt, at),
   };
 }
 

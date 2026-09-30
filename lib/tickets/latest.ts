@@ -14,7 +14,7 @@ import type { AnyPgColumn } from 'drizzle-orm/pg-core';
  * `greatest` ignores nulls, so a column nothing has written yet takes `at`. The
  * instant is bound as an ISO string behind `::timestamptz`, because a bare
  * `Date` in a `sql` template reaches postgres.js untyped (AGENTS.md, Tests).
- * `interactionWindowSet` in `ingest-meta.ts` is the same statement for Meta.
+ * `interactionWindowSet` in `ingest-meta.ts` builds the Meta window from it.
  */
 export function latest(column: AnyPgColumn, at: Date): SQL {
   return sql`greatest(${column}, ${at.toISOString()}::timestamptz)`;

@@ -114,15 +114,17 @@ function selectInboxRows(where: SQL | undefined) {
       // yet: nobody has spoken, so it is not ours.
       preview: newest.bodyText,
       lastFromUs: sql<boolean>`coalesce(${newest.direction} = 'outbound', false)`,
-      // The newest message on the newest still-open side conversation. One
-      // correlated subquery beside the preview one above rather than a join,
-      // because a ticket with three threads must still produce one row.
+      // The newest message on the newest still-open side conversation. A
+      // correlated subquery rather than a join, because a ticket with three
+      // threads must still produce one row. The id settles a tie, as it does
+      // for the preview: a hub answer now carries its receipt instant, and
+      // without it two messages sharing one would answer either way.
       sideState: sql<string | null>`(
         SELECT CASE WHEN sm.direction = 'inbound' THEN 'replied' ELSE 'waiting' END
         FROM side_conversations sc
         JOIN side_conversation_messages sm ON sm.side_conversation_id = sc.id
         WHERE sc.conversation_id = ${conversations.id} AND sc.state = 'open'
-        ORDER BY sm.created_at DESC LIMIT 1
+        ORDER BY sm.created_at DESC, sm.id DESC LIMIT 1
       )`,
     })
     .from(conversations)

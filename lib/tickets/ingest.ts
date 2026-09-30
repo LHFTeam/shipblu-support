@@ -227,7 +227,7 @@ export async function ingestInboundEmail(
     // Forward only: a mail that reached us earlier can be processed after a
     // later one, and must not pull either column back (`latest`).
     const lastMessageAt = latest(conversations.lastMessageAt, receivedAt);
-    await tx
+    const [clocks] = await tx
       .update(conversations)
       .set(
         automation.isAutoReply
@@ -237,9 +237,16 @@ export async function ingestInboundEmail(
               lastCustomerMessageAt: latest(conversations.lastCustomerMessageAt, receivedAt),
             },
       )
-      .where(eq(conversations.id, conversationId));
+      .where(eq(conversations.id, conversationId))
+      .returning({ lastCustomerMessageAt: conversations.lastCustomerMessageAt });
 
-    return { conversationId, conversationNumber, messageId, createdConversation };
+    return {
+      conversationId,
+      conversationNumber,
+      messageId,
+      createdConversation,
+      customerWroteAt: clocks?.lastCustomerMessageAt ?? receivedAt,
+    };
   });
 
   // Attachments are uploaded after the transaction commits: a slow or failing
@@ -254,12 +261,18 @@ export async function ingestInboundEmail(
     direction: 'inbound',
   });
 
-  await afterInboundMessage(result.conversationId, result.createdConversation, receivedAt, {
+  // The next-response clock counts from the newest customer mail on the ticket,
+  // not from this one: the same forward-only rule as the columns above. An older
+  // mail processed after a newer one would otherwise restart the target from its
+  // own earlier instant and pull a due date the newer mail had already set back
+  // by however far apart the two arrived.
+  const { customerWroteAt, ...stored } = result;
+  await afterInboundMessage(stored.conversationId, stored.createdConversation, customerWroteAt, {
     autoReply: automation.isAutoReply,
   });
 
   return {
-    ...result,
+    ...stored,
     duplicate: false,
     automationReason: automation.reason,
   };
