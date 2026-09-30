@@ -2,14 +2,18 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useEffect, useRef, useState, type UIEvent } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type UIEvent } from 'react';
+import { AgentAvatar } from '@/components/avatar';
 import { ChannelBadge, channelInfo } from '@/components/channel';
-import { BookIcon, SearchIcon } from '@/components/icons';
+import { BookIcon, ReplyIcon, SearchIcon } from '@/components/icons';
+import { InfoTip } from '@/components/tooltip';
 import { Badge, Select } from '@/components/ui';
 import { formatRelative } from '@/lib/format';
+import { DEFAULT_LOCALE } from '@/lib/kb/locale';
 import type { InboxRow } from '@/lib/tickets/inbox';
 import type { InboxFilters } from '@/lib/tickets/inbox-filters';
 import { FILTERABLE_CHANNELS, isRestrictedChannel } from '@/lib/tickets/channel-policy';
+import { messageLines } from '@/lib/tickets/inbox-lines';
 import {
   inboxSignature,
   readInboxPosition,
@@ -33,7 +37,6 @@ export function InboxList({
   activeNumber,
   canSeeBot = false,
   canCreate = false,
-  canViewKb = false,
 }: {
   rows: InboxRow[];
   nextCursor: string | null;
@@ -41,7 +44,6 @@ export function InboxList({
   activeNumber?: number;
   canSeeBot?: boolean;
   canCreate?: boolean;
-  canViewKb?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -79,31 +81,41 @@ export function InboxList({
     <>
       <div className="flex shrink-0 flex-col gap-2 border-b border-[var(--border)] bg-[var(--surface)] p-2">
         {/*
-          The knowledge base, named, on the screen an agent spends the day on.
+          The public help centre's front door, named, on the screen an agent
+          spends the day on.
 
-          The rail already links to it, but as an unlabelled icon whose name
-          appears on hover — which is no name at all on a phone, and on the
-          desktop is a thing you have to already suspect is there before you
-          point at it. Inside a ticket the composer's panel answers the same
-          need; this is the half of the console where that panel does not exist,
-          and looking something up meant guessing at an icon.
+          The public site rather than the console's `/kb`, which the rail still
+          links to: from the queue, the article an agent looks up is usually one
+          to send, and the help centre is the only copy of it a customer can
+          open — a console link is a sign-in page to them.
+
+          A path on whichever host served this page rather than
+          `publicBaseUrl()`, for the reason `requestBaseUrl` gives: the published
+          hostname is a 404 until the domain serves this app, and `proxy.ts`
+          rewrites a locale prefix into the help centre on every host. A new
+          tab, because leaving the console is a full navigation and the place
+          this list keeps (`lib/tickets/inbox-position`) lives in memory, so the
+          agent would come back to the top of the queue.
+
+          Behind no permission: a link to a page any stranger can open is not a
+          capability, and gating it on `kb.view` hid nothing.
 
           Its own line rather than a third control in either row below, because
           both of those are measured against this column's width: the search
-          placeholder is trimmed to the pixel it has (see `SearchBox`) and the
-          filters are native selects, which clip their longest option rather
-          than wrap. One line of a column that scrolls anyway is the cheaper
-          side of that trade.
+          box already shares its row with New and its own ⓘ (see `SearchBox`)
+          and the filters are native selects, which clip their longest option
+          rather than wrap. One line of a column that scrolls anyway is the
+          cheaper side of that trade.
         */}
-        {canViewKb ? (
-          <Link
-            href="/kb"
-            className="flex items-center gap-1.5 self-start rounded-md px-1.5 py-1 text-xs font-medium text-brand-600 hover:bg-[var(--muted)]"
-          >
-            <BookIcon size={15} />
-            Knowledge base
-          </Link>
-        ) : null}
+        <a
+          href={`/${DEFAULT_LOCALE}`}
+          target="_blank"
+          rel="noreferrer"
+          className="flex items-center gap-1.5 self-start rounded-md px-1.5 py-1 text-xs font-medium text-brand-600 hover:bg-[var(--muted)]"
+        >
+          <BookIcon size={15} />
+          Knowledge base
+        </a>
 
         <div className="flex items-center gap-2">
           <div className="min-w-0 flex-1">
@@ -172,6 +184,7 @@ export function InboxList({
 
         {visible.map((row) => {
           const active = row.number === activeNumber;
+          const { headline, secondary } = messageLines(row);
 
           return (
             <li key={row.id}>
@@ -196,13 +209,23 @@ export function InboxList({
                   </span>
                 </div>
 
-                <p className="mt-0.5 truncate text-sm">{row.subject ?? '(no subject)'}</p>
-
-                {/* The preview repeats the subject on channels that have none of
-                    their own, so it is only shown when it adds something. */}
-                {row.preview && row.preview !== row.subject ? (
-                  <p className="mt-0.5 truncate text-xs text-[var(--muted-foreground)]">
-                    {row.preview}
+                {/* `dir="auto"` because the console is LTR and most of this
+                    text is Arabic: an RTL sentence truncated in an LTR box is
+                    cut at the wrong end, so the card showed the last words of a
+                    long reply and lost the ones that say what it is about. And
+                    `text-left` so a short Arabic line still sits under the name
+                    rather than zig-zagging to the right edge: a line that
+                    overflows is laid out from its own start whatever the
+                    alignment, so it is still the sentence's end that is cut. */}
+                <p dir="auto" className="mt-0.5 truncate text-left text-sm">
+                  {headline}
+                </p>
+                {secondary ? (
+                  <p
+                    dir="auto"
+                    className="mt-0.5 truncate text-left text-xs text-[var(--muted-foreground)]"
+                  >
+                    {secondary}
                   </p>
                 ) : null}
 
@@ -236,15 +259,38 @@ export function InboxList({
                     <Badge tone="neutral">awaiting hub</Badge>
                   ) : null}
 
-                  {row.assigneeName ? (
-                    <span className="ms-auto truncate text-xs text-[var(--muted-foreground)]">
-                      {row.assigneeName}
-                    </span>
-                  ) : (
-                    <span className="ms-auto text-xs text-[var(--muted-foreground)]/70">
-                      unassigned
-                    </span>
-                  )}
+                  {/* One group so the row wraps it as a unit: the arrow is about
+                      the conversation and the tile about who owns it, and a
+                      wrap that separated them would put either one on a line
+                      by itself. */}
+                  <span className="ms-auto flex shrink-0 items-center gap-1.5">
+                    {/* Ours was the last word, so the next move is the
+                        customer's. */}
+                    {row.lastFromUs ? (
+                      <span className="text-[var(--muted-foreground)]">
+                        <ReplyIcon size={15} />
+                        <span className="sr-only">Last message from ShipBlu</span>
+                      </span>
+                    ) : null}
+
+                    {/* The assignee as a tile rather than a name. The name
+                        still goes to assistive technology as text, but to
+                        nobody on hover: `title=` never shows on a phone, and a
+                        Tooltip is a button, which cannot sit inside this link.
+                        The ticket's header names the assignee in full. */}
+                    {row.assigneeId ? (
+                      <>
+                        <AgentAvatar
+                          name={row.assigneeName}
+                          color={row.assigneeColor}
+                          avatarUrl={row.assigneeAvatarUrl}
+                        />
+                        <span className="sr-only">Assigned to {row.assigneeName}</span>
+                      </>
+                    ) : (
+                      <span className="text-xs text-[var(--muted-foreground)]/70">unassigned</span>
+                    )}
+                  </span>
                 </div>
               </Link>
             </li>
@@ -514,6 +560,16 @@ function reviveRow(row: SerialisedRow): InboxRow {
 }
 
 /**
+ * What the search box matches, in one place because it is said twice: in the ⓘ
+ * a reader opens and as the input's description a screen reader announces. It
+ * names what is not searched too, since "anything" is a claim: an agent typing a
+ * colleague's name or a tag gets an empty list, which otherwise reads as "no
+ * such tickets" rather than "not searchable".
+ */
+const SEARCH_HINT =
+  "Matches a ticket's number (#812) and subject, the requester's name, email or phone, and any words in a message or side conversation. Arabic spellings of the same letter match each other, so احمد finds أحمد. A pasted tracking number or SBID finds that shipment's tickets; start with track: or sbid: to search only those. A ticket number finds its ticket whatever the Status filter says; everything else follows it, and the Channel filter applies to all of it. Tags, custom fields and the assignee are not searched.";
+
+/**
  * Debounced so typing a ticket number does not fire a query per keystroke —
  * each one is a full server render of the list.
  *
@@ -527,6 +583,7 @@ function reviveRow(row: SerialisedRow): InboxRow {
  */
 function SearchBox({ initial, onSearch }: { initial: string; onSearch: (value: string) => void }) {
   const [value, setValue] = useState(initial);
+  const hintId = useId();
 
   const latest = useRef(onSearch);
   useEffect(() => {
@@ -544,25 +601,47 @@ function SearchBox({ initial, onSearch }: { initial: string; onSearch: (value: s
       <span className="pointer-events-none absolute inset-y-0 start-2 flex items-center text-[var(--muted-foreground)]">
         <SearchIcon size={15} />
       </span>
-      {/* Three words, because the box is 327px wide and the previous
-          placeholder rendered 373px of text — it was cut off mid-list, which is
-          why it advertised `sbid:` and stopped there.
+      {/* A claim rather than a list. The row is 327px on a phone and shares it
+          with "New", which leaves the box about 276px: the first list that sat
+          here rendered 373px and stopped at `sbid:`, and the three-item one
+          after it used the last pixel of the room and still said nothing about
+          tracking numbers, which work pasted bare.
 
-          They are also the right three. Message text is the half nobody guesses
-          and the half that finds things: subjects on the messaging channels are
-          canned categories hundreds of tickets share, so the sentence an agent
-          half-remembers is only in the messages. It went missing when `track:`
-          and `sbid:` were added, and those two never needed the room — a pasted
-          tracking number or SBID is recognised on its own. The syntax lives in
-          the tooltip instead. */}
+          What "anything" stands for — what `listInbox` matches, and the three
+          things it does not — is one tap away in the ⓘ at the end of the
+          field, and is the input's accessible description. It used to be a
+          `title=`, which a phone never shows. The ⓘ costs the text 18px, so it
+          fits only because the placeholder is short. */}
       <input
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        placeholder="Search #number, contact, message…"
-        title="Finds a ticket by its number, a contact by name, email or phone, and any words said in a message or a side conversation. A pasted tracking number or SBID finds that shipment's tickets; track: or sbid: narrows the search to only those."
+        placeholder="Search for anything"
         aria-label="Search tickets and chats"
-        className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] py-1.5 pe-2.5 ps-7 text-sm outline-none focus:border-brand-500"
+        aria-describedby={hintId}
+        className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] py-1.5 pe-7 ps-7 text-sm outline-none focus:border-brand-500"
       />
+      {/* The description the `title=` used to give a screen reader. The ⓘ
+          cannot stand in for it: its tip describes the ⓘ, and only while
+          open. */}
+      <span id={hintId} className="sr-only">
+        {SEARCH_HINT}
+      </span>
+      {/* Padded so a thumb has 22px to find rather than the 14px glyph, and
+          inset by the padding so the glyph itself sits where the search icon's
+          mirror would.
+
+          A pointer pressing it leaves focus in the field. The ⓘ is a button,
+          so a tap mid-query moved focus to it, and on a phone that closed the
+          keyboard under an agent who only wanted to check the syntax. Tab
+          still reaches it, since only a pointer's default is prevented. */}
+      <span
+        className="absolute inset-y-0 end-1 flex items-center"
+        onMouseDown={(e) => e.preventDefault()}
+      >
+        <InfoTip label="search" className="p-1">
+          {SEARCH_HINT}
+        </InfoTip>
+      </span>
     </div>
   );
 }

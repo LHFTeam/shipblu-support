@@ -223,7 +223,12 @@ export async function getConversation(
         .leftJoin(agents, eq(agents.id, messages.authorAgentId))
         .leftJoin(contacts, eq(contacts.id, messages.authorContactId))
         .where(eq(messages.conversationId, row.conversation.id))
-        .orderBy(asc(messages.createdAt)),
+        // The id settles two messages stamped with the same instant — a batch
+        // sharing one `now`, or a provider's second-precision `sentAt` — so the
+        // timeline's last message is the one the inbox card previews
+        // (`lastVisibleMessage` in lib/tickets/inbox.ts breaks the tie the same
+        // way). Without it Postgres returns equal rows in whatever order it likes.
+        .orderBy(asc(messages.createdAt), asc(messages.id)),
 
       db
         .select({

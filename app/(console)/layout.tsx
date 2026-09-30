@@ -2,12 +2,13 @@ import Link from 'next/link';
 import { ShipBluLogo } from '@/components/brand';
 import { AgentActivity } from '@/components/agent-activity';
 import { AgentPresence } from '@/components/agent-presence';
+import { initials } from '@/components/initials';
 import { requireAgent } from '@/lib/auth/guard';
+import { agentColorClass } from '@/lib/auth/agent-colors';
 import { can } from '@/lib/auth/permissions';
 import { warningLeadMs } from '@/lib/presence/idle';
 import { loadPresencePolicy } from '@/lib/presence/policy';
 import { inboxCounts } from '@/lib/tickets/inbox';
-import { initials } from '@/lib/format';
 import { AvailabilitySwitch } from './availability';
 import { Rail, type NavItem } from './nav';
 
@@ -86,7 +87,7 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
             </span>
             <span
               title={agent.email}
-              className="flex size-7 items-center justify-center rounded-full bg-brand-600 text-xs font-medium text-white"
+              className={`flex size-7 items-center justify-center rounded-full text-xs font-medium ${agentColorClass(agent.avatarColor)}`}
             >
               {initials(agent.name)}
             </span>

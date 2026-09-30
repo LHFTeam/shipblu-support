@@ -9,10 +9,10 @@
 import { detectShipmentRefs, shipmentPatterns } from '@/lib/shipments/detect';
 import { couldBeReference, normaliseSbid, normaliseTrackingNumber } from '@/lib/shipments/format';
 import { containing } from '@/lib/search/like';
+import { cleanQuery, textPatterns, type TextPatterns } from '@/lib/search/text';
 
-export type SearchTerm = {
-  /** ILIKE pattern for free-text columns. Wildcards in the query are literal. */
-  pattern: string;
+/** The free-text patterns every search builds, plus what only the inbox reads. */
+export type SearchTerm = TextPatterns & {
   /**
    * The ticket number the query names, if it names one. "#812" is how the team
    * refers to a ticket, so it earns an exact match on the number rather than a
@@ -61,7 +61,9 @@ function stripPrefix(query: string, prefixes: readonly string[]): string | null 
 const PHONE_PUNCTUATION = /^[\d+()\-.\s]+$/;
 
 export function parseSearchTerm(query: string): SearchTerm {
-  const raw = query.trim();
+  // Cleaned before anything reads it, so a ticket number or a pasted tracking
+  // number with a U+200F still reads as one.
+  const raw = cleanQuery(query);
 
   // A prefix narrows the search. An empty or unusable value after one degrades
   // to an ordinary text search rather than returning nothing — someone
@@ -106,20 +108,22 @@ export function parseSearchTerm(query: string): SearchTerm {
 function textTerm(query: string): SearchTerm {
   const q = query.trim();
 
-  const asTicket = /^#?(\d+)$/.exec(q);
-  // Number() would also accept "1e3" and " 12.0 ", which are not ticket
-  // numbers anybody types. Postgres bigints are what this is compared against,
-  // so anything past the safe integer range is not one either.
+  // No leading zero. Nobody writes a ticket reference as "0812", but every
+  // Egyptian mobile number starts 010, 011, 012 or 015, and the box searches as
+  // it is typed — so "0101" is a phone number on its way in, and reading it as
+  // ticket 101 put an unrelated ticket at the top of the list the agent was
+  // narrowing. Number() would also accept "1e3" and " 12.0 ", which are not
+  // ticket numbers anybody types. Postgres bigints are what this is compared
+  // against, so anything past the safe integer range is not one either.
+  const asTicket = /^#?([1-9]\d*)$/.exec(q);
   const number =
-    asTicket && Number(asTicket[1]) > 0 && Number(asTicket[1]) <= Number.MAX_SAFE_INTEGER
-      ? Number(asTicket[1])
-      : null;
+    asTicket && Number(asTicket[1]) <= Number.MAX_SAFE_INTEGER ? Number(asTicket[1]) : null;
 
   const digits = q.replace(/\D/g, '');
   const looksLikePhone = PHONE_PUNCTUATION.test(q) && digits.length >= 6;
 
   return {
-    pattern: containing(q),
+    ...textPatterns(q),
     number,
     // Only when the punctuation actually got in the way: for a query that is
     // already bare digits the free-text pattern covers the phone column too.

@@ -33,6 +33,8 @@ export type SessionAgent = {
   role: (typeof agents.$inferSelect)['role'];
   permissions: Record<string, boolean>;
   avatarUrl: string | null;
+  /** Their tile's colour key, so the header draws them as the inbox does. */
+  avatarColor: string | null;
   /**
    * Their own "route new work to me" switch. On the session rather than fetched
    * where it is needed because the console header renders it on every page, and
@@ -110,6 +112,7 @@ export async function getSessionAgent(): Promise<SessionAgent | null> {
         role: agents.role,
         permissions: agents.permissions,
         avatarUrl: agents.avatarUrl,
+        avatarColor: agents.avatarColor,
         isAcceptingTickets: agents.isAcceptingTickets,
         isActive: agents.isActive,
         lastUsedAt: sessions.lastUsedAt,
@@ -150,6 +153,7 @@ export async function getSessionAgent(): Promise<SessionAgent | null> {
     role: row.role,
     permissions: row.permissions,
     avatarUrl: row.avatarUrl,
+    avatarColor: row.avatarColor,
     isAcceptingTickets: row.isAcceptingTickets,
     // Never negative. A row written by an instance whose clock runs ahead of
     // this one's would otherwise read as idle for minus three minutes, and the
