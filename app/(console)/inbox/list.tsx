@@ -3,8 +3,9 @@
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, type UIEvent } from 'react';
+import { AgentAvatar } from '@/components/avatar';
 import { ChannelBadge, channelInfo } from '@/components/channel';
-import { BookIcon, SearchIcon } from '@/components/icons';
+import { BookIcon, ReplyIcon, SearchIcon } from '@/components/icons';
 import { Badge, Select } from '@/components/ui';
 import { formatRelative } from '@/lib/format';
 import type { InboxRow } from '@/lib/tickets/inbox';
@@ -236,15 +237,38 @@ export function InboxList({
                     <Badge tone="neutral">awaiting hub</Badge>
                   ) : null}
 
-                  {row.assigneeName ? (
-                    <span className="ms-auto truncate text-xs text-[var(--muted-foreground)]">
-                      {row.assigneeName}
-                    </span>
-                  ) : (
-                    <span className="ms-auto text-xs text-[var(--muted-foreground)]/70">
-                      unassigned
-                    </span>
-                  )}
+                  {/* One group so the row wraps it as a unit: the arrow is about
+                      the conversation and the tile about who owns it, and a
+                      wrap that separated them would put either one on a line
+                      by itself. */}
+                  <span className="ms-auto flex shrink-0 items-center gap-1.5">
+                    {/* Ours was the last word, so the next move is the
+                        customer's. */}
+                    {row.lastFromUs ? (
+                      <span className="text-[var(--muted-foreground)]">
+                        <ReplyIcon size={15} />
+                        <span className="sr-only">Last message from ShipBlu</span>
+                      </span>
+                    ) : null}
+
+                    {/* The assignee as a tile rather than a name. The name
+                        still goes to assistive technology as text, but to
+                        nobody on hover: `title=` never shows on a phone, and a
+                        Tooltip is a button, which cannot sit inside this link.
+                        The ticket's header names the assignee in full. */}
+                    {row.assigneeId ? (
+                      <>
+                        <AgentAvatar
+                          id={row.assigneeId}
+                          name={row.assigneeName}
+                          avatarUrl={row.assigneeAvatarUrl}
+                        />
+                        <span className="sr-only">Assigned to {row.assigneeName}</span>
+                      </>
+                    ) : (
+                      <span className="text-xs text-[var(--muted-foreground)]/70">unassigned</span>
+                    )}
+                  </span>
                 </div>
               </Link>
             </li>

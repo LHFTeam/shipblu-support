@@ -27,7 +27,10 @@ export type InboxRow = {
   statusCategory: 'open' | 'pending' | 'resolved' | 'closed';
   requesterName: string | null;
   requesterHandle: string | null;
+  /** Keys the tile's colour, so it stays with the agent through a rename. */
+  assigneeId: string | null;
   assigneeName: string | null;
+  assigneeAvatarUrl: string | null;
   lastMessageAt: Date;
   lastCustomerMessageAt: Date | null;
   /**
@@ -39,6 +42,15 @@ export type InboxRow = {
   isComment: boolean;
   tags: string[];
   preview: string | null;
+  /**
+   * Whether the newest message the customer can see — the one `preview` holds —
+   * is ours, which leaves the next move with the customer.
+   *
+   * Read off `direction`, not `author_agent_id`: an automation's reply, the CSAT
+   * survey and the WhatsApp bot's echoes carry no author and are still ShipBlu
+   * speaking.
+   */
+  lastFromUs: boolean;
   /**
    * Whether this ticket is blocked on, or has just heard back from, an internal
    * team.
@@ -156,6 +168,15 @@ export async function listInbox(
     );
   }
 
+  // The newest message the customer can see. Written once and read by both the
+  // preview and `lastFromUs`, so the list can never show our arrow beside the
+  // customer's words. The id breaks a tie on `created_at` for the same reason:
+  // two subqueries left to choose between equal rows need not choose the same.
+  const newestVisible = sql`
+    FROM ${messages} m
+    WHERE m.conversation_id = ${conversations.id} AND m.kind <> 'note'
+    ORDER BY m.created_at DESC, m.id DESC LIMIT 1`;
+
   const rows = await db
     .select({
       id: conversations.id,
@@ -168,7 +189,9 @@ export async function listInbox(
       requesterName: contacts.name,
       requesterEmail: contacts.primaryEmail,
       requesterPhone: contacts.primaryPhone,
+      assigneeId: agents.id,
       assigneeName: agents.name,
+      assigneeAvatarUrl: agents.avatarUrl,
       lastMessageAt: conversations.lastMessageAt,
       lastCustomerMessageAt: conversations.lastCustomerMessageAt,
       externalId: conversations.externalId,
@@ -177,12 +200,11 @@ export async function listInbox(
       cursorTime: sql<string>`${conversations.lastMessageAt}::text`,
       tags: conversations.tags,
       // The newest message body, for the two-line preview in the list. A
-      // lateral subquery keeps this one round trip instead of N+1.
-      preview: sql<string | null>`(
-        SELECT m.body_text FROM ${messages} m
-        WHERE m.conversation_id = ${conversations.id} AND m.kind <> 'note'
-        ORDER BY m.created_at DESC LIMIT 1
-      )`,
+      // correlated subquery keeps this one round trip instead of N+1.
+      preview: sql<string | null>`(SELECT m.body_text ${newestVisible})`,
+      // False rather than null for a ticket with no message yet: nobody has
+      // spoken, so it is not ours.
+      lastFromUs: sql<boolean>`coalesce((SELECT m.direction = 'outbound' ${newestVisible}), false)`,
       // The newest message on the newest still-open side conversation. One
       // correlated subquery beside the preview one above rather than a join,
       // because a ticket with three threads must still produce one row.
@@ -226,12 +248,15 @@ export async function listInbox(
       statusCategory: row.statusCategory,
       requesterName: row.requesterName,
       requesterHandle: row.requesterEmail ?? row.requesterPhone,
+      assigneeId: row.assigneeId,
       assigneeName: row.assigneeName,
+      assigneeAvatarUrl: row.assigneeAvatarUrl,
       lastMessageAt: row.lastMessageAt,
       lastCustomerMessageAt: row.lastCustomerMessageAt,
       isComment: rootCommentId(row.externalId) !== null,
       tags: row.tags,
       preview: row.preview,
+      lastFromUs: row.lastFromUs,
       sideState: row.sideState === 'replied' || row.sideState === 'waiting' ? row.sideState : null,
     })),
   };
