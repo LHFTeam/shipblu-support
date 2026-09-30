@@ -47,6 +47,7 @@ function email(overrides: Partial<ParsedInboundEmail> = {}): ParsedInboundEmail 
     textBody: 'Hello, my parcel has not arrived.',
     attachments: [],
     headers: {},
+    dateHeader: null,
     receivedAt: RECEIVED,
     ...overrides,
   };

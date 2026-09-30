@@ -76,8 +76,11 @@ export async function processWebhook(job: ClaimedJob): Promise<void> {
       throw new Error(`unsupported webhook channel "${event.channel}"`);
     }
 
+    // When the mail happened is the row's fact, not the payload's: the stamp our
+    // endpoint wrote on arrival, which a late run or a replay leaves alone. The
+    // mail's own `Date` header is the sender's clock (`ParsedInboundEmail`).
     const parsed = await emailProvider().parseInbound(event.payload);
-    const result = await ingestInboundEmail(parsed);
+    const result = await ingestInboundEmail({ ...parsed, receivedAt: event.receivedAt });
 
     if (result === null) {
       // Deliberately dropped (self-addressed loop). Mark processed so it is not

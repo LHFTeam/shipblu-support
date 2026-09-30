@@ -41,13 +41,17 @@ const log = logger('lifecycle');
  * as closed, and answering before that ran would tell the customer we are open.
  *
  * It is also the only step handed the wall clock rather than `at`. Everything
- * else here is measuring the customer's message and wants the moment it was
- * sent; the acknowledgement is *being sent now* and has to say so — "we open on
- * Sunday at 09:00" is counted from the instant it leaves, not from the header on
- * the mail that prompted it. On email those are not the same instant and the
- * difference is not ours: `receivedAt` is Postmark's `Date`, which is the
- * sender's own header, so a customer whose clock reads 23:00 at 11:00 Cairo
- * would otherwise be told the office is shut in the middle of a working morning.
+ * else here is measuring the customer's message and wants the moment it reached
+ * us; the acknowledgement is *being sent now* and has to say so — "we open on
+ * Sunday at 09:00" is counted from the instant it leaves, not from the instant
+ * of the message that prompted it. The two part whenever a delivery is processed
+ * late or replayed, which is when an acknowledgement matters most.
+ *
+ * On email `at` is our own receipt, `webhook_events.received_at`, and not the
+ * mail's `Date` header, which is the sender's clock (`ParsedInboundEmail`). From
+ * the header, a customer whose clock read 23:00 at 11:00 Cairo started the
+ * next-response clock twelve hours in the future, and one whose clock ran two
+ * hours slow could be overdue before the mail had arrived.
  */
 export async function afterInboundMessage(
   conversationId: string,

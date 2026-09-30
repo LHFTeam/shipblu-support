@@ -194,7 +194,11 @@ export async function ingestInboundEmail(email: ParsedInboundEmail): Promise<Ing
           strippedBy: body.strippedBy,
           spfPass: email.spfPass,
           spamScore: email.spamScore,
+          dateHeader: email.dateHeader?.toISOString() ?? null,
         },
+        // When it reached us, not the `Date` header beside it in `meta`: the
+        // timeline, the inbox card and the list all order by this instant, and
+        // the sender's clock would file an answer above the reply it answers.
         createdAt: email.receivedAt,
       })
       .returning({ id: messages.id });

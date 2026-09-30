@@ -168,6 +168,7 @@ export async function ingestSideReply(
           strippedBy: body.strippedBy,
           spfPass: email.spfPass,
           spamScore: email.spamScore,
+          dateHeader: email.dateHeader?.toISOString() ?? null,
         },
         createdAt: email.receivedAt,
       })

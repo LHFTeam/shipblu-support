@@ -65,6 +65,7 @@ describe('requireDefaultOpenStatusId', () => {
         textBody: 'Hello.',
         attachments: [],
         headers: {},
+        dateHeader: null,
         receivedAt: new Date('2026-09-20T10:00:00Z'),
       }),
     ).rejects.toThrow(NO_STATUS);

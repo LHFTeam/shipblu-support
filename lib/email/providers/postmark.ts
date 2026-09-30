@@ -1,5 +1,6 @@
 import { safeEqual } from '@/lib/auth/tokens';
 import { isTimeout, WRITE_TIMEOUT_MS } from '@/lib/http/deadline';
+import { parseDateHeader } from '../date-header';
 import { formatAddress, formatMessageId, normaliseMessageId } from '../threading';
 import type {
   EmailAddress,
@@ -7,7 +8,7 @@ import type {
   InboundAttachment,
   InboundVerdict,
   OutboundEmail,
-  ParsedInboundEmail,
+  ProviderInboundEmail,
   SendResult,
 } from '../types';
 import { errorMessage } from '@/lib/errors';
@@ -214,7 +215,7 @@ export class PostmarkEmailProvider implements EmailProvider {
     return { verified: true };
   }
 
-  async parseInbound(payload: unknown): Promise<ParsedInboundEmail> {
+  async parseInbound(payload: unknown): Promise<ProviderInboundEmail> {
     const p = payload as PostmarkInboundPayload;
 
     const headers: Record<string, string> = {};
@@ -271,7 +272,9 @@ export class PostmarkEmailProvider implements EmailProvider {
       spamScore: headers['x-spam-score'] ? Number(headers['x-spam-score']) : null,
       spfPass: headers['received-spf'] ? /^\s*pass/i.test(headers['received-spf']) : null,
       dkimPass: null,
-      receivedAt: p.Date ? new Date(p.Date) : new Date(),
+      // The sender's claim, kept as evidence. When the mail arrived is not
+      // something the payload can say; see `ProviderInboundEmail`.
+      dateHeader: parseDateHeader(p.Date),
     };
   }
 }

@@ -33,6 +33,7 @@ function email(overrides: Partial<ParsedInboundEmail> = {}): ParsedInboundEmail 
     textBody: 'hello',
     attachments: [],
     headers: {},
+    dateHeader: null,
     receivedAt: new Date(),
     ...overrides,
   };

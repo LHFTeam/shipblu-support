@@ -4231,6 +4231,44 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     side: a Blueprint that cannot sync is not documentation, it is a list of
     changes queued to land all at once on the day somebody fixes the branch.
 
+77. **An inbound email's time was the sender's clock.** _2026-09-30, raised in
+    review on #324 and fixed before it bit._ `ParsedInboundEmail.receivedAt`
+    was Postmark's `Date` field, which is the mail's own header, so
+    `messages.created_at`, `last_message_at`, `last_customer_message_at` and the
+    next-response SLA all ran on whatever the customer's machine thought the
+    time was. Two hours slow, and an answer to our 10:00 reply was stored at
+    08:30. It sorted above that reply on the timeline, the card previewed our
+    older message, the list ranked the ticket by 08:30, and a one-hour
+    next-response target was breached before the mail arrived. Twelve hours
+    fast, and the ticket sat at the top of the list all day. A header that did
+    not parse became an Invalid Date, which throws on insert, so the job failed
+    on every retry and the message was lost.
+
+    Sized before fixing, read-only: **5** inbound email replies in production
+    ever (email is not live) and **0** of them sort before an outbound message
+    that preceded them. The two that can be matched to their Postmark delivery
+    carry a header **20 s** before `webhook_events.received_at`, which is the
+    whole Zoho-forward-to-Postmark transit. So for an honest clock the fix moves
+    the stamp by seconds, and for a wrong one it removes however wrong the clock
+    was. The five stored rows were left alone, since they are already in order.
+
+    `receivedAt` is now `webhook_events.received_at`, added by
+    `process_webhook`. That is our clock, and a late run or a replay does not
+    move it. The header is kept as `meta.dateHeader` and nothing reads it.
+    Providers return `ProviderInboundEmail`, a type with no `receivedAt`, so a
+    driver cannot fill it from the payload again. A `stored_at` column beside
+    `created_at` was the alternative, and it was rejected. It fixes only the
+    readers that are moved onto it, leaving `last_message_at`, the SLA,
+    `requesterLocale()` and volume-by-hour on the old value. It also puts two
+    clocks on one row for every future query to choose between, and it needs a
+    backfill and an index build on `messages` (§6.64).
+
+    Left open: WhatsApp and Meta stamp inbound rows with the provider's
+    whole-second `sentAt` and ours with `now()`, so an answer landing in the
+    same second as our reply can still sort before it. And ingest sets
+    `last_message_at` unconditionally, so a delivery processed after a later
+    reply (a worker backlog) moves it back.
+
 ## 7. Verification already done
 
 - **The knowledge-base role floor, against a real Postgres.** _2026-09-04._ The

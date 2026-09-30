@@ -1,11 +1,12 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { parseDateHeader } from '../date-header';
 import { normaliseMessageId } from '../threading';
 import type {
   EmailProvider,
   InboundVerdict,
   OutboundEmail,
-  ParsedInboundEmail,
+  ProviderInboundEmail,
   SendResult,
 } from '../types';
 import { logger } from '@/lib/log';
@@ -71,9 +72,15 @@ export class LocalEmailProvider implements EmailProvider {
   /**
    * Accepts a payload already shaped like ParsedInboundEmail, so tests and local
    * experiments can post a message straight into the pipeline.
+   *
+   * Everything except `receivedAt`: the instant is the stored delivery's, for
+   * this driver as for every other. A local experiment that wants a mail from a
+   * skewed clock sets `dateHeader`, the field that carries one.
    */
-  async parseInbound(payload: unknown): Promise<ParsedInboundEmail> {
-    const raw = payload as Partial<ParsedInboundEmail> & { receivedAt?: string | Date };
+  async parseInbound(payload: unknown): Promise<ProviderInboundEmail> {
+    const raw = payload as Partial<Omit<ProviderInboundEmail, 'dateHeader'>> & {
+      dateHeader?: string | Date | null;
+    };
 
     if (!raw.from?.address) {
       throw new Error('local inbound payload requires from.address');
@@ -95,7 +102,7 @@ export class LocalEmailProvider implements EmailProvider {
       spamScore: raw.spamScore ?? null,
       spfPass: raw.spfPass ?? null,
       dkimPass: raw.dkimPass ?? null,
-      receivedAt: raw.receivedAt ? new Date(raw.receivedAt) : new Date(),
+      dateHeader: parseDateHeader(raw.dateHeader),
     };
   }
 }

@@ -50,8 +50,43 @@ export type ParsedInboundEmail = {
   spfPass?: boolean | null;
   dkimPass?: boolean | null;
 
+  /**
+   * The mail's own `Date` header, or null when it is missing or does not parse.
+   *
+   * A claim made by the sender's machine, not a measurement, so it is recorded
+   * on the message as evidence and nothing orders or measures by it. It used to
+   * be `receivedAt`, and it is wrong in both directions: a clock two hours slow
+   * filed the customer's answer above the reply it answered and hid it from the
+   * inbox card; one twelve hours fast held the ticket at the top of the list.
+   */
+  dateHeader: Date | null;
+
+  /**
+   * When the delivery reached us: `webhook_events.received_at`, stamped by our
+   * endpoint as it stored the payload.
+   *
+   * Every clock downstream reads this — `messages.created_at`, the list's
+   * `last_message_at`, `last_customer_message_at` and the next-response SLA —
+   * because it is the first moment the team could have seen the mail, which is
+   * what a support timeline orders by and what an SLA can fairly charge from.
+   * Taken from the stored row rather than the worker's clock so that a
+   * delivery processed late, or replayed by hand, keeps the instant it arrived.
+   * Postmark retrying an endpoint that was down makes it later than the mail
+   * was, by up to the ten or so hours those retries last, and that delay is
+   * ours.
+   */
   receivedAt: Date;
 };
+
+/**
+ * What a provider can read off a delivery: everything except when it arrived.
+ *
+ * `receivedAt` is left out of the type rather than documented as "do not fill
+ * this from the payload", so a driver cannot reach for the mail's `Date` header
+ * again without the return type refusing it. The worker adds the instant from
+ * the stored delivery (`worker/handlers/process-webhook.ts`).
+ */
+export type ProviderInboundEmail = Omit<ParsedInboundEmail, 'receivedAt'>;
 
 export type OutboundEmail = {
   to: EmailAddress[];
@@ -118,5 +153,5 @@ export interface EmailProvider {
    */
   verifySignature(rawBody: string, headers: Record<string, string>): InboundVerdict;
 
-  parseInbound(payload: unknown): Promise<ParsedInboundEmail>;
+  parseInbound(payload: unknown): Promise<ProviderInboundEmail>;
 }
