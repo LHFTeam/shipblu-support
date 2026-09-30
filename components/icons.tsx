@@ -228,6 +228,16 @@ export function ReturnIcon(props: IconProps) {
   );
 }
 
+/** A reply arrow. Distinct from `ReturnIcon`, which is a parcel going back. */
+export function ReplyIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M9 17l-5-5 5-5" />
+      <path d="M4 12h11a5 5 0 0 1 5 5v1" />
+    </Icon>
+  );
+}
+
 export function WalletIcon(props: IconProps) {
   return (
     <Icon {...props}>

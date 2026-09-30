@@ -115,6 +115,7 @@ async function admin(): Promise<SessionAgent> {
     role: row!.role,
     permissions: {},
     avatarUrl: null,
+    avatarColor: row!.avatarColor,
     isAcceptingTickets: true,
     sessionIdleForMs: 0,
   };

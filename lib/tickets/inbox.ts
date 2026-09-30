@@ -40,7 +40,11 @@ export type InboxRow = {
   statusCategory: 'open' | 'pending' | 'resolved' | 'closed';
   requesterName: string | null;
   requesterHandle: string | null;
+  assigneeId: string | null;
   assigneeName: string | null;
+  assigneeAvatarUrl: string | null;
+  /** A key from `AGENT_COLORS`; see `agents.avatar_color`. */
+  assigneeColor: string | null;
   lastMessageAt: Date;
   lastCustomerMessageAt: Date | null;
   /**
@@ -52,6 +56,16 @@ export type InboxRow = {
   isComment: boolean;
   tags: string[];
   preview: string | null;
+  /**
+   * Whether the newest message the customer can see — the one `preview` holds —
+   * is ours, which leaves the next move with the customer. What counts as seen
+   * is `lastVisibleMessage` below.
+   *
+   * Read off `direction`, not `author_agent_id`: an automation's reply, the CSAT
+   * survey and the WhatsApp bot's echoes carry no author and are still ShipBlu
+   * speaking.
+   */
+  lastFromUs: boolean;
   /**
    * Whether this ticket is blocked on, or has just heard back from, an internal
    * team.
@@ -70,6 +84,7 @@ export type InboxRow = {
  * missing a field its neighbours carry.
  */
 function selectInboxRows(where: SQL | undefined) {
+  const newest = lastVisibleMessage();
   return db
     .select({
       id: conversations.id,
@@ -82,7 +97,10 @@ function selectInboxRows(where: SQL | undefined) {
       requesterName: contacts.name,
       requesterEmail: contacts.primaryEmail,
       requesterPhone: contacts.primaryPhone,
+      assigneeId: agents.id,
       assigneeName: agents.name,
+      assigneeAvatarUrl: agents.avatarUrl,
+      assigneeColor: agents.avatarColor,
       lastMessageAt: conversations.lastMessageAt,
       lastCustomerMessageAt: conversations.lastCustomerMessageAt,
       externalId: conversations.externalId,
@@ -90,13 +108,12 @@ function selectInboxRows(where: SQL | undefined) {
       // `InboxCursor` for why the mapped `Date` above cannot serve.
       cursorTime: sql<string>`${conversations.lastMessageAt}::text`,
       tags: conversations.tags,
-      // The newest message body, for the two-line preview in the list. A
-      // lateral subquery keeps this one round trip instead of N+1.
-      preview: sql<string | null>`(
-        SELECT m.body_text FROM ${messages} m
-        WHERE m.conversation_id = ${conversations.id} AND m.kind <> 'note'
-        ORDER BY m.created_at DESC LIMIT 1
-      )`,
+      // Both off the one lateral row, so the arrow is about the message the
+      // preview shows by construction rather than because two subqueries broke
+      // a tie the same way. False rather than null for a ticket with no message
+      // yet: nobody has spoken, so it is not ours.
+      preview: newest.bodyText,
+      lastFromUs: sql<boolean>`coalesce(${newest.direction} = 'outbound', false)`,
       // The newest message on the newest still-open side conversation. One
       // correlated subquery beside the preview one above rather than a join,
       // because a ticket with three threads must still produce one row.
@@ -112,6 +129,7 @@ function selectInboxRows(where: SQL | undefined) {
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
     .innerJoin(contacts, eq(contacts.id, conversations.requesterContactId))
     .leftJoin(agents, eq(agents.id, conversations.assigneeAgentId))
+    .leftJoinLateral(newest, sql`true`)
     .where(where);
 }
 
@@ -284,15 +302,58 @@ export async function listInbox(
       statusCategory: row.statusCategory,
       requesterName: row.requesterName,
       requesterHandle: row.requesterEmail ?? row.requesterPhone,
+      assigneeId: row.assigneeId,
       assigneeName: row.assigneeName,
+      assigneeAvatarUrl: row.assigneeAvatarUrl,
+      assigneeColor: row.assigneeColor,
       lastMessageAt: row.lastMessageAt,
       lastCustomerMessageAt: row.lastCustomerMessageAt,
       isComment: rootCommentId(row.externalId) !== null,
       tags: row.tags,
       preview: row.preview,
+      lastFromUs: row.lastFromUs,
       sideState: row.sideState === 'replied' || row.sideState === 'waiting' ? row.sideState : null,
     })),
   };
+}
+
+/**
+ * The newest message on a ticket that the customer can actually see, for the
+ * list's preview and reply arrow. Each exclusion is a row that is in the thread
+ * but would otherwise put the wrong words on the card or the arrow on the wrong
+ * side:
+ *
+ * - **Only `reply`.** A note is ours alone, and a `system` row is an internal
+ *   notice — the form path writes "could not store x.pdf" as an inbound row
+ *   right after the auto-acknowledgement, which would hide the arrow behind an
+ *   instruction to the team. The same `kind = 'reply'` the portal and the widget
+ *   read (`lib/portal/tickets.ts`, `lib/widget/conversation.ts`).
+ * - **Not a send that failed or bounced.** The customer never received it, so
+ *   the next move is still ours; left in, a delivery outage would put the arrow
+ *   on every ticket it broke and hide exactly the ones that need a person.
+ * - **Not an email autoresponder.** "Out of office until Sunday" asks nothing of
+ *   the team — `afterInboundMessage` leaves the SLA clock alone for it — so it
+ *   must not take the arrow off our reply either.
+ *
+ * Ordered by `created_at` and then `id`, the same order the ticket's timeline
+ * uses (`lib/tickets/conversation.ts`), so on a tie the card names the message
+ * the open ticket shows last.
+ */
+function lastVisibleMessage() {
+  return db
+    .select({ bodyText: messages.bodyText, direction: messages.direction })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.conversationId, conversations.id),
+        eq(messages.kind, 'reply'),
+        notInArray(messages.deliveryStatus, ['failed', 'bounced']),
+        sql`${messages.meta}->>'isAutoReply' IS DISTINCT FROM 'true'`,
+      ),
+    )
+    .orderBy(desc(messages.createdAt), desc(messages.id))
+    .limit(1)
+    .as('last_message');
 }
 
 export async function inboxCounts(agent: SessionAgent) {

@@ -3,6 +3,7 @@ import type { SessionAgent } from '@/lib/auth/session';
 import {
   canSeeChannel,
   CONVERSATION_CHANNELS,
+  hasWrittenSubject,
   hiddenChannels,
   isReadOnlyChannel,
   isRestrictedChannel,
@@ -99,4 +100,9 @@ describe('who can see the bot channel', () => {
     expect(isRestrictedChannel('whatsapp_bot')).toBe(true);
     expect(isRestrictedChannel('whatsapp')).toBe(false);
   });
+});
+
+it('keeps a subject on the card only on the channels where somebody wrote one', () => {
+  // Over every channel, so a new one is answered here rather than defaulting.
+  expect(CONVERSATION_CHANNELS.filter(hasWrittenSubject)).toEqual(['email', 'portal']);
 });

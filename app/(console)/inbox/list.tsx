@@ -3,8 +3,9 @@
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useId, useRef, useState, type UIEvent } from 'react';
+import { AgentAvatar } from '@/components/avatar';
 import { ChannelBadge, channelInfo } from '@/components/channel';
-import { BookIcon, SearchIcon } from '@/components/icons';
+import { BookIcon, ReplyIcon, SearchIcon } from '@/components/icons';
 import { InfoTip } from '@/components/tooltip';
 import { Badge, Select } from '@/components/ui';
 import { formatRelative } from '@/lib/format';
@@ -12,6 +13,7 @@ import { DEFAULT_LOCALE } from '@/lib/kb/locale';
 import type { InboxRow } from '@/lib/tickets/inbox';
 import type { InboxFilters } from '@/lib/tickets/inbox-filters';
 import { FILTERABLE_CHANNELS, isRestrictedChannel } from '@/lib/tickets/channel-policy';
+import { messageLines } from '@/lib/tickets/inbox-lines';
 import {
   inboxSignature,
   readInboxPosition,
@@ -182,6 +184,7 @@ export function InboxList({
 
         {visible.map((row) => {
           const active = row.number === activeNumber;
+          const { headline, secondary } = messageLines(row);
 
           return (
             <li key={row.id}>
@@ -206,13 +209,23 @@ export function InboxList({
                   </span>
                 </div>
 
-                <p className="mt-0.5 truncate text-sm">{row.subject ?? '(no subject)'}</p>
-
-                {/* The preview repeats the subject on channels that have none of
-                    their own, so it is only shown when it adds something. */}
-                {row.preview && row.preview !== row.subject ? (
-                  <p className="mt-0.5 truncate text-xs text-[var(--muted-foreground)]">
-                    {row.preview}
+                {/* `dir="auto"` because the console is LTR and most of this
+                    text is Arabic: an RTL sentence truncated in an LTR box is
+                    cut at the wrong end, so the card showed the last words of a
+                    long reply and lost the ones that say what it is about. And
+                    `text-left` so a short Arabic line still sits under the name
+                    rather than zig-zagging to the right edge: a line that
+                    overflows is laid out from its own start whatever the
+                    alignment, so it is still the sentence's end that is cut. */}
+                <p dir="auto" className="mt-0.5 truncate text-left text-sm">
+                  {headline}
+                </p>
+                {secondary ? (
+                  <p
+                    dir="auto"
+                    className="mt-0.5 truncate text-left text-xs text-[var(--muted-foreground)]"
+                  >
+                    {secondary}
                   </p>
                 ) : null}
 
@@ -246,15 +259,38 @@ export function InboxList({
                     <Badge tone="neutral">awaiting hub</Badge>
                   ) : null}
 
-                  {row.assigneeName ? (
-                    <span className="ms-auto truncate text-xs text-[var(--muted-foreground)]">
-                      {row.assigneeName}
-                    </span>
-                  ) : (
-                    <span className="ms-auto text-xs text-[var(--muted-foreground)]/70">
-                      unassigned
-                    </span>
-                  )}
+                  {/* One group so the row wraps it as a unit: the arrow is about
+                      the conversation and the tile about who owns it, and a
+                      wrap that separated them would put either one on a line
+                      by itself. */}
+                  <span className="ms-auto flex shrink-0 items-center gap-1.5">
+                    {/* Ours was the last word, so the next move is the
+                        customer's. */}
+                    {row.lastFromUs ? (
+                      <span className="text-[var(--muted-foreground)]">
+                        <ReplyIcon size={15} />
+                        <span className="sr-only">Last message from ShipBlu</span>
+                      </span>
+                    ) : null}
+
+                    {/* The assignee as a tile rather than a name. The name
+                        still goes to assistive technology as text, but to
+                        nobody on hover: `title=` never shows on a phone, and a
+                        Tooltip is a button, which cannot sit inside this link.
+                        The ticket's header names the assignee in full. */}
+                    {row.assigneeId ? (
+                      <>
+                        <AgentAvatar
+                          name={row.assigneeName}
+                          color={row.assigneeColor}
+                          avatarUrl={row.assigneeAvatarUrl}
+                        />
+                        <span className="sr-only">Assigned to {row.assigneeName}</span>
+                      </>
+                    ) : (
+                      <span className="text-xs text-[var(--muted-foreground)]/70">unassigned</span>
+                    )}
+                  </span>
                 </div>
               </Link>
             </li>
