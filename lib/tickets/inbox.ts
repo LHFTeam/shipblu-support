@@ -4,7 +4,6 @@ import { agents, conversations, contacts, messages, ticketStatuses } from '@/db/
 import type { SessionAgent } from '@/lib/auth/session';
 import { can } from '@/lib/auth/permissions';
 import { hiddenChannels, restrictedChannels } from './channel-policy';
-import { sendsByEmail } from './outbound';
 import { rootCommentId } from '@/lib/meta/comments';
 import { sbidMatches, trackingMatches } from '@/lib/shipments/queries';
 import { parseSearchTerm } from './search';
@@ -22,25 +21,12 @@ export type InboxRow = {
   id: string;
   number: number;
   subject: string | null;
-  /**
-   * Whether `subject` was written as one — an email's subject line, or a portal
-   * ticket's, typed by the customer or rendered from its form — rather than
-   * being the opening message's text, which is what every messaging channel
-   * stores there. Only the first kind is worth a line on the card: the second
-   * repeats a message.
-   *
-   * Asked as `sendsByEmail`, not `channel === 'email'`, because a portal ticket
-   * has a written subject too and is answered by email, and testing the channel
-   * name is how portal tickets have been left out before (`lib/tickets/outbound.ts`).
-   */
-  hasOwnSubject: boolean;
   channel: string;
   priority: string;
   statusName: string;
   statusCategory: 'open' | 'pending' | 'resolved' | 'closed';
   requesterName: string | null;
   requesterHandle: string | null;
-  /** Keys the tile's colour, so it stays with the agent through a rename. */
   assigneeId: string | null;
   assigneeName: string | null;
   assigneeAvatarUrl: string | null;
@@ -57,7 +43,8 @@ export type InboxRow = {
   preview: string | null;
   /**
    * Whether the newest message the customer can see — the one `preview` holds —
-   * is ours, which leaves the next move with the customer.
+   * is ours, which leaves the next move with the customer. What counts as seen
+   * is `lastVisibleMessage` below.
    *
    * Read off `direction`, not `author_agent_id`: an automation's reply, the CSAT
    * survey and the WhatsApp bot's echoes carry no author and are still ShipBlu
@@ -181,14 +168,7 @@ export async function listInbox(
     );
   }
 
-  // The newest message the customer can see. Written once and read by both the
-  // preview and `lastFromUs`, so the list can never show our arrow beside the
-  // customer's words. The id breaks a tie on `created_at` for the same reason:
-  // two subqueries left to choose between equal rows need not choose the same.
-  const newestVisible = sql`
-    FROM ${messages} m
-    WHERE m.conversation_id = ${conversations.id} AND m.kind <> 'note'
-    ORDER BY m.created_at DESC, m.id DESC LIMIT 1`;
+  const newest = lastVisibleMessage();
 
   const rows = await db
     .select({
@@ -212,12 +192,12 @@ export async function listInbox(
       // `InboxCursor` for why the mapped `Date` above cannot serve.
       cursorTime: sql<string>`${conversations.lastMessageAt}::text`,
       tags: conversations.tags,
-      // The newest message body, which is the list's one line of what was
-      // said. A correlated subquery keeps this one round trip instead of N+1.
-      preview: sql<string | null>`(SELECT m.body_text ${newestVisible})`,
-      // False rather than null for a ticket with no message yet: nobody has
-      // spoken, so it is not ours.
-      lastFromUs: sql<boolean>`coalesce((SELECT m.direction = 'outbound' ${newestVisible}), false)`,
+      // Both off the one lateral row, so the arrow is about the message the
+      // preview shows by construction rather than because two subqueries broke
+      // a tie the same way. False rather than null for a ticket with no message
+      // yet: nobody has spoken, so it is not ours.
+      preview: newest.bodyText,
+      lastFromUs: sql<boolean>`coalesce(${newest.direction} = 'outbound', false)`,
       // The newest message on the newest still-open side conversation. One
       // correlated subquery beside the preview one above rather than a join,
       // because a ticket with three threads must still produce one row.
@@ -233,6 +213,7 @@ export async function listInbox(
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
     .innerJoin(contacts, eq(contacts.id, conversations.requesterContactId))
     .leftJoin(agents, eq(agents.id, conversations.assigneeAgentId))
+    .leftJoinLateral(newest, sql`true`)
     .where(and(...where))
     // The id is part of the sort, not decoration: without a total order, two
     // rows sharing a timestamp could come back in either order and the cursor
@@ -255,7 +236,6 @@ export async function listInbox(
       id: row.id,
       number: row.number,
       subject: row.subject,
-      hasOwnSubject: sendsByEmail(row.channel),
       channel: row.channel,
       priority: row.priority,
       statusName: row.statusName,
@@ -274,6 +254,45 @@ export async function listInbox(
       sideState: row.sideState === 'replied' || row.sideState === 'waiting' ? row.sideState : null,
     })),
   };
+}
+
+/**
+ * The newest message on a ticket that the customer can actually see, for the
+ * list's preview and reply arrow. Each exclusion is a row that is in the thread
+ * but would otherwise put the wrong words on the card or the arrow on the wrong
+ * side:
+ *
+ * - **Only `reply`.** A note is ours alone, and a `system` row is an internal
+ *   notice — the form path writes "could not store x.pdf" as an inbound row
+ *   right after the auto-acknowledgement, which would hide the arrow behind an
+ *   instruction to the team. The same `kind = 'reply'` the portal and the widget
+ *   read (`lib/portal/tickets.ts`, `lib/widget/conversation.ts`).
+ * - **Not a send that failed or bounced.** The customer never received it, so
+ *   the next move is still ours; left in, a delivery outage would put the arrow
+ *   on every ticket it broke and hide exactly the ones that need a person.
+ * - **Not an email autoresponder.** "Out of office until Sunday" asks nothing of
+ *   the team — `afterInboundMessage` leaves the SLA clock alone for it — so it
+ *   must not take the arrow off our reply either.
+ *
+ * Ordered by `created_at` and then `id`, the same order the ticket's timeline
+ * uses (`lib/tickets/conversation.ts`), so on a tie the card names the message
+ * the open ticket shows last.
+ */
+function lastVisibleMessage() {
+  return db
+    .select({ bodyText: messages.bodyText, direction: messages.direction })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.conversationId, conversations.id),
+        eq(messages.kind, 'reply'),
+        notInArray(messages.deliveryStatus, ['failed', 'bounced']),
+        sql`${messages.meta}->>'isAutoReply' IS DISTINCT FROM 'true'`,
+      ),
+    )
+    .orderBy(desc(messages.createdAt), desc(messages.id))
+    .limit(1)
+    .as('last_message');
 }
 
 export async function inboxCounts(agent: SessionAgent) {

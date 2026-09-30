@@ -10,7 +10,11 @@ import { Badge, Select } from '@/components/ui';
 import { formatRelative } from '@/lib/format';
 import type { InboxRow } from '@/lib/tickets/inbox';
 import type { InboxFilters } from '@/lib/tickets/inbox-filters';
-import { FILTERABLE_CHANNELS, isRestrictedChannel } from '@/lib/tickets/channel-policy';
+import {
+  FILTERABLE_CHANNELS,
+  hasWrittenSubject,
+  isRestrictedChannel,
+} from '@/lib/tickets/channel-policy';
 import {
   inboxSignature,
   readInboxPosition,
@@ -201,33 +205,39 @@ export function InboxList({
                     whose it is.
 
                     Under a subject only where the ticket has one of its own —
-                    email and the portal. Everywhere else the subject is the
-                    opening message's text, and showing it put the first and the
-                    latest message on one card; there a ticket with no message
-                    yet falls back to it rather than to an empty line.
+                    email and the portal — and not repeated when the message is
+                    only the subject again, as mail from a phone often is.
+                    Everywhere else the subject is the opening message's text,
+                    and showing it put the first and the latest message on one
+                    card; there a ticket with no text to show yet falls back to
+                    it rather than to an empty line. `||` rather than `??` for
+                    that reason: `body_text` is never null, only empty.
 
-                    `dir="auto"` on both lines because the console is LTR and
-                    most of this text is Arabic: an RTL sentence truncated in an
-                    LTR box is cut at the wrong end, so the card showed the last
-                    words of a long reply and lost the ones that say what it is
-                    about. */}
-                {row.hasOwnSubject ? (
+                    `dir="auto"` because the console is LTR and most of this
+                    text is Arabic: an RTL sentence truncated in an LTR box is
+                    cut at the wrong end, so the card showed the last words of a
+                    long reply and lost the ones that say what it is about. And
+                    `text-left` so a short Arabic line still sits under the name
+                    rather than zig-zagging to the right edge: a line that
+                    overflows is laid out from its own start whatever the
+                    alignment, so it is still the sentence's end that is cut. */}
+                {hasWrittenSubject(row.channel) ? (
                   <>
-                    <p dir="auto" className="mt-0.5 truncate text-sm">
-                      {row.subject ?? '(no subject)'}
+                    <p dir="auto" className="mt-0.5 truncate text-left text-sm">
+                      {row.subject || '(no subject)'}
                     </p>
-                    {row.preview ? (
+                    {row.preview && row.preview !== row.subject ? (
                       <p
                         dir="auto"
-                        className="mt-0.5 truncate text-xs text-[var(--muted-foreground)]"
+                        className="mt-0.5 truncate text-left text-xs text-[var(--muted-foreground)]"
                       >
                         {row.preview}
                       </p>
                     ) : null}
                   </>
                 ) : (
-                  <p dir="auto" className="mt-0.5 truncate text-sm">
-                    {row.preview ?? row.subject ?? '(no subject)'}
+                  <p dir="auto" className="mt-0.5 truncate text-left text-sm">
+                    {row.preview || row.subject || '(no subject)'}
                   </p>
                 )}
 
@@ -282,11 +292,7 @@ export function InboxList({
                         The ticket's header names the assignee in full. */}
                     {row.assigneeId ? (
                       <>
-                        <AgentAvatar
-                          id={row.assigneeId}
-                          name={row.assigneeName}
-                          avatarUrl={row.assigneeAvatarUrl}
-                        />
+                        <AgentAvatar name={row.assigneeName} avatarUrl={row.assigneeAvatarUrl} />
                         <span className="sr-only">Assigned to {row.assigneeName}</span>
                       </>
                     ) : (

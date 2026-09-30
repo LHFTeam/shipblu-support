@@ -143,3 +143,23 @@ export function readOnlyReason(channel: string): string | null {
 export function readOnlyChannels(): ConversationChannel[] {
   return [...READ_ONLY];
 }
+
+/**
+ * Channels whose `subject` somebody wrote: an email's subject line, and a portal
+ * ticket's, typed by the customer or rendered from its form. Every other channel
+ * stores the opening message's text there (`subjectFrom()` on WhatsApp and Meta,
+ * the opening words on web chat), so the inbox card shows that one only as a
+ * fallback — beside the latest message it would put the first message and the
+ * last on one card.
+ *
+ * A named list rather than `sendsByEmail()`, which asks how a reply travels:
+ * `carrierFor` sends anything unrecognised to email, so a channel added later
+ * would default to "has a written subject" and bring the duplicate back without
+ * anything failing. `api` is out for the same reason — nothing writes one yet,
+ * so there is no subject to vouch for.
+ */
+const WRITTEN_SUBJECT: readonly ConversationChannel[] = ['email', 'portal'];
+
+export function hasWrittenSubject(channel: string): boolean {
+  return (WRITTEN_SUBJECT as readonly string[]).includes(channel);
+}

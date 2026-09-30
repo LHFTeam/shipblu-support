@@ -39,52 +39,31 @@ export function Avatar({
 }
 
 /**
- * Tints for an agent's tile, picked by id.
- *
- * Coloured where a customer's tile is grey because the inbox shows an agent as
- * two letters and nothing else, and two letters collide — the colour is what
- * lets an agent find their own tickets down a list without reading each one.
- * Keyed on the id rather than the name so a rename does not recolour somebody.
- *
- * None of these hues is a status: emerald, amber, blue and red already mean
- * open, pending, resolved and urgent on the badges beside the tile, and the
- * coral is kept scarce on purpose (`app/globals.css`). Five rather than more
- * because the next candidates — sky, teal, indigo — each read as one of these
- * or as a status at twenty pixels, and two tints nobody can tell apart are one.
- */
-const AGENT_TONES = [
-  'bg-violet-100 text-violet-700',
-  'bg-pink-100 text-pink-700',
-  'bg-cyan-100 text-cyan-800',
-  'bg-lime-100 text-lime-800',
-  'bg-fuchsia-100 text-fuchsia-700',
-] as const;
-
-function agentTone(id: string): string {
-  let hash = 0;
-  for (const char of id) hash = (hash * 31 + char.charCodeAt(0)) | 0;
-  return AGENT_TONES[Math.abs(hash) % AGENT_TONES.length]!;
-}
-
-/**
  * An agent's picture, or their initials.
+ *
+ * Solid brand blue with white letters: the circle the console header already
+ * draws for the signed-in agent, so an agent reads the same everywhere. Solid
+ * because every badge on an inbox row — status, channel, window — is a pale
+ * tint, and a pale tile in any hue collides with one of them: pink is the
+ * Instagram badge, violet the customer bot, blue Facebook, slate the portal,
+ * and emerald, amber and red are statuses. One colour for every agent rather
+ * than one each for the same reason, since the hues left after those are too
+ * few to tell a team apart.
  *
  * `agents.avatar_url` is a URL rather than a storage path — nothing in the app
  * uploads one — so it is used as given, and the same layering as `Avatar` means
  * one that has gone stale falls back to the initials rather than a broken image.
  */
 export function AgentAvatar({
-  id,
   name,
   avatarUrl,
   size = 22,
 }: {
-  id: string;
   name: string | null;
   avatarUrl: string | null;
   size?: number;
 }) {
-  return <Tile name={name} src={avatarUrl} size={size} tone={agentTone(id)} />;
+  return <Tile name={name} src={avatarUrl} size={size} tone="bg-brand-600 text-white" />;
 }
 
 /**
@@ -121,7 +100,9 @@ function Tile({
       aria-hidden
     >
       <span className="font-medium">{initials(name)}</span>
-      {src !== null && failedFor !== src ? (
+      {/* Truthiness, not `!== null`: an `avatar_url` cleared to '' is not a
+          picture, and `<img src="">` asks the browser for the page itself. */}
+      {src && failedFor !== src ? (
         // Not next/image: a contact's source is a redirect to a signed URL on a
         // host that changes per request, which the optimiser cannot cache and
         // would only add a hop to — and an agent's is on whatever host it names,
