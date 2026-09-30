@@ -1,4 +1,16 @@
-import { and, desc, eq, ilike, inArray, isNull, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import {
+  and,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNull,
+  ne,
+  notInArray,
+  or,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agents, conversations, contacts, messages, ticketStatuses } from '@/db/schema';
 import type { SessionAgent } from '@/lib/auth/session';
@@ -6,6 +18,7 @@ import { can } from '@/lib/auth/permissions';
 import { hiddenChannels, restrictedChannels } from './channel-policy';
 import { rootCommentId } from '@/lib/meta/comments';
 import { sbidMatches, trackingMatches } from '@/lib/shipments/queries';
+import { cleanQuery, textMatches } from '@/lib/search/text';
 import { parseSearchTerm } from './search';
 import { type InboxCursor, type InboxFilters, PAGE_SIZE, encodeInboxCursor } from './inbox-filters';
 
@@ -51,112 +64,13 @@ export type InboxRow = {
   sideState: 'waiting' | 'replied' | null;
 };
 
-export async function listInbox(
-  agent: SessionAgent,
-  filters: InboxFilters,
-  cursor: InboxCursor | null = null,
-): Promise<{ rows: InboxRow[]; nextCursor: string | null }> {
-  const where = [isNull(conversations.deletedAt), isNull(conversations.mergedIntoId)];
-
-  // Visibility is enforced in the query, not the template: an agent who can
-  // only see their own tickets must not be able to reach another's by URL, and
-  // filtering after the fact would still have loaded the row.
-  if (!can(agent, 'ticket.view.all')) {
-    where.push(eq(conversations.assigneeAgentId, agent.id));
-  }
-
-  // Restricted channels are excluded in the query, for two different reasons
-  // that happen to use the same clause.
-  //
-  // Permission is the first: an agent without `ticket.view.bot` must not reach
-  // one however they ask, which is why forcing `?channel=whatsapp_bot` returns
-  // nothing rather than working.
-  //
-  // The second is that the inbox is a working queue. These channels are opt-in:
-  // absent from "all channels" even for an admin who may see them, and reached
-  // by naming them in the filter. Without that, one number the team does not
-  // answer buried the tickets that were actually waiting under nineteen hundred
-  // transcripts. Search follows the same rule, so finding a bot conversation
-  // means filtering to the channel first.
-  const excluded = filters.channel === 'all' ? restrictedChannels() : hiddenChannels(agent);
-  if (excluded.length) where.push(notInArray(conversations.channel, excluded));
-
-  if (filters.view === 'mine') where.push(eq(conversations.assigneeAgentId, agent.id));
-  if (filters.view === 'unassigned') where.push(isNull(conversations.assigneeAgentId));
-
-  if (filters.statusCategory === 'unresolved') {
-    where.push(inArray(ticketStatuses.category, ['open', 'pending']));
-  } else if (filters.statusCategory !== 'all') {
-    where.push(eq(ticketStatuses.category, filters.statusCategory));
-  }
-
-  if (filters.channel !== 'all') {
-    where.push(eq(conversations.channel, filters.channel));
-  }
-
-  if (filters.q) {
-    const { pattern, number, phonePattern, trackingNumber, sbid, scope } = parseSearchTerm(
-      filters.q,
-    );
-
-    // A prefixed query is narrowed to its one clause. That is what makes typing
-    // `track:` worth doing — the alternative ORs it into a list that still has
-    // to consider every message body in the account.
-    if (scope === 'tracking' && trackingNumber) {
-      where.push(trackingMatches(trackingNumber));
-    } else if (scope === 'sbid' && sbid) {
-      where.push(sbidMatches(sbid));
-    } else {
-      const clauses: SQL[] = [
-        ilike(conversations.subject, pattern),
-        ilike(contacts.name, pattern),
-        ilike(contacts.primaryEmail, pattern),
-        ilike(contacts.primaryPhone, pattern),
-        // What was actually said. Subjects on the messaging channels are picked
-        // from a short list of canned categories, so hundreds of tickets share
-        // one — searching them finds a category, never a conversation. The
-        // tracking number or the sentence the agent half-remembers is in the
-        // messages, which is where a search of a chat has to look.
-        sql`EXISTS (
-          SELECT 1 FROM ${messages} m
-          WHERE m.conversation_id = ${conversations.id} AND m.body_text ILIKE ${pattern}
-        )`,
-        // And what the hub said. Often the only place the actual explanation
-        // lives — "driver attempted twice, phone off" is written by somebody who
-        // never appears on the ticket timeline, and it is what an agent
-        // half-remembers weeks later. Only agents ever read this table, so
-        // searching it raises no visibility question.
-        sql`EXISTS (
-          SELECT 1 FROM side_conversations sc
-          JOIN side_conversation_messages sm ON sm.side_conversation_id = sc.id
-          WHERE sc.conversation_id = ${conversations.id} AND sm.body_text ILIKE ${pattern}
-        )`,
-      ];
-
-      if (number !== null) clauses.push(eq(conversations.number, number));
-      if (phonePattern) clauses.push(ilike(contacts.primaryPhone, phonePattern));
-
-      // The body search above already finds tickets that *mention* a number.
-      // These two add every ticket that is *about* the shipment: the reply that
-      // never quoted it, the one an agent linked by hand, the one where it
-      // appeared only in a private note.
-      if (trackingNumber) clauses.push(trackingMatches(trackingNumber));
-      if (sbid) clauses.push(sbidMatches(sbid));
-
-      where.push(or(...clauses)!);
-    }
-  }
-
-  // "Older than the row the last page ended on", as a tuple so the id breaks
-  // ties on identical timestamps. Matches the ORDER BY below exactly; if one
-  // changes the other has to.
-  if (cursor) {
-    where.push(
-      sql`(${conversations.lastMessageAt}, ${conversations.id}) < (${cursor.time}::timestamptz, ${cursor.id}::uuid)`,
-    );
-  }
-
-  const rows = await db
+/**
+ * The list's row, with the joins every row needs. Shared by the paged query and
+ * the lookup of a ticket named by number, so the one put first cannot be
+ * missing a field its neighbours carry.
+ */
+function selectInboxRows(where: SQL | undefined) {
+  return db
     .select({
       id: conversations.id,
       number: conversations.number,
@@ -198,13 +112,157 @@ export async function listInbox(
     .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
     .innerJoin(contacts, eq(contacts.id, conversations.requesterContactId))
     .leftJoin(agents, eq(agents.id, conversations.assigneeAgentId))
-    .where(and(...where))
-    // The id is part of the sort, not decoration: without a total order, two
-    // rows sharing a timestamp could come back in either order and the cursor
-    // would step over one of them.
-    .orderBy(desc(conversations.lastMessageAt), desc(conversations.id))
-    // One extra row is the cheapest way to know whether a next page exists.
-    .limit(PAGE_SIZE + 1);
+    .where(where);
+}
+
+export async function listInbox(
+  agent: SessionAgent,
+  filters: InboxFilters,
+  cursor: InboxCursor | null = null,
+): Promise<{ rows: InboxRow[]; nextCursor: string | null }> {
+  const where = [isNull(conversations.deletedAt), isNull(conversations.mergedIntoId)];
+
+  // Visibility is enforced in the query, not the template: an agent who can
+  // only see their own tickets must not be able to reach another's by URL, and
+  // filtering after the fact would still have loaded the row.
+  if (!can(agent, 'ticket.view.all')) {
+    where.push(eq(conversations.assigneeAgentId, agent.id));
+  }
+
+  // Restricted channels are excluded in the query, for two different reasons
+  // that happen to use the same clause.
+  //
+  // Permission is the first: an agent without `ticket.view.bot` must not reach
+  // one however they ask, which is why forcing `?channel=whatsapp_bot` returns
+  // nothing rather than working.
+  //
+  // The second is that the inbox is a working queue. These channels are opt-in:
+  // absent from "all channels" even for an admin who may see them, and reached
+  // by naming them in the filter. Without that, one number the team does not
+  // answer buried the tickets that were actually waiting under nineteen hundred
+  // transcripts. Search follows the same rule, so finding a bot conversation
+  // means filtering to the channel first.
+  const excluded = filters.channel === 'all' ? restrictedChannels() : hiddenChannels(agent);
+  if (excluded.length) where.push(notInArray(conversations.channel, excluded));
+
+  if (filters.view === 'mine') where.push(eq(conversations.assigneeAgentId, agent.id));
+  if (filters.view === 'unassigned') where.push(isNull(conversations.assigneeAgentId));
+
+  if (filters.channel !== 'all') {
+    where.push(eq(conversations.channel, filters.channel));
+  }
+
+  // Everything but the status and the search: what the ticket a query names by
+  // number is read under. A ticket number is an address, and an agent typing
+  // #812 means that ticket whether it was resolved last week or is open now —
+  // under the default "Open + pending" a resolved one answered "Nothing matches
+  // those filters", which reads as "no such ticket". Visibility, the restricted
+  // channels, the view and the channel filter all still hold, so naming a
+  // ticket reaches nothing the agent could not already open from the list.
+  const namedScope = [...where];
+  let namedNumber: number | null = null;
+
+  if (filters.statusCategory === 'unresolved') {
+    where.push(inArray(ticketStatuses.category, ['open', 'pending']));
+  } else if (filters.statusCategory !== 'all') {
+    where.push(eq(ticketStatuses.category, filters.statusCategory));
+  }
+
+  // Cleaned before the check rather than after: a query that is only a pasted
+  // U+200F, a tatweel or a fatha cleans to '', and searching for '' matched
+  // every ticket with any text on it — and ran both EXISTS scans over the
+  // messages to do it — while dropping the one ticket that has none.
+  const query = cleanQuery(filters.q);
+
+  if (query) {
+    const term = parseSearchTerm(query);
+    const { pattern, number, phonePattern, trackingNumber, sbid, scope } = term;
+
+    // A prefixed query is narrowed to its one clause. That is what makes typing
+    // `track:` worth doing — the alternative ORs it into a list that still has
+    // to consider every message body in the account.
+    if (scope === 'tracking' && trackingNumber) {
+      where.push(trackingMatches(trackingNumber));
+    } else if (scope === 'sbid' && sbid) {
+      where.push(sbidMatches(sbid));
+    } else {
+      // `textMatches` on the columns people write Arabic in, so احمد finds
+      // أحمد; email and phone never hold Arabic, so they stay a plain ILIKE.
+      const clauses: SQL[] = [
+        textMatches(conversations.subject, term),
+        textMatches(contacts.name, term),
+        ilike(contacts.primaryEmail, pattern),
+        ilike(contacts.primaryPhone, pattern),
+        // What was actually said. Subjects on the messaging channels are picked
+        // from a short list of canned categories, so hundreds of tickets share
+        // one — searching them finds a category, never a conversation. The
+        // tracking number or the sentence the agent half-remembers is in the
+        // messages, which is where a search of a chat has to look.
+        sql`EXISTS (
+          SELECT 1 FROM ${messages} m
+          WHERE m.conversation_id = ${conversations.id} AND ${textMatches(sql`m.body_text`, term)}
+        )`,
+        // And what the hub said. Often the only place the actual explanation
+        // lives — "driver attempted twice, phone off" is written by somebody who
+        // never appears on the ticket timeline, and it is what an agent
+        // half-remembers weeks later. Only agents ever read this table, so
+        // searching it raises no visibility question.
+        sql`EXISTS (
+          SELECT 1 FROM side_conversations sc
+          JOIN side_conversation_messages sm ON sm.side_conversation_id = sc.id
+          WHERE sc.conversation_id = ${conversations.id} AND ${textMatches(sql`sm.body_text`, term)}
+        )`,
+      ];
+
+      if (phonePattern) clauses.push(ilike(contacts.primaryPhone, phonePattern));
+
+      // The body search above already finds tickets that *mention* a number.
+      // These two add every ticket that is *about* the shipment: the reply that
+      // never quoted it, the one an agent linked by hand, the one where it
+      // appeared only in a private note.
+      if (trackingNumber) clauses.push(trackingMatches(trackingNumber));
+      if (sbid) clauses.push(sbidMatches(sbid));
+
+      where.push(or(...clauses)!);
+
+      // "#812" and a bare "812" both name ticket 812, but the bare one also
+      // matches every phone and message holding those digits — 394 tickets for
+      // 812 in production — and in recency order the ticket it named can be
+      // pages down. So that ticket is read on its own and put first, and kept
+      // out of the paged query so no page shows it twice. On its own rather than
+      // as a leading sort key: the cursor below compares the timestamp and the
+      // id and nothing else, so a ticket sorted to the top of page one by some
+      // other key would come back on whichever later page its timestamp is on.
+      if (number !== null) {
+        namedNumber = number;
+        where.push(ne(conversations.number, number));
+      }
+    }
+  }
+
+  // "Older than the row the last page ended on", as a tuple so the id breaks
+  // ties on identical timestamps. Matches the ORDER BY below exactly; if one
+  // changes the other has to.
+  if (cursor) {
+    where.push(
+      sql`(${conversations.lastMessageAt}, ${conversations.id}) < (${cursor.time}::timestamptz, ${cursor.id}::uuid)`,
+    );
+  }
+
+  const [rows, named] = await Promise.all([
+    selectInboxRows(and(...where))
+      // The id is part of the sort, not decoration: without a total order, two
+      // rows sharing a timestamp could come back in either order and the cursor
+      // would step over one of them.
+      .orderBy(desc(conversations.lastMessageAt), desc(conversations.id))
+      // One extra row is the cheapest way to know whether a next page exists.
+      .limit(PAGE_SIZE + 1),
+    // For the first page, which it leads. The paged query excludes it on every
+    // page, so no later one brings it back.
+    namedNumber !== null && !cursor
+      ? selectInboxRows(and(...namedScope, eq(conversations.number, namedNumber))).limit(1)
+      : [],
+  ]);
 
   const page = rows.slice(0, PAGE_SIZE);
   const last = page[page.length - 1];
@@ -216,7 +274,7 @@ export async function listInbox(
       rows.length > PAGE_SIZE && last
         ? encodeInboxCursor({ time: last.cursorTime, id: last.id })
         : null,
-    rows: page.map((row) => ({
+    rows: [...named, ...page].map((row) => ({
       id: row.id,
       number: row.number,
       subject: row.subject,

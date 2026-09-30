@@ -8,7 +8,14 @@ describe('ticket numbers', () => {
   });
 
   it('leaves anything that is not plainly a number alone', () => {
-    for (const query of ['', '#', 'Nada', '812a', '1e3', '12.0', '-4', '0', '#0']) {
+    for (const query of ['', '#', 'Nada', '812a', '1e3', '12.0', '-4', '0', '#0', '#012']) {
+      expect(parseSearchTerm(query).number, query).toBeNull();
+    }
+  });
+
+  it('reads a leading zero as the start of a phone number, not a ticket', () => {
+    // What the box holds while an agent types 01014428154, one debounce at a time.
+    for (const query of ['0', '01', '010', '0101', '01014', '0812', '01014428154']) {
       expect(parseSearchTerm(query).number, query).toBeNull();
     }
   });
@@ -59,6 +66,26 @@ describe('the free-text pattern', () => {
 
   it('handles Arabic exactly as it handles anything else', () => {
     expect(parseSearchTerm('تأكيد').pattern).toBe('%تأكيد%');
+  });
+});
+
+describe('the Arabic pattern', () => {
+  it('widens the letters Arabic spells several ways, from the trimmed query', () => {
+    expect(parseSearchTerm('  احمد ').arabicPattern).toBe('[اأإآٱ]حمد');
+  });
+
+  it('drops what a paste carries that the stored text does not', () => {
+    // A right-to-left mark from a WhatsApp copy, a tatweel, a fatha.
+    expect(parseSearchTerm('\u200Fاحمد').arabicPattern).toBe('[اأإآٱ]حمد');
+    expect(parseSearchTerm('أَحمد').arabicPattern).toBe('[اأإآٱ]حمد');
+    expect(parseSearchTerm('الشحنـة').arabicPattern).toBe('[اأإآٱ]لشحن[هة]');
+    expect(parseSearchTerm('\u200FNada\u200E').pattern).toBe('%Nada%');
+  });
+
+  it('is left unset when there is nothing to widen', () => {
+    for (const query of ['Nada', '#812', 'شكر', 'track:SB123456789']) {
+      expect(parseSearchTerm(query).arabicPattern, query).toBeNull();
+    }
   });
 });
 

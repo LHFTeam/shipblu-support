@@ -726,6 +726,28 @@ public URL keeps an explicit locale segment. Use `direction()` from
 ASCII slugify erases Arabic entirely — and decode dynamic route params with
 `decodeSlugParam()`, because Next hands them over still percent-encoded.
 
+**A search over text people write in Arabic widens the query, never the
+column.** The same name is أحمد on one contact and احمد on the next, and ILIKE
+treats them as different words. `arabicVariantPattern` in `lib/search/arabic.ts`
+turns each letter Arabic spells several ways (ا/أ/إ/آ, ي/ى/ئ, ه/ة, و/ؤ) into a
+bracket expression for `~*`, which the trigram indexes that already exist
+serve. Folding the column through `translate()` instead is a different
+expression, so it would need a new index on every table it touched, `messages`
+included. The letter table is the categoriser's too, so the two agree on which
+letters are one letter — and on no more: the categoriser also strips tatweel
+and tashkeel from the text it reads, which a search can do to the query
+(`cleanQuery`) but not to the column.
+
+Every free-text search in the console — the inbox, the contacts page, the merge
+picker and the knowledge base list — goes through `lib/search/text.ts`:
+`cleanQuery` first, and an empty-query check on its answer rather than on the
+input, because a query that was only a pasted U+200F, a tatweel or a fatha
+cleans to `''` and `%%` matches every row with any text; then `textPatterns`
+once, and `textMatches(column, …)` on each column people write in. Email, phone
+and tracking columns stay `ilike(column, patterns.pattern)`. A new search box
+that builds its own ILIKE for a name is how the same agent came to find a
+customer in one box and not in the next.
+
 **Anything a customer reads is a `*_ar` / `*_en` pair, and either side covers
 the other.** Auto-response bodies, ticket field labels, form names, canned
 responses and holiday names all take that shape: both columns `not null default

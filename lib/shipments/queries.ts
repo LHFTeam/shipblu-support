@@ -17,6 +17,7 @@ import { couldBeReference, normaliseSbid, normaliseTrackingNumber } from './form
 import { deriveRequesterRole, type RequesterRole } from './roles';
 import { returnsForShipments } from './lookup';
 import { containing } from '@/lib/search/like';
+import { cleanQuery, textMatches, textPatterns } from '@/lib/search/text';
 
 /**
  * Reading shipments, shipping accounts and what is attached to them.
@@ -547,10 +548,13 @@ export async function shipmentsForContact(contactId: string, limit = 25) {
  * would match nothing. The trigram indexes accelerate all three.
  */
 export async function searchContacts(query: string, limit = 20) {
-  const q = query.trim();
+  const q = cleanQuery(query);
   if (!q) return { contacts: [], accounts: [], shipments: [] };
 
-  const pattern = containing(q);
+  // Names go through `textMatches`, so احمد finds أحمد here as it does in the
+  // inbox; email and phone never hold Arabic and stay a plain ILIKE.
+  const text = textPatterns(q);
+  const { pattern } = text;
   // Only a value that could be a reference is searched as one. Normalising
   // strips separators, not everything else: a lone `%` came out as `%` and, as a
   // tracking number, listed every shipment in the account — and a query with no
@@ -573,7 +577,7 @@ export async function searchContacts(query: string, limit = 20) {
         and(
           isNull(contacts.deletedAt),
           or(
-            ilike(contacts.name, pattern),
+            textMatches(contacts.name, text),
             ilike(contacts.primaryEmail, pattern),
             ilike(contacts.primaryPhone, pattern),
           ),
@@ -594,9 +598,9 @@ export async function searchContacts(query: string, limit = 20) {
         couldBeReference(canonicalSbid)
           ? or(
               ilike(shippingAccounts.sbid, containing(canonicalSbid)),
-              ilike(shippingAccounts.name, pattern),
+              textMatches(shippingAccounts.name, text),
             )
-          : ilike(shippingAccounts.name, pattern),
+          : textMatches(shippingAccounts.name, text),
       )
       .orderBy(shippingAccounts.sbid)
       .limit(limit),

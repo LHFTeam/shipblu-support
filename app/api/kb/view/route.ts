@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import { hasConsoleSession } from '@/lib/auth/cookie';
 import { readJsonBody } from '@/lib/http/json-body';
 import { allow, clientIp } from '@/lib/http/rate-limit';
 import { recordArticleView } from '@/lib/kb/queries';
@@ -17,6 +18,11 @@ export async function POST(request: Request) {
   if (!allow(`kb-view:${clientIp(request)}`, LIMIT, WINDOW_MS)) {
     return new NextResponse(null, { status: 429 });
   }
+
+  // A reader signed in to the console is one of us, and the count orders the
+  // help centre's "most read" list. `hasConsoleSession` says why presence of the
+  // cookie is enough.
+  if (hasConsoleSession(request.headers)) return new NextResponse(null, { status: 204 });
 
   const body = await readJsonBody(request, viewBody);
   if (!body) return new NextResponse(null, { status: 400 });

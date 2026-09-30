@@ -5,8 +5,10 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, type UIEvent } from 'react';
 import { ChannelBadge, channelInfo } from '@/components/channel';
 import { BookIcon, SearchIcon } from '@/components/icons';
+import { InfoTip } from '@/components/tooltip';
 import { Badge, Select } from '@/components/ui';
 import { formatRelative } from '@/lib/format';
+import { DEFAULT_LOCALE } from '@/lib/kb/locale';
 import type { InboxRow } from '@/lib/tickets/inbox';
 import type { InboxFilters } from '@/lib/tickets/inbox-filters';
 import { FILTERABLE_CHANNELS, isRestrictedChannel } from '@/lib/tickets/channel-policy';
@@ -33,7 +35,6 @@ export function InboxList({
   activeNumber,
   canSeeBot = false,
   canCreate = false,
-  canViewKb = false,
 }: {
   rows: InboxRow[];
   nextCursor: string | null;
@@ -41,7 +42,6 @@ export function InboxList({
   activeNumber?: number;
   canSeeBot?: boolean;
   canCreate?: boolean;
-  canViewKb?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -79,31 +79,40 @@ export function InboxList({
     <>
       <div className="flex shrink-0 flex-col gap-2 border-b border-[var(--border)] bg-[var(--surface)] p-2">
         {/*
-          The knowledge base, named, on the screen an agent spends the day on.
+          The public help centre's front door, named, on the screen an agent
+          spends the day on.
 
-          The rail already links to it, but as an unlabelled icon whose name
-          appears on hover — which is no name at all on a phone, and on the
-          desktop is a thing you have to already suspect is there before you
-          point at it. Inside a ticket the composer's panel answers the same
-          need; this is the half of the console where that panel does not exist,
-          and looking something up meant guessing at an icon.
+          The public site rather than the console's `/kb`, which the rail still
+          links to: from the queue, the article an agent looks up is usually one
+          to send, and the help centre is the only copy of it a customer can
+          open — a console link is a sign-in page to them.
+
+          A path on whichever host served this page rather than
+          `publicBaseUrl()`, for the reason `requestBaseUrl` gives: the published
+          hostname is a 404 until the domain serves this app, and `proxy.ts`
+          rewrites a locale prefix into the help centre on every host. A new
+          tab, because leaving the console is a full navigation and the place
+          this list keeps (`lib/tickets/inbox-position`) lives in memory, so the
+          agent would come back to the top of the queue.
+
+          Behind no permission: a link to a page any stranger can open is not a
+          capability, and gating it on `kb.view` hid nothing.
 
           Its own line rather than a third control in either row below, because
-          both of those are measured against this column's width: the search
-          placeholder is trimmed to the pixel it has (see `SearchBox`) and the
+          both of those are measured against this column's width and the
           filters are native selects, which clip their longest option rather
           than wrap. One line of a column that scrolls anyway is the cheaper
           side of that trade.
         */}
-        {canViewKb ? (
-          <Link
-            href="/kb"
-            className="flex items-center gap-1.5 self-start rounded-md px-1.5 py-1 text-xs font-medium text-brand-600 hover:bg-[var(--muted)]"
-          >
-            <BookIcon size={15} />
-            Knowledge base
-          </Link>
-        ) : null}
+        <a
+          href={`/${DEFAULT_LOCALE}`}
+          target="_blank"
+          rel="noreferrer"
+          className="flex items-center gap-1.5 self-start rounded-md px-1.5 py-1 text-xs font-medium text-brand-600 hover:bg-[var(--muted)]"
+        >
+          <BookIcon size={15} />
+          Knowledge base
+        </a>
 
         <div className="flex items-center gap-2">
           <div className="min-w-0 flex-1">
@@ -544,25 +553,34 @@ function SearchBox({ initial, onSearch }: { initial: string; onSearch: (value: s
       <span className="pointer-events-none absolute inset-y-0 start-2 flex items-center text-[var(--muted-foreground)]">
         <SearchIcon size={15} />
       </span>
-      {/* Three words, because the box is 327px wide and the previous
-          placeholder rendered 373px of text — it was cut off mid-list, which is
-          why it advertised `sbid:` and stopped there.
-
-          They are also the right three. Message text is the half nobody guesses
-          and the half that finds things: subjects on the messaging channels are
-          canned categories hundreds of tickets share, so the sentence an agent
-          half-remembers is only in the messages. It went missing when `track:`
-          and `sbid:` were added, and those two never needed the room — a pasted
-          tracking number or SBID is recognised on its own. The syntax lives in
-          the tooltip instead. */}
+      {/* A claim rather than a list. The box is 327px wide, and every list
+          that has sat here was either cut off or read as the whole of it: the
+          first rendered 373px and stopped at `sbid:`, and the three-item one
+          after it said nothing about tracking numbers, which work pasted bare.
+          "Anything" stands for what `listInbox` matches, and the ⓘ at the
+          box's end names exactly what that is — including what it is not, so
+          a search by assignee that finds nothing says why. An `InfoTip` rather
+          than the `title` this used to carry, which no phone ever shows; inside
+          the box rather than beside it, because the row is measured against the
+          column's width and already holds the New button. */}
       <input
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        placeholder="Search #number, contact, message…"
-        title="Finds a ticket by its number, a contact by name, email or phone, and any words said in a message or a side conversation. A pasted tracking number or SBID finds that shipment's tickets; track: or sbid: narrows the search to only those."
+        placeholder="Search for anything"
         aria-label="Search tickets and chats"
-        className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] py-1.5 pe-2.5 ps-7 text-sm outline-none focus:border-brand-500"
+        className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] py-1.5 pe-7 ps-7 text-sm outline-none focus:border-brand-500"
       />
+      <span className="absolute inset-y-0 end-1.5 flex items-center text-[var(--muted-foreground)]">
+        <InfoTip label="search">
+          Finds a ticket by its number (#812) or subject, a contact by name, email or phone, and any
+          words said in a message or a side conversation. Arabic spellings of the same letter match
+          each other, so احمد finds أحمد. A pasted tracking number or SBID finds that
+          shipment&apos;s tickets; track: or sbid: narrows the search to only those. Tags, custom
+          fields and the assignee are not searched. A ticket number finds its ticket whatever the
+          Status filter says; everything else follows it, and the Channel filter applies to all of
+          it.
+        </InfoTip>
+      </span>
     </div>
   );
 }

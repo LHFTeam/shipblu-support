@@ -1,4 +1,5 @@
 import { stripTashkeel } from '@/lib/kb/seed';
+import { ARABIC_LETTER_VARIANTS } from '@/lib/search/arabic';
 import { normaliseDigits, stripInvisible } from '@/lib/shipments/format';
 
 /**
@@ -28,21 +29,13 @@ import { normaliseDigits, stripInvisible } from '@/lib/shipments/format';
  */
 
 /**
- * Arabic orthographic variants that are one letter as far as meaning goes.
- *
- * Hamza forms collapse to bare alef, ya/alef-maqsura collapse, ta-marbuta
- * collapses to ha, and the two hamza-carriers collapse to their base letters.
- * These are the five substitutions Egyptian colloquial writing varies on
- * constantly, and no more: the aim is a form that collapses spellings of the
- * same word, not one that makes different words equal.
+ * Arabic orthographic variants folded to the one letter they stand for. The
+ * list is `ARABIC_LETTER_VARIANTS`, shared with the inbox search so a spelling
+ * this recognises is one an agent can also find.
  */
-const FOLD: ReadonlyArray<readonly [RegExp, string]> = [
-  [/[أإآٱ]/g, 'ا'], // أ إ آ ٱ → ا
-  [/ى/g, 'ي'], // ى → ي
-  [/ة/g, 'ه'], // ة → ه
-  [/ؤ/g, 'و'], // ؤ → و
-  [/ئ/g, 'ي'], // ئ → ي
-];
+const FOLD: ReadonlyArray<readonly [RegExp, string]> = ARABIC_LETTER_VARIANTS.map(
+  ({ letter, variants }) => [new RegExp(`[${variants}]`, 'g'), letter] as const,
+);
 
 /** Arabic punctuation that has an ASCII twin people use interchangeably. */
 const PUNCTUATION: ReadonlyArray<readonly [RegExp, string]> = [
