@@ -1,12 +1,13 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseDateHeader } from '../date-header';
+import { fallbackMessageId } from '../fallback-id';
 import { normaliseMessageId } from '../threading';
 import type {
   EmailProvider,
   InboundVerdict,
   OutboundEmail,
-  ProviderInboundEmail,
+  ParsedInboundEmail,
   SendResult,
 } from '../types';
 import { logger } from '@/lib/log';
@@ -73,21 +74,33 @@ export class LocalEmailProvider implements EmailProvider {
    * Accepts a payload already shaped like ParsedInboundEmail, so tests and local
    * experiments can post a message straight into the pipeline.
    *
-   * Everything except `receivedAt`: the instant is the stored delivery's, for
-   * this driver as for every other. A local experiment that wants a mail from a
-   * skewed clock sets `dateHeader`, the field that carries one.
+   * Everything except when it arrived, which is the stored delivery's for this
+   * driver as for every other (`InboundDelivery`). A local experiment that wants
+   * a mail from a skewed clock sets `dateHeader`, the field that carries one.
    */
-  async parseInbound(payload: unknown): Promise<ProviderInboundEmail> {
-    const raw = payload as Partial<Omit<ProviderInboundEmail, 'dateHeader'>> & {
-      dateHeader?: string | Date | null;
+  async parseInbound(payload: unknown): Promise<ParsedInboundEmail> {
+    const raw = payload as Partial<Omit<ParsedInboundEmail, 'dateHeader'>> & {
+      dateHeader?: string | null;
     };
 
     if (!raw.from?.address) {
       throw new Error('local inbound payload requires from.address');
     }
 
+    // This driver used to take `receivedAt` from the payload, so an experiment
+    // written against it would now be stamped with its arrival without a word.
+    // It still lands; the warning is so the backdating that did not happen is
+    // not mistaken for one that did.
+    if ('receivedAt' in raw) {
+      log.warn(
+        'ignoring receivedAt on a local payload: a mail is stamped when it reached us; set dateHeader to simulate a skewed clock',
+      );
+    }
+
     return {
-      messageId: normaliseMessageId(raw.messageId ?? `local-${Date.now()}@localhost`),
+      messageId: normaliseMessageId(
+        raw.messageId ?? `${fallbackMessageId('local', payload)}@localhost`,
+      ),
       inReplyTo: raw.inReplyTo ? normaliseMessageId(raw.inReplyTo) : undefined,
       references: (raw.references ?? []).map(normaliseMessageId),
       from: raw.from,

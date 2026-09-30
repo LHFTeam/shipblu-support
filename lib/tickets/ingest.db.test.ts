@@ -15,7 +15,7 @@ import {
   ticketStatuses,
 } from '@/db/schema';
 import { buildReplyAddress, buildSideReplyAddress, buildSubjectTag } from '@/lib/email/threading';
-import type { ParsedInboundEmail } from '@/lib/email/types';
+import type { InboundDelivery, ParsedInboundEmail } from '@/lib/email/types';
 import { env } from '@/lib/env';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { ingestInboundEmail } from './ingest';
@@ -36,7 +36,10 @@ withCleanDatabase();
 
 const RECEIVED = new Date('2026-09-20T10:00:00Z');
 
-function email(overrides: Partial<ParsedInboundEmail> = {}): ParsedInboundEmail {
+/** A mail as a test hands it to ingest: what the provider parsed, and when it reached us. */
+type Delivered = ParsedInboundEmail & InboundDelivery;
+
+function email(overrides: Partial<Delivered> = {}): Delivered {
   return {
     messageId: 'first@customer.example',
     references: [],
@@ -53,8 +56,8 @@ function email(overrides: Partial<ParsedInboundEmail> = {}): ParsedInboundEmail 
   };
 }
 
-async function ingested(mail: ParsedInboundEmail) {
-  const result = await ingestInboundEmail(mail);
+async function ingested({ receivedAt, ...mail }: Delivered) {
+  const result = await ingestInboundEmail(mail, { receivedAt });
   if (!result) throw new Error('ingest returned null');
   return result;
 }

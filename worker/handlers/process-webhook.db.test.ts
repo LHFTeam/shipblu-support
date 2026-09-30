@@ -61,8 +61,8 @@ type Delivery = {
   receivedAt: DateTime;
 };
 
-/** Stores a Postmark delivery the way the webhook route does, then runs the job for it. */
-async function deliver(mail: Delivery): Promise<void> {
+/** Stores a Postmark delivery the way the webhook route does, and returns its row id. */
+async function store(mail: Delivery): Promise<string> {
   const headers = [{ Name: 'Message-ID', Value: `<${mail.messageId}>` }];
   if (mail.references?.length) {
     headers.push({ Name: 'References', Value: mail.references.map((r) => `<${r}>`).join(' ') });
@@ -87,12 +87,20 @@ async function deliver(mail: Delivery): Promise<void> {
       receivedAt: mail.receivedAt.toJSDate(),
     })
     .returning({ id: webhookEvents.id });
+  return event!.id;
+}
 
+/** Runs the job for a stored delivery, whenever the worker gets to it. */
+async function run(webhookEventId: string): Promise<void> {
   await processWebhook({
     id: 'job-1',
     type: 'process_webhook',
-    payload: { webhookEventId: event!.id },
+    payload: { webhookEventId },
   } as unknown as ClaimedJob);
+}
+
+async function deliver(mail: Delivery): Promise<void> {
+  await run(await store(mail));
 }
 
 async function admin(): Promise<SessionAgent> {
@@ -144,20 +152,29 @@ async function agentReplies(conversationId: string, agentId: string, at: DateTim
     .where(eq(conversations.id, conversationId));
 }
 
-async function hourlyPolicy(conversationId: string) {
+/** The default policy, so `applySlaOnCreate` gives every new ticket an hour. */
+async function hourlyPolicy() {
   const target = { firstResponseMins: 60, nextResponseMins: 60, resolutionMins: 1440 };
-  const [policy] = await db
-    .insert(slaPolicies)
-    .values({
-      name: 'every hour',
-      hoursSource: 'round_the_clock',
-      targets: { low: target, medium: target, high: target, urgent: target },
+  await db.insert(slaPolicies).values({
+    name: 'every hour',
+    hoursSource: 'round_the_clock',
+    isDefault: true,
+    targets: { low: target, medium: target, high: target, urgent: target },
+  });
+}
+
+async function clocksOf(conversationId: string) {
+  const [row] = await db
+    .select({
+      createdAt: conversations.createdAt,
+      firstResponseDueAt: conversations.firstResponseDueAt,
+      lastMessageAt: conversations.lastMessageAt,
+      lastCustomerMessageAt: conversations.lastCustomerMessageAt,
+      nextResponseDueAt: conversations.nextResponseDueAt,
     })
-    .returning({ id: slaPolicies.id });
-  await db
-    .update(conversations)
-    .set({ slaPolicyId: policy!.id })
+    .from(conversations)
     .where(eq(conversations.id, conversationId));
+  return row!;
 }
 
 describe('processWebhook — when an inbound email happened', () => {
@@ -165,15 +182,24 @@ describe('processWebhook — when an inbound email happened', () => {
   // 10:30 from a device whose clock reads 08:30.
   it('puts a reply from a customer whose clock is behind after the reply it answers', async () => {
     const agent = await admin();
+    await hourlyPolicy();
     const opened = cairo('09:00');
+    const arrived = opened.plus({ seconds: 20 });
     await deliver({
       messageId: 'first@customer.example',
       date: opened.toRFC2822()!,
       text: 'My parcel has not arrived.',
-      receivedAt: opened.plus({ seconds: 20 }),
+      receivedAt: arrived,
     });
     const ticket = await ticketOf('first@customer.example');
-    await hourlyPolicy(ticket.id);
+
+    // The ticket itself began when the mail reached us, and so did its
+    // first-response target. On the insert's own `now()` both would be today.
+    expect(await clocksOf(ticket.id)).toMatchObject({
+      createdAt: arrived.toJSDate(),
+      firstResponseDueAt: arrived.plus({ hours: 1 }).toJSDate(),
+    });
+
     await agentReplies(ticket.id, agent.id, cairo('10:00'), 'It is out for delivery today.');
 
     // Somebody else's ticket, last touched between our reply and the answer.
@@ -217,19 +243,68 @@ describe('processWebhook — when an inbound email happened', () => {
 
     // The clocks: a reply is owed an hour from when it reached us. From the
     // header, it would have been overdue an hour before it arrived.
-    const [clocks] = await db
-      .select({
-        lastMessageAt: conversations.lastMessageAt,
-        lastCustomerMessageAt: conversations.lastCustomerMessageAt,
-        nextResponseDueAt: conversations.nextResponseDueAt,
-      })
-      .from(conversations)
-      .where(eq(conversations.id, ticket.id));
-    expect(clocks).toEqual({
+    expect(await clocksOf(ticket.id)).toMatchObject({
       lastMessageAt: answered.toJSDate(),
       lastCustomerMessageAt: answered.toJSDate(),
       nextResponseDueAt: answered.plus({ hours: 1 }).toJSDate(),
     });
+  });
+
+  // Each delivery keeps the instant it arrived, so the one processed last is
+  // not always the newest: the worker claims several at once, and a failed
+  // attempt retries behind a later mail. Processed in that order, the older
+  // mail must not pull the ticket's clocks back to itself.
+  it('does not move the ticket back when an older mail is processed after a newer one', async () => {
+    const agent = await admin();
+    await deliver({
+      messageId: 'first@customer.example',
+      date: cairo('09:00').toRFC2822()!,
+      text: 'My parcel has not arrived.',
+      receivedAt: cairo('09:00'),
+    });
+    const ticket = await ticketOf('first@customer.example');
+
+    const older = await store({
+      messageId: 'second@customer.example',
+      references: ['first@customer.example'],
+      date: cairo('10:00').toRFC2822()!,
+      text: 'Any news?',
+      receivedAt: cairo('10:00'),
+    });
+    const newer = await store({
+      messageId: 'third@customer.example',
+      references: ['first@customer.example'],
+      date: cairo('10:05').toRFC2822()!,
+      text: 'Hello?',
+      receivedAt: cairo('10:05'),
+    });
+    await deliver({
+      messageId: 'other@customer.example',
+      from: 'karim@customer.example',
+      date: cairo('10:02').toRFC2822()!,
+      text: 'Can I change my address?',
+      receivedAt: cairo('10:02'),
+    });
+    const other = await ticketOf('other@customer.example');
+
+    await run(newer);
+    await run(older);
+
+    const detail = await getConversation(agent, ticket.number);
+    expect(detail!.messages.map((m) => m.bodyText)).toEqual([
+      'My parcel has not arrived.',
+      'Any news?',
+      'Hello?',
+    ]);
+    expect(await clocksOf(ticket.id)).toMatchObject({
+      lastMessageAt: cairo('10:05').toJSDate(),
+      lastCustomerMessageAt: cairo('10:05').toJSDate(),
+    });
+    const { rows } = await listInbox(agent, parseFilters({}));
+    expect(rows.map((row) => [row.id, row.preview])).toEqual([
+      [ticket.id, 'Hello?'],
+      [other.id, 'Can I change my address?'],
+    ]);
   });
 
   // The other direction, and the example `lifecycle.ts` gives: a clock reading
@@ -262,9 +337,9 @@ describe('processWebhook — when an inbound email happened', () => {
     expect(detail!.messages[0]!.createdAt).toEqual(arrived.toJSDate());
   });
 
-  // `new Date('not a date')` is an Invalid Date, and inserting one throws — so
-  // a header nobody had to get right for the mail to be delivered used to fail
-  // the job on every retry and lose the message.
+  // `new Date('not a date')` is an Invalid Date, and inserting one throws. So a
+  // header nobody had to get right for the mail to be delivered used to send
+  // the job to `dead`, and a hand replay failed the same way.
   it.each([
     ['does not parse', 'not a date'],
     ['is absent', undefined],
@@ -286,8 +361,9 @@ describe('processWebhook — when an inbound email happened', () => {
     expect(detail!.messages[0]!.meta.dateHeader).toBeNull();
   });
 
-  // The same seam feeds side conversations, and the card's side-thread badge
-  // is decided by the newest message there, ordered the same way.
+  // The same seam feeds side conversations. The card's side-thread badge is
+  // decided by the newest message there, ordered the same way, and the hub's
+  // answer is what floats the ticket back up the list.
   it("puts a hub's reply with a slow clock after the message it answers", async () => {
     const agent = await admin();
     await deliver({
@@ -316,23 +392,48 @@ describe('processWebhook — when an inbound email happened', () => {
       createdAt: cairo('10:00').toJSDate(),
     });
 
+    // Somebody else's ticket, last touched between our question and the answer.
+    await deliver({
+      messageId: 'other@customer.example',
+      from: 'karim@customer.example',
+      date: cairo('10:15').toRFC2822()!,
+      text: 'Can I change my address?',
+      receivedAt: cairo('10:15'),
+    });
+    const other = await ticketOf('other@customer.example');
+
     const answered = cairo('10:30');
+    const hubClock = answered.minus({ hours: 2 });
     await deliver({
       messageId: 'hub-reply@warehouse.example',
       from: 'hub@warehouse.example',
       to: buildSideReplyAddress(side!.number, env().APP_SECRET, 'support', 'shipblu.test'),
-      date: answered.minus({ hours: 2 }).toRFC2822()!,
+      date: hubClock.toRFC2822()!,
       text: 'Found it, out for delivery tomorrow.',
       receivedAt: answered,
     });
 
     const [reply] = await db
-      .select({ createdAt: sideConversationMessages.createdAt })
+      .select({
+        createdAt: sideConversationMessages.createdAt,
+        meta: sideConversationMessages.meta,
+      })
       .from(sideConversationMessages)
       .where(eq(sideConversationMessages.direction, 'inbound'));
-    expect(reply!.createdAt).toEqual(answered.toJSDate());
+    expect(reply).toMatchObject({
+      createdAt: answered.toJSDate(),
+      meta: { dateHeader: hubClock.toJSDate().toISOString() },
+    });
+    const [thread] = await db
+      .select({ lastInboundAt: sideConversations.lastInboundAt })
+      .from(sideConversations)
+      .where(eq(sideConversations.id, side!.id));
+    expect(thread!.lastInboundAt).toEqual(answered.toJSDate());
 
     const { rows } = await listInbox(agent, parseFilters({}));
-    expect(rows).toMatchObject([{ id: ticket.id, sideState: 'replied' }]);
+    expect(rows.map((row) => [row.id, row.sideState])).toEqual([
+      [ticket.id, 'replied'],
+      [other.id, null],
+    ]);
   });
 });

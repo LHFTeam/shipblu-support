@@ -48,10 +48,12 @@ const log = logger('lifecycle');
  * late or replayed, which is when an acknowledgement matters most.
  *
  * On email `at` is our own receipt, `webhook_events.received_at`, and not the
- * mail's `Date` header, which is the sender's clock (`ParsedInboundEmail`). From
+ * mail's `Date` header, which is the sender's clock (`InboundDelivery`). From
  * the header, a customer whose clock read 23:00 at 11:00 Cairo started the
  * next-response clock twelve hours in the future, and one whose clock ran two
- * hours slow could be overdue before the mail had arrived.
+ * hours slow could be overdue before the mail had arrived. The create branch
+ * takes no `at` because its clocks count from the ticket's `created_at`, which
+ * email ingest sets to the same receipt.
  */
 export async function afterInboundMessage(
   conversationId: string,

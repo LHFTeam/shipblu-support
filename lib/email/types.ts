@@ -55,38 +55,44 @@ export type ParsedInboundEmail = {
    *
    * A claim made by the sender's machine, not a measurement, so it is recorded
    * on the message as evidence and nothing orders or measures by it. It used to
-   * be `receivedAt`, and it is wrong in both directions: a clock two hours slow
-   * filed the customer's answer above the reply it answered and hid it from the
-   * inbox card; one twelve hours fast held the ticket at the top of the list.
+   * be the message's time, and it is wrong in both directions: a clock two hours
+   * slow filed the customer's answer above the reply it answered and hid it from
+   * the inbox card; one twelve hours fast held the ticket at the top of the list.
    */
   dateHeader: Date | null;
-
-  /**
-   * When the delivery reached us: `webhook_events.received_at`, stamped by our
-   * endpoint as it stored the payload.
-   *
-   * Every clock downstream reads this — `messages.created_at`, the list's
-   * `last_message_at`, `last_customer_message_at` and the next-response SLA —
-   * because it is the first moment the team could have seen the mail, which is
-   * what a support timeline orders by and what an SLA can fairly charge from.
-   * Taken from the stored row rather than the worker's clock so that a
-   * delivery processed late, or replayed by hand, keeps the instant it arrived.
-   * Postmark retrying an endpoint that was down makes it later than the mail
-   * was, by up to the ten or so hours those retries last, and that delay is
-   * ours.
-   */
-  receivedAt: Date;
 };
 
 /**
- * What a provider can read off a delivery: everything except when it arrived.
+ * What the pipeline knows about a delivery that the mail itself cannot say.
  *
- * `receivedAt` is left out of the type rather than documented as "do not fill
- * this from the payload", so a driver cannot reach for the mail's `Date` header
- * again without the return type refusing it. The worker adds the instant from
- * the stored delivery (`worker/handlers/process-webhook.ts`).
+ * A separate argument to the two ingest paths rather than a field on
+ * `ParsedInboundEmail`, so nothing a provider returns can carry it. A driver
+ * that read the `Date` header into it again would have no field to put it in,
+ * and no spread order at a call site decides which of two values wins.
  */
-export type ProviderInboundEmail = Omit<ParsedInboundEmail, 'receivedAt'>;
+export type InboundDelivery = {
+  /**
+   * When the delivery reached our endpoint: `webhook_events.received_at`,
+   * stamped as the payload was stored.
+   *
+   * Every clock an inbound email sets reads this: a new ticket's `created_at`,
+   * and with it the first-response and resolution targets; the message's
+   * `created_at`; `last_message_at`, `last_customer_message_at` and the
+   * next-response target. It is taken from the stored row rather than the
+   * worker's clock, so a delivery processed late or replayed by hand keeps the
+   * instant it arrived. Postmark retrying an endpoint that was down makes it
+   * later than the mail was, by up to the ten or so hours those retries last,
+   * and that delay is ours.
+   *
+   * It is when the mail reached us, not when anybody could read it. A worker
+   * backlog sits between the two, and an agent who writes during one files a
+   * message after an answer they have not seen. `last_agent_message_at` is then
+   * the later of the two, so every "awaiting us" predicate reads the ticket as
+   * answered (docs/PROJECT-STATE.md §6.77). Any arrival instant has that
+   * property. The header, seconds earlier still, had it too.
+   */
+  receivedAt: Date;
+};
 
 export type OutboundEmail = {
   to: EmailAddress[];
@@ -153,5 +159,5 @@ export interface EmailProvider {
    */
   verifySignature(rawBody: string, headers: Record<string, string>): InboundVerdict;
 
-  parseInbound(payload: unknown): Promise<ProviderInboundEmail>;
+  parseInbound(payload: unknown): Promise<ParsedInboundEmail>;
 }

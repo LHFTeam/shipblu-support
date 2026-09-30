@@ -762,11 +762,15 @@ luxon and let the timezone database convert; never hand-convert fixtures. SLA
 clocks are working-time, resolved through `lib/hours/resolve.ts` by every
 consumer so a due date and the report measuring it cannot disagree.
 
-**An inbound email happened when it reached us.** Its `receivedAt` is
-`webhook_events.received_at`, added by `process_webhook`, and never the mail's
-`Date` header. That header is the sender's clock, wrong in either direction, and
-is kept only as `meta.dateHeader`. Providers return `ProviderInboundEmail`, which
-has no `receivedAt` for a driver to fill in from the payload (§6.77).
+**An inbound email happened when it reached us.** Every instant its ingest
+writes (the new ticket's `created_at`, the message's, `last_message_at`,
+`last_customer_message_at`) is `webhook_events.received_at`, passed by
+`process_webhook` as `InboundDelivery`. It is never the mail's `Date` header,
+which is the sender's clock, wrong in either direction, and is kept only as
+`meta.dateHeader`. The instant is a separate argument, not a field on what a
+provider parses, so no driver can supply it. The "last" columns move forward
+only (`latest()`), because deliveries are not processed in arrival order
+(§6.77).
 
 **Measured time is a union, never a sum.** Presence and focus are recorded as
 intervals by hot paths that are deliberately approximate — two instances racing

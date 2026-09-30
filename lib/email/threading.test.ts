@@ -34,7 +34,6 @@ function email(overrides: Partial<ParsedInboundEmail> = {}): ParsedInboundEmail 
     attachments: [],
     headers: {},
     dateHeader: null,
-    receivedAt: new Date(),
     ...overrides,
   };
 }

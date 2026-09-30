@@ -56,10 +56,11 @@ type Ticket = {
  * engine that already succeeded — including sending this reply again.
  *
  * `at` is the moment the reply goes out, and defaults to it. Deliberately not
- * the timestamp on the customer's message: that one is the sender's own `Date:`
- * header on email, and everything below — whether the office is shut, what
- * `{{next_opening}}` resolves to, when the claim says we last answered — is a
- * statement about now that a wrong clock would make wrong in both directions.
+ * the timestamp on the customer's message, which is when that message reached
+ * us: hours before now for a delivery processed late or replayed, which is the
+ * case an acknowledgement most needs to get right. Everything below — whether
+ * the office is shut, what `{{next_opening}}` resolves to, when the claim says
+ * we last answered — is a statement about now.
  */
 export async function maybeSendAutoResponse(
   conversationId: string,

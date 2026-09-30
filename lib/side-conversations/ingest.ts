@@ -11,8 +11,9 @@ import { env } from '@/lib/env';
 import { readEmailBody } from '@/lib/email/body';
 import { classifyAutomation } from '@/lib/email/loop-protection';
 import { resolveThread } from '@/lib/email/threading';
-import type { ParsedInboundEmail } from '@/lib/email/types';
+import type { InboundDelivery, ParsedInboundEmail } from '@/lib/email/types';
 import { buildAttachmentPath, uploadObject } from '@/lib/storage';
+import { latest } from '@/lib/tickets/latest';
 import { logger } from '@/lib/log';
 
 const log = logger('side-ingest');
@@ -107,6 +108,7 @@ export async function resolveSideConversation(
 export async function ingestSideReply(
   side: ResolvedSide,
   email: ParsedInboundEmail,
+  { receivedAt }: InboundDelivery,
 ): Promise<SideIngestResult> {
   // Idempotency, against this table only. The provider retries on any non-2xx
   // and webhook_events can be replayed by hand, so the same Message-ID must
@@ -160,7 +162,7 @@ export async function ingestSideReply(
         channelMessageId: email.messageId,
         inReplyTo: email.inReplyTo ?? null,
         deliveryStatus: 'delivered',
-        deliveredAt: email.receivedAt,
+        deliveredAt: receivedAt,
         meta: {
           automationReason: automation.reason,
           isAutomated: automation.isAutomated,
@@ -170,15 +172,17 @@ export async function ingestSideReply(
           spamScore: email.spamScore,
           dateHeader: email.dateHeader?.toISOString() ?? null,
         },
-        createdAt: email.receivedAt,
+        createdAt: receivedAt,
       })
       .returning({ id: sideConversationMessages.id });
 
     await tx
       .update(sideConversations)
       .set({
-        lastMessageAt: email.receivedAt,
-        lastInboundAt: email.receivedAt,
+        // Forward only, as on the ticket: an earlier answer processed after a
+        // later one must not pull either back (`latest`).
+        lastMessageAt: latest(sideConversations.lastMessageAt, receivedAt),
+        lastInboundAt: latest(sideConversations.lastInboundAt, receivedAt),
         // An answer that arrives after the agent gave up reopens the thread, for
         // the same reason a customer's reply reopens a resolved ticket: filing it
         // under `done` puts the thing somebody was waiting for behind a collapsed
@@ -193,7 +197,7 @@ export async function ingestSideReply(
     // Only this one column on the ticket. See the module docstring.
     await tx
       .update(conversations)
-      .set({ lastMessageAt: email.receivedAt })
+      .set({ lastMessageAt: latest(conversations.lastMessageAt, receivedAt) })
       .where(eq(conversations.id, side.conversationId));
 
     // The ticket's activity feed is where an agent who was not the one who asked

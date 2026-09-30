@@ -201,6 +201,20 @@ describe('PostmarkEmailProvider.parseInbound', () => {
     },
   );
 
+  // Ingest's idempotency is keyed on the id, and a retried job parses the same
+  // stored payload again: a clock-minted fallback stored the mail twice.
+  it('derives an id for a payload that carries none, so a re-parse agrees', async () => {
+    const bare = { FromFull: { Email: 'a@b.com' }, TextBody: 'hello' };
+    const first = await provider.parseInbound(bare);
+    const again = await provider.parseInbound(bare);
+
+    expect(first.messageId).toMatch(/^pm-[0-9a-f]{32}$/);
+    expect(again.messageId).toBe(first.messageId);
+    expect((await provider.parseInbound({ ...bare, TextBody: 'bye' })).messageId).not.toBe(
+      first.messageId,
+    );
+  });
+
   it('throws when there is no sender rather than inventing one', async () => {
     await expect(provider.parseInbound({ Subject: 'x' })).rejects.toThrow(/no sender/i);
   });
