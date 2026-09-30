@@ -35,6 +35,21 @@ export const agents = pgTable(
     avatarUrl: text('avatar_url'),
 
     /**
+     * The colour of this agent's tile in the inbox and the header: a key from
+     * `AGENT_COLORS` in `lib/auth/agent-colors.ts`, never a CSS value.
+     *
+     * Stored rather than derived because it has to stay put. A colour hashed
+     * from the id moves the moment the palette changes size, and one picked from
+     * the agent's rank moves when anything ahead of them in the order does; an
+     * agent who has learned "mine are the violet ones" would lose that silently.
+     * So it is assigned once, as the palette's least-used colour, by a
+     * `BEFORE INSERT` trigger in `db/sql/006_agent_avatar_colors.sql` — which
+     * every path that creates an agent goes through without having to remember
+     * — and nothing writes it after that.
+     */
+    avatarColor: text('avatar_color'),
+
+    /**
      * Written by exactly one thing: the SSE stream at /api/events, which is open
      * while the agent has the console in front of them and closed when they do
      * not. The agent's own away switch is `isAcceptingTickets` below rather than

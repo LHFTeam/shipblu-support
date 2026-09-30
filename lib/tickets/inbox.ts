@@ -30,6 +30,8 @@ export type InboxRow = {
   assigneeId: string | null;
   assigneeName: string | null;
   assigneeAvatarUrl: string | null;
+  /** A key from `AGENT_COLORS`; see `agents.avatar_color`. */
+  assigneeColor: string | null;
   lastMessageAt: Date;
   lastCustomerMessageAt: Date | null;
   /**
@@ -185,6 +187,7 @@ export async function listInbox(
       assigneeId: agents.id,
       assigneeName: agents.name,
       assigneeAvatarUrl: agents.avatarUrl,
+      assigneeColor: agents.avatarColor,
       lastMessageAt: conversations.lastMessageAt,
       lastCustomerMessageAt: conversations.lastCustomerMessageAt,
       externalId: conversations.externalId,
@@ -245,6 +248,7 @@ export async function listInbox(
       assigneeId: row.assigneeId,
       assigneeName: row.assigneeName,
       assigneeAvatarUrl: row.assigneeAvatarUrl,
+      assigneeColor: row.assigneeColor,
       lastMessageAt: row.lastMessageAt,
       lastCustomerMessageAt: row.lastCustomerMessageAt,
       isComment: rootCommentId(row.externalId) !== null,

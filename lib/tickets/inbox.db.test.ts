@@ -31,6 +31,7 @@ async function admin(): Promise<SessionAgent> {
     role: row!.role,
     permissions: {},
     avatarUrl: null,
+    avatarColor: row!.avatarColor,
     isAcceptingTickets: true,
     sessionIdleForMs: 0,
   };
@@ -139,11 +140,15 @@ describe('listInbox', () => {
       assigneeId: assignee!.id,
       assigneeName: 'Dina Mostafa',
       assigneeAvatarUrl: 'https://example.test/dina.png',
+      // Whatever the trigger gave her, read straight through.
+      assigneeColor: assignee!.avatarColor,
     });
+    expect(assignee!.avatarColor).not.toBeNull();
     expect(byId.get(unassigned)).toMatchObject({
       assigneeId: null,
       assigneeName: null,
       assigneeAvatarUrl: null,
+      assigneeColor: null,
     });
   });
 

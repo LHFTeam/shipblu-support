@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { agentColorClass } from '@/lib/auth/agent-colors';
 import { initials } from './initials';
 
 /**
@@ -39,16 +40,12 @@ export function Avatar({
 }
 
 /**
- * An agent's picture, or their initials.
+ * An agent's picture, or their initials on the agent's own colour.
  *
- * Solid brand blue with white letters: the circle the console header already
- * draws for the signed-in agent, so an agent reads the same everywhere. Solid
- * because every badge on an inbox row — status, channel, window — is a pale
- * tint, and a pale tile in any hue collides with one of them: pink is the
- * Instagram badge, violet the customer bot, blue Facebook, slate the portal,
- * and emerald, amber and red are statuses. One colour for every agent rather
- * than one each for the same reason, since the hues left after those are too
- * few to tell a team apart.
+ * The colour is the agent's for good (`agents.avatar_color`), so two agents with
+ * the same initials still read as two people, and an agent learns which tiles
+ * are theirs. Every colour is a solid fill, which no pale badge on the same row
+ * can be mistaken for — `lib/auth/agent-colors.ts` has the list and why.
  *
  * `agents.avatar_url` is a URL rather than a storage path — nothing in the app
  * uploads one — so it is used as given, and the same layering as `Avatar` means
@@ -56,14 +53,16 @@ export function Avatar({
  */
 export function AgentAvatar({
   name,
+  color,
   avatarUrl,
   size = 22,
 }: {
   name: string | null;
+  color: string | null;
   avatarUrl: string | null;
   size?: number;
 }) {
-  return <Tile name={name} src={avatarUrl} size={size} tone="bg-brand-600 text-white" />;
+  return <Tile name={name} src={avatarUrl} size={size} tone={agentColorClass(color)} />;
 }
 
 /**

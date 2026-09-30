@@ -270,7 +270,11 @@ export function InboxList({
                         The ticket's header names the assignee in full. */}
                     {row.assigneeId ? (
                       <>
-                        <AgentAvatar name={row.assigneeName} avatarUrl={row.assigneeAvatarUrl} />
+                        <AgentAvatar
+                          name={row.assigneeName}
+                          color={row.assigneeColor}
+                          avatarUrl={row.assigneeAvatarUrl}
+                        />
                         <span className="sr-only">Assigned to {row.assigneeName}</span>
                       </>
                     ) : (
