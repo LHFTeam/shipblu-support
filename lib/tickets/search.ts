@@ -8,11 +8,21 @@
 
 import { detectShipmentRefs, shipmentPatterns } from '@/lib/shipments/detect';
 import { couldBeReference, normaliseSbid, normaliseTrackingNumber } from '@/lib/shipments/format';
+import { arabicVariantPattern } from '@/lib/search/arabic';
 import { containing } from '@/lib/search/like';
 
 export type SearchTerm = {
   /** ILIKE pattern for free-text columns. Wildcards in the query are literal. */
   pattern: string;
+  /**
+   * A `~*` pattern that stands in for `pattern` on the columns people write
+   * Arabic in, set only when the query holds a letter with spelling variants.
+   * "احمد" otherwise misses every أحمد in the contact list — 31 of them in
+   * production, beside 98 spelled احمد — and "الشحنه" every message that
+   * wrote الشحنة. See `arabicVariantPattern` for why the query is widened
+   * rather than the column folded.
+   */
+  arabicPattern: string | null;
   /**
    * The ticket number the query names, if it names one. "#812" is how the team
    * refers to a ticket, so it earns an exact match on the number rather than a
@@ -120,6 +130,7 @@ function textTerm(query: string): SearchTerm {
 
   return {
     pattern: containing(q),
+    arabicPattern: arabicVariantPattern(q),
     number,
     // Only when the punctuation actually got in the way: for a query that is
     // already bare digits the free-text pattern covers the phone column too.

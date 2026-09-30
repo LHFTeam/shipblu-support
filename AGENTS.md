@@ -726,6 +726,16 @@ public URL keeps an explicit locale segment. Use `direction()` from
 ASCII slugify erases Arabic entirely — and decode dynamic route params with
 `decodeSlugParam()`, because Next hands them over still percent-encoded.
 
+**A search over text people write in Arabic widens the query, never the
+column.** The same name is أحمد on one contact and احمد on the next, and ILIKE
+treats them as different words. `arabicVariantPattern` in `lib/search/arabic.ts`
+turns each letter Arabic spells several ways (ا/أ/إ/آ, ي/ى/ئ, ه/ة, و/ؤ) into a
+bracket expression for `~*`, which the trigram indexes that already exist
+serve. Folding the column through `translate()` instead is a different
+expression, so it would need a new index on every table it touched, `messages`
+included. The letter table is the categoriser's too, so a spelling it files
+under is one an agent can find. The inbox is the only search using it so far.
+
 **Anything a customer reads is a `*_ar` / `*_en` pair, and either side covers
 the other.** Auto-response bodies, ticket field labels, form names, canned
 responses and holiday names all take that shape: both columns `not null default

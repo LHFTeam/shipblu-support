@@ -62,6 +62,18 @@ describe('the free-text pattern', () => {
   });
 });
 
+describe('the Arabic pattern', () => {
+  it('widens the letters Arabic spells several ways, from the trimmed query', () => {
+    expect(parseSearchTerm('  احمد ').arabicPattern).toBe('[اأإآٱ]حمد');
+  });
+
+  it('is left unset when there is nothing to widen', () => {
+    for (const query of ['Nada', '#812', 'شكر', 'track:SB123456789']) {
+      expect(parseSearchTerm(query).arabicPattern, query).toBeNull();
+    }
+  });
+});
+
 describe('parseSearchTerm — shipments', () => {
   it('narrows to the shipment clause on a track: prefix', () => {
     const term = parseSearchTerm('track:SB123456789');

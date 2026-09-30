@@ -1,4 +1,17 @@
-import { and, desc, eq, ilike, inArray, isNull, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import {
+  and,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNull,
+  ne,
+  notInArray,
+  or,
+  sql,
+  type AnyColumn,
+  type SQL,
+} from 'drizzle-orm';
 import { db } from '@/db/client';
 import { agents, conversations, contacts, messages, ticketStatuses } from '@/db/schema';
 import type { SessionAgent } from '@/lib/auth/session';
@@ -51,6 +64,57 @@ export type InboxRow = {
   sideState: 'waiting' | 'replied' | null;
 };
 
+/**
+ * The list's row, with the joins every row needs. Shared by the paged query and
+ * the lookup of a ticket named by number, so the one put first cannot be
+ * missing a field its neighbours carry.
+ */
+function selectInboxRows(where: SQL | undefined) {
+  return db
+    .select({
+      id: conversations.id,
+      number: conversations.number,
+      subject: conversations.subject,
+      channel: conversations.channel,
+      priority: conversations.priority,
+      statusName: ticketStatuses.name,
+      statusCategory: ticketStatuses.category,
+      requesterName: contacts.name,
+      requesterEmail: contacts.primaryEmail,
+      requesterPhone: contacts.primaryPhone,
+      assigneeName: agents.name,
+      lastMessageAt: conversations.lastMessageAt,
+      lastCustomerMessageAt: conversations.lastCustomerMessageAt,
+      externalId: conversations.externalId,
+      // The cursor's timestamp, at the precision Postgres stores it. See
+      // `InboxCursor` for why the mapped `Date` above cannot serve.
+      cursorTime: sql<string>`${conversations.lastMessageAt}::text`,
+      tags: conversations.tags,
+      // The newest message body, for the two-line preview in the list. A
+      // lateral subquery keeps this one round trip instead of N+1.
+      preview: sql<string | null>`(
+        SELECT m.body_text FROM ${messages} m
+        WHERE m.conversation_id = ${conversations.id} AND m.kind <> 'note'
+        ORDER BY m.created_at DESC LIMIT 1
+      )`,
+      // The newest message on the newest still-open side conversation. One
+      // correlated subquery beside the preview one above rather than a join,
+      // because a ticket with three threads must still produce one row.
+      sideState: sql<string | null>`(
+        SELECT CASE WHEN sm.direction = 'inbound' THEN 'replied' ELSE 'waiting' END
+        FROM side_conversations sc
+        JOIN side_conversation_messages sm ON sm.side_conversation_id = sc.id
+        WHERE sc.conversation_id = ${conversations.id} AND sc.state = 'open'
+        ORDER BY sm.created_at DESC LIMIT 1
+      )`,
+    })
+    .from(conversations)
+    .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
+    .innerJoin(contacts, eq(contacts.id, conversations.requesterContactId))
+    .leftJoin(agents, eq(agents.id, conversations.assigneeAgentId))
+    .where(where);
+}
+
 export async function listInbox(
   agent: SessionAgent,
   filters: InboxFilters,
@@ -94,10 +158,15 @@ export async function listInbox(
     where.push(eq(conversations.channel, filters.channel));
   }
 
+  // Everything but the search. The ticket a query names by number is read under
+  // exactly these, so naming it cannot reach one the filters or visibility keep
+  // out of the list.
+  const filtered = [...where];
+  let namedNumber: number | null = null;
+
   if (filters.q) {
-    const { pattern, number, phonePattern, trackingNumber, sbid, scope } = parseSearchTerm(
-      filters.q,
-    );
+    const { pattern, arabicPattern, number, phonePattern, trackingNumber, sbid, scope } =
+      parseSearchTerm(filters.q);
 
     // A prefixed query is narrowed to its one clause. That is what makes typing
     // `track:` worth doing — the alternative ORs it into a list that still has
@@ -107,9 +176,16 @@ export async function listInbox(
     } else if (scope === 'sbid' && sbid) {
       where.push(sbidMatches(sbid));
     } else {
+      // The columns people write Arabic in. A query holding a letter Arabic
+      // spells several ways is matched as a regular expression widened to all of
+      // them, and anything else keeps the ILIKE it always had; the same trigram
+      // index serves both. Email and phone never hold Arabic, so they stay ILIKE.
+      const written = (column: AnyColumn | SQL): SQL =>
+        arabicPattern ? sql`${column} ~* ${arabicPattern}` : sql`${column} ILIKE ${pattern}`;
+
       const clauses: SQL[] = [
-        ilike(conversations.subject, pattern),
-        ilike(contacts.name, pattern),
+        written(conversations.subject),
+        written(contacts.name),
         ilike(contacts.primaryEmail, pattern),
         ilike(contacts.primaryPhone, pattern),
         // What was actually said. Subjects on the messaging channels are picked
@@ -119,7 +195,7 @@ export async function listInbox(
         // messages, which is where a search of a chat has to look.
         sql`EXISTS (
           SELECT 1 FROM ${messages} m
-          WHERE m.conversation_id = ${conversations.id} AND m.body_text ILIKE ${pattern}
+          WHERE m.conversation_id = ${conversations.id} AND ${written(sql`m.body_text`)}
         )`,
         // And what the hub said. Often the only place the actual explanation
         // lives — "driver attempted twice, phone off" is written by somebody who
@@ -129,11 +205,10 @@ export async function listInbox(
         sql`EXISTS (
           SELECT 1 FROM side_conversations sc
           JOIN side_conversation_messages sm ON sm.side_conversation_id = sc.id
-          WHERE sc.conversation_id = ${conversations.id} AND sm.body_text ILIKE ${pattern}
+          WHERE sc.conversation_id = ${conversations.id} AND ${written(sql`sm.body_text`)}
         )`,
       ];
 
-      if (number !== null) clauses.push(eq(conversations.number, number));
       if (phonePattern) clauses.push(ilike(contacts.primaryPhone, phonePattern));
 
       // The body search above already finds tickets that *mention* a number.
@@ -144,6 +219,19 @@ export async function listInbox(
       if (sbid) clauses.push(sbidMatches(sbid));
 
       where.push(or(...clauses)!);
+
+      // "#812" and a bare "812" both name ticket 812, but the bare one also
+      // matches every phone and message holding those digits — 394 tickets for
+      // 812 in production — and in recency order the ticket it named can be
+      // pages down. So that ticket is read on its own and put first, and kept
+      // out of the paged query so no page shows it twice. On its own rather than
+      // as a leading sort key: the cursor below compares the timestamp and the
+      // id and nothing else, so a ticket sorted to the top of page one by some
+      // other key would come back on whichever later page its timestamp is on.
+      if (number !== null) {
+        namedNumber = number;
+        where.push(ne(conversations.number, number));
+      }
     }
   }
 
@@ -156,55 +244,20 @@ export async function listInbox(
     );
   }
 
-  const rows = await db
-    .select({
-      id: conversations.id,
-      number: conversations.number,
-      subject: conversations.subject,
-      channel: conversations.channel,
-      priority: conversations.priority,
-      statusName: ticketStatuses.name,
-      statusCategory: ticketStatuses.category,
-      requesterName: contacts.name,
-      requesterEmail: contacts.primaryEmail,
-      requesterPhone: contacts.primaryPhone,
-      assigneeName: agents.name,
-      lastMessageAt: conversations.lastMessageAt,
-      lastCustomerMessageAt: conversations.lastCustomerMessageAt,
-      externalId: conversations.externalId,
-      // The cursor's timestamp, at the precision Postgres stores it. See
-      // `InboxCursor` for why the mapped `Date` above cannot serve.
-      cursorTime: sql<string>`${conversations.lastMessageAt}::text`,
-      tags: conversations.tags,
-      // The newest message body, for the two-line preview in the list. A
-      // lateral subquery keeps this one round trip instead of N+1.
-      preview: sql<string | null>`(
-        SELECT m.body_text FROM ${messages} m
-        WHERE m.conversation_id = ${conversations.id} AND m.kind <> 'note'
-        ORDER BY m.created_at DESC LIMIT 1
-      )`,
-      // The newest message on the newest still-open side conversation. One
-      // correlated subquery beside the preview one above rather than a join,
-      // because a ticket with three threads must still produce one row.
-      sideState: sql<string | null>`(
-        SELECT CASE WHEN sm.direction = 'inbound' THEN 'replied' ELSE 'waiting' END
-        FROM side_conversations sc
-        JOIN side_conversation_messages sm ON sm.side_conversation_id = sc.id
-        WHERE sc.conversation_id = ${conversations.id} AND sc.state = 'open'
-        ORDER BY sm.created_at DESC LIMIT 1
-      )`,
-    })
-    .from(conversations)
-    .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
-    .innerJoin(contacts, eq(contacts.id, conversations.requesterContactId))
-    .leftJoin(agents, eq(agents.id, conversations.assigneeAgentId))
-    .where(and(...where))
-    // The id is part of the sort, not decoration: without a total order, two
-    // rows sharing a timestamp could come back in either order and the cursor
-    // would step over one of them.
-    .orderBy(desc(conversations.lastMessageAt), desc(conversations.id))
-    // One extra row is the cheapest way to know whether a next page exists.
-    .limit(PAGE_SIZE + 1);
+  const [rows, named] = await Promise.all([
+    selectInboxRows(and(...where))
+      // The id is part of the sort, not decoration: without a total order, two
+      // rows sharing a timestamp could come back in either order and the cursor
+      // would step over one of them.
+      .orderBy(desc(conversations.lastMessageAt), desc(conversations.id))
+      // One extra row is the cheapest way to know whether a next page exists.
+      .limit(PAGE_SIZE + 1),
+    // For the first page, which it leads. The paged query excludes it on every
+    // page, so no later one brings it back.
+    namedNumber !== null && !cursor
+      ? selectInboxRows(and(...filtered, eq(conversations.number, namedNumber))).limit(1)
+      : [],
+  ]);
 
   const page = rows.slice(0, PAGE_SIZE);
   const last = page[page.length - 1];
@@ -216,7 +269,7 @@ export async function listInbox(
       rows.length > PAGE_SIZE && last
         ? encodeInboxCursor({ time: last.cursorTime, id: last.id })
         : null,
-    rows: page.map((row) => ({
+    rows: [...named, ...page].map((row) => ({
       id: row.id,
       number: row.number,
       subject: row.subject,
