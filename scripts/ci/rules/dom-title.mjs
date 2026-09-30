@@ -1,4 +1,5 @@
-import { fail, scannable, scan } from '../lib.mjs';
+import ts from 'typescript';
+import { fail, read, scannable } from '../lib.mjs';
 
 /**
  * `title=` on a DOM element never appears on a phone, which is where the console
@@ -7,13 +8,14 @@ import { fail, scannable, scan } from '../lib.mjs';
  * Only lowercase JSX elements are DOM elements — `<Section title="...">` is a
  * component prop and perfectly fine.
  *
- * The attributes before `title=` may hold an arrow function, whose `=>` the
- * first version of this pattern took for the end of the tag: `[^<>]` stopped
- * at the `>`, so `<input onChange={(e) => …} title="…">` passed, and the inbox
- * search box carried a phone-invisible tooltip through every run of this check.
- * `=>` is the one `>` an attribute routinely holds, so it is the one allowed
- * through; a bare `>` still ends the tag, which is what keeps a match from
- * running on into the element's children and the next tag.
+ * Read off the syntax tree rather than matched as text. A pattern has to guess
+ * where a tag ends, and every guess was wrong somewhere: the first took the `=>`
+ * of `onChange={(e) => …}` for the end of the tag, so the inbox search box
+ * carried a phone-invisible tooltip through every run of this check, and
+ * letting `=>` through still stopped at `count > 0` or `ChangeEvent<Input>`.
+ * The parser knows where the attributes are, so there is nothing left to guess.
+ * TypeScript is already how the repository is type-checked, so this adds no
+ * dependency.
  */
 export function checkNoDomTitleAttribute() {
   /**
@@ -35,15 +37,34 @@ export function checkNoDomTitleAttribute() {
     'components/channel.tsx',
   ]);
 
-  scan(
-    scannable.filter((f) => f.endsWith('.tsx') && !predating.has(f)),
-    /<[a-z][a-zA-Z0-9]*(?:\s(?:[^<>]|=>)*?)?\stitle=/g,
-    (file, line) => {
-      fail(
-        'dom-title',
-        `${file}:${line}`,
-        'title= on a DOM element never appears on a phone — use Tooltip or InfoTip from components/tooltip.tsx',
-      );
-    },
-  );
+  for (const file of scannable.filter((f) => f.endsWith('.tsx') && !predating.has(f))) {
+    const source = ts.createSourceFile(
+      file,
+      read(file),
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TSX,
+    );
+
+    const visit = (node) => {
+      if (
+        (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) &&
+        ts.isIdentifier(node.tagName) &&
+        /^[a-z]/.test(node.tagName.text)
+      ) {
+        for (const attribute of node.attributes.properties) {
+          if (ts.isJsxAttribute(attribute) && attribute.name.getText(source) === 'title') {
+            const { line } = source.getLineAndCharacterOfPosition(node.getStart(source));
+            fail(
+              'dom-title',
+              `${file}:${line + 1}`,
+              'title= on a DOM element never appears on a phone — use Tooltip or InfoTip from components/tooltip.tsx',
+            );
+          }
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+  }
 }

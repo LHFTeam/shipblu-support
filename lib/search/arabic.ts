@@ -13,7 +13,7 @@
  * so it widens each letter out to the whole group instead (below). One list
  * keeps the two agreeing on which letters are one letter, and on no more than
  * that: the categoriser also strips tatweel and tashkeel from the message, and
- * a search can strip them only from the query (`parseSearchTerm`). So a stored
+ * a search can strip them only from the query (`cleanQuery`). So a stored
  * الشحنـة is one the categoriser files as الشحنه and a search for الشحنه does
  * not find.
  */

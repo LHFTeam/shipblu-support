@@ -3,6 +3,7 @@ import { eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '@/db/client';
 import { kbArticleFeedback, kbArticles } from '@/db/schema';
+import { hasConsoleSession } from '@/lib/auth/cookie';
 import { readJsonBody } from '@/lib/http/json-body';
 import { allow, clientIp } from '@/lib/http/rate-limit';
 
@@ -26,6 +27,12 @@ export async function POST(request: Request) {
   if (!allow(`kb-feedback:${clientIp(request)}`, LIMIT, WINDOW_MS)) {
     return new NextResponse(null, { status: 429 });
   }
+
+  // Not a customer's vote. `helpfulCount` orders the related articles a customer
+  // is shown, and the inbox links agents here; `hasConsoleSession` says why the
+  // cookie's presence is enough. The page ignores the answer, so a 204 thanks
+  // the agent exactly as it thanks anybody else.
+  if (hasConsoleSession(request.headers)) return new NextResponse(null, { status: 204 });
 
   const body = await readJsonBody(request, feedbackBody);
   if (!body) return new NextResponse(null, { status: 400 });

@@ -35,6 +35,26 @@ describe('dom-title', () => {
     expect(await found(source)).toEqual([expect.objectContaining({ where: `${FILE}:2` })]);
   });
 
+  it('refuses one that follows a comparison or a generic type argument', async () => {
+    const comparison = 'export const A = () => <button disabled={count > 0} title="Send" />;\n';
+    const generic = [
+      'export const A = () => (',
+      '  <input onChange={(e: ChangeEvent<HTMLInputElement>) => f(e)} title="Search" />',
+      ');',
+      '',
+    ].join('\n');
+
+    expect(await found(comparison)).toEqual([expect.objectContaining({ where: `${FILE}:1` })]);
+    expect(await found(generic)).toEqual([expect.objectContaining({ where: `${FILE}:2` })]);
+  });
+
+  it('does not mistake the word title in text or a string for the attribute', async () => {
+    const source =
+      'export const A = () => <p className="x">Set title="Hours" here, or {"title="}</p>;\n';
+
+    expect(await found(source)).toEqual([]);
+  });
+
   it("leaves a component's title prop alone", async () => {
     expect(await found('export const A = () => <Section title="Hours">x</Section>;\n')).toEqual([]);
   });

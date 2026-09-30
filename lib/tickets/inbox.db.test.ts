@@ -173,4 +173,22 @@ describe('listInbox search', () => {
     const email = await listInbox(agent, parseFilters({ q: `#${n}`, channel: 'email' }));
     expect(email.rows).toEqual([]);
   });
+
+  it('treats a query that is only a pasted direction mark or decoration as no search', async () => {
+    const agent = await admin();
+    // No subject, no name, no email, no phone and no messages: nothing a
+    // search clause could match, so only an unsearched list shows it.
+    const [bare] = await tickets([{}]);
+
+    const unsearched = await listInbox(agent, parseFilters({}));
+    expect(unsearched.rows.map((row) => row.id)).toContain(bare!.id);
+
+    for (const q of ['\u200F', 'ـ', '\u064E']) {
+      const { rows } = await listInbox(agent, parseFilters({ q }));
+      expect(
+        rows.map((row) => row.id),
+        JSON.stringify(q),
+      ).toEqual(unsearched.rows.map((row) => row.id));
+    }
+  });
 });

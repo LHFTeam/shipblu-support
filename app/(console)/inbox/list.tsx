@@ -576,7 +576,8 @@ function SearchBox({ initial, onSearch }: { initial: string; onSearch: (value: s
           words said in a message or a side conversation. Arabic spellings of the same letter match
           each other, so احمد finds أحمد. A pasted tracking number or SBID finds that
           shipment&apos;s tickets; track: or sbid: narrows the search to only those. Tags, custom
-          fields and the assignee are not searched.
+          fields and the assignee are not searched, and the Status and Channel filters still apply:
+          a resolved ticket needs Any status.
         </InfoTip>
       </span>
     </div>

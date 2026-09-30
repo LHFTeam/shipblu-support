@@ -46,6 +46,16 @@ describe('POST /api/kb/view', () => {
     expect(recordArticleView).not.toHaveBeenCalled();
   });
 
+  it('counts a browser holding an empty console cookie, which is signed out everywhere else', async () => {
+    const response = await view({
+      'x-forwarded-for': '198.51.100.4',
+      cookie: 'shipblu_session=',
+    });
+
+    expect(response.status).toBe(204);
+    expect(recordArticleView).toHaveBeenCalledWith(ARTICLE);
+  });
+
   it('still counts a customer signed in to the portal, which is a different cookie', async () => {
     const response = await view({
       'x-forwarded-for': '198.51.100.3',

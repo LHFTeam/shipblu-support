@@ -7,15 +7,10 @@
  */
 
 import { detectShipmentRefs, shipmentPatterns } from '@/lib/shipments/detect';
-import { stripTashkeel } from '@/lib/kb/seed';
-import {
-  couldBeReference,
-  normaliseSbid,
-  normaliseTrackingNumber,
-  stripInvisible,
-} from '@/lib/shipments/format';
+import { couldBeReference, normaliseSbid, normaliseTrackingNumber } from '@/lib/shipments/format';
 import { arabicVariantPattern } from '@/lib/search/arabic';
 import { containing } from '@/lib/search/like';
+import { cleanQuery } from '@/lib/search/text';
 
 export type SearchTerm = {
   /** ILIKE pattern for free-text columns. Wildcards in the query are literal. */
@@ -77,14 +72,9 @@ function stripPrefix(query: string, prefixes: readonly string[]): string | null 
 const PHONE_PUNCTUATION = /^[\d+()\-.\s]+$/;
 
 export function parseSearchTerm(query: string): SearchTerm {
-  // What a paste brings along that the stored text does not have. A name copied
-  // out of an RTL WhatsApp message carries a U+200F, which `trim()` keeps
-  // because it is a format character rather than whitespace, and it made the
-  // query match nobody. Tatweel and tashkeel are decoration a writer may or may
-  // not use; the columns are searched as stored, and they are stored without
-  // them far more often than with, so a query keeping one misses the plain
-  // spelling of the same word.
-  const raw = stripTashkeel(stripInvisible(query)).trim();
+  // Cleaned before anything reads it, so a ticket number or a pasted tracking
+  // number with a U+200F still reads as one.
+  const raw = cleanQuery(query);
 
   // A prefix narrows the search. An empty or unusable value after one degrades
   // to an ordinary text search rather than returning nothing — someone

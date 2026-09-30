@@ -19,6 +19,7 @@ import { can } from '@/lib/auth/permissions';
 import { hiddenChannels, restrictedChannels } from './channel-policy';
 import { rootCommentId } from '@/lib/meta/comments';
 import { sbidMatches, trackingMatches } from '@/lib/shipments/queries';
+import { cleanQuery } from '@/lib/search/text';
 import { parseSearchTerm } from './search';
 import { type InboxCursor, type InboxFilters, PAGE_SIZE, encodeInboxCursor } from './inbox-filters';
 
@@ -164,9 +165,15 @@ export async function listInbox(
   const filtered = [...where];
   let namedNumber: number | null = null;
 
-  if (filters.q) {
+  // Cleaned before the check rather than after: a query that is only a pasted
+  // U+200F, a tatweel or a fatha cleans to '', and searching for '' matched
+  // every ticket with any text on it — and ran both EXISTS scans over the
+  // messages to do it — while dropping the one ticket that has none.
+  const query = cleanQuery(filters.q);
+
+  if (query) {
     const { pattern, arabicPattern, number, phonePattern, trackingNumber, sbid, scope } =
-      parseSearchTerm(filters.q);
+      parseSearchTerm(query);
 
     // A prefixed query is narrowed to its one clause. That is what makes typing
     // `track:` worth doing — the alternative ORs it into a list that still has
