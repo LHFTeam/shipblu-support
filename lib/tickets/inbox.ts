@@ -199,8 +199,8 @@ export async function listInbox(
       // `InboxCursor` for why the mapped `Date` above cannot serve.
       cursorTime: sql<string>`${conversations.lastMessageAt}::text`,
       tags: conversations.tags,
-      // The newest message body, for the two-line preview in the list. A
-      // correlated subquery keeps this one round trip instead of N+1.
+      // The newest message body, which is the list's one line of what was
+      // said. A correlated subquery keeps this one round trip instead of N+1.
       preview: sql<string | null>`(SELECT m.body_text ${newestVisible})`,
       // False rather than null for a ticket with no message yet: nobody has
       // spoken, so it is not ours.

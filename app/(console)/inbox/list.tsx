@@ -197,15 +197,20 @@ export function InboxList({
                   </span>
                 </div>
 
-                <p className="mt-0.5 truncate text-sm">{row.subject ?? '(no subject)'}</p>
+                {/* The last thing said, by either side, and not the subject: on
+                    every channel but email the subject is the opening message's
+                    text, so showing both put the first and the latest message
+                    on one card. The arrow below says whose this one is. Only a
+                    ticket with no message yet falls back to its subject, rather
+                    than to an empty line.
 
-                {/* The preview repeats the subject on channels that have none of
-                    their own, so it is only shown when it adds something. */}
-                {row.preview && row.preview !== row.subject ? (
-                  <p className="mt-0.5 truncate text-xs text-[var(--muted-foreground)]">
-                    {row.preview}
-                  </p>
-                ) : null}
+                    `dir="auto"` because the console is LTR and most of these
+                    are Arabic: an RTL sentence truncated in an LTR box is cut
+                    at the wrong end, so the card showed the last words of a
+                    long reply and lost the ones that say what it is about. */}
+                <p dir="auto" className="mt-0.5 truncate text-sm">
+                  {row.preview ?? row.subject ?? '(no subject)'}
+                </p>
 
                 <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                   <ChannelBadge channel={row.channel} showLabel={false} />
