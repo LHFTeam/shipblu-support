@@ -53,6 +53,12 @@ const SCRIPT_ID = 'shipblu-chat-embed';
  * its new effects, so a teardown deferred by one task is cancelled by the mount
  * that replaces it, and goes ahead only when nothing did: when the reader has
  * left the help centre.
+ *
+ * That holds because both layouts change in one commit, which nothing above
+ * this one prevents today. A `loading.tsx` at `app/` or `app/help/` would give
+ * each locale a Suspense boundary of its own, the fallback could commit between
+ * the two, and an open chat would close on every language switch. That would
+ * be a regression, not a leak, because the teardown would still run.
  */
 let mounted = 0;
 let pendingTeardown: ReturnType<typeof setTimeout> | null = null;
@@ -77,28 +83,28 @@ function removeChat() {
   const tag = document.getElementById(SCRIPT_ID);
 
   if (!api) {
-    // Still on its way, and it will run wherever the reader is when it lands.
-    // So it is taken down the moment it has — unless they came back meanwhile.
+    // Still on its way: removing the tag would not stop it, and it will run
+    // wherever the reader is when it lands. So it is taken down the moment it
+    // has, unless they came back meanwhile.
     tag?.addEventListener(
       'load',
       () => {
-        if (mounted === 0) chatWidget()?.destroy?.();
+        if (mounted === 0) removeChat();
       },
       { once: true },
     );
     return;
   }
 
-  // A copy cached from before `destroy()` existed, which is at most five
-  // minutes after the deploy that added it. Its elements and its names can be
-  // taken back from here; its listeners cannot, and are harmless without them
-  // until the next full page load.
+  // A copy cached from before `destroy()` existed, at most five minutes after
+  // the deploy that added it. It can be hidden but not stood down, because its
+  // listeners cannot be reached from here. So it keeps its names, and the guard
+  // at the top of the snippet stops a second copy from starting beside it and
+  // having its frame's messages answered by this one. Chat comes back with the
+  // next full page load.
   api.close?.();
   document.getElementById('shipblu-chat-launcher')?.remove();
   document.getElementById('shipblu-chat-frame')?.remove();
-  tag?.remove();
-  delete window.shipbluChat;
-  delete window.__shipbluWidget;
 }
 
 /**
@@ -111,7 +117,7 @@ function removeChat() {
  * cannot slow a page down.
  *
  * The tag is injected here instead of being written into the layout because the
- * language switcher is a client-side navigation: the layout re-renders in the
+ * language switcher is a client-side navigation: the layout is rebuilt in the
  * other language without the document being replaced, so nothing would reload
  * the snippet and the widget would keep answering in the language the visitor
  * arrived in, from the wrong side of the screen. The element is created once,

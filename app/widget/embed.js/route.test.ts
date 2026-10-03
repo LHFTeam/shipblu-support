@@ -159,8 +159,11 @@ function fakePage({ phone }: { phone: boolean }) {
     pageYOffset: 0,
     visualViewport,
     matchMedia: () => ({ matches: phone }),
-    scrollTo() {},
-  }) as FakeTarget & { shipbluChat?: HostApi; __shipbluWidget?: HostApi };
+    scrolls: [] as number[],
+    scrollTo(_x: number, y: number) {
+      window.scrolls.push(y);
+    },
+  }) as FakeTarget & { scrolls: number[]; shipbluChat?: HostApi; __shipbluWidget?: HostApi };
   const document = Object.assign(new FakeTarget(), {
     head,
     body,
@@ -207,6 +210,8 @@ describe('destroy()', () => {
     expect(page.ids(page.body)).toEqual([]);
     expect(page.ids(page.head)).toEqual([]);
     expect(page.body.style.position).toBe('');
+    // The page the reader is moving to has been put in place by its router.
+    expect(page.window.scrolls).toEqual([]);
     expect(page.window.live()).toEqual([]);
     expect(page.document.live()).toEqual([]);
     expect(page.visualViewport.live()).toEqual([]);

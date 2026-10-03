@@ -360,7 +360,12 @@ export async function GET() {
     body.style.width = '100%';
   }
 
-  function releasePage() {
+  /**
+   * \`stay\` is for a page the visitor is leaving: its router has already put
+   * the next page where it belongs, and scrolling that to where this one was
+   * would move it under them.
+   */
+  function releasePage(stay) {
     if (!pinned) return;
 
     var body = document.body;
@@ -370,7 +375,7 @@ export async function GET() {
     body.style.left = pinned.left;
     body.style.right = pinned.right;
     body.style.width = pinned.width;
-    window.scrollTo(0, pinned.offset);
+    if (!stay) window.scrollTo(0, pinned.offset);
 
     pinned = null;
   }
@@ -715,7 +720,7 @@ export async function GET() {
     // body, and the page the visitor is moving to cannot scroll until it is
     // let go.
     open = false;
-    releasePage();
+    releasePage(true);
 
     window.removeEventListener('resize', onViewportChange);
     window.removeEventListener('orientationchange', onViewportChange);
