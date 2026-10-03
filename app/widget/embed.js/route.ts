@@ -535,6 +535,9 @@ export async function GET() {
   }
 
   function ensureFrame() {
+    // Ahead of everything, so a stale reference stays inert however the frame
+    // variable was left.
+    if (destroyed) return null;
     if (iframe) return iframe;
 
     /*
@@ -543,7 +546,7 @@ export async function GET() {
      * be built by the click on the launcher, which cannot happen before there is
      * a body to draw it in.
      */
-    if (destroyed || !document.body) return null;
+    if (!document.body) return null;
 
     iframe = document.createElement('iframe');
     iframe.id = 'shipblu-chat-frame';
@@ -700,9 +703,14 @@ export async function GET() {
    * a reload. The launcher and the frame hang off \`document.body\`, outside
    * anything a framework renders, so a single-page app navigating away leaves
    * them behind on whatever it shows next — which is how the help centre's
-   * launcher came to sit over the agent console, once an agent signed in from
-   * the help centre's header and landed in their inbox without the page ever
-   * being replaced.
+   * launcher came to sit over the agent console, once an agent signed in on
+   * the help centre and landed in their inbox without the page ever being
+   * replaced.
+   *
+   * It drops a \`clear()\` that has not reached the frame yet: the frame goes
+   * in the same task, and with it the message or the flag that was waiting
+   * for it. Signing a visitor out and taking the chat away are two steps, and
+   * the first has to finish before the second.
    *
    * The listeners and the API names go with the elements, so loading the
    * snippet again later runs a fresh copy rather than being turned away by the
@@ -738,8 +746,22 @@ export async function GET() {
     });
     iframe = null;
 
-    if (window.shipbluChat === api) delete window.shipbluChat;
-    if (window.__shipbluWidget === api) delete window.__shipbluWidget;
+    if (window.shipbluChat === api) release('shipbluChat');
+    if (window.__shipbluWidget === api) release('__shipbluWidget');
+  }
+
+  /**
+   * A name given up. Deleted where it can be, but a host page that declared
+   * \`var shipbluChat\` at the top level made it a property that cannot be
+   * deleted, and strict mode throws on trying. Undefined satisfies the guard at
+   * the top just as well.
+   */
+  function release(name) {
+    try {
+      delete window[name];
+    } catch (error) {
+      window[name] = undefined;
+    }
   }
 
   function mount() {

@@ -14,7 +14,6 @@ import type { Locale } from '@/lib/kb/locale';
 type ShipbluChat = {
   setLocale?: (locale: string) => void;
   open?: () => void;
-  close?: () => void;
   compose?: (text: string) => void;
   destroy?: () => void;
 };
@@ -55,10 +54,10 @@ const SCRIPT_ID = 'shipblu-chat-embed';
  * left the help centre.
  *
  * That holds because both layouts change in one commit, which nothing above
- * this one prevents today. A `loading.tsx` at `app/` or `app/help/` would give
- * each locale a Suspense boundary of its own, the fallback could commit between
- * the two, and an open chat would close on every language switch. That would
- * be a regression, not a leak, because the teardown would still run.
+ * this one prevents today. A `loading.tsx` in `app/help/` would give each
+ * locale a Suspense boundary of its own, the fallback could commit between the
+ * two, and an open chat would close on every language switch. That would be a
+ * regression, not a leak, because the teardown would still run.
  */
 let mounted = 0;
 let pendingTeardown: ReturnType<typeof setTimeout> | null = null;
@@ -68,9 +67,9 @@ let pendingTeardown: ReturnType<typeof setTimeout> | null = null;
  *
  * The snippet hangs its launcher off `document.body`, which no navigation
  * inside the app replaces, so the launcher used to outlive the layout that
- * loaded it. An agent who signed in from the help centre's header landed in
- * the console without the page ever being reloaded, and found a customer's chat
- * button floating over their inbox (`docs/PROJECT-STATE.md` §6.78).
+ * loaded it. An agent who signed in on the help centre landed in the console
+ * without the page ever being reloaded, and found a customer's chat button
+ * floating over their inbox (`docs/PROJECT-STATE.md` §6.78).
  */
 function removeChat() {
   const api = chatWidget();
@@ -96,15 +95,25 @@ function removeChat() {
     return;
   }
 
-  // A copy cached from before `destroy()` existed, at most five minutes after
-  // the deploy that added it. It can be hidden but not stood down, because its
-  // listeners cannot be reached from here. So it keeps its names, and the guard
-  // at the top of the snippet stops a second copy from starting beside it and
-  // having its frame's messages answered by this one. Chat comes back with the
-  // next full page load.
-  api.close?.();
+  // A copy from before `destroy()` existed: fetched from the cache in the five
+  // minutes after the deploy that added it, and alive for as long as that
+  // document is. It can be hidden but not stood down, because its listeners
+  // cannot be reached from here, and its own `close()` would build a frame it
+  // never had and scroll the page the reader just arrived on. So the elements
+  // go by id, and the body it may have pinned is let go directly, since the
+  // help centre's body carries no inline style of its own. The names are kept,
+  // but as an empty object, so the guard at the top of the snippet still
+  // refuses a second copy whose frame this one would answer. Nothing finds a
+  // method on it, and "Ask support" falls back to its link. Chat comes back
+  // with the next full page load.
   document.getElementById('shipblu-chat-launcher')?.remove();
   document.getElementById('shipblu-chat-frame')?.remove();
+  if (document.body.style.position === 'fixed') {
+    for (const property of ['position', 'top', 'left', 'right', 'width'] as const) {
+      document.body.style[property] = '';
+    }
+  }
+  window.shipbluChat = window.__shipbluWidget = {};
 }
 
 /**

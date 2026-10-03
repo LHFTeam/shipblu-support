@@ -155,7 +155,7 @@ export default async function KbLayout({
         support" falls back to the form link it already carries as its `href`,
         which is exactly what that fallback is there for. And taken back down
         when this layout goes, for a reader who signs in here and is sent to the
-        console without a reload — see `removeChat`.
+        console without a reload — see `ChatWidget`.
       */}
       {isTeamMember ? null : <ChatWidget locale={locale} />}
     </div>

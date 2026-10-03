@@ -149,7 +149,7 @@ class FakeNode extends FakeTarget {
 
 type HostApi = Record<string, (...args: unknown[]) => void>;
 
-function fakePage({ phone }: { phone: boolean }) {
+function fakePage({ phone, loading = false }: { phone: boolean; loading?: boolean }) {
   const head = new FakeNode('head');
   const body = new FakeNode('body');
   const visualViewport = Object.assign(new FakeTarget(), { width: 390, height: 844, offsetTop: 0 });
@@ -163,12 +163,17 @@ function fakePage({ phone }: { phone: boolean }) {
     scrollTo(_x: number, y: number) {
       window.scrolls.push(y);
     },
-  }) as FakeTarget & { scrolls: number[]; shipbluChat?: HostApi; __shipbluWidget?: HostApi };
+  }) as FakeTarget & {
+    pageYOffset: number;
+    scrolls: number[];
+    shipbluChat?: HostApi;
+    __shipbluWidget?: HostApi;
+  };
   const document = Object.assign(new FakeTarget(), {
     head,
     body,
     documentElement: { scrollTop: 0 },
-    readyState: 'complete',
+    readyState: loading ? 'loading' : 'complete',
     currentScript: null as FakeNode | null,
     createElement: (tag: string) => new FakeNode(tag),
     createElementNS: (_ns: string, tag: string) => new FakeNode(tag),
@@ -186,9 +191,15 @@ function fakePage({ phone }: { phone: boolean }) {
     return tag;
   }
 
+  /** The parser reaching the end of the document. */
+  function parsed() {
+    document.readyState = 'interactive';
+    for (const listener of document.listeners.get('DOMContentLoaded') ?? []) listener();
+  }
+
   const ids = (node: FakeNode) => node.childNodes.map((child) => child.id || child.tagName);
 
-  return { window, document, visualViewport, head, body, load, ids };
+  return { window, document, visualViewport, head, body, load, parsed, ids };
 }
 
 describe('destroy()', () => {
@@ -226,15 +237,20 @@ describe('destroy()', () => {
    */
   it('leaves a stale reference inert and makes room for a fresh copy', async () => {
     const source = await (await GET()).text();
-    const page = fakePage({ phone: false });
+    const page = fakePage({ phone: true });
 
     page.load(source);
     const stale = page.window.shipbluChat!;
+    // Opened before it goes, so a frame existed: on a phone, a stale open()
+    // that reached it again would pin the next page's body.
+    stale.open!();
     stale.destroy!();
 
     stale.open!();
     stale.compose!('Tracking number: 1755021358719');
+    stale.toggle!();
     expect(page.ids(page.body)).toEqual([]);
+    expect(page.body.style.position).toBe('');
 
     page.load(source);
     const fresh = page.window.shipbluChat!;
@@ -243,5 +259,43 @@ describe('destroy()', () => {
 
     fresh.open!();
     expect(page.ids(page.body)).toEqual(['script', 'shipblu-chat-launcher', 'shipblu-chat-frame']);
+  });
+
+  it('does not draw the launcher when the page finishes parsing after it went', async () => {
+    const source = await (await GET()).text();
+    const page = fakePage({ phone: false, loading: true });
+
+    page.load(source);
+    page.window.shipbluChat!.destroy!();
+    page.parsed();
+
+    expect(page.ids(page.body)).toEqual([]);
+    expect(page.document.live()).toEqual([]);
+  });
+
+  it('gives up a name the host page declared with a top-level var', async () => {
+    const source = await (await GET()).text();
+    const page = fakePage({ phone: false });
+    // What `var shipbluChat` at the top of a classic script makes it.
+    Object.defineProperty(page.window, 'shipbluChat', { writable: true, configurable: false });
+
+    page.load(source);
+    expect(() => page.window.shipbluChat!.destroy!()).not.toThrow();
+
+    expect(page.window.shipbluChat).toBeUndefined();
+    expect(page.window.__shipbluWidget).toBeUndefined();
+  });
+
+  /** The scroll is withheld from `destroy()` only; a visitor closing the panel gets their place back. */
+  it('still returns the page to where it was when the panel is closed', async () => {
+    const source = await (await GET()).text();
+    const page = fakePage({ phone: true });
+    page.window.pageYOffset = 500;
+
+    page.load(source);
+    page.window.shipbluChat!.open!();
+    page.window.shipbluChat!.close!();
+
+    expect(page.window.scrolls).toEqual([500]);
   });
 });

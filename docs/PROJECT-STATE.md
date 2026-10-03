@@ -442,13 +442,13 @@ article — which the knowledge panel inside the composer is built to make them 
 ticket into their own queue. `viewerIsTeamMember()` in `lib/widget/audience.ts`
 reads the session rather than the cookie, because a stale cookie hiding the
 launcher would take live chat away from a customer silently and for good, and
-the help layout leaves `ChatWidget` out for anyone the console recognises. A
-launcher that loaded while an agent was still signed out is taken back down
-when they leave the help centre, since signing in from its header reaches the
-console without a reload (§6.78). Only on the pages we render: `embed.js` is
-cached publicly for five minutes, so a merchant's own site cannot be told this
-without either dropping that cache or letting a shared one hand a reader an
-answer about somebody else.
+the help layout leaves `ChatWidget` out for anyone the console recognises. Only
+on the pages we render: `embed.js` is cached publicly for five minutes, so a
+merchant's own site cannot be told this without either dropping that cache or
+letting a shared one hand a reader an answer about somebody else. A launcher
+that loaded while an agent was still signed out is taken back down when they
+leave the help centre, since signing in there reaches the console without a
+reload (§6.78).
 
 **The bot channel is live, and everything else is not.** This is the single most
 important thing to understand about the current state, and the easiest to read
@@ -4309,27 +4309,54 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     _loads_. The snippet appends its launcher to `document.body`, outside
     anything React renders, and nothing ever took it back off. The bare
     hostname opens the Arabic help centre (`app/page.tsx`), so an agent who is
-    signed out loads the launcher there like any customer would. Signing in
-    from the header form ends in `redirect('/inbox')` from a server action,
-    and that is a client-side navigation: both surfaces share the root layout,
-    the document is never replaced, and the launcher stays put. A panel left
-    open full screen also left `position: fixed` on the body.
+    signed out loads the launcher there like any customer would. The header's
+    Sign in link leads to the form on `/{locale}/account/login`, whose
+    `portalSignIn` action sends an agent on with
+    `redirect(safePath(next, '/inbox'))`. A redirect from a server action is a
+    client-side navigation: both surfaces share the root layout, the document
+    is never replaced, and the launcher stays put. The console's own `/login`
+    does the same after a visit to the help centre and a press of Back. A
+    panel left open full screen also covered the whole console and left
+    `position: fixed` on the body.
 
     The gate cannot reach this, because the gate is a render decision and the
     launcher is not rendered. The fix is a lifetime. The snippet gained
-    `destroy()`, which removes the launcher, the frame, its stylesheet, its own
-    tag and every listener it added, lets go of a pinned body, and gives up the
-    `shipbluChat` name, so a later load runs a fresh copy. `ChatWidget` calls it
-    when the help layout goes for good. A language switch also unmounts that
-    layout, because the locale is part of its segment key, and a teardown on
-    every unmount would close an open conversation. So the teardown waits one
-    task, and the replacing mount cancels it (`removeChat` in
-    `app/help/[locale]/chat.tsx`). The tests run the served snippet in a fake
-    DOM that records every listener, and fail if `destroy()` leaves one behind.
+    `destroy()`. It removes the launcher, the frame, its stylesheet and its own
+    tag, and every listener it added to the window, the document and the visual
+    viewport. It lets go of a pinned body without scrolling the page the reader
+    arrived on, and it gives up the `shipbluChat` name so a later load runs a
+    fresh copy. `ChatWidget` calls it, through `removeChat`, when the help
+    layout goes for good. A language switch also unmounts that layout, because
+    the locale is part of its segment key, and a teardown on every unmount
+    would close an open conversation. So `ChatWidget`'s second effect defers
+    the teardown by one task, and the replacing mount, which lands in the same
+    commit, cancels it. A `loading.tsx` in `app/help/` would split that commit
+    in two, and an open chat would then close on every switch. A snippet still
+    loading when the reader leaves is torn down when it lands. Removing its tag
+    would not have stopped it. A copy from before `destroy()` existed is hidden
+    rather than stood down.
+
+    Verified in Chromium at a phone size against a local build, on `main` and
+    on the fix:
+    - the header sign-in, with the panel open, closed and never opened;
+    - the console's `/login` route;
+    - Back and Forward between the two surfaces;
+    - a snippet held in flight past the sign-in;
+    - a language switch with the panel open, which stays open.
+
+    On `main` the launcher, or the whole panel, was on `/inbox`; with the fix it
+    was on no console page, and no page error was raised. The unit tests run the
+    served snippet in a fake DOM that records every listener on those three
+    targets, and fail if `destroy()` leaves one behind.
+
+    Still open: a help-centre tab that was already open when its reader signed
+    in somewhere else keeps its launcher on help pages until it reloads. The
+    layout is not re-rendered by a soft navigation, so the gate is not asked
+    again. The launcher never reaches the console that way.
 
     Generally: anything a script hangs off `document.body` in this app outlives
-    the page that put it there, because no navigation inside the app replaces
-    the body. A layout-level gate on what loads does not cover what is already
+    the page that put it there, because no client-side navigation replaces the
+    body. A layout-level gate on what loads does not cover what is already
     loaded.
 
 ## 7. Verification already done
