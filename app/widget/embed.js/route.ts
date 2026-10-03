@@ -36,14 +36,15 @@ export async function GET() {
    * \`__shipbluWidget\` is the name this shipped under and stays an alias: a help
    * centre page held in a back/forward cache still calls it.
    */
-  window.shipbluChat = window.__shipbluWidget = {
+  var api = window.shipbluChat = window.__shipbluWidget = {
     identify: identify,
     clear: clear,
     setLocale: setLocale,
     compose: compose,
     open: function () { toggle(true); },
     close: function () { toggle(false); },
-    toggle: function () { toggle(); }
+    toggle: function () { toggle(); },
+    destroy: destroy
   };
 
   // The names the frame and this script speak to each other, from
@@ -132,6 +133,9 @@ export async function GET() {
 
   /** The host page's scroll position while it is pinned, or null. */
   var pinned = null;
+
+  /** Set by \`destroy()\`, after which nothing here may reach the page again. */
+  var destroyed = false;
 
   var launcher = document.createElement('button');
   launcher.type = 'button';
@@ -534,7 +538,7 @@ export async function GET() {
      * be built by the click on the launcher, which cannot happen before there is
      * a body to draw it in.
      */
-    if (!document.body) return null;
+    if (destroyed || !document.body) return null;
 
     iframe = document.createElement('iframe');
     iframe.id = 'shipblu-chat-frame';
@@ -618,7 +622,9 @@ export async function GET() {
     window.visualViewport.addEventListener('scroll', onViewportChange);
   }
 
-  window.addEventListener('message', function (event) {
+  window.addEventListener('message', onMessage);
+
+  function onMessage(event) {
     // The origin check is the whole security of this listener: without it any
     // page could post a message that opens the widget or fakes an unread count.
     if (event.origin !== BASE) return;
@@ -680,9 +686,59 @@ export async function GET() {
     }
 
     if (data.type === WIDGET_SAYS.close) toggle(false);
-  });
+  }
+
+  /**
+   * Take back off the page everything this script put on it, and stand down.
+   *
+   * For a host page that leaves the part of itself carrying the chat without
+   * a reload. The launcher and the frame hang off \`document.body\`, outside
+   * anything a framework renders, so a single-page app navigating away leaves
+   * them behind on whatever it shows next — which is how the help centre's
+   * launcher came to sit over the agent console, once an agent signed in from
+   * the help centre's header and landed in their inbox without the page ever
+   * being replaced.
+   *
+   * The listeners and the API names go with the elements, so loading the
+   * snippet again later runs a fresh copy rather than being turned away by the
+   * duplicate guard at the top. A reference a page kept to the old object can
+   * still be called, and reaches nothing: the frame is never rebuilt and the
+   * launcher never re-appended. The visitor's token stays where it is — this
+   * removes a chat from the page, it does not sign anyone out of one, which is
+   * what \`clear()\` is for.
+   */
+  function destroy() {
+    if (destroyed) return;
+    destroyed = true;
+
+    // First: a panel open full screen on a phone has pinned the host page's
+    // body, and the page the visitor is moving to cannot scroll until it is
+    // let go.
+    open = false;
+    releasePage();
+
+    window.removeEventListener('resize', onViewportChange);
+    window.removeEventListener('orientationchange', onViewportChange);
+    if (window.visualViewport) {
+      window.visualViewport.removeEventListener('resize', onViewportChange);
+      window.visualViewport.removeEventListener('scroll', onViewportChange);
+    }
+    window.removeEventListener('message', onMessage);
+    document.removeEventListener('DOMContentLoaded', mount);
+
+    // The tag too: it is what a host page checks for before adding one, and a
+    // page that finds it would conclude the chat is already there.
+    [launcher, iframe, sheet, script].forEach(function (node) {
+      if (node && node.parentNode) node.parentNode.removeChild(node);
+    });
+    iframe = null;
+
+    if (window.shipbluChat === api) delete window.shipbluChat;
+    if (window.__shipbluWidget === api) delete window.__shipbluWidget;
+  }
 
   function mount() {
+    if (destroyed) return;
     document.body.appendChild(launcher);
   }
 

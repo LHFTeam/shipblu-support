@@ -79,6 +79,7 @@ window.shipbluChat.open(); // e.g. from a "Contact support" menu item
 window.shipbluChat.close();
 window.shipbluChat.toggle();
 window.shipbluChat.compose('Tracking number: 1755021358719\n\n'); // open with a draft
+window.shipbluChat.destroy(); // take the chat off the page entirely
 ```
 
 **`compose(text)` opens the panel with `text` already in the composer, and
@@ -93,6 +94,16 @@ composer only moves the caret.
 The text is capped at 1,000 characters and is a draft like any other, so keep
 it to the facts the agent needs first. Called before the frame exists, it waits
 for it; called on a panel that is already open, it lands immediately.
+
+**`destroy()` takes the chat off the page and stands it down**: the launcher,
+the panel, every listener the snippet added, and the `shipbluChat` name itself.
+It is for a single-page app moving to a part of itself that should not carry a
+chat, without a reload. The launcher hangs off `document.body`, outside anything
+your framework renders, so nothing else will remove it. It does not sign the
+visitor out, because their token stays in the widget's own storage, so call
+`clear()` first if you mean that too. Appending the tag again afterwards loads a
+working copy. A reference you kept to the old object stays callable and does
+nothing.
 
 **Call `clear()` when the user signs out.** The visitor's token lives in the
 widget's own storage, so it outlives the dashboard's session entirely: on a
@@ -166,6 +177,12 @@ opens against their own queue is a contact and a conversation with nobody
 behind either, in the tables the reports are drawn from.
 `viewerIsTeamMember()` in `lib/widget/audience.ts` is the decision, taken on the
 server, per request.
+
+The launcher also leaves when the reader leaves those pages without a reload.
+An agent who signs in from the help centre's header reaches the console by a
+client-side navigation, and the launcher that loaded while they were signed out
+used to ride along onto their inbox. `ChatWidget` calls `destroy()` when the
+help centre's layout goes for good.
 
 **A host page of your own gets no such filtering and should not expect any.**
 `embed.js` is one publicly cached response shared by every reader of every site

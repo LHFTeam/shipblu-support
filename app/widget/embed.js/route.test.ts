@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 import { HOST_SAYS, SOURCE, WIDGET_SAYS } from '@/lib/widget/protocol';
 import { GET } from './route';
@@ -36,7 +37,17 @@ describe('the embed snippet', () => {
   it('exposes the whole host API', async () => {
     const body = await (await GET()).text();
 
-    for (const method of ['identify', 'clear', 'setLocale', 'compose', 'open', 'close', 'toggle']) {
+    const methods = [
+      'identify',
+      'clear',
+      'setLocale',
+      'compose',
+      'open',
+      'close',
+      'toggle',
+      'destroy',
+    ];
+    for (const method of methods) {
       expect(body).toMatch(new RegExp(`^\\s*${method}:`, 'm'));
     }
   });
@@ -59,5 +70,173 @@ describe('the embed snippet', () => {
     }
 
     expect(body).not.toMatch(/'shipblu-(host|widget)'/);
+  });
+});
+
+/**
+ * Just enough of a browser to run the snippet in. Every node knows its parent,
+ * and every listener added to the window, the document or the visual viewport
+ * is recorded until it is removed — so a test can ask whether `destroy()`
+ * handed back everything the snippet took, which is the whole of its job: a
+ * listener it forgets keeps answering on whatever page the reader moved to.
+ */
+type Listener = (...args: unknown[]) => void;
+
+class FakeTarget {
+  readonly listeners = new Map<string, Set<Listener>>();
+
+  addEventListener(type: string, listener: Listener) {
+    const set = this.listeners.get(type) ?? new Set<Listener>();
+    set.add(listener);
+    this.listeners.set(type, set);
+  }
+
+  removeEventListener(type: string, listener: Listener) {
+    this.listeners.get(type)?.delete(listener);
+  }
+
+  live(): string[] {
+    return [...this.listeners].filter(([, set]) => set.size > 0).map(([type]) => type);
+  }
+}
+
+class FakeNode extends FakeTarget {
+  parentNode: FakeNode | null = null;
+  readonly childNodes: FakeNode[] = [];
+  readonly attributes = new Map<string, string>();
+  // A real style declaration reads '' for anything unset, and the snippet saves
+  // and restores the body's styles by reading them.
+  readonly style: Record<string, string> = new Proxy({} as Record<string, string>, {
+    get: (declared, name: string) => declared[name] ?? '',
+  });
+  readonly dataset: Record<string, string> = {};
+  readonly contentWindow = { postMessage() {} };
+  id = '';
+  type = '';
+  title = '';
+  src = '';
+  textContent = '';
+
+  constructor(readonly tagName: string) {
+    super();
+  }
+
+  get firstChild(): FakeNode | null {
+    return this.childNodes[0] ?? null;
+  }
+
+  appendChild(child: FakeNode): FakeNode {
+    child.parentNode?.removeChild(child);
+    child.parentNode = this;
+    this.childNodes.push(child);
+    return child;
+  }
+
+  removeChild(child: FakeNode): FakeNode {
+    this.childNodes.splice(this.childNodes.indexOf(child), 1);
+    child.parentNode = null;
+    return child;
+  }
+
+  setAttribute(name: string, value: unknown) {
+    this.attributes.set(name, String(value));
+  }
+
+  getAttribute(name: string): string | null {
+    return this.attributes.get(name) ?? null;
+  }
+}
+
+type HostApi = Record<string, (...args: unknown[]) => void>;
+
+function fakePage({ phone }: { phone: boolean }) {
+  const head = new FakeNode('head');
+  const body = new FakeNode('body');
+  const visualViewport = Object.assign(new FakeTarget(), { width: 390, height: 844, offsetTop: 0 });
+  const window = Object.assign(new FakeTarget(), {
+    location: { href: 'https://help.example/ar' },
+    innerHeight: 844,
+    pageYOffset: 0,
+    visualViewport,
+    matchMedia: () => ({ matches: phone }),
+    scrollTo() {},
+  }) as FakeTarget & { shipbluChat?: HostApi; __shipbluWidget?: HostApi };
+  const document = Object.assign(new FakeTarget(), {
+    head,
+    body,
+    documentElement: { scrollTop: 0 },
+    readyState: 'complete',
+    currentScript: null as FakeNode | null,
+    createElement: (tag: string) => new FakeNode(tag),
+    createElementNS: (_ns: string, tag: string) => new FakeNode(tag),
+  });
+
+  /** Adds a tag to the body and runs the snippet as that tag, as a browser would. */
+  function load(source: string): FakeNode {
+    const tag = new FakeNode('script');
+    tag.src = 'https://help.example/widget/embed.js';
+    tag.setAttribute('data-locale', 'ar');
+    body.appendChild(tag);
+    document.currentScript = tag;
+    runInNewContext(source, { window, document, URL });
+    document.currentScript = null;
+    return tag;
+  }
+
+  const ids = (node: FakeNode) => node.childNodes.map((child) => child.id || child.tagName);
+
+  return { window, document, visualViewport, head, body, load, ids };
+}
+
+describe('destroy()', () => {
+  it('takes back every node and listener the snippet added, and lets go of the body', async () => {
+    const source = await (await GET()).text();
+    const page = fakePage({ phone: true });
+
+    page.load(source);
+    const api = page.window.shipbluChat!;
+    // Open on a phone: the panel goes full screen and pins the host page.
+    api.open!();
+
+    expect(page.ids(page.body)).toEqual(['script', 'shipblu-chat-launcher', 'shipblu-chat-frame']);
+    expect(page.body.style.position).toBe('fixed');
+    expect(page.window.live().length).toBeGreaterThan(0);
+
+    api.destroy!();
+
+    expect(page.ids(page.body)).toEqual([]);
+    expect(page.ids(page.head)).toEqual([]);
+    expect(page.body.style.position).toBe('');
+    expect(page.window.live()).toEqual([]);
+    expect(page.document.live()).toEqual([]);
+    expect(page.visualViewport.live()).toEqual([]);
+    expect(page.window.shipbluChat).toBeUndefined();
+    expect(page.window.__shipbluWidget).toBeUndefined();
+  });
+
+  /**
+   * The two halves of "stand down": a page holding the old object cannot bring
+   * the chat back by calling it, and the snippet loaded again is a working copy
+   * rather than a duplicate the guard turns away.
+   */
+  it('leaves a stale reference inert and makes room for a fresh copy', async () => {
+    const source = await (await GET()).text();
+    const page = fakePage({ phone: false });
+
+    page.load(source);
+    const stale = page.window.shipbluChat!;
+    stale.destroy!();
+
+    stale.open!();
+    stale.compose!('Tracking number: 1755021358719');
+    expect(page.ids(page.body)).toEqual([]);
+
+    page.load(source);
+    const fresh = page.window.shipbluChat!;
+    expect(fresh).not.toBe(stale);
+    expect(page.ids(page.body)).toEqual(['script', 'shipblu-chat-launcher']);
+
+    fresh.open!();
+    expect(page.ids(page.body)).toEqual(['script', 'shipblu-chat-launcher', 'shipblu-chat-frame']);
   });
 });

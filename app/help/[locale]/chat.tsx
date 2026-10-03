@@ -14,7 +14,9 @@ import type { Locale } from '@/lib/kb/locale';
 type ShipbluChat = {
   setLocale?: (locale: string) => void;
   open?: () => void;
+  close?: () => void;
   compose?: (text: string) => void;
+  destroy?: () => void;
 };
 
 declare global {
@@ -40,6 +42,66 @@ export function chatWidget(): ShipbluChat | null {
 const SCRIPT_ID = 'shipblu-chat-embed';
 
 /**
+ * How many help-centre layouts are on screen, and the teardown waiting to see
+ * whether another arrives.
+ *
+ * Module state rather than a ref because the question spans instances. The
+ * language switch does not re-render the layout, it replaces it — the locale is
+ * part of its segment key — so one `ChatWidget` unmounts and the next mounts in
+ * the same commit, and tearing down on unmount alone would close an open
+ * conversation on every switch. React runs a commit's cleanups before any of
+ * its new effects, so a teardown deferred by one task is cancelled by the mount
+ * that replaces it, and goes ahead only when nothing did: when the reader has
+ * left the help centre.
+ */
+let mounted = 0;
+let pendingTeardown: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Take the chat off the page, for a reader who has left the help centre.
+ *
+ * The snippet hangs its launcher off `document.body`, which no navigation
+ * inside the app replaces, so the launcher used to outlive the layout that
+ * loaded it. An agent who signed in from the help centre's header landed in
+ * the console without the page ever being reloaded, and found a customer's chat
+ * button floating over their inbox (`docs/PROJECT-STATE.md` §6.78).
+ */
+function removeChat() {
+  const api = chatWidget();
+
+  if (api?.destroy) {
+    api.destroy();
+    return;
+  }
+
+  const tag = document.getElementById(SCRIPT_ID);
+
+  if (!api) {
+    // Still on its way, and it will run wherever the reader is when it lands.
+    // So it is taken down the moment it has — unless they came back meanwhile.
+    tag?.addEventListener(
+      'load',
+      () => {
+        if (mounted === 0) chatWidget()?.destroy?.();
+      },
+      { once: true },
+    );
+    return;
+  }
+
+  // A copy cached from before `destroy()` existed, which is at most five
+  // minutes after the deploy that added it. Its elements and its names can be
+  // taken back from here; its listeners cannot, and are harmless without them
+  // until the next full page load.
+  api.close?.();
+  document.getElementById('shipblu-chat-launcher')?.remove();
+  document.getElementById('shipblu-chat-frame')?.remove();
+  tag?.remove();
+  delete window.shipbluChat;
+  delete window.__shipbluWidget;
+}
+
+/**
  * Live chat on the help centre.
  *
  * The help centre loads the same `/widget/embed.js` a merchant would paste into
@@ -58,7 +120,9 @@ const SCRIPT_ID = 'shipblu-chat-embed';
  * lands after.
  *
  * Nothing is rendered: the snippet appends the launcher to `document.body`
- * itself, which is what it does on every other host page.
+ * itself, which is what it does on every other host page. So nothing React
+ * does removes it either, and leaving the help centre has to say so — see
+ * `removeChat`.
  */
 export function ChatWidget({ locale }: { locale: Locale }) {
   useEffect(() => {
@@ -80,6 +144,25 @@ export function ChatWidget({ locale }: { locale: Locale }) {
     script.dataset.locale = locale;
     document.body.appendChild(script);
   }, [locale]);
+
+  useEffect(() => {
+    mounted += 1;
+    if (pendingTeardown !== null) {
+      clearTimeout(pendingTeardown);
+      pendingTeardown = null;
+    }
+
+    return () => {
+      mounted -= 1;
+      if (mounted > 0) return;
+
+      if (pendingTeardown !== null) clearTimeout(pendingTeardown);
+      pendingTeardown = setTimeout(() => {
+        pendingTeardown = null;
+        if (mounted === 0) removeChat();
+      }, 0);
+    };
+  }, []);
 
   return null;
 }

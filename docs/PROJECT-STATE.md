@@ -442,10 +442,13 @@ article — which the knowledge panel inside the composer is built to make them 
 ticket into their own queue. `viewerIsTeamMember()` in `lib/widget/audience.ts`
 reads the session rather than the cookie, because a stale cookie hiding the
 launcher would take live chat away from a customer silently and for good, and
-the help layout leaves `ChatWidget` out for anyone the console recognises. Only
-on the pages we render: `embed.js` is cached publicly for five minutes, so a
-merchant's own site cannot be told this without either dropping that cache or
-letting a shared one hand a reader an answer about somebody else.
+the help layout leaves `ChatWidget` out for anyone the console recognises. A
+launcher that loaded while an agent was still signed out is taken back down
+when they leave the help centre, since signing in from its header reaches the
+console without a reload (§6.78). Only on the pages we render: `embed.js` is
+cached publicly for five minutes, so a merchant's own site cannot be told this
+without either dropping that cache or letting a shared one hand a reader an
+answer about somebody else.
 
 **The bot channel is live, and everything else is not.** This is the single most
 important thing to understand about the current state, and the easiest to read
@@ -4298,6 +4301,36 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
       whole-second `sentAt` and ours with `now()`, so an answer landing in the
       same second as our reply can still sort before it. Their new tickets
       also still take `created_at` from the insert.
+
+78. **The help centre's chat launcher rode into the console.** _2026-10-03,
+    reported from a phone: the launcher over the inbox, bottom-left, so it was
+    the Arabic one._ `viewerIsTeamMember()` keeps `ChatWidget` out of the help
+    layout for a signed-in agent, and that only decides what a fresh render
+    _loads_. The snippet appends its launcher to `document.body`, outside
+    anything React renders, and nothing ever took it back off. The bare
+    hostname opens the Arabic help centre (`app/page.tsx`), so an agent who is
+    signed out loads the launcher there like any customer would. Signing in
+    from the header form ends in `redirect('/inbox')` from a server action,
+    and that is a client-side navigation: both surfaces share the root layout,
+    the document is never replaced, and the launcher stays put. A panel left
+    open full screen also left `position: fixed` on the body.
+
+    The gate cannot reach this, because the gate is a render decision and the
+    launcher is not rendered. The fix is a lifetime. The snippet gained
+    `destroy()`, which removes the launcher, the frame, its stylesheet, its own
+    tag and every listener it added, lets go of a pinned body, and gives up the
+    `shipbluChat` name, so a later load runs a fresh copy. `ChatWidget` calls it
+    when the help layout goes for good. A language switch also unmounts that
+    layout, because the locale is part of its segment key, and a teardown on
+    every unmount would close an open conversation. So the teardown waits one
+    task, and the replacing mount cancels it (`removeChat` in
+    `app/help/[locale]/chat.tsx`). The tests run the served snippet in a fake
+    DOM that records every listener, and fail if `destroy()` leaves one behind.
+
+    Generally: anything a script hangs off `document.body` in this app outlives
+    the page that put it there, because no navigation inside the app replaces
+    the body. A layout-level gate on what loads does not cover what is already
+    loaded.
 
 ## 7. Verification already done
 

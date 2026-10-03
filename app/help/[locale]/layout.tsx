@@ -153,7 +153,9 @@ export default async function KbLayout({
         Left out rather than hidden with CSS: the snippet is then never
         fetched, `chatWidget()` stays null, and the tracking page's "Ask
         support" falls back to the form link it already carries as its `href`,
-        which is exactly what that fallback is there for.
+        which is exactly what that fallback is there for. And taken back down
+        when this layout goes, for a reader who signs in here and is sent to the
+        console without a reload — see `removeChat`.
       */}
       {isTeamMember ? null : <ChatWidget locale={locale} />}
     </div>
