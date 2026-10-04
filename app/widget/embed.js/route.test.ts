@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 import { HOST_SAYS, SOURCE, WIDGET_SAYS } from '@/lib/widget/protocol';
 import { GET } from './route';
@@ -36,7 +37,10 @@ describe('the embed snippet', () => {
   it('exposes the whole host API', async () => {
     const body = await (await GET()).text();
 
-    for (const method of ['identify', 'clear', 'setLocale', 'compose', 'open', 'close', 'toggle']) {
+    // Not `destroy`, which is on the object for the help centre and kept out
+    // of the documented contract on purpose; its own tests are below.
+    const methods = ['identify', 'clear', 'setLocale', 'compose', 'open', 'close', 'toggle'];
+    for (const method of methods) {
       expect(body).toMatch(new RegExp(`^\\s*${method}:`, 'm'));
     }
   });
@@ -59,5 +63,272 @@ describe('the embed snippet', () => {
     }
 
     expect(body).not.toMatch(/'shipblu-(host|widget)'/);
+  });
+});
+
+/**
+ * Just enough of a browser to run the snippet in. Every node knows its parent,
+ * and every listener added to the window, the document or the visual viewport
+ * is recorded until it is removed — so a test can ask whether `destroy()`
+ * handed back everything the snippet took, which is the whole of its job: a
+ * listener it forgets keeps answering on whatever page the reader moved to.
+ */
+type Listener = (...args: unknown[]) => void;
+
+class FakeTarget {
+  readonly listeners = new Map<string, Set<Listener>>();
+
+  addEventListener(type: string, listener: Listener) {
+    const set = this.listeners.get(type) ?? new Set<Listener>();
+    set.add(listener);
+    this.listeners.set(type, set);
+  }
+
+  removeEventListener(type: string, listener: Listener) {
+    this.listeners.get(type)?.delete(listener);
+  }
+
+  live(): string[] {
+    return [...this.listeners].filter(([, set]) => set.size > 0).map(([type]) => type);
+  }
+}
+
+class FakeNode extends FakeTarget {
+  parentNode: FakeNode | null = null;
+  readonly childNodes: FakeNode[] = [];
+  readonly attributes = new Map<string, string>();
+  // A real style declaration reads '' for anything unset, and the snippet saves
+  // and restores the body's styles by reading them.
+  readonly style: Record<string, string> = new Proxy({} as Record<string, string>, {
+    get: (declared, name: string) => declared[name] ?? '',
+  });
+  readonly dataset: Record<string, string> = {};
+  private readonly frameWindow = { postMessage() {} };
+  id = '';
+  type = '';
+  title = '';
+  src = '';
+  textContent = '';
+
+  constructor(readonly tagName: string) {
+    super();
+  }
+
+  /** What a browser gives a frame once it has been taken out of the page. */
+  get contentWindow(): { postMessage(): void } | null {
+    return this.parentNode ? this.frameWindow : null;
+  }
+
+  get firstChild(): FakeNode | null {
+    return this.childNodes[0] ?? null;
+  }
+
+  appendChild(child: FakeNode): FakeNode {
+    child.parentNode?.removeChild(child);
+    child.parentNode = this;
+    this.childNodes.push(child);
+    return child;
+  }
+
+  removeChild(child: FakeNode): FakeNode {
+    this.childNodes.splice(this.childNodes.indexOf(child), 1);
+    child.parentNode = null;
+    return child;
+  }
+
+  setAttribute(name: string, value: unknown) {
+    this.attributes.set(name, String(value));
+  }
+
+  getAttribute(name: string): string | null {
+    return this.attributes.get(name) ?? null;
+  }
+}
+
+type HostApi = Record<string, (...args: unknown[]) => void>;
+
+function fakePage({ phone, loading = false }: { phone: boolean; loading?: boolean }) {
+  const head = new FakeNode('head');
+  const body = new FakeNode('body');
+  const visualViewport = Object.assign(new FakeTarget(), { width: 390, height: 844, offsetTop: 0 });
+  const window = Object.assign(new FakeTarget(), {
+    location: { href: 'https://help.example/ar' },
+    innerHeight: 844,
+    pageYOffset: 0,
+    visualViewport,
+    matchMedia: () => ({ matches: phone }),
+    scrolls: [] as number[],
+    scrollTo(_x: number, y: number) {
+      window.scrolls.push(y);
+    },
+  }) as FakeTarget & {
+    pageYOffset: number;
+    scrolls: number[];
+    shipbluChat?: HostApi;
+    __shipbluWidget?: HostApi;
+  };
+  const document = Object.assign(new FakeTarget(), {
+    head,
+    body,
+    documentElement: { scrollTop: 0 },
+    readyState: loading ? 'loading' : 'complete',
+    currentScript: null as FakeNode | null,
+    createElement: (tag: string) => new FakeNode(tag),
+    createElementNS: (_ns: string, tag: string) => new FakeNode(tag),
+  });
+
+  /** Adds a tag to the body and runs the snippet as that tag, as a browser would. */
+  function load(source: string): FakeNode {
+    const tag = new FakeNode('script');
+    tag.src = 'https://help.example/widget/embed.js';
+    tag.setAttribute('data-locale', 'ar');
+    body.appendChild(tag);
+    document.currentScript = tag;
+    runInNewContext(source, { window, document, URL });
+    document.currentScript = null;
+    return tag;
+  }
+
+  /** The parser reaching the end of the document. */
+  function parsed() {
+    document.readyState = 'interactive';
+    for (const listener of document.listeners.get('DOMContentLoaded') ?? []) listener();
+  }
+
+  const ids = (node: FakeNode) => node.childNodes.map((child) => child.id || child.tagName);
+
+  /** The frame speaking, from the origin the snippet was loaded from. */
+  function frameSays(type: string) {
+    const event = { origin: 'https://help.example', data: { source: SOURCE.widget, type } };
+    for (const listener of window.listeners.get('message') ?? []) listener(event);
+  }
+
+  return { window, document, visualViewport, head, body, load, parsed, frameSays, ids };
+}
+
+describe('destroy()', () => {
+  it('takes back every node and listener the snippet added, and lets go of the body', async () => {
+    const source = await (await GET()).text();
+    const page = fakePage({ phone: true });
+
+    page.load(source);
+    const api = page.window.shipbluChat!;
+    // Open on a phone: the panel goes full screen and pins the host page.
+    api.open!();
+
+    expect(page.ids(page.body)).toEqual(['script', 'shipblu-chat-launcher', 'shipblu-chat-frame']);
+    expect(page.body.style.position).toBe('fixed');
+    expect(page.window.live().length).toBeGreaterThan(0);
+
+    api.destroy!();
+
+    expect(page.ids(page.body)).toEqual([]);
+    expect(page.ids(page.head)).toEqual([]);
+    expect(page.body.style.position).toBe('');
+    // The page the reader is moving to has been put in place by its router.
+    expect(page.window.scrolls).toEqual([]);
+    expect(page.window.live()).toEqual([]);
+    expect(page.document.live()).toEqual([]);
+    expect(page.visualViewport.live()).toEqual([]);
+    expect(page.window.shipbluChat).toBeUndefined();
+    expect(page.window.__shipbluWidget).toBeUndefined();
+  });
+
+  /**
+   * The two halves of "stand down": a page holding the old object cannot bring
+   * the chat back by calling it, and the snippet loaded again is a working copy
+   * rather than a duplicate the guard turns away.
+   */
+  it('leaves a stale reference inert and makes room for a fresh copy', async () => {
+    const source = await (await GET()).text();
+    const page = fakePage({ phone: true });
+
+    page.load(source);
+    const stale = page.window.shipbluChat!;
+    // Opened before it goes, so a frame existed: on a phone, a stale open()
+    // that reached it again would pin the next page's body.
+    stale.open!();
+    stale.destroy!();
+
+    stale.open!();
+    stale.compose!('Tracking number: 1755021358719');
+    stale.toggle!();
+    expect(page.ids(page.body)).toEqual([]);
+    expect(page.body.style.position).toBe('');
+
+    page.load(source);
+    const fresh = page.window.shipbluChat!;
+    expect(fresh).not.toBe(stale);
+    expect(page.ids(page.body)).toEqual(['script', 'shipblu-chat-launcher']);
+
+    fresh.open!();
+    expect(page.ids(page.body)).toEqual(['script', 'shipblu-chat-launcher', 'shipblu-chat-frame']);
+
+    // And a second call on the stale object is about that object only.
+    stale.destroy!();
+    expect(page.window.shipbluChat).toBe(fresh);
+    expect(page.ids(page.body)).toEqual(['script', 'shipblu-chat-launcher', 'shipblu-chat-frame']);
+  });
+
+  /**
+   * A frame that had said it was ready is the case where a stale call would
+   * reach for it: `clear()` and `identify()` post to it directly. Removed from
+   * the page, it has no window to post to, and a call that tried would throw
+   * inside whatever handler the host page made it from.
+   */
+  it('lets a stale reference call into a frame that is gone without throwing', async () => {
+    const source = await (await GET()).text();
+    const page = fakePage({ phone: false });
+
+    page.load(source);
+    const stale = page.window.shipbluChat!;
+    stale.open!();
+    page.frameSays(WIDGET_SAYS.ready);
+    stale.destroy!();
+
+    expect(() => {
+      stale.clear!();
+      stale.identify!({ email: 'merchant@example.com' });
+      stale.compose!('Tracking number: 1755021358719');
+    }).not.toThrow();
+    expect(page.ids(page.body)).toEqual([]);
+  });
+
+  it('does not draw the launcher when the page finishes parsing after it went', async () => {
+    const source = await (await GET()).text();
+    const page = fakePage({ phone: false, loading: true });
+
+    page.load(source);
+    page.window.shipbluChat!.destroy!();
+    page.parsed();
+
+    expect(page.ids(page.body)).toEqual([]);
+    expect(page.document.live()).toEqual([]);
+  });
+
+  it('gives up a name the host page declared with a top-level var', async () => {
+    const source = await (await GET()).text();
+    const page = fakePage({ phone: false });
+    // What `var shipbluChat` at the top of a classic script makes it.
+    Object.defineProperty(page.window, 'shipbluChat', { writable: true, configurable: false });
+
+    page.load(source);
+    expect(() => page.window.shipbluChat!.destroy!()).not.toThrow();
+
+    expect(page.window.shipbluChat).toBeUndefined();
+    expect(page.window.__shipbluWidget).toBeUndefined();
+  });
+
+  /** The scroll is withheld from `destroy()` only; a visitor closing the panel gets their place back. */
+  it('still returns the page to where it was when the panel is closed', async () => {
+    const source = await (await GET()).text();
+    const page = fakePage({ phone: true });
+    page.window.pageYOffset = 500;
+
+    page.load(source);
+    page.window.shipbluChat!.open!();
+    page.window.shipbluChat!.close!();
+
+    expect(page.window.scrolls).toEqual([500]);
   });
 });

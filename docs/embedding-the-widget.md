@@ -167,6 +167,29 @@ behind either, in the tables the reports are drawn from.
 `viewerIsTeamMember()` in `lib/widget/audience.ts` is the decision, taken on the
 server, per request.
 
+The launcher also leaves when the reader leaves those pages without a reload.
+An agent who signs in on the help centre reaches the console by a client-side
+navigation, and the launcher that loaded while they were signed out used to
+ride along onto their inbox. `ChatWidget` in `app/help/chat.tsx` takes it down
+when the help centre's layout goes, through a `destroy()` on the same
+`shipbluChat` object.
+
+**`destroy()` is not part of this contract**, although you will find it on the
+object. It does exactly what the help centre needs, and its limits are ones a
+host page would trip over:
+
+- It leaves the page's scroll position to a router it assumes is about to set
+  one.
+- It drops a `clear()` still on its way to the panel, and leaves no object to
+  sign a visitor out with afterwards.
+- It cannot reach a snippet that has not finished loading.
+- A copy loaded after it reads `shipbluChatSettings` again, so it is told
+  whatever your page said at load rather than what you told the copy it
+  replaced, an identity included.
+
+Do not call it. If you need to take the chat off a page without a reload, ask,
+and it will get a version made for a host page.
+
 **A host page of your own gets no such filtering and should not expect any.**
 `embed.js` is one publicly cached response shared by every reader of every site
 carrying it, so it cannot answer differently for one of them. Nothing about

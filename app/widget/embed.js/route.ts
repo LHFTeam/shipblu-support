@@ -36,14 +36,15 @@ export async function GET() {
    * \`__shipbluWidget\` is the name this shipped under and stays an alias: a help
    * centre page held in a back/forward cache still calls it.
    */
-  window.shipbluChat = window.__shipbluWidget = {
+  var api = window.shipbluChat = window.__shipbluWidget = {
     identify: identify,
     clear: clear,
     setLocale: setLocale,
     compose: compose,
     open: function () { toggle(true); },
     close: function () { toggle(false); },
-    toggle: function () { toggle(); }
+    toggle: function () { toggle(); },
+    destroy: destroy
   };
 
   // The names the frame and this script speak to each other, from
@@ -132,6 +133,9 @@ export async function GET() {
 
   /** The host page's scroll position while it is pinned, or null. */
   var pinned = null;
+
+  /** Set by \`destroy()\`, after which nothing here may reach the page again. */
+  var destroyed = false;
 
   var launcher = document.createElement('button');
   launcher.type = 'button';
@@ -356,7 +360,12 @@ export async function GET() {
     body.style.width = '100%';
   }
 
-  function releasePage() {
+  /**
+   * \`stay\` is for a page the visitor is leaving: its router has already put
+   * the next page where it belongs, and scrolling that to where this one was
+   * would move it under them.
+   */
+  function releasePage(stay) {
     if (!pinned) return;
 
     var body = document.body;
@@ -366,7 +375,7 @@ export async function GET() {
     body.style.left = pinned.left;
     body.style.right = pinned.right;
     body.style.width = pinned.width;
-    window.scrollTo(0, pinned.offset);
+    if (!stay) window.scrollTo(0, pinned.offset);
 
     pinned = null;
   }
@@ -526,6 +535,9 @@ export async function GET() {
   }
 
   function ensureFrame() {
+    // Ahead of everything, so a stale reference stays inert however the frame
+    // variable was left.
+    if (destroyed) return null;
     if (iframe) return iframe;
 
     /*
@@ -618,7 +630,9 @@ export async function GET() {
     window.visualViewport.addEventListener('scroll', onViewportChange);
   }
 
-  window.addEventListener('message', function (event) {
+  window.addEventListener('message', onMessage);
+
+  function onMessage(event) {
     // The origin check is the whole security of this listener: without it any
     // page could post a message that opens the widget or fakes an unread count.
     if (event.origin !== BASE) return;
@@ -680,9 +694,86 @@ export async function GET() {
     }
 
     if (data.type === WIDGET_SAYS.close) toggle(false);
-  });
+  }
+
+  /**
+   * Take back off the page everything this script put on it, and stand down.
+   *
+   * For the help centre, which leaves the part of itself carrying the chat
+   * without a reload. The launcher and the frame hang off \`document.body\`,
+   * outside anything a framework renders, so navigating away left them behind
+   * on whatever came next — which is how the launcher came to sit over the
+   * agent console, once an agent signed in on the help centre and landed in
+   * their inbox without the page ever being replaced.
+   *
+   * **On the object, and deliberately not in the documented host API.** It
+   * does what the help centre needs and no more, and each limit is one a
+   * merchant would trip over:
+   * - It releases a pinned body without scrolling back, because the page being
+   *   left has a router about to place the next one.
+   * - It drops a \`clear()\` that has not reached the frame yet, and once it has
+   *   run there is no object left to sign a visitor out with.
+   * - A snippet still loading has no object to call it on.
+   * - A copy loaded afterwards reads \`shipbluChatSettings\` afresh, so it is
+   *   told whatever the page said at load rather than what was said to the copy
+   *   it replaces.
+   * The help centre sets no settings, signs nobody out through the widget, and
+   * waits for a copy in flight itself (\`app/help/chat.tsx\`). A host page has
+   * none of those guarantees, and promising it this method would be promising
+   * all four.
+   *
+   * The listeners and the API names go with the elements, so loading the
+   * snippet again later runs a fresh copy rather than being turned away by the
+   * duplicate guard at the top. A reference kept to the old object can still be
+   * called, and reaches nothing: the frame is never rebuilt and the launcher
+   * never re-appended. The visitor's token stays where it is.
+   */
+  function destroy() {
+    if (destroyed) return;
+    destroyed = true;
+
+    // First: a panel open full screen on a phone has pinned the host page's
+    // body, and the page the visitor is moving to cannot scroll until it is
+    // let go.
+    open = false;
+    releasePage(true);
+
+    window.removeEventListener('resize', onViewportChange);
+    window.removeEventListener('orientationchange', onViewportChange);
+    if (window.visualViewport) {
+      window.visualViewport.removeEventListener('resize', onViewportChange);
+      window.visualViewport.removeEventListener('scroll', onViewportChange);
+    }
+    window.removeEventListener('message', onMessage);
+    document.removeEventListener('DOMContentLoaded', mount);
+
+    // The tag too: the help centre looks for it by id before adding one, and
+    // finding it would conclude the chat is already there.
+    [launcher, iframe, sheet, script].forEach(function (node) {
+      if (node && node.parentNode) node.parentNode.removeChild(node);
+    });
+    iframe = null;
+
+    if (window.shipbluChat === api) release('shipbluChat');
+    if (window.__shipbluWidget === api) release('__shipbluWidget');
+  }
+
+  /**
+   * A name given up. Deleted where it can be, but a host page that declared
+   * \`var shipbluChat\` at the top level made it a property that cannot be
+   * deleted, and strict mode throws on trying. Undefined satisfies the guard at
+   * the top just as well.
+   */
+  function release(name) {
+    try {
+      delete window[name];
+    } catch (error) {
+      window[name] = undefined;
+    }
+  }
 
   function mount() {
+    if (destroyed) return;
     document.body.appendChild(launcher);
   }
 

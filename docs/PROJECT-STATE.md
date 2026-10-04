@@ -445,7 +445,10 @@ launcher would take live chat away from a customer silently and for good, and
 the help layout leaves `ChatWidget` out for anyone the console recognises. Only
 on the pages we render: `embed.js` is cached publicly for five minutes, so a
 merchant's own site cannot be told this without either dropping that cache or
-letting a shared one hand a reader an answer about somebody else.
+letting a shared one hand a reader an answer about somebody else. A launcher
+that loaded while an agent was still signed out is taken back down when they
+leave the help centre, since signing in there reaches the console without a
+reload (§6.78).
 
 **The bot channel is live, and everything else is not.** This is the single most
 important thing to understand about the current state, and the easiest to read
@@ -4298,6 +4301,88 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
       whole-second `sentAt` and ours with `now()`, so an answer landing in the
       same second as our reply can still sort before it. Their new tickets
       also still take `created_at` from the insert.
+
+78. **The help centre's chat launcher rode into the console.** _2026-10-03,
+    reported from a phone: the launcher over the inbox, bottom-left, so it was
+    the Arabic one._ `viewerIsTeamMember()` keeps `ChatWidget` out of the help
+    layout for a signed-in agent, and that only decides what a fresh render
+    _loads_. The snippet appends its launcher to `document.body`, outside
+    anything React renders, and nothing ever took it back off. The bare
+    hostname opens the Arabic help centre (`app/page.tsx`), so an agent who is
+    signed out loads the launcher there like any customer would. The header's
+    Sign in link leads to the form on `/{locale}/account/login`, whose
+    `portalSignIn` action sends an agent on with
+    `redirect(safePath(next, '/inbox'))`. A redirect from a server action is a
+    client-side navigation: both surfaces share the root layout, the document
+    is never replaced, and the launcher stays put. The console's own `/login`
+    does the same after a visit to the help centre and a press of Back. A
+    panel left open full screen also covered the whole console and left
+    `position: fixed` on the body.
+
+    The gate cannot reach this, because the gate is a render decision and the
+    launcher is not rendered. The fix is a lifetime, in two halves.
+
+    The snippet gained `destroy()`. It removes the launcher, the frame, its
+    stylesheet and its own tag, and every listener it added to the window, the
+    document and the visual viewport. It lets go of a pinned body without
+    scrolling the page the reader arrived on, and it gives up the `shipbluChat`
+    name so a later load runs a fresh copy. It belongs to the help centre and is
+    not part of the host API. Its docblock names the four limits a merchant
+    would trip over, among them that a copy loaded after it re-reads
+    `shipbluChatSettings`, identity included.
+
+    `ChatWidget` and the gate moved up into `app/help/layout.tsx`, above the
+    locale segment, and that placement is the design. The `[locale]` layout is
+    replaced on every language switch, so a teardown on unmount there closes an
+    open chat on every switch. The first version of this fix deferred the
+    teardown by a task and let the replacing mount cancel it. That held only
+    while nothing split the commit, and it ran after the browser had painted.
+    In review, a measurement found a frame of the launcher over the inbox in
+    about a quarter of runs. Above the segment, an unmount means the help
+    centre has gone, so the teardown is a plain layout-effect cleanup and lands
+    before the paint. `app/help/chat.test.ts` pins where `ChatWidget` is
+    rendered and covers the orderings a navigation produces.
+
+    Three things finish it:
+    - **A snippet still loading when the reader leaves** is torn down when it
+      lands. Removing its tag would not have stopped it.
+    - **The help centre loads the snippet as `/widget/embed.js?v=2`**, so no
+      browser can hand it a cached copy from before `destroy()` existed.
+    - **Two error boundaries keep a failure inside the help centre.** Before
+      them, an error fell through to `global-error`, which replaces the root
+      layout. Now that the help layout going takes the chat with it, a
+      customer would have lost their open conversation to an error on an
+      unrelated page. `[locale]/error.tsx` catches a page. `app/help/error.tsx`
+      catches the `[locale]` layout itself, whose `AccountNav` reads the
+      database for a signed-in customer; a boundary never catches the layout in
+      its own segment. Both answer "Try again" with `retry`. `reset` re-renders
+      the failed payload the router already holds, so the button did nothing.
+
+    Verified in Chromium at a phone size against a local build, on `main` and
+    on the fix:
+    - the header sign-in, with the panel open, closed and never opened;
+    - the console's `/login` route;
+    - Back and Forward between the two surfaces;
+    - a snippet held in flight past the sign-in;
+    - a language switch with the panel open, which stays open;
+    - a page error mid-conversation, with Postgres stopped under a client-side
+      navigation, which keeps the chat, the open panel and an unsent draft.
+
+    On `main` the launcher, or the whole panel, was on `/inbox`; with the fix it
+    was on no console page, and no page error was raised. Sampled every
+    animation frame over 25 sign-ins with the panel closed and 25 with it open:
+    the deferred teardown showed the launcher over the inbox in 20 of each, and
+    the layout-effect teardown in none.
+
+    Still open: a help-centre tab that was already open when its reader signed
+    in somewhere else keeps its launcher on help pages until it reloads. The
+    layout is not re-rendered by a soft navigation, so the gate is not asked
+    again. The launcher never reaches the console that way.
+
+    Generally: anything a script hangs off `document.body` in this app outlives
+    the page that put it there, because no client-side navigation replaces the
+    body. A layout-level gate on what loads does not cover what is already
+    loaded.
 
 ## 7. Verification already done
 
