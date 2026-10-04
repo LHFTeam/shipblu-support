@@ -145,8 +145,8 @@ export function hideChat() {
 export function ChatWidget() {
   const params = useParams<{ locale?: string }>();
   // Read from the route rather than passed down, because the layout rendering
-  // this sits above the segment that holds it. Not a locale (a mistyped path on
-  // its way to a 404) leaves the chat as it is.
+  // this sits above the segment that holds it. Anything but a locale is a path
+  // on its way to the root 404, which unmounts this anyway; nothing to load.
   const locale = isLocale(params?.locale) ? params.locale : null;
 
   // Nothing to do on mount; leaving is the whole of it.

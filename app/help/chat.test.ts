@@ -1,7 +1,34 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { hideChat, showChat } from './chat';
+import { ChatWidget, hideChat, showChat } from './chat';
+
+/**
+ * `ChatWidget` with React's effect hooks recorded rather than run, so a test
+ * can say which kind of effect each one is, what it depends on, and what its
+ * cleanup does — the three things the design rests on, and none of which a
+ * test of `showChat` and `hideChat` alone can see.
+ */
+const hooks = vi.hoisted(() => ({
+  params: {} as { locale?: string },
+  effects: [] as {
+    kind: 'layout' | 'passive';
+    run: () => void | (() => void);
+    deps?: readonly unknown[];
+  }[],
+}));
+
+vi.mock('react', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('react')>()),
+  useEffect: (run: () => void | (() => void), deps?: readonly unknown[]) => {
+    hooks.effects.push({ kind: 'passive', run, deps });
+  },
+  useLayoutEffect: (run: () => void | (() => void), deps?: readonly unknown[]) => {
+    hooks.effects.push({ kind: 'layout', run, deps });
+  },
+}));
+
+vi.mock('next/navigation', () => ({ useParams: () => hooks.params }));
 
 /**
  * The help centre's half of the chat's lifetime: when the snippet is loaded,
@@ -162,6 +189,61 @@ describe('the help centre chat', () => {
     showChat('ar');
     expect(page.tags).toHaveLength(1);
     expect(page.tags[0]).not.toBe(first);
+  });
+});
+
+describe('ChatWidget', () => {
+  function render(locale?: string) {
+    hooks.params = locale === undefined ? {} : { locale };
+    hooks.effects = [];
+    ChatWidget();
+    return {
+      layout: hooks.effects.filter((effect) => effect.kind === 'layout'),
+      passive: hooks.effects.filter((effect) => effect.kind === 'passive'),
+    };
+  }
+
+  /**
+   * The locale effect re-runs on every switch, so a cleanup on it would take
+   * the chat down each time the reader changed language — an open conversation
+   * closed by the language link.
+   */
+  it('loads the chat for the locale in the route, and a language switch takes nothing down', () => {
+    const { passive } = render('ar');
+
+    expect(passive).toHaveLength(1);
+    expect(passive[0]!.deps).toEqual(['ar']);
+    expect(passive[0]!.run()).toBeUndefined();
+    expect(page.tags).toHaveLength(1);
+    expect(page.tags[0]!.dataset.locale).toBe('ar');
+  });
+
+  /**
+   * A layout effect, so the chat is gone in the commit that draws the next
+   * page. A passive one runs after the browser has painted, and the console
+   * showed a frame of the launcher over the inbox in most runs.
+   */
+  it('takes the chat down when it unmounts, before the next page is painted', () => {
+    const { layout, passive } = render('ar');
+    passive[0]!.run();
+    const api = snippetRuns();
+    page.tags[0]!.fire('load');
+
+    expect(layout).toHaveLength(1);
+    expect(layout[0]!.deps).toEqual([]);
+
+    const cleanup = layout[0]!.run();
+    expect(typeof cleanup).toBe('function');
+    (cleanup as () => void)();
+
+    expect(api.destroy).toHaveBeenCalledOnce();
+  });
+
+  it('loads nothing for a route with no locale in it', () => {
+    const { passive } = render();
+    passive[0]!.run();
+
+    expect(page.tags).toEqual([]);
   });
 });
 

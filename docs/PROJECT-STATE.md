@@ -4348,11 +4348,15 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
       lands. Removing its tag would not have stopped it.
     - **The help centre loads the snippet as `/widget/embed.js?v=2`**, so no
       browser can hand it a cached copy from before `destroy()` existed.
-    - **`app/help/[locale]/error.tsx` keeps a failing page inside the help
-      centre.** Before it, a page error fell through to `global-error`, which
-      replaces the root layout. Now that the help layout going takes the chat
-      with it, a customer would have lost their open conversation to an error
-      on an unrelated page.
+    - **Two error boundaries keep a failure inside the help centre.** Before
+      them, an error fell through to `global-error`, which replaces the root
+      layout. Now that the help layout going takes the chat with it, a
+      customer would have lost their open conversation to an error on an
+      unrelated page. `[locale]/error.tsx` catches a page. `app/help/error.tsx`
+      catches the `[locale]` layout itself, whose `AccountNav` reads the
+      database for a signed-in customer; a boundary never catches the layout in
+      its own segment. Both answer "Try again" with `retry`. `reset` re-renders
+      the failed payload the router already holds, so the button did nothing.
 
     Verified in Chromium at a phone size against a local build, on `main` and
     on the fix:
@@ -4361,10 +4365,14 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     - Back and Forward between the two surfaces;
     - a snippet held in flight past the sign-in;
     - a language switch with the panel open, which stays open;
-    - a page error mid-conversation, which keeps the chat.
+    - a page error mid-conversation, with Postgres stopped under a client-side
+      navigation, which keeps the chat, the open panel and an unsent draft.
 
     On `main` the launcher, or the whole panel, was on `/inbox`; with the fix it
-    was on no console page, and no page error was raised.
+    was on no console page, and no page error was raised. Sampled every
+    animation frame over 25 sign-ins with the panel closed and 25 with it open:
+    the deferred teardown showed the launcher over the inbox in 20 of each, and
+    the layout-effect teardown in none.
 
     Still open: a help-centre tab that was already open when its reader signed
     in somewhere else keeps its launcher on help pages until it reloads. The
