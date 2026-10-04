@@ -1,6 +1,6 @@
 'use client';
 
-import { chatWidget } from '../chat';
+import { chatWidget } from '../../chat';
 
 /**
  * "Ask support about this shipment", which opens the chat with the parcel

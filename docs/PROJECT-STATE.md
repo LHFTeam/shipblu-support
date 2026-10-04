@@ -4320,21 +4320,39 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     `position: fixed` on the body.
 
     The gate cannot reach this, because the gate is a render decision and the
-    launcher is not rendered. The fix is a lifetime. The snippet gained
-    `destroy()`. It removes the launcher, the frame, its stylesheet and its own
-    tag, and every listener it added to the window, the document and the visual
-    viewport. It lets go of a pinned body without scrolling the page the reader
-    arrived on, and it gives up the `shipbluChat` name so a later load runs a
-    fresh copy. `ChatWidget` calls it, through `removeChat`, when the help
-    layout goes for good. A language switch also unmounts that layout, because
-    the locale is part of its segment key, and a teardown on every unmount
-    would close an open conversation. So `ChatWidget`'s second effect defers
-    the teardown by one task, and the replacing mount, which lands in the same
-    commit, cancels it. A `loading.tsx` in `app/help/` would split that commit
-    in two, and an open chat would then close on every switch. A snippet still
-    loading when the reader leaves is torn down when it lands. Removing its tag
-    would not have stopped it. A copy from before `destroy()` existed is hidden
-    rather than stood down.
+    launcher is not rendered. The fix is a lifetime, in two halves.
+
+    The snippet gained `destroy()`. It removes the launcher, the frame, its
+    stylesheet and its own tag, and every listener it added to the window, the
+    document and the visual viewport. It lets go of a pinned body without
+    scrolling the page the reader arrived on, and it gives up the `shipbluChat`
+    name so a later load runs a fresh copy. It belongs to the help centre and is
+    not part of the host API. Its docblock names the four limits a merchant
+    would trip over, among them that a copy loaded after it re-reads
+    `shipbluChatSettings`, identity included.
+
+    `ChatWidget` and the gate moved up into `app/help/layout.tsx`, above the
+    locale segment, and that placement is the design. The `[locale]` layout is
+    replaced on every language switch, so a teardown on unmount there closes an
+    open chat on every switch. The first version of this fix deferred the
+    teardown by a task and let the replacing mount cancel it. That held only
+    while nothing split the commit, and it ran after the browser had painted.
+    In review, a measurement found a frame of the launcher over the inbox in
+    about a quarter of runs. Above the segment, an unmount means the help
+    centre has gone, so the teardown is a plain layout-effect cleanup and lands
+    before the paint. `app/help/chat.test.ts` pins where `ChatWidget` is
+    rendered and covers the orderings a navigation produces.
+
+    Three things finish it:
+    - **A snippet still loading when the reader leaves** is torn down when it
+      lands. Removing its tag would not have stopped it.
+    - **The help centre loads the snippet as `/widget/embed.js?v=2`**, so no
+      browser can hand it a cached copy from before `destroy()` existed.
+    - **`app/help/[locale]/error.tsx` keeps a failing page inside the help
+      centre.** Before it, a page error fell through to `global-error`, which
+      replaces the root layout. Now that the help layout going takes the chat
+      with it, a customer would have lost their open conversation to an error
+      on an unrelated page.
 
     Verified in Chromium at a phone size against a local build, on `main` and
     on the fix:
@@ -4342,12 +4360,11 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     - the console's `/login` route;
     - Back and Forward between the two surfaces;
     - a snippet held in flight past the sign-in;
-    - a language switch with the panel open, which stays open.
+    - a language switch with the panel open, which stays open;
+    - a page error mid-conversation, which keeps the chat.
 
     On `main` the launcher, or the whole panel, was on `/inbox`; with the fix it
-    was on no console page, and no page error was raised. The unit tests run the
-    served snippet in a fake DOM that records every listener on those three
-    targets, and fail if `destroy()` leaves one behind.
+    was on no console page, and no page error was raised.
 
     Still open: a help-centre tab that was already open when its reader signed
     in somewhere else keeps its launcher on help pages until it reloads. The

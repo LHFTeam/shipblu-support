@@ -699,26 +699,34 @@ export async function GET() {
   /**
    * Take back off the page everything this script put on it, and stand down.
    *
-   * For a host page that leaves the part of itself carrying the chat without
-   * a reload. The launcher and the frame hang off \`document.body\`, outside
-   * anything a framework renders, so a single-page app navigating away leaves
-   * them behind on whatever it shows next — which is how the help centre's
-   * launcher came to sit over the agent console, once an agent signed in on
-   * the help centre and landed in their inbox without the page ever being
-   * replaced.
+   * For the help centre, which leaves the part of itself carrying the chat
+   * without a reload. The launcher and the frame hang off \`document.body\`,
+   * outside anything a framework renders, so navigating away left them behind
+   * on whatever came next — which is how the launcher came to sit over the
+   * agent console, once an agent signed in on the help centre and landed in
+   * their inbox without the page ever being replaced.
    *
-   * It drops a \`clear()\` that has not reached the frame yet: the frame goes
-   * in the same task, and with it the message or the flag that was waiting
-   * for it. Signing a visitor out and taking the chat away are two steps, and
-   * the first has to finish before the second.
+   * **On the object, and deliberately not in the documented host API.** It
+   * does what the help centre needs and no more, and each limit is one a
+   * merchant would trip over:
+   * - It releases a pinned body without scrolling back, because the page being
+   *   left has a router about to place the next one.
+   * - It drops a \`clear()\` that has not reached the frame yet, and once it has
+   *   run there is no object left to sign a visitor out with.
+   * - A snippet still loading has no object to call it on.
+   * - A copy loaded afterwards reads \`shipbluChatSettings\` afresh, so it is
+   *   told whatever the page said at load rather than what was said to the copy
+   *   it replaces.
+   * The help centre sets no settings, signs nobody out through the widget, and
+   * waits for a copy in flight itself (\`app/help/chat.tsx\`). A host page has
+   * none of those guarantees, and promising it this method would be promising
+   * all four.
    *
    * The listeners and the API names go with the elements, so loading the
    * snippet again later runs a fresh copy rather than being turned away by the
-   * duplicate guard at the top. A reference a page kept to the old object can
-   * still be called, and reaches nothing: the frame is never rebuilt and the
-   * launcher never re-appended. The visitor's token stays where it is — this
-   * removes a chat from the page, it does not sign anyone out of one, which is
-   * what \`clear()\` is for.
+   * duplicate guard at the top. A reference kept to the old object can still be
+   * called, and reaches nothing: the frame is never rebuilt and the launcher
+   * never re-appended. The visitor's token stays where it is.
    */
   function destroy() {
     if (destroyed) return;
@@ -739,8 +747,8 @@ export async function GET() {
     window.removeEventListener('message', onMessage);
     document.removeEventListener('DOMContentLoaded', mount);
 
-    // The tag too: it is what a host page checks for before adding one, and a
-    // page that finds it would conclude the chat is already there.
+    // The tag too: the help centre looks for it by id before adding one, and
+    // finding it would conclude the chat is already there.
     [launcher, iframe, sheet, script].forEach(function (node) {
       if (node && node.parentNode) node.parentNode.removeChild(node);
     });

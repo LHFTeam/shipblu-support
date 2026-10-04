@@ -37,16 +37,9 @@ describe('the embed snippet', () => {
   it('exposes the whole host API', async () => {
     const body = await (await GET()).text();
 
-    const methods = [
-      'identify',
-      'clear',
-      'setLocale',
-      'compose',
-      'open',
-      'close',
-      'toggle',
-      'destroy',
-    ];
+    // Not `destroy`, which is on the object for the help centre and kept out
+    // of the documented contract on purpose; its own tests are below.
+    const methods = ['identify', 'clear', 'setLocale', 'compose', 'open', 'close', 'toggle'];
     for (const method of methods) {
       expect(body).toMatch(new RegExp(`^\\s*${method}:`, 'm'));
     }
@@ -110,7 +103,7 @@ class FakeNode extends FakeTarget {
     get: (declared, name: string) => declared[name] ?? '',
   });
   readonly dataset: Record<string, string> = {};
-  readonly contentWindow = { postMessage() {} };
+  private readonly frameWindow = { postMessage() {} };
   id = '';
   type = '';
   title = '';
@@ -119,6 +112,11 @@ class FakeNode extends FakeTarget {
 
   constructor(readonly tagName: string) {
     super();
+  }
+
+  /** What a browser gives a frame once it has been taken out of the page. */
+  get contentWindow(): { postMessage(): void } | null {
+    return this.parentNode ? this.frameWindow : null;
   }
 
   get firstChild(): FakeNode | null {
@@ -199,7 +197,13 @@ function fakePage({ phone, loading = false }: { phone: boolean; loading?: boolea
 
   const ids = (node: FakeNode) => node.childNodes.map((child) => child.id || child.tagName);
 
-  return { window, document, visualViewport, head, body, load, parsed, ids };
+  /** The frame speaking, from the origin the snippet was loaded from. */
+  function frameSays(type: string) {
+    const event = { origin: 'https://help.example', data: { source: SOURCE.widget, type } };
+    for (const listener of window.listeners.get('message') ?? []) listener(event);
+  }
+
+  return { window, document, visualViewport, head, body, load, parsed, frameSays, ids };
 }
 
 describe('destroy()', () => {
@@ -259,6 +263,35 @@ describe('destroy()', () => {
 
     fresh.open!();
     expect(page.ids(page.body)).toEqual(['script', 'shipblu-chat-launcher', 'shipblu-chat-frame']);
+
+    // And a second call on the stale object is about that object only.
+    stale.destroy!();
+    expect(page.window.shipbluChat).toBe(fresh);
+    expect(page.ids(page.body)).toEqual(['script', 'shipblu-chat-launcher', 'shipblu-chat-frame']);
+  });
+
+  /**
+   * A frame that had said it was ready is the case where a stale call would
+   * reach for it: `clear()` and `identify()` post to it directly. Removed from
+   * the page, it has no window to post to, and a call that tried would throw
+   * inside whatever handler the host page made it from.
+   */
+  it('lets a stale reference call into a frame that is gone without throwing', async () => {
+    const source = await (await GET()).text();
+    const page = fakePage({ phone: false });
+
+    page.load(source);
+    const stale = page.window.shipbluChat!;
+    stale.open!();
+    page.frameSays(WIDGET_SAYS.ready);
+    stale.destroy!();
+
+    expect(() => {
+      stale.clear!();
+      stale.identify!({ email: 'merchant@example.com' });
+      stale.compose!('Tracking number: 1755021358719');
+    }).not.toThrow();
+    expect(page.ids(page.body)).toEqual([]);
   });
 
   it('does not draw the launcher when the page finishes parsing after it went', async () => {

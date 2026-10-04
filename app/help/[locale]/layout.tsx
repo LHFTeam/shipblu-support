@@ -4,9 +4,7 @@ import type { Metadata } from 'next';
 import { ShipBluLogo } from '@/components/brand';
 import { DEFAULT_LOCALE, direction, isLocale, LOCALES, LOCALE_NAMES, t } from '@/lib/kb/locale';
 import { publicBaseUrl } from '@/lib/kb/site';
-import { viewerIsTeamMember } from '@/lib/widget/audience';
 import { AccountNav } from './account-nav';
-import { ChatWidget } from './chat';
 import { Container } from './chrome';
 import { ServiceNoticeBanner } from './notice';
 import { lato, tajawal } from './fonts';
@@ -35,8 +33,6 @@ export default async function KbLayout({
 }) {
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
-
-  const isTeamMember = await viewerIsTeamMember();
 
   return (
     <div
@@ -141,23 +137,6 @@ export default async function KbLayout({
           </span>
         </Container>
       </footer>
-
-      {/*
-        Renders nothing: the snippet appends its own launcher to the document
-        body, as it does on any other host page. In the layout rather than on
-        one page because a visitor who cannot find an answer gives up wherever
-        they happen to be — most often on a search that returned nothing.
-
-        Not for a signed-in team member. The launcher is a customer's way in,
-        and this is a surface the team reads on too — see `viewerIsTeamMember`.
-        Left out rather than hidden with CSS: the snippet is then never
-        fetched, `chatWidget()` stays null, and the tracking page's "Ask
-        support" falls back to the form link it already carries as its `href`,
-        which is exactly what that fallback is there for. And taken back down
-        when this layout goes, for a reader who signs in here and is sent to the
-        console without a reload — see `ChatWidget`.
-      */}
-      {isTeamMember ? null : <ChatWidget locale={locale} />}
     </div>
   );
 }

@@ -79,7 +79,6 @@ window.shipbluChat.open(); // e.g. from a "Contact support" menu item
 window.shipbluChat.close();
 window.shipbluChat.toggle();
 window.shipbluChat.compose('Tracking number: 1755021358719\n\n'); // open with a draft
-window.shipbluChat.destroy(); // take the chat off the page entirely
 ```
 
 **`compose(text)` opens the panel with `text` already in the composer, and
@@ -94,22 +93,6 @@ composer only moves the caret.
 The text is capped at 1,000 characters and is a draft like any other, so keep
 it to the facts the agent needs first. Called before the frame exists, it waits
 for it; called on a panel that is already open, it lands immediately.
-
-**`destroy()` takes the chat off the page and stands it down.** It removes the
-launcher, the panel, every listener the snippet added to the page, the
-`shipbluChat` name, and the `<script>` element that loaded it. It is for a
-single-page app moving to a part of itself that should not carry a chat, without
-a reload. The launcher hangs off `document.body`, outside anything your
-framework renders, so nothing else will remove it. To bring the chat back,
-append a _new_ script element: the old one has already run and will not run
-again if you re-insert it. The new copy reads `shipbluChatSettings` afresh. A
-reference you kept to the old object stays callable and does nothing.
-
-`destroy()` is not a sign-out, and it cannot be combined with one in the same
-breath. The visitor's token stays in the widget's own storage. A `clear()`
-called just before it is lost, because the panel it was on its way to goes in
-the same moment. If the user is signing out, call `clear()` and leave the chat
-where it is until the next page load.
 
 **Call `clear()` when the user signs out.** The visitor's token lives in the
 widget's own storage, so it outlives the dashboard's session entirely: on a
@@ -187,8 +170,25 @@ server, per request.
 The launcher also leaves when the reader leaves those pages without a reload.
 An agent who signs in on the help centre reaches the console by a client-side
 navigation, and the launcher that loaded while they were signed out used to
-ride along onto their inbox. `ChatWidget` calls `destroy()` when the help
-centre's layout goes for good.
+ride along onto their inbox. `ChatWidget` in `app/help/chat.tsx` takes it down
+when the help centre's layout goes, through a `destroy()` on the same
+`shipbluChat` object.
+
+**`destroy()` is not part of this contract**, although you will find it on the
+object. It does exactly what the help centre needs, and its limits are ones a
+host page would trip over:
+
+- It leaves the page's scroll position to a router it assumes is about to set
+  one.
+- It drops a `clear()` still on its way to the panel, and leaves no object to
+  sign a visitor out with afterwards.
+- It cannot reach a snippet that has not finished loading.
+- A copy loaded after it reads `shipbluChatSettings` again, so it is told
+  whatever your page said at load rather than what you told the copy it
+  replaced, an identity included.
+
+Do not call it. If you need to take the chat off a page without a reload, ask,
+and it will get a version made for a host page.
 
 **A host page of your own gets no such filtering and should not expect any.**
 `embed.js` is one publicly cached response shared by every reader of every site
