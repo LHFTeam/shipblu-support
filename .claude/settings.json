@@ -1,5 +1,15 @@
 {
   "model": "claude-opus-5-5",
   "effortLevel": "xhigh",
-  "ultracode": true
+  "ultracode": true,
+  "permissions": {
+    "allow": [
+      "mcp__Render__list_logs",
+      "mcp__Render__list_log_label_values",
+      "mcp__Render__list_events",
+      "mcp__Render__get_metrics",
+      "mcp__Render__list_deploys",
+      "mcp__Supabase__query_logs"
+    ]
+  }
 }
