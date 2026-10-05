@@ -163,11 +163,12 @@ Design decisions worth knowing before changing things:
   records are one person is not being told which name is right. `is_blocked` never
   moves in either direction, because blocking is a decision about a record rather than
   a fact about a person.
-- **Locations are a register, and side conversations are its first consumer.** ShipBlu's
-  sixteen hubs each have a name, a unique code and a shared mailbox. They were entered
-  before anything used them precisely so that whichever feature landed first would point
-  at a real row instead of a hub name typed sixteen different ways — and the side
-  conversation picker is that feature. Still nothing else routes on a location: no agent
+- **Locations are a register, and side conversations are its first consumer.** Each of
+  ShipBlu's hubs has a name, a unique code and a shared mailbox. The table was built
+  before anything used it precisely so that whichever feature landed first would point at
+  a real row instead of a hub name typed a different way by every agent — and the side
+  conversation picker is that feature. No number of locations is expected; the register
+  holds whatever an admin enters. Still nothing else routes on a location: no agent
   carries one, no ticket is attributed to one. The email remains on the record rather
   than in the mail path — an agent picks it, nothing delivers a customer's reply there.
 - **Side conversations are their own tables, not `conversations` rows.** A thread with

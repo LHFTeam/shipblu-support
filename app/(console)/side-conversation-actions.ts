@@ -95,7 +95,7 @@ export async function startSideConversation(
 
   /*
    * The picker offers two registers in one list, so its value carries which:
-   * `location:<uuid>` for one of the sixteen places ShipBlu works out of,
+   * `location:<uuid>` for one of the places ShipBlu works out of,
    * `recipient:<uuid>` for a party that is not a place, `other` for free text.
    *
    * The address is re-read from the row here rather than taken from a hidden

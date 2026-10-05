@@ -37,15 +37,15 @@ searches on both, and the console finally has contact, account and shipment
 pages — the first screens ever to use the `contact.view` and `contact.edit`
 permissions, which had been in the list and checked nowhere since the start.
 
-And since **that**: **contact merging** and a **register of ShipBlu's sixteen
+And since **that**: **contact merging** and a **register of ShipBlu's
 locations**. The console section is now `/contacts` rather than `/customers`,
 matching the table name it has always had. A duplicate is folded into the record
 an agent is looking at — identities, tickets, messages, account memberships and
 parcel roles move, and the loser stays as a tombstone that redirects — behind a
 new `contact.merge` permission held by supervisors and above. `locations` holds a
 name, a unique code and a shared mailbox per hub, joined to nothing on purpose;
-see `plans/contact-merge-and-locations.md` for why, and §5.1 for the sixteen rows
-nobody has entered yet.
+see `plans/contact-merge-and-locations.md` for why, and §5.1 for the rows
+entered on 2026-10-05.
 
 And then **side conversations**: an agent can open a thread with a hub, an
 internal team or a vendor from inside a ticket, and the answer comes back onto the
@@ -53,9 +53,9 @@ ticket rather than into their personal mailbox — never onto the customer's tim
 This is the first thing to join `locations` to anything: the picker's hubs are
 its rows, which is what that table was entered for. Teams and vendors are not
 locations, so they keep their own small directory at `/admin/recipients`. Built
-and verified end to end against a local Postgres. The team directory has since
-been filled to three rows, but `locations` has not, so the picker still offers no
-hub at all — see §5.1, because a hub is the recipient an agent most often wants.
+and verified end to end against a local Postgres. Both directories now have rows
+— three teams, and the hubs entered on 2026-10-05 — so the picker opens on the
+hubs. No thread has yet gone to a real hub list; see §5.1 and §5.2.
 
 And **shared locations**: a pin a customer drops is kept as coordinates rather
 than flattened into prose and rendered as a card with a Maps link. **Every pin in
@@ -480,8 +480,8 @@ no default group, which is right. There is still no `portal` row, so a ticket
 opened from the customer portal lands with no default group.
 
 `sla_policies` holds **4** rows and `automation_rules` **1** ("Close resolved
-tickets after 3 days", §6.30), so both crons finally have work. `locations` is
-**still empty, all sixteen of them** — the one register nobody has entered.
+tickets after 3 days", §6.30), so both crons finally have work. `locations` holds
+**14** rows as of 2026-10-05 (§5.1).
 
 This branch adds **permanent deletion for admins by default**, which is a deliberate exception to
 everything above about tombstones. While the product is still being tested
@@ -1052,38 +1052,51 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   skill's conditions is a ticket no human ever sees. `/admin` reports both,
   including any skill no active agent holds.
 
-- **Locations.** `locations` is empty, and there are sixteen of them. Nothing
-  routes on a location yet, so an empty table breaks nothing — but a register
-  entered to fourteen is worse than an empty one, because the two missing hubs
-  read as hubs that do not exist. `/admin/locations` states the count and the
-  settings overview carries the same check. No seed data was written: nobody has
-  given us the real names, codes and addresses, and inventing them would put
-  plausible-looking wrong codes in every environment.
+- ~~**Locations are empty.**~~ Entered in production on 2026-10-05 by SQL from a
+  list ali@shipblu.com supplied, normalised exactly as `saveLocation` would. No
+  number of locations is expected: `/admin/locations` reports how many are
+  entered and operating, and the settings overview flags only an empty register.
+  The rows entered that day share one `created_at`,
+  `2026-10-05 10:02:27.625296+00` (keep the microseconds — to the second it
+  matches none of them), which is how to select them to undo the entry. Delete
+  only while no `side_conversations.location_id` points at one: the foreign key
+  is `on delete set null` and would quietly strip the hub from a real thread,
+  leaving only the address in `to_addresses`. The same holds for the Delete
+  button on `/admin/locations` — `deleteLocation` has no in-use guard, and its
+  comment still says nothing references a location — so a hub a thread has used
+  is deactivated, not deleted.
+
 - ~~**SLA policies and automation rules are both empty.**~~ `sla_policies` holds
   **4** rows and `automation_rules` **1** as of 2026-09-20, so neither cron runs
   over nothing any more. Whatever else Freshdesk enforces today still needs
   transcribing, and one automation rule is not a rule set.
-- **The side conversation picker's two registers.** One is now filled and one is
-  not. `internal_recipients` has 3 rows, all of them teams — so the picker
-  offers those three and nothing else. **Every hub is still missing**, because
-  the hubs are the sixteen `locations` rows nobody has entered (above), and a
-  hub is the recipient an agent most often wants. Until they exist an agent
-  needing one will type an address from memory, which is the exact failure the
-  feature was built to prevent: a mistyped address delivers a customer's name,
-  address and complaint to whoever owns that domain. Vendors — a courier
-  partner, Finance — also still go in `internal_recipients` at
-  `/admin/recipients`, and none is entered. Two side conversations are open
-  against the three teams that exist, so the mechanism is in use.
+- **The side conversation picker's two registers.** Both are filled:
+  `internal_recipients` has 3 teams and `locations` 14 hubs (above), so the
+  picker opens on _Hubs and warehouses_. **Its default moved with them.** The
+  picker preselects its first entry (`side-conversations.tsx`,
+  `recipients[0]`), hubs sort first and by name, so an agent who sends without
+  touching it now asks Alexandria Hub, where until 2026-10-05 it asked Finance.
+  Vendors — a courier partner — still go in `internal_recipients` at
+  `/admin/recipients`, and none is entered. All three side conversations that
+  exist are open and went to a typed test address, with `location_id` and
+  `recipient_id` null on every one (measured 2026-10-05; the "hub" in §6.41 is
+  #3, that typed address standing in for one): none has yet gone to a team or a
+  real hub.
 - ~~**The shared-location backfill has not been run.**~~ Run on 2026-08-21: 821
   recovered, 0 unreadable, and `/admin/import` now reports nothing text-only. It
   stays available and is safe to re-run — a second pass recovers nothing — so
   re-run it if the parser ever learns to read a shape it currently skips. §7 has
   the figures.
-- **Unset config:** `EMAIL_API_KEY`, `EMAIL_FROM_ADDRESS`, `EMAIL_REPLY_DOMAIN`,
-  `WIDGET_ALLOWED_ORIGINS`, `WIDGET_IDENTITY_SECRET`.
+- **Unset config:** `WIDGET_ALLOWED_ORIGINS`, `WIDGET_IDENTITY_SECRET`. The
+  email keys that were on this list are all set. `EMAIL_API_KEY` and
+  `EMAIL_FROM_ADDRESS` were confirmed by the owner on 2026-10-05, since Render's
+  API does not show values, and the traffic agrees: ticket #13777's reply went
+  out through Postmark on 2026-09-03, and side conversations have sent through
+  it since 2026-08-20. `EMAIL_REPLY_DOMAIN` is `shipblu.com`, a literal in
+  `shipblu-support-shared` taken from the 2026-09-26 dashboard export
+  (`render.yaml`).
 
-  **The last two are what stands between the widget and the merchant
-  dashboard.** Measured 2026-08-31: `https://shipblu-support.onrender.com/widget`
+  **Both are what stands between the widget and the merchant dashboard.** Measured 2026-08-31: `https://shipblu-support.onrender.com/widget`
   answers `content-security-policy: frame-ancestors 'self';`, so
   `app.shipblu.com` cannot frame it at all — the launcher would open an empty
   box. `WIDGET_ALLOWED_ORIGINS` has to name that origin before the snippet in
@@ -1219,14 +1232,16 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
 
 ### 5.2 Live-provider verification
 
-Everything below passes unit tests and has never been exercised against the real
-provider. Each is a round trip somebody has to actually watch:
+Everything below passes unit tests. Each is a round trip, or the half of one
+nobody has run, that somebody has to actually watch against the real provider:
 
-- **Postmark**, once credentials exist: send a reply, reply to it from Gmail
-  _and_ Outlook, confirm it threads onto the same ticket rather than opening a
-  new one. Threading is the thing naive helpdesks get wrong, and the two bugs in
-  §6.4 were both found by reading the API docs rather than by testing — there
-  may be a third.
+- **Postmark, from Outlook.** The credentials are set (§5.1), and the Gmail half
+  has been watched: on ticket #13777 on 2026-09-03 a Gmail message arrived, an
+  agent replied through Postmark, and the Gmail answer threaded onto the same
+  ticket. Outlook is the half nobody has run — send a reply, answer it from
+  Outlook, confirm it threads rather than opening a new ticket. Threading is the
+  thing naive helpdesks get wrong, and the two bugs in §6.4 were both found by
+  reading the API docs rather than by testing — there may be a third.
 - **The widget on a genuine third-party origin**, not localhost. The
   `frame-ancestors` allowlist and the visitor token are what you are testing.
   The help centre is not that test even on its own domain — it serves the
@@ -1255,7 +1270,12 @@ shipblu.com` still serves Freshdesk, so each one took a reader out of this
   `To`/`Delivered-To`, or the `References` chain. Send one to an actual hub list
   and have somebody on it reply. If all three are eaten the reply opens a new
   customer ticket instead, which is visible immediately: the mail lands in the
-  inbox as a new ticket from a hub address rather than on the thread.
+  inbox as a new ticket from a hub address rather than on the thread. Since
+  2026-10-05 this is one send away: the hubs are in `locations` (§5.1). A side
+  message marked `sent` only means Postmark accepted it, not that the hub's mail
+  group did — a group restricted to its members, or moderated, can hold mail
+  from `help-support@` — so the test is a reply landing on the thread, not a
+  delivery status.
 - **Meta's Human Agent feature is not approved. Confirmed 2026-09-06, and it is
   the whole 24-hour-to-7-day path.** _Was a hypothesis; is now a reading._ A
   Facebook or Instagram reply sent more than 24 hours after the customer's last

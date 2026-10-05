@@ -5,9 +5,6 @@ import { requirePermission } from '@/lib/auth/guard';
 
 export const dynamic = 'force-dynamic';
 
-/** ShipBlu's location count, and the only reason this page can say "the rest". */
-const LOCATIONS_EXPECTED = 16;
-
 /**
  * Settings overview.
  *
@@ -59,17 +56,15 @@ export default async function AdminIndexPage() {
       bad: 'None configured — tickets still arrive, but with no default group',
     },
     {
-      // Sixteen is the number, and a register stuck at fourteen is the failure
-      // this row exists to make visible — a missing hub reads as a hub that does
-      // not exist. Optional because nothing routes on a location yet.
-      ok: (counts?.locations ?? 0) >= LOCATIONS_EXPECTED,
+      // No number of locations is expected, so the only absence worth naming is
+      // an empty register: the side-conversation picker then offers no hub, and
+      // an agent types the address from memory. Optional because nothing routes
+      // on a location.
+      ok: (counts?.locations ?? 0) > 0,
       href: '/admin/locations',
       title: 'Locations',
       good: `${counts?.locations} entered`,
-      bad:
-        (counts?.locations ?? 0) === 0
-          ? `None of the ${LOCATIONS_EXPECTED} ShipBlu locations have been entered`
-          : `${counts?.locations} of ${LOCATIONS_EXPECTED} entered — the rest look like locations that do not exist`,
+      bad: 'None entered — the side-conversation picker offers no hub to ask',
       optional: true,
     },
     {

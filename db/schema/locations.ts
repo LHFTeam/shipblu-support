@@ -2,7 +2,8 @@ import { boolean, index, pgTable, text, timestamp, uniqueIndex, uuid } from 'dri
 
 /**
  * ShipBlu's own locations — the hubs, warehouses and offices employees work out
- * of. Sixteen of them at the time of writing.
+ * of. No number of them is expected; the register holds whatever has been
+ * entered.
  *
  * A location is three facts: a name people say out loud, a **code** they type,
  * and a shared **email** that reaches whoever is there. All three are here
@@ -13,8 +14,8 @@ import { boolean, index, pgTable, text, timestamp, uniqueIndex, uuid } from 'dri
  * Deliberately not joined to anything yet. Nothing in this system routes on a
  * location, no agent carries one, and no ticket is attributed to one: this is
  * the register of what exists, entered once, so that whichever of those lands
- * first has a real row to point at instead of a free-text hub name typed
- * sixteen different ways. Guessing which of them to build now would mean
+ * first has a real row to point at instead of a free-text hub name typed a
+ * different way by every agent. Guessing which of them to build now would mean
  * guessing the column that carries it.
  *
  * The email is on the record, not in the mail path. It is the address an agent
