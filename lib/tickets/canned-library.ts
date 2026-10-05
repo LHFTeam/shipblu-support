@@ -103,7 +103,7 @@ export const CANNED_LIBRARY: LibraryFolder[] = [
           'If your question is about a shipment, sending its tracking number will help me look into it faster.',
         ],
       }),
-      reply('general.ask_tracking_number', 'Ask for the tracking number (private channels only)', {
+      reply('general.ask_tracking_number', 'Tracking number — ask for it (private chats only)', {
         ar: [
           'هل يمكن لحضرتك إرسال رقم تتبع الشحنة؟ فهو يساعدني على الوصول إليها في نظامنا ومعرفة آخر حالة لها.',
           'ويمكن لحضرتك العثور على رقم التتبع عادةً في الرسالة النصية (SMS) التي وصلت من شيب بلو، أو في رسالة تأكيد الطلب من المتجر.',
@@ -113,7 +113,7 @@ export const CANNED_LIBRARY: LibraryFolder[] = [
           "It's usually in the text message from ShipBlu, or in the store's order confirmation.",
         ],
       }),
-      reply('general.ask_details', 'Ask for more details', {
+      reply('general.ask_details', 'Unclear message — ask for details', {
         ar: [
           'هل يمكن لحضرتك توضيح ما حدث بمزيد من التفاصيل؟ أودّ أن أفهم الأمر بدقة قبل مراجعته.',
           'وإذا كانت لدى حضرتك صورة أو لقطة شاشة للمشكلة، فيُرجى إرسالها أيضًا. وإن كان الأمر يخص شحنة، فرقم التتبع سيساعدني على الوصول إليها فورًا.',
@@ -145,11 +145,11 @@ export const CANNED_LIBRARY: LibraryFolder[] = [
       }),
       reply('general.resolved', "Closing — glad it's sorted", {
         ar: [
-          'يسعدني أننا وصلنا إلى حل، وأشكر حضرتك على الصبر والتعاون طوال الفترة الماضية.',
+          'يسعدني أننا وصلنا إلى حل، وأشكر حضرتك على التعاون.',
           'وإذا كان هناك أي استفسار آخر، فيمكن لحضرتك الرد على هذه المحادثة، ويسرّنا تقديم المساعدة دائمًا.',
         ],
         en: [
-          "I'm glad we got this sorted, and thank you for your patience along the way.",
+          "I'm glad we got this sorted, and thanks for working through it with me.",
           "If anything else comes up, just reply to this conversation and we'll be happy to help.",
         ],
       }),
@@ -173,10 +173,10 @@ export const CANNED_LIBRARY: LibraryFolder[] = [
       }),
       reply('general.slow_reply', 'Slow reply — sorry for the wait', {
         ar: [
-          'نعتذر لحضرتك عن التأخر في الرد، وشكرًا على المتابعة. أراجع الأمر الآن، وسأوافي حضرتك بالمستجدات هنا أولًا بأول.',
+          'نعتذر لحضرتك عن التأخر في الرد، وشكرًا على المتابعة. أتابع الأمر بنفسي الآن، وسأُطلع حضرتك على كل جديد هنا أولًا بأول.',
         ],
         en: [
-          "I'm sorry it's taken us a while to get back to you, and thanks for following up. I'm looking into this now and will keep you updated right here.",
+          "I'm sorry it's taken us a while to get back to you, and thanks for following up. I'm on it now, and I'll keep you posted right here.",
         ],
       }),
       reply('general.complaint', "Complaint received — I've escalated it", {
@@ -189,7 +189,7 @@ export const CANNED_LIBRARY: LibraryFolder[] = [
           "I've raised your complaint with the team responsible so they can look into what happened. I'll update you here as soon as I hear back.",
         ],
       }),
-      reply('general.handover', 'Passed to the specialist team', {
+      reply('general.handover', 'Handover — passed to the specialist team', {
         ar: [
           'حوّلتُ طلب حضرتك إلى الفريق المختص بمتابعته، وسنوافي حضرتك بالمستجدات في المحادثة نفسها، لذا لا داعي لإعادة إرساله.',
         ],
@@ -214,6 +214,16 @@ export const CANNED_LIBRARY: LibraryFolder[] = [
           'You can follow your shipment at any time by entering its tracking number on the tracking page in our help centre.',
           'For live updates, use the myBlu app on Android or iPhone. Search for "ShipBlu" or "myBlu" in your app store, then log in with the mobile number that got the shipment\'s text message, using the verification code sent to it.',
           "If it's easier, send me the tracking number here and I'll check on your shipment myself.",
+        ],
+      }),
+      reply('delivery.hours', 'Delivery days, hours and attempts', {
+        ar: [
+          'يوصّل مندوبونا الشحنات يوميًا طوال أيام الأسبوع، من السبت إلى الجمعة، بين الساعة 10 صباحًا و7 مساءً، وقد تمتد مواعيد التوصيل إلى ما بعد ذلك في مواسم الذروة.',
+          'وتُجرى حتى ثلاث محاولات لتوصيل كل شحنة، وتصل رسالة نصية عند خروج الشحنة للتوصيل، ثم يتصل المندوب قبل الوصول.',
+        ],
+        en: [
+          'Our couriers deliver every day of the week, Saturday to Friday, between 10 AM and 7 PM. During peak seasons, deliveries can run later than usual.',
+          'Each shipment gets up to three delivery attempts. A text message goes out when the shipment is out for delivery, and the courier calls before arriving.',
         ],
       }),
       reply('delivery.out_for_delivery', 'Out for delivery today', {
@@ -258,26 +268,36 @@ export const CANNED_LIBRARY: LibraryFolder[] = [
           "I've reported this to our operations team so they can look into what happened, and I've arranged another delivery attempt. The courier will call you before arriving, so please keep your phone reachable.",
         ],
       }),
-      reply('delivery.no_call', "Courier didn't call", {
+      reply('delivery.no_call', "Courier didn't call before the attempt", {
         ar: [
-          'نعتذر عن عدم الاتصال بحضرتك للتنسيق قبل التوصيل.',
+          'نعتذر عن عدم اتصال المندوب بحضرتك للتنسيق قبل محاولة التوصيل.',
           'نقلت هذه الملاحظة إلى فريق العمليات، وطلبت أن يتصل المندوب بحضرتك قبل المحاولة التالية.',
           'وإذا كان رقم الهاتف المسجل على الشحنة قد تغيّر، يُرجى إرسال الرقم الصحيح هنا وسأنقله إلى الفريق أيضًا.',
         ],
         en: [
-          "I'm sorry you didn't get a call before the delivery.",
+          "I'm sorry the courier didn't call you before the delivery attempt.",
           "I've passed this to our operations team and asked for the courier to call you before the next attempt.",
-          "If the phone number on your shipment may be out of date, send me the right one and I'll pass it on too.",
+          "If the phone number on your shipment might be out of date, send me the right one and I'll pass it on too.",
         ],
       }),
-      reply('delivery.reschedule_done', 'New delivery date confirmed', {
+      reply('delivery.reschedule_done', 'Change delivery date — confirmed', {
         ar: [
-          'نقلت الموعد الذي حددته حضرتك لاستلام الشحنة إلى فريق التوصيل، وسيتصل المندوب بحضرتك في ذلك اليوم قبل الوصول.',
+          'نقلت الموعد الذي حددته حضرتك لاستلام الشحنة إلى فريق العمليات، وسيتصل المندوب بحضرتك في ذلك اليوم قبل الوصول.',
           'وإذا تغيّرت ظروف حضرتك، فيمكن اختيار موعد توصيل آخر مباشرةً من خلال تطبيق ماي بلو (myBlu).',
         ],
         en: [
-          "All set. I've passed the date you asked for to our delivery team, and the courier will call you on that day before arriving.",
+          "All set. I've passed the date you asked for to our operations team, and the courier will call you on that day before arriving.",
           'If your plans change, you can choose a different delivery date yourself in the myBlu app.',
+        ],
+      }),
+      reply('delivery.reschedule_ask', 'Change delivery date — ask for the day', {
+        ar: [
+          'يمكن لحضرتك اختيار موعد التوصيل المناسب من خلال تطبيق ماي بلو (myBlu) المتاح على أندرويد وآيفون، بتسجيل الدخول برقم الهاتف الذي وصلته الرسالة النصية الخاصة بالشحنة، مع رمز التحقق الذي يصل إليه.',
+          'وإذا كان ذلك أسهل، يمكن إبلاغي هنا باليوم الأنسب لحضرتك، وسأنقله إلى فريق العمليات. وتُجرى حتى ثلاث محاولات لتوصيل كل شحنة، ويتصل المندوب بحضرتك قبل الوصول.',
+        ],
+        en: [
+          "You can pick a delivery date that suits you in the myBlu app, on Android or iPhone. Log in with the mobile number that got the shipment's text message, using the verification code sent to it.",
+          "If it's easier, tell me which day works better and I'll pass it on to our operations team. Each shipment gets up to three delivery attempts, and the courier will call you before arriving.",
         ],
       }),
       reply('delivery.address_ask', 'Change address — ask for the new address', {
@@ -294,11 +314,11 @@ export const CANNED_LIBRARY: LibraryFolder[] = [
       }),
       reply('delivery.address_done', 'Change address — updated', {
         ar: [
-          'نقلت العنوان الجديد إلى فريق التوصيل، وستصل الشحنة إليه بدلًا من العنوان السابق. وكالمعتاد، سيتصل المندوب بحضرتك قبل الوصول.',
+          'نقلت العنوان الجديد إلى فريق العمليات، وستصل الشحنة إليه بدلًا من العنوان السابق. وكالمعتاد، سيتصل المندوب بحضرتك قبل الوصول.',
           'وإذا كان العنوان الجديد في منطقة مختلفة، فقد يستغرق التوصيل وقتًا أطول قليلًا.',
         ],
         en: [
-          "I've passed your new address to our delivery team, so your shipment will now be delivered there. As usual, the courier will call you before arriving.",
+          "I've passed your new address to our operations team, so your shipment will now be delivered there. As usual, the courier will call you before arriving.",
           'If the new address is in a different area from the original one, delivery may take a little longer.',
         ],
       }),
@@ -314,38 +334,38 @@ export const CANNED_LIBRARY: LibraryFolder[] = [
       }),
       reply('delivery.marked_delivered', 'Marked delivered but not received', {
         ar: [
-          'نعتذر لحضرتك عن ذلك، ونتفهم تمامًا القلق حين تُسجَّل الشحنة مُسلَّمة وهي لم تصل بعد. ونتعامل مع هذا الأمر بكل جدية.',
+          'من المقلق فعلًا أن تظهر الشحنة مُسلَّمة وهي لم تصل إلى حضرتك، ونأسف لذلك، ونتعامل مع الأمر بكل جدية.',
           'نرجو من حضرتك أولًا سؤال أفراد الأسرة أو الجيران أو حارس العقار، فربما استلمها أحدهم نيابةً عن حضرتك. وإذا كانت الشحنة لدى أحدهم، يُرجى إبلاغي هنا.',
-          'وفي الوقت نفسه، طلبت من فريق العمليات فتح تحقيق في الأمر، وسأبلغ حضرتك بأي جديد في هذه المحادثة.',
+          'وفي الوقت نفسه، طلبت من فريق العمليات فتح تحقيق في الأمر، وسأُطلع حضرتك هنا على ما يتوصل إليه الفريق.',
         ],
         en: [
-          "I'm sorry, and I understand how worrying it is to see your shipment marked as delivered when it hasn't reached you. We're taking this seriously.",
+          "Seeing your shipment marked as delivered when it hasn't reached you is worrying, and I'm sorry you're dealing with it. We're taking this seriously.",
           "First, could you check with family members, neighbours or your building's security, in case someone received it on your behalf? If one of them has it, just let me know here.",
-          "In the meantime, I've opened an investigation with our operations team, and I'll update you here as soon as I hear back.",
+          "In the meantime, I've opened an investigation with our operations team, and I'll let you know here what they find.",
         ],
       }),
       reply('delivery.refuse', 'Refusing the parcel', {
         ar: [
           'لا مشكلة. يمكن لحضرتك رفض استلام الشحنة عند اتصال المندوب أو عند وصوله، وستعود الشحنة إلى المتجر الذي أرسلها.',
           'وتختار بعض المتاجر تحصيل رسوم توصيل في حال رفض الشحنة، لتغطية تكلفة التوصيل. فإذا كان المتجر قد حدد هذه الرسوم لهذا الطلب، فسيطلبها المندوب عند الرفض.',
-          'أما إلغاء الطلب نفسه، أو استرداد المبلغ في حال الدفع للمتجر مقدمًا، فيتم ترتيبهما مع المتجر مباشرةً. وإذا كان الدفع من خلال تطبيق ماي بلو (myBlu)، يُرجى إبلاغي وسأوضح لحضرتك طريقة تقديم طلب الاسترداد.',
+          'وإذا كان الدفع للمتجر مقدمًا، فيتم ترتيب استرداد المبلغ مع المتجر مباشرةً. أما إذا كان الدفع من خلال تطبيق ماي بلو (myBlu)، فيُرجى إبلاغي وسأوضح لحضرتك طريقة تقديم طلب الاسترداد.',
         ],
         en: [
-          'No problem. You can decline the shipment when the courier calls or arrives, and it will be returned to the store that sent it.',
-          'Some stores choose to have a delivery fee collected when a parcel is refused, to cover the delivery cost. If the store has set one for this order, the courier will ask for it.',
-          "To cancel the order itself, please contact the store directly. If you paid the store in advance, any refund is arranged with them too. If you paid through the myBlu app, let me know and I'll explain how to request a refund.",
+          'No problem. You can decline the shipment when the courier calls or arrives, and it will go back to the store that sent it.',
+          'Some stores choose to have a delivery fee collected when a shipment is refused, to cover the delivery cost. If the store has set one for this order, the courier will ask for it.',
+          "If you paid the store in advance, any refund is arranged with the store. If you paid through the myBlu app, let me know and I'll explain how to request a refund.",
         ],
       }),
       reply('delivery.unrecognised', "Doesn't recognise the parcel", {
         ar: [
-          'شيب بلو شركة شحن تتولى توصيل الطلبات نيابةً عن المتاجر الإلكترونية، وهذه الشحنة مُرسلة من متجر يظهر على طلبه اسم حضرتك ورقم هاتفك.',
+          'شيب بلو شركة شحن تتولى توصيل الطلبات نيابةً عن المتاجر الإلكترونية، وهذه الشحنة مُرسلة من متجر يظهر على طلبه اسم حضرتك ورقم الهاتف الخاص بحضرتك.',
           'ولمعرفة اسم المتجر، يمكن سؤال المندوب عند اتصاله.',
           'وإذا لم يكن هذا الطلب من حضرتك، يمكن رفض استلام الشحنة عند الباب، وستعود إلى المتجر.',
         ],
         en: [
-          'ShipBlu delivers parcels on behalf of online stores. This shipment was sent by a store that has your name and phone number on the order.',
+          'ShipBlu delivers orders on behalf of online stores. This shipment was sent by a store that has your name and phone number on the order.',
           "To find out which store it's from, you can ask the courier when they call.",
-          "If you didn't order anything, you can refuse the parcel at the door and it will go back to the store.",
+          "If you didn't order anything, you can refuse the shipment at the door, and it will go back to the store.",
         ],
       }),
     ],
@@ -373,7 +393,7 @@ export const CANNED_LIBRARY: LibraryFolder[] = [
           'ويحصّلها مندوبنا نيابةً عن المتجر، لذا يُرجى التواصل مع المتجر مباشرةً لأي استفسار بخصوص هذه الرسوم.',
         ],
         en: [
-          'The fee the courier asks for when a parcel is refused is a delivery fee set by the store, to cover the cost of delivering it. Not every store charges one; the store decides whether to, and how much.',
+          'The fee the courier asks for when a shipment is refused is a delivery fee set by the store, to cover the cost of delivering it. Not every store charges one; the store decides whether to, and how much.',
           "Our courier collects it on the store's behalf, so if you have any questions about the fee, the store is the right place to ask.",
         ],
       }),
@@ -387,12 +407,14 @@ export const CANNED_LIBRARY: LibraryFolder[] = [
       reply('condition.damaged_recipient', 'Damaged parcel (recipient)', {
         ar: [
           'يؤسفنا أن شحنة حضرتك وصلت متضررة. نرجو من حضرتك الاحتفاظ بالشحنة وبكل مواد التغليف كما هي، لأنه لا يمكن قبول شكوى التلف بعد التخلص من التغليف.',
-          'ولتسجيل الشكوى، يُرجى إرسال ما يلي في أقرب وقت:\n1. صور للمنتج يظهر فيها التلف\n2. صور للتغليف\n3. رقم تتبع الشحنة',
+          'ولتسجيل الشكوى، يُرجى إرسال ما يلي في أقرب وقت:',
+          '1. صور للمنتج يظهر فيها التلف\n2. صور للتغليف\n3. رقم تتبع الشحنة',
           'وبمجرد وصول الصور ورقم التتبع، سأرفع الشكوى إلى الفريق المختص. أما الاستبدال أو استرداد المبلغ فيكون بالاتفاق مع المتجر مباشرةً، لذا من الأفضل التواصل معه أيضًا.',
         ],
         en: [
-          "I'm sorry your parcel arrived damaged. Please keep the parcel and all of its packaging as they are. We can't accept a damage complaint once the packaging has been thrown away.",
-          'To report it, please send us these as soon as you can:\n1. Photos of the product showing the damage\n2. Photos of the packaging\n3. The tracking number',
+          "I'm sorry your shipment arrived damaged. Please keep the shipment and all of its packaging as they are. We can't accept a damage complaint once the packaging has been thrown away.",
+          'To report it, please send us these as soon as you can:',
+          '1. Photos of the product showing the damage\n2. Photos of the packaging\n3. The tracking number',
           "Once I have these, I'll raise the complaint with the team responsible. Replacements and refunds are arranged directly with the store, so it's worth contacting them too.",
         ],
       }),
@@ -402,20 +424,22 @@ export const CANNED_LIBRARY: LibraryFolder[] = [
           'أما إذا بدا التغليف مفتوحًا أو كانت عليه آثار عبث عند الاستلام، فنرجو من حضرتك الاحتفاظ به وإرسال صور له مع رقم تتبع الشحنة، وسأراجع الأمر من جانبنا أيضًا.',
         ],
         en: [
-          "I'm sorry your order didn't arrive as expected. The store prepared and packed your order, and we deliver the package as it was handed to us. Contacting the store is the quickest way to sort out a wrong or missing item.",
+          "I'm sorry your order didn't arrive as expected. The store prepared and packed your order, and we deliver the shipment as it was handed to us. Contacting the store is the quickest way to sort out a wrong or missing item.",
           "If the packaging looked opened or tampered with when it arrived, please keep it. Send us photos of the packaging and the tracking number, and I'll look into it on our side too.",
         ],
       }),
       reply('condition.damage_claim_merchant', 'Damage claim (merchant) — what we need', {
         ar: [
           'يؤسفنا وصول أحد أوردرات حضرتك متضررًا. ويجب الإبلاغ عن الأوردرات المتضررة خلال 24 ساعة من تاريخ التسليم، في موعد أقصاه الساعة 6 مساءً من يوم العمل التالي.',
-          'ولفتح تحقيق في الأمر، يُرجى إرسال:\n1. رقم التتبع\n2. صور لتغليف الأوردر\n3. صور تُظهر التلف بوضوح',
-          'ويُشترط لقبول شكوى التلف أن يكون الأوردر مسجّلًا في نظام شيب بلو على أنه قابل للكسر (Fragile)، وأن يحمل ملصق «Fragile» واضحًا على التغليف الخارجي، وأن يكون مغلّفًا وفقًا لإرشادات التغليف الخاصة بنا.',
+          'ولفتح تحقيق في الأمر، يُرجى إرسال:',
+          '1. رقم التتبع\n2. صور لتغليف الأوردر\n3. صور تُظهر التلف بوضوح',
+          'ويُشترط لقبول شكوى التلف أن يكون الأوردر مسجّلًا في نظام شيب بلو على أنه قابل للكسر (Fragile)، وأن يحمل ملصق «Fragile» واضحًا على التغليف الخارجي، وأن يكون مغلّفًا وفقًا لإرشادات التغليف الخاصة بنا. كما لا تتحمل شيب بلو مسؤولية التلف الذي يحدث للأوردرات المسموح بفتحها (Allow to Open) أثناء فتحها أو بعده.',
         ],
         en: [
           'Sorry to hear one of your orders arrived damaged. Damage needs to be reported within 24 hours of the delivery date, and no later than 6 PM on the next business day.',
-          "To open an investigation, please send us:\n1. The tracking number\n2. Photos of the order's packaging\n3. Photos that clearly show the damage",
-          'A damage claim is valid only if the order was marked "Fragile" in the ShipBlu system and had a visible "Fragile" label on its outer packaging. It also needs to have been packed according to our packaging guidelines.',
+          'To open an investigation, please send us:',
+          "1. The tracking number\n2. Photos of the order's packaging\n3. Photos that clearly show the damage",
+          'A damage claim is valid only if the order was marked "Fragile" in the ShipBlu system and had a visible "Fragile" label on its outer packaging. It also needs to have been packed according to our packaging guidelines. ShipBlu also isn\'t liable for damage to an "Allow to Open" order that happens during or after opening.',
         ],
       }),
     ],
@@ -442,20 +466,34 @@ export const CANNED_LIBRARY: LibraryFolder[] = [
         ],
         en: [
           'To cancel the order, please get in touch with the store you bought from. The store manages the order, so only they can cancel it.',
-          "If the parcel reaches you before the store cancels the order, you can decline it when the courier calls or arrives, and it'll be returned to the store. If the store has set a delivery fee for refused parcels, the courier will ask for it.",
+          "If the shipment reaches you before the store cancels the order, you can decline it when the courier calls or arrives, and it'll be returned to the store. If the store has set a delivery fee for refused shipments, the courier will ask for it.",
         ],
       }),
-      reply('returns.cancel_merchant', 'Cancel an order (merchant) — Return to Origin', {
+      reply('returns.cancel_merchant', 'Cancel an order — Return to Origin (merchant)', {
         ar: [
-          'لإلغاء أوردر استلمه مندوبنا بالفعل، يمكن لحضرتك استخدام لوحة تحكم شيب بلو كالتالي:\n1. الضغط على النقاط الثلاث تحت «خيارات» (Actions) بجانب الأوردر.\n2. اختيار «يعود إلى المتجر» (Return to Origin).',
+          'لإلغاء أوردر استلمه مندوبنا بالفعل، يمكن لحضرتك استخدام لوحة تحكم شيب بلو كالتالي:',
+          '1. الضغط على النقاط الثلاث تحت «خيارات» (Actions) بجانب الأوردر.\n2. اختيار «يعود إلى المتجر» (Return to Origin).',
           'وبعد ذلك سيعود الأوردر إلى عنوان الإرجاع المسجّل في حساب حضرتك، ويمكن متابعته من سجل حالة الأوردر.',
         ],
         en: [
-          'To cancel an order we\'ve already picked up, use your ShipBlu dashboard:\n1. Click the three dots under Actions next to the order.\n2. Choose "Return to Origin".',
+          "To cancel an order we've already picked up, use your ShipBlu dashboard:",
+          '1. Click the three dots under Actions next to the order.\n2. Choose "Return to Origin".',
           "The order will then be returned to your return point, and you can follow it in the order's timeline.",
         ],
       }),
-      reply('returns.status_merchant', 'Where is my return (merchant)', {
+      reply('returns.create_return_merchant', 'Return order — how to create one (merchant)', {
+        ar: [
+          'يمكن لحضرتك إنشاء أوردر إرجاع من لوحة تحكم شيب بلو كالتالي:',
+          '1. الدخول إلى إنشاء أوردر (Create Order).\n2. اختيار أوردر إرجاع (Return Order).',
+          'وبعد إنشائه، يمكن متابعته من سجل حالة الأوردر. أما إذا كان العميل يرغب في استبدال المنتج لا إرجاعه، فالخيار المناسب هو الاستبدال (Pickup to Exchange) من قائمة الأوردر الذي تم توصيله.',
+        ],
+        en: [
+          'You can create a return order from your ShipBlu dashboard:',
+          '1. Go to Create Order.\n2. Choose "Return Order".',
+          'Once it\'s created, you can follow it in the order\'s timeline. If your customer is swapping the item rather than sending it back, use "Pickup to Exchange" on the delivered order instead.',
+        ],
+      }),
+      reply('returns.status_merchant', 'Return status — where to follow it (merchant)', {
         ar: [
           'يمكن لحضرتك متابعة أي مرتجع من لوحة تحكم شيب بلو بفتح الأوردر ومراجعة سجل حالته، فهو يعرض كل تحديث حتى يعود الأوردر إلى حضرتك.',
           'ولمراجعة مرتجع معيّن، يُرجى إرسال رقم تتبعه، وسأتحقق من موقعه الحالي وأوافي حضرتك بالتحديث هنا.',
@@ -465,27 +503,29 @@ export const CANNED_LIBRARY: LibraryFolder[] = [
           "If you'd like me to check a specific return, send me its tracking number. I'll find out where it is and update you here.",
         ],
       }),
-      reply('returns.not_received_merchant', 'Return not received (merchant)', {
+      reply('returns.not_received_merchant', 'Return not received — investigating (merchant)', {
         ar: [
-          'نعتذر لحضرتك عن عدم وصول المرتجع حتى الآن، وقد فتحتُ تحقيقًا مع فريق العمليات لتتبّع مكانه، وسأوافي حضرتك بالتحديثات هنا فور وصول الرد.',
+          'يؤسفنا أن المرتجع لم يصل إلى حضرتك حتى الآن. فتحتُ تحقيقًا مع فريق العمليات لتتبّع مكانه، وسأعود إلى حضرتك هنا بما يتوصل إليه الفريق.',
           'وإذا كانت هناك مرتجعات أخرى لم تصل، يُرجى إرسال أرقام تتبعها لأضيفها إلى التحقيق نفسه.',
         ],
         en: [
-          "I'm sorry the return hasn't reached you yet. I've opened an investigation with our operations team to trace it, and I'll update you here as soon as I hear back.",
+          "I'm sorry the return hasn't reached you yet. I've opened an investigation with our operations team to trace it, and I'll come back to you here with what they find.",
           "If any other returns are missing, send me their tracking numbers and I'll add them to the same investigation.",
         ],
       }),
-      reply('returns.exchange_merchant', 'Create an exchange (merchant)', {
+      reply('returns.exchange_merchant', 'Exchange — how to create one (merchant)', {
         ar: [
-          'من لوحة تحكم شيب بلو، يمكن لحضرتك إنشاء طلب استبدال لأي أوردر تم توصيله كالتالي:\n1. الدخول إلى قائمة أوردرات التوصيل (Delivery Orders)، ثم الضغط على النقاط الثلاث بجانب الأوردر الذي تم توصيله.\n2. اختيار الاستبدال (Pickup to Exchange).\n3. إدخال بيانات الشحنة المرتجعة وبيانات الشحنة المطلوب توصيلها.\n4. تحديد أوردر الاستبدال، ثم الضغط على زر طلب الاستلام (Request Pickup).',
+          'من لوحة تحكم شيب بلو، يمكن لحضرتك إنشاء طلب استبدال لأي أوردر تم توصيله كالتالي:',
+          '1. الدخول إلى قائمة أوردرات التوصيل (Delivery Orders)، ثم الضغط على النقاط الثلاث بجانب الأوردر الذي تم توصيله.\n2. اختيار الاستبدال (Pickup to Exchange).\n3. إدخال بيانات الشحنة المرتجعة وبيانات الشحنة المطلوب توصيلها.\n4. تحديد أوردر الاستبدال، ثم الضغط على زر طلب الاستلام (Request Pickup).',
           'وتبدأ أرقام تتبع الاستبدال بالرقم 31 لشحنة التوصيل وبالرقم 32 لشحنة الإرجاع.',
         ],
         en: [
-          'From your ShipBlu dashboard, you can create an exchange for any delivered order:\n1. Go to Delivery Orders and click the three dots next to the delivered order.\n2. Choose "Pickup to Exchange".\n3. Enter the details of the package to be returned and the package to be delivered.\n4. Select the exchange and click "Request Pickup".',
+          'From your ShipBlu dashboard, you can create an exchange for any delivered order:',
+          '1. Go to Delivery Orders and click the three dots next to the delivered order.\n2. Choose "Pickup to Exchange".\n3. Enter the details of the package to be returned and the package to be delivered.\n4. Select the exchange and click "Request Pickup".',
           'Exchange tracking numbers start with 31 for the delivery leg and 32 for the return leg.',
         ],
       }),
-      reply('returns.refund_myblu', 'Refund for a myBlu payment, not delivered (recipient)', {
+      reply('returns.refund_myblu', 'Refund — paid in myBlu, not delivered (recipient)', {
         ar: [
           'إذا كان الدفع قد تم من خلال تطبيق ماي بلو (myBlu) ولم تصل الشحنة، يمكن لحضرتك تقديم طلب استرداد المبلغ عبر النموذج المتاح في مركز المساعدة.',
           'تتم مراجعة الطلب بعد إرجاع الشحنة إلى المتجر، وهو ما يستغرق عادةً يوم عمل أو يومين من تاريخ رفض الاستلام أو آخر محاولة توصيل. ويُردّ المبلغ إلى وسيلة الدفع الأصلية فقط، وبعد أن نعالج الطلب، يظهر المبلغ في حساب حضرتك خلال 7 إلى 14 يومًا حسب البنك أو المحفظة الإلكترونية.',
@@ -505,14 +545,14 @@ export const CANNED_LIBRARY: LibraryFolder[] = [
       reply('pickup.missed', 'Pickup missed — rescheduling as a priority', {
         ar: [
           'نعتذر لحضرتك عن عدم استلام الأوردرات في موعدها، ونتفهم أن ذلك يؤخر وصولها إلى عملاء حضرتك.',
-          'رفعت الأمر إلى فريق الاستلام وطلبت تحديد موعد استلام جديد بشكل عاجل، وسيتواصل المندوب مع حضرتك قبل وصوله. وسأتابع بنفسي وأبلغ حضرتك بأي جديد هنا.',
+          'رفعت الأمر إلى فريق العمليات وطلبت تحديد موعد استلام جديد بشكل عاجل، وسيتواصل المندوب مع حضرتك قبل وصوله. وسأؤكد لحضرتك هنا فور تحديد الموعد الجديد.',
         ],
         en: [
           "I'm sorry your orders weren't collected as planned. I understand this holds up deliveries to your customers.",
-          "I've raised it with our pickup team and asked them to reschedule the pickup as a priority. The courier will contact you before arriving, and I'll follow it up and update you here.",
+          "I've raised it with our operations team and asked them to reschedule the pickup as a priority. The courier will contact you before arriving, and I'll confirm here once the new pickup is booked.",
         ],
       }),
-      reply('pickup.request', 'How to request a pickup', {
+      reply('pickup.request', 'Pickup — how to request one', {
         ar: [
           'يمكن لحضرتك طلب استلام الأوردرات من لوحة تحكم شيب بلو بطريقتين:',
           '1. لكل أوردر على حدة، من خلال خيار طلب الاستلام (Request Pickup).\n2. لكل الأوردرات الجديدة، بتفعيل خيار الطلب التلقائي للاستلام والإرجاع والتحصيل (Automatic Pickup, Return, Collection Request) من إعدادات الحساب (Account Settings)، فيُطلب استلامها دون أي خطوة إضافية.',
@@ -527,7 +567,7 @@ export const CANNED_LIBRARY: LibraryFolder[] = [
       reply('pickup.point_change', 'Change pickup or return point — ask for address', {
         ar: [
           'يسعدني مساعدة حضرتك في تغيير عنوان الاستلام أو الإرجاع. يُرجى إرسال:',
-          '1. العنوان الجديد كاملًا: المنطقة، والشارع، ورقم المبنى، والدور، وأقرب علامة مميزة\n2. اسم الشخص المسؤول عن التواصل في العنوان الجديد ورقم موبايله',
+          '1. العنوان الجديد كاملًا: المنطقة، والشارع، ورقم المبنى، والدور، وأقرب علامة مميزة\n2. اسم الشخص المسؤول عن التواصل في العنوان الجديد ورقم هاتفه',
           'وبمجرد وصول البيانات، سأتحقق من أن العنوان الجديد يقع ضمن نطاق تغطيتنا، وأنسّق التغيير مع الفريق المختص.',
         ],
         en: [
@@ -536,7 +576,7 @@ export const CANNED_LIBRARY: LibraryFolder[] = [
           "Once I have them, I'll check that the new address is within our coverage and arrange the change with the right team.",
         ],
       }),
-      reply('pickup.supplies', 'Order packaging materials', {
+      reply('pickup.supplies', 'Packaging materials — how to order', {
         ar: [
           'يمكن لحضرتك طلب مواد التغليف مباشرة من لوحة التحكم، من خلال متجر مواد التغليف (Supplies Shop). وبعد اختيار المواد المطلوبة، يكون الدفع بالبطاقة أو من رصيد شيب بلو (ShipBlu Balance).',
           'وتصل المواد إلى حضرتك خلال 24 إلى 48 ساعة عمل.',
@@ -546,7 +586,7 @@ export const CANNED_LIBRARY: LibraryFolder[] = [
           'Your supplies will arrive within 24 to 48 working hours.',
         ],
       }),
-      reply('pickup.fragile', 'Shipping fragile items', {
+      reply('pickup.fragile', 'Fragile items — how to ship them', {
         ar: [
           'لشحن المنتجات القابلة للكسر، يلزم في كل أوردر ثلاثة أمور:',
           '1. تحديد الأوردر على أنه قابل للكسر (Fragile) في نظام شيب بلو\n2. وضع ملصق واضح بعبارة «قابل للكسر» (Fragile) على التغليف الخارجي\n3. تغليف الأوردر وفق إرشادات شيب بلو للتغليف، المتاحة في مركز المساعدة',
@@ -569,7 +609,7 @@ export const CANNED_LIBRARY: LibraryFolder[] = [
         ar: [
           'تُحوَّل مستحقات حضرتك وفق الدورة الأسبوعية المحددة للحساب، وتتحدد هذه الدورة حسب حجم الشحنات الشهري.',
           'ولمعرفة ما شمله كل تحويل، يمكن الدخول إلى قائمة الماليات (Finances) ثم الفواتير (Billing) في لوحة التحكم، ومن هناك يمكن تنزيل أي كشف حساب بصيغة Excel أو PDF.',
-          'وإذا رغبت حضرتك في معرفة دورة التحويل المحددة لحسابك، يمكنني التحقق منها.',
+          'وإذا رغبت حضرتك في معرفة دورة التحويل المحددة للحساب، يمكنني التحقق منها.',
         ],
         en: [
           "Your payouts follow your account's weekly transfer cycle, which depends on your monthly shipping volume.",
@@ -577,19 +617,29 @@ export const CANNED_LIBRARY: LibraryFolder[] = [
           "If you'd like to know which cycle your account is on, I can check it for you.",
         ],
       }),
+      reply('finance.cod_limit', 'COD limit — EGP 10,000 per order', {
+        ar: [
+          'الحد الأقصى للمبلغ الذي نحصّله عند التسليم هو 10,000 جنيه مصري للأوردر الواحد، ونحصّله من عميل حضرتك نيابةً عن حضرتك، وفق المبلغ المحدد على الأوردر.',
+          'كما لا يمكن شحن أي منتج تزيد قيمته على 10,000 جنيه مصري. والقائمة الكاملة لما لا يمكن شحنه متاحة في مركز المساعدة.',
+        ],
+        en: [
+          'The most we can collect on delivery for a single order is EGP 10,000. We collect it from your customer on your behalf, and the amount is the one you set on the order.',
+          "Items worth more than EGP 10,000 also can't be shipped with us. The full list of what can't be shipped is in our help centre.",
+        ],
+      }),
       reply('finance.payout_missing', 'Payout or collection missing — investigating', {
         ar: [
-          'نعتذر لحضرتك عن هذا القلق. رفعت الموضوع إلى فريق الماليات لمراجعة المبالغ ومطابقتها، وسأبلغ حضرتك هنا فور وصول رد الفريق.',
+          'نتفهم قلق حضرتك بشأن هذا المبلغ، لذا رفعت الموضوع إلى فريق الماليات لمراجعة المبالغ ومطابقتها، وسأنقل إلى حضرتك ردّ الفريق هنا.',
           'وإن أمكن، نرجو إرسال أرقام تتبع الأوردرات التي كان من المتوقع أن يشملها التحويل، فذلك يساعد الفريق على تعقّب المبالغ بسرعة.',
           'وحتى ذلك الحين، يمكن لحضرتك الاطلاع على كشوف الحساب من قائمة الماليات (Finances) ثم الفواتير (Billing) في لوحة التحكم، وفيها يتضح ما شمله كل تحويل.',
         ],
         en: [
-          "I'm sorry, I know a missing amount is worrying. I've raised it with our finance team and asked them to reconcile it, and I'll update you here as soon as I hear back.",
+          "I understand how worrying a missing amount is, so I've raised it with our finance team to reconcile it. I'll share their answer with you here.",
           'If you can, please send the tracking numbers of the orders you expected the transfer to include. It helps the team trace the amounts quickly.',
           'In the meantime, the statements under Finances, then Billing, in your dashboard show what each transfer covered.',
         ],
       }),
-      reply('finance.price_list', 'See your price list', {
+      reply('finance.price_list', 'Price list — where to find it', {
         ar: [
           'يمكن لحضرتك الاطلاع على أسعار الشحن من لوحة التحكم، من قائمة الحساب (Account) ثم الأسعار (Pricing).',
           'وبعد إدخال حجم الشحنات الشهري، ونوع الأوردر، وعدد الطرود، يظهر متوسط رسوم الشحن.',
@@ -640,7 +690,7 @@ export const CANNED_LIBRARY: LibraryFolder[] = [
   {
     name: 'Merchant account and integrations',
     responses: [
-      reply('account.signup', 'Open a merchant account', {
+      reply('account.signup', 'Sign-up — open a merchant account', {
         ar: [
           'يمكن لحضرتك فتح حساب تاجر على شيب بلو بخطوات بسيطة:',
           '1. الضغط على زر بدء الشحن (Start Shipping) على منصة شيب بلو.\n2. إدخال البيانات الشخصية.\n3. تأكيد الحساب برمز التحقق الذي يصل في رسالة نصية.',
@@ -652,7 +702,7 @@ export const CANNED_LIBRARY: LibraryFolder[] = [
           "Before you can request pickups, you'll need to set your account type: Company or Personal. Please choose carefully, as it can't be changed after you submit it. If you'll need tax invoices, choose Company.",
         ],
       }),
-      reply('integration.connect', 'Connect an online store', {
+      reply('integration.connect', 'Store integration — how to connect', {
         ar: [
           'يمكن لحضرتك ربط المتجر الإلكتروني بحساب شيب بلو، إذ نوفر الربط مع منصات Shopify، وWooCommerce، وMagento، وZammit، بالإضافة إلى الربط عبر واجهة برمجة التطبيقات (API).',
           'ولكل منصة دليل خطوة بخطوة في مركز المساعدة. على أي منصة يعمل متجر حضرتك؟ وسأرسل الدليل المناسب لها.',
@@ -662,14 +712,14 @@ export const CANNED_LIBRARY: LibraryFolder[] = [
           "Each platform has its own step-by-step guide in our help centre. Which platform is your store on? I'll send you the right guide.",
         ],
       }),
-      reply('integration.sync_issue', 'Orders not syncing — what we need', {
+      reply('integration.sync_issue', 'Store integration — orders not syncing', {
         ar: [
-          'نعتذر لحضرتك عن عدم وصول الأوردرات إلى حساب شيب بلو. وحتى يتمكن فريقنا التقني من فحص المشكلة، يُرجى إرسال:',
-          '1. اسم المنصة التي يعمل عليها المتجر\n2. التاريخ التقريبي الذي توقفت فيه مزامنة الأوردرات\n3. رقمان أو ثلاثة من أرقام أوردرات المتجر التي لم تصل إلى حساب شيب بلو\n4. لقطة شاشة لأي رسالة خطأ ظهرت',
+          'يؤسفنا توقّف وصول الأوردرات إلى حساب شيب بلو. وحتى يتمكن فريقنا التقني من فحص المشكلة، يُرجى إرسال:',
+          '1. اسم المنصة التي يعمل عليها المتجر\n2. التاريخ التقريبي الذي توقفت فيه مزامنة الأوردرات\n3. رقمين أو ثلاثة من أرقام أوردرات المتجر التي لم تصل إلى حساب شيب بلو\n4. لقطة شاشة لأي رسالة خطأ ظهرت',
           'وبمجرد وصول هذه البيانات، سأحيلها إلى الفريق التقني وأبلغ حضرتك بأي جديد هنا.',
         ],
         en: [
-          "I'm sorry your orders aren't coming through. To help our technical team look into it, please send me:",
+          "Sorry to hear your orders aren't coming through. To help our technical team look into it, please send me:",
           "1. The platform your store is on\n2. Roughly when the orders stopped syncing\n3. Two or three order numbers from your store that didn't reach your ShipBlu account\n4. A screenshot of any error message you've seen",
           "As soon as I have these, I'll pass them on and update you here.",
         ],
@@ -683,13 +733,13 @@ export const CANNED_LIBRARY: LibraryFolder[] = [
     responses: [
       reply('sales.rates', 'Rates before signing up', {
         ar: [
-          'شكرًا لاهتمام حضرتك بخدمات شيب بلو. تختلف أسعارنا حسب حجم الشحنات ومناطق التوصيل، ولإعداد عرض يناسب نشاط حضرتك، يُرجى إرسال:',
+          'يسعدنا اهتمام حضرتك بخدمات شيب بلو. تختلف أسعارنا حسب حجم الشحنات ومناطق التوصيل، ولإعداد عرض يناسب نشاط حضرتك، يُرجى إرسال:',
           '1. العدد المتوقع للشحنات شهريًا\n2. منطقة الاستلام\n3. أهم مناطق التوصيل\n4. متوسط حجم الشحنة ووزنها',
           'وسأحيل البيانات إلى فريق المبيعات لإعداد العرض. ويمكن لحضرتك أيضًا فتح حساب تاجر في أي وقت، ثم معرفة متوسط رسوم الشحن من قائمة الحساب (Account) ثم الأسعار (Pricing) بعد إدخال حجم الشحنات.',
         ],
         en: [
           'Thanks for considering ShipBlu. Our prices depend on your shipping volume and destinations. To help our sales team prepare an offer that fits your business, please send me:',
-          "1. Your expected number of shipments per month\n2. The area we'd pick up from\n3. Your main delivery areas\n4. The typical size and weight of your parcels",
+          "1. Your expected number of shipments per month\n2. The area we'd pick up from\n3. Your main delivery areas\n4. The typical size and weight of your shipments",
           "I'll pass these on to the team. You can also open a merchant account at any time and see the average shipping fee for your volume under Account, then Pricing.",
         ],
       }),
@@ -740,10 +790,10 @@ export const CANNED_LIBRARY: LibraryFolder[] = [
       }),
       reply('other.partnership', 'Partnership, courier and vendor offers', {
         ar: [
-          'شكرًا لحضرتك على التواصل والاهتمام بالعمل مع شيب بلو. هذه القناة مخصصة لخدمة العملاء، لذا حوّلتُ الرسالة إلى الفريق المختص، وسيتواصل الفريق مع حضرتك في حال وجود فرصة مناسبة للتعاون.',
+          'نقدّر تواصل حضرتك مع شيب بلو بخصوص العمل معًا. هذه القناة مخصصة لخدمة العملاء، لذا حوّلتُ الرسالة إلى الفريق المختص، وسيتواصل مع حضرتك في حال وجود فرصة مناسبة للتعاون.',
         ],
         en: [
-          "Thank you for reaching out and for your interest in working with ShipBlu. This channel is for customer support, so I've passed your message to the right team. They'll get in touch if there's a fit.",
+          "We appreciate you reaching out about working with ShipBlu. This channel is for customer support, so I've passed your message to the right team. They'll get in touch if there's a fit.",
         ],
       }),
     ],
