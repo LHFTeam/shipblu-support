@@ -119,7 +119,8 @@ export async function processMetaWebhook(event: {
   log.info(
     `${event.id} via ${event.connection ?? 'an unrecorded connection'}: ` +
       `${messages} message(s), ${comments} comment(s), ${receipts} receipt(s), ` +
-      `${interactions} interaction(s) (${skipped} skipped), ${parsed.echoes} echo(es) ignored`,
+      `${interactions} interaction(s) (${skipped} skipped), ${parsed.echoes} echo(es) ignored, ` +
+      `${parsed.emptyCards} empty card(s) ignored`,
   );
 }
 

@@ -44,6 +44,7 @@ export function parseMetaWebhook(
     receipts: [],
     interactions: [],
     echoes: 0,
+    emptyCards: 0,
   };
 
   if (!isObject(payload)) return result;
@@ -131,6 +132,24 @@ function readMessagingEvent(
   // A deleted message has no content to file and no id worth threading on.
   if (message.is_deleted) return;
 
+  const received = message.attachments ?? [];
+  const attachments = received.filter((attachment) => !isEmptyCard(attachment));
+
+  // A message that was only Instagram's phone-number card is not something the
+  // customer said: the number arrived a second earlier as a message of its own.
+  // Filed, it became a customer bubble reading "[template]", the inbox headline
+  // in place of that number, a second inbound message in the volume figures and
+  // a reply restarting the next-response clock (§6.79).
+  if (
+    attachments.length === 0 &&
+    received.length > 0 &&
+    !message.text?.trim() &&
+    !message.is_unsupported
+  ) {
+    result.emptyCards += 1;
+    return;
+  }
+
   const from = event.sender?.id;
   if (!from || !message.mid) return;
 
@@ -142,8 +161,8 @@ function readMessagingEvent(
     accountId: event.recipient?.id ?? accountId,
     senderName: event.sender?.username ?? null,
     sentAt: fromEpoch(event.timestamp),
-    text: displayText(event),
-    attachments: (message.attachments ?? []).map(normaliseAttachment),
+    text: displayText(message, attachments),
+    attachments: attachments.map(normaliseAttachment),
     replyToMid: message.reply_to?.mid ?? null,
     standby,
     raw: event as unknown as Record<string, unknown>,
@@ -236,18 +255,50 @@ function describeReferral(referral: MetaReferral | undefined): string {
  * An empty body renders as a blank bubble, which reads like a bug rather than
  * like a photo — so a message that is only an attachment says so.
  */
-function displayText(event: MetaMessagingEvent): string {
-  const message = event.message;
-  const text = message?.text?.trim();
+function displayText(
+  message: NonNullable<MetaMessagingEvent['message']>,
+  attachments: MetaRawAttachment[],
+): string {
+  const text = message.text?.trim();
   if (text) return text;
 
-  if (message?.is_unsupported) return '[unsupported message type]';
+  if (message.is_unsupported) return '[unsupported message type]';
 
-  const attachments = message?.attachments ?? [];
   if (attachments.length === 1) return `[${attachments[0]?.type ?? 'attachment'}]`;
   if (attachments.length > 1) return `[${attachments.length} attachments]`;
 
   return '';
+}
+
+/**
+ * A `template` attachment with no value anywhere in it.
+ *
+ * When a customer sends Instagram a message that is only a phone number,
+ * Instagram follows it about a second later with a card of its own — "Phone
+ * number", the number, and WhatsApp message and WhatsApp call buttons — and the
+ * Page connection delivers that card, attributed to the customer, as
+ * `{ type: 'template', payload: { generic: { elements: [] } } }`: everything the
+ * card showed has been removed before it reaches us. Established from all 13
+ * production deliveries between 2026-09-20 and 2026-10-05, each 0.5–1.8 s after
+ * a digits-only number from the same sender, and from the same thread as Meta's
+ * own inbox draws it.
+ *
+ * Judged by content rather than by type, because a `template` that does carry
+ * something — a product shared into the thread, a card whose elements arrive —
+ * is the customer sending us something, and it must keep reaching an agent even
+ * while this parser cannot name it. Not limited to Instagram for the same
+ * reason: a card with nothing in it has nothing to file on any platform.
+ */
+function isEmptyCard(raw: MetaRawAttachment): boolean {
+  return raw?.type === 'template' && !carriesValue(raw.payload);
+}
+
+function carriesValue(value: unknown): boolean {
+  if (typeof value === 'string') return value.trim() !== '';
+  if (typeof value === 'number' || typeof value === 'boolean') return true;
+  if (Array.isArray(value)) return value.some(carriesValue);
+  if (isObject(value)) return Object.values(value).some(carriesValue);
+  return false;
 }
 
 function normaliseAttachment(raw: MetaRawAttachment): MetaAttachment {

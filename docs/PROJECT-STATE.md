@@ -4404,6 +4404,43 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     body. A layout-level gate on what loads does not cover what is already
     loaded.
 
+79. **Instagram's phone-number card reached the inbox as "[template]".**
+    _2026-10-05, asked about by the team._ When a customer sends Instagram a
+    message that is only a phone number, Instagram follows it with a card of its
+    own: "Phone number", the number, and WhatsApp message and WhatsApp call
+    buttons. Meta's inbox draws it in the customer's column. The Page connection
+    delivers it as a second message from the customer, whose one attachment is
+    `{ type: 'template', payload: { generic: { elements: [] } } }`, with
+    everything the card showed removed. `displayText()` printed an unknown
+    attachment type in brackets, so the card was filed as an inbound reply
+    reading `[template]`.
+
+    Sized read-only before fixing: **13** such messages in production, from
+    2026-09-20 to 2026-10-05, in 12 conversations. All came over
+    `facebook_page`, all in `standby`, and each was 0.5–1.8 s after a
+    digits-only Egyptian mobile number from the same sender. Every valid number
+    sent alone on Instagram was followed by one; a 12-digit number was not, and
+    neither was either of the two written in Arabic-Indic digits, nor any of
+    about 50 on Messenger. The card's effects:
+    - it was the inbox headline in place of the number (9 open tickets at the
+      time);
+    - it counted as a second inbound message in today's volume;
+    - it moved `last_customer_message_at` and restarted the next-response
+      clock;
+    - the categoriser read it as text.
+
+    `parseMetaWebhook` now drops a `template` attachment with no value anywhere
+    in its payload. A message left with no text and no attachments is not filed,
+    and `process_meta_webhook` counts it as `empty card(s) ignored`. The rule is
+    judged by content, not type: a template that carries something is the
+    customer sending us something, and keeps reaching an agent. The delivery
+    itself stays in `webhook_events` like every other.
+
+    Still open: the other attachment types Instagram now documents (`ig_post`,
+    `ig_reel`, `reel`, `story_mention`) are not in `ATTACHMENT_TYPES` either.
+    Nothing in production has carried one yet. When one does, it will read
+    `[ig_post]` with an `unsupported` attachment rather than show the post.
+
 ## 7. Verification already done
 
 - **The knowledge-base role floor, against a real Postgres.** _2026-09-04._ The
