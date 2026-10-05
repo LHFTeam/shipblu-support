@@ -624,12 +624,27 @@ export const cannedResponses = pgTable(
 
     usageCount: integer('usage_count').notNull().default(0),
 
+    /**
+     * Which entry of the starter library this row was seeded from, as
+     * `library:<key>`; null on everything a person wrote in the console.
+     *
+     * The seed's identity for the row, because the title cannot be: a team
+     * renames "Out for delivery today" to whatever their agents search for,
+     * and a seed that found its rows by title would read the renamed one as
+     * missing and insert a second copy beside it. Unique, so two runs racing
+     * cannot both insert; a plain unique index, because Postgres already
+     * treats every null as distinct and the console's own rows are all null.
+     * See `worker/handlers/seed-canned-responses.ts`.
+     */
+    seedKey: text('seed_key'),
+
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index('canned_responses_visibility_idx').on(t.visibility),
     index('canned_responses_agent_idx').on(t.agentId),
+    uniqueIndex('canned_responses_seed_key_idx').on(t.seedKey),
   ],
 );
 

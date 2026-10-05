@@ -193,6 +193,16 @@ const JOB_PAYLOADS = {
     /** Also replace the title and body of articles that already exist. */
     overwrite: z.boolean().optional(),
   }),
+  seed_canned_responses: z.strictObject({
+    /** Report what would change, write nothing. */
+    dryRun: z.boolean().optional(),
+    /**
+     * Also replace the title, folder and bodies of seeded responses the team
+     * has since edited. There is no version history for a canned response, so
+     * this cannot be undone — run it with `dryRun=true` first.
+     */
+    overwrite: z.boolean().optional(),
+  }),
 } satisfies Partial<Record<JobType, z.ZodType>>;
 
 type CheckedJob = keyof typeof JOB_PAYLOADS;

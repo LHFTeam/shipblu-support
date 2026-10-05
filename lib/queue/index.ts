@@ -34,6 +34,7 @@ export type JobType =
   | 'backfill_categorise_ai'
   | 'normalise_kb_formatting'
   | 'seed_console_handbook'
+  | 'seed_canned_responses'
   | 'cleanup';
 
 export type EnqueueOptions = {

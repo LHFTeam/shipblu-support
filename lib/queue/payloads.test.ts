@@ -142,6 +142,8 @@ describe('the backfills and the knowledge-base passes', () => {
     ['normalise_kb_formatting', { dryRun: true }],
     ['seed_console_handbook', {}],
     ['seed_console_handbook', { overwrite: true }],
+    ['seed_canned_responses', { dryRun: true }],
+    ['seed_canned_responses', { dryRun: true, overwrite: true }],
   ] as const)('takes %s %o', (type, payload) => {
     expect(parse(type, payload)).toEqual(payload);
   });
@@ -153,6 +155,7 @@ describe('the backfills and the knowledge-base passes', () => {
     'backfill_categorise_ai',
     'normalise_kb_formatting',
     'seed_console_handbook',
+    'seed_canned_responses',
   ] as const)('refuses a %s dryRun that is not a boolean, rather than writing', (type) => {
     expect(() => parse(type, { dryRun: 1 })).toThrow(PermanentJobError);
     expect(() => parse(type, { dryRun: 'yes' })).toThrow(PermanentJobError);
@@ -176,6 +179,11 @@ describe('the backfills and the knowledge-base passes', () => {
   it('refuses an option it does not know, so a misspelt dryRun does not write', () => {
     expect(() => parse('normalise_kb_formatting', { dryrun: true })).toThrow(PermanentJobError);
     expect(() => parse('seed_console_handbook', { overWrite: true })).toThrow(PermanentJobError);
+    // The one option here with no undo: a misspelt dryRun beside it must not
+    // turn a preview into the run that replaces the team's edits.
+    expect(() => parse('seed_canned_responses', { overwrite: true, dryrun: true })).toThrow(
+      PermanentJobError,
+    );
   });
 
   it('keeps a run label of digits as the text it was typed as', () => {

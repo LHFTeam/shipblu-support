@@ -15,6 +15,7 @@ import { presenceSweep } from './presence-sweep';
 import { processWebhook } from './process-webhook';
 import { rollupMetrics } from './rollup-metrics';
 import { runTimeAutomations } from './run-time-automations';
+import { seedCannedResponses } from './seed-canned-responses';
 import { seedConsoleHandbook } from './seed-console-handbook';
 import { sendCsat } from './send-csat';
 import { sendEmail } from './send-email';
@@ -59,6 +60,7 @@ export const handlers: Partial<Record<JobType, JobHandler>> = {
   process_webhook: processWebhook,
   rollup_metrics: (job) => rollupMetrics(job),
   run_time_automations: () => runTimeAutomations(),
+  seed_canned_responses: (job) => seedCannedResponses(job),
   seed_console_handbook: (job) => seedConsoleHandbook(job),
   send_csat: sendCsat,
   send_email: sendEmail,

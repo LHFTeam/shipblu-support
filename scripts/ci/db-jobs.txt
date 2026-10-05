@@ -31,6 +31,7 @@ run: backfill_message_locations limit=1
 run: normalise_kb_formatting dryRun=true
 run: backfill_categorise_ai dryRun=true limit=1
 run: send_csat conversationId=00000000-0000-0000-0000-000000000000
+run: seed_canned_responses dryRun=true
 
 skip: seed_console_handbook — its own step runs it twice and asserts on what the second run wrote
 skip: process_webhook — needs a stored webhook event to process
