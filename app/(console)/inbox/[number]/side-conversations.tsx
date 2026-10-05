@@ -3,7 +3,7 @@
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { Badge, Button, ErrorText, Input, Label, Select, Textarea } from '@/components/ui';
-import { formatBytes, formatDateTime, formatRelative } from '@/lib/format';
+import { formatDateTime, formatRelative } from '@/lib/format';
 import type { PickerEntry, SideConversationView } from '@/lib/side-conversations/queries';
 import {
   blankSideSubject,
@@ -18,6 +18,7 @@ import {
   setSideConversationState,
   startSideConversation,
 } from '../../side-conversation-actions';
+import { AttachmentList } from './attachments';
 import { useSubmitWithoutReset } from './form-state';
 
 const INITIAL: ActionState = { error: null };
@@ -159,26 +160,7 @@ export function SideConversationCard({
                   <p className="whitespace-pre-wrap text-sm">{message.bodyText}</p>
                 )}
 
-                {message.attachments.length > 0 ? (
-                  <ul className="mt-1.5 flex flex-wrap gap-1.5">
-                    {message.attachments.map((file) => (
-                      <li
-                        key={file.id}
-                        className="rounded border border-[var(--border)] px-1.5 py-0.5 text-xs"
-                      >
-                        <a
-                          href={`/api/attachments/${file.id}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="hover:underline"
-                        >
-                          {file.filename}
-                        </a>
-                        <span className="ms-1 opacity-60">{formatBytes(file.sizeBytes)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
+                <AttachmentList files={message.attachments} compact />
 
                 {message.direction === 'outbound' && message.deliveryStatus === 'failed' ? (
                   <p className="mt-1 text-xs text-red-600">
