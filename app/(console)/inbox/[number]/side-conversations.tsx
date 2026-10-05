@@ -290,7 +290,7 @@ export function StartSideConversationForm({
   // Submitted by hand rather than through `action`, which matters more here
   // than anywhere: React's reset after a refusal put the first hub back in the
   // picker while the component still held the agent's choice, and the next Send
-  // went to that hub (`docs/PROJECT-STATE.md` §6.79).
+  // went to that hub (`docs/PROJECT-STATE.md` §6.80).
   const { state, busy, onSubmit } = useSubmitWithoutReset(startSideConversation, onSent);
 
   return (

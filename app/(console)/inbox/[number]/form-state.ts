@@ -54,7 +54,7 @@ function isNextNavigation(error: unknown): boolean {
  * Submits a form to an action without letting React reset it.
  *
  * `<form action={fn}>` makes React 19 reset the form after every action, a
- * refused one included (`docs/PROJECT-STATE.md` §6.79). The nonce key hides
+ * refused one included (`docs/PROJECT-STATE.md` §6.80). The nonce key hides
  * that on success; on a refusal it wipes what the agent typed, and a controlled
  * select falls back to its first enabled option while its state says otherwise.
  * Submitting by hand keeps a refused form exactly as the agent left it, and a
