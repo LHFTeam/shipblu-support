@@ -1,19 +1,17 @@
 'use client';
 
-import { type MouseEvent, useEffect, useId, useRef, useState } from 'react';
+import { type MouseEvent, useEffect, useId, useReducer, useRef } from 'react';
 import { ChevronDownIcon, ChevronUpIcon } from '@/components/icons';
 import { isPreviewableImage } from '@/lib/attachments/preview';
+import { initialPreviewState, type Load, loadOf, previewReducer } from '@/lib/attachments/previews';
 import { formatBytes } from '@/lib/format';
 
 type Attachment = { id: string; filename: string; contentType: string; sizeBytes: number };
 
-/** Absent until a preview first mounts, which is the same as loading. */
-type Load = 'loading' | 'loaded' | 'failed';
+/** What was pressed to ask for a picture, which is where the agent is looking. */
+type Pressed = 'chip' | 'figure';
 
 const fileUrl = (file: Attachment) => `/api/attachments/${file.id}`;
-
-const failureNotice = (file: Attachment) =>
-  `${file.filename} could not be shown here. Try again, or open the file.`;
 
 /**
  * The files on one message: a row of chips, where a picture opens under the row
@@ -53,42 +51,40 @@ export function AttachmentList({
   compact?: boolean;
 }) {
   const baseId = useId();
-  // A key exists once a preview has been opened, which is also when it mounts;
-  // its value is whether it is showing now.
-  const [previews, setPreviews] = useState<Record<string, boolean>>({});
-  const [loads, setLoads] = useState<Record<string, Load>>({});
-  const [notice, setNotice] = useState<{ text: string; seq: number } | null>(null);
+  const [state, dispatch] = useReducer(previewReducer, initialPreviewState);
   const chips = useRef(new Map<string, HTMLElement>());
   const figures = useRef(new Map<string, HTMLElement>());
   /*
-    The picture the agent last asked for, until it can be brought into view.
+    Pictures waiting to be brought into view, each with what was pressed to ask
+    for it.
 
-    Set only from their own clicks, so a live update re-rendering the list with
-    a picture open never moves the pane — and cleared by the reveal, so one click
-    reveals at most once.
+    Written only by the agent's clicks, so a live update re-rendering the list
+    with a picture open never moves the pane. An entry is spent by its reveal,
+    or dropped when its preview turns out closed. One per picture, so closing
+    one picture to make room does not cancel the reveal of another still
+    loading.
   */
-  const pending = useRef<string | null>(null);
+  const pending = useRef(new Map<string, Pressed>());
 
   useEffect(() => {
-    const id = pending.current;
-    if (!id || previews[id] !== true || (loads[id] ?? 'loading') === 'loading') return;
-    pending.current = null;
+    for (const [id, pressed] of pending.current) {
+      if (state.showing[id] !== true) {
+        pending.current.delete(id);
+        continue;
+      }
+      if (loadOf(state, id) === 'loading') continue;
+      pending.current.delete(id);
 
-    const figure = figures.current.get(id);
-    const chip = chips.current.get(id);
-    if (figure && chip) revealInPane(figure, chip);
-  }, [previews, loads]);
+      const figure = figures.current.get(id);
+      const anchor = pressed === 'chip' ? chips.current.get(id) : figure;
+      if (figure && anchor) revealInPane(figure, anchor);
+    }
+  }, [state]);
 
   if (files.length === 0) return null;
 
   const previewId = (file: Attachment) => `${baseId}-${file.id}`;
-  const opened = files.filter((file) => previews[file.id] !== undefined);
-
-  // A new key each time, so the same sentence twice is still a change for the
-  // live region to announce: two photos failing one after the other, or one
-  // failure reopened.
-  const announce = (text: string) =>
-    setNotice((current) => ({ text, seq: (current?.seq ?? 0) + 1 }));
+  const opened = files.filter((file) => state.showing[file.id] !== undefined);
 
   const toggle = (event: MouseEvent<HTMLAnchorElement>, file: Attachment) => {
     // A modified click means what it means on any link — a background tab, a
@@ -98,31 +94,29 @@ export function AttachmentList({
       return;
     }
     event.preventDefault();
-
-    const opening = previews[file.id] !== true;
-    setPreviews((current) => ({ ...current, [file.id]: opening }));
-    pending.current = opening ? file.id : null;
-    // "Expanded" is all the chip itself says, which reads as success over a
-    // failure line nobody else will mention.
-    if (opening && loads[file.id] === 'failed') announce(failureNotice(file));
-  };
-
-  const settle = (file: Attachment, load: Load) => {
-    setLoads((current) => ({ ...current, [file.id]: load }));
-    if (load === 'failed' && previews[file.id] === true) announce(failureNotice(file));
+    pending.current.set(file.id, 'chip');
+    dispatch({ type: 'toggle', file });
   };
 
   const retry = (file: Attachment) => {
-    // The button pressed is about to unmount with the failure line. Without
-    // somewhere to go, focus falls to <body>, and the next Tab skips the
-    // picture's link or the next "Try again" alike.
+    // The button pressed is about to unmount with the failure line, which
+    // would drop focus to <body> — and a screen reader whose focused node
+    // vanishes loses its place in the ticket. The figure stays.
     figures.current.get(file.id)?.focus({ preventScroll: true });
-    pending.current = file.id;
-    setLoads((current) => ({ ...current, [file.id]: 'loading' }));
+    // The figure, not the chip: the agent was looking at "Try again", which may
+    // be a whole picture's height below the chip.
+    pending.current.set(file.id, 'figure');
+    dispatch({ type: 'retry', file });
   };
 
   return (
-    <>
+    // Positioned for the live region's sake. `sr-only` is `position: absolute`,
+    // and nothing above the timeline is positioned, so without this its box is
+    // placed against the document — past every `overflow-hidden` up to the shell
+    // — and stretches the page under the console by however far down the
+    // thread this message is. Scrolling past the end of the timeline then
+    // scrolled the whole console off the screen.
+    <div className="relative">
       <ul className={compact ? 'mt-1.5 flex flex-wrap gap-1.5' : 'mt-2 flex flex-wrap gap-2'}>
         {files.map((file) => (
           <li
@@ -143,14 +137,14 @@ export function AttachmentList({
                 target="_blank"
                 rel="noreferrer"
                 onClick={(event) => toggle(event, file)}
-                aria-expanded={previews[file.id] === true}
+                aria-expanded={state.showing[file.id] === true}
                 // Only once the preview exists: before the first click there
                 // is nothing in the document for it to name.
-                aria-controls={previews[file.id] === undefined ? undefined : previewId(file)}
+                aria-controls={state.showing[file.id] === undefined ? undefined : previewId(file)}
                 className="inline-flex items-center gap-0.5 hover:underline"
               >
                 {file.filename}
-                {previews[file.id] === true ? (
+                {state.showing[file.id] === true ? (
                   <ChevronUpIcon size={14} />
                 ) : (
                   <ChevronDownIcon size={14} />
@@ -174,13 +168,14 @@ export function AttachmentList({
         one mounted with each figure missed the very failure it existed for — a
         401 can land within a frame or two of the click.
 
-        Failures only. Loading is visible text and stays out of it: "Loading
-        picture" read out after "expanded", for a photo that arrived in a tenth
-        of a second, is noise between the agent and the ticket.
+        Failures only, and `previewReducer` says when. Loading is visible text
+        and stays out of it: "Loading picture" read out after "expanded", for a
+        photo that arrived in a tenth of a second, is noise between the agent
+        and the ticket.
       */}
       {files.some((file) => isPreviewableImage(file.contentType)) ? (
         <span role="status" className="sr-only">
-          {notice ? <span key={notice.seq}>{notice.text}</span> : null}
+          {state.notice ? <span key={state.notice.seq}>{state.notice.text}</span> : null}
         </span>
       ) : null}
 
@@ -190,7 +185,7 @@ export function AttachmentList({
         // away. Hidden at all because its margin would otherwise stay behind
         // as a strip of empty bubble under the chips.
         <div
-          hidden={!opened.some((file) => previews[file.id] === true)}
+          hidden={!opened.some((file) => state.showing[file.id] === true)}
           className="mt-2 flex flex-col items-start gap-2"
         >
           {opened.map((file) => (
@@ -198,19 +193,19 @@ export function AttachmentList({
               key={file.id}
               id={previewId(file)}
               file={file}
-              hidden={previews[file.id] !== true}
-              load={loads[file.id] ?? 'loading'}
+              hidden={state.showing[file.id] !== true}
+              load={loadOf(state, file.id)}
               figureRef={(node) => {
                 if (node) figures.current.set(file.id, node);
                 else figures.current.delete(file.id);
               }}
-              onSettle={(load) => settle(file, load)}
+              onSettle={(load) => dispatch({ type: 'settle', file, load })}
               onRetry={() => retry(file)}
             />
           ))}
         </div>
       ) : null}
-    </>
+    </div>
   );
 }
 
@@ -253,9 +248,12 @@ function ImagePreview({
       {load === 'failed' ? (
         <p className="text-xs text-[var(--muted-foreground)]">
           <span id={failureId}>{file.filename} could not be shown here.</span>{' '}
-          {/* Described by the sentence rather than renamed, so the name a
-              voice-control user says is still the one on the button, and two
-              failures in one message are not two identical "Try again"s. */}
+          {/* Described by the sentence rather than renamed, so the name stays
+              the label on screen for voice control, and each control says which
+              picture it is about when it takes focus. A list of names alone —
+              a rotor, an elements list — still shows two "Try again"s when two
+              pictures fail; a name that differed from the label would be the
+              worse trade. */}
           <button
             type="button"
             onClick={onRetry}
@@ -322,18 +320,20 @@ function ImagePreview({
  * way to put it back. So: the nearest ancestor that is set to scroll and has
  * something to scroll, and only that one.
  *
- * Only while the chip that was pressed is still on screen, which is the agent
- * still looking where they tapped. One who has scrolled away while it loaded
- * is reading something else, and pulling them back would take their place. The
- * chip rather than the picture, because the picture opens under the whole chip
- * list: on a message with six files the chips wrap to five rows on a phone, and
- * a tap on the first row puts the picture's top a hundred pixels below a pane
- * whose bottom edge the chip was sitting on.
+ * Only while what was pressed — the chip, or the figure that held "Try again" —
+ * is still at least partly on screen, which is the agent still looking where
+ * they tapped. One who has scrolled away while it loaded is reading something
+ * else, and pulling them back would take their place. What was pressed rather
+ * than the picture, because a picture opens under the whole chip list: on a
+ * message with six files the chips wrap to five rows on a phone, and a tap on
+ * the first row puts the picture's top a hundred pixels below a pane whose
+ * bottom edge the chip was sitting on.
  *
  * Never so far that the picture's top leaves the pane, so one taller than the
- * pane shows from its top down.
+ * pane shows from its top down. That can take the pressed chip off the top of
+ * the pane; the picture is what was asked for.
  */
-function revealInPane(figure: HTMLElement, chip: HTMLElement) {
+function revealInPane(figure: HTMLElement, pressed: HTMLElement) {
   let pane = figure.parentElement;
   while (
     pane &&
@@ -347,10 +347,10 @@ function revealInPane(figure: HTMLElement, chip: HTMLElement) {
   if (!pane) return;
 
   const view = pane.getBoundingClientRect();
-  const anchor = chip.getBoundingClientRect();
+  const anchor = pressed.getBoundingClientRect();
   const box = figure.getBoundingClientRect();
-  const chipOnScreen = anchor.top >= view.top && anchor.top < view.bottom;
-  if (!chipOnScreen || box.bottom <= view.bottom) return;
+  const stillLooking = anchor.bottom > view.top && anchor.top < view.bottom;
+  if (!stillLooking || box.bottom <= view.bottom) return;
 
   pane.scrollBy({
     top: Math.min(box.bottom - view.bottom, box.top - view.top),
