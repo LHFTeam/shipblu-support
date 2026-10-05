@@ -1,5 +1,28 @@
 import { describe, expect, it } from 'vitest';
-import { blankSideSubject, subjectPrefill } from './format';
+import { blankSideSubject, sideSubject, subjectPrefill } from './format';
+
+describe('sideSubject', () => {
+  it('sends an untouched prefill as the tracking number alone', () => {
+    expect(sideSubject('1212121212121 || ', 'Where is my order')).toBe('1212121212121');
+    expect(sideSubject('1212121212121||', 'Where is my order')).toBe('1212121212121');
+  });
+
+  it('keeps what the agent wrote after the separator', () => {
+    expect(sideSubject('1212121212121 || not delivered', 'x')).toBe(
+      '1212121212121 || not delivered',
+    );
+  });
+
+  it("falls back to the ticket's subject only when nothing is left", () => {
+    expect(sideSubject('', 'Where is my order')).toBe('Where is my order');
+    expect(sideSubject(' || ', 'Where is my order')).toBe('Where is my order');
+    expect(sideSubject('', null)).toBe('(no subject)');
+  });
+
+  it('leaves a separator in the middle alone', () => {
+    expect(sideSubject('a || b', null)).toBe('a || b');
+  });
+});
 
 describe('blankSideSubject', () => {
   it("is the ticket's own subject", () => {

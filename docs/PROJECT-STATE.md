@@ -1083,7 +1083,9 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   choice there is. The subject opens on the ticket's tracking number and `|| `
   when it has exactly one parcel (`subjectPrefill`), and empty otherwise — an
   empty subject is sent as the ticket's own, or `(no subject)`, and the field
-  shows which as its placeholder (`blankSideSubject` answers both).
+  shows which as its placeholder (`blankSideSubject` answers both). A prefill
+  sent untouched goes out as the tracking number alone: `sideSubject` drops a
+  trailing `||` rather than send it dangling (decided on review, 2026-10-05).
   Vendors — a courier partner — still go in `internal_recipients` at
   `/admin/recipients`, and none is entered. All three side conversations that
   exist are open and went to a typed test address, with `location_id` and
@@ -4470,8 +4472,10 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     a native `form.reset()` before it calls `fn`, and run it once the action
     settles — whatever the action answered. The `key={state.nonce}` remount
     (§6.58) hides this on success, because the form being reset is the one
-    being thrown away; on a refusal the key does not move, and the live form
-    is reset. Two consequences, and only the first is visible:
+    being thrown away; on a first refusal the key stays at `0`, and the live
+    form is reset. (After an earlier success a refusal moves the key _back_ to
+    `0`, because only `ok()` carries a nonce, and the remount wipes the fields
+    just the same.) Two consequences, and only the first is visible:
     - **A controlled `<select>` stops matching its own state.** React sets the
       selected option through `value` and never marks one `defaultSelected`,
       so the browser's reset picks the first option that is not disabled.
@@ -4487,9 +4491,13 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     Both side-conversation forms — starting a thread and writing back on one —
     now submit through `useSubmitWithoutReset` (`inbox/[number]/form-state.ts`),
     which calls the action from `onSubmit` with `preventDefault()` and so takes
-    React's form-action path, and with it the reset, out of the picture. It
-    also answers an action that throws, which a hand-rolled submit forgets:
-    without its `finally` the button stays on "Sending…" for good. The picker's
+    React's form-action path, and with it the reset, out of the picture. Only
+    a success moves its key — anything else keeps the nonce it found, or the
+    second send on a ticket would be wiped by the remount instead. It also
+    answers an action that throws, which a hand-rolled submit forgets: without
+    its `finally` the button stays on "Sending…" for good. Next's own redirect
+    (an ended session, from `requireAgent()`) is let through rather than
+    reported as lost, since nothing was written. The picker's
     placeholder is not `disabled` either, so any reset that does happen lands
     on "Choose…". The other forms in the console still submit through
     `action=`, so the same reset should reach them on a refusal; only the

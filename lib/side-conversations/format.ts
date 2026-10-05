@@ -123,6 +123,20 @@ export function blankSideSubject(ticketSubject: string | null): string {
 }
 
 /**
+ * The subject a new thread is sent with, from what the agent left in the field.
+ *
+ * A prefill sent untouched is the tracking number and a separator with nothing
+ * after it, and the hub would read `1212121212121 ||` with the `||` dangling —
+ * so a trailing `||` is dropped and the number goes out on its own. Nothing is
+ * invented in its place: the agent did not write anything there. A field that
+ * was nothing but the separator is empty, and gets `blankSideSubject`.
+ */
+export function sideSubject(typed: string, ticketSubject: string | null): string {
+  const subject = typed.trim().replace(/\s*\|\|$/, '');
+  return subject || blankSideSubject(ticketSubject);
+}
+
+/**
  * How the recipient is named on screen, however the agent chose it.
  *
  * Here rather than beside the read model it describes, for the reason already

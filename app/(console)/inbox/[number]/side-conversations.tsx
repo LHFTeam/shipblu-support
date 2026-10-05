@@ -376,11 +376,15 @@ function SideConversationDraft({
             {/* Not `disabled`. Anything that resets this form lands on the
                 first option that is not, and "Choose…" is the only safe place
                 for it to land. Choosing it again on purpose is harmless:
-                `required` refuses the empty value. Also kept while it is the
-                value: a refresh can empty the directory under an open form,
-                and an unchosen select with no option to show it would display
-                "Someone else…" without the address field that goes with it. */}
-            {recipients.length > 0 || recipientId === '' ? <option value="">Choose…</option> : null}
+                `required` refuses the empty value. Dropped only when the
+                directory is empty and the value is "Someone else…": a refresh
+                can empty the directory under an open form, and a value with no
+                option left to show it — unchosen, or an entry that has just
+                gone — would otherwise display "Someone else…" without the
+                address field, and picking it again changes nothing. */}
+            {recipients.length > 0 || recipientId !== 'other' ? (
+              <option value="">Choose…</option>
+            ) : null}
             {GROUPS.map(({ kind, label }) => {
               const entries = recipients.filter((entry) => entry.kind === kind);
               if (entries.length === 0) return null;

@@ -18,7 +18,7 @@ import { ok } from '@/lib/http/action-state';
 import { env } from '@/lib/env';
 import { can } from '@/lib/auth/permissions';
 import { enqueue } from '@/lib/queue';
-import { blankSideSubject, quoteAnchor } from '@/lib/side-conversations/format';
+import { quoteAnchor, sideSubject } from '@/lib/side-conversations/format';
 import {
   normaliseAddress,
   parseAddressList,
@@ -159,7 +159,7 @@ export async function startSideConversation(
 
   // --- What it says --------------------------------------------------------
 
-  const subject = text(formData, 'subject') || blankSideSubject(conversation.subject);
+  const subject = sideSubject(text(formData, 'subject'), conversation.subject);
 
   const anchorMessageId = String(formData.get('anchorMessageId') ?? '') || null;
 
