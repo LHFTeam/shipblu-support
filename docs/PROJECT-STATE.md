@@ -4436,8 +4436,17 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     `[meta] … empty card(s) ignored`. The rule is judged by content, not type: a
     template that carries something is the customer sending us something, and
     keeps reaching an agent. The delivery itself stays in `webhook_events` like
-    every other. It takes effect when the worker is deployed. The cards filed
-    before then are still in `messages` unless somebody deletes them.
+    every other. It takes effect when the worker is deployed.
+
+    The 14 cards already filed were deleted by hand on 2026-10-05, matched by
+    id and by the empty-card shape. Nothing referenced them but three
+    `ai_category_runs.message_id` links, which the foreign key set to null. A
+    backup of the rows and a restore script were checked field by field
+    against the database first. They are kept outside the repo because they
+    hold customer identifiers. A card filed between that delete and the
+    deploy is still in `messages`. The same shape test finds it:
+    `raw_body::jsonb #> '{message,attachments}'` equal to the empty card on
+    an inbound Instagram reply reading `[template]`.
 
     Still open: the other attachment types Instagram now documents (`ig_post`,
     `ig_reel`, `reel`, `story_mention`) are not in `ATTACHMENT_TYPES` either.

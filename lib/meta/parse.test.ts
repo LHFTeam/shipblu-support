@@ -173,7 +173,7 @@ describe('parseMetaWebhook', () => {
     /** The card exactly as the Page connection delivers it. */
     const card = { type: 'template', payload: { generic: { elements: [] } } };
 
-    /** The shape of the 13 production deliveries: standby, keys `mid` and `attachments`. */
+    /** The shape every production delivery had: standby, keys `mid` and `attachments`. */
     function instagramStandby(message: Record<string, unknown>) {
       return {
         object: 'instagram',
