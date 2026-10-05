@@ -1,10 +1,10 @@
 'use client';
 
-import { useActionState } from 'react';
 import { ErrorText, Textarea } from '@/components/ui';
 import { addNote } from '../../reply-actions';
 import { INITIAL, useRefreshOnSuccess } from './form-state';
 import { SubmitButton } from '@/components/submit-button';
+import { useActionForm } from '@/components/use-action-form';
 
 export function NoteForm({
   conversationId,
@@ -13,11 +13,11 @@ export function NoteForm({
   conversationId: string;
   onSent?: () => void;
 }) {
-  const [state, action] = useActionState(addNote, INITIAL);
+  const { state, key, form } = useActionForm(addNote, INITIAL);
   useRefreshOnSuccess(state, onSent);
 
   return (
-    <form key={state.nonce ?? 0} action={action} className="flex flex-col gap-2">
+    <form key={key} action={form.action} onSubmit={form.onSubmit} className="flex flex-col gap-2">
       <input type="hidden" name="conversationId" value={conversationId} />
 
       <Textarea

@@ -21,7 +21,12 @@ import { FLOOR_LABELS, SELECTABLE_FLOORS, folderFloor, meetsFloor } from '@/lib/
 import { isLocale } from '@/lib/kb/locale';
 import { slugify, uniqueSlug } from '@/lib/kb/slug';
 
-export type KbState = ActionState;
+/**
+ * `slug` is what an article save stored, so the editor can show it. The box is
+ * usually left blank for the server to generate one, and a box still blank
+ * after the save would send blank again and regenerate it from the next title.
+ */
+export type KbState = ActionState & { slug?: string };
 
 const VISIBILITIES = ['public', 'logged_in', 'agents_only', 'selected_companies'] as const;
 
@@ -239,7 +244,7 @@ export async function saveArticle(_state: KbState, formData: FormData): Promise<
 
   revalidatePath('/kb');
   revalidatePath(`/kb/${id}`);
-  return ok();
+  return { ...ok(), slug };
 }
 
 export async function setArticleStatus(_state: KbState, formData: FormData): Promise<KbState> {

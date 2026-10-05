@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useActionState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Badge, Button, ErrorText, Select } from '@/components/ui';
+import { useActionForm } from '@/components/use-action-form';
 import { formatRelative } from '@/lib/format';
 import type { ArticleVersion, TranslationGroup, TranslationOption } from '@/lib/kb/admin';
 import {
@@ -34,7 +35,7 @@ export function ArticleSidebar({
   stats: { views: number; helpful: number; unhelpful: number };
 }) {
   const [statusState, statusAction] = useActionState(setArticleStatus, INITIAL);
-  const [linkState, linkAction] = useActionState(linkTranslation, INITIAL);
+  const link = useActionForm(linkTranslation, INITIAL);
 
   // `total` counts the group without the role filter, so "not linked" is only
   // ever said when the group really is empty. Deriving this by filtering the
@@ -145,7 +146,12 @@ export function ArticleSidebar({
         {translationCandidates.length === 0 ? (
           <p className="text-xs opacity-50">No article in another language to link to yet.</p>
         ) : (
-          <form action={linkAction} className="flex flex-col gap-2">
+          <form
+            key={link.key}
+            action={link.form.action}
+            onSubmit={link.form.onSubmit}
+            className="flex flex-col gap-2"
+          >
             <input type="hidden" name="id" value={articleId} />
             <label htmlFor="otherId" className="sr-only">
               Link this article to its translation
@@ -173,7 +179,7 @@ export function ArticleSidebar({
           </form>
         )}
 
-        <ErrorText>{linkState.error}</ErrorText>
+        <ErrorText>{link.state.error}</ErrorText>
       </section>
 
       <section className="mb-5 border-t border-[var(--border)] pt-4">

@@ -1,9 +1,10 @@
 'use client';
 
-import { useActionState, useState } from 'react';
+import { useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Button, ErrorText, Field, Input, Select, Textarea } from '@/components/ui';
 import { TicketFieldInput } from '@/components/ticket-field-input';
+import { useActionForm } from '@/components/use-action-form';
 import { ACCEPT_ATTRIBUTE } from '@/lib/forms/files';
 import {
   elementHelp,
@@ -51,7 +52,7 @@ export function ConsoleTicketForm({
   /** What the form would set if the agent does not touch the control. */
   defaultPriority: string | null;
 }) {
-  const [state, action] = useActionState(createTicketFromForm, INITIAL);
+  const { state, form } = useActionForm(createTicketFromForm, INITIAL);
   const [custom, setCustom] = useState<CustomFieldValues>({});
   // Seeded, not left empty. The select rendered `value={value || 'medium'}`
   // while state stayed '', so the DOM submitted `medium` and the client's
@@ -71,7 +72,7 @@ export function ConsoleTicketForm({
   });
 
   return (
-    <form action={action} className="flex flex-col gap-4">
+    <form action={form.action} onSubmit={form.onSubmit} className="flex flex-col gap-4">
       <input type="hidden" name="slug" value={slug} />
 
       <div className="grid gap-3 sm:grid-cols-2">

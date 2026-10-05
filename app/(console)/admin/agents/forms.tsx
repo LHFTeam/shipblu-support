@@ -17,6 +17,7 @@ import type { AdminState } from '../settings-shared';
 import { createInvite, savePresenceSettings, setAgentActive, setAgentCapacity } from './actions';
 import type { ActionState } from '@/lib/http/action-state';
 import { SubmitButton } from '@/components/submit-button';
+import { useActionForm } from '@/components/use-action-form';
 
 const INITIAL: AdminState = { error: null };
 const SETTINGS_INITIAL: ActionState = { error: null };
@@ -40,11 +41,12 @@ export function IdlePolicyForm({
   autoAwayAfterMins: number | null;
   autoSignoutAfterMins: number | null;
 }) {
-  const [state, action] = useActionState(savePresenceSettings, SETTINGS_INITIAL);
+  const { state, form } = useActionForm(savePresenceSettings, SETTINGS_INITIAL);
 
   return (
     <form
-      action={action}
+      action={form.action}
+      onSubmit={form.onSubmit}
       className="flex flex-col gap-3 rounded-lg border border-[var(--border)] p-4"
     >
       <div className="flex flex-col gap-3 sm:flex-row">
@@ -108,11 +110,15 @@ export function IdlePolicyForm({
 }
 
 export function InviteForm() {
-  const [state, action] = useActionState(createInvite, INITIAL);
+  const { state, key, form } = useActionForm(createInvite, INITIAL);
 
+  // Keyed on the last success, so a sent invitation clears the address and the
+  // name; the link and what happened to it render from `state`, above the key.
   return (
     <form
-      action={action}
+      key={key}
+      action={form.action}
+      onSubmit={form.onSubmit}
       className="flex flex-col gap-3 rounded-lg border border-[var(--border)] p-4"
     >
       {/* Stacked on a phone: three fields sharing one row leaves an email box
@@ -270,7 +276,7 @@ export function AgentRow({
   isSelf: boolean;
 }) {
   const [state, action] = useActionState(setAgentActive, INITIAL);
-  const [capacityState, capacityAction] = useActionState(setAgentCapacity, INITIAL);
+  const capacity = useActionForm(setAgentCapacity, INITIAL);
 
   // What assignment actually sees, which is not what either column says on its
   // own: connected but switched off is "away", and it is the state an admin
@@ -325,7 +331,11 @@ export function AgentRow({
       </div>
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <form action={capacityAction} className="flex shrink-0 items-center gap-1">
+        <form
+          action={capacity.form.action}
+          onSubmit={capacity.form.onSubmit}
+          className="flex shrink-0 items-center gap-1"
+        >
           <input type="hidden" name="agentId" value={agent.id} />
           <label className="text-xs opacity-50" htmlFor={`cap-${agent.id}`}>
             cap
@@ -364,8 +374,8 @@ export function AgentRow({
         </form>
       </div>
 
-      {state.error || capacityState.error ? (
-        <span className="text-xs text-red-600">{state.error ?? capacityState.error}</span>
+      {state.error || capacity.state.error ? (
+        <span className="text-xs text-red-600">{state.error ?? capacity.state.error}</span>
       ) : null}
     </li>
   );

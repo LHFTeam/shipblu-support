@@ -263,6 +263,20 @@ and the help centre's are not a mistake to tidy: its `error` is a `StringKey`
 the page translates, not a sentence. A new action file anywhere else answers
 with `lib/http/action-state.ts`.
 
+A console form submits through `useActionForm`
+(`components/use-action-form.ts`), not a bare `<form action={…}>`, whenever a
+native reset could move one of its fields: anything uncontrolled, and any
+controlled select or checkbox. React 19 resets a form after every function
+action, a refusal included, so the bare shape wipes the reply an agent is
+about to correct and leaves a controlled `<select>` disagreeing with the state
+everything around it is drawn from (§6.80). The hook's `key` is also the one to
+clear a form on after a success: it holds the last success's nonce, where
+`state.nonce ?? 0` fell back to 0 on a refusal and remounted the form. A form
+of hidden fields, buttons and controlled text boxes has nothing a reset moves
+and may keep `action=`; the purge panel is one. The hook also turns an action
+that throws into a refusal, so a dropped connection keeps the draft rather than
+falling through to `global-error`.
+
 **Authorisation lives in code.** `proxy.ts` only checks that a session cookie
 exists; it cannot tell a revoked session from a live one. It runs on Node.js in
 Next 16, not the Edge, so that is a choice rather than a limit — its header says
