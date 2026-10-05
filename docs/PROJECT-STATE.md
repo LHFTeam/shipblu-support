@@ -1083,10 +1083,15 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   the running worker claims within seconds,
   `insert into jobs (type, payload) values ('seed_canned_responses', '{"dryRun": true}')`,
   with the report under `[seed_canned_responses]` in the worker's log.
-  Re-running is safe and changes nothing that is current. A response the team has edited is named in the report and
-  left alone, and `overwrite=true` replaces it with no undo. A response deleted
-  in the console comes back on the next run, so retire one by removing it from
-  the library. The policy the responses state (delivery hours and attempts, the
+  Re-running is safe and changes nothing that is current. A response the team
+  has edited is named in the report and left alone. To ship a content fix, use
+  `overwrite=true keys=<key,...>`. It replaces only the entries named, logs
+  each one it replaces, and has no undo, so preview it with `dryRun=true`
+  first. Retiring a response takes two steps: a response deleted in the console
+  comes back on the next run, and an entry removed from the library is not
+  deleted, since an automation rule may send it. So remove it from the library
+  and then delete its row in the console. The report names every seeded row the
+  library no longer has. The policy the responses state (delivery hours and attempts, the
   24-hour damage-claim window, the myBlu refund path, the COD ceiling, Fees on
   Delivery, the dashboard menus) is quoted from the help centre as it read that
   day.

@@ -45,11 +45,13 @@ describe('the canned-response library', () => {
     expect(text.length).toBeGreaterThan(0);
   });
 
-  // Instagram refuses a direct message over 1000 characters, and it is the
-  // strictest of the five channels the same text is sent on. A longer body
-  // would insert fine and fail only once it reached Graph.
+  // Instagram's limit is the strictest of the five channels the same text goes
+  // out on — "Message text must be UTF-8 and be a 1000 bytes or less" — and it
+  // is bytes, not characters: an Arabic letter takes two, so the longest Arabic
+  // body here is 559 characters and 976 bytes. Measured as `length`, a body
+  // could grow by a paragraph, stay green, and fail only once it reached Graph.
   it.each(bodies)('$key ($locale) fits an Instagram message', ({ text }) => {
-    expect(text.length).toBeLessThanOrEqual(1000);
+    expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(1000);
   });
 
   // Nothing fills a blank in: the composer inserts the text as it is, and an
@@ -65,7 +67,9 @@ describe('the canned-response library', () => {
   // The customer is already talking to support, so no address or number either.
   it.each(bodies)('$key ($locale) carries no link, address or phone number', ({ text }) => {
     expect(text).not.toMatch(/https?:|www\.|\.com\b|@/i);
-    expect(text).not.toMatch(/\d[\d\s-]{7,}\d/);
+    // Both digit sets: a number in Arabic text is as likely written ٠١٠… as 010…,
+    // and `\d` without the `u` flag is ASCII only.
+    expect(text).not.toMatch(/[0-9٠-٩][0-9٠-٩\s-]{7,}[0-9٠-٩]/);
   });
 
   // Plain text on every channel: WhatsApp would bold an asterisk and email
@@ -87,10 +91,20 @@ describe('the canned-response library', () => {
   // text too. «حضرتك» is the form that serves both; these are the forms that
   // give one away. Imperatives are gendered in writing, so instructions are
   // phrased «يمكن لحضرتك…» / «يُرجى…» instead.
+  //
+  // A word is looked up with and without a leading و or ف, because Arabic
+  // writes the conjunction onto the verb: «فاضغط» and «وانتظر» are the same
+  // imperatives as «اضغط» and «انتظر», and a whole-token match let them by.
+  // «أرسل» is in the list although it can also be read as "I send": the
+  // library says «سأرسل» for that, so a bare one is the imperative.
   it.each(entries)('$key addresses the customer without assuming a gender', ({ ar }) => {
     const GENDERED = new Set([
       'عزيزي',
       'عزيزتي',
+      'أرسل',
+      'أرسلي',
+      'ارسل',
+      'ارسلي',
       'اضغط',
       'اضغطي',
       'قم',
@@ -107,7 +121,9 @@ describe('the canned-response library', () => {
       'متأكدة',
     ]);
     const words = ar.split(/[\s،؛؟.,:!()«»"\-–—/]+/u).filter(Boolean);
-    expect(words.filter((word) => GENDERED.has(word))).toEqual([]);
+    const gendered = (word: string) =>
+      GENDERED.has(word) || (/^[وف]/u.test(word) && GENDERED.has(word.slice(1)));
+    expect(words.filter(gendered)).toEqual([]);
   });
 
   it.each(entries)('$key avoids the formulas modern support writing dropped', ({ en }) => {

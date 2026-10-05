@@ -199,9 +199,16 @@ const JOB_PAYLOADS = {
     /**
      * Also replace the title, folder and bodies of seeded responses the team
      * has since edited. There is no version history for a canned response, so
-     * this cannot be undone — run it with `dryRun=true` first.
+     * this cannot be undone — run it with `dryRun=true` first, and aim it with
+     * `keys`.
      */
     overwrite: z.boolean().optional(),
+    /**
+     * Comma-separated library keys (`finance.cod_limit,delivery.hours`): the
+     * run touches only these. What makes one content fix shippable without
+     * reverting every other response the team has edited.
+     */
+    keys: z.string().optional(),
   }),
 } satisfies Partial<Record<JobType, z.ZodType>>;
 

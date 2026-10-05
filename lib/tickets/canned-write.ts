@@ -16,17 +16,25 @@ import type { BilingualBody } from './canned';
  * which runs in the browser, and `textToHtml` lives beside the sanitiser.
  */
 export function cannedBodyColumns(body: BilingualBody) {
+  // Line endings first, for the reason `textToHtml` gives: a browser submits a
+  // textarea's breaks as CRLF. `textToHtml` copes on its own, so the HTML never
+  // showed it, but the text columns kept the `\r` — on every WhatsApp and
+  // social send, and in the seed's comparison, where a seeded response saved
+  // once in the console unchanged read as edited by the team ever after.
+  const ar = body.ar.replace(/\r\n?/g, '\n');
+  const en = body.en.replace(/\r\n?/g, '\n');
+
   // Stored as both forms: email sends HTML, WhatsApp and the social channels
   // send text, and deriving one from the other at send time would mean every
   // channel guessing at line breaks. An unwritten language stays empty in both
   // — `textToHtml('')` would otherwise leave markup that reads as a body.
-  const bodyHtmlAr = body.ar ? textToHtml(body.ar) : '';
-  const bodyHtmlEn = body.en ? textToHtml(body.en) : '';
+  const bodyHtmlAr = ar ? textToHtml(ar) : '';
+  const bodyHtmlEn = en ? textToHtml(en) : '';
 
   return {
-    bodyTextAr: body.ar,
+    bodyTextAr: ar,
     bodyHtmlAr,
-    bodyTextEn: body.en,
+    bodyTextEn: en,
     bodyHtmlEn,
     /*
       The superseded pair, written for as long as it still exists.
@@ -42,7 +50,7 @@ export function cannedBodyColumns(body: BilingualBody) {
 
       Goes when the columns do; `docs/PROJECT-STATE.md` §5.5 carries the removal.
     */
-    bodyText: body.ar || body.en,
+    bodyText: ar || en,
     bodyHtml: bodyHtmlAr || bodyHtmlEn,
   };
 }

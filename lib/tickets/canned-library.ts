@@ -32,9 +32,11 @@
  * knowledge panel, which builds it from the live host. The customer is already
  * talking to support, so nothing tells them to contact it.
  *
- * **1000 characters at most**, which is Instagram's limit for a direct message
- * and the strictest of the five channels the same text goes out on. Most are
- * far shorter: they are read on a phone, mid-conversation.
+ * **1000 bytes of UTF-8 at most**, which is Instagram's limit for a direct
+ * message and the strictest of the five channels the same text goes out on.
+ * Bytes, not characters: an Arabic letter is two of them, so an Arabic body
+ * reaches the limit at about 550 characters. Most are far shorter: they are
+ * read on a phone, mid-conversation.
  *
  * **The Arabic addresses the customer as «حضرتك» and gives no gender away.**
  * We never know the customer's gender, and the text does not know the
@@ -50,8 +52,9 @@
  * what a claim needs, the myBlu refund path, the COD ceiling, Fees on Delivery,
  * the dashboard menus. When one of those articles changes, the response quoting
  * it changes in the same pull request — and it is shipped by re-running the
- * seed with `overwrite=true` after a dry run, because a canned response has no
- * version history to undo it with.
+ * seed with `overwrite=true keys=<that key>` after a dry run. Scoped, because a
+ * canned response has no version history to undo it with, and an unscoped
+ * overwrite would revert every other response the team has made its own.
  *
  * **The titles and folders are English**, because the console they are read in
  * is. The picker sorts folders and titles alphabetically, so a title starts
@@ -73,9 +76,11 @@ export type LibraryFolder = {
   responses: LibraryResponse[];
 };
 
-/** What the seed writes into `seed_key`, so its rows are told apart from typed ones. */
+/** What every seeded row's `seed_key` starts with, so its rows are told apart from typed ones. */
+export const LIBRARY_SEED_PREFIX = 'library:';
+
 export function librarySeedKey(key: string): string {
-  return `library:${key}`;
+  return `${LIBRARY_SEED_PREFIX}${key}`;
 }
 
 /** Paragraphs as they are written, joined the way `textToHtml` splits them. */

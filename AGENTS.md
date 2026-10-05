@@ -782,14 +782,18 @@ read as 'en'.
 **The starter canned responses are content with rules, and the rules are
 tests.** `lib/tickets/canned-library.ts` holds them and `seed_canned_responses`
 puts them in, finding its rows by `canned_responses.seed_key` rather than by
-title, so a response the team renamed is not duplicated. It leaves an edited
-response alone unless given `overwrite=true`, and that has no undo: a canned
-response has no version table. `canned-library.test.ts` is the style guide.
+title, so a response the team renamed is not duplicated. It judges a row by its
+title, folder and two texts, never by the HTML derived from them, and leaves an
+edited response alone unless given `overwrite=true`. That has no undo, because a
+canned response has no version table. So a content fix ships as `overwrite=true
+keys=<key,...>`, which replaces only the entries named, and an entry removed
+from the library is reported rather than deleted. `canned-library.test.ts` is
+the style guide.
 Every body is sendable exactly as it stands, because nothing interpolates and an
 automation sends it unread, so it carries no placeholder. It carries no link,
 because `support.shipblu.com` still serves Freshdesk and agents add links from
-the knowledge panel. It is at most 1000 characters, Instagram's limit for a
-direct message. The Arabic addresses the customer as «حضرتك» and uses no
+the knowledge panel. It is at most 1000 bytes of UTF-8, Instagram's limit for a
+direct message, so roughly 550 Arabic characters. The Arabic addresses the customer as «حضرتك» and uses no
 imperative, because neither the customer's gender nor the agent's is known. Any
 policy a response states is quoted from the help centre, so a change to a
 help-centre article that one quotes also changes the library, in the same PR.

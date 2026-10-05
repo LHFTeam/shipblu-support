@@ -144,6 +144,7 @@ describe('the backfills and the knowledge-base passes', () => {
     ['seed_console_handbook', { overwrite: true }],
     ['seed_canned_responses', { dryRun: true }],
     ['seed_canned_responses', { dryRun: true, overwrite: true }],
+    ['seed_canned_responses', { overwrite: true, keys: 'finance.cod_limit,delivery.hours' }],
   ] as const)('takes %s %o', (type, payload) => {
     expect(parse(type, payload)).toEqual(payload);
   });
