@@ -1,11 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { Badge, Button, ErrorText, Input, Label, Select, Textarea } from '@/components/ui';
 import { formatBytes, formatDateTime, formatRelative } from '@/lib/format';
 import type { PickerEntry, SideConversationView } from '@/lib/side-conversations/queries';
 import {
+  blankSideSubject,
   describeRecipient,
   subjectPrefill,
   trackingPrefill,
@@ -17,6 +18,7 @@ import {
   setSideConversationState,
   startSideConversation,
 } from '../../side-conversation-actions';
+import { useSubmitWithoutReset } from './form-state';
 
 const INITIAL: ActionState = { error: null };
 
@@ -208,20 +210,11 @@ export function SideConversationCard({
 }
 
 function SideReplyForm({ side }: { side: SideConversationView }) {
-  const router = useRouter();
-  const [state, setState] = useState<ActionState>(INITIAL);
-  const [busy, setBusy] = useState(false);
-
-  async function submit(formData: FormData) {
-    setBusy(true);
-    const result = await replyToSideConversation(INITIAL, formData);
-    setBusy(false);
-    setState(result);
-    if (result.ok) router.refresh();
-  }
+  // A refused reply keeps what the agent wrote — see `useSubmitWithoutReset`.
+  const { state, busy, onSubmit } = useSubmitWithoutReset(replyToSideConversation);
 
   return (
-    <form key={state.nonce ?? 0} action={submit} className="mt-2 flex flex-col gap-1.5">
+    <form key={state.nonce ?? 0} onSubmit={onSubmit} className="mt-2 flex flex-col gap-1.5">
       <input type="hidden" name="sideConversationId" value={side.id} />
       <Textarea
         name="body"
@@ -294,20 +287,11 @@ export function StartSideConversationForm({
   /** Lets the composer put itself away on a phone once the thread is started. */
   onSent?: () => void;
 }) {
-  const router = useRouter();
-  const [state, setState] = useState<ActionState>(INITIAL);
-  const [busy, setBusy] = useState(false);
-
-  async function submit(formData: FormData) {
-    setBusy(true);
-    const result = await startSideConversation(INITIAL, formData);
-    setBusy(false);
-    setState(result);
-    if (result.ok) {
-      router.refresh();
-      onSent?.();
-    }
-  }
+  // Submitted by hand rather than through `action`, which matters more here
+  // than anywhere: React's reset after a refusal put the first hub back in the
+  // picker while the component still held the agent's choice, and the next Send
+  // went to that hub (`docs/PROJECT-STATE.md` §6.79).
+  const { state, busy, onSubmit } = useSubmitWithoutReset(startSideConversation, onSent);
 
   return (
     <SideConversationDraft
@@ -316,7 +300,7 @@ export function StartSideConversationForm({
       recipients={recipients}
       error={state.error}
       busy={busy}
-      onSubmit={submit}
+      onSubmit={onSubmit}
     />
   );
 }
@@ -339,7 +323,7 @@ function SideConversationDraft({
   recipients: PickerEntry[];
   error: string | null;
   busy: boolean;
-  onSubmit: (formData: FormData) => Promise<void>;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   // Nobody is preselected. Opening on the first entry meant an agent who sent
   // without touching the picker asked whichever hub sorts first by name —
@@ -366,22 +350,7 @@ function SideConversationDraft({
   ];
 
   return (
-    <form
-      // Submitted by hand rather than through `action`, because React 19 resets
-      // a form after every function action — a refused one included — and the
-      // reset is the browser's, which knows nothing of React state. A
-      // controlled select has no default option, so it falls back to its first
-      // enabled one: after a refusal the picker showed the first hub while the
-      // component still held the agent's choice, and the next Send went to the
-      // hub. Opting out also keeps the question and the typed address when the
-      // server refuses one, which is the moment the agent corrects it rather
-      // than retypes it. A thread that went out is still cleared, by the key.
-      onSubmit={(event) => {
-        event.preventDefault();
-        void onSubmit(new FormData(event.currentTarget));
-      }}
-      className="flex flex-col gap-2"
-    >
+    <form onSubmit={onSubmit} className="flex flex-col gap-2">
       <input type="hidden" name="conversationId" value={conversation.id} />
       <input type="hidden" name="anchorMessageId" value={anchor?.id ?? ''} />
 
@@ -407,8 +376,11 @@ function SideConversationDraft({
             {/* Not `disabled`. Anything that resets this form lands on the
                 first option that is not, and "Choose…" is the only safe place
                 for it to land. Choosing it again on purpose is harmless:
-                `required` refuses the empty value. */}
-            {recipients.length > 0 ? <option value="">Choose…</option> : null}
+                `required` refuses the empty value. Also kept while it is the
+                value: a refresh can empty the directory under an open form,
+                and an unchosen select with no option to show it would display
+                "Someone else…" without the address field that goes with it. */}
+            {recipients.length > 0 || recipientId === '' ? <option value="">Choose…</option> : null}
             {GROUPS.map(({ kind, label }) => {
               const entries = recipients.filter((entry) => entry.kind === kind);
               if (entries.length === 0) return null;
@@ -435,15 +407,14 @@ function SideConversationDraft({
         <div>
           <Label htmlFor="subject">Subject</Label>
           {/* Empty unless the ticket has exactly one parcel — see
-              `subjectPrefill`. An empty subject is sent as the ticket's own
-              (`startSideConversation`), so that is what the placeholder shows:
-              the field no longer holds it, and an agent should still be able to
-              see what leaving it blank will send. */}
+              `subjectPrefill`. The placeholder is what leaving it blank sends,
+              from the same `blankSideSubject` the action sends it with, so the
+              two cannot disagree. */}
           <Input
             id="subject"
             name="subject"
             defaultValue={subjectPrefill(trackingNumbers)}
-            placeholder={conversation.subject?.trim() || 'What this is about'}
+            placeholder={blankSideSubject(conversation.subject)}
           />
         </div>
       </div>

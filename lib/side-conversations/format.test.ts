@@ -1,5 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { subjectPrefill } from './format';
+import { blankSideSubject, subjectPrefill } from './format';
+
+describe('blankSideSubject', () => {
+  it("is the ticket's own subject", () => {
+    expect(blankSideSubject('Where is my order')).toBe('Where is my order');
+  });
+
+  it('says there is none rather than sending nothing, or whitespace', () => {
+    expect(blankSideSubject(null)).toBe('(no subject)');
+    expect(blankSideSubject('   ')).toBe('(no subject)');
+  });
+
+  it('trims what it keeps', () => {
+    expect(blankSideSubject('  Where is my order \n')).toBe('Where is my order');
+  });
+});
 
 describe('subjectPrefill', () => {
   it('leads with the one tracking number and leaves the rest to the agent', () => {

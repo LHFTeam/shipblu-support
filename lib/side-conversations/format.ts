@@ -109,6 +109,20 @@ export function subjectPrefill(trackingNumbers: string[]): string {
 }
 
 /**
+ * What a thread is called when the agent leaves its subject empty: the
+ * ticket's own, or `(no subject)` when the ticket has none worth the name.
+ *
+ * One function because two places state it — the action sends it and the
+ * composer shows it as the field's placeholder — and the placeholder exists to
+ * say what a blank field will send. Trimmed here rather than left to
+ * `buildSideSubject`, which would turn a whitespace subject into `(no subject)`
+ * in the mail while the thread card went on showing the whitespace.
+ */
+export function blankSideSubject(ticketSubject: string | null): string {
+  return ticketSubject?.trim() || '(no subject)';
+}
+
+/**
  * How the recipient is named on screen, however the agent chose it.
  *
  * Here rather than beside the read model it describes, for the reason already
