@@ -109,6 +109,18 @@ export function AttachmentList({
     dispatch({ type: 'retry', file });
   };
 
+  const settle = (file: Attachment, load: 'loaded' | 'failed') => {
+    // The same rescue as `retry`, for the other thing a failure unmounts: the
+    // picture's own link, which Tab reaches while it is still loading — and
+    // reaches first after "Try again", so a second failure would otherwise
+    // drop focus exactly where the first one was caught.
+    const figure = figures.current.get(file.id);
+    if (load === 'failed' && figure?.contains(document.activeElement)) {
+      figure.focus({ preventScroll: true });
+    }
+    dispatch({ type: 'settle', file, load });
+  };
+
   return (
     // Positioned for the live region's sake. `sr-only` is `position: absolute`,
     // and nothing above the timeline is positioned, so without this its box is
@@ -199,7 +211,7 @@ export function AttachmentList({
                 if (node) figures.current.set(file.id, node);
                 else figures.current.delete(file.id);
               }}
-              onSettle={(load) => dispatch({ type: 'settle', file, load })}
+              onSettle={(load) => settle(file, load)}
               onRetry={() => retry(file)}
             />
           ))}
@@ -332,6 +344,13 @@ function ImagePreview({
  * Never so far that the picture's top leaves the pane, so one taller than the
  * pane shows from its top down. That can take the pressed chip off the top of
  * the pane; the picture is what was asked for.
+ *
+ * And only ever down. A picture whose top is already above the pane is one
+ * the agent has scrolled past — after "Try again", where the figure is what was
+ * pressed and it has since grown by a whole picture — and taking them back up
+ * to it is exactly the pulling back this exists not to do. In a browser that
+ * does no scroll anchoring, a picture growing above the agent pushes them down
+ * past it, so there it is the ordinary case rather than an edge.
  */
 function revealInPane(figure: HTMLElement, pressed: HTMLElement) {
   let pane = figure.parentElement;
@@ -350,10 +369,11 @@ function revealInPane(figure: HTMLElement, pressed: HTMLElement) {
   const anchor = pressed.getBoundingClientRect();
   const box = figure.getBoundingClientRect();
   const stillLooking = anchor.bottom > view.top && anchor.top < view.bottom;
-  if (!stillLooking || box.bottom <= view.bottom) return;
+  const distance = Math.min(box.bottom - view.bottom, box.top - view.top);
+  if (!stillLooking || distance <= 0) return;
 
   pane.scrollBy({
-    top: Math.min(box.bottom - view.bottom, box.top - view.top),
+    top: distance,
     behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
   });
 }
