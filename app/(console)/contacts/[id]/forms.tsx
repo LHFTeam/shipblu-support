@@ -1,9 +1,10 @@
 'use client';
 
-import { useActionState, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Badge, ErrorText } from '@/components/ui';
+import { useActionForm } from '@/components/use-action-form';
 import type { LinkedShippingAccount } from '@/lib/shipments/queries';
 import {
   linkContactToAccount,
@@ -89,7 +90,7 @@ export function AccountLinks({
   editable: boolean;
 }) {
   const router = useRouter();
-  const [state, action, pending] = useActionState(linkContactToAccount, INITIAL);
+  const { state, key, form, pending } = useActionForm(linkContactToAccount, INITIAL);
   const [removing, setRemoving] = useState<string | null>(null);
 
   async function remove(shippingAccountId: string) {
@@ -137,8 +138,10 @@ export function AccountLinks({
 
       {editable ? (
         <form
-          action={(formData) => {
-            action(formData);
+          key={key}
+          action={form.action}
+          onSubmit={(event) => {
+            form.onSubmit(event);
             router.refresh();
           }}
           className="flex gap-2"

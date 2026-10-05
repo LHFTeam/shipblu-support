@@ -22,10 +22,10 @@ export type SettingsState = ActionState;
 
 /**
  * What the agents, channels, import and categories actions answer: the error,
- * and for an invite, which of its two deliveries happened.
+ * and for an invite, which of its two deliveries happened. Built on
+ * `ActionState` so a success can carry the nonce a form clears itself on.
  */
-export type AdminState = {
-  error: string | null;
+export type AdminState = ActionState & {
   inviteUrl?: string;
   /**
    * The address an invitation was *queued* for, present only when it was.

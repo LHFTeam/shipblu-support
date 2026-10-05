@@ -1,8 +1,8 @@
 'use client';
 
-import { useActionState } from 'react';
 import { ErrorText, Input } from '@/components/ui';
 import { SubmitButton } from '@/components/submit-button';
+import { useActionForm } from '@/components/use-action-form';
 import { INITIAL, useRefreshOnSuccess } from '../forms-shared';
 import { saveTrackingPhrase } from './actions';
 
@@ -32,11 +32,11 @@ export function PhraseEditor({
   fallback: string;
   saved: string;
 }) {
-  const [state, formAction] = useActionState(saveTrackingPhrase, INITIAL);
+  const { state, form } = useActionForm(saveTrackingPhrase, INITIAL);
   useRefreshOnSuccess(state);
 
   return (
-    <form action={formAction} className="flex flex-col gap-1">
+    <form action={form.action} onSubmit={form.onSubmit} className="flex flex-col gap-1">
       <div className="flex items-center gap-2">
         <input type="hidden" name="key" value={phraseKey} />
         <Input

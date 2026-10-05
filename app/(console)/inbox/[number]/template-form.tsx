@@ -1,12 +1,13 @@
 'use client';
 
-import { useActionState, useState } from 'react';
+import { useState } from 'react';
 import { ErrorText, Input, Label, Select } from '@/components/ui';
 import { renderTemplatePreview, templateShape } from '@/lib/whatsapp/templates';
 import { sendTemplateReply } from '../../reply-actions';
 import type { TemplateOption } from './types';
 import { INITIAL, useRefreshOnSuccess } from './form-state';
 import { SubmitButton } from '@/components/submit-button';
+import { useActionForm } from '@/components/use-action-form';
 
 /**
  * Template send.
@@ -26,7 +27,7 @@ export function TemplateForm({
   templates: TemplateOption[];
   onSent?: () => void;
 }) {
-  const [state, action] = useActionState(sendTemplateReply, INITIAL);
+  const { state, form } = useActionForm(sendTemplateReply, INITIAL);
   const [templateId, setTemplateId] = useState(templates[0]?.id ?? '');
   const [values, setValues] = useState<Record<string, string>>({});
   useRefreshOnSuccess(state, onSent);
@@ -49,7 +50,7 @@ export function TemplateForm({
   );
 
   return (
-    <form action={action} className="flex flex-col gap-3">
+    <form action={form.action} onSubmit={form.onSubmit} className="flex flex-col gap-3">
       <input type="hidden" name="conversationId" value={conversationId} />
 
       <div>
