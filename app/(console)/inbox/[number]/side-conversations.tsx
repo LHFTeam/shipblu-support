@@ -5,7 +5,11 @@ import { useRouter } from 'next/navigation';
 import { Badge, Button, ErrorText, Input, Label, Select, Textarea } from '@/components/ui';
 import { formatBytes, formatDateTime, formatRelative } from '@/lib/format';
 import type { PickerEntry, SideConversationView } from '@/lib/side-conversations/queries';
-import { describeRecipient, trackingPrefill } from '@/lib/side-conversations/format';
+import {
+  describeRecipient,
+  subjectPrefill,
+  trackingPrefill,
+} from '@/lib/side-conversations/format';
 import type { ConversationDetail } from '@/lib/tickets/conversation';
 import type { ActionState } from '../../action-state';
 import {
@@ -293,9 +297,15 @@ export function StartSideConversationForm({
   const router = useRouter();
   const [state, setState] = useState<ActionState>(INITIAL);
   const [busy, setBusy] = useState(false);
-  const [recipientId, setRecipientId] = useState(
-    recipients[0] ? `${recipients[0].source}:${recipients[0].id}` : 'other',
-  );
+  // Nobody is preselected. Opening on the first entry meant an agent who sent
+  // without touching the picker asked whichever hub sorts first by name —
+  // Alexandria, once the hubs were entered — about a parcel it may never have
+  // seen, carrying the customer's name and address. "Choose…" makes the
+  // recipient something the agent decided, and `required` stops the form until
+  // they have. With an empty directory there is nothing to choose between, so
+  // it opens on the typed address the notice below tells them to use.
+  const unchosen = recipients.length > 0 ? '' : 'other';
+  const [recipientId, setRecipientId] = useState(unchosen);
 
   // The last thing the customer actually said. Both the anchor the thread hangs
   // off and, optionally, the text quoted into the question.
@@ -311,6 +321,10 @@ export function StartSideConversationForm({
     setBusy(false);
     setState(result);
     if (result.ok) {
+      // The form's `key` clears the fields it owns, but the picker's value lives
+      // here, above the key — so without this the next thread on this ticket
+      // would open already addressed to the last one's hub.
+      setRecipientId(unchosen);
       router.refresh();
       onSent?.();
     }
@@ -345,7 +359,13 @@ export function StartSideConversationForm({
             name="recipientId"
             value={recipientId}
             onChange={(event) => setRecipientId(event.target.value)}
+            required
           >
+            {recipients.length > 0 ? (
+              <option value="" disabled>
+                Choose…
+              </option>
+            ) : null}
             {GROUPS.map(({ kind, label }) => {
               const entries = recipients.filter((entry) => entry.kind === kind);
               if (entries.length === 0) return null;
@@ -371,11 +391,16 @@ export function StartSideConversationForm({
 
         <div>
           <Label htmlFor="subject">Subject</Label>
+          {/* Empty unless the ticket has exactly one parcel — see
+              `subjectPrefill`. An empty subject is sent as the ticket's own
+              (`startSideConversation`), so that is what the placeholder shows:
+              the field no longer holds it, and an agent should still be able to
+              see what leaving it blank will send. */}
           <Input
             id="subject"
             name="subject"
-            defaultValue={conversation.subject ?? ''}
-            placeholder="What this is about"
+            defaultValue={subjectPrefill(trackingNumbers)}
+            placeholder={conversation.subject?.trim() || 'What this is about'}
           />
         </div>
       </div>

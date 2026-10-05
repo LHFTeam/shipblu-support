@@ -1061,10 +1061,12 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   matches none of them), which is how to select them to undo the entry. Delete
   only while no `side_conversations.location_id` points at one: the foreign key
   is `on delete set null` and would quietly strip the hub from a real thread,
-  leaving only the address in `to_addresses`. The same holds for the Delete
-  button on `/admin/locations` — `deleteLocation` has no in-use guard, and its
-  comment still says nothing references a location — so a hub a thread has used
-  is deactivated, not deleted.
+  leaving only the address in `to_addresses`. That check is the SQL's to make by
+  hand; the Delete button on `/admin/locations` makes it itself. `deleteLocation`
+  goes through `removeLocation` (`lib/locations/remove.ts`), which locks the row,
+  counts the threads, and marks a hub any thread has used not operating instead
+  of deleting it — the rule `deleteInternalRecipient` already applied to the
+  picker's other register.
 
 - ~~**SLA policies and automation rules are both empty.**~~ `sla_policies` holds
   **4** rows and `automation_rules` **1** as of 2026-09-20, so neither cron runs
@@ -1072,10 +1074,15 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   transcribing, and one automation rule is not a rule set.
 - **The side conversation picker's two registers.** Both are filled:
   `internal_recipients` has 3 teams and `locations` 14 hubs (above), so the
-  picker opens on _Hubs and warehouses_. **Its default moved with them.** The
-  picker preselects its first entry (`side-conversations.tsx`,
-  `recipients[0]`), hubs sort first and by name, so an agent who sends without
-  touching it now asks Alexandria Hub, where until 2026-10-05 it asked Finance.
+  picker lists _Hubs and warehouses_ first. **It preselects nobody.** It used to
+  open on its first entry, and with hubs sorting first and by name an agent who
+  sent without touching it asked Alexandria Hub (Finance, before 2026-10-05);
+  it now opens on _Choose…_ and the form will not send until somebody is
+  chosen. Only an empty directory still opens on _Someone else…_, the one
+  choice there is. The subject opens on the ticket's tracking number and `|| `
+  when it has exactly one parcel (`subjectPrefill`), and empty otherwise — an
+  empty subject is sent as the ticket's own, which the field shows as its
+  placeholder.
   Vendors — a courier partner — still go in `internal_recipients` at
   `/admin/recipients`, and none is entered. All three side conversations that
   exist are open and went to a typed test address, with `location_id` and

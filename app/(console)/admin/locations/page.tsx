@@ -67,7 +67,9 @@ export default async function LocationsPage() {
       ) : (
         <p className="mt-3 text-xs text-[var(--muted-foreground)]">
           A location that has closed is marked not operating rather than deleted, so its code still
-          reads in the tickets that mention it. Deleting is for one entered by mistake.
+          reads in the tickets that mention it. Deleting is for one entered by mistake — one a side
+          conversation has already gone to is marked not operating instead, so the thread still
+          names it.
         </p>
       )}
 

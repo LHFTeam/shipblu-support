@@ -89,6 +89,26 @@ export function trackingPrefill(trackingNumbers: string[]): string {
 }
 
 /**
+ * The subject a new thread opens with: `1212121212121 || `, leaving the agent to
+ * type only what they are asking.
+ *
+ * The tracking number leads because it is what a hub sorts its shared inbox by
+ * and searches it for — the `[#123]` that `buildSideSubject` appends is our
+ * number, not theirs — and, as in the body, a number the agent never retypes is
+ * one they cannot transpose.
+ *
+ * Only for exactly one parcel. With none there is nothing to lead with, and with
+ * several, picking one would file a question about all of them under whichever
+ * the ticket happened to link first — so the field stays empty and the agent
+ * says which they mean. `trackingPrefill` names every one of them in the body
+ * either way.
+ */
+export function subjectPrefill(trackingNumbers: string[]): string {
+  const distinct = [...new Set(trackingNumbers.filter(Boolean))];
+  return distinct.length === 1 ? `${distinct[0]} || ` : '';
+}
+
+/**
  * How the recipient is named on screen, however the agent chose it.
  *
  * Here rather than beside the read model it describes, for the reason already

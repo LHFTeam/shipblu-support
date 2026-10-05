@@ -12,6 +12,7 @@ import {
   normaliseLocationCode,
   LOCATION_CODE_MAX,
 } from '@/lib/locations/format';
+import { removeLocation } from '@/lib/locations/remove';
 import { GONE, refresh, type SettingsState } from '../settings-shared';
 
 // --- Locations --------------------------------------------------------------
@@ -81,12 +82,14 @@ export async function saveLocation(
 }
 
 /**
- * Deletes a location outright.
+ * Deletes a location, unless a side conversation has gone to it — then it is
+ * marked not operating instead, and `removeLocation` says why the delete itself
+ * would have been silent damage.
  *
- * Safe today only because nothing references a location yet: no agent carries
- * one, no ticket is attributed to one. The moment something does, this needs the
- * in-use guard `deleteGroup` has — and `is_active` is already the right answer
- * for a hub that has closed but whose code appears in history.
+ * The retirement comes back on the error line because that is the one line
+ * `DangerAction` shows, the same channel `deleteInternalRecipient` uses for the
+ * same outcome: the admin pressed Delete and the row is still in the table, so
+ * the page owes them a sentence saying what happened instead.
  */
 export async function deleteLocation(
   _state: SettingsState,
@@ -96,7 +99,21 @@ export async function deleteLocation(
   const id = uuidField(formData, 'id');
   if (!id) return { error: 'Nothing to delete' };
 
-  await db.delete(locations).where(eq(locations.id, id));
+  const removal = await removeLocation(id);
   refresh('/admin/locations');
+
+  if (removal.outcome === 'retired') {
+    const one = removal.threads === 1;
+    const threads = one ? 'a side conversation' : `${removal.threads} side conversations`;
+    const record = one ? 'that thread still says' : 'those threads still say';
+    const instead = removal.wasActive
+      ? 'so it was marked not operating rather than deleted. It is gone from the picker'
+      : 'so it stays, marked not operating, rather than being deleted. It is already gone from the picker';
+
+    return {
+      error: `${removal.name} (${removal.code}) has ${threads}, ${instead}, and ${record} which location was asked.`,
+    };
+  }
+
   return ok();
 }

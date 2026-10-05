@@ -137,6 +137,9 @@ export async function startSideConversation(
     resolvedRecipientId = recipient.id;
     toAddress = recipient.email;
   } else {
+    // `other`, and also the picker's unchosen "Choose…", which `required` stops
+    // in the browser. Sent anyway, it arrives with no typed address either —
+    // the field is only rendered for `other` — and `refuseRecipient` answers it.
     toAddress = normaliseAddress(typedAddress);
   }
 
