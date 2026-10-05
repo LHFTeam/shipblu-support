@@ -1,15 +1,15 @@
 'use client';
 
-import { useActionState } from 'react';
 import { ErrorText, Input, Label } from '@/components/ui';
 import { t, type Locale } from '@/lib/kb/locale';
 import { portalRegister, type PortalFormState } from '../actions';
 import { SubmitButton } from '@/components/submit-button';
+import { useActionForm } from '@/components/use-action-form';
 
 const INITIAL: PortalFormState = { error: null };
 
 export function RegisterForm({ locale }: { locale: Locale }) {
-  const [state, action] = useActionState(portalRegister, INITIAL);
+  const { state, form } = useActionForm(portalRegister, INITIAL);
 
   // Deliberately the same panel whether the address was new, already had an
   // account, or was throttled. The customer's next step is identical in all
@@ -25,7 +25,7 @@ export function RegisterForm({ locale }: { locale: Locale }) {
   }
 
   return (
-    <form action={action} className="flex flex-col gap-4">
+    <form action={form.action} onSubmit={form.onSubmit} className="flex flex-col gap-4">
       <input type="hidden" name="locale" value={locale} />
 
       <div>

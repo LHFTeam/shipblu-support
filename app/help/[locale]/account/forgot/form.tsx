@@ -1,15 +1,15 @@
 'use client';
 
-import { useActionState } from 'react';
 import { ErrorText, Input, Label } from '@/components/ui';
 import { t, type Locale } from '@/lib/kb/locale';
 import { portalForgotPassword, type PortalFormState } from '../actions';
 import { SubmitButton } from '@/components/submit-button';
+import { useActionForm } from '@/components/use-action-form';
 
 const INITIAL: PortalFormState = { error: null };
 
 export function ForgotForm({ locale }: { locale: Locale }) {
-  const [state, action] = useActionState(portalForgotPassword, INITIAL);
+  const { state, form } = useActionForm(portalForgotPassword, INITIAL);
 
   if (state.done) {
     return (
@@ -21,7 +21,7 @@ export function ForgotForm({ locale }: { locale: Locale }) {
   }
 
   return (
-    <form action={action} className="flex flex-col gap-4">
+    <form action={form.action} onSubmit={form.onSubmit} className="flex flex-col gap-4">
       <input type="hidden" name="locale" value={locale} />
 
       <div>

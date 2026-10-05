@@ -1,18 +1,19 @@
 'use client';
 
-import { useActionState } from 'react';
 import { bootstrapAdmin, type AuthFormState } from '../actions';
 import { ErrorText, Input, Label } from '@/components/ui';
 import { SubmitButton } from '@/components/submit-button';
+import { useActionForm } from '@/components/use-action-form';
 
 const INITIAL: AuthFormState = { error: null };
 
 export function SetupForm() {
-  const [state, action] = useActionState(bootstrapAdmin, INITIAL);
+  const { state, form } = useActionForm(bootstrapAdmin, INITIAL);
 
   return (
     <form
-      action={action}
+      action={form.action}
+      onSubmit={form.onSubmit}
       className="flex flex-col gap-4 rounded-lg border border-[var(--border)] p-6"
     >
       <p className="text-sm opacity-70">

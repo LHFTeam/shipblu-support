@@ -1,8 +1,8 @@
 'use client';
 
-import { useActionState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Button, ErrorText, Textarea } from '@/components/ui';
+import { useActionForm } from '@/components/use-action-form';
 import { t, type Locale } from '@/lib/kb/locale';
 import { replyToPortalTicket, type PortalTicketState } from '../../actions';
 
@@ -15,10 +15,10 @@ const INITIAL: PortalTicketState = { error: null };
  * customer's own message missing from the conversation they just added it to.
  */
 export function ReplyBox({ locale, number }: { locale: Locale; number: number }) {
-  const [state, action] = useActionState(replyToPortalTicket, INITIAL);
+  const { state, form } = useActionForm(replyToPortalTicket, INITIAL);
 
   return (
-    <form action={action} className="flex flex-col gap-3">
+    <form action={form.action} onSubmit={form.onSubmit} className="flex flex-col gap-3">
       <input type="hidden" name="locale" value={locale} />
       <input type="hidden" name="number" value={number} />
 

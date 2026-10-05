@@ -1,10 +1,11 @@
 'use client';
 
-import { useActionState } from 'react';
+import { useEffect, useRef } from 'react';
 import { ErrorText, Input, Label, SuccessText } from '@/components/ui';
 import { t, type Locale } from '@/lib/kb/locale';
 import { portalSignIn, type PortalFormState } from '../actions';
 import { SubmitButton } from '@/components/submit-button';
+import { useActionForm } from '@/components/use-action-form';
 
 const INITIAL: PortalFormState = { error: null };
 
@@ -22,10 +23,20 @@ export function LoginForm({
   next?: string;
   justReset?: boolean;
 }) {
-  const [state, action] = useActionState(portalSignIn, INITIAL);
+  const { state, form } = useActionForm(portalSignIn, INITIAL);
+  const password = useRef<HTMLInputElement>(null);
+
+  // A refused sign-in keeps the address and empties the password, as React's
+  // reset used to: a wrong password is usually a near miss of the right one,
+  // and left in the box it can be revealed by whoever sits down next. Cleared
+  // on the node rather than by a remount, so the caret stays where an Enter
+  // left it; skipped for the initial state, which would wipe an autofill.
+  useEffect(() => {
+    if (state.error && password.current) password.current.value = '';
+  }, [state]);
 
   return (
-    <form action={action} className="flex flex-col gap-4">
+    <form action={form.action} onSubmit={form.onSubmit} className="flex flex-col gap-4">
       <input type="hidden" name="locale" value={locale} />
       {next ? <input type="hidden" name="next" value={next} /> : null}
 
@@ -47,6 +58,7 @@ export function LoginForm({
       <div>
         <Label htmlFor="password">{t(locale, 'password')}</Label>
         <Input
+          ref={password}
           id="password"
           name="password"
           type="password"
