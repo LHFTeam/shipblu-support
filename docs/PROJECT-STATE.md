@@ -4562,6 +4562,54 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     mobile nav, which carries `app-scroll`. To check, compare the document's
     `scrollHeight` with its `clientHeight`; a `scrollTop` of 0 proves nothing.
 
+80. **A media element never comes back through `/api/attachments`.**
+    _2026-10-05, found before shipping inline voice notes and video._ The route
+    answers 307 to a Storage URL signed for five minutes. An `<img>` fetches
+    once, so that was always enough. An `<audio>` or `<video>` fetches in
+    ranges for as long as it plays, and every engine sends those later range
+    requests straight to the signed URL it was redirected to. Chrome and
+    Firefox were measured doing it, it is in both engines' loader source, and
+    Safari has been reported doing the same. So a video paused for more than
+    five minutes, or seeked past what was buffered, asks Storage with a dead
+    signature.
+
+    Storage answers that with a 400 and a JSON body. Chrome's response
+    blocking (ORB) hides a cross-origin JSON body from the media stack as a
+    network failure, and the element then retries the dead URL for about 31
+    seconds before it reports an error. Firefox reports one at once. Waiting
+    for the error is therefore not a recovery strategy.
+
+    `lib/attachments/signed-url.ts` decides before the request instead:
+    - **When.** A play, a seek or a stall on a URL more than four minutes old,
+      at a position with nothing buffered ahead of it, reloads the element.
+    - **How.** The reload calls `load()`, which goes back through the route
+      for a new signature, and puts back the position, the speed and the
+      playing state.
+    - **Timed from metadata.** The URL's age runs from `loadedmetadata`, not
+      `loadstart`. With `preload="none"`, `loadstart` fires at render, so a
+      voice note played four minutes after the page opened would reload on its
+      first press.
+    - **`waiting` is not starvation on its own.** Chrome fires it on every
+      seek, into buffered data too. Treating it as starvation reloaded a
+      replayed voice note and cut the replay off.
+
+    The route marks its redirect `no-store` and must stay a 307. A 301 or 308
+    can be cached, and then the browser would reuse a dead signature.
+
+    Voice notes rarely reach any of this. The largest in production is about
+    212 KB, so the first response carries the whole note, and replaying it an
+    hour later makes no request at all.
+
+    Ogg Opus, which is what every WhatsApp voice note is, plays on an iPhone
+    only from iOS 18.4, whatever browser the phone runs. Below that, an
+    ungated player shows a duration and plays nothing. So the console asks
+    `canPlayType` in the browser, and any phone that cannot play a note keeps
+    the download link.
+
+    Not verified on a real Safari: whether it keeps requesting the signed URL
+    after the redirect, what it does when that URL expires, and whether
+    `play()` after `load()` works without a new tap.
+
 ## 7. Verification already done
 
 - **The knowledge-base role floor, against a real Postgres.** _2026-09-04._ The

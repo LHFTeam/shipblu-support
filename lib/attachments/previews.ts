@@ -13,8 +13,18 @@
 
 export type Load = 'loading' | 'loaded' | 'failed';
 
-/** Named apart from the DOM's `File`, which client code importing this also has in scope. */
-type PreviewFile = { id: string; filename: string };
+/**
+ * Named apart from the DOM's `File`, which client code importing this also has
+ * in scope. `kind` is absent for a picture.
+ *
+ * A voice note's player is on the page from the start rather than opened from
+ * its chip, so for this reducer it is always showing: its failure is announced
+ * at once, where a closed picture's waits until it is opened.
+ */
+export type PreviewFile = { id: string; filename: string; kind?: 'image' | 'audio' | 'video' };
+
+const showing = (state: PreviewState, file: PreviewFile) =>
+  file.kind === 'audio' || state.showing[file.id] === true;
 
 export type PreviewState = {
   /**
@@ -65,7 +75,7 @@ export function previewReducer(state: PreviewState, action: PreviewAction): Prev
       if (action.load === 'loaded') return withdraw(next, file.id);
       // A failure behind a closed preview is told when it is opened, not now,
       // while the agent is looking at something else.
-      return state.showing[file.id] === true ? announce(next, file) : next;
+      return showing(state, file) ? announce(next, file) : next;
     }
 
     case 'retry':
@@ -84,7 +94,7 @@ function announce(state: PreviewState, file: PreviewFile): PreviewState {
     seq,
     notice: {
       fileId: file.id,
-      text: `${file.filename} could not be shown here. Try again, or open the file.`,
+      text: `${file.filename} could not be ${file.kind === 'audio' || file.kind === 'video' ? 'played' : 'shown'} here. Try again, or open the file.`,
       seq,
     },
   };

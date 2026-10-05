@@ -1,12 +1,32 @@
 'use client';
 
-import { type MouseEvent, useEffect, useId, useReducer, useRef } from 'react';
+import {
+  type MouseEvent,
+  type ReactNode,
+  type SyntheticEvent,
+  useEffect,
+  useId,
+  useReducer,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { ChevronDownIcon, ChevronUpIcon } from '@/components/icons';
-import { isPreviewableImage } from '@/lib/attachments/preview';
-import { initialPreviewState, type Load, loadOf, previewReducer } from '@/lib/attachments/previews';
+import { isPreviewableImage, type PlayableMedia, playableMedia } from '@/lib/attachments/preview';
+import {
+  initialPreviewState,
+  type Load,
+  loadOf,
+  type PreviewFile,
+  previewReducer,
+} from '@/lib/attachments/previews';
+import { type MediaTrigger, shouldRefresh } from '@/lib/attachments/signed-url';
 import { formatBytes } from '@/lib/format';
 
 type Attachment = { id: string; filename: string; contentType: string; sizeBytes: number };
+
+/** What an attachment can be in the conversation; null is a plain link. */
+type Kind = 'image' | 'audio' | 'video' | null;
 
 /** What was pressed to ask for a picture, which is where the agent is looking. */
 type Pressed = 'chip' | 'figure';
@@ -21,6 +41,35 @@ const fileUrl = (file: Attachment) => `/api/attachments/${file.id}`;
 */
 const previewIdFor = (baseId: string, fileId: string) => `${baseId}-${fileId}`;
 const chipIdFor = (baseId: string, fileId: string) => `${baseId}-${fileId}-chip`;
+
+/*
+  Whether this browser plays a media type is only known in the browser, and a
+  WhatsApp voice note is the case that varies: Ogg Opus plays on an iPhone from
+  iOS 18.4, and before it a player shows a duration and then plays nothing. So
+  the server draws every media file as the link it always was, and the client
+  draws the player once it has asked. `useSyncExternalStore` with a server
+  snapshot is what lets the first client render match the server's, as
+  `components/use-now.ts` does for the clock.
+*/
+const subscribeToNothing = () => () => {};
+const useOnClient = () =>
+  useSyncExternalStore(
+    subscribeToNothing,
+    () => true,
+    () => false,
+  );
+
+const verdicts = new Map<string, boolean>();
+
+function canPlay(media: PlayableMedia): boolean {
+  const key = `${media.kind} ${media.probe}`;
+  let verdict = verdicts.get(key);
+  if (verdict === undefined) {
+    verdict = document.createElement(media.kind).canPlayType(media.probe) !== '';
+    verdicts.set(key, verdict);
+  }
+  return verdict;
+}
 
 /**
  * The files on one message: a row of chips, where a picture opens under the row
@@ -54,6 +103,20 @@ const chipIdFor = (baseId: string, fileId: string) => `${baseId}-${fileId}-chip`
  * `compact` is the side conversation card's density for the chip row, which
  * that card has always drawn a step smaller. An opened picture is the same size
  * at both, because the picture is what the agent opened it to read.
+ *
+ * Recorded media plays here too, wherever the browser says it can (see
+ * `canPlay`):
+ *
+ * - **A voice note's player is on the page from the start**, under the chips,
+ *   because listening is the whole of reading one. `preload="none"` keeps the
+ *   promise above: every engine fetches nothing for it until play is pressed,
+ *   so a thread of forty notes costs nothing until somebody listens. They are
+ *   small (the largest in production is about 200 KB), so the first response
+ *   carries the whole note.
+ * - **A video opens from its chip**, like a picture, because it is not small —
+ *   a WhatsApp video runs to tens of megabytes.
+ * - **Only one plays at a time.** Two voice notes talking over each other is
+ *   never what was meant.
  */
 export function AttachmentList({
   files,
@@ -63,6 +126,7 @@ export function AttachmentList({
   compact?: boolean;
 }) {
   const baseId = useId();
+  const onClient = useOnClient();
   const [state, dispatch] = useReducer(previewReducer, initialPreviewState);
   /*
     Pictures waiting to be brought into view, each with what was pressed to ask
@@ -100,6 +164,16 @@ export function AttachmentList({
 
   if (files.length === 0) return null;
 
+  const kindOf = (file: Attachment): Kind => {
+    if (isPreviewableImage(file.contentType)) return 'image';
+    const media = playableMedia(file.contentType);
+    return media && onClient && canPlay(media) ? media.kind : null;
+  };
+  const asPreview = (file: Attachment): PreviewFile => ({
+    id: file.id,
+    filename: file.filename,
+    kind: kindOf(file) ?? undefined,
+  });
   const previewId = (file: Attachment) => previewIdFor(baseId, file.id);
   const figureOf = (file: Attachment) => document.getElementById(previewId(file));
   // Deleted first so the newest ask is the last entry, which is the one the
@@ -109,6 +183,7 @@ export function AttachmentList({
     pending.current.set(file.id, pressed);
   };
   const opened = files.filter((file) => state.showing[file.id] !== undefined);
+  const voiceNotes = files.filter((file) => kindOf(file) === 'audio');
 
   const toggle = (event: MouseEvent<HTMLAnchorElement>, file: Attachment) => {
     // A modified click means what it means on any link — a background tab, a
@@ -119,7 +194,7 @@ export function AttachmentList({
     }
     event.preventDefault();
     ask(file, 'chip');
-    dispatch({ type: 'toggle', file });
+    dispatch({ type: 'toggle', file: asPreview(file) });
   };
 
   const retry = (file: Attachment) => {
@@ -128,9 +203,10 @@ export function AttachmentList({
     // vanishes loses its place in the ticket. The figure stays.
     figureOf(file)?.focus({ preventScroll: true });
     // The figure, not the chip: the agent was looking at "Try again", which may
-    // be a whole picture's height below the chip.
-    ask(file, 'figure');
-    dispatch({ type: 'retry', file });
+    // be a whole picture's height below the chip. A voice note is already where
+    // it was, and loads nothing until play is pressed again.
+    if (kindOf(file) !== 'audio') ask(file, 'figure');
+    dispatch({ type: 'retry', file: asPreview(file) });
   };
 
   const settle = (file: Attachment, load: 'loaded' | 'failed') => {
@@ -144,10 +220,11 @@ export function AttachmentList({
     } else if (load === 'loaded' && figure && document.activeElement === figure) {
       // Focus parked on the figure by "Try again" moves on to what the retry
       // produced, so the next thing a screen reader says is the picture's link
-      // rather than nothing — the figure's name alone does not say it worked.
-      figure.querySelector('a')?.focus({ preventScroll: true });
+      // or the player rather than nothing — the figure's name alone does not
+      // say it worked.
+      figure.querySelector<HTMLElement>('a, audio, video')?.focus({ preventScroll: true });
     }
-    dispatch({ type: 'settle', file, load });
+    dispatch({ type: 'settle', file: asPreview(file), load });
   };
 
   return (
@@ -168,7 +245,7 @@ export function AttachmentList({
                 : 'rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs'
             }
           >
-            {isPreviewableImage(file.contentType) ? (
+            {kindOf(file) === 'image' || kindOf(file) === 'video' ? (
               <a
                 id={chipIdFor(baseId, file.id)}
                 href={fileUrl(file)}
@@ -211,10 +288,28 @@ export function AttachmentList({
         photo that arrived in a tenth of a second, is noise between the agent
         and the ticket.
       */}
-      {files.some((file) => isPreviewableImage(file.contentType)) ? (
+      {files.some(
+        (file) => isPreviewableImage(file.contentType) || playableMedia(file.contentType),
+      ) ? (
         <span role="status" className="sr-only">
           {state.notice ? <span key={state.notice.seq}>{state.notice.text}</span> : null}
         </span>
+      ) : null}
+
+      {voiceNotes.length > 0 ? (
+        <div className={compact ? 'mt-1.5 flex flex-col gap-1.5' : 'mt-2 flex flex-col gap-2'}>
+          {voiceNotes.map((file) => (
+            <MediaFigure key={file.id} id={previewId(file)} file={file}>
+              <MediaPlayer
+                kind="audio"
+                file={file}
+                load={loadOf(state, file.id)}
+                onSettle={(load) => settle(file, load)}
+                onRetry={() => retry(file)}
+              />
+            </MediaFigure>
+          ))}
+        </div>
       ) : null}
 
       {opened.length > 0 ? (
@@ -227,15 +322,30 @@ export function AttachmentList({
           className="mt-2 flex flex-col items-start gap-2"
         >
           {opened.map((file) => (
-            <ImagePreview
+            <MediaFigure
               key={file.id}
               id={previewId(file)}
               file={file}
               hidden={state.showing[file.id] !== true}
-              load={loadOf(state, file.id)}
-              onSettle={(load) => settle(file, load)}
-              onRetry={() => retry(file)}
-            />
+            >
+              {kindOf(file) === 'video' ? (
+                <MediaPlayer
+                  kind="video"
+                  file={file}
+                  hidden={state.showing[file.id] !== true}
+                  load={loadOf(state, file.id)}
+                  onSettle={(load) => settle(file, load)}
+                  onRetry={() => retry(file)}
+                />
+              ) : (
+                <ImagePreview
+                  file={file}
+                  load={loadOf(state, file.id)}
+                  onSettle={(load) => settle(file, load)}
+                  onRetry={() => retry(file)}
+                />
+              )}
+            </MediaFigure>
           ))}
         </div>
       ) : null}
@@ -244,99 +354,358 @@ export function AttachmentList({
 }
 
 /**
+ * The frame every opened picture, video and voice note sits in.
+ *
+ * It takes focus (`tabIndex={-1}`, so never by Tab) only because "Try again"
+ * hands focus to it before unmounting — see `retry` — and is named after the
+ * file so that focus lands on something a screen reader can say.
+ */
+function MediaFigure({
+  id,
+  file,
+  hidden = false,
+  children,
+}: {
+  id: string;
+  file: Attachment;
+  hidden?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <figure id={id} hidden={hidden} tabIndex={-1} aria-label={file.filename} className="max-w-full">
+      {children}
+    </figure>
+  );
+}
+
+/**
+ * What a file that would not load says instead, keeping the link: the bytes may
+ * be fine and only this browser unable to decode them, or the session may have
+ * lapsed since the page was drawn, and in both cases the file is still one
+ * click away.
+ */
+function Failure({
+  file,
+  verb,
+  onRetry,
+}: {
+  file: Attachment;
+  verb: 'shown' | 'played';
+  onRetry: () => void;
+}) {
+  const failureId = `${useId()}-failure`;
+
+  return (
+    <p className="text-xs text-[var(--muted-foreground)]">
+      <span id={failureId}>
+        {file.filename} could not be {verb} here.
+      </span>{' '}
+      {/* Described by the sentence rather than renamed, so the name stays
+          the label on screen for voice control, and each control says which
+          file it is about when it takes focus. A list of names alone — a
+          rotor, an elements list — still shows two "Try again"s when two
+          files fail; a name that differed from the label would be the worse
+          trade. */}
+      <button type="button" onClick={onRetry} aria-describedby={failureId} className="underline">
+        Try again
+      </button>
+      {' · '}
+      <a
+        href={fileUrl(file)}
+        target="_blank"
+        rel="noreferrer"
+        aria-describedby={failureId}
+        className="underline"
+      >
+        Open the file
+      </a>
+    </p>
+  );
+}
+
+/**
  * One picture, linked to the original for when the detail matters — the
  * tracking number on a photographed label is often only legible full size.
  *
- * A picture that will not load says so and keeps the link, rather than leaving
- * a broken-image box: the bytes may be fine and only this browser unable to
- * decode them, or the session may have lapsed since the page was drawn, and in
- * both cases the file is still one click away. "Try again" draws a new `<img>`,
- * which asks the route again: a failed load is never in the browser's list of
- * available images to be answered from, so a Storage timeout a moment ago does
- * not decide what the agent sees now.
- *
- * The figure takes focus (`tabIndex={-1}`, so never by Tab) only because
- * "Try again" hands focus to it before unmounting — see `retry` — and is named
- * after the file so that focus lands on something a screen reader can say.
+ * "Try again" draws a new `<img>`, which asks the route again: a failed load is
+ * never in the browser's list of available images to be answered from, so a
+ * Storage timeout a moment ago does not decide what the agent sees now.
  */
 function ImagePreview({
-  id,
   file,
-  hidden,
   load,
   onSettle,
   onRetry,
 }: {
-  id: string;
   file: Attachment;
-  hidden: boolean;
   load: Load;
   onSettle: (load: 'loaded' | 'failed') => void;
   onRetry: () => void;
 }) {
-  const failureId = `${id}-failure`;
+  if (load === 'failed') return <Failure file={file} verb="shown" onRetry={onRetry} />;
 
   return (
-    <figure id={id} hidden={hidden} tabIndex={-1} aria-label={file.filename} className="max-w-full">
-      {load === 'failed' ? (
-        <p className="text-xs text-[var(--muted-foreground)]">
-          <span id={failureId}>{file.filename} could not be shown here.</span>{' '}
-          {/* Described by the sentence rather than renamed, so the name stays
-              the label on screen for voice control, and each control says which
-              picture it is about when it takes focus. A list of names alone —
-              a rotor, an elements list — still shows two "Try again"s when two
-              pictures fail; a name that differed from the label would be the
-              worse trade. */}
-          <button
-            type="button"
-            onClick={onRetry}
-            aria-describedby={failureId}
-            className="underline"
-          >
-            Try again
-          </button>
-          {' · '}
-          <a
-            href={fileUrl(file)}
-            target="_blank"
-            rel="noreferrer"
-            aria-describedby={failureId}
-            className="underline"
-          >
-            Open the file
-          </a>
-        </p>
-      ) : (
-        <>
-          <a
-            href={fileUrl(file)}
-            target="_blank"
-            rel="noreferrer"
-            aria-label={`Open ${file.filename} full size in a new tab`}
-            className="block"
-          >
-            {/*
-              Not next/image, for the reason `components/avatar.tsx` gives: the
-              source is a redirect to a signed URL on a host that changes per
-              request, which the optimiser cannot cache and would only add a hop to.
-            */}
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={fileUrl(file)}
-              alt={file.filename}
-              decoding="async"
-              onLoad={() => onSettle('loaded')}
-              onError={() => onSettle('failed')}
-              className="block max-h-96 max-w-full cursor-zoom-in rounded-md border border-[var(--border)] bg-[var(--surface)]"
-            />
-          </a>
-          {load === 'loading' ? (
-            <p className="text-xs text-[var(--muted-foreground)]">Loading picture…</p>
-          ) : null}
-        </>
-      )}
-    </figure>
+    <>
+      <a
+        href={fileUrl(file)}
+        target="_blank"
+        rel="noreferrer"
+        aria-label={`Open ${file.filename} full size in a new tab`}
+        className="block"
+      >
+        {/*
+          Not next/image, for the reason `components/avatar.tsx` gives: the
+          source is a redirect to a signed URL on a host that changes per
+          request, which the optimiser cannot cache and would only add a hop to.
+        */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={fileUrl(file)}
+          alt={file.filename}
+          decoding="async"
+          onLoad={() => onSettle('loaded')}
+          onError={() => onSettle('failed')}
+          className="block max-h-96 max-w-full cursor-zoom-in rounded-md border border-[var(--border)] bg-[var(--surface)]"
+        />
+      </a>
+      {load === 'loading' ? (
+        <p className="text-xs text-[var(--muted-foreground)]">Loading picture…</p>
+      ) : null}
+    </>
   );
+}
+
+/** How many reloads a player makes for one stretch of playback before giving up. */
+const MAX_RELOADS = 3;
+
+/**
+ * A voice note or a video, with the native controls — which already carry play,
+ * seek, speed and volume, and are accessible, on every platform the console is
+ * read on.
+ *
+ * A voice note is `preload="none"`: nothing is fetched until play. A video
+ * fetches its metadata as soon as it is opened, because opening it was the
+ * agent asking for it, and the first frame and the shape of the box come with
+ * the metadata.
+ *
+ * A video with no picture is a Facebook voice clip, which arrives as MP4. It
+ * draws as a bar of controls rather than a black rectangle.
+ *
+ * A hidden video is paused: hiding it with its chip is not asking for its sound
+ * to carry on from nowhere.
+ */
+function MediaPlayer({
+  kind,
+  file,
+  hidden = false,
+  load,
+  onSettle,
+  onRetry,
+}: {
+  kind: 'audio' | 'video';
+  file: Attachment;
+  hidden?: boolean;
+  load: Load;
+  onSettle: (load: 'loaded' | 'failed') => void;
+  onRetry: () => void;
+}) {
+  if (load === 'failed') return <Failure file={file} verb="played" onRetry={onRetry} />;
+  // A separate component so that "Try again" mounts a new one: the element and
+  // `useFreshMedia`'s count of reloads start over together, rather than a new
+  // element inheriting a spent count and a "ready" it never reached.
+  return <Player kind={kind} file={file} hidden={hidden} load={load} onSettle={onSettle} />;
+}
+
+function Player({
+  kind,
+  file,
+  hidden,
+  load,
+  onSettle,
+}: {
+  kind: 'audio' | 'video';
+  file: Attachment;
+  hidden: boolean;
+  load: Load;
+  onSettle: (load: 'loaded' | 'failed') => void;
+}) {
+  const element = useRef<HTMLVideoElement & HTMLAudioElement>(null);
+  const [soundOnly, setSoundOnly] = useState(false);
+  const fresh = useFreshMedia({
+    onReady: (media) => {
+      if (media instanceof HTMLVideoElement && media.videoWidth === 0) setSoundOnly(true);
+      onSettle('loaded');
+    },
+    onFail: () => onSettle('failed'),
+  });
+
+  useEffect(() => {
+    if (hidden) element.current?.pause();
+  }, [hidden]);
+
+  if (kind === 'audio') {
+    return (
+      <audio
+        ref={element}
+        src={fileUrl(file)}
+        controls
+        preload="none"
+        aria-label={file.filename}
+        className="block w-full max-w-xs"
+        {...fresh}
+      />
+    );
+  }
+
+  return (
+    <>
+      <video
+        ref={element}
+        src={fileUrl(file)}
+        controls
+        playsInline
+        preload="metadata"
+        aria-label={file.filename}
+        className={
+          soundOnly
+            ? 'block h-12 w-full max-w-xs'
+            : 'block max-h-96 max-w-full rounded-md border border-[var(--border)] bg-black'
+        }
+        {...fresh}
+      />
+      {load === 'loading' ? (
+        <p className="text-xs text-[var(--muted-foreground)]">Loading video…</p>
+      ) : null}
+    </>
+  );
+}
+
+/** Pauses every other player on the page when one starts. */
+function pauseOthers(playing: HTMLMediaElement) {
+  for (const media of document.querySelectorAll<HTMLMediaElement>('audio, video')) {
+    if (media !== playing) media.pause();
+  }
+}
+
+type MediaEvent = SyntheticEvent<HTMLMediaElement>;
+
+/**
+ * Keeps a player's signed URL alive for as long as somebody is listening, and
+ * says when it cannot be played at all.
+ *
+ * The route answers with a signed Storage URL that lasts five minutes, and
+ * every browser sends its later range requests straight to that URL, never back
+ * through the route — `shouldRefresh` has the evidence. So a long pause, a seek
+ * past what was buffered, or a stall on an old URL reloads the element through
+ * the route for a fresh signature, and puts the position, the speed and the
+ * playing state back. Before metadata nothing has been signed yet, which is why
+ * the URL's age runs from `loadedmetadata` and not from `loadstart`: with
+ * `preload="none"`, `loadstart` fires when the page renders, and a note played
+ * four minutes later would reload on its very first press.
+ *
+ * Playing is tracked from `play`, `pause` and `ended` rather than read off
+ * `paused`, because Firefox fires no `pause` when a stream fails.
+ *
+ * An error before the first metadata is not an expiry. The format, the file or
+ * the session is the problem, and the failure line says so.
+ */
+function useFreshMedia({
+  onReady,
+  onFail,
+}: {
+  onReady: (media: HTMLMediaElement) => void;
+  onFail: () => void;
+}) {
+  const mintedAt = useRef<number | null>(null);
+  const ready = useRef(false);
+  const playing = useRef(false);
+  const reloads = useRef(0);
+  const resume = useRef<{ at: number; rate: number; play: boolean } | null>(null);
+
+  const reload = (media: HTMLMediaElement) => {
+    if (reloads.current >= MAX_RELOADS) {
+      resume.current = null;
+      onFail();
+      return;
+    }
+    reloads.current += 1;
+    resume.current ??= { at: media.currentTime, rate: media.playbackRate, play: playing.current };
+    mintedAt.current = null;
+    // `load()` resets the speed to the default, so the default becomes the
+    // speed the agent chose.
+    media.defaultPlaybackRate = resume.current.rate;
+    media.load();
+  };
+
+  const consider = (trigger: MediaTrigger, media: HTMLMediaElement) => {
+    const buffered: Array<[number, number]> = [];
+    for (let range = 0; range < media.buffered.length; range++) {
+      buffered.push([media.buffered.start(range), media.buffered.end(range)]);
+    }
+    const ageMs = mintedAt.current === null ? null : performance.now() - mintedAt.current;
+    if (
+      !shouldRefresh(trigger, {
+        ageMs,
+        position: media.currentTime,
+        duration: media.duration,
+        buffered,
+      })
+    ) {
+      return false;
+    }
+    reload(media);
+    return true;
+  };
+
+  return {
+    onLoadedMetadata: (event: MediaEvent) => {
+      const media = event.currentTarget;
+      mintedAt.current = performance.now();
+      const back = resume.current;
+      resume.current = null;
+      if (back) {
+        media.currentTime = back.at;
+        media.playbackRate = back.rate;
+        // Refused only where the browser wants a fresh tap; the controls are
+        // right there for it.
+        if (back.play) media.play().catch(() => {});
+        return;
+      }
+      if (!ready.current) {
+        ready.current = true;
+        onReady(media);
+      }
+    },
+    onPlay: (event: MediaEvent) => {
+      playing.current = true;
+      pauseOthers(event.currentTarget);
+      consider('play', event.currentTarget);
+    },
+    onPlaying: () => {
+      reloads.current = 0;
+    },
+    onPause: () => {
+      playing.current = false;
+    },
+    onEnded: () => {
+      playing.current = false;
+    },
+    onSeeking: (event: MediaEvent) => {
+      consider('seeking', event.currentTarget);
+    },
+    onWaiting: (event: MediaEvent) => {
+      consider('waiting', event.currentTarget);
+    },
+    onStalled: (event: MediaEvent) => {
+      consider('waiting', event.currentTarget);
+    },
+    onError: (event: MediaEvent) => {
+      const media = event.currentTarget;
+      // A reload that itself failed tries again, keeping where it was going.
+      if (resume.current) return reload(media);
+      if (!ready.current || !consider('error', media)) onFail();
+    },
+  };
 }
 
 /**

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isPreviewableImage } from './preview';
+import { isPreviewableImage, playableMedia } from './preview';
 
 describe('isPreviewableImage', () => {
   it('accepts what channels actually send photographs as', () => {
@@ -22,6 +22,23 @@ describe('isPreviewableImage', () => {
 
   it('leaves an SVG as a link, since the preview opens the original in a tab', () => {
     expect(isPreviewableImage('image/svg+xml')).toBe(false);
+  });
+
+  it('offers what channels record as media to the browser, asking about voice notes as Opus', () => {
+    expect(playableMedia('audio/ogg')).toEqual({
+      kind: 'audio',
+      probe: 'audio/ogg; codecs="opus"',
+    });
+    expect(playableMedia('audio/ogg; codecs=opus')?.kind).toBe('audio');
+    expect(playableMedia('VIDEO/MP4')).toEqual({ kind: 'video', probe: 'video/mp4' });
+    expect(playableMedia('audio/x-m4a')?.probe).toBe('audio/mp4');
+  });
+
+  it('keeps what no browser plays as a download link', () => {
+    expect(playableMedia('audio/amr')).toBeNull();
+    expect(playableMedia('video/3gpp')).toBeNull();
+    expect(playableMedia('image/jpeg')).toBeNull();
+    expect(playableMedia('__proto__')).toBeNull();
   });
 
   it('does not guess from a type that says nothing', () => {

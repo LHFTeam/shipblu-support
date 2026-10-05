@@ -1,7 +1,8 @@
 import { mimeEssence } from '@/lib/http/mime';
 
 /**
- * Which attachments the console can show as a picture in the conversation.
+ * Which attachments the console can show as a picture in the conversation, and
+ * which it can try to play.
  *
  * Decided on the stored content type, because that is what Storage serves the
  * object back with. Client-safe on purpose: the timeline is a client component,
@@ -39,4 +40,44 @@ const PREVIEWABLE = new Set([
 
 export function isPreviewableImage(contentType: string): boolean {
   return PREVIEWABLE.has(mimeEssence(contentType));
+}
+
+/** Recorded media the console offers to play, and the type to ask the browser about. */
+export type PlayableMedia = { kind: 'audio' | 'video'; probe: string };
+
+/**
+ * Candidates only. Unlike a picture, whether these play is a question for the
+ * browser, not for this list: an iPhone plays a WhatsApp voice note from iOS
+ * 18.4 and not before, whatever browser it runs, so `canPlayType` with `probe`
+ * decides in the console itself.
+ *
+ * `audio/ogg` is asked about as Opus, because that is what WhatsApp records a
+ * voice note in and the bare type only ever answers "maybe".
+ *
+ * Absent on purpose, so they stay download links:
+ *
+ * - **AMR**, the other thing WhatsApp can send as audio, which no browser
+ *   decodes.
+ * - **3GPP**. Chrome says "maybe" because it plays the H.264 and AAC it may
+ *   hold, but a phone that records 3GP records H.263 and AMR, which nothing
+ *   plays, and Firefox has no 3GP at all.
+ *
+ * A Map, not an object literal: the key is a sender's content type, and
+ * `'__proto__'` read off a literal answers with `Object.prototype`.
+ */
+const PLAYABLE = new Map<string, PlayableMedia>([
+  ['audio/ogg', { kind: 'audio', probe: 'audio/ogg; codecs="opus"' }],
+  ['audio/mpeg', { kind: 'audio', probe: 'audio/mpeg' }],
+  ['audio/mp4', { kind: 'audio', probe: 'audio/mp4' }],
+  ['audio/x-m4a', { kind: 'audio', probe: 'audio/mp4' }],
+  ['audio/aac', { kind: 'audio', probe: 'audio/aac' }],
+  ['audio/wav', { kind: 'audio', probe: 'audio/wav' }],
+  ['audio/webm', { kind: 'audio', probe: 'audio/webm' }],
+  ['video/mp4', { kind: 'video', probe: 'video/mp4' }],
+  ['video/webm', { kind: 'video', probe: 'video/webm' }],
+  ['video/quicktime', { kind: 'video', probe: 'video/quicktime' }],
+]);
+
+export function playableMedia(contentType: string): PlayableMedia | null {
+  return PLAYABLE.get(mimeEssence(contentType)) ?? null;
 }

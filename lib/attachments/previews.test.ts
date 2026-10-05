@@ -3,6 +3,7 @@ import {
   initialPreviewState,
   loadOf,
   type PreviewAction,
+  type PreviewFile,
   previewReducer,
   type PreviewState,
 } from './previews';
@@ -14,8 +15,12 @@ function run(...actions: PreviewAction[]): PreviewState {
   return actions.reduce(previewReducer, initialPreviewState);
 }
 
-const toggle = (file = photo): PreviewAction => ({ type: 'toggle', file });
-const fail = (file = photo): PreviewAction => ({ type: 'settle', file, load: 'failed' });
+const toggle = (file: PreviewFile = photo): PreviewAction => ({ type: 'toggle', file });
+const fail = (file: PreviewFile = photo): PreviewAction => ({
+  type: 'settle',
+  file,
+  load: 'failed',
+});
 const load = (file = photo): PreviewAction => ({ type: 'settle', file, load: 'loaded' });
 const retry = (file = photo): PreviewAction => ({ type: 'retry', file });
 
@@ -67,6 +72,19 @@ describe('previewReducer', () => {
     const second = run(toggle(), fail(), retry(), fail());
     expect(second.notice?.fileId).toBe(photo.id);
     expect(second.notice?.seq).toBeGreaterThan(first.notice!.seq);
+  });
+
+  it('announces a voice note’s failure at once, since its player was never closed', () => {
+    const note = { id: 'n', filename: 'PTT-0001.ogg', kind: 'audio' as const };
+    const state = run({ type: 'settle', file: note, load: 'failed' });
+    expect(state.notice?.text).toBe(
+      'PTT-0001.ogg could not be played here. Try again, or open the file.',
+    );
+  });
+
+  it('says a video could not be played, not shown', () => {
+    const clip = { id: 'v', filename: 'clip.mp4', kind: 'video' as const };
+    expect(run(toggle(clip), fail(clip)).notice?.text).toMatch(/^clip\.mp4 could not be played/);
   });
 
   it('leaves another picture’s notice alone', () => {
