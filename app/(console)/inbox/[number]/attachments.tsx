@@ -13,6 +13,15 @@ type Pressed = 'chip' | 'figure';
 
 const fileUrl = (file: Attachment) => `/api/attachments/${file.id}`;
 
+/*
+  Elements are found by id when a handler or the reveal needs one, rather than
+  held in maps filled by ref callbacks: an inline callback is a new function
+  every render, so React detached and reattached every chip and figure on every
+  load, toggle and notice to keep maps nobody read in between.
+*/
+const previewIdFor = (baseId: string, fileId: string) => `${baseId}-${fileId}`;
+const chipIdFor = (baseId: string, fileId: string) => `${baseId}-${fileId}-chip`;
+
 /**
  * The files on one message: a row of chips, where a picture opens under the row
  * instead of in a new tab.
@@ -34,10 +43,13 @@ const fileUrl = (file: Attachment) => `/api/attachments/${file.id}`;
  * per request by `/api/attachments/[id]`, so an eager thumbnail would be a
  * Storage round trip per image each time a ticket opened — and every photo on a
  * long WhatsApp thread downloaded to an agent's phone whether or not anybody
- * looked at it. A preview stays mounted once opened, so hiding and showing it
- * again costs nothing. A fresh `<img>` would ask the route again, which mints
- * another URL, unless the browser answered it from its list of available
- * images — which the HTML spec lets it empty at any time — so this does not ask.
+ * looked at it. A preview stays mounted once opened, so hiding it with its chip
+ * and showing it again costs nothing. A fresh `<img>` would ask the route again,
+ * which mints another URL, unless the browser answered it from its list of
+ * available images — which the HTML spec lets it empty at any time — so this
+ * does not ask. Collapsing a whole side conversation thread is a reset instead,
+ * as it already is for the reply the agent was typing there, so its pictures
+ * start closed again.
  *
  * `compact` is the side conversation card's density for the chip row, which
  * that card has always drawn a step smaller. An opened picture is the same size
@@ -52,11 +64,9 @@ export function AttachmentList({
 }) {
   const baseId = useId();
   const [state, dispatch] = useReducer(previewReducer, initialPreviewState);
-  const chips = useRef(new Map<string, HTMLElement>());
-  const figures = useRef(new Map<string, HTMLElement>());
   /*
     Pictures waiting to be brought into view, each with what was pressed to ask
-    for it.
+    for it, oldest first.
 
     Written only by the agent's clicks, so a live update re-rendering the list
     with a picture open never moves the pane. An entry is spent by its reveal,
@@ -67,6 +77,10 @@ export function AttachmentList({
   const pending = useRef(new Map<string, Pressed>());
 
   useEffect(() => {
+    // One reveal per commit, the latest ask. Two calls would each measure the
+    // pane before either had moved it, and the second smooth scroll cancels the
+    // first mid-flight — so two pictures settling together showed neither.
+    let latest: [string, Pressed] | null = null;
     for (const [id, pressed] of pending.current) {
       if (state.showing[id] !== true) {
         pending.current.delete(id);
@@ -74,16 +88,26 @@ export function AttachmentList({
       }
       if (loadOf(state, id) === 'loading') continue;
       pending.current.delete(id);
-
-      const figure = figures.current.get(id);
-      const anchor = pressed === 'chip' ? chips.current.get(id) : figure;
-      if (figure && anchor) revealInPane(figure, anchor);
+      latest = [id, pressed];
     }
-  }, [state]);
+    if (!latest) return;
+
+    const [id, pressed] = latest;
+    const figure = document.getElementById(previewIdFor(baseId, id));
+    const anchor = pressed === 'chip' ? document.getElementById(chipIdFor(baseId, id)) : figure;
+    if (figure && anchor) revealInPane(figure, anchor);
+  }, [state, baseId]);
 
   if (files.length === 0) return null;
 
-  const previewId = (file: Attachment) => `${baseId}-${file.id}`;
+  const previewId = (file: Attachment) => previewIdFor(baseId, file.id);
+  const figureOf = (file: Attachment) => document.getElementById(previewId(file));
+  // Deleted first so the newest ask is the last entry, which is the one the
+  // reveal takes.
+  const ask = (file: Attachment, pressed: Pressed) => {
+    pending.current.delete(file.id);
+    pending.current.set(file.id, pressed);
+  };
   const opened = files.filter((file) => state.showing[file.id] !== undefined);
 
   const toggle = (event: MouseEvent<HTMLAnchorElement>, file: Attachment) => {
@@ -94,7 +118,7 @@ export function AttachmentList({
       return;
     }
     event.preventDefault();
-    pending.current.set(file.id, 'chip');
+    ask(file, 'chip');
     dispatch({ type: 'toggle', file });
   };
 
@@ -102,32 +126,37 @@ export function AttachmentList({
     // The button pressed is about to unmount with the failure line, which
     // would drop focus to <body> — and a screen reader whose focused node
     // vanishes loses its place in the ticket. The figure stays.
-    figures.current.get(file.id)?.focus({ preventScroll: true });
+    figureOf(file)?.focus({ preventScroll: true });
     // The figure, not the chip: the agent was looking at "Try again", which may
     // be a whole picture's height below the chip.
-    pending.current.set(file.id, 'figure');
+    ask(file, 'figure');
     dispatch({ type: 'retry', file });
   };
 
   const settle = (file: Attachment, load: 'loaded' | 'failed') => {
-    // The same rescue as `retry`, for the other thing a failure unmounts: the
-    // picture's own link, which Tab reaches while it is still loading — and
-    // reaches first after "Try again", so a second failure would otherwise
-    // drop focus exactly where the first one was caught.
-    const figure = figures.current.get(file.id);
+    const figure = figureOf(file);
     if (load === 'failed' && figure?.contains(document.activeElement)) {
+      // The same rescue as `retry`, for the other thing a failure unmounts: the
+      // picture's own link, which Tab reaches while it is still loading — and
+      // reaches first after "Try again", so a second failure would otherwise
+      // drop focus exactly where the first one was caught.
       figure.focus({ preventScroll: true });
+    } else if (load === 'loaded' && figure && document.activeElement === figure) {
+      // Focus parked on the figure by "Try again" moves on to what the retry
+      // produced, so the next thing a screen reader says is the picture's link
+      // rather than nothing — the figure's name alone does not say it worked.
+      figure.querySelector('a')?.focus({ preventScroll: true });
     }
     dispatch({ type: 'settle', file, load });
   };
 
   return (
     // Positioned for the live region's sake. `sr-only` is `position: absolute`,
-    // and nothing above the timeline is positioned, so without this its box is
-    // placed against the document — past every `overflow-hidden` up to the shell
-    // — and stretches the page under the console by however far down the
-    // thread this message is. Scrolling past the end of the timeline then
-    // scrolled the whole console off the screen.
+    // and a box with no positioned ancestor is placed against the document —
+    // past every `overflow-hidden` up to the shell — stretching the page under
+    // the console until scrolling past the timeline's end took the console off
+    // the screen (PROJECT-STATE §6.79). The timeline pane is positioned now as
+    // well; this keeps the list safe wherever else it is mounted.
     <div className="relative">
       <ul className={compact ? 'mt-1.5 flex flex-wrap gap-1.5' : 'mt-2 flex flex-wrap gap-2'}>
         {files.map((file) => (
@@ -141,10 +170,7 @@ export function AttachmentList({
           >
             {isPreviewableImage(file.contentType) ? (
               <a
-                ref={(node) => {
-                  if (node) chips.current.set(file.id, node);
-                  else chips.current.delete(file.id);
-                }}
+                id={chipIdFor(baseId, file.id)}
                 href={fileUrl(file)}
                 target="_blank"
                 rel="noreferrer"
@@ -207,10 +233,6 @@ export function AttachmentList({
               file={file}
               hidden={state.showing[file.id] !== true}
               load={loadOf(state, file.id)}
-              figureRef={(node) => {
-                if (node) figures.current.set(file.id, node);
-                else figures.current.delete(file.id);
-              }}
               onSettle={(load) => settle(file, load)}
               onRetry={() => retry(file)}
             />
@@ -234,14 +256,14 @@ export function AttachmentList({
  * not decide what the agent sees now.
  *
  * The figure takes focus (`tabIndex={-1}`, so never by Tab) only because
- * "Try again" hands focus to it before unmounting — see `retry`.
+ * "Try again" hands focus to it before unmounting — see `retry` — and is named
+ * after the file so that focus lands on something a screen reader can say.
  */
 function ImagePreview({
   id,
   file,
   hidden,
   load,
-  figureRef,
   onSettle,
   onRetry,
 }: {
@@ -249,14 +271,13 @@ function ImagePreview({
   file: Attachment;
   hidden: boolean;
   load: Load;
-  figureRef: (node: HTMLElement | null) => void;
   onSettle: (load: 'loaded' | 'failed') => void;
   onRetry: () => void;
 }) {
   const failureId = `${id}-failure`;
 
   return (
-    <figure ref={figureRef} id={id} hidden={hidden} tabIndex={-1} className="max-w-full">
+    <figure id={id} hidden={hidden} tabIndex={-1} aria-label={file.filename} className="max-w-full">
       {load === 'failed' ? (
         <p className="text-xs text-[var(--muted-foreground)]">
           <span id={failureId}>{file.filename} could not be shown here.</span>{' '}

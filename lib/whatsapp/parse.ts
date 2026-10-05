@@ -1,3 +1,4 @@
+import { mimeEssence } from '@/lib/http/mime';
 import { parseCoordinates } from '@/lib/tickets/shared-location';
 import type {
   NormalisedEcho,
@@ -288,8 +289,7 @@ function trimmedOrNull(value: string | undefined): string | null {
  * Content-Type header want the bare type.
  */
 function normaliseMime(mime: string | undefined): string | null {
-  if (!mime) return null;
-  return mime.split(';')[0]!.trim().toLowerCase() || null;
+  return mimeEssence(mime) || null;
 }
 
 function normaliseStatus(status: WhatsAppStatus): NormalisedStatus | null {

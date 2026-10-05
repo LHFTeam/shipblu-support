@@ -4553,9 +4553,14 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
 
     Generally: anything `position: absolute` inside a console scroll pane,
     `sr-only` included, needs a positioned ancestor inside that pane. The
-    inbox list's `sr-only` spans are safe only because their rows are
-    `relative`. To check, compare the document's `scrollHeight` with its
-    `clientHeight`; a `scrollTop` of 0 proves nothing.
+    timeline pane in `view.tsx` is now `relative` itself, so nothing added to a
+    thread can escape it. The inbox list's `sr-only` spans are safe only
+    because their rows are `relative`. Making every `.app-scroll` positioned
+    from `globals.css` looks like the general fix and is not: the class is
+    declared only under `@media (pointer: fine)`, so phones would never get it.
+    It is also unlayered, so it would beat Tailwind's `fixed` on the admin
+    mobile nav, which carries `app-scroll`. To check, compare the document's
+    `scrollHeight` with its `clientHeight`; a `scrollTop` of 0 proves nothing.
 
 ## 7. Verification already done
 

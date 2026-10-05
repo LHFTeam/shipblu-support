@@ -123,7 +123,13 @@ export function ConversationView({
       <div className="flex min-w-0 flex-1 flex-col">
         <Header conversation={conversation} canEditContact={canEditContact} />
 
-        <div className="app-scroll min-h-0 flex-1 overflow-y-auto px-4 py-4">
+        {/*
+          Positioned so it is the containing block for anything absolutely
+          positioned in the thread — `sr-only` text included. Without it such a
+          box is placed against the document, past every `overflow-hidden`, and
+          lengthens the page under the console (PROJECT-STATE §6.79).
+        */}
+        <div className="app-scroll relative min-h-0 flex-1 overflow-y-auto px-4 py-4">
           <Timeline
             conversation={conversation}
             canSideConversation={canSideConversation}

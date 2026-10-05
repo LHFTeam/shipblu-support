@@ -13,7 +13,8 @@
 
 export type Load = 'loading' | 'loaded' | 'failed';
 
-type File = { id: string; filename: string };
+/** Named apart from the DOM's `File`, which client code importing this also has in scope. */
+type PreviewFile = { id: string; filename: string };
 
 export type PreviewState = {
   /**
@@ -36,9 +37,9 @@ export type PreviewState = {
 };
 
 export type PreviewAction =
-  | { type: 'toggle'; file: File }
-  | { type: 'settle'; file: File; load: 'loaded' | 'failed' }
-  | { type: 'retry'; file: File };
+  | { type: 'toggle'; file: PreviewFile }
+  | { type: 'settle'; file: PreviewFile; load: 'loaded' | 'failed' }
+  | { type: 'retry'; file: PreviewFile };
 
 export const initialPreviewState: PreviewState = { showing: {}, loads: {}, notice: null, seq: 0 };
 
@@ -76,7 +77,7 @@ export function previewReducer(state: PreviewState, action: PreviewAction): Prev
  * Names the next steps as well as the failure: the controls sit under the whole
  * chip list, away from the chip that has focus, so nothing else says they exist.
  */
-function announce(state: PreviewState, file: File): PreviewState {
+function announce(state: PreviewState, file: PreviewFile): PreviewState {
   const seq = state.seq + 1;
   return {
     ...state,

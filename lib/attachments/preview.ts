@@ -1,3 +1,5 @@
+import { mimeEssence } from '@/lib/http/mime';
+
 /**
  * Which attachments the console can show as a picture in the conversation.
  *
@@ -36,6 +38,5 @@ const PREVIEWABLE = new Set([
 ]);
 
 export function isPreviewableImage(contentType: string): boolean {
-  // `image/jpeg; name="IMG_0412.jpg"` is how a MIME part often labels itself.
-  return PREVIEWABLE.has(contentType.split(';')[0]!.trim().toLowerCase());
+  return PREVIEWABLE.has(mimeEssence(contentType));
 }
