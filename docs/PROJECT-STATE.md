@@ -4415,13 +4415,14 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     attachment type in brackets, so the card was filed as an inbound reply
     reading `[template]`.
 
-    Sized read-only before fixing: **13** such messages in production, from
-    2026-09-20 to 2026-10-05, in 12 conversations. All came over
-    `facebook_page`, all in `standby`, and each was 0.5–1.8 s after a
-    digits-only Egyptian mobile number from the same sender. Every valid number
-    sent alone on Instagram was followed by one; a 12-digit number was not, and
-    neither was either of the two written in Arabic-Indic digits, nor any of
-    about 50 on Messenger. The card's effects:
+    Sized read-only before fixing, as of 2026-10-05 13:00 UTC: **14** such
+    messages in production since 2026-09-20, in 13 conversations. All came over
+    `facebook_page`, all in `standby`, and each was 0.4–1.8 s after an Egyptian
+    mobile number sent alone by the same customer: 11 digits as a rule, once
+    written `+20 1xx xxx xxxx`. Every valid number sent alone on Instagram was
+    followed by one; a 12-digit number was not, and neither was either of the
+    two written in Arabic-Indic digits, nor any of about 50 on Messenger. The
+    card's effects:
     - it was the inbox headline in place of the number (9 open tickets at the
       time);
     - it counted as a second inbound message in today's volume;
@@ -4430,11 +4431,13 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     - the categoriser read it as text.
 
     `parseMetaWebhook` now drops a `template` attachment with no value anywhere
-    in its payload. A message left with no text and no attachments is not filed,
-    and `process_meta_webhook` counts it as `empty card(s) ignored`. The rule is
-    judged by content, not type: a template that carries something is the
-    customer sending us something, and keeps reaching an agent. The delivery
-    itself stays in `webhook_events` like every other.
+    in its payload. A message left with no text, no attachments and no
+    `is_unsupported` flag is not filed, and `process_webhook` logs it as
+    `[meta] … empty card(s) ignored`. The rule is judged by content, not type: a
+    template that carries something is the customer sending us something, and
+    keeps reaching an agent. The delivery itself stays in `webhook_events` like
+    every other. It takes effect when the worker is deployed. The cards filed
+    before then are still in `messages` unless somebody deletes them.
 
     Still open: the other attachment types Instagram now documents (`ig_post`,
     `ig_reel`, `reel`, `story_mention`) are not in `ATTACHMENT_TYPES` either.

@@ -132,7 +132,7 @@ function readMessagingEvent(
   // A deleted message has no content to file and no id worth threading on.
   if (message.is_deleted) return;
 
-  const received = message.attachments ?? [];
+  const received = Array.isArray(message.attachments) ? message.attachments : [];
   const attachments = received.filter((attachment) => !isEmptyCard(attachment));
 
   // A message that was only Instagram's phone-number card is not something the
@@ -278,10 +278,10 @@ function displayText(
  * number", the number, and WhatsApp message and WhatsApp call buttons — and the
  * Page connection delivers that card, attributed to the customer, as
  * `{ type: 'template', payload: { generic: { elements: [] } } }`: everything the
- * card showed has been removed before it reaches us. Established from all 13
- * production deliveries between 2026-09-20 and 2026-10-05, each 0.5–1.8 s after
- * a digits-only number from the same sender, and from the same thread as Meta's
- * own inbox draws it.
+ * card showed has been removed before it reaches us. Established from every
+ * such delivery in production since 2026-09-20, each under two seconds after an
+ * Egyptian mobile number sent alone by the same customer, and from the same
+ * thread as Meta's own inbox draws it (§6.79).
  *
  * Judged by content rather than by type, because a `template` that does carry
  * something — a product shared into the thread, a card whose elements arrive —
