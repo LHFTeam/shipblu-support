@@ -12,8 +12,9 @@ becomes two or three records — and there has never been a way to say they are 
 same person. The console got its first contact page only in the shipment work;
 this is the write that page was missing.
 
-**Locations.** ShipBlu has sixteen of them, and this database has never been able
-to name one. A hub was whatever an agent typed into a ticket.
+**Locations.** ShipBlu works out of hubs, warehouses and offices, and this
+database has never been able to name one. A hub was whatever an agent typed into
+a ticket.
 
 Both are also a **terminology fix**: the console said "Customers" for a table
 that has been called `contacts` since the first migration. It now says contacts,
@@ -184,10 +185,10 @@ discipline as agent emails and `contact_identities`.
 **Deliberately joined to nothing.** No agent carries a location, no ticket is
 attributed to one, nothing routes on one. This is the register of what exists,
 entered once, so that whichever of those lands first has a real row to point at
-instead of a free-text hub name typed sixteen different ways. Guessing which to
-build now would mean guessing the column that carries it — and the cardinality
-question ("can a supervisor cover three hubs?") is exactly the one that is cheap
-now and a migration later.
+instead of a free-text hub name typed a different way by every agent. Guessing
+which to build now would mean guessing the column that carries it — and the
+cardinality question ("can a supervisor cover three hubs?") is exactly the one
+that is cheap now and a migration later.
 
 **The email is on the record, not in the mail path.** It is the address an agent
 escalates to or copies by hand. It is not a `channels` row, nothing routes
@@ -195,17 +196,16 @@ inbound mail by it, and mail arriving from it is treated like any other sender �
 so a customer's reply cannot end up in a mailbox nobody is watching.
 
 The admin screen is at `/admin/locations` (permission `admin.locations`, admins
-and above) and states the count: sixteen rows entered by hand is exactly the job
-that gets left at fourteen, and a half-entered register is worse than an empty
-one because the two missing hubs look like locations that do not exist. The
-settings overview carries the same check.
+and above) and states how many locations are entered and how many are
+operating. No number of locations is expected; the settings overview flags only
+an empty register, because then the side-conversation picker offers no hub.
 
 A closed hub is marked not operating rather than deleted, so its code still
 reads in the tickets that mention it. Deleting is for one entered by mistake —
 and it is an unguarded delete only because nothing references a location yet. The
 moment something does, it needs the in-use guard `deleteGroup` has.
 
-**No seed data.** Nobody has given us the sixteen names, codes and addresses, and
+**No seed data.** Nobody had given us the names, codes and addresses, and
 inventing them would put plausible-looking wrong codes in every environment.
 
 ---

@@ -66,8 +66,8 @@ import {
  * The parties an agent can write to that are **not** places.
  *
  * Finance, a courier partner, a customs broker. Hubs are deliberately absent:
- * they are `locations` rows, and that register already holds the sixteen places
- * ShipBlu works out of with the shared mailbox that reaches each one. The
+ * they are `locations` rows, and that register already holds the places ShipBlu
+ * works out of with the shared mailbox that reaches each one. The
  * picker reads both tables and keeps them apart, because a single merged
  * directory would mean a hub's address maintained in two admin screens with
  * nothing keeping them in step — the failure `locations` was entered to prevent.

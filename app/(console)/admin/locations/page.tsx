@@ -6,19 +6,13 @@ import { LocationEditor, NewLocation } from './forms';
 export const dynamic = 'force-dynamic';
 
 /**
- * ShipBlu has sixteen locations, and until now this system had nowhere to say
- * so — a hub was whatever an agent typed into a ticket.
- *
- * The count is stated on the page for one reason: sixteen rows entered by hand
- * is exactly the job that gets left at fourteen, and a half-entered register is
- * worse than an empty one, because the two missing hubs look like locations that
- * do not exist.
+ * Where ShipBlu's people work. Before this register a hub was whatever an agent
+ * typed into a ticket. No number of locations is expected: the register holds
+ * whatever an admin has entered.
  *
  * Sorted by code rather than by name. The code is what gets typed and quoted, so
  * it is the column somebody scans down looking for the row they mean.
  */
-const EXPECTED = 16;
-
 export default async function LocationsPage() {
   await requirePermission('admin.locations');
 
@@ -36,10 +30,8 @@ export default async function LocationsPage() {
 
       <p className="mb-4 text-xs text-[var(--muted-foreground)]">
         {rows.length === 0
-          ? `None entered yet. There are ${EXPECTED} of them.`
-          : rows.length < EXPECTED
-            ? `${rows.length} of ${EXPECTED} entered — ${EXPECTED - rows.length} still missing.`
-            : `${rows.length} entered, ${operating} operating.`}
+          ? 'None entered yet.'
+          : `${rows.length} entered, ${operating} operating.`}
       </p>
 
       <Table head={['Code', 'Location', 'Email', '']}>

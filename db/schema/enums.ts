@@ -214,8 +214,8 @@ export const sideConversationStateEnum = pgEnum('side_conversation_state', ['ope
  * What kind of internal party a directory entry names.
  *
  * **No `hub`.** A hub is a `locations` row — that register already exists, holds
- * the sixteen places ShipBlu works out of, and carries the shared mailbox that
- * reaches whoever is there. Repeating hubs here would mean a hub's address is
+ * the places ShipBlu works out of, and carries the shared mailbox that reaches
+ * whoever is there. Repeating hubs here would mean a hub's address is
  * maintained in two admin screens with nothing keeping them in step, which is
  * the exact failure `locations` was entered to prevent.
  *

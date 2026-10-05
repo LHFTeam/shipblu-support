@@ -316,8 +316,7 @@ export function StartSideConversationForm({
     }
   }
 
-  // Hubs first: they are what a late parcel is almost always about, and the
-  // sixteen of them dwarf the handful of teams and vendors.
+  // Hubs first: they are what a late parcel is almost always about.
   const GROUPS: { kind: PickerEntry['kind']; label: string }[] = [
     { kind: 'hub', label: 'Hubs and warehouses' },
     { kind: 'team', label: 'Internal teams' },

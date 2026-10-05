@@ -24,7 +24,7 @@ import { GONE, refresh, type SettingsState } from '../settings-shared';
  * a sentence naming the location already using them, rather than left to the
  * unique index. A 23505 reaching the form is a stack trace where an explanation
  * belongs, and "which location has that code?" is the question an admin
- * entering sixteen of them actually has.
+ * entering a list of them by hand actually has.
  */
 export async function saveLocation(
   _state: SettingsState,

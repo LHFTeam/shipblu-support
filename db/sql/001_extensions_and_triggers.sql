@@ -131,9 +131,8 @@ END $$;
 -- --------------------------------------------------------------------------
 -- A side conversation names at most one directory entry
 --
--- The picker reads two registers and keeps them apart. `locations` is the sixteen
--- places ShipBlu works out of, entered before anything used them;
--- `internal_recipients` is the parties that are not places — Finance, a courier
+-- The picker reads two registers and keeps them apart. `locations` is the places
+-- ShipBlu works out of; `internal_recipients` is the parties that are not places — Finance, a courier
 -- partner. A thread points at one or the other, or at neither when the agent
 -- typed an address by hand.
 --
