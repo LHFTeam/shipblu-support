@@ -21,9 +21,12 @@ export type LocationRemoval =
  * that asked it — the card falls back to the bare address in `to_addresses`,
  * and grouping or reporting by location silently loses those threads. So a
  * location a thread has used is marked not operating instead: gone from the
- * picker, still named on the threads. That is the rule every settings screen
- * follows for a row something points at (`settings-shared.ts`), and the one
- * `deleteInternalRecipient` applies to the picker's other register.
+ * picker, still named on the threads. That is the answer
+ * `deleteInternalRecipient` gives the picker's other register, and
+ * `deleteSlaPolicy` a policy tickets point at. Groups and statuses refuse
+ * instead and ask for their tickets to be moved first, but a thread already
+ * sent to a hub cannot be moved to another one, so a refusal here would leave
+ * the admin with nothing they could do.
  *
  * One transaction, and the location row is locked before the threads are
  * counted. Starting a thread takes a key-share lock on it through the foreign

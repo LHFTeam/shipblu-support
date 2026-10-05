@@ -99,7 +99,7 @@ export function trackingPrefill(trackingNumbers: string[]): string {
  *
  * Only for exactly one parcel. With none there is nothing to lead with, and with
  * several, picking one would file a question about all of them under whichever
- * the ticket happened to link first — so the field stays empty and the agent
+ * the list happened to put first — so the field stays empty and the agent
  * says which they mean. `trackingPrefill` names every one of them in the body
  * either way.
  */

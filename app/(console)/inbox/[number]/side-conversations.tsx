@@ -297,6 +297,50 @@ export function StartSideConversationForm({
   const router = useRouter();
   const [state, setState] = useState<ActionState>(INITIAL);
   const [busy, setBusy] = useState(false);
+
+  async function submit(formData: FormData) {
+    setBusy(true);
+    const result = await startSideConversation(INITIAL, formData);
+    setBusy(false);
+    setState(result);
+    if (result.ok) {
+      router.refresh();
+      onSent?.();
+    }
+  }
+
+  return (
+    <SideConversationDraft
+      key={state.nonce ?? 0}
+      conversation={conversation}
+      recipients={recipients}
+      error={state.error}
+      busy={busy}
+      onSubmit={submit}
+    />
+  );
+}
+
+/**
+ * The form itself, a component of its own so that the `key` above resets the
+ * picker along with the fields — `docs/PROJECT-STATE.md` §6.58. The recipient
+ * used to be deliberately sticky and lived above the key; now that nobody is
+ * preselected, a recipient carried over from the last thread is exactly the
+ * preselection that default exists to prevent.
+ */
+function SideConversationDraft({
+  conversation,
+  recipients,
+  error,
+  busy,
+  onSubmit,
+}: {
+  conversation: ConversationDetail;
+  recipients: PickerEntry[];
+  error: string | null;
+  busy: boolean;
+  onSubmit: (formData: FormData) => Promise<void>;
+}) {
   // Nobody is preselected. Opening on the first entry meant an agent who sent
   // without touching the picker asked whichever hub sorts first by name —
   // Alexandria, once the hubs were entered — about a parcel it may never have
@@ -304,8 +348,7 @@ export function StartSideConversationForm({
   // recipient something the agent decided, and `required` stops the form until
   // they have. With an empty directory there is nothing to choose between, so
   // it opens on the typed address the notice below tells them to use.
-  const unchosen = recipients.length > 0 ? '' : 'other';
-  const [recipientId, setRecipientId] = useState(unchosen);
+  const [recipientId, setRecipientId] = useState(recipients.length > 0 ? '' : 'other');
 
   // The last thing the customer actually said. Both the anchor the thread hangs
   // off and, optionally, the text quoted into the question.
@@ -315,21 +358,6 @@ export function StartSideConversationForm({
 
   const trackingNumbers = conversation.shipments.map((shipment) => shipment.trackingNumber);
 
-  async function submit(formData: FormData) {
-    setBusy(true);
-    const result = await startSideConversation(INITIAL, formData);
-    setBusy(false);
-    setState(result);
-    if (result.ok) {
-      // The form's `key` clears the fields it owns, but the picker's value lives
-      // here, above the key — so without this the next thread on this ticket
-      // would open already addressed to the last one's hub.
-      setRecipientId(unchosen);
-      router.refresh();
-      onSent?.();
-    }
-  }
-
   // Hubs first: they are what a late parcel is almost always about.
   const GROUPS: { kind: PickerEntry['kind']; label: string }[] = [
     { kind: 'hub', label: 'Hubs and warehouses' },
@@ -338,7 +366,22 @@ export function StartSideConversationForm({
   ];
 
   return (
-    <form key={state.nonce ?? 0} action={submit} className="flex flex-col gap-2">
+    <form
+      // Submitted by hand rather than through `action`, because React 19 resets
+      // a form after every function action — a refused one included — and the
+      // reset is the browser's, which knows nothing of React state. A
+      // controlled select has no default option, so it falls back to its first
+      // enabled one: after a refusal the picker showed the first hub while the
+      // component still held the agent's choice, and the next Send went to the
+      // hub. Opting out also keeps the question and the typed address when the
+      // server refuses one, which is the moment the agent corrects it rather
+      // than retypes it. A thread that went out is still cleared, by the key.
+      onSubmit={(event) => {
+        event.preventDefault();
+        void onSubmit(new FormData(event.currentTarget));
+      }}
+      className="flex flex-col gap-2"
+    >
       <input type="hidden" name="conversationId" value={conversation.id} />
       <input type="hidden" name="anchorMessageId" value={anchor?.id ?? ''} />
 
@@ -361,11 +404,11 @@ export function StartSideConversationForm({
             onChange={(event) => setRecipientId(event.target.value)}
             required
           >
-            {recipients.length > 0 ? (
-              <option value="" disabled>
-                Choose…
-              </option>
-            ) : null}
+            {/* Not `disabled`. Anything that resets this form lands on the
+                first option that is not, and "Choose…" is the only safe place
+                for it to land. Choosing it again on purpose is harmless:
+                `required` refuses the empty value. */}
+            {recipients.length > 0 ? <option value="">Choose…</option> : null}
             {GROUPS.map(({ kind, label }) => {
               const entries = recipients.filter((entry) => entry.kind === kind);
               if (entries.length === 0) return null;
@@ -446,7 +489,7 @@ export function StartSideConversationForm({
         </label>
       ) : null}
 
-      <ErrorText>{state.error}</ErrorText>
+      <ErrorText>{error}</ErrorText>
 
       <div className="flex flex-wrap items-center gap-3">
         <label className="flex items-center gap-1.5 text-xs opacity-70">

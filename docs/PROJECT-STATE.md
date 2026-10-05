@@ -54,8 +54,9 @@ This is the first thing to join `locations` to anything: the picker's hubs are
 its rows, which is what that table was entered for. Teams and vendors are not
 locations, so they keep their own small directory at `/admin/recipients`. Built
 and verified end to end against a local Postgres. Both directories now have rows
-— three teams, and the hubs entered on 2026-10-05 — so the picker opens on the
-hubs. No thread has yet gone to a real hub list; see §5.1 and §5.2.
+— three teams, and the hubs entered on 2026-10-05 — so the picker lists the hubs
+first, and opens on _Choose…_ rather than on any of them. No thread has yet gone
+to a real hub list; see §5.1 and §5.2.
 
 And **shared locations**: a pin a customer drops is kept as coordinates rather
 than flattened into prose and rendered as a card with a Maps link. **Every pin in
@@ -3705,9 +3706,12 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
 
     The rule: state that a keyed form's submission depends on belongs _inside_
     the keyed subtree, in a component of its own. State that is deliberately
-    sticky (`privately`, the side-conversation recipient, and the canned
-    picker's language toggle) belongs outside it — and all three are visible
-    controls, so what carries over is on screen rather than in a hidden field.
+    sticky (`privately` and the canned picker's language toggle) belongs
+    outside it — and both are visible controls, so what carries over is on
+    screen rather than in a hidden field. The side-conversation recipient was a
+    third until 2026-10-05, when the picker stopped preselecting anybody: a
+    recipient carried over from the last thread is the preselection that change
+    removed, so it moved inside the key (`SideConversationDraft`).
     The toggle is the case that shows why the distinction is not about risk: it
     _should_ survive a send, because an agent who has decided to answer an
     Arabic ticket in English is answering the whole thread in English.
@@ -4459,6 +4463,33 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     `ig_reel`, `reel`, `story_mention`) are not in `ATTACHMENT_TYPES` either.
     Nothing in production has carried one yet. When one does, it will read
     `[ig_post]` with an `unsupported` attachment rather than show the post.
+
+80. **React 19 resets a form after every function action, a refused one
+    included.** _2026-10-05, review of the side-conversation picker's
+    "Choose…" default; never shipped._ `<form action={fn}>` makes React queue
+    a native `form.reset()` before it calls `fn`, and run it once the action
+    settles — whatever the action answered. The `key={state.nonce}` remount
+    (§6.58) hides this on success, because the form being reset is the one
+    being thrown away; on a refusal the key does not move, and the live form
+    is reset. Two consequences, and only the first is visible:
+    - **A controlled `<select>` stops matching its own state.** React sets the
+      selected option through `value` and never marks one `defaultSelected`,
+      so the browser's reset picks the first option that is not disabled.
+      With the new "Choose…" placeholder `disabled`, that was the first hub:
+      after any refusal the picker showed Alexandria while the component still
+      held the agent's choice, and the next Send went to Alexandria. Reproduced
+      in Chromium against the repo's own React build, on the branch, before it
+      merged.
+    - **Every uncontrolled field goes back to its `defaultValue`**, so a
+      refused send wipes what the agent typed — the reply, the question, the
+      address — at exactly the moment they are about to correct one word of it.
+
+    `SideConversationDraft` submits from `onSubmit` with `preventDefault()`,
+    which takes React's form-action path, and with it the reset, out of the
+    picture; its placeholder is not `disabled`, so any reset that does happen
+    lands on "Choose…". The other forms in the console still submit through
+    `action=`, so the same reset should reach them on a refusal; only this form
+    was measured.
 
 ## 7. Verification already done
 
