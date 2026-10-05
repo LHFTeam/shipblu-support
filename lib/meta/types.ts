@@ -223,4 +223,9 @@ export type NormalisedMetaWebhook = {
   interactions: NormalisedInteraction[];
   /** Echoes of our own outbound messages, counted but never ingested. */
   echoes: number;
+  /**
+   * Messages that were nothing but a `template` card with nothing in it —
+   * Instagram's phone-number card — counted but never ingested.
+   */
+  emptyCards: number;
 };

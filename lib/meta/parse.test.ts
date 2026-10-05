@@ -169,6 +169,79 @@ describe('parseMetaWebhook', () => {
     ]);
   });
 
+  describe("Instagram's phone-number card", () => {
+    /** The card exactly as the Page connection delivers it. */
+    const card = { type: 'template', payload: { generic: { elements: [] } } };
+
+    /** The shape every production delivery had: standby, keys `mid` and `attachments`. */
+    function instagramStandby(message: Record<string, unknown>) {
+      return {
+        object: 'instagram',
+        entry: [
+          {
+            id: 'ig-account',
+            time: 1_790_000_001_000,
+            standby: [
+              {
+                sender: { id: 'igsid-7' },
+                recipient: { id: 'ig-account' },
+                timestamp: 1_790_000_000_760,
+                message,
+              },
+            ],
+          },
+        ],
+      };
+    }
+
+    it('files nothing for a message that was only the card', () => {
+      // It was a customer bubble reading "[template]" and the inbox headline in
+      // place of the number the customer had sent a second earlier.
+      const parsed = parse(instagramStandby({ mid: 'ig_card', attachments: [card] }));
+
+      expect(parsed.messages).toHaveLength(0);
+      expect(parsed.emptyCards).toBe(1);
+    });
+
+    it('keeps a template that carries something, even one this parser cannot name', () => {
+      const parsed = parse(
+        instagramStandby({
+          mid: 'ig_product',
+          attachments: [
+            { type: 'template', payload: { generic: { elements: [{ title: 'Box, large' }] } } },
+          ],
+        }),
+      );
+
+      expect(parsed.messages).toHaveLength(1);
+      expect(parsed.emptyCards).toBe(0);
+    });
+
+    it('keeps the text and drops only the card when the two arrive together', () => {
+      const parsed = parse(
+        instagramStandby({ mid: 'ig_both', text: '01001234567', attachments: [card] }),
+      );
+
+      expect(parsed.messages[0]).toMatchObject({ text: '01001234567', attachments: [] });
+      expect(parsed.emptyCards).toBe(0);
+    });
+
+    it('describes what is left when the card arrives beside a real attachment', () => {
+      // Counted, it would have read "[2 attachments]" for one photo.
+      const parsed = parse(
+        instagramStandby({
+          mid: 'ig_photo',
+          attachments: [{ type: 'image', payload: { url: 'https://cdn.example/2.jpg' } }, card],
+        }),
+      );
+
+      expect(parsed.messages[0]?.text).toBe('[image]');
+      expect(parsed.messages[0]?.attachments).toEqual([
+        { type: 'image', url: 'https://cdn.example/2.jpg', title: null },
+      ]);
+    });
+  });
+
   it('reads a Facebook comment and knows a top-level one from a reply', () => {
     const top = parse({
       object: 'page',
