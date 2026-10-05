@@ -10,9 +10,11 @@
  *
  * - **HEIC and HEIF** are what an iPhone photographs in, and the help-centre
  *   form accepts them (`lib/forms/files.ts`), but only Safari can decode one.
- *   Elsewhere the agent who clicked would get a broken-image box in place of a
- *   link that at least downloads the file.
- * - **TIFF** has the same problem, and nobody photographs a parcel in it.
+ *   Anywhere else a click would mint a signed URL and download the whole file
+ *   only for the preview to say it cannot be shown, where a link hands the file
+ *   straight over. The cost is an agent in Safari getting a link for a picture
+ *   their browser could have drawn.
+ * - **TIFF** is the same trade, and nobody photographs a parcel in it.
  * - **SVG** is inert inside an `<img>`, but the preview links to the original,
  *   and opened in a tab an SVG is a document that runs its author's script.
  *   An attachment is written by whoever sent it, and a picture is the one thing
