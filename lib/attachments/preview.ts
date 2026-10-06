@@ -49,15 +49,22 @@ export type PlayableMedia = { kind: 'audio' | 'video'; probe: string };
  * Candidates only. Unlike a picture, whether these play is a question for the
  * browser, not for this list: an iPhone plays a WhatsApp voice note from iOS
  * 18.4 and not before, whatever browser it runs, so `canPlayType` with `probe`
- * decides in the console itself.
+ * decides in the console itself, and any answer but `''` counts.
  *
- * Each is asked about with the codecs it arrives in, because a bare container
- * only ever answers "maybe" and so says nothing. `audio/ogg` is Opus, which
- * is what WhatsApp records a voice note in. MP4 is H.264 and AAC, which is what
- * WhatsApp and Messenger send. A Chromium built without those codecs says
- * "maybe" to a bare `video/mp4`, then fails to play every one. An iPhone video
- * may be HEVC instead, which the probe cannot see; one that will not decode
- * reaches the failure line, which keeps the link.
+ * The codecs are named where the container leaves them open, because there a
+ * bare type answers "maybe" whether or not the browser can decode what is
+ * inside. `audio/ogg` is Opus, which is what WhatsApp records a voice note in.
+ * MP4 and QuickTime are H.264 and AAC, which is what WhatsApp and Messenger
+ * send: a Chromium built without those codecs says "maybe" to a bare
+ * `video/mp4`, then fails to play every one. The rest name their codec in the
+ * type, or are WebM, and are asked bare; "maybe" is the most a browser says
+ * about those, so it is accepted.
+ *
+ * An iPhone or Android video may be HEVC instead, which the probe cannot see.
+ * Where the machine has no HEVC decoder, Chrome drops the picture and plays the
+ * sound, so one with a soundtrack draws as the sound-only bar — exactly what
+ * opening the file in a tab of that browser shows — and only one with no sound
+ * reaches the failure line.
  *
  * Absent on purpose, so they stay download links:
  *

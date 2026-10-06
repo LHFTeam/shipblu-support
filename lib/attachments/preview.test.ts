@@ -24,6 +24,14 @@ describe('isPreviewableImage', () => {
     expect(isPreviewableImage('image/svg+xml')).toBe(false);
   });
 
+  it('does not guess from a type that says nothing', () => {
+    expect(isPreviewableImage('application/octet-stream')).toBe(false);
+    expect(isPreviewableImage('')).toBe(false);
+    expect(isPreviewableImage('application/pdf')).toBe(false);
+  });
+});
+
+describe('playableMedia', () => {
   it('offers what channels record as media to the browser, asking about voice notes as Opus', () => {
     expect(playableMedia('audio/ogg')).toEqual({
       kind: 'audio',
@@ -35,6 +43,10 @@ describe('isPreviewableImage', () => {
       probe: 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"',
     });
     expect(playableMedia('audio/x-m4a')?.probe).toBe('audio/mp4; codecs="mp4a.40.2"');
+    expect(playableMedia('audio/mp4')?.probe).toBe('audio/mp4; codecs="mp4a.40.2"');
+    expect(playableMedia('video/quicktime')?.probe).toBe(
+      'video/quicktime; codecs="avc1.42E01E, mp4a.40.2"',
+    );
   });
 
   it('keeps what no browser plays as a download link', () => {
@@ -42,11 +54,5 @@ describe('isPreviewableImage', () => {
     expect(playableMedia('video/3gpp')).toBeNull();
     expect(playableMedia('image/jpeg')).toBeNull();
     expect(playableMedia('__proto__')).toBeNull();
-  });
-
-  it('does not guess from a type that says nothing', () => {
-    expect(isPreviewableImage('application/octet-stream')).toBe(false);
-    expect(isPreviewableImage('')).toBe(false);
-    expect(isPreviewableImage('application/pdf')).toBe(false);
   });
 });

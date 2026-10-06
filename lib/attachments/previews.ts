@@ -19,11 +19,16 @@ export type Load = 'loading' | 'loaded' | 'failed';
  * file shown only as a link, which can neither fail nor be announced, and the
  * wording reads absent as a picture.
  *
+ * `name` is what the file is called aloud — its file name for a picture, and
+ * the player's own name ("Audio, 21 KB") for a voice note or a video, so the
+ * notice about a player names the control the agent just pressed rather than
+ * the sixteen-digit media id WhatsApp stores a note under.
+ *
  * A voice note's player is on the page from the start rather than opened from
  * its chip, so for this reducer it is always showing: its failure is announced
  * at once, where a closed picture's waits until it is opened.
  */
-export type PreviewFile = { id: string; filename: string; kind?: 'image' | 'audio' | 'video' };
+export type PreviewFile = { id: string; name: string; kind?: 'image' | 'audio' | 'video' };
 
 const showing = (state: PreviewState, file: PreviewFile) =>
   file.kind === 'audio' || state.showing[file.id] === true;
@@ -96,7 +101,7 @@ function announce(state: PreviewState, file: PreviewFile): PreviewState {
     seq,
     notice: {
       fileId: file.id,
-      text: `${file.filename} could not be ${file.kind === 'audio' || file.kind === 'video' ? 'played' : 'shown'} here. Try again, or open the file.`,
+      text: `${file.name} could not be ${file.kind === 'audio' || file.kind === 'video' ? 'played' : 'shown'} here. Try again, or open the file.`,
       seq,
     },
   };

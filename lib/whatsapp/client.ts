@@ -1,5 +1,6 @@
 import { env } from '@/lib/env';
 import { isTimeout, sizedTimeout } from '@/lib/http/deadline';
+import { mimeEssence } from '@/lib/http/mime';
 import { GRAPH_BASE, graphTimeout } from '@/lib/meta/graph';
 import { ACCESS_TOKEN_CODE } from './errors';
 import type { WhatsAppTemplateComponent } from './templates';
@@ -377,7 +378,7 @@ export async function getMediaUrl(
 
   return {
     url: body.url,
-    mimeType: body.mime_type?.split(';')[0]?.trim() ?? null,
+    mimeType: mimeEssence(body.mime_type) || null,
     sha256: body.sha256 ?? null,
     fileSize: typeof body.file_size === 'number' ? body.file_size : null,
   };
@@ -444,8 +445,7 @@ export async function downloadMedia(
   }
   return {
     content: buffer,
-    contentType:
-      response.headers.get('content-type')?.split(';')[0]?.trim() ?? 'application/octet-stream',
+    contentType: mimeEssence(response.headers.get('content-type')) || 'application/octet-stream',
   };
 }
 

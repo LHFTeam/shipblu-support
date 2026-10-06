@@ -8,8 +8,8 @@ import {
   type PreviewState,
 } from './previews';
 
-const photo = { id: 'a', filename: 'IMG_0412.jpg' };
-const label = { id: 'b', filename: 'label.webp' };
+const photo = { id: 'a', name: 'IMG_0412.jpg' };
+const label = { id: 'b', name: 'label.webp' };
 
 function run(...actions: PreviewAction[]): PreviewState {
   return actions.reduce(previewReducer, initialPreviewState);
@@ -75,16 +75,18 @@ describe('previewReducer', () => {
   });
 
   it('announces a voice note’s failure at once, since its player was never closed', () => {
-    const note = { id: 'n', filename: 'PTT-0001.ogg', kind: 'audio' as const };
+    const note = { id: 'n', name: 'Audio, 21 KB', kind: 'audio' as const };
     const state = run({ type: 'settle', file: note, load: 'failed' });
     expect(state.notice?.text).toBe(
-      'PTT-0001.ogg could not be played here. Try again, or open the file.',
+      'Audio, 21 KB could not be played here. Try again, or open the file.',
     );
   });
 
   it('says a video could not be played, not shown', () => {
-    const clip = { id: 'v', filename: 'clip.mp4', kind: 'video' as const };
-    expect(run(toggle(clip), fail(clip)).notice?.text).toMatch(/^clip\.mp4 could not be played/);
+    const clip = { id: 'v', name: 'Video, 2.3 MB', kind: 'video' as const };
+    expect(run(toggle(clip), fail(clip)).notice?.text).toMatch(
+      /^Video, 2\.3 MB could not be played/,
+    );
   });
 
   it('leaves another picture’s notice alone', () => {

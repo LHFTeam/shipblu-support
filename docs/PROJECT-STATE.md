@@ -4573,18 +4573,40 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     a video resumed from a pause, or seeked past what was buffered, asks
     Storage with a dead signature.
 
-    Storage answers that with a 400 and a JSON body. Chrome's response
-    blocking (ORB) hides a cross-origin JSON body from the media stack as a
-    network failure, and the element then retries the dead URL for about 31
-    seconds before it reports an error. Firefox reports one at once. Waiting
-    for the error is therefore not a recovery strategy.
+    The Storage origin answers that with a 400 and a JSON body. Chrome's
+    response blocking (ORB) hides a cross-origin JSON body from the media stack
+    as a network failure, and the element then retries the dead URL for about
+    31 seconds before it reports an error. Firefox reports one at once. Waiting
+    for the error is therefore not a recovery strategy. Every other Storage
+    error is JSON too, so a range that fails for any reason after the first
+    response costs Chrome the same half minute before the player can react;
+    with the three reloads a player allows itself, a file whose later ranges
+    keep failing takes about two minutes to reach its failure line.
+
+    The origin checks the signature only as a request starts and then streams
+    the rest, so a response that began before the deadline keeps arriving after
+    it. And the project is on the Pro plan, which puts Supabase's Smart CDN in
+    front of Storage: an edge that has cached a response for one signed URL
+    keeps serving it for that URL after the token expires. Neither breaks
+    playback, but expiry is not revocation — only deleting the object cuts off
+    a URL that has already been handed out.
 
     `lib/attachments/signed-url.ts` decides before the request instead:
-    - **When.** A play, a seek or a stall on a URL more than four minutes old,
-      at a position with nothing buffered ahead of it, reloads the element.
+    - **When.** On a URL more than four minutes old, a play or a seek reloads
+      the element when the position has nothing buffered ahead of it. A
+      `waiting` is judged the same way unless bytes arrived in the last three
+      seconds, because a response that is still arriving is a slow link, and a
+      reload would throw it away to start the wait again. A `stalled` reloads
+      when the element cannot play on, whatever `buffered` says: for a plain
+      `src` MP4, Chrome maps the bytes received linearly onto the duration, so a
+      `moov` at the head of the file puts the reported edge 1.3 to 2.5 seconds
+      past where playback really starves, enough to let the `waiting` through
+      and freeze the picture for half a minute.
     - **How.** The reload calls `load()`, which goes back through the route
       for a new signature, and puts back the position, the speed and the
-      playing state.
+      playing state. A video keeps its box while the reload is in flight, and
+      focus stays on the player: Chromium blurs a focused native control inside
+      `load()`.
     - **Timed from metadata.** The URL's age runs from `loadedmetadata`, not
       `loadstart`. With `preload="none"`, `loadstart` fires at render, so a
       voice note played four minutes after the page opened would reload on its
@@ -4592,6 +4614,16 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     - **`waiting` is not starvation on its own.** Chrome fires it on every
       seek, into buffered data too. Treating it as starvation reloaded a
       replayed voice note and cut the replay off.
+    - **Not in the middle of a drag.** Chrome's and Firefox's controls pause a
+      playing video for a drag on the timeline, seek at every step, and play
+      on the release. A reload at the first step past the buffer dropped the
+      rest of the drag and left the video paused at the buffer's edge, so a
+      seek that follows a pause by less than a quarter of a second marks a drag,
+      and the release's `play` reloads from where it ended.
+    - **Spaced out when they fail.** A reload made because of an error goes at
+      once; one after a reload that itself failed waits a second, then two.
+      Firefox fails a request at once while the network is down, and three
+      back-to-back reloads spent the whole allowance inside one short outage.
 
     The route marks its redirect `no-store` and must stay a 307. A 301 or 308
     can be cached, and then the browser would reuse a dead signature.
@@ -4607,8 +4639,9 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     the download link.
 
     Not verified on a real Safari: whether it keeps requesting the signed URL
-    after the redirect, what it does when that URL expires, and whether
-    `play()` after `load()` works without a new tap.
+    after the redirect, what it does when that URL expires, whether `play()`
+    after `load()` works without a new tap, and whether its controls pause
+    for a drag the way Chrome's and Firefox's do.
 
 ## 7. Verification already done
 
