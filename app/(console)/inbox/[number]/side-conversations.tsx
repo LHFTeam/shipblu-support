@@ -1,11 +1,16 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { Badge, Button, ErrorText, Input, Label, Select, Textarea } from '@/components/ui';
 import { formatBytes, formatDateTime, formatRelative } from '@/lib/format';
 import type { PickerEntry, SideConversationView } from '@/lib/side-conversations/queries';
-import { describeRecipient, trackingPrefill } from '@/lib/side-conversations/format';
+import {
+  blankSideSubject,
+  describeRecipient,
+  subjectPrefill,
+  trackingPrefill,
+} from '@/lib/side-conversations/format';
 import type { ConversationDetail } from '@/lib/tickets/conversation';
 import type { ActionState } from '../../action-state';
 import {
@@ -13,6 +18,7 @@ import {
   setSideConversationState,
   startSideConversation,
 } from '../../side-conversation-actions';
+import { useSubmitWithoutReset } from './form-state';
 
 const INITIAL: ActionState = { error: null };
 
@@ -204,20 +210,11 @@ export function SideConversationCard({
 }
 
 function SideReplyForm({ side }: { side: SideConversationView }) {
-  const router = useRouter();
-  const [state, setState] = useState<ActionState>(INITIAL);
-  const [busy, setBusy] = useState(false);
-
-  async function submit(formData: FormData) {
-    setBusy(true);
-    const result = await replyToSideConversation(INITIAL, formData);
-    setBusy(false);
-    setState(result);
-    if (result.ok) router.refresh();
-  }
+  // A refused reply keeps what the agent wrote — see `useSubmitWithoutReset`.
+  const { state, busy, onSubmit } = useSubmitWithoutReset(replyToSideConversation);
 
   return (
-    <form key={state.nonce ?? 0} action={submit} className="mt-2 flex flex-col gap-1.5">
+    <form key={state.nonce ?? 0} onSubmit={onSubmit} className="mt-2 flex flex-col gap-1.5">
       <input type="hidden" name="sideConversationId" value={side.id} />
       <Textarea
         name="body"
@@ -290,12 +287,52 @@ export function StartSideConversationForm({
   /** Lets the composer put itself away on a phone once the thread is started. */
   onSent?: () => void;
 }) {
-  const router = useRouter();
-  const [state, setState] = useState<ActionState>(INITIAL);
-  const [busy, setBusy] = useState(false);
-  const [recipientId, setRecipientId] = useState(
-    recipients[0] ? `${recipients[0].source}:${recipients[0].id}` : 'other',
+  // Submitted by hand rather than through `action`, which matters more here
+  // than anywhere: React's reset after a refusal put the first hub back in the
+  // picker while the component still held the agent's choice, and the next Send
+  // went to that hub (`docs/PROJECT-STATE.md` §6.80).
+  const { state, busy, onSubmit } = useSubmitWithoutReset(startSideConversation, onSent);
+
+  return (
+    <SideConversationDraft
+      key={state.nonce ?? 0}
+      conversation={conversation}
+      recipients={recipients}
+      error={state.error}
+      busy={busy}
+      onSubmit={onSubmit}
+    />
   );
+}
+
+/**
+ * The form itself, a component of its own so that the `key` above resets the
+ * picker along with the fields — `docs/PROJECT-STATE.md` §6.58. The recipient
+ * used to be deliberately sticky and lived above the key; now that nobody is
+ * preselected, a recipient carried over from the last thread is exactly the
+ * preselection that default exists to prevent.
+ */
+function SideConversationDraft({
+  conversation,
+  recipients,
+  error,
+  busy,
+  onSubmit,
+}: {
+  conversation: ConversationDetail;
+  recipients: PickerEntry[];
+  error: string | null;
+  busy: boolean;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  // Nobody is preselected. Opening on the first entry meant an agent who sent
+  // without touching the picker asked whichever hub sorts first by name —
+  // Alexandria, once the hubs were entered — about a parcel it may never have
+  // seen, carrying the customer's name and address. "Choose…" makes the
+  // recipient something the agent decided, and `required` stops the form until
+  // they have. With an empty directory there is nothing to choose between, so
+  // it opens on the typed address the notice below tells them to use.
+  const [recipientId, setRecipientId] = useState(recipients.length > 0 ? '' : 'other');
 
   // The last thing the customer actually said. Both the anchor the thread hangs
   // off and, optionally, the text quoted into the question.
@@ -305,17 +342,6 @@ export function StartSideConversationForm({
 
   const trackingNumbers = conversation.shipments.map((shipment) => shipment.trackingNumber);
 
-  async function submit(formData: FormData) {
-    setBusy(true);
-    const result = await startSideConversation(INITIAL, formData);
-    setBusy(false);
-    setState(result);
-    if (result.ok) {
-      router.refresh();
-      onSent?.();
-    }
-  }
-
   // Hubs first: they are what a late parcel is almost always about.
   const GROUPS: { kind: PickerEntry['kind']; label: string }[] = [
     { kind: 'hub', label: 'Hubs and warehouses' },
@@ -324,7 +350,7 @@ export function StartSideConversationForm({
   ];
 
   return (
-    <form key={state.nonce ?? 0} action={submit} className="flex flex-col gap-2">
+    <form onSubmit={onSubmit} className="flex flex-col gap-2">
       <input type="hidden" name="conversationId" value={conversation.id} />
       <input type="hidden" name="anchorMessageId" value={anchor?.id ?? ''} />
 
@@ -345,7 +371,20 @@ export function StartSideConversationForm({
             name="recipientId"
             value={recipientId}
             onChange={(event) => setRecipientId(event.target.value)}
+            required
           >
+            {/* Not `disabled`. Anything that resets this form lands on the
+                first option that is not, and "Choose…" is the only safe place
+                for it to land. Choosing it again on purpose is harmless:
+                `required` refuses the empty value. Dropped only when the
+                directory is empty and the value is "Someone else…": a refresh
+                can empty the directory under an open form, and a value with no
+                option left to show it — unchosen, or an entry that has just
+                gone — would otherwise display "Someone else…" without the
+                address field, and picking it again changes nothing. */}
+            {recipients.length > 0 || recipientId !== 'other' ? (
+              <option value="">Choose…</option>
+            ) : null}
             {GROUPS.map(({ kind, label }) => {
               const entries = recipients.filter((entry) => entry.kind === kind);
               if (entries.length === 0) return null;
@@ -371,11 +410,15 @@ export function StartSideConversationForm({
 
         <div>
           <Label htmlFor="subject">Subject</Label>
+          {/* Empty unless the ticket has exactly one parcel — see
+              `subjectPrefill`. The placeholder is what leaving it blank sends,
+              from the same `blankSideSubject` the action sends it with, so the
+              two cannot disagree. */}
           <Input
             id="subject"
             name="subject"
-            defaultValue={conversation.subject ?? ''}
-            placeholder="What this is about"
+            defaultValue={subjectPrefill(trackingNumbers)}
+            placeholder={blankSideSubject(conversation.subject)}
           />
         </div>
       </div>
@@ -421,7 +464,7 @@ export function StartSideConversationForm({
         </label>
       ) : null}
 
-      <ErrorText>{state.error}</ErrorText>
+      <ErrorText>{error}</ErrorText>
 
       <div className="flex flex-wrap items-center gap-3">
         <label className="flex items-center gap-1.5 text-xs opacity-70">

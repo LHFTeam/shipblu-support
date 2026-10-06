@@ -18,7 +18,7 @@ import { ok } from '@/lib/http/action-state';
 import { env } from '@/lib/env';
 import { can } from '@/lib/auth/permissions';
 import { enqueue } from '@/lib/queue';
-import { quoteAnchor } from '@/lib/side-conversations/format';
+import { quoteAnchor, sideSubject } from '@/lib/side-conversations/format';
 import {
   normaliseAddress,
   parseAddressList,
@@ -137,6 +137,9 @@ export async function startSideConversation(
     resolvedRecipientId = recipient.id;
     toAddress = recipient.email;
   } else {
+    // `other`, and also the picker's unchosen "Choose…", which `required` stops
+    // in the browser. Sent anyway, it arrives with no typed address either —
+    // the field is only rendered for `other` — and `refuseRecipient` answers it.
     toAddress = normaliseAddress(typedAddress);
   }
 
@@ -156,7 +159,7 @@ export async function startSideConversation(
 
   // --- What it says --------------------------------------------------------
 
-  const subject = text(formData, 'subject') || (conversation.subject ?? '(no subject)');
+  const subject = sideSubject(text(formData, 'subject'), conversation.subject);
 
   const anchorMessageId = String(formData.get('anchorMessageId') ?? '') || null;
 

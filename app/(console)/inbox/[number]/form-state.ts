@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useState, type FormEvent } from 'react';
+import { unstable_rethrow, useRouter } from 'next/navigation';
 import type { ActionState } from '../../action-state';
 
 export const INITIAL: ActionState = { error: null };
@@ -27,4 +27,80 @@ export function useRefreshOnSuccess(state: ActionState, onSent?: () => void) {
     router.refresh();
     onSent?.();
   }, [state, router, onSent]);
+}
+
+/**
+ * Said when the action never answered — the connection dropped, the server
+ * failed, a deploy cut the request off. Whether the write landed is unknown,
+ * so the sentence sends the agent to the timeline rather than to the button.
+ */
+const LOST =
+  'No answer came back, so this may or may not have been sent. Check the timeline before sending it again.';
+
+/**
+ * A redirect or not-found raised by the action, which Next is already acting
+ * on. `unstable_rethrow` is the public test for one; it answers by throwing.
+ */
+function isNextNavigation(error: unknown): boolean {
+  try {
+    unstable_rethrow(error);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Submits a form to an action without letting React reset it.
+ *
+ * `<form action={fn}>` makes React 19 reset the form after every action, a
+ * refused one included (`docs/PROJECT-STATE.md` §6.80). The nonce key hides
+ * that on success; on a refusal it wipes what the agent typed, and a controlled
+ * select falls back to its first enabled option while its state says otherwise.
+ * Submitting by hand keeps a refused form exactly as the agent left it, and a
+ * success still clears it through `key={state.nonce}` like every other form.
+ *
+ * Only a success may move that key. A refusal carries no nonce, so storing it
+ * as it came back would turn the key from the last success's back to `0` and
+ * remount the form — the same wipe, arriving instead on the second send of a
+ * ticket rather than the first. Everything that is not a success keeps the
+ * nonce it found.
+ *
+ * It also owns the one case a hand-rolled submit forgets: an action that throws
+ * instead of answering. Without the `finally` the button stays on "Sending…"
+ * for good, and without the `catch` the agent is told nothing. Next's own
+ * redirect is the exception: an ended session makes `requireAgent()` redirect,
+ * which rejects this call while Next navigates to `/login` itself — nothing
+ * was written, so "may or may not have been sent" would be false.
+ */
+export function useSubmitWithoutReset(
+  action: (state: ActionState, formData: FormData) => Promise<ActionState>,
+  onSent?: () => void,
+) {
+  const router = useRouter();
+  const [state, setState] = useState<ActionState>(INITIAL);
+  const [busy, setBusy] = useState(false);
+  useRefreshOnSuccess(state, onSent);
+
+  async function send(formData: FormData) {
+    setBusy(true);
+    try {
+      const result = await action(INITIAL, formData);
+      setState((previous) => (result.ok ? result : { ...result, nonce: previous.nonce }));
+    } catch (error) {
+      if (isNextNavigation(error)) return;
+      setState((previous) => ({ error: LOST, nonce: previous.nonce }));
+      // If it did land, this is what puts it on the timeline the error points at.
+      router.refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void send(new FormData(event.currentTarget));
+  }
+
+  return { state, busy, onSubmit };
 }

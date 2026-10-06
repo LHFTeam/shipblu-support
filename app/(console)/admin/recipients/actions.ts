@@ -3,11 +3,12 @@
 import { revalidatePath } from 'next/cache';
 import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { internalRecipients, sideConversations } from '@/db/schema';
+import { internalRecipients } from '@/db/schema';
 import { requirePermission } from '@/lib/auth/guard';
 import { ok } from '@/lib/http/action-state';
 import { text, uuidField } from '@/lib/http/form-data';
 import { errorMessage } from '@/lib/errors';
+import { removeInternalRecipient } from '@/lib/side-conversations/remove-recipient';
 import { GONE, type SettingsState } from '../settings-shared';
 
 // --- Internal recipients ----------------------------------------------------
@@ -92,28 +93,18 @@ export async function deleteInternalRecipient(
   const id = uuidField(formData, 'id');
   if (!id) return { error: 'Nothing to delete' };
 
-  const inUse = await db
-    .select({ id: sideConversations.id })
-    .from(sideConversations)
-    .where(eq(sideConversations.recipientId, id))
-    .limit(1);
+  // Deactivated instead when a thread has used it, so the picker loses it and
+  // the history keeps it — checked under a lock, see `removeInternalRecipient`.
+  const removal = await removeInternalRecipient(id);
 
-  if (inUse.length > 0) {
-    // Deactivated instead, so the picker loses it and the history keeps it.
-    await db
-      .update(internalRecipients)
-      .set({ isActive: false })
-      .where(eq(internalRecipients.id, id));
+  revalidatePath('/admin/recipients');
 
-    revalidatePath('/admin/recipients');
+  if (removal.outcome === 'retired') {
     return {
       error:
         'That recipient has side conversations, so it was deactivated rather than deleted. It is gone from the picker and the old threads still say who was asked.',
     };
   }
 
-  await db.delete(internalRecipients).where(eq(internalRecipients.id, id));
-
-  revalidatePath('/admin/recipients');
   return ok();
 }

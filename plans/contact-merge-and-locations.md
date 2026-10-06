@@ -201,9 +201,12 @@ operating. No number of locations is expected; the settings overview flags only
 an empty register, because then the side-conversation picker offers no hub.
 
 A closed hub is marked not operating rather than deleted, so its code still
-reads in the tickets that mention it. Deleting is for one entered by mistake —
-and it is an unguarded delete only because nothing references a location yet. The
-moment something does, it needs the in-use guard `deleteGroup` has.
+reads in the tickets that mention it. Deleting is for one entered by mistake.
+Side conversations were the first thing to reference a location, and the delete
+gained its in-use guard after them: one a thread has gone to is marked not
+operating instead (`lib/locations/remove.ts`), because
+`side_conversations.location_id` is `on delete set null` and an unguarded delete
+would strip the hub off the thread without a word.
 
 **No seed data.** Nobody had given us the names, codes and addresses, and
 inventing them would put plausible-looking wrong codes in every environment.

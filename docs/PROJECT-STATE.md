@@ -54,8 +54,9 @@ This is the first thing to join `locations` to anything: the picker's hubs are
 its rows, which is what that table was entered for. Teams and vendors are not
 locations, so they keep their own small directory at `/admin/recipients`. Built
 and verified end to end against a local Postgres. Both directories now have rows
-— three teams, and the hubs entered on 2026-10-05 — so the picker opens on the
-hubs. No thread has yet gone to a real hub list; see §5.1 and §5.2.
+— three teams, and the hubs entered on 2026-10-05 — so the picker lists the hubs
+first, and opens on _Choose…_ rather than on any of them. No thread has yet gone
+to a real hub list; see §5.1 and §5.2.
 
 And **shared locations**: a pin a customer drops is kept as coordinates rather
 than flattened into prose and rendered as a card with a Maps link. **Every pin in
@@ -1061,10 +1062,12 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   matches none of them), which is how to select them to undo the entry. Delete
   only while no `side_conversations.location_id` points at one: the foreign key
   is `on delete set null` and would quietly strip the hub from a real thread,
-  leaving only the address in `to_addresses`. The same holds for the Delete
-  button on `/admin/locations` — `deleteLocation` has no in-use guard, and its
-  comment still says nothing references a location — so a hub a thread has used
-  is deactivated, not deleted.
+  leaving only the address in `to_addresses`. That check is the SQL's to make by
+  hand; the Delete button on `/admin/locations` makes it itself. `deleteLocation`
+  goes through `removeLocation` (`lib/locations/remove.ts`), which locks the row,
+  counts the threads, and marks a hub any thread has used not operating instead
+  of deleting it — the rule `deleteInternalRecipient` already applied to the
+  picker's other register.
 
 - ~~**SLA policies and automation rules are both empty.**~~ `sla_policies` holds
   **4** rows and `automation_rules` **1** as of 2026-09-20, so neither cron runs
@@ -1097,10 +1100,17 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   day.
 - **The side conversation picker's two registers.** Both are filled:
   `internal_recipients` has 3 teams and `locations` 14 hubs (above), so the
-  picker opens on _Hubs and warehouses_. **Its default moved with them.** The
-  picker preselects its first entry (`side-conversations.tsx`,
-  `recipients[0]`), hubs sort first and by name, so an agent who sends without
-  touching it now asks Alexandria Hub, where until 2026-10-05 it asked Finance.
+  picker lists _Hubs and warehouses_ first. **It preselects nobody.** It used to
+  open on its first entry, and with hubs sorting first and by name an agent who
+  sent without touching it asked Alexandria Hub (Finance, before 2026-10-05);
+  it now opens on _Choose…_ and the form will not send until somebody is
+  chosen. Only an empty directory still opens on _Someone else…_, the one
+  choice there is. The subject opens on the ticket's tracking number and `|| `
+  when it has exactly one parcel (`subjectPrefill`), and empty otherwise — an
+  empty subject is sent as the ticket's own, or `(no subject)`, and the field
+  shows which as its placeholder (`blankSideSubject` answers both). A prefill
+  sent untouched goes out as the tracking number alone: `sideSubject` drops a
+  trailing `||` rather than send it dangling (decided on review, 2026-10-05).
   Vendors — a courier partner — still go in `internal_recipients` at
   `/admin/recipients`, and none is entered. All three side conversations that
   exist are open and went to a typed test address, with `location_id` and
@@ -3723,9 +3733,12 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
 
     The rule: state that a keyed form's submission depends on belongs _inside_
     the keyed subtree, in a component of its own. State that is deliberately
-    sticky (`privately`, the side-conversation recipient, and the canned
-    picker's language toggle) belongs outside it — and all three are visible
-    controls, so what carries over is on screen rather than in a hidden field.
+    sticky (`privately` and the canned picker's language toggle) belongs
+    outside it — and both are visible controls, so what carries over is on
+    screen rather than in a hidden field. The side-conversation recipient was a
+    third until 2026-10-05, when the picker stopped preselecting anybody: a
+    recipient carried over from the last thread is the preselection that change
+    removed, so it moved inside the key (`SideConversationDraft`).
     The toggle is the case that shows why the distinction is not about risk: it
     _should_ survive a send, because an agent who has decided to answer an
     Arabic ticket in English is answering the whole thread in English.
@@ -4477,6 +4490,43 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     `ig_reel`, `reel`, `story_mention`) are not in `ATTACHMENT_TYPES` either.
     Nothing in production has carried one yet. When one does, it will read
     `[ig_post]` with an `unsupported` attachment rather than show the post.
+
+80. **React 19 resets a form after every function action, a refused one
+    included.** _2026-10-05, review of the side-conversation picker's
+    "Choose…" default; never shipped._ `<form action={fn}>` makes React queue
+    a native `form.reset()` before it calls `fn`, and run it once the action
+    settles — whatever the action answered. The `key={state.nonce}` remount
+    (§6.58) hides this on success, because the form being reset is the one
+    being thrown away; on a first refusal the key stays at `0`, and the live
+    form is reset. (After an earlier success a refusal moves the key _back_ to
+    `0`, because only `ok()` carries a nonce, and the remount wipes the fields
+    just the same.) Two consequences, and only the first is visible:
+    - **A controlled `<select>` stops matching its own state.** React sets the
+      selected option through `value` and never marks one `defaultSelected`,
+      so the browser's reset picks the first option that is not disabled.
+      With the new "Choose…" placeholder `disabled`, that was the first hub:
+      after any refusal the picker showed Alexandria while the component still
+      held the agent's choice, and the next Send went to Alexandria. Reproduced
+      in Chromium against the repo's own React build, on the branch, before it
+      merged.
+    - **Every uncontrolled field goes back to its `defaultValue`**, so a
+      refused send wipes what the agent typed — the reply, the question, the
+      address — at exactly the moment they are about to correct one word of it.
+
+    Both side-conversation forms — starting a thread and writing back on one —
+    now submit through `useSubmitWithoutReset` (`inbox/[number]/form-state.ts`),
+    which calls the action from `onSubmit` with `preventDefault()` and so takes
+    React's form-action path, and with it the reset, out of the picture. Only
+    a success moves its key — anything else keeps the nonce it found, or the
+    second send on a ticket would be wiped by the remount instead. It also
+    answers an action that throws, which a hand-rolled submit forgets: without
+    its `finally` the button stays on "Sending…" for good. Next's own redirect
+    (an ended session, from `requireAgent()`) is let through rather than
+    reported as lost, since nothing was written. The picker's
+    placeholder is not `disabled` either, so any reset that does happen lands
+    on "Choose…". The other forms in the console still submit through
+    `action=`, so the same reset should reach them on a refusal; only the
+    thread form was measured, and the hook is there for them to adopt.
 
 ## 7. Verification already done
 

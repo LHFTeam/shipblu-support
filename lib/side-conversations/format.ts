@@ -89,6 +89,54 @@ export function trackingPrefill(trackingNumbers: string[]): string {
 }
 
 /**
+ * The subject a new thread opens with: `1212121212121 || `, leaving the agent to
+ * type only what they are asking.
+ *
+ * The tracking number leads because it is what a hub sorts its shared inbox by
+ * and searches it for — the `[#123]` that `buildSideSubject` appends is our
+ * number, not theirs — and, as in the body, a number the agent never retypes is
+ * one they cannot transpose.
+ *
+ * Only for exactly one parcel. With none there is nothing to lead with, and with
+ * several, picking one would file a question about all of them under whichever
+ * the list happened to put first — so the field stays empty and the agent
+ * says which they mean. `trackingPrefill` names every one of them in the body
+ * either way.
+ */
+export function subjectPrefill(trackingNumbers: string[]): string {
+  const distinct = [...new Set(trackingNumbers.filter(Boolean))];
+  return distinct.length === 1 ? `${distinct[0]} || ` : '';
+}
+
+/**
+ * What a thread is called when the agent leaves its subject empty: the
+ * ticket's own, or `(no subject)` when the ticket has none worth the name.
+ *
+ * One function because two places state it — the action sends it and the
+ * composer shows it as the field's placeholder — and the placeholder exists to
+ * say what a blank field will send. Trimmed here rather than left to
+ * `buildSideSubject`, which would turn a whitespace subject into `(no subject)`
+ * in the mail while the thread card went on showing the whitespace.
+ */
+export function blankSideSubject(ticketSubject: string | null): string {
+  return ticketSubject?.trim() || '(no subject)';
+}
+
+/**
+ * The subject a new thread is sent with, from what the agent left in the field.
+ *
+ * A prefill sent untouched is the tracking number and a separator with nothing
+ * after it, and the hub would read `1212121212121 ||` with the `||` dangling —
+ * so a trailing `||` is dropped and the number goes out on its own. Nothing is
+ * invented in its place: the agent did not write anything there. A field that
+ * was nothing but the separator is empty, and gets `blankSideSubject`.
+ */
+export function sideSubject(typed: string, ticketSubject: string | null): string {
+  const subject = typed.trim().replace(/\s*\|\|$/, '');
+  return subject || blankSideSubject(ticketSubject);
+}
+
+/**
  * How the recipient is named on screen, however the agent chose it.
  *
  * Here rather than beside the read model it describes, for the reason already
