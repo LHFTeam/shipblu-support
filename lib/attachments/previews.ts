@@ -15,7 +15,9 @@ export type Load = 'loading' | 'loaded' | 'failed';
 
 /**
  * Named apart from the DOM's `File`, which client code importing this also has
- * in scope. `kind` is absent for a picture.
+ * in scope. `kind` is what the file is in the conversation; it is absent for a
+ * file shown only as a link, which can neither fail nor be announced, and the
+ * wording reads absent as a picture.
  *
  * A voice note's player is on the page from the start rather than opened from
  * its chip, so for this reducer it is always showing: its failure is announced

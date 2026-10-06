@@ -218,11 +218,12 @@ export function AttachmentList({
       // drop focus exactly where the first one was caught.
       figure.focus({ preventScroll: true });
     } else if (load === 'loaded' && figure && document.activeElement === figure) {
-      // Focus parked on the figure by "Try again" moves on to what the retry
-      // produced, so the next thing a screen reader says is the picture's link
-      // or the player rather than nothing — the figure's name alone does not
-      // say it worked.
-      figure.querySelector<HTMLElement>('a, audio, video')?.focus({ preventScroll: true });
+      // Focus parked on the figure by "Try again" moves on to the picture's
+      // link once it loads, so the next thing a screen reader says is what the
+      // retry produced — the figure's name alone does not say it worked. A
+      // player takes focus as soon as it mounts instead (see `Player`), because
+      // a voice note loads nothing until play is pressed.
+      figure.querySelector<HTMLElement>('a')?.focus({ preventScroll: true });
     }
     dispatch({ type: 'settle', file: asPreview(file), load });
   };
@@ -299,7 +300,7 @@ export function AttachmentList({
       {voiceNotes.length > 0 ? (
         <div className={compact ? 'mt-1.5 flex flex-col gap-1.5' : 'mt-2 flex flex-col gap-2'}>
           {voiceNotes.map((file) => (
-            <MediaFigure key={file.id} id={previewId(file)} file={file}>
+            <MediaFigure key={file.id} id={previewId(file)}>
               <MediaPlayer
                 kind="audio"
                 file={file}
@@ -325,7 +326,7 @@ export function AttachmentList({
             <MediaFigure
               key={file.id}
               id={previewId(file)}
-              file={file}
+              label={kindOf(file) === 'image' ? file.filename : undefined}
               hidden={state.showing[file.id] !== true}
             >
               {kindOf(file) === 'video' ? (
@@ -357,22 +358,25 @@ export function AttachmentList({
  * The frame every opened picture, video and voice note sits in.
  *
  * It takes focus (`tabIndex={-1}`, so never by Tab) only because "Try again"
- * hands focus to it before unmounting — see `retry` — and is named after the
- * file so that focus lands on something a screen reader can say.
+ * hands focus to it before unmounting — see `retry`. A picture's figure is
+ * named after the file, so that focus lands on something a screen reader can
+ * say while the picture loads. A player's is not: focus moves straight on to
+ * the new player, which carries its own name, and a figure named as well would
+ * be the same words read twice.
  */
 function MediaFigure({
   id,
-  file,
+  label,
   hidden = false,
   children,
 }: {
   id: string;
-  file: Attachment;
+  label?: string;
   hidden?: boolean;
   children: ReactNode;
 }) {
   return (
-    <figure id={id} hidden={hidden} tabIndex={-1} aria-label={file.filename} className="max-w-full">
+    <figure id={id} hidden={hidden} tabIndex={-1} aria-label={label} className="max-w-full">
       {children}
     </figure>
   );
@@ -475,8 +479,17 @@ function ImagePreview({
   );
 }
 
-/** How many reloads a player makes for one stretch of playback before giving up. */
-const MAX_RELOADS = 3;
+/**
+ * How many failed reloads a player makes in one place before giving up.
+ *
+ * Only an error counts, and the count clears once playback has moved on a few
+ * seconds past where it failed. Clearing it on "playing" instead let a file
+ * that broke at the same second play, fail, reload and play again forever.
+ * The reloads made ahead of an expiry do not count: they are already limited
+ * to one per URL lifetime by its age.
+ */
+const MAX_FAILURES = 3;
+const PROGRESS_SECONDS = 5;
 
 /**
  * A voice note or a video, with the native controls — which already carry play,
@@ -543,6 +556,24 @@ function Player({
     if (hidden) element.current?.pause();
   }, [hidden]);
 
+  // Mounted by "Try again", which parked focus on the figure: hand it to the
+  // new player, so a screen reader names what the retry produced. A voice note
+  // fetches nothing until play, so waiting for it to load would wait forever.
+  useEffect(() => {
+    const media = element.current;
+    if (media && document.activeElement === media.closest('figure')) {
+      media.focus({ preventScroll: true });
+    }
+  }, []);
+
+  /*
+    Named by what it is, not by its file. WhatsApp sends a voice note without a
+    name, so it is stored as its media id — sixteen digits — and every note in
+    production would be read out as a number. The chip beside it still carries
+    the file name as its link text.
+  */
+  const name = `${kind === 'audio' ? 'Audio' : 'Video'}, ${formatBytes(file.sizeBytes)}`;
+
   if (kind === 'audio') {
     return (
       <audio
@@ -550,7 +581,7 @@ function Player({
         src={fileUrl(file)}
         controls
         preload="none"
-        aria-label={file.filename}
+        aria-label={name}
         className="block w-full max-w-xs"
         {...fresh}
       />
@@ -565,10 +596,14 @@ function Player({
         controls
         playsInline
         preload="metadata"
-        aria-label={file.filename}
+        aria-label={name}
         className={
+          // A width of its own, not a share of the figure's: the figure shrinks
+          // to fit what it holds, and Firefox gives a video with no picture a
+          // 2:1 shape, so at 48px tall the bar shrank to 96px wide and lost its
+          // scrubber and its time.
           soundOnly
-            ? 'block h-12 w-full max-w-xs'
+            ? 'block h-12 w-80 max-w-full'
             : 'block max-h-96 max-w-full rounded-md border border-[var(--border)] bg-black'
         }
         {...fresh}
@@ -580,7 +615,11 @@ function Player({
   );
 }
 
-/** Pauses every other player on the page when one starts. */
+/**
+ * One player at a time, across the whole ticket rather than this message's
+ * list: two voice notes talking over each other, or a note under a video, is
+ * never what was meant.
+ */
 function pauseOthers(playing: HTMLMediaElement) {
   for (const media of document.querySelectorAll<HTMLMediaElement>('audio, video')) {
     if (media !== playing) media.pause();
@@ -588,6 +627,14 @@ function pauseOthers(playing: HTMLMediaElement) {
 }
 
 type MediaEvent = SyntheticEvent<HTMLMediaElement>;
+
+/** Whether some other player on the page is sounding. */
+function anotherPlaying(media: HTMLMediaElement) {
+  for (const other of document.querySelectorAll<HTMLMediaElement>('audio, video')) {
+    if (other !== media && !other.paused) return true;
+  }
+  return false;
+}
 
 /**
  * Keeps a player's signed URL alive for as long as somebody is listening, and
@@ -603,6 +650,17 @@ type MediaEvent = SyntheticEvent<HTMLMediaElement>;
  * `preload="none"`, `loadstart` fires when the page renders, and a note played
  * four minutes later would reload on its very first press.
  *
+ * The age is the larger of wall-clock and monotonic time since then.
+ * `performance.now()` stops while a laptop or phone sleeps, and a phone in a
+ * pocket is exactly when a paused note goes stale. `Date.now()` keeps counting
+ * through sleep but jumps when the clock is set. Taking the larger means
+ * neither one can make a dead URL look young.
+ *
+ * A reload's resume is a promise to play again, not an order. If the video was
+ * hidden while the reload was in flight, or the agent started another player,
+ * `load()` has already set the element paused without firing `pause`, so
+ * nothing else could have cancelled it. It is checked when the metadata lands.
+ *
  * Playing is tracked from `play`, `pause` and `ended` rather than read off
  * `paused`, because Firefox fires no `pause` when a stream fails.
  *
@@ -616,21 +674,32 @@ function useFreshMedia({
   onReady: (media: HTMLMediaElement) => void;
   onFail: () => void;
 }) {
-  const mintedAt = useRef<number | null>(null);
+  const minted = useRef<{ wall: number; mono: number } | null>(null);
   const ready = useRef(false);
   const playing = useRef(false);
-  const reloads = useRef(0);
+  const failures = useRef(0);
+  const failedAt = useRef<number | null>(null);
   const resume = useRef<{ at: number; rate: number; play: boolean } | null>(null);
 
-  const reload = (media: HTMLMediaElement) => {
-    if (reloads.current >= MAX_RELOADS) {
-      resume.current = null;
-      onFail();
-      return;
+  const ageMs = () =>
+    minted.current === null
+      ? null
+      : Math.max(Date.now() - minted.current.wall, performance.now() - minted.current.mono);
+
+  const giveUp = () => {
+    resume.current = null;
+    playing.current = false;
+    onFail();
+  };
+
+  const reload = (media: HTMLMediaElement, failed: boolean) => {
+    if (failed) {
+      if (failures.current >= MAX_FAILURES) return giveUp();
+      failures.current += 1;
+      failedAt.current = resume.current?.at ?? media.currentTime;
     }
-    reloads.current += 1;
     resume.current ??= { at: media.currentTime, rate: media.playbackRate, play: playing.current };
-    mintedAt.current = null;
+    minted.current = null;
     // `load()` resets the speed to the default, so the default becomes the
     // speed the agent chose.
     media.defaultPlaybackRate = resume.current.rate;
@@ -642,33 +711,39 @@ function useFreshMedia({
     for (let range = 0; range < media.buffered.length; range++) {
       buffered.push([media.buffered.start(range), media.buffered.end(range)]);
     }
-    const ageMs = mintedAt.current === null ? null : performance.now() - mintedAt.current;
     if (
       !shouldRefresh(trigger, {
-        ageMs,
+        ageMs: ageMs(),
         position: media.currentTime,
         duration: media.duration,
         buffered,
+        errorCode: media.error?.code ?? null,
       })
     ) {
       return false;
     }
-    reload(media);
+    reload(media, trigger === 'error');
     return true;
   };
 
   return {
     onLoadedMetadata: (event: MediaEvent) => {
       const media = event.currentTarget;
-      mintedAt.current = performance.now();
+      minted.current = { wall: Date.now(), mono: performance.now() };
       const back = resume.current;
       resume.current = null;
       if (back) {
         media.currentTime = back.at;
         media.playbackRate = back.rate;
-        // Refused only where the browser wants a fresh tap; the controls are
-        // right there for it.
-        if (back.play) media.play().catch(() => {});
+        if (back.play && !media.closest('[hidden]') && !anotherPlaying(media)) {
+          // Refused only where the browser wants a fresh tap; the controls are
+          // right there for it.
+          media.play().catch(() => {
+            playing.current = false;
+          });
+        } else {
+          playing.current = false;
+        }
         return;
       }
       if (!ready.current) {
@@ -681,14 +756,20 @@ function useFreshMedia({
       pauseOthers(event.currentTarget);
       consider('play', event.currentTarget);
     },
-    onPlaying: () => {
-      reloads.current = 0;
-    },
     onPause: () => {
       playing.current = false;
     },
     onEnded: () => {
       playing.current = false;
+    },
+    onTimeUpdate: (event: MediaEvent) => {
+      if (
+        failedAt.current !== null &&
+        event.currentTarget.currentTime > failedAt.current + PROGRESS_SECONDS
+      ) {
+        failures.current = 0;
+        failedAt.current = null;
+      }
     },
     onSeeking: (event: MediaEvent) => {
       consider('seeking', event.currentTarget);
@@ -701,9 +782,10 @@ function useFreshMedia({
     },
     onError: (event: MediaEvent) => {
       const media = event.currentTarget;
-      // A reload that itself failed tries again, keeping where it was going.
-      if (resume.current) return reload(media);
-      if (!ready.current || !consider('error', media)) onFail();
+      // A reload that itself failed counts as a failure, and tries again from
+      // where it was going.
+      if (resume.current) return reload(media, true);
+      if (!ready.current || !consider('error', media)) giveUp();
     },
   };
 }

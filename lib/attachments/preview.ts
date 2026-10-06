@@ -51,8 +51,13 @@ export type PlayableMedia = { kind: 'audio' | 'video'; probe: string };
  * 18.4 and not before, whatever browser it runs, so `canPlayType` with `probe`
  * decides in the console itself.
  *
- * `audio/ogg` is asked about as Opus, because that is what WhatsApp records a
- * voice note in and the bare type only ever answers "maybe".
+ * Each is asked about with the codecs it arrives in, because a bare container
+ * only ever answers "maybe" and so says nothing. `audio/ogg` is Opus, which
+ * is what WhatsApp records a voice note in. MP4 is H.264 and AAC, which is what
+ * WhatsApp and Messenger send. A Chromium built without those codecs says
+ * "maybe" to a bare `video/mp4`, then fails to play every one. An iPhone video
+ * may be HEVC instead, which the probe cannot see; one that will not decode
+ * reaches the failure line, which keeps the link.
  *
  * Absent on purpose, so they stay download links:
  *
@@ -68,14 +73,14 @@ export type PlayableMedia = { kind: 'audio' | 'video'; probe: string };
 const PLAYABLE = new Map<string, PlayableMedia>([
   ['audio/ogg', { kind: 'audio', probe: 'audio/ogg; codecs="opus"' }],
   ['audio/mpeg', { kind: 'audio', probe: 'audio/mpeg' }],
-  ['audio/mp4', { kind: 'audio', probe: 'audio/mp4' }],
-  ['audio/x-m4a', { kind: 'audio', probe: 'audio/mp4' }],
+  ['audio/mp4', { kind: 'audio', probe: 'audio/mp4; codecs="mp4a.40.2"' }],
+  ['audio/x-m4a', { kind: 'audio', probe: 'audio/mp4; codecs="mp4a.40.2"' }],
   ['audio/aac', { kind: 'audio', probe: 'audio/aac' }],
   ['audio/wav', { kind: 'audio', probe: 'audio/wav' }],
   ['audio/webm', { kind: 'audio', probe: 'audio/webm' }],
-  ['video/mp4', { kind: 'video', probe: 'video/mp4' }],
+  ['video/mp4', { kind: 'video', probe: 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"' }],
   ['video/webm', { kind: 'video', probe: 'video/webm' }],
-  ['video/quicktime', { kind: 'video', probe: 'video/quicktime' }],
+  ['video/quicktime', { kind: 'video', probe: 'video/quicktime; codecs="avc1.42E01E, mp4a.40.2"' }],
 ]);
 
 export function playableMedia(contentType: string): PlayableMedia | null {

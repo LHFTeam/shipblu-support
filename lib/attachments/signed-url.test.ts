@@ -14,8 +14,23 @@ describe('shouldRefresh', () => {
     }
   });
 
-  it('reloads on an error once metadata had arrived, however young the URL', () => {
-    expect(shouldRefresh('error', { ageMs: 1_000, position: 3, ...note })).toBe(true);
+  it('reloads on a network error once metadata had arrived, however young the URL', () => {
+    expect(shouldRefresh('error', { ageMs: 1_000, position: 3, errorCode: 2, ...note })).toBe(true);
+  });
+
+  it('takes a decode error on a young URL for the file, and on an old one for a dead range', () => {
+    expect(shouldRefresh('error', { ageMs: 1_000, position: 3, errorCode: 3, ...note })).toBe(
+      false,
+    );
+    expect(shouldRefresh('error', { ageMs: minutes(6), position: 3, errorCode: 3, ...note })).toBe(
+      true,
+    );
+  });
+
+  it('never reloads a source that was refused outright', () => {
+    expect(shouldRefresh('error', { ageMs: minutes(6), position: 3, errorCode: 4, ...note })).toBe(
+      false,
+    );
   });
 
   it('trusts a young URL through a stall, a play or a seek', () => {

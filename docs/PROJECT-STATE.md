@@ -4569,9 +4569,9 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     ranges for as long as it plays, and every engine sends those later range
     requests straight to the signed URL it was redirected to. Chrome and
     Firefox were measured doing it, it is in both engines' loader source, and
-    Safari has been reported doing the same. So a video paused for more than
-    five minutes, or seeked past what was buffered, asks Storage with a dead
-    signature.
+    Safari has been reported doing the same. So once five minutes have passed,
+    a video resumed from a pause, or seeked past what was buffered, asks
+    Storage with a dead signature.
 
     Storage answers that with a 400 and a JSON body. Chrome's response
     blocking (ORB) hides a cross-origin JSON body from the media stack as a

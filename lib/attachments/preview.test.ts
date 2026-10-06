@@ -30,8 +30,11 @@ describe('isPreviewableImage', () => {
       probe: 'audio/ogg; codecs="opus"',
     });
     expect(playableMedia('audio/ogg; codecs=opus')?.kind).toBe('audio');
-    expect(playableMedia('VIDEO/MP4')).toEqual({ kind: 'video', probe: 'video/mp4' });
-    expect(playableMedia('audio/x-m4a')?.probe).toBe('audio/mp4');
+    expect(playableMedia('VIDEO/MP4')).toEqual({
+      kind: 'video',
+      probe: 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"',
+    });
+    expect(playableMedia('audio/x-m4a')?.probe).toBe('audio/mp4; codecs="mp4a.40.2"');
   });
 
   it('keeps what no browser plays as a download link', () => {
