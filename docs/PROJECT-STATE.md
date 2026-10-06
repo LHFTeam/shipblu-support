@@ -4528,6 +4528,35 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     `action=`, so the same reset should reach them on a refusal; only the
     thread form was measured, and the hook is there for them to adopt.
 
+81. **An `sr-only` span scrolled the whole console off the screen.** _2026-10-05,
+    caught in review before merge._ The inline image preview gave each
+    attachment list a screen-reader live region, `sr-only`, which is
+    `position: absolute`. Nothing between the timeline and `<html>` is
+    positioned, so the box was placed against the document, past the shell's
+    `overflow-hidden`. That clips only what it contains, and a box whose
+    containing block is above it is not contained. The span sat at its static
+    position thousands of pixels down the thread and stretched the document
+    to reach it: 7,791px against an 800px viewport on a 59-message ticket.
+    Scrolling past the end of the timeline then chained to the window and took
+    the header, timeline and composer off the screen. It happened on every
+    ticket with a picture below the first screen, whether or not anybody
+    opened one.
+
+    It was invisible to every check that ran first. Typecheck, lint and the
+    build have no opinion, and a browser run asserting the shell's and the
+    document's `scrollTop` stayed 0 passed, because nothing had scrolled yet.
+    What caught it was measuring `document.documentElement.scrollHeight`
+    against `clientHeight`, and then wheeling past the end. The fix is a
+    `relative` wrapper on `AttachmentList`
+    (`app/(console)/inbox/[number]/attachments.tsx`), so the box belongs to the
+    pane, which clips it.
+
+    Generally: anything `position: absolute` inside a console scroll pane,
+    `sr-only` included, needs a positioned ancestor inside that pane. The
+    inbox list's `sr-only` spans are safe only because their rows are
+    `relative`. To check, compare the document's `scrollHeight` with its
+    `clientHeight`; a `scrollTop` of 0 proves nothing.
+
 ## 7. Verification already done
 
 - **The knowledge-base role floor, against a real Postgres.** _2026-09-04._ The
