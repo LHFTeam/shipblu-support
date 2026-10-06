@@ -1070,6 +1070,31 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   **4** rows and `automation_rules` **1** as of 2026-09-20, so neither cron runs
   over nothing any more. Whatever else Freshdesk enforces today still needs
   transcribing, and one automation rule is not a rule set.
+- **Canned responses are empty, and a starter library is ready to seed.**
+  `canned_responses` held **0** rows on 2026-10-05, so the composer's
+  `Canned reply` picker renders nothing at all and no automation rule has a
+  response to send. `lib/tickets/canned-library.ts` holds a bilingual starter
+  set organised by the taxonomy's areas, and
+  `seed_canned_responses` puts it in. The order matters, because the job writes
+  `canned_responses.seed_key` from migration 0030 and only the **web** service
+  migrates on deploy: deploy web, then the worker, then run it dry and read the
+  report before running it for real. From a shell that is
+  `npm run job -- seed_canned_responses dryRun=true`; without one, a `jobs` row
+  the running worker claims within seconds,
+  `insert into jobs (type, payload) values ('seed_canned_responses', '{"dryRun": true}')`,
+  with the report under `[seed_canned_responses]` in the worker's log.
+  Re-running is safe and changes nothing that is current. A response the team
+  has edited is named in the report and left alone. To ship a content fix, use
+  `overwrite=true keys=<key,...>`. It replaces only the entries named, logs
+  each one it replaces, and has no undo, so preview it with `dryRun=true`
+  first. Retiring a response takes two steps: a response deleted in the console
+  comes back on the next run, and an entry removed from the library is not
+  deleted, since an automation rule may send it. So remove it from the library
+  and then delete its row in the console. The report names every seeded row the
+  library no longer has. The policy the responses state (delivery hours and attempts, the
+  24-hour damage-claim window, the myBlu refund path, the COD ceiling, Fees on
+  Delivery, the dashboard menus) is quoted from the help centre as it read that
+  day.
 - **The side conversation picker's two registers.** Both are filled:
   `internal_recipients` has 3 teams and `locations` 14 hubs (above), so the
   picker opens on _Hubs and warehouses_. **Its default moved with them.** The
