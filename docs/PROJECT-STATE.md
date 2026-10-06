@@ -4621,28 +4621,99 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     nothing for a reset to move (`DangerAction`, thread control, profile
     refresh, comment moderation, the article status, restore and delete
     buttons, merge rows, the availability switches, the import and backfill
-    buttons, agent activate). The purge panel stays too, because its one typed
-    field is controlled and a reset leaves it alone. Those forms still get
-    React's reset, and it changes nothing in them. Nothing else in the console
-    resets a form: there is no reset button and no `requestFormReset` call. So
-    a converted form's controlled select cannot drift from what it submits.
+    buttons, agent activate, and the help centre's sign-out). The purge panel
+    stays too, because its one typed field is controlled and a reset leaves it
+    alone. Those forms still get React's reset, and it changes nothing in them.
+    Nothing else in the console resets a form: there is no reset button and no
+    `requestFormReset` call. So a converted form's controlled select cannot
+    drift from what it submits.
     `TemplateForm` still keeps its values after a send, as it always did. It now
     also keeps showing the template it sent, where the reset used to put the
     select back on the first one.
 
-    **Not changed: the help centre and the sign-in pages**, which this fix's
-    scope, the agent console, left out. Measured the same way on the same day,
-    every one of them reproduces. The ones that matter: the portal's reply box
-    empties a customer's whole reply when the ticket was closed while they
-    typed; the portal's new-ticket form wipes everything and puts an edited
-    subject back to the one it was opened with; registration empties the name,
-    email and password for an address the browser accepts and the server
-    refuses (`mona@shipblu`); both sign-in forms empty the email after a wrong
-    password; and the agent invite puts a corrected name back to the admin's
-    spelling, which a resend then writes onto the agent row. The help centre's
-    ticket form keeps its typed text, which is controlled, and loses its
-    dropdowns and ticks. The hook fits all of them: their `error` is a
-    `StringKey`, which is a string.
+    **The help centre and the sign-in pages followed on 2026-10-06.** The
+    console fix had left them out, and every one of them reproduced. The
+    portal's reply box emptied a customer's whole reply when the ticket was
+    closed while they typed. The portal's new-ticket form wiped everything and
+    put an edited subject back to the one it was opened with, so a ticket sent
+    again was stored without whichever answers the customer did not retype.
+    Registration emptied the name, email and password for an address the
+    browser accepts and the server refuses (`mona@shipblu`). Both sign-in forms
+    emptied the email after a wrong password. The agent invite put a corrected
+    name back to the admin's spelling, and the resend wrote that spelling onto
+    the agent row. Setup and the password reset emptied their fields. The help
+    centre's ticket form kept its typed text, which is controlled, and lost its
+    dropdowns, ticks and files under the state still describing them: the
+    question a dropdown answer revealed stayed on screen while the dropdown
+    read blank, the note shown while files are attached stayed while the input
+    held none, and an unchanged resend sent the blank and no files. A keystroke
+    in any controlled field put the dropdown back, which is why typing a
+    correction hid it. And an action that never answered took the form to the
+    error page, the draft with it, as it had the console's: measured on the
+    reply box and both sign-ins.
+
+    All ten now submit through `useActionForm`, the forgot-password form
+    included: it has no realistic refusal, but converting it cost nothing.
+    Their state shapes fit as they are, because the hook asks only that `error`
+    be a string and a `StringKey` is one. None takes the key, because every
+    success leaves the form behind: a redirect, or the check-your-email panel
+    in its place.
+    - The portal reply is the one success that stays on its own route
+      (`?replied=1`), and the router keeps a page mounted across a change of
+      search params. The box empties anyway, and always did: a server action's
+      redirect rejects the action with a redirect error marked handled, and
+      `RedirectErrorBoundary` catches it in order to remount the subtree.
+      Measured on both trees and both builds as a new textarea, no reset event,
+      and the reply once in the thread and once in the table. React's reset was
+      never what cleared it, so converting changed nothing on success.
+    - The two sign-in forms keep the address and still empty the password on a
+      refusal, which is what the reset did to it. A wrong password is usually
+      a near miss of the right one, and left in the box it can be revealed by
+      whoever sits down next. An effect clears it on the node rather than a key
+      remounting it, so focus stays in the box an Enter was pressed in, and
+      only on a refusal, so the initial state cannot wipe a password already
+      in the box when the form hydrates or mounts, which is where an autofill
+      lands. (Measured by setting the value before each; Chrome's own autofill
+      was not driven.)
+    - A thrown action's refusal carries a `StringKey` in the help centre. The
+      hook's own sentence is English and not a key: `t()` looked it up, got
+      `undefined`, and `ErrorText` rendered nothing, so with the request
+      aborted the Arabic reply box and sign-in kept the draft and said nothing
+      at all. The hook now takes the refusal's error as an argument, required
+      by type wherever `error` is narrower than `string`, and the help centre
+      passes `errorNoAnswer`.
+
+    One thing the hook costs every form it serves, and these more than the
+    console's, which needs JavaScript anyway: posting without it. To catch a
+    thrown action the hook hands React a client function rather than the server
+    action, so the server renders the form with a `javascript:` action and no
+    server-action fields, where it used to render a `POST` to the action. A
+    submission made while the page is still loading is captured and replayed
+    once React arrives; one made with JavaScript off does nothing: no request,
+    no answer, no message. Measured on both sign-ins: before the conversion,
+    JavaScript off, each posted and came back refused; after it, nothing left
+    the page. Keeping both is possible and not done here, because it changes the
+    hook every console form uses: a second `useActionState` over the server
+    action itself, handed to the form as `action` and seeding the wrapped one,
+    would let the server render the post again and still show its answer.
+
+    Measured both ways described above, on both builds. The scratch harness
+    bundled the ten real components, hydrated server-rendered markup, stubbed
+    the actions and ran 244 checks per build: the commit before failed the same
+    86 on each, the conversion none (on the hook as it stood before its own
+    rebase, whose refusal path is unchanged). The real app ran against a local
+    Postgres under `next dev` and `next start`, with the real actions and real
+    refusals (a ticket closed by SQL while the reply was typed, a pattern the
+    field refuses, six files, `mona@shipblu`, a wrong password, a 201-character
+    password), reading the database after each success: 145 checks per build,
+    the commit before failing the same 54 on each. On the rebased hook the
+    conversion passed all 139 that do not turn JavaScript off, on both builds;
+    the ones that do are the change above. With the action request aborted, the
+    commit before failed 9 of 12 checks (each form replaced by the error page),
+    the rebased hook without `errorNoAnswer` 2 of 13 (the two help-centre forms
+    silent), and the change none of 13 on either build. The harness and the
+    runs before the rebase logged no React warning or error; the no-answer runs
+    log only the aborted request itself.
 
     Generally: assume a native reset is a desync, not a clear. The default a
     controlled `<select>` or checkbox carries is the one it was rendered with,
