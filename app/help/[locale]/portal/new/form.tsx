@@ -19,7 +19,7 @@ export function NewTicketForm({
   /** Seeded from the query string; see the comment on the page above. */
   subject?: string;
 }) {
-  const { state, form } = useActionForm(createPortalTicket, INITIAL);
+  const { state, form } = useActionForm(createPortalTicket, INITIAL, 'errorNoAnswer');
 
   return (
     <form action={form.action} onSubmit={form.onSubmit} className="flex flex-col gap-4">

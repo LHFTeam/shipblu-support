@@ -9,7 +9,7 @@ import { useActionForm } from '@/components/use-action-form';
 const INITIAL: PortalFormState = { error: null };
 
 export function ResetForm({ locale, token }: { locale: Locale; token: string }) {
-  const { state, form } = useActionForm(portalResetPassword, INITIAL);
+  const { state, form } = useActionForm(portalResetPassword, INITIAL, 'errorNoAnswer');
 
   return (
     <form action={form.action} onSubmit={form.onSubmit} className="flex flex-col gap-4">

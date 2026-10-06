@@ -9,7 +9,7 @@ import { useActionForm } from '@/components/use-action-form';
 const INITIAL: PortalFormState = { error: null };
 
 export function RegisterForm({ locale }: { locale: Locale }) {
-  const { state, form } = useActionForm(portalRegister, INITIAL);
+  const { state, form } = useActionForm(portalRegister, INITIAL, 'errorNoAnswer');
 
   // Deliberately the same panel whether the address was new, already had an
   // account, or was throttled. The customer's next step is identical in all

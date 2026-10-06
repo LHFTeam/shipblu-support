@@ -23,7 +23,7 @@ export function LoginForm({
   next?: string;
   justReset?: boolean;
 }) {
-  const { state, form } = useActionForm(portalSignIn, INITIAL);
+  const { state, form } = useActionForm(portalSignIn, INITIAL, 'errorNoAnswer');
   const password = useRef<HTMLInputElement>(null);
 
   // A refused sign-in keeps the address and empties the password, as React's

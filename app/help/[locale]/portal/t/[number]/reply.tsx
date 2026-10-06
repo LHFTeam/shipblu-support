@@ -13,9 +13,16 @@ const INITIAL: PortalTicketState = { error: null };
  * only ever renders the failure case. That is deliberate: the thread above it is
  * server-rendered, and a success path that stayed on the page would leave the
  * customer's own message missing from the conversation they just added it to.
+ *
+ * The redirect is also what empties the box after a send, which is why the form
+ * has no key. `?replied=1` keeps the page on its own route, which the router
+ * would leave mounted, but a server action's redirect reaches the page as a
+ * handled redirect error and Next's redirect boundary remounts the subtree for
+ * it: measured as a new textarea and no reset. A refusal, such as the ticket
+ * being closed while the customer typed, leaves the reply where it is.
  */
 export function ReplyBox({ locale, number }: { locale: Locale; number: number }) {
-  const { state, form } = useActionForm(replyToPortalTicket, INITIAL);
+  const { state, form } = useActionForm(replyToPortalTicket, INITIAL, 'errorNoAnswer');
 
   return (
     <form action={form.action} onSubmit={form.onSubmit} className="flex flex-col gap-3">

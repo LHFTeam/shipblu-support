@@ -63,7 +63,7 @@ export function TicketForm({
   /** Seeded from the query string, the way the tracking page hands over a number. */
   subject?: string;
 }) {
-  const { state, form } = useActionForm(submitTicketForm, INITIAL);
+  const { state, form } = useActionForm(submitTicketForm, INITIAL, 'errorNoAnswer');
   const [custom, setCustom] = useState<CustomFieldValues>({});
   const [system, setSystem] = useState<SystemValues>(subject ? { subject } : {});
   const [fileCount, setFileCount] = useState(0);

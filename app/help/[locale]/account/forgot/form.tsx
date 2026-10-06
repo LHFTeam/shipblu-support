@@ -9,7 +9,7 @@ import { useActionForm } from '@/components/use-action-form';
 const INITIAL: PortalFormState = { error: null };
 
 export function ForgotForm({ locale }: { locale: Locale }) {
-  const { state, form } = useActionForm(portalForgotPassword, INITIAL);
+  const { state, form } = useActionForm(portalForgotPassword, INITIAL, 'errorNoAnswer');
 
   if (state.done) {
     return (

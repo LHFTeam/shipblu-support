@@ -25,7 +25,8 @@ const LOST =
  * and a controlled checkbox on what it showed at mount. The component still
  * holds the agent's choice, so the screen drawn from it says one thing and the
  * control, which is what gets submitted, says another. Measured in Chromium
- * across the console's forms; `docs/PROJECT-STATE.md` §6.80.
+ * across the console's forms, then the help centre's and the sign-in pages';
+ * `docs/PROJECT-STATE.md` §6.80.
  *
  * So the form submits from `onSubmit`, which cancels the native submission and
  * starts the action in a transition of its own. React then takes the path it
@@ -51,6 +52,7 @@ const LOST =
 export function useActionForm<State extends ActionState>(
   action: (state: Awaited<State>, formData: FormData) => Promise<State>,
   initial: Awaited<State>,
+  ...[lost = LOST]: Lost<Awaited<State>>
 ): { state: Awaited<State>; key: number; form: FormHandlers; pending: boolean } {
   const router = useRouter();
 
@@ -64,7 +66,7 @@ export function useActionForm<State extends ActionState>(
       unstable_rethrow(error);
       // If it did land, this is what puts it on the page the error points at.
       router.refresh();
-      return { error: LOST, nonce: previous.nonce } as Awaited<State>;
+      return { error: lost, nonce: previous.nonce } as Awaited<State>;
     }
   }
 
@@ -84,6 +86,19 @@ export function useActionForm<State extends ActionState>(
 
   return { state, key: state.nonce ?? 0, form: { action: dispatch, onSubmit }, pending };
 }
+
+/**
+ * What a thrown action answers with. A form whose `error` is a sentence takes
+ * `LOST`. One whose `error` is a key its page translates — the help centre's
+ * `StringKey` — must name its own: `t()` looks a sentence up as a key, gets
+ * `undefined`, and the refusal shows nothing at all, so the customer is not
+ * told their reply may not have gone. Required by type rather than by
+ * convention, because forgetting it fails silently.
+ */
+type Lost<State extends ActionState> =
+  string extends NonNullable<State['error']>
+    ? [lost?: string]
+    : [lost: NonNullable<State['error']>];
 
 /** Both go on the `<form>`; a component rendering it for a parent takes this. */
 export type FormHandlers = {
