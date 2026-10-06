@@ -1073,31 +1073,59 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   **4** rows and `automation_rules` **1** as of 2026-09-20, so neither cron runs
   over nothing any more. Whatever else Freshdesk enforces today still needs
   transcribing, and one automation rule is not a rule set.
-- **Canned responses are empty, and a starter library is ready to seed.**
-  `canned_responses` held **0** rows on 2026-10-05, so the composer's
-  `Canned reply` picker renders nothing at all and no automation rule has a
-  response to send. `lib/tickets/canned-library.ts` holds a bilingual starter
-  set organised by the taxonomy's areas, and
-  `seed_canned_responses` puts it in. The order matters, because the job writes
-  `canned_responses.seed_key` from migration 0030 and only the **web** service
-  migrates on deploy: deploy web, then the worker, then run it dry and read the
-  report before running it for real. From a shell that is
-  `npm run job -- seed_canned_responses dryRun=true`; without one, a `jobs` row
-  the running worker claims within seconds,
-  `insert into jobs (type, payload) values ('seed_canned_responses', '{"dryRun": true}')`,
-  with the report under `[seed_canned_responses]` in the worker's log.
-  Re-running is safe and changes nothing that is current. A response the team
-  has edited is named in the report and left alone. To ship a content fix, use
-  `overwrite=true keys=<key,...>`. It replaces only the entries named, logs
-  each one it replaces, and has no undo, so preview it with `dryRun=true`
-  first. Retiring a response takes two steps: a response deleted in the console
-  comes back on the next run, and an entry removed from the library is not
-  deleted, since an automation rule may send it. So remove it from the library
-  and then delete its row in the console. The report names every seeded row the
-  library no longer has. The policy the responses state (delivery hours and attempts, the
-  24-hour damage-claim window, the myBlu refund path, the COD ceiling, Fees on
-  Delivery, the dashboard menus) is quoted from the help centre as it read that
-  day.
+- ~~**Canned responses are empty.**~~ Seeded in production on 2026-10-06, from
+  0 rows: `canned_responses` holds the **62** responses of
+  `lib/tickets/canned-library.ts` in **11** folders. Every one is `global`,
+  carries both languages and both HTML bodies, and the longest Arabic body is
+  976 bytes, under Instagram's 1000. Web and worker went out on `8426c35` first.
+  Web went live at 07:32 UTC and applied migration 0030 in its pre-deploy; the
+  worker followed at 07:37. Then three `jobs` rows went in, and the worker's log
+  answered each under `[seed_canned_responses]`:
+
+  - **10:50**, a dry run: `62 created`.
+  - **10:52**, the real run (job `3181996e-892e-4a28-8a34-2a531e016c09`):
+    `62 created`.
+  - **10:53**, a second dry run: `0 created, 0 rewritten, 62 already current`.
+    That is the idempotence the job exists for, measured against production
+    rather than the test database.
+
+  The rows were inserted from the Supabase SQL editor because the Supabase MCP
+  connector answered every call that day with
+  `FGA Authentication Error. Unauthorized`, including after it was reconnected.
+  The running worker claims a row like this within seconds:
+
+  ```sql
+  insert into jobs (type, payload)
+  values ('seed_canned_responses', '{"dryRun": true}');
+  ```
+
+  From a shell it is `npm run job -- seed_canned_responses dryRun=true`.
+
+  Operating it from here:
+
+  - **Re-running is safe** and changes nothing that is current. A response the
+    team has edited is named in the report and left alone.
+  - **To ship a content fix**, use `overwrite=true keys=<key,...>`. It replaces
+    only the entries named and logs each one it replaces. It has no undo,
+    because a canned response has no version table, so preview it with
+    `dryRun=true` first.
+  - **Retiring a response takes two steps.** A response deleted in the console
+    comes back on the next run. An entry removed from the library is not
+    deleted, since an automation rule may send it. So remove the entry from the
+    library first, then delete its row in the console. The report names every
+    seeded row the library no longer has.
+  - **To undo the seed**, run
+    `delete from canned_responses where seed_key like 'library:%'`. Only do it
+    while no rule sends one of them: a `send_reply` action holds its
+    `cannedResponseId` in jsonb, not behind a foreign key. A deleted response
+    leaves a rule that logs "references a canned response that is gone" and
+    sends nothing.
+
+  The policy the responses state is quoted from the help centre as it read on
+  2026-10-05: delivery hours and attempts, the 24-hour damage-claim window, the
+  myBlu refund path, the COD ceiling, Fees on Delivery and the dashboard menus.
+  A change to one of those articles changes the library in the same PR.
+
 - **The side conversation picker's two registers.** Both are filled:
   `internal_recipients` has 3 teams and `locations` 14 hubs (above), so the
   picker lists _Hubs and warehouses_ first. **It preselects nobody.** It used to
@@ -1891,8 +1919,8 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
 
   What is still missing is the **importer mapping**, which belongs with §5.3
   rather than here — a Freshdesk ticket's custom fields have nowhere to land
-  until the ticket importer exists. `usage_count` on canned responses is the
-  remaining member of this family: still incremented by nothing.
+  until the ticket importer exists. `usage_count` on canned responses was the
+  other member of this family and is now counted on send (below).
 
 - ~~`canned_responses.usage_count` is never incremented, and the reason is
   bigger than the column.~~ Both halves are done. The composer's reply tab now
