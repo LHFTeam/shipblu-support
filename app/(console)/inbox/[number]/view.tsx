@@ -127,7 +127,7 @@ export function ConversationView({
           Positioned so it is the containing block for anything absolutely
           positioned in the thread — `sr-only` text included. Without it such a
           box is placed against the document, past every `overflow-hidden`, and
-          lengthens the page under the console (PROJECT-STATE §6.80).
+          lengthens the page under the console (PROJECT-STATE §6.81).
         */}
         <div className="app-scroll relative min-h-0 flex-1 overflow-y-auto px-4 py-4">
           <Timeline

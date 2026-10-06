@@ -4562,7 +4562,7 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     mobile nav, which carries `app-scroll`. To check, compare the document's
     `scrollHeight` with its `clientHeight`; a `scrollTop` of 0 proves nothing.
 
-81. **A media element never comes back through `/api/attachments`.**
+82. **A media element never comes back through `/api/attachments`.**
     _2026-10-05, found before shipping inline voice notes and video._ The route
     answers 307 to a Storage URL signed for five minutes. An `<img>` fetches
     once, so that was always enough. An `<audio>` or `<video>` fetches in
