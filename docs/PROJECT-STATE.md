@@ -4679,6 +4679,24 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     after the redirect, what it does when that URL expires, and whether
     `play()` after `load()` works without a new tap.
 
+83. **Enter in the knowledge search sent the agent's half-written reply.**
+    _2026-10-07._ The knowledge panel renders inside the inbox reply `<form>`,
+    beside the canned picker, and its "Search articles…" box was a plain text
+    input. Enter in a single-line input is the browser's implicit submission
+    of the form around it. So an agent who typed half a reply, opened the
+    panel, searched and pressed Enter sent that half to the customer.
+    Reproduced in Chromium on a desktop and on a phone. The search already
+    runs as the agent types, so Enter there now does nothing: the input's
+    `onKeyDown` calls `preventDefault()`, as `shipments-field.tsx` already
+    did. The guard is on the input rather than the panel, because a keydown
+    guard on the panel would also stop Enter activating its buttons.
+
+    The rule is general. A text box that is not one of a form's own fields
+    must not render inside that form without the same guard, or Enter submits
+    whatever the form submits. A sweep of every `<form>` in the console, help
+    centre, widget and sign-in pages found no other instance, and no native
+    `<button>` missing its `type`.
+
 ## 7. Verification already done
 
 - **The knowledge-base role floor, against a real Postgres.** _2026-09-04._ The

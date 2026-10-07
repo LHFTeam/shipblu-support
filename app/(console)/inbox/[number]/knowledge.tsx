@@ -149,6 +149,18 @@ export function KnowledgePanel({
           <Input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
+            /*
+              This panel renders inside the reply form, so Enter here is the
+              browser's implicit submission of *that* form: the agent's
+              half-written reply went to the customer because they pressed the
+              key every search box teaches them to press. The search already
+              runs as they type, so Enter has nothing of its own to do and is
+              swallowed. On the input rather than the panel, because a keydown
+              guard on the panel would also stop Enter activating its buttons.
+            */
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') event.preventDefault();
+            }}
             placeholder="Search articles…"
             aria-label="Search knowledge base articles"
             className="min-w-0 flex-1"
