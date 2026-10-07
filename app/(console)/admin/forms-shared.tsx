@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Button, Card, ErrorText } from '@/components/ui';
 import type { ActionState } from '@/lib/http/action-state';
 import { SubmitButton } from '@/components/submit-button';
+import { useActionForm } from '@/components/use-action-form';
 
 /**
  * The shape every admin editor shares: a disclosure that opens a form, submits
@@ -38,11 +39,11 @@ export function EditorForm({
   submitLabel: string;
   onSaved?: () => void;
 }) {
-  const [state, formAction] = useActionState(action, INITIAL);
+  const { state, form } = useActionForm(action, INITIAL);
   useRefreshOnSuccess(state, onSaved);
 
   return (
-    <form action={formAction} className="flex flex-col gap-3">
+    <form {...form} className="flex flex-col gap-3">
       {children}
       <ErrorText>{state.error}</ErrorText>
       <SubmitButton idle={submitLabel} className="self-start" />

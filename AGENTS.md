@@ -263,6 +263,23 @@ and the help centre's are not a mistake to tidy: its `error` is a `StringKey`
 the page translates, not a sentence. A new action file anywhere else answers
 with `lib/http/action-state.ts`.
 
+A console form submits through `useActionForm`
+(`components/use-action-form.ts`), not a bare `<form action={…}>`, whenever a
+native reset could move one of its fields: anything uncontrolled, and any
+controlled select or checkbox. React 19 resets a form after every function
+action, a refusal included, so the bare shape wipes the reply an agent is
+about to correct and leaves a controlled `<select>` disagreeing with the state
+everything around it is drawn from (§6.80). The hook's `key` is also the one to
+clear a form on after a success: it holds the last success's nonce, where
+`state.nonce ?? 0` fell back to 0 on a refusal and remounted the form. A form
+of hidden fields, buttons and controlled text boxes has nothing a reset moves
+and may keep `action=`; the purge panel is one. Spread the hook's `form` onto
+the element, `<form {...form}>`: a form given only its `action` still submits,
+through React's reset. The `form-reset` repo rule refuses that shape where it
+can see a field the reset moves. The hook also turns an action that throws into
+a refusal, so a dropped connection keeps the draft rather than falling through
+to `global-error`; a form whose retry reaches a customer passes `LOST_SEND`.
+
 **Authorisation lives in code.** `proxy.ts` only checks that a session cookie
 exists; it cannot tell a revoked session from a live one. It runs on Node.js in
 Next 16, not the Edge, so that is a choice rather than a limit — its header says
@@ -506,6 +523,14 @@ overflow. Reach for a `Field` hint when the explanation should always be on
 screen, and `InfoTip` when it should be one gesture away. Never `title=` on a DOM
 element — it never appears on a phone, which is where the console is read, and
 CI rejects it.
+
+**A text box rendered inside a form it is not a field of is a `SearchInput`.**
+Enter in a single-line input submits the form that owns it, so a search or filter
+box there sends whatever that form sends: the knowledge panel's
+search, inside the reply form, sent half-written replies (§6.83).
+`components/search-input.tsx` owns no form, so no key path reaches one, and Enter
+puts a phone's keyboard away instead. No repo rule checks this, because the box
+and the form are usually in different files.
 
 **One palette, light.** The console, the help centre and the widget render the
 same colours whatever the reader's operating system asks for. So: no

@@ -161,7 +161,7 @@ export async function deliverAutomatedReply(reply: AutomatedReply): Promise<stri
       // where the row is the delivery, the visitor saw it. Either way no event
       // was written, so a time-based rule wrote it again on its next sweep.
       // Unseen only because production had no rule that replies and the
-      // out-of-hours reply switched off (§6.83).
+      // out-of-hours reply switched off (§6.84).
       firstAutoRepliedAt: firstAt(conversations.firstAutoRepliedAt, now),
     })
     .where(eq(conversations.id, reply.conversationId));

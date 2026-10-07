@@ -1,12 +1,13 @@
 'use client';
 
-import { useActionState, useState } from 'react';
+import { useState } from 'react';
 import { ErrorText, Input, Label, Select } from '@/components/ui';
 import { renderTemplatePreview, templateShape } from '@/lib/whatsapp/templates';
 import { sendTemplateReply } from '../../reply-actions';
 import type { TemplateOption } from './types';
-import { INITIAL, useRefreshOnSuccess } from './form-state';
+import { INITIAL, LOST_SEND, useRefreshOnSuccess } from './form-state';
 import { SubmitButton } from '@/components/submit-button';
+import { useActionForm, type FormHandlers } from '@/components/use-action-form';
 
 /**
  * Template send.
@@ -26,13 +27,8 @@ export function TemplateForm({
   templates: TemplateOption[];
   onSent?: () => void;
 }) {
-  const [state, action] = useActionState(sendTemplateReply, INITIAL);
-  const [templateId, setTemplateId] = useState(templates[0]?.id ?? '');
-  const [values, setValues] = useState<Record<string, string>>({});
+  const { state, key, form } = useActionForm(sendTemplateReply, INITIAL, { lost: LOST_SEND });
   useRefreshOnSuccess(state, onSent);
-
-  const template = templates.find((t) => t.id === templateId);
-  const shape = template ? templateShape(template.components) : null;
 
   if (templates.length === 0) {
     return (
@@ -43,13 +39,50 @@ export function TemplateForm({
     );
   }
 
+  return (
+    <TemplateDraft
+      key={key}
+      conversationId={conversationId}
+      templates={templates}
+      error={state.error}
+      form={form}
+    />
+  );
+}
+
+/**
+ * The form itself, keyed on the last send so a template that went out clears:
+ * the choice and every value, which live here rather than above the key
+ * (`docs/PROJECT-STATE.md` §6.58). Left filled in, the composer stays open on a
+ * desktop and a second press sends the same paid template to the customer
+ * again. React's reset used to move the select to the first template after a
+ * send, which cleared nothing — the values stayed — and left the next send
+ * pairing template one with template two's values.
+ */
+function TemplateDraft({
+  conversationId,
+  templates,
+  error,
+  form,
+}: {
+  conversationId: string;
+  templates: TemplateOption[];
+  error: string | null;
+  form: FormHandlers;
+}) {
+  const [templateId, setTemplateId] = useState(templates[0]?.id ?? '');
+  const [values, setValues] = useState<Record<string, string>>({});
+
+  const template = templates.find((t) => t.id === templateId);
+  const shape = template ? templateShape(template.components) : null;
+
   const bodyValues = Array.from(
     { length: shape?.bodyVariableCount ?? 0 },
     (_, index) => values[`body_${index + 1}`] ?? '',
   );
 
   return (
-    <form action={action} className="flex flex-col gap-3">
+    <form {...form} className="flex flex-col gap-3">
       <input type="hidden" name="conversationId" value={conversationId} />
 
       <div>
@@ -103,7 +136,7 @@ export function TemplateForm({
         </div>
       ) : null}
 
-      <ErrorText>{state.error}</ErrorText>
+      <ErrorText>{error}</ErrorText>
 
       <SubmitButton className="self-end" idle="Send template" busy="Sending…" />
     </form>

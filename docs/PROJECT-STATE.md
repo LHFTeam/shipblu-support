@@ -3814,6 +3814,13 @@ true` with a null `last_run_at`, and find nothing wrong with the rule itself.
     _should_ survive a send, because an agent who has decided to answer an
     Arabic ticket in English is answering the whole thread in English.
 
+    Two corrections from 2026-10-05 (§6.80). Not every form cleared this way:
+    the admin editors close instead, and `TemplateForm` never cleared. And the
+    key is no longer `state.nonce ?? 0`. A refusal carries no nonce, so that key
+    fell back to 0 on the first refusal after a send and remounted the form,
+    which wiped it. The key now comes from `useActionForm` and holds the last
+    success's nonce.
+
 59. **An `UPDATE` that changes nothing still moves `updated_at`.**
     _2026-09-04, review of the handbook seed._ `touch_updated_at` is created
     `BEFORE UPDATE` on every table with the column by a loop in
@@ -4563,41 +4570,198 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     `[ig_post]` with an `unsupported` attachment rather than show the post.
 
 80. **React 19 resets a form after every function action, a refused one
-    included.** _2026-10-05, review of the side-conversation picker's
-    "Choose…" default; never shipped._ `<form action={fn}>` makes React queue
-    a native `form.reset()` before it calls `fn`, and run it once the action
-    settles — whatever the action answered. The `key={state.nonce}` remount
-    (§6.58) hides this on success, because the form being reset is the one
-    being thrown away; on a first refusal the key stays at `0`, and the live
-    form is reset. (After an earlier success a refusal moves the key _back_ to
-    `0`, because only `ok()` carries a nonce, and the remount wipes the fields
-    just the same.) Two consequences, and only the first is visible:
-    - **A controlled `<select>` stops matching its own state.** React sets the
-      selected option through `value` and never marks one `defaultSelected`,
-      so the browser's reset picks the first option that is not disabled.
-      With the new "Choose…" placeholder `disabled`, that was the first hub:
-      after any refusal the picker showed Alexandria while the component still
-      held the agent's choice, and the next Send went to Alexandria. Reproduced
-      in Chromium against the repo's own React build, on the branch, before it
-      merged.
-    - **Every uncontrolled field goes back to its `defaultValue`**, so a
-      refused send wipes what the agent typed — the reply, the question, the
-      address — at exactly the moment they are about to correct one word of it.
+    included.** _2026-10-05: found reviewing the side-conversation picker's
+    "Choose…" default, then measured across the console's forms the same day._
+    `<form action={fn}>` makes React queue a native `form.reset()` before it
+    calls `fn`, and run it once the action settles, whatever the action
+    answered. A success hides this, because the form clears anyway. A refusal
+    does not, and it had three consequences:
+    - **Every uncontrolled field went back to its `defaultValue`.** A refused
+      send wiped the reply, the note, the question, the typed address, the
+      customer's email on a new ticket and an admin's whole editor, at the
+      moment the agent was about to correct one word of it. An editor of a
+      saved row went back to the row, which reads as an undo rather than a
+      wipe. A ticked box unticked and a chosen file was dropped. On the reply
+      form the hidden `cannedResponseId` survived the body it credited, which
+      is §6.58's over-count again.
+    - **A controlled `<select>` or checkbox stopped matching its own state.**
+      In the browser React never marks a controlled select's option
+      `defaultSelected`, so the reset lands on the option the server rendered
+      as selected, or on the first enabled one if the form was mounted in the
+      browser. A
+      controlled checkbox goes back to what it showed at mount. React state
+      keeps the agent's choice, so everything drawn from state still says it,
+      while the control, which is what gets submitted, says something else. It
+      heals on the component's next render, which is why nobody noticed:
+      typing into a controlled field puts it right, typing into an
+      uncontrolled one does not. Measured:
+      - the side-conversation picker showed, and sent, Alexandria;
+      - `TemplateForm` went back to the first template while the preview and
+        the variable boxes stayed on the chosen one, so the resend sent
+        template one with template two's values. Every send after a success
+        did the same, because the form has no key;
+      - on a comment thread, "Reply privately instead" unticked while
+        `metaSendKind` still said `private_reply`, so the resend went out as
+        Meta's once-per-comment private reply under a box that read public;
+      - a new ticket's priority fell back, and was sent that way: to Low when
+        the form was reached by the inbox's link, so even an untouched Urgent
+        default was downgraded, and to the server-rendered default after a full
+        page load. A custom dropdown emptied, a multi-select lost its ticks, and
+        the attachment was dropped while the visibility pass still counted it;
+      - the article editor showed and sent `public` under a note still saying
+        the article was internal, and moved the language and folder too. A new
+        knowledge-base folder was sent as Public with no floor;
+      - adding a channel sent a WhatsApp number as an email channel. A group's
+        assignment strategy was saved as Manual. An auto-response marked "Send
+        nothing" was sent as an ordinary reply with no body. A WhatsApp account
+        an admin was disconnecting was re-saved connected, and as the default.
+    - **A refusal after a success remounted the form anyway.** The keyed forms
+      used `key={state.nonce ?? 0}`. A refusal carries no nonce, so the first
+      one after a send moved the key back to 0, and the remount wiped the form
+      with or without the reset. The side-conversation form's first fix stopped
+      the reset and still lost everything this way on a ticket's second thread,
+      until #335 kept the nonce through a refusal.
 
-    Both side-conversation forms — starting a thread and writing back on one —
-    now submit through `useSubmitWithoutReset` (`inbox/[number]/form-state.ts`),
-    which calls the action from `onSubmit` with `preventDefault()` and so takes
-    React's form-action path, and with it the reset, out of the picture. Only
-    a success moves its key — anything else keeps the nonce it found, or the
-    second send on a ticket would be wiped by the remount instead. It also
-    answers an action that throws, which a hand-rolled submit forgets: without
-    its `finally` the button stays on "Sending…" for good. Next's own redirect
-    (an ended session, from `requireAgent()`) is let through rather than
-    reported as lost, since nothing was written. The picker's
-    placeholder is not `disabled` either, so any reset that does happen lands
-    on "Choose…". The other forms in the console still submit through
-    `action=`, so the same reset should reach them on a refusal; only the
-    thread form was measured, and the hook is there for them to adopt.
+    **How it was measured.** A scratch harness bundled each real component with
+    esbuild against the React that Next vendors, in its development and
+    production builds. `next/navigation` was stubbed, and every `'use server'`
+    module was replaced by a stub that records the `FormData` it receives and
+    answers a refusal or a success with a fresh nonce. Playwright drove it in
+    the container's Chromium and counted native `reset` events and remounts on
+    every refusal, so each wipe has a measured cause. The same scripts ran
+    against the commit before the fix and against the fix, with every check
+    phrased as the behaviour wanted, and each group of forms was re-run by a
+    second, adversarial pass. In the final run of all of them, against `main`
+    with #335 merged, the code before this change failed 576 of 1,112 checks
+    across both builds, in 33 of 38 scenarios. The five without a failure cover
+    the two side-conversation forms, which #335 had already fixed; the purge
+    panel and merge rows, which were never converted; two forms on one page
+    leaving each other alone; and the article editor's success path, which the
+    old reset got right. The fix failed 12 of 1,150 checks: six checks on each
+    build, every one of them a success-path change listed below. The extra
+    scenario is the slug's, which needs the fix's answer. React logged no
+    warning or error outside the redirect test, where a stand-in boundary
+    catches one on purpose.
+
+    **The fix is `useActionForm`** (`components/use-action-form.ts`):
+    - It submits from `onSubmit`, cancels the native submission and dispatches
+      the action inside `startTransition`. React keeps a path for exactly that
+      (a submit event that was `defaultPrevented` while a transition started):
+      it calls `startHostTransition` with a null action, which marks the form
+      pending for `useFormStatus` and queues no reset. `SubmitButton` needed no
+      change.
+    - `action` stays on the form too, for a submission made before hydration:
+      React captures it and replays it once it loads, where a form with no
+      `action` would send its fields to the page's own URL as a query string.
+      That one replayed submission takes React's own path, reset included.
+    - Only a success moves its `key`. A success is what `ok()` answers; one
+      without a nonce is given a fresh one, so the key and everything keyed on
+      it still move. Any other answer keeps the nonce the state already had.
+    - An action that throws becomes a refusal saying no answer came back, with
+      the draft kept and the page re-read in case it landed. The forms whose
+      retry reaches a customer or a hub (reply, template, both side
+      conversations) pass `LOST_SEND`, which says to check the timeline before
+      sending again. Before, `useActionState` rethrew it while rendering,
+      the console fell through to `global-error`, and the draft went with it: a
+      dropped connection, or an action a deploy removed. Next's own redirect and
+      not-found are rethrown through `unstable_rethrow`, so `RedirectBoundary`
+      still sees them; `requireAgent()` redirecting an ended session is not a
+      lost send.
+
+    The last two came from #335's `useSubmitWithoutReset`, written for the
+    side-conversation forms the same day. The hook absorbed it, and those
+    forms now use `useActionForm` like every other; one shape rather than two.
+
+    Its `form` is spread onto the element, `<form {...form}>`, rather than
+    wired as `action` and `onSubmit`: a form given only `action` still submits,
+    through React's own path, reset and all. The `form-reset` repo rule refuses
+    a console form with a function `action`, no spread and no `onSubmit`, that
+    holds a field a reset moves. Run against `main` before this change it named
+    15 of the converted forms; it cannot see a field another component renders
+    (`EditorForm`'s children, `Toggle`).
+
+    Converted: the composer's reply, note, template and both side-conversation
+    forms; the new-ticket form; `EditorForm`, and with it every admin editor
+    built on it; the channel add, edit and web-chat forms; the invite,
+    idle-policy and capacity forms; the article editor, the category and folder
+    forms and the translation-link picker; the contact's SBID box; and the
+    tracking-phrase editor. The side-conversation forms also moved from
+    hand-rolled `busy` state onto `useActionState` and `SubmitButton`.
+    `SideReplyForm`'s "Sending…" had never appeared, because `setBusy(true)`
+    ran inside the action's own transition.
+
+    Three actions changed with it:
+    - `saveChannel` and `createInvite` answered a success with no nonce, and
+      their add forms relied on React's reset to clear. They now answer with
+      `ok()`, `AdminState` builds on `ActionState`, and the add forms are keyed
+      on the success.
+    - `saveArticle` returns the slug it stored, and the slug box remounts on
+      the save holding it. A slug left blank is generated by the server, and a
+      box still blank after the save would send blank again and regenerate the
+      slug from the next title, moving the article's URL. The answer arrives in
+      the same commit as the key. The revalidated page is not promised to, and
+      an uncontrolled input React mounts is dirty from birth, so it would not
+      follow a page that arrived later.
+
+    The translation-link picker and the contact's SBID box are keyed the same
+    way as the add forms; their actions already returned a nonce.
+
+    What the success path gave up, all measured, none of it a change to stored
+    data:
+    - An editor that stays open after a save (the article editor, recipients,
+      channels, web chat, idle policy, the tracking phrases) shows what was
+      typed rather than the server's normalised form: tags as typed, a name not
+      yet trimmed or lowercased. Saving again stores the same row. React's
+      reset after the success used to clear each field's dirty flag so the
+      revalidated value showed. The same flag now also keeps a later change
+      made elsewhere from showing in a box whose last action was a save.
+    - In exchange those editors keep their selects. On `main` the reset after a
+      successful save put an uncontrolled select back on the option it mounted
+      on, because React never moves `defaultSelected` after mount. The next
+      save quietly undid the recipient's kind, the channel's account and group,
+      and the web chat's folders.
+    - The newly keyed forms (the channel add, the invite, the SBID box, the
+      translation-link picker) lose the caret after a success submitted with
+      Enter, because the remount replaces the input; the reset kept it. The
+      composer forms were always keyed and always did this.
+
+    Left on a bare `action=`: forms of hidden fields and a button, which have
+    nothing for a reset to move (`DangerAction`, thread control, profile
+    refresh, comment moderation, the article status, restore and delete
+    buttons, merge rows, the availability switches, the import and backfill
+    buttons, agent activate). The purge panel stays too, because its one typed
+    field is controlled and a reset leaves it alone. Those forms still get
+    React's reset, and it changes nothing in them. Nothing else in the console
+    resets a form: there is no reset button and no `requestFormReset` call. So
+    a converted form's controlled select cannot drift from what it submits.
+    `TemplateForm` now clears after a send: its choice and values moved into a
+    child keyed on the success. It never cleared before. The values stayed and
+    the reset moved only the select, so the next send paired template one with
+    template two's values; without the reset, a second press would have sent
+    the same paid template again. The agent's capacity box, which submits on
+    blur, now sends only a value that changed since it last sent: a refused cap
+    stays in the box rather than being put back, and resending it on every
+    focus change repeated the refusal.
+
+    **Not changed: the help centre and the sign-in pages**, which this fix's
+    scope, the agent console, left out. Measured the same way on the same day,
+    every one of them reproduces. The ones that matter: the portal's reply box
+    empties a customer's whole reply when the ticket was closed while they
+    typed; the portal's new-ticket form wipes everything and puts an edited
+    subject back to the one it was opened with; registration empties the name,
+    email and password for an address the browser accepts and the server
+    refuses (`mona@shipblu`); both sign-in forms empty the email after a wrong
+    password; and the agent invite puts a corrected name back to the admin's
+    spelling, which a resend then writes onto the agent row. The help centre's
+    ticket form keeps its typed text, which is controlled, and loses its
+    dropdowns and ticks. The hook fits all of them: their `error` is a
+    `StringKey`, which is a string.
+
+    Generally: assume a native reset is a desync, not a clear. The default a
+    controlled `<select>` or checkbox carries is the one it was rendered with,
+    not the one React state holds, so anything that resets the form underneath
+    React moves the control silently, and whatever reads React state goes on
+    describing the old choice.
 
     The reply form was measured on 2026-10-07 and does lose the agent's text
     on a refusal. The canned-response pick it carries in a hidden field did
@@ -4729,7 +4893,35 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     after the redirect, what it does when that URL expires, and whether
     `play()` after `load()` works without a new tap.
 
-83. **A bare `Date` in a `sql` template stranded every automated reply.**
+83. **Enter in the knowledge search sent the agent's half-written reply.**
+    _2026-10-07._ The knowledge panel renders inside the inbox reply `<form>`,
+    beside the canned picker, and its "Search articles…" box was a plain text
+    input. Enter in a single-line input is the browser's implicit submission
+    of the form that owns it. So an agent who typed half a reply, opened the
+    panel, searched and pressed Enter sent that half to the customer.
+    Reproduced in Chromium at desktop width and in a 390px touch-emulated
+    viewport. It was not tried on a real phone's keyboard, whose search key
+    reaches the page as the same Enter keydown.
+
+    The box is now a `SearchInput` (`components/search-input.tsx`), which
+    owns no form: `form=""` names none, so its form owner is null, and no key
+    path can submit the reply. A keydown guard on the one input was the first
+    fix. Review pointed out that it holds only for that input, and only for an
+    Enter that arrives as a cancellable keydown. Enter in a `SearchInput`
+    blurs it instead, since the search already runs as the agent types. On a
+    phone, blurring is what puts the keyboard away so the results under it
+    can be read.
+
+    The rule is general: a text box rendered inside a form it is not a field
+    of is a `SearchInput`, or Enter in it submits whatever the form submits.
+    No repo rule checks it, because the box and the form it lands in are
+    usually in different files, as they were here. A single-file check would
+    have missed this instance, and today it would flag only the invite page's
+    read-only email box, which is nameless on purpose. A sweep of every
+    `<form>` in the console, help centre, widget and sign-in pages found no
+    other instance, and no native `<button>` missing its `type`.
+
+84. **A bare `Date` in a `sql` template stranded every automated reply.**
     _2026-10-07, found by the first database test of `send_reply`; never
     reached a customer._ `deliverAutomatedReply` stamped
     `first_auto_replied_at` with ``sql`coalesce(..., ${now})` ``, which

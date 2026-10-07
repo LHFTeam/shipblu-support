@@ -29,7 +29,7 @@ export function latest(column: AnyPgColumn, at: Date): SQL {
  * again. Here beside `latest()` for the reason that one is — a bare `Date` in a
  * `sql` template is refused by postgres.js, and an inline copy of this coalesce
  * is exactly how `deliverAutomatedReply` came to bind one (`docs/PROJECT-STATE.md`
- * §6.83).
+ * §6.84).
  */
 export function firstAt(column: AnyPgColumn, at: Date): SQL {
   return sql`coalesce(${column}, ${at.toISOString()}::timestamptz)`;

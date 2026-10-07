@@ -217,7 +217,7 @@ export async function createInvite(_state: AdminState, formData: FormData): Prom
   revalidatePath('/admin/agents');
 
   return {
-    error: null,
+    ...ok(),
     inviteUrl,
     ...(queuedFor ? { inviteQueuedFor: queuedFor } : {}),
   };
