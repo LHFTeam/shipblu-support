@@ -3,7 +3,7 @@
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { Badge, Button, ErrorText, Input, Label, Select, Textarea } from '@/components/ui';
-import { formatBytes, formatDateTime, formatRelative } from '@/lib/format';
+import { formatDateTime, formatRelative } from '@/lib/format';
 import type { PickerEntry, SideConversationView } from '@/lib/side-conversations/queries';
 import {
   blankSideSubject,
@@ -18,6 +18,7 @@ import {
   setSideConversationState,
   startSideConversation,
 } from '../../side-conversation-actions';
+import { AttachmentList } from './attachments';
 import { useSubmitWithoutReset } from './form-state';
 
 const INITIAL: ActionState = { error: null };
@@ -137,48 +138,36 @@ export function SideConversationCard({
               <li
                 key={message.id}
                 className={`rounded-md border border-[var(--border)] bg-[var(--surface)] px-2.5 py-2 ${
-                  // An out-of-office is not the hub's answer. Dimmed rather than
-                  // hidden: "we heard back but only from a robot" is information.
-                  message.isAutomated ? 'opacity-60' : ''
-                } ${message.direction === 'outbound' ? 'ms-6' : 'me-6'}`}
+                  message.direction === 'outbound' ? 'ms-6' : 'me-6'
+                }`}
               >
-                <div className="mb-1 flex items-baseline gap-2 text-xs text-[var(--muted-foreground)]">
-                  <span className="font-medium">
-                    {message.authorName ?? (message.direction === 'inbound' ? 'They' : 'We')}
-                  </span>
-                  {message.isAutomated ? <Badge>auto-reply</Badge> : null}
-                  <span className="ms-auto">{formatDateTime(message.createdAt)}</span>
+                {/*
+                  An out-of-office is not the hub's answer. Dimmed rather than
+                  hidden: "we heard back but only from a robot" is information.
+                  The words only, not the message: opacity cannot be undone by a
+                  child, and a photo opened from the files below is opened to be
+                  read.
+                */}
+                <div className={message.isAutomated ? 'opacity-60' : undefined}>
+                  <div className="mb-1 flex items-baseline gap-2 text-xs text-[var(--muted-foreground)]">
+                    <span className="font-medium">
+                      {message.authorName ?? (message.direction === 'inbound' ? 'They' : 'We')}
+                    </span>
+                    {message.isAutomated ? <Badge>auto-reply</Badge> : null}
+                    <span className="ms-auto">{formatDateTime(message.createdAt)}</span>
+                  </div>
+
+                  {message.bodyHtml ? (
+                    <div
+                      className="prose-sm max-w-none text-sm [&_a]:text-brand-600 [&_a]:underline"
+                      dangerouslySetInnerHTML={{ __html: message.bodyHtml }}
+                    />
+                  ) : (
+                    <p className="whitespace-pre-wrap text-sm">{message.bodyText}</p>
+                  )}
                 </div>
 
-                {message.bodyHtml ? (
-                  <div
-                    className="prose-sm max-w-none text-sm [&_a]:text-brand-600 [&_a]:underline"
-                    dangerouslySetInnerHTML={{ __html: message.bodyHtml }}
-                  />
-                ) : (
-                  <p className="whitespace-pre-wrap text-sm">{message.bodyText}</p>
-                )}
-
-                {message.attachments.length > 0 ? (
-                  <ul className="mt-1.5 flex flex-wrap gap-1.5">
-                    {message.attachments.map((file) => (
-                      <li
-                        key={file.id}
-                        className="rounded border border-[var(--border)] px-1.5 py-0.5 text-xs"
-                      >
-                        <a
-                          href={`/api/attachments/${file.id}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="hover:underline"
-                        >
-                          {file.filename}
-                        </a>
-                        <span className="ms-1 opacity-60">{formatBytes(file.sizeBytes)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
+                <AttachmentList files={message.attachments} compact />
 
                 {message.direction === 'outbound' && message.deliveryStatus === 'failed' ? (
                   <p className="mt-1 text-xs text-red-600">

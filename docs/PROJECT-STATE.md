@@ -4556,6 +4556,129 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     `action=`, so the same reset should reach them on a refusal; only the
     thread form was measured, and the hook is there for them to adopt.
 
+81. **An `sr-only` span scrolled the whole console off the screen.** _2026-10-05,
+    caught in review before merge._ The inline image preview gave each
+    attachment list a screen-reader live region, `sr-only`, which is
+    `position: absolute`. Nothing between the timeline and `<html>` is
+    positioned, so the box was placed against the document, past the shell's
+    `overflow-hidden`. That clips only what it contains, and a box whose
+    containing block is above it is not contained. The span sat at its static
+    position thousands of pixels down the thread and stretched the document
+    to reach it: 7,791px against an 800px viewport on a 59-message ticket.
+    Scrolling past the end of the timeline then chained to the window and took
+    the header, timeline and composer off the screen. It happened on every
+    ticket with a picture below the first screen, whether or not anybody
+    opened one.
+
+    It was invisible to every check that ran first. Typecheck, lint and the
+    build have no opinion, and a browser run asserting the shell's and the
+    document's `scrollTop` stayed 0 passed, because nothing had scrolled yet.
+    What caught it was measuring `document.documentElement.scrollHeight`
+    against `clientHeight`, and then wheeling past the end. The fix is a
+    `relative` wrapper on `AttachmentList`
+    (`app/(console)/inbox/[number]/attachments.tsx`), so the box belongs to the
+    pane, which clips it.
+
+    Generally: anything `position: absolute` inside a console scroll pane,
+    `sr-only` included, needs a positioned ancestor inside that pane. The
+    timeline pane in `view.tsx` is now `relative` itself, so nothing added to a
+    thread can escape it. The inbox list's `sr-only` spans are safe only
+    because their rows are `relative`. Making every `.app-scroll` positioned
+    from `globals.css` looks like the general fix and is not: the class is
+    declared only under `@media (pointer: fine)`, so phones would never get it.
+    It is also unlayered, so it would beat Tailwind's `fixed` on the admin
+    mobile nav, which carries `app-scroll`. To check, compare the document's
+    `scrollHeight` with its `clientHeight`; a `scrollTop` of 0 proves nothing.
+
+82. **A media element never comes back through `/api/attachments`.**
+    _2026-10-05, found before shipping inline voice notes and video._ The route
+    answers 307 to a Storage URL signed for five minutes. An `<img>` fetches
+    once, so that was always enough. An `<audio>` or `<video>` fetches in
+    ranges for as long as it plays, and every engine sends those later range
+    requests straight to the signed URL it was redirected to. Chrome and
+    Firefox were measured doing it, it is in both engines' loader source, and
+    Safari has been reported doing the same. So once five minutes have passed,
+    a video resumed from a pause, or seeked past what was buffered, asks
+    Storage with a dead signature.
+
+    The Storage origin answers that with a 400 and a JSON body. Chrome's
+    response blocking (ORB) hides a cross-origin JSON body from the media stack
+    as a network failure, and the element then retries the dead URL for about
+    31 seconds before it reports an error. Firefox reports one at once. Waiting
+    for the error is therefore not a recovery strategy. Every other Storage
+    error is JSON too, so a range that fails for any reason after the first
+    response costs Chrome the same half minute before the player can react;
+    with the three reloads a player allows itself, a file whose later ranges
+    keep failing takes about two minutes to reach its failure line.
+
+    The origin checks the signature only as a request starts and then streams
+    the rest, so a response that began before the deadline keeps arriving after
+    it. And the project is on the Pro plan, which puts Supabase's Smart CDN in
+    front of Storage: an edge that has cached a response for one signed URL
+    keeps serving it for that URL after the token expires. Neither breaks
+    playback, but expiry is not revocation — only deleting the object cuts off
+    a URL that has already been handed out.
+
+    `lib/attachments/signed-url.ts` decides before the request instead:
+    - **When.** On a URL more than four minutes old, a play or a seek reloads
+      the element when the position has nothing buffered ahead of it. A
+      `waiting` is judged the same way unless bytes arrived in the last three
+      seconds, because a response that is still arriving is a slow link, and a
+      reload would throw it away to start the wait again. A `stalled` reloads
+      when the element cannot play on, whatever `buffered` says: for a plain
+      `src` MP4, Chrome maps the bytes received linearly onto the duration, so
+      the bytes ahead of the first frame — a `moov` at the head of the file
+      most of all — put the reported edge 1.4 to 2.5 seconds past where
+      playback really starves, enough to let the `waiting` through and freeze
+      the picture for 13 to 34 seconds.
+    - **How.** The reload calls `load()`, which goes back through the route
+      for a new signature, and puts back the position, the speed and the
+      playing state. A video keeps its box while a reload ahead of an expiry
+      is in flight, and focus stays on the player: Chromium 141 blurs a
+      focused native control inside `load()`.
+    - **Timed from metadata.** The URL's age runs from `loadedmetadata`, not
+      `loadstart`. With `preload="none"`, `loadstart` fires at render, so a
+      voice note played four minutes after the page opened would reload on its
+      first press.
+    - **`waiting` is not starvation on its own.** Chrome fires it on every
+      seek, into buffered data too. Treating it as starvation reloaded a
+      replayed voice note and cut the replay off.
+
+    The route marks its redirect `no-store` and must stay a 307. A 301 or 308
+    can be cached, and then the browser would reuse a dead signature.
+
+    Voice notes rarely reach any of this. The largest in production is about
+    212 KB, so the first response carries the whole note, and replaying it an
+    hour later makes no request at all.
+
+    Ogg Opus, which is what every WhatsApp voice note is, plays on an iPhone
+    only from iOS 18.4, whatever browser the phone runs. Below that, an
+    ungated player shows a duration and plays nothing. So the console asks
+    `canPlayType` in the browser, and any phone that cannot play a note keeps
+    the download link.
+
+    Known gaps, left on purpose after three rounds of measuring them, because
+    every fix tried brought a worse problem with it. Each needs a URL more
+    than four minutes old:
+    - A click or a drag on the timeline past what was buffered reloads at the
+      first seek past the buffer. A drag lands there rather than where it was
+      released, and when the reload outlasts the click the video comes back
+      paused. Treating a seek close behind the controls' pause as a drag
+      latched on a person's own pause-and-arrow and later played a paused
+      video by itself; deciding seeks only once seeking settled reloaded in
+      the middle of a drag held still, and let Firefox spend its reloads on
+      every stale seek.
+    - Firefox fails a request at once while the network is down, so a short
+      outage that refuses connections can spend all three reloads in
+      milliseconds and show the failure line. Spacing the reloads out let
+      Chromium's own late `pause` stop the video it was meant to resume.
+    - In Firefox, focus on a player's native control can fall to the page
+      after an error reload, because Firefox blurs it after `load()` returns.
+
+    Not verified on a real Safari: whether it keeps requesting the signed URL
+    after the redirect, what it does when that URL expires, and whether
+    `play()` after `load()` works without a new tap.
+
 ## 7. Verification already done
 
 - **The knowledge-base role floor, against a real Postgres.** _2026-09-04._ The

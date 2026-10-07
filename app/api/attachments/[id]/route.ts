@@ -10,6 +10,7 @@ import {
 } from '@/db/schema';
 import { can } from '@/lib/auth/permissions';
 import { getSessionAgent } from '@/lib/auth/session';
+import { ATTACHMENT_URL_TTL_SECONDS } from '@/lib/attachments/signed-url';
 import { isUuid } from '@/lib/http/uuid';
 import { canSeeChannel } from '@/lib/tickets/channel-policy';
 import { signedUrl } from '@/lib/storage';
@@ -81,6 +82,12 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     return NextResponse.json({ error: 'not found' }, { status: 404 });
   }
 
-  const url = await signedUrl(attachment.storagePath, 300);
-  return NextResponse.redirect(url, { status: 307 });
+  const url = await signedUrl(attachment.storagePath, ATTACHMENT_URL_TTL_SECONDS);
+  const response = NextResponse.redirect(url, { status: 307 });
+  // A redirect carrying no freshness is not cached heuristically, but this one
+  // names a URL that stops working within minutes and an inline player asks
+  // for it again on purpose to get a new one, so it says so rather than relying
+  // on that. And a 307 rather than a 308: a permanent redirect may be cached.
+  response.headers.set('Cache-Control', 'no-store');
+  return response;
 }

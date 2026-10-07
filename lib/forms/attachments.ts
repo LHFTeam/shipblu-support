@@ -1,6 +1,7 @@
 import { db } from '@/db/client';
 import { attachments } from '@/db/schema';
 import { buildAttachmentPath, uploadObject } from '@/lib/storage';
+import { mimeEssence } from '@/lib/http/mime';
 import { logger } from '@/lib/log';
 
 const log = logger('forms');
@@ -29,7 +30,7 @@ export async function storeFormAttachments(input: {
   for (const [index, file] of input.files.entries()) {
     try {
       const bytes = Buffer.from(await file.arrayBuffer());
-      const contentType = (file.type || 'application/octet-stream').split(';')[0]!.trim();
+      const contentType = mimeEssence(file.type) || 'application/octet-stream';
 
       const object = await uploadObject(
         buildAttachmentPath(input.conversationId, `${input.messageId}-${index}`, file.name),

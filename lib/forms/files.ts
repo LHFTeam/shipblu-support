@@ -1,3 +1,5 @@
+import { mimeEssence } from '@/lib/http/mime';
+
 /**
  * What a form will accept as an attachment, and how it says no.
  *
@@ -94,7 +96,7 @@ export function checkFormFiles(entries: unknown[]): CheckedFiles {
     // The browser's guess, and it is the only one available before the bytes are
     // read. It is a courtesy check: the allowlist bounds what an honest customer
     // uploads, and the private bucket is what bounds what a dishonest one gains.
-    const type = (file.type || '').split(';')[0]!.trim().toLowerCase();
+    const type = mimeEssence(file.type);
     if (!ACCEPTED.has(type)) {
       return { ok: false, refusal: { reason: 'type', filename: file.name } };
     }

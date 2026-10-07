@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { env } from '@/lib/env';
 import { isTimeout, sizedTimeout } from '@/lib/http/deadline';
+import { mimeEssence } from '@/lib/http/mime';
 
 /**
  * Supabase Storage via its REST API rather than the JS SDK.
@@ -88,7 +89,7 @@ export function buildAttachmentPath(
 const AVATAR_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 
 export function isStorableAvatarType(contentType: string): boolean {
-  return AVATAR_TYPES.has(contentType.split(';')[0]!.trim().toLowerCase());
+  return AVATAR_TYPES.has(mimeEssence(contentType));
 }
 
 /**

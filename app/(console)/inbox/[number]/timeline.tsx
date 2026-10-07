@@ -1,7 +1,7 @@
 'use client';
 
 import { Badge } from '@/components/ui';
-import { formatBytes, formatDateTime } from '@/lib/format';
+import { formatDateTime } from '@/lib/format';
 import type { ConversationDetail } from '@/lib/tickets/conversation';
 import { isPrivateReplyMessage, isPublicMetaMessage } from '@/lib/meta/visibility';
 import {
@@ -12,6 +12,7 @@ import {
 } from '@/lib/tickets/shared-location';
 import { lostReceiptNote } from '@/lib/whatsapp/receipts';
 import { readOnlyReason } from '@/lib/tickets/channel-policy';
+import { AttachmentList } from './attachments';
 import { CommentModeration } from './comment-moderation';
 import { SideConversationCard } from './side-conversations';
 
@@ -123,28 +124,7 @@ export function Timeline({
 
             <MessageBody message={message} />
 
-            {message.attachments.length > 0 ? (
-              <ul className="mt-2 flex flex-wrap gap-2">
-                {message.attachments.map((file) => (
-                  <li
-                    key={file.id}
-                    className="rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs"
-                  >
-                    <a
-                      href={`/api/attachments/${file.id}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="hover:underline"
-                    >
-                      {file.filename}
-                    </a>
-                    <span className="ms-1.5 text-[var(--muted-foreground)]">
-                      {formatBytes(file.sizeBytes)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
+            <AttachmentList files={message.attachments} />
 
             {isInbound && isPublicComment ? (
               <CommentModeration

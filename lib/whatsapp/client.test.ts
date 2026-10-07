@@ -177,6 +177,40 @@ describe('WhatsApp credentials', () => {
   });
 });
 
+/**
+ * What `download_media` stores as the attachment's content type and picks the
+ * file's extension from, so case and parameters must not survive into it.
+ */
+describe('the media type a download reports', () => {
+  it("reads Graph's mime_type as its essence, and an empty one as unknown", async () => {
+    stubFetch(
+      async () =>
+        new Response(JSON.stringify({ url: 'https://cdn', mime_type: 'Image/JPEG; q=1' })),
+    );
+    await expect(getMediaUrl('media-1')).resolves.toMatchObject({ mimeType: 'image/jpeg' });
+
+    stubFetch(async () => new Response(JSON.stringify({ url: 'https://cdn', mime_type: '' })));
+    await expect(getMediaUrl('media-1')).resolves.toMatchObject({ mimeType: null });
+  });
+
+  it("reads the download's Content-Type the same way", async () => {
+    stubFetch(
+      async () =>
+        new Response(new Uint8Array([1]), {
+          headers: { 'Content-Type': 'Audio/OGG; codecs=opus' },
+        }),
+    );
+    await expect(downloadMedia('https://lookaside.fbsbx.com/1')).resolves.toMatchObject({
+      contentType: 'audio/ogg',
+    });
+
+    stubFetch(async () => new Response(new Uint8Array([1])));
+    await expect(downloadMedia('https://lookaside.fbsbx.com/1')).resolves.toMatchObject({
+      contentType: 'application/octet-stream',
+    });
+  });
+});
+
 describe('WhatsApp error classification', () => {
   it('retries an expired or revoked access token', async () => {
     // The token is rotated by a human, and every attempt before that fails. The
