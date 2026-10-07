@@ -1068,11 +1068,12 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   locks the row, counts the threads, and marks a hub any thread has used not
   operating instead of deleting it — the same function, and so the same rule,
   `deleteInternalRecipient` applies to the picker's other register. Starting a
-  thread re-reads its hub or recipient under a share lock (`holdEntry`) before
-  inserting, so one deleted or switched off while the agent wrote is refused
-  with a sentence. Before, a deleted one died on the foreign key and the
-  composer said the send "may or may not have gone through" when nothing was
-  written, and a retired one was sent to anyway.
+  thread reads its hub or recipient when Send is pressed, which already refused
+  one removed while the agent wrote, and now reads it again under a share lock
+  (`holdEntry`) inside the insert's transaction. That second read covers the
+  moment between the first and the insert: before it, a hub deleted there died
+  on the foreign key and the composer said the send "may or may not have been
+  sent" when nothing was written, and one retired there was sent to anyway.
 
 - ~~**SLA policies and automation rules are both empty.**~~ `sla_policies` holds
   **4** rows and `automation_rules` **1** as of 2026-09-20, so neither cron runs
@@ -4729,12 +4730,14 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     converting it cost nothing. None takes the key, because every success
     leaves the form behind: a redirect, or the check-your-email panel in its
     place.
-    - The portal reply is the one success that stays on its own route
-      (`?replied=1`), and the router keeps a page mounted across a change of
-      search params. The box empties anyway, and always did: a server action's
-      redirect rejects the action with a redirect error marked handled, and
-      `RedirectErrorBoundary` catches it in order to remount the subtree.
-      React's reset was never what cleared it.
+    - The portal reply is the one success that comes back to its own route
+      and renders the same form again (`?replied=1`); the anonymous ticket form
+      comes back to its own too (`?submitted=N`), but its page renders the
+      confirmation in place of the form. The router keeps a page mounted across
+      a change of search params, and the reply box empties anyway, and always
+      did: a server action's redirect rejects the action with a redirect error
+      marked handled, and `RedirectErrorBoundary` catches it in order to
+      remount the subtree. React's reset was never what cleared it.
     - The two sign-in forms keep the address and still empty the password on a
       refusal, which is what the reset did to it. A wrong password is usually
       a near miss of the right one, and left in the box it can be revealed by

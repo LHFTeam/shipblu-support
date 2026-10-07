@@ -57,7 +57,8 @@ const LOST =
  * `form` is spread onto the `<form>` — `<form {...form} key={key}>` — rather
  * than wired as two props, because a form given only `action` still submits:
  * through React's own path, reset and all, which is the bug this exists to
- * close. The `form-reset` repo rule refuses a console form that does that.
+ * close. The `form-reset` repo rule refuses a form anywhere under `app/` that
+ * does that.
  */
 export function useActionForm<State extends ActionState>(
   action: (state: Awaited<State>, formData: FormData) => Promise<State>,

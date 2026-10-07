@@ -92,7 +92,7 @@ export async function removeEntry<R extends Register>(
  * can refuse early and knows the address. That read takes no lock, and the
  * insert comes after the guard checks, so a hub deleted or retired in between
  * was missed: the foreign key refused a deleted one with an exception, which
- * the composer reports as a send that "may or may not have gone through" when
+ * the composer reports as a send that "may or may not have been sent" when
  * nothing was written, and a retired one was sent to anyway.
  *
  * `for share` rather than the `for key share` the foreign key takes, because it
