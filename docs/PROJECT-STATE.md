@@ -1931,9 +1931,10 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   tests its own key too, so an orphaned `personal` row with a null `agent_id` is
   visible to nobody rather than to everybody.
 
-  `usage_count` is incremented by both senders — the agent's composer and the
+  ~~`usage_count` is incremented by both senders — the agent's composer and the
   automation's `send_reply`, which had been reading the body and leaving the
-  count alone. **Counted on send, not on insert**, so a response an agent
+  count alone.~~ Agents only since 2026-10-07; see below. **Counted on send, not
+  on insert**, so a response an agent
   reached for and thought better of does not score. It over-counts in one
   direction on purpose: an agent who inserts one and rewrites every word still
   registers a use, because the alternative is diffing the sent body against the
@@ -1941,9 +1942,10 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   in one reply attribute to the last one picked, because the column counts
   replies rather than fragments.
 
-  The figures start from this change, so **a response the team has sent for
+  ~~The figures start from this change, so **a response the team has sent for
   months still starts at zero** and the ranking is only meaningful once some
-  traffic has gone through it. The tooltip says so.
+  traffic has gone through it. The tooltip says so.~~ It never applied to a
+  production row, and the tooltip no longer says it; see below.
 
   **A response is now two bodies, one per language, and the picker carries a
   toggle beside it.** It opens on the language the customer is writing in — the
@@ -1956,6 +1958,47 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   ticket through `requesterLocale()` rather than at the rule — one rule serves
   both halves of the queue. `usage_count` still counts replies rather than
   languages: which language a response goes out in is not what the column ranks.
+  (The split below sits beside it rather than changing what it counts.)
+
+  **Since 2026-10-07: agents only, and split by language.** Two changes the team
+  asked for together. An automation's `send_reply` **no longer counts** — the
+  column says which responses agents reach for, and a rule sends its response to
+  every ticket it matches, so one acknowledgement rule would outrank everything
+  chosen by hand. Production had never had a `send_reply` rule and every one of
+  its 62 responses stood at 0 that day, so nothing already counted needed taking
+  back. And the agents' uses are now split by language in `usage_count_ar` and
+  `usage_count_en`, beside the total, with `/admin/canned` showing all three.
+  The language is the body the composer inserted — posted as `cannedLocale`
+  beside `cannedResponseId`, and the one `resolveLocale` chose rather than what
+  the toggle says, so an Arabic-only response picked with the toggle on English
+  counts as Arabic. `recordCannedUse` in `lib/tickets/canned-usage.ts` treats
+  both the posted id and the posted language as claims: it re-reads the response
+  through `cannedVisibleTo`, the rule the picker's list is built from (so
+  somebody else's personal response, or a team's the agent is not on, counts
+  nothing), and puts the language through `resolveLocale` against the bodies it
+  just read. Then it moves the total and the language in one statement, and it
+  never throws. The total stays the
+  authority and the split is a breakdown of it: a use posted without a language
+  (a console tab rendered before the deploy) moves the total alone, so Arabic
+  plus English can be less than Used. Nothing can backfill it — no message row
+  records which canned response it came from.
+
+  The old tooltip's "a response the team has sent for months still starts at
+  zero" never applied to a production row, and it is gone. Counting went live
+  on 2026-08-22 (#70), and all 62 responses were created on 2026-10-06, so each
+  has been counted since it existed. Their zeros mean no agent had sent one: the
+  last agent reply in production was on 2026-09-26.
+
+  The same change closed two ways the composer over-counted, both reproduced in
+  Chromium before the fix. **A refused send** (a required field, a missing root
+  cause, a closed window) had React reset the form (§6.80): the textarea came
+  back empty while `ReplyBody` and its hidden field kept the earlier pick, and
+  the reply the agent then wrote from nothing was counted as that response. And
+  **clearing the box** by hand kept the pick too. `ReplyBody` now forgets the
+  pick whenever the agent empties the box; a reworded response still counts, as
+  before. The first it also caught on the form's `reset` event, until #337 moved
+  the reply form onto `useActionForm`: a refusal now keeps the agent's text and
+  the pick together, so there is no reset left to listen for.
 
 - **The dead-scaffolding sweep, run rather than recommended.** §1 has said it is
   worth grepping for other columns nothing reads or writes; this is the answer as
@@ -4720,6 +4763,15 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     React moves the control silently, and whatever reads React state goes on
     describing the old choice.
 
+    The reply form was measured again on 2026-10-07, before it moved onto
+    `useActionForm`, and lost the agent's text on a refusal. The
+    canned-response pick it carries in a hidden field did not — React mirrors
+    a controlled value into `defaultValue`, so a reset puts it straight back —
+    and the next reply counted a response it no longer contained. `ReplyBody`
+    cleared the pick on `reset` until the conversion left no reset to listen
+    for. The pick now stays with the draft it credits, and is forgotten only
+    when the agent empties the box.
+
 81. **An `sr-only` span scrolled the whole console off the screen.** _2026-10-05,
     caught in review before merge._ The inline image preview gave each
     attachment list a screen-reader live region, `sr-only`, which is
@@ -4870,6 +4922,31 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     read-only email box, which is nameless on purpose. A sweep of every
     `<form>` in the console, help centre, widget and sign-in pages found no
     other instance, and no native `<button>` missing its `type`.
+
+84. **A bare `Date` in a `sql` template stranded every automated reply.**
+    _2026-10-07, found by the first database test of `send_reply`; never
+    reached a customer._ `deliverAutomatedReply` stamped
+    `first_auto_replied_at` with ``sql`coalesce(..., ${now})` ``, which
+    postgres.js refuses with `ERR_INVALID_ARG_TYPE` — the trap AGENTS.md
+    describes under Tests, on the same `prepare: false` client production
+    uses. It runs after the message insert and before the event and the send
+    job, so every automated reply — the out-of-hours one and every automation
+    rule's — would have been left `pending` on the timeline for good and never
+    sent on a carrier channel. On web chat, where the row is the delivery, the
+    visitor would have seen it. Either way no `auto_replied` event was written,
+    so a time-based rule would have sent it again each sweep. Production
+    never ran it, though the deployed worker (`8426c35`) carries the line:
+    the out-of-hours reply is inactive (its row last changed on 2026-09-02,
+    the day of the last `auto_replied` event), no rule has ever had a
+    `send_reply` action, and `first_auto_replied_at` is set on no
+    conversation. Fixed by binding `now.toISOString()` behind `::timestamptz`,
+    through `firstAt()` beside `latest()` in `lib/tickets/latest.ts`, so the
+    coalesce form has one audited implementation as the greatest form does.
+    `lib/tickets/outbound.db.test.ts` now runs the write against Postgres,
+    and `outbound.test.ts` and `latest.test.ts` assert no `Date` survives in
+    the fragment. The unit test had checked the fragment's shape against a
+    mocked client, which is how a statement Postgres never saw passed for a
+    tested one.
 
 ## 7. Verification already done
 

@@ -76,7 +76,16 @@ describe('deliverAutomatedReply', () => {
     // leave the first one's timestamp alone, or a rule keyed off it fires again.
     expect(stamp).toBeDefined();
     expect(stamp).not.toBeInstanceOf(Date);
-    expect(sqlShape(stamp!.queryChunks!)).toBe('coalesce( first_auto_replied_at ,  ? )');
+    expect(sqlShape(stamp!.queryChunks!)).toBe(
+      'coalesce( first_auto_replied_at ,  ? ::timestamptz)',
+    );
+
+    // And the instant inside it bound as a string. A bare Date in a `sql`
+    // template reaches postgres.js untyped, which refuses it — after the
+    // message row is written, so the event and the send job never are.
+    const lastMessageAt = written.lastMessageAt as Date;
+    expect(stamp!.queryChunks!.some((chunk) => chunk instanceof Date)).toBe(false);
+    expect(stamp!.queryChunks!).toContain(lastMessageAt.toISOString());
   });
 });
 

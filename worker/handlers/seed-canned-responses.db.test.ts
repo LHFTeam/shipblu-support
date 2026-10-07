@@ -53,6 +53,8 @@ async function seededRows() {
       visibility: cannedResponses.visibility,
       groupId: cannedResponses.groupId,
       usageCount: cannedResponses.usageCount,
+      usageCountAr: cannedResponses.usageCountAr,
+      usageCountEn: cannedResponses.usageCountEn,
       updatedAt: cannedResponses.updatedAt,
     })
     .from(cannedResponses)
@@ -85,6 +87,8 @@ describe('seedCannedResponses', () => {
           bodyTextEn: response.en,
           visibility: 'global',
           usageCount: 0,
+          usageCountAr: 0,
+          usageCountEn: 0,
         });
         // The HTML is what email sends; a blank one would mail an empty reply.
         expect(row!.bodyHtmlAr).toMatch(/^<p>/);
@@ -129,6 +133,8 @@ describe('seedCannedResponses', () => {
         visibility: 'group',
         groupId,
         usageCount: 7,
+        usageCountAr: 4,
+        usageCountEn: 2,
       })
       .where(eq(cannedResponses.id, original.id));
 
@@ -149,6 +155,8 @@ describe('seedCannedResponses', () => {
       visibility: 'group',
       groupId,
       usageCount: 7,
+      usageCountAr: 4,
+      usageCountEn: 2,
     });
   });
 

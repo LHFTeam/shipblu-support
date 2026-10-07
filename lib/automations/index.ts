@@ -454,13 +454,12 @@ async function sendCannedReply(
   // acknowledges every new ticket turns the human-response metric into the
   // automation's response time and can satisfy every target by itself.
 
-  // Counted here as well as on the agent's own path. A rule sending a response
-  // a thousand times a week is the clearest signal the column can carry, and
-  // leaving it out would rank the team's busiest boilerplate at zero.
-  await db
-    .update(cannedResponses)
-    .set({ usageCount: sql`${cannedResponses.usageCount} + 1` })
-    .where(eq(cannedResponses.id, cannedResponseId));
+  // Not counted in `usage_count`, for the same reason. The column, and its
+  // per-language split, say which responses the *agents* reach for, and a rule
+  // sends its response to every ticket it matches: one acknowledgement rule
+  // would outrank everything the team chose by hand and bury the signal the
+  // column exists to carry. This was counted until 2026-10-07; the team asked
+  // for it not to be, and production had never sent one by then.
 }
 
 /**

@@ -1,15 +1,17 @@
 'use server';
 
-import { and, eq, sql, desc } from 'drizzle-orm';
+import { and, eq, desc } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { cannedResponses, messages, whatsappTemplates } from '@/db/schema';
+import { messages, whatsappTemplates } from '@/db/schema';
 import { requireAgent } from '@/lib/auth/guard';
-import { text } from '@/lib/http/form-data';
+import { text, uuidField } from '@/lib/http/form-data';
 import { ok } from '@/lib/http/action-state';
 import { can } from '@/lib/auth/permissions';
 import { sendsByEmail } from '@/lib/tickets/outbound';
 import { htmlToText, sanitiseEmailHtml, textToHtml } from '@/lib/html/sanitize';
 import { afterMessageStored } from '@/lib/tickets/lifecycle';
+import { recordCannedUse } from '@/lib/tickets/canned-usage';
+import { isLocale } from '@/lib/kb/locale';
 import { storeAgentReply } from '@/lib/tickets/agent-reply';
 import {
   buildTemplateComponents,
@@ -30,9 +32,6 @@ import {
   refuseIfReadOnly,
 } from '@/lib/tickets/console-guards';
 import type { ActionState } from './action-state';
-import { logger } from '@/lib/log';
-
-const log = logger('canned');
 
 // --- Replies and notes ------------------------------------------------------
 
@@ -43,7 +42,16 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
   const conversationId = String(formData.get('conversationId') ?? '');
   const body = text(formData, 'body');
   const resolveAfter = formData.get('resolveAfter') === 'on';
-  const cannedResponseId = String(formData.get('cannedResponseId') ?? '');
+  // Which canned response went into this reply, and the language the composer
+  // inserted it in — not the toggle beside the picker, which can be flipped
+  // after the pick. Both are only claims: `recordCannedUse` re-reads the
+  // response and checks them against it. A malformed id is dropped here rather
+  // than handed to Postgres, which would refuse it with 22P02, and a missing
+  // language (a tab rendered before the composer sent one) moves the total
+  // alone.
+  const cannedResponseId = uuidField(formData, 'cannedResponseId');
+  const cannedLocaleField = text(formData, 'cannedLocale');
+  const cannedLocale = isLocale(cannedLocaleField) ? cannedLocaleField : null;
 
   if (!body) return { error: 'Write something first' };
 
@@ -151,7 +159,7 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
           : {},
   });
 
-  if (cannedResponseId) await countCannedUse(cannedResponseId);
+  if (cannedResponseId) await recordCannedUse(agent.id, cannedResponseId, cannedLocale);
 
   if (resolveAfter) {
     await applyStatusCategory(agent, conversation.id, 'resolved');
@@ -159,29 +167,6 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
 
   refresh(conversation.number);
   return ok();
-}
-
-/**
- * Records that a canned response went out in a reply.
- *
- * After the send rather than before it: the column ranks what the team actually
- * sends, so a reply that failed validation and never left must not count. The
- * id comes from the composer, so it is incremented rather than trusted for
- * anything — a bogus id updates no rows, which is the whole blast radius.
- *
- * Not awaited for correctness anywhere: a lost increment costs a ranking column
- * one point, and failing the agent's reply because a counter did not move would
- * be the wrong trade.
- */
-async function countCannedUse(id: string): Promise<void> {
-  try {
-    await db
-      .update(cannedResponses)
-      .set({ usageCount: sql`${cannedResponses.usageCount} + 1` })
-      .where(eq(cannedResponses.id, id));
-  } catch (error) {
-    log.warn('could not record a use', error);
-  }
 }
 
 export async function addNote(_state: ActionState, formData: FormData): Promise<ActionState> {

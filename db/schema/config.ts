@@ -622,7 +622,30 @@ export const cannedResponses = pgTable(
     /** Set when visibility = 'group'. */
     groupId: uuid('group_id').references(() => groups.id, { onDelete: 'cascade' }),
 
+    /**
+     * Every reply an agent sent carrying this response, in whichever language.
+     * An automation rule sending it is not counted; see `recordCannedUse`.
+     */
     usageCount: integer('usage_count').notNull().default(0),
+
+    /*
+      The same replies again, split by the language of the body the agent
+      inserted. Moved in the same statement as the total, by `recordCannedUse`.
+
+      Beside the total rather than replacing it, because the total holds every
+      use before the split began and nothing recorded which language those
+      were — so the two can add up to less than `usage_count`, and the
+      difference is that history rather than an error. A use whose language
+      the server was not told (a console tab rendered before this shipped)
+      moves the total alone, for the same reason.
+
+      A pair of columns rather than a jsonb map, because a canned response is
+      already a `*_ar` / `*_en` pair everywhere else, and the record in
+      `recordCannedUse` that maps a locale to its column stops compiling the
+      day a third locale is added.
+    */
+    usageCountAr: integer('usage_count_ar').notNull().default(0),
+    usageCountEn: integer('usage_count_en').notNull().default(0),
 
     /**
      * Which entry of the starter library this row was seeded from, as

@@ -19,3 +19,18 @@ import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 export function latest(column: AnyPgColumn, at: Date): SQL {
   return sql`greatest(${column}, ${at.toISOString()}::timestamptz)`;
 }
+
+/**
+ * `column` set to `at` the first time, and never moved after that.
+ *
+ * The once-only twin of `latest()`, for a "when did this first happen" stamp:
+ * `first_auto_replied_at` records that a customer was acknowledged at all, so a
+ * second automated reply must not move it and make a rule keyed off it fire
+ * again. Here beside `latest()` for the reason that one is — a bare `Date` in a
+ * `sql` template is refused by postgres.js, and an inline copy of this coalesce
+ * is exactly how `deliverAutomatedReply` came to bind one (`docs/PROJECT-STATE.md`
+ * §6.84).
+ */
+export function firstAt(column: AnyPgColumn, at: Date): SQL {
+  return sql`coalesce(${column}, ${at.toISOString()}::timestamptz)`;
+}
