@@ -6,6 +6,7 @@ import {
   type PreviewFile,
   previewReducer,
   type PreviewState,
+  previewFile,
 } from './previews';
 
 const photo = { id: 'a', name: 'IMG_0412.jpg' };
@@ -92,5 +93,19 @@ describe('previewReducer', () => {
   it('leaves another picture’s notice alone', () => {
     const state = run(toggle(photo), toggle(label), fail(label), load(photo), toggle(photo));
     expect(state.notice?.fileId).toBe(label.id);
+  });
+});
+
+describe('previewFile', () => {
+  const stored = { id: 'f', filename: '1011360668584057.ogg', sizeBytes: 21_504 };
+
+  it('names a player by what it is, never by the media id it is stored under', () => {
+    expect(previewFile(stored, 'audio').name).toBe('Audio, 21 KB');
+    expect(previewFile({ ...stored, sizeBytes: 2_411_725 }, 'video').name).toBe('Video, 2.3 MB');
+  });
+
+  it('names a picture, and a file shown only as a link, by its file name', () => {
+    expect(previewFile({ ...stored, filename: 'IMG_0412.jpg' }, 'image').name).toBe('IMG_0412.jpg');
+    expect(previewFile(stored, undefined).name).toBe('1011360668584057.ogg');
   });
 });

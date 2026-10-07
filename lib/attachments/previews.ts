@@ -11,6 +11,8 @@
  * only reason it is out of the component file.
  */
 
+import { formatBytes } from '@/lib/format';
+
 export type Load = 'loading' | 'loaded' | 'failed';
 
 /**
@@ -29,6 +31,26 @@ export type Load = 'loading' | 'loaded' | 'failed';
  * at once, where a closed picture's waits until it is opened.
  */
 export type PreviewFile = { id: string; name: string; kind?: 'image' | 'audio' | 'video' };
+
+/**
+ * What a player is called aloud: by what it is, not by its file. WhatsApp sends
+ * a voice note without a name, so it is stored as its media id — sixteen digits
+ * — and every note in production would be read out as a number. The chip
+ * beside it still carries the file name as its link text.
+ */
+export function playerName(kind: 'audio' | 'video', sizeBytes: number): string {
+  return `${kind === 'audio' ? 'Audio' : 'Video'}, ${formatBytes(sizeBytes)}`;
+}
+
+/** A file as this reducer knows it, named the way its control is. */
+export function previewFile(
+  file: { id: string; filename: string; sizeBytes: number },
+  kind: PreviewFile['kind'],
+): PreviewFile {
+  const name =
+    kind === 'audio' || kind === 'video' ? playerName(kind, file.sizeBytes) : file.filename;
+  return { id: file.id, name, kind };
+}
 
 const showing = (state: PreviewState, file: PreviewFile) =>
   file.kind === 'audio' || state.showing[file.id] === true;

@@ -18,7 +18,8 @@ import {
   initialPreviewState,
   type Load,
   loadOf,
-  type PreviewFile,
+  playerName,
+  previewFile,
   previewReducer,
 } from '@/lib/attachments/previews';
 import { type MediaTrigger, reloadDelayMs, shouldRefresh } from '@/lib/attachments/signed-url';
@@ -33,17 +34,6 @@ type Kind = 'image' | 'audio' | 'video' | null;
 type Pressed = 'chip' | 'figure';
 
 const fileUrl = (file: Attachment) => `/api/attachments/${file.id}`;
-
-/*
-  A player is named by what it is, not by its file. WhatsApp sends a voice note
-  without a name, so it is stored as its media id — sixteen digits — and every
-  note in production would be read out as a number. The chip beside it still
-  carries the file name as its link text. The same name is what a failure
-  notice and a failed player's frame are called, so they name the control the
-  agent pressed.
-*/
-const mediaName = (kind: 'audio' | 'video', file: Attachment) =>
-  `${kind === 'audio' ? 'Audio' : 'Video'}, ${formatBytes(file.sizeBytes)}`;
 
 /*
   Elements are found by id when a handler or the reveal needs one, rather than
@@ -87,8 +77,8 @@ function canPlay(media: PlayableMedia): boolean {
  * The files on one message: a row of chips, where a picture opens under the row
  * instead of in a new tab.
  *
- * In place rather than in a lightbox. Nothing a ticket shows opens in a layer
- * over it (see `ShipmentsField`), and the timeline's order is its information: the
+ * In place rather than in a lightbox. Nothing in the console opens a dialog over
+ * a ticket's content, and the timeline's order is its information: the
  * photograph of a crushed box belongs beside the sentence complaining about it,
  * not in a layer over the whole ticket. Anything that is not a picture is left
  * as it was, because a PDF or a spreadsheet has nothing to show in a bubble.
@@ -181,14 +171,7 @@ export function AttachmentList({
     const media = playableMedia(file.contentType);
     return media && onClient && canPlay(media) ? media.kind : null;
   };
-  const asPreview = (file: Attachment): PreviewFile => {
-    const kind = kindOf(file);
-    return {
-      id: file.id,
-      name: kind === 'audio' || kind === 'video' ? mediaName(kind, file) : file.filename,
-      kind: kind ?? undefined,
-    };
-  };
+  const asPreview = (file: Attachment) => previewFile(file, kindOf(file) ?? undefined);
   const previewId = (file: Attachment) => previewIdFor(baseId, file.id);
   const figureOf = (file: Attachment) => document.getElementById(previewId(file));
   // Deleted first so the newest ask is the last entry, which is the one the
@@ -318,7 +301,11 @@ export function AttachmentList({
             <MediaFigure
               key={file.id}
               id={previewId(file)}
-              label={loadOf(state, file.id) === 'failed' ? mediaName('audio', file) : undefined}
+              label={
+                loadOf(state, file.id) === 'failed'
+                  ? playerName('audio', file.sizeBytes)
+                  : undefined
+              }
             >
               <MediaPlayer
                 kind="audio"
@@ -349,7 +336,7 @@ export function AttachmentList({
                 kindOf(file) === 'image'
                   ? file.filename
                   : loadOf(state, file.id) === 'failed'
-                    ? mediaName('video', file)
+                    ? playerName('video', file.sizeBytes)
                     : undefined
               }
               hidden={state.showing[file.id] !== true}
@@ -523,17 +510,29 @@ const MAX_FAILURES = 3;
 const PROGRESS_SECONDS = 5;
 
 /**
- * How soon after a playing element is paused a seek has to come to be a drag
- * on the timeline starting. The controls pause and seek in the same task; a
- * person pausing and then seeking by hand is never this quick.
+ * How long seeking has to go quiet before a seek is decided. A drag on the
+ * timeline seeks at every step, and so does a held arrow key; a reload at the
+ * first step past the buffer emptied the element under the pointer and dropped
+ * the rest of the drag.
  */
-const SCRUB_MS = 250;
+const SEEK_SETTLE_MS = 500;
 
 /**
- * How recently focus has to have left a player for nowhere for an error to be
- * what took it. Chromium blurs the control in the moment before it reports one.
+ * How close behind a playing element's `pause` a seek has to come for the pause
+ * to be the controls' — made for a click or a drag on the timeline, to be
+ * undone on the release — rather than the agent's. Measured: Chromium fires
+ * the two in the same millisecond, Firefox within about twelve. A person's
+ * Space and then an arrow key, or a click on pause and then on the timeline,
+ * take well over a hundred.
  */
-const DROPPED_FOCUS_MS = 1000;
+const CONTROLS_PAUSE_MS = 50;
+
+/**
+ * How long after a reload starts a blur to nowhere is the reload's doing, and
+ * how recently before an error one has to be for the error to have caused it.
+ * Measured at a few milliseconds; a click elsewhere is not that close.
+ */
+const REFOCUS_MS = 100;
 
 /**
  * A voice note or a video, with the native controls — which already carry play,
@@ -570,7 +569,14 @@ function MediaPlayer({
   onRetry: () => void;
 }) {
   if (load === 'failed') {
-    return <Failure file={file} name={mediaName(kind, file)} verb="played" onRetry={onRetry} />;
+    return (
+      <Failure
+        file={file}
+        name={playerName(kind, file.sizeBytes)}
+        verb="played"
+        onRetry={onRetry}
+      />
+    );
   }
   // A separate component so that "Try again" mounts a new one: the element and
   // `useFreshMedia`'s count of reloads start over together, rather than a new
@@ -615,7 +621,7 @@ function Player({
     }
   }, []);
 
-  const name = mediaName(kind, file);
+  const name = playerName(kind, file.sizeBytes);
 
   if (kind === 'audio') {
     return (
@@ -707,29 +713,38 @@ function anotherPlaying(media: HTMLMediaElement) {
  * already set `paused` by the time it reports a failed range, and fires `pause`
  * only after the `error`; and a `play()` can land while a reload is in flight.
  *
- * A drag on the timeline is its own case. Chrome's and Firefox's controls
- * pause a playing element on the press, seek at every step, and play it again
- * on the release. Reloading at the first step past the buffer emptied the
- * element under the pointer, dropped the rest of the drag and took the
- * controls' pause for the agent's, so the video stopped where the buffer ended.
- * While a drag is under way only an error reloads, and the release's `play`
- * reloads from where the drag ended.
+ * A seek is decided once seeking settles (`SEEK_SETTLE_MS`), and the stall it
+ * causes in the meantime is left to it, so a drag on the timeline reloads once,
+ * from where it was released, whether the video was playing or paused. On a
+ * playing video Chrome's and Firefox's controls pause for the drag or the click
+ * and play again on the release; that `play` decides at once, and the reload
+ * keeps the video playing. A seek right behind such a pause marks the pause as
+ * the controls' (`CONTROLS_PAUSE_MS`), so that a release which lands while the
+ * reload is in flight, and plays nothing, does not leave the video stopped.
+ * The mark lasts one gesture: a key, any later pause, the release's `play` or
+ * the settled seek clears it, so it cannot turn a later reload into an order
+ * to play.
  *
  * A reload's resume is a promise to play again, not an order. If the video was
  * hidden while the reload was in flight, or the agent started another player,
  * `load()` has already set the element paused without firing `pause`, so
  * nothing else could have cancelled it. It is checked when the metadata lands.
+ * A reload that waits (`reloadDelayMs`) takes the position and the playing
+ * state again when it goes, because Firefox plays on from what it holds in the
+ * meantime, and the agent may have paused or moved it.
  *
  * While a reload is in flight a video keeps the box it had. `load()` drops the
  * picture's size until the metadata is back, and the default 300 × 150 it fell
  * back to moved the controls out from under the pointer and the conversation
  * below by hundreds of pixels.
  *
- * Focus stays with the player. `document.activeElement` is the element itself
- * while one of its native controls — play, the scrubber — has focus, and
- * Chromium blurs that control to nowhere inside `load()`, and just before it
- * reports an error. Left there, the next key reached nothing, and a screen
- * reader lost its place in the ticket.
+ * Focus stays with the player through a reload. `document.activeElement` is
+ * the element itself while one of its native controls — play, the scrubber —
+ * has focus, and the browsers take focus off that control to nowhere when the
+ * element resets: Chromium 141 inside `load()` and just before it reports an
+ * error, Chrome 155 once the element has sat in its error state across a
+ * frame, Firefox a few milliseconds after `load()`. Left there, the next key
+ * reached nothing, and a screen reader lost its place in the ticket.
  *
  * An error before the first metadata is not an expiry. The format, the file or
  * the session is the problem, and the failure line says so.
@@ -747,18 +762,24 @@ function useFreshMedia({
   const failures = useRef(0);
   const failedAt = useRef<number | null>(null);
   const resume = useRef<{ at: number; rate: number; play: boolean } | null>(null);
-  /** When a playing element was last paused, for telling a drag starting. */
-  const pausedWhilePlaying = useRef<number | null>(null);
-  const scrubbing = useRef(false);
+  /** When a playing element was last paused, as an event time stamp. */
+  const pausedAt = useRef<number | null>(null);
+  /** The controls paused a playing element for the gesture now settling. */
+  const gesture = useRef(false);
+  const settling = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   /** When bytes last arrived, for telling a slow response from a refused one. */
   const lastData = useRef<number | null>(null);
   /** When focus last left the player for nowhere. */
   const focusDropped = useRef<number | null>(null);
+  /** Until when a blur to nowhere is a reload's, to be undone. */
+  const refocusUntil = useRef(0);
   const pendingLoad = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
-    const timer = pendingLoad;
-    return () => clearTimeout(timer.current);
+    const timers = [pendingLoad, settling];
+    return () => {
+      for (const timer of timers) clearTimeout(timer.current);
+    };
   }, []);
 
   const ageMs = () =>
@@ -766,23 +787,27 @@ function useFreshMedia({
       ? null
       : Math.max(Date.now() - minted.current.wall, performance.now() - minted.current.mono);
 
+  const unsettle = () => {
+    clearTimeout(settling.current);
+    settling.current = undefined;
+  };
+
   const giveUp = (media: HTMLMediaElement) => {
     clearTimeout(pendingLoad.current);
+    unsettle();
     resume.current = null;
     playing.current = false;
-    scrubbing.current = false;
+    gesture.current = false;
     // Back on the element first, so `settle` hands it to the failure line as
     // it would from the element itself.
-    const lost = document.activeElement === null || document.activeElement === document.body;
     const dropped = focusDropped.current;
-    if (lost && dropped !== null && performance.now() - dropped < DROPPED_FOCUS_MS) {
+    if (nothingFocused() && dropped !== null && performance.now() - dropped < REFOCUS_MS) {
       media.focus({ preventScroll: true });
     }
     onFail();
   };
 
-  const restart = (media: HTMLMediaElement) => {
-    const focused = document.activeElement === media;
+  const restart = (media: HTMLMediaElement, hadFocus: boolean) => {
     if (media instanceof HTMLVideoElement) {
       const box = media.getBoundingClientRect();
       if (box.width > 0) {
@@ -791,7 +816,10 @@ function useFreshMedia({
       }
     }
     media.load();
-    if (focused && document.activeElement !== media) media.focus({ preventScroll: true });
+    if (hadFocus) {
+      refocusUntil.current = performance.now() + REFOCUS_MS;
+      if (nothingFocused()) media.focus({ preventScroll: true });
+    }
   };
 
   const reload = (media: HTMLMediaElement, failed: boolean) => {
@@ -803,21 +831,36 @@ function useFreshMedia({
     resume.current ??= {
       at: media.currentTime,
       rate: media.playbackRate,
-      play: playing.current || scrubbing.current || !media.paused,
+      // Not on a failure: Firefox fails a drag's own request at the press, and
+      // the release will say whether to play.
+      play: playing.current || (gesture.current && !failed) || !media.paused,
     };
+    gesture.current = false;
+    unsettle();
     minted.current = null;
     lastData.current = null;
     // `load()` resets the speed to the default, so the default becomes the
     // speed the agent chose.
     media.defaultPlaybackRate = resume.current.rate;
     clearTimeout(pendingLoad.current);
+    const hadFocus = document.activeElement === media;
     const wait = failed ? reloadDelayMs(failures.current) : 0;
-    if (wait === 0) restart(media);
-    else pendingLoad.current = setTimeout(() => restart(media), wait);
+    if (wait === 0) return restart(media, hadFocus);
+    const playedOn = !media.paused;
+    pendingLoad.current = setTimeout(() => {
+      const back = resume.current;
+      if (back && playedOn) {
+        back.at = media.currentTime;
+        back.play = !media.paused;
+      }
+      restart(media, hadFocus);
+    }, wait);
   };
 
   const consider = (trigger: MediaTrigger, media: HTMLMediaElement) => {
-    if (scrubbing.current && trigger !== 'error') return false;
+    if (settling.current !== undefined && (trigger === 'waiting' || trigger === 'stalled')) {
+      return false;
+    }
     const buffered: Array<[number, number]> = [];
     for (let range = 0; range < media.buffered.length; range++) {
       buffered.push([media.buffered.start(range), media.buffered.end(range)]);
@@ -848,7 +891,6 @@ function useFreshMedia({
       const back = resume.current;
       resume.current = null;
       if (back) {
-        scrubbing.current = false;
         media.currentTime = back.at;
         media.playbackRate = back.rate;
         if (back.play && !media.closest('[hidden]') && !anotherPlaying(media)) {
@@ -858,8 +900,8 @@ function useFreshMedia({
             playing.current = false;
           });
         } else {
-          // Paused by `load()`, unless the agent — or Firefox's timeline, on
-          // the release of a drag — called `play()` while it was in flight.
+          // Paused by `load()`, unless the agent pressed play while it was in
+          // flight.
           playing.current = !media.paused;
         }
         return;
@@ -871,19 +913,26 @@ function useFreshMedia({
     },
     onPlay: (event: MediaEvent) => {
       playing.current = true;
-      scrubbing.current = false;
-      pausedWhilePlaying.current = null;
+      pausedAt.current = null;
+      unsettle();
       pauseOthers(event.currentTarget);
       consider('play', event.currentTarget);
+      gesture.current = false;
     },
-    onPause: () => {
-      pausedWhilePlaying.current = playing.current ? performance.now() : null;
-      scrubbing.current = false;
+    onPause: (event: MediaEvent) => {
+      pausedAt.current = playing.current ? event.timeStamp : null;
+      gesture.current = false;
       playing.current = false;
     },
     onEnded: () => {
       playing.current = false;
-      scrubbing.current = false;
+      gesture.current = false;
+    },
+    onKeyDown: () => {
+      // A key is always the agent's: Space and then an arrow pauses and seeks
+      // as a press on the timeline does.
+      pausedAt.current = null;
+      gesture.current = false;
     },
     onTimeUpdate: (event: MediaEvent) => {
       if (
@@ -895,9 +944,16 @@ function useFreshMedia({
       }
     },
     onSeeking: (event: MediaEvent) => {
-      const paused = pausedWhilePlaying.current;
-      if (paused !== null && performance.now() - paused < SCRUB_MS) scrubbing.current = true;
-      consider('seeking', event.currentTarget);
+      const media = event.currentTarget;
+      const paused = pausedAt.current;
+      if (paused !== null && event.timeStamp - paused < CONTROLS_PAUSE_MS) gesture.current = true;
+      pausedAt.current = null;
+      clearTimeout(settling.current);
+      settling.current = setTimeout(() => {
+        settling.current = undefined;
+        consider('seeking', media);
+        gesture.current = false;
+      }, SEEK_SETTLE_MS);
     },
     onWaiting: (event: MediaEvent) => {
       consider('waiting', event.currentTarget);
@@ -912,7 +968,19 @@ function useFreshMedia({
       focusDropped.current = null;
     },
     onBlur: (event: FocusEvent<HTMLMediaElement>) => {
-      focusDropped.current = event.relatedTarget === null ? performance.now() : null;
+      if (event.relatedTarget !== null) {
+        focusDropped.current = null;
+        return;
+      }
+      focusDropped.current = performance.now();
+      if (performance.now() < refocusUntil.current) {
+        // After the blur has run its course: focus taken back inside the
+        // handler is undone by the rest of it.
+        const media = event.currentTarget;
+        setTimeout(() => {
+          if (nothingFocused()) media.focus({ preventScroll: true });
+        }, 0);
+      }
     },
     onError: (event: MediaEvent) => {
       const media = event.currentTarget;
@@ -922,6 +990,11 @@ function useFreshMedia({
       if (!ready.current || !consider('error', media)) giveUp(media);
     },
   };
+}
+
+/** Focus has gone nowhere: nothing took it over. */
+function nothingFocused() {
+  return document.activeElement === null || document.activeElement === document.body;
 }
 
 /**

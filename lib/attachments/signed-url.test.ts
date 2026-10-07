@@ -58,7 +58,9 @@ describe('shouldRefresh', () => {
   });
 
   it('reloads a play or a seek into what an old URL never fetched', () => {
-    const old = { ageMs: minutes(6), ...video };
+    // Bytes still arriving for the old position are no reason to wait: the new
+    // position needs a request of its own.
+    const old = { ageMs: minutes(6), sinceDataMs: 400, ...video };
     expect(shouldRefresh('play', { ...old, position: 95.5 })).toBe(true);
     expect(shouldRefresh('seeking', { ...old, position: 200 })).toBe(true);
   });
@@ -100,7 +102,7 @@ describe('shouldRefresh', () => {
     const starved = { ageMs: minutes(6), position: 93.7, ...video };
     expect(shouldRefresh('waiting', starved)).toBe(false);
     expect(shouldRefresh('stalled', { ...starved, readyState: 2 })).toBe(true);
-    expect(shouldRefresh('stalled', { ...starved, readyState: 4 })).toBe(false);
+    expect(shouldRefresh('stalled', { ...starved, readyState: 3 })).toBe(false);
   });
 
   it('refreshes a minute inside the TTL, not at it', () => {

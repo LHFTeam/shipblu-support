@@ -81,13 +81,15 @@ const LIVE_DATA_MS = 3000;
  * - **A `stalled` on an old URL** reloads when the element cannot play on
  *   (`readyState` below `HAVE_FUTURE_DATA`), whatever `buffered` says. It
  *   fires only while the element is fetching and nothing has arrived for
- *   about three seconds, which on an old URL is the dead signature being
- *   retried. `buffered` cannot be trusted to say so: for a plain `src` MP4,
- *   Chrome maps the bytes received linearly onto the duration, and a `moov`
- *   at the head of the file puts the reported edge a second or two past where
- *   playback actually starves — measured at 1.3 to 2.5 seconds, enough to let
- *   the `waiting` through and freeze the picture for half a minute. A note
- *   held whole in memory is not fetching, so it never sees one.
+ *   about three seconds, which on an old URL is most likely the dead
+ *   signature being retried, and at worst a response that has gone quiet,
+ *   which a fresh URL answers as well. `buffered` cannot be trusted to say
+ *   so: for a plain `src` MP4, Chrome maps the bytes received linearly onto
+ *   the duration, so the bytes ahead of the first frame — a `moov` at the head
+ *   of the file most of all — put the reported edge past where playback
+ *   actually starves. Measured at 1.4 to 2.5 seconds, enough to let the
+ *   `waiting` through and freeze the picture for 13 to 34 seconds. A note held
+ *   whole in memory is not fetching, so it never sees one.
  */
 export function shouldRefresh(
   trigger: MediaTrigger,

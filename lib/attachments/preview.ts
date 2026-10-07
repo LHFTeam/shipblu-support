@@ -57,8 +57,8 @@ export type PlayableMedia = { kind: 'audio' | 'video'; probe: string };
  * MP4 and QuickTime are H.264 and AAC, which is what WhatsApp and Messenger
  * send: a Chromium built without those codecs says "maybe" to a bare
  * `video/mp4`, then fails to play every one. The rest name their codec in the
- * type, or are WebM, and are asked bare; "maybe" is the most a browser says
- * about those, so it is accepted.
+ * type, or are WebM, and are asked bare; a browser may answer no more than
+ * "maybe" about those, so "maybe" is accepted.
  *
  * An iPhone or Android video may be HEVC instead, which the probe cannot see.
  * Where the machine has no HEVC decoder, Chrome drops the picture and plays the

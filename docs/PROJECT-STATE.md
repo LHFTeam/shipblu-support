@@ -4598,10 +4598,11 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
       seconds, because a response that is still arriving is a slow link, and a
       reload would throw it away to start the wait again. A `stalled` reloads
       when the element cannot play on, whatever `buffered` says: for a plain
-      `src` MP4, Chrome maps the bytes received linearly onto the duration, so a
-      `moov` at the head of the file puts the reported edge 1.3 to 2.5 seconds
-      past where playback really starves, enough to let the `waiting` through
-      and freeze the picture for half a minute.
+      `src` MP4, Chrome maps the bytes received linearly onto the duration, so
+      the bytes ahead of the first frame — a `moov` at the head of the file
+      most of all — put the reported edge 1.4 to 2.5 seconds past where
+      playback really starves, enough to let the `waiting` through and freeze
+      the picture for 13 to 34 seconds.
     - **How.** The reload calls `load()`, which goes back through the route
       for a new signature, and puts back the position, the speed and the
       playing state. A video keeps its box while the reload is in flight, and
@@ -4614,16 +4615,21 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     - **`waiting` is not starvation on its own.** Chrome fires it on every
       seek, into buffered data too. Treating it as starvation reloaded a
       replayed voice note and cut the replay off.
-    - **Not in the middle of a drag.** Chrome's and Firefox's controls pause a
-      playing video for a drag on the timeline, seek at every step, and play
-      on the release. A reload at the first step past the buffer dropped the
-      rest of the drag and left the video paused at the buffer's edge, so a
-      seek that follows a pause by less than a quarter of a second marks a drag,
-      and the release's `play` reloads from where it ended.
+    - **Not in the middle of a drag.** A drag on the timeline seeks at every
+      step, and a reload at the first step past the buffer dropped the rest of
+      it. A seek is decided once seeking has been quiet for half a second, so a
+      drag reloads once, from where it was released. On a playing video
+      Chrome's and Firefox's controls pause for the gesture and play on the
+      release, and that `play` reloads at once and keeps it playing. A pause
+      followed within 50 ms by a seek is taken as theirs, so a release that
+      lands in the reload still plays; a person's own pause and seek are never
+      that close, and a key or the gesture's end clears the mark.
     - **Spaced out when they fail.** A reload made because of an error goes at
       once; one after a reload that itself failed waits a second, then two.
       Firefox fails a request at once while the network is down, and three
       back-to-back reloads spent the whole allowance inside one short outage.
+      Firefox plays on from what it holds while a reload waits, so the reload
+      takes the position, and whether the agent paused, when it goes.
 
     The route marks its redirect `no-store` and must stay a 307. A 301 or 308
     can be cached, and then the browser would reuse a dead signature.
