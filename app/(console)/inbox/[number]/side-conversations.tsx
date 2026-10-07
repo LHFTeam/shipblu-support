@@ -15,7 +15,8 @@ import type { ConversationDetail } from '@/lib/tickets/conversation';
 import type { ActionState } from '../../action-state';
 import { SubmitButton } from '@/components/submit-button';
 import { useActionForm, type FormHandlers } from '@/components/use-action-form';
-import { LOST_SEND, useRefreshOnSuccess } from './form-state';
+import { useRefreshOnSuccess } from '@/components/use-refresh-on-success';
+import { LOST_SEND } from './form-state';
 import {
   replyToSideConversation,
   setSideConversationState,
