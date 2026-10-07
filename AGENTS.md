@@ -273,9 +273,12 @@ everything around it is drawn from (§6.80). The hook's `key` is also the one to
 clear a form on after a success: it holds the last success's nonce, where
 `state.nonce ?? 0` fell back to 0 on a refusal and remounted the form. A form
 of hidden fields, buttons and controlled text boxes has nothing a reset moves
-and may keep `action=`; the purge panel is one. The hook also turns an action
-that throws into a refusal, so a dropped connection keeps the draft rather than
-falling through to `global-error`.
+and may keep `action=`; the purge panel is one. Spread the hook's `form` onto
+the element, `<form {...form}>`: a form given only its `action` still submits,
+through React's reset. The `form-reset` repo rule refuses that shape where it
+can see a field the reset moves. The hook also turns an action that throws into
+a refusal, so a dropped connection keeps the draft rather than falling through
+to `global-error`; a form whose retry reaches a customer passes `LOST_SEND`.
 
 **Authorisation lives in code.** `proxy.ts` only checks that a session cookie
 exists; it cannot tell a revoked session from a live one. It runs on Node.js in

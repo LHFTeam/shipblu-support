@@ -146,12 +146,7 @@ export function ArticleSidebar({
         {translationCandidates.length === 0 ? (
           <p className="text-xs opacity-50">No article in another language to link to yet.</p>
         ) : (
-          <form
-            key={link.key}
-            action={link.form.action}
-            onSubmit={link.form.onSubmit}
-            className="flex flex-col gap-2"
-          >
+          <form key={link.key} {...link.form} className="flex flex-col gap-2">
             <input type="hidden" name="id" value={articleId} />
             <label htmlFor="otherId" className="sr-only">
               Link this article to its translation

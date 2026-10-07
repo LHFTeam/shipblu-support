@@ -79,7 +79,7 @@ export function ArticleEditor({
   const internal = visibility === 'agents_only' || folder?.visibility === 'agents_only';
 
   return (
-    <form action={form.action} onSubmit={form.onSubmit} className="flex flex-col gap-4">
+    <form {...form} className="flex flex-col gap-4">
       {article ? <input type="hidden" name="id" value={article.id} /> : null}
 
       <div>

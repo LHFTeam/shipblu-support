@@ -137,15 +137,10 @@ export function AccountLinks({
       </ul>
 
       {editable ? (
-        <form
-          key={key}
-          action={form.action}
-          onSubmit={(event) => {
-            form.onSubmit(event);
-            router.refresh();
-          }}
-          className="flex gap-2"
-        >
+        // No refresh of its own: `linkContactToAccount` revalidates this page,
+        // so the action's answer already carries it, and a refresh fired from
+        // the submit ran before the action answered and after a refusal too.
+        <form key={key} {...form} className="flex gap-2">
           <input type="hidden" name="contactId" value={contactId} />
           <input
             name="sbid"

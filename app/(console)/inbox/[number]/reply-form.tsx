@@ -13,7 +13,7 @@ import {
 import { sendReply } from '../../reply-actions';
 import { KnowledgePanel } from './knowledge';
 import type { KnowledgeContext } from './types';
-import { INITIAL, useRefreshOnSuccess } from './form-state';
+import { INITIAL, LOST_SEND, useRefreshOnSuccess } from './form-state';
 import { SubmitButton } from '@/components/submit-button';
 import { useActionForm } from '@/components/use-action-form';
 
@@ -56,7 +56,7 @@ export function ReplyForm({
   knowledge: KnowledgeContext | null;
   onSent?: () => void;
 }) {
-  const { state, key, form } = useActionForm(sendReply, INITIAL);
+  const { state, key, form } = useActionForm(sendReply, INITIAL, { lost: LOST_SEND });
   const [privately, setPrivately] = useState(false);
   useRefreshOnSuccess(state, onSent);
 
@@ -75,7 +75,7 @@ export function ReplyForm({
   const [cannedLocale, setCannedLocale] = useState<CannedLocale>(customerLocale);
 
   return (
-    <form key={key} action={form.action} onSubmit={form.onSubmit} className="flex flex-col gap-2">
+    <form key={key} {...form} className="flex flex-col gap-2">
       <input type="hidden" name="conversationId" value={conversationId} />
       <input
         type="hidden"

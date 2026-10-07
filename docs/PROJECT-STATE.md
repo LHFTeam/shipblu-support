@@ -4588,16 +4588,17 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     every refusal, so each wipe has a measured cause. The same scripts ran
     against the commit before the fix and against the fix, with every check
     phrased as the behaviour wanted, and each group of forms was re-run by a
-    second, adversarial pass. In the final run of all of them, against the
-    head of #335, the code before this change failed 562 of 1,104 checks across
-    both builds, in 33 of 38 scenarios. The five without a failure cover the two
-    side-conversation forms, which #335 had already fixed; the purge panel and
-    merge rows, which were never converted; two forms on one page leaving each
-    other alone; and the article editor's success path, which the old reset got
-    right. The fix failed 12 of 1,142 checks: six checks on each build, every
-    one of them a success-path change listed below. The extra scenario is the
-    slug's, which needs the fix's answer. React logged no warning or error
-    outside the redirect test, where a stand-in boundary catches one on purpose.
+    second, adversarial pass. In the final run of all of them, against `main`
+    with #335 merged, the code before this change failed 576 of 1,112 checks
+    across both builds, in 33 of 38 scenarios. The five without a failure cover
+    the two side-conversation forms, which #335 had already fixed; the purge
+    panel and merge rows, which were never converted; two forms on one page
+    leaving each other alone; and the article editor's success path, which the
+    old reset got right. The fix failed 12 of 1,150 checks: six checks on each
+    build, every one of them a success-path change listed below. The extra
+    scenario is the slug's, which needs the fix's answer. React logged no
+    warning or error outside the redirect test, where a stand-in boundary
+    catches one on purpose.
 
     **The fix is `useActionForm`** (`components/use-action-form.ts`):
     - It submits from `onSubmit`, cancels the native submission and dispatches
@@ -4610,11 +4611,14 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
       React captures it and replays it once it loads, where a form with no
       `action` would send its fields to the page's own URL as a query string.
       That one replayed submission takes React's own path, reset included.
-    - Only a success moves its `key`. An answer without a nonce keeps the one
-      the state already had, so the key stays on the last success's.
-    - An action that throws becomes a refusal: "No answer came back, so this may
-      or may not have gone through", with the draft kept and the page re-read
-      in case it landed. Before, `useActionState` rethrew it while rendering,
+    - Only a success moves its `key`. A success is what `ok()` answers; one
+      without a nonce is given a fresh one, so the key and everything keyed on
+      it still move. Any other answer keeps the nonce the state already had.
+    - An action that throws becomes a refusal saying no answer came back, with
+      the draft kept and the page re-read in case it landed. The forms whose
+      retry reaches a customer or a hub (reply, template, both side
+      conversations) pass `LOST_SEND`, which says to check the timeline before
+      sending again. Before, `useActionState` rethrew it while rendering,
       the console fell through to `global-error`, and the draft went with it: a
       dropped connection, or an action a deploy removed. Next's own redirect and
       not-found are rethrown through `unstable_rethrow`, so `RedirectBoundary`
@@ -4624,6 +4628,14 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     The last two came from #335's `useSubmitWithoutReset`, written for the
     side-conversation forms the same day. The hook absorbed it, and those
     forms now use `useActionForm` like every other; one shape rather than two.
+
+    Its `form` is spread onto the element, `<form {...form}>`, rather than
+    wired as `action` and `onSubmit`: a form given only `action` still submits,
+    through React's own path, reset and all. The `form-reset` repo rule refuses
+    a console form with a function `action`, no spread and no `onSubmit`, that
+    holds a field a reset moves. Run against `main` before this change it named
+    15 of the converted forms; it cannot see a field another component renders
+    (`EditorForm`'s children, `Toggle`).
 
     Converted: the composer's reply, note, template and both side-conversation
     forms; the new-ticket form; `EditorForm`, and with it every admin editor
@@ -4679,9 +4691,14 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     React's reset, and it changes nothing in them. Nothing else in the console
     resets a form: there is no reset button and no `requestFormReset` call. So
     a converted form's controlled select cannot drift from what it submits.
-    `TemplateForm` still keeps its values after a send, as it always did. It now
-    also keeps showing the template it sent, where the reset used to put the
-    select back on the first one.
+    `TemplateForm` now clears after a send: its choice and values moved into a
+    child keyed on the success. It never cleared before. The values stayed and
+    the reset moved only the select, so the next send paired template one with
+    template two's values; without the reset, a second press would have sent
+    the same paid template again. The agent's capacity box, which submits on
+    blur, now sends only a value that changed since it last sent: a refused cap
+    stays in the box rather than being put back, and resending it on every
+    focus change repeated the refusal.
 
     **Not changed: the help centre and the sign-in pages**, which this fix's
     scope, the agent console, left out. Measured the same way on the same day,

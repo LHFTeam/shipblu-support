@@ -15,7 +15,7 @@ import type { ConversationDetail } from '@/lib/tickets/conversation';
 import type { ActionState } from '../../action-state';
 import { SubmitButton } from '@/components/submit-button';
 import { useActionForm, type FormHandlers } from '@/components/use-action-form';
-import { useRefreshOnSuccess } from './form-state';
+import { LOST_SEND, useRefreshOnSuccess } from './form-state';
 import {
   replyToSideConversation,
   setSideConversationState,
@@ -201,16 +201,13 @@ export function SideConversationCard({
 }
 
 function SideReplyForm({ side }: { side: SideConversationView }) {
-  const { state, key, form } = useActionForm(replyToSideConversation, INITIAL);
+  const { state, key, form } = useActionForm(replyToSideConversation, INITIAL, {
+    lost: LOST_SEND,
+  });
   useRefreshOnSuccess(state);
 
   return (
-    <form
-      key={key}
-      action={form.action}
-      onSubmit={form.onSubmit}
-      className="mt-2 flex flex-col gap-1.5"
-    >
+    <form key={key} {...form} className="mt-2 flex flex-col gap-1.5">
       <input type="hidden" name="sideConversationId" value={side.id} />
       <Textarea
         name="body"
@@ -285,7 +282,9 @@ export function StartSideConversationForm({
   // reset after a refusal put the first hub back in the picker while the
   // component still held the agent's choice, and the next Send went to that
   // hub (`docs/PROJECT-STATE.md` §6.80).
-  const { state, key, form } = useActionForm(startSideConversation, INITIAL);
+  const { state, key, form } = useActionForm(startSideConversation, INITIAL, {
+    lost: LOST_SEND,
+  });
   useRefreshOnSuccess(state, onSent);
 
   return (
@@ -342,7 +341,7 @@ function SideConversationDraft({
   ];
 
   return (
-    <form action={form.action} onSubmit={form.onSubmit} className="flex flex-col gap-2">
+    <form {...form} className="flex flex-col gap-2">
       <input type="hidden" name="conversationId" value={conversation.id} />
       <input type="hidden" name="anchorMessageId" value={anchor?.id ?? ''} />
 

@@ -43,7 +43,7 @@ export function EditorForm({
   useRefreshOnSuccess(state, onSaved);
 
   return (
-    <form action={form.action} onSubmit={form.onSubmit} className="flex flex-col gap-3">
+    <form {...form} className="flex flex-col gap-3">
       {children}
       <ErrorText>{state.error}</ErrorText>
       <SubmitButton idle={submitLabel} className="self-start" />

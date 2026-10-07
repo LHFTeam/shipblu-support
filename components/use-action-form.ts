@@ -7,10 +7,12 @@ import type { ActionState } from '@/lib/http/action-state';
 /**
  * Said when the action never answered: the connection dropped, the server
  * failed, a deploy cut the request off. Whether the write landed is unknown,
- * so the sentence says so rather than inviting a blind retry.
+ * so the sentence says so rather than inviting a blind retry, and points at the
+ * page the hook has just re-read. A form whose retry reaches a customer says
+ * where to look instead — `lost` below.
  */
 const LOST =
-  'No answer came back, so this may or may not have gone through. Check before trying again.';
+  'No answer came back, so this may or may not have gone through. Check the page before trying again.';
 
 /**
  * `useActionState` for a form, without the reset React performs on a refusal.
@@ -41,16 +43,24 @@ const LOST =
  *   after a success (§6.58), and a refusal carries no nonce. Taken as it came
  *   back, it turned the key from the last success's back to 0 and the remount
  *   wiped the form just as the reset did, on the second send rather than the
- *   first. Anything that is not a success keeps the nonce it found.
+ *   first. A success is what `ok()` answers, `ok: true`; one that arrives
+ *   without a nonce is given a fresh one, so the key and every effect keyed on
+ *   it still move. Anything else keeps the nonce it found.
  * - **An action that throws becomes a refusal.** Without this, `useActionState`
  *   rethrows it while rendering, the console falls through to `global-error`,
  *   and the draft goes with it. Next's own redirect and not-found go through
  *   untouched: `requireAgent()` redirects an ended session, which rejects the
  *   call while Next navigates, and nothing was written.
+ *
+ * `form` is spread onto the `<form>` — `<form {...form} key={key}>` — rather
+ * than wired as two props, because a form given only `action` still submits:
+ * through React's own path, reset and all, which is the bug this exists to
+ * close. The `form-reset` repo rule refuses a console form that does that.
  */
 export function useActionForm<State extends ActionState>(
   action: (state: Awaited<State>, formData: FormData) => Promise<State>,
   initial: Awaited<State>,
+  { lost = LOST }: { lost?: string } = {},
 ): { state: Awaited<State>; key: number; form: FormHandlers; pending: boolean } {
   const router = useRouter();
 
@@ -58,13 +68,15 @@ export function useActionForm<State extends ActionState>(
     try {
       const result = await action(previous, formData);
       return (
-        result.nonce === undefined ? { ...result, nonce: previous.nonce } : result
+        result.ok
+          ? { ...result, nonce: result.nonce ?? Date.now() }
+          : { ...result, nonce: previous.nonce }
       ) as Awaited<State>;
     } catch (error) {
       unstable_rethrow(error);
       // If it did land, this is what puts it on the page the error points at.
       router.refresh();
-      return { error: LOST, nonce: previous.nonce } as Awaited<State>;
+      return { error: lost, nonce: previous.nonce } as Awaited<State>;
     }
   }
 
@@ -85,7 +97,7 @@ export function useActionForm<State extends ActionState>(
   return { state, key: state.nonce ?? 0, form: { action: dispatch, onSubmit }, pending };
 }
 
-/** Both go on the `<form>`; a component rendering it for a parent takes this. */
+/** Spread onto the `<form>`; a component rendering it for a parent takes this. */
 export type FormHandlers = {
   action: (formData: FormData) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;

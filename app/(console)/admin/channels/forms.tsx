@@ -56,8 +56,7 @@ export function ChannelForm({
   return (
     <form
       key={key}
-      action={form.action}
-      onSubmit={form.onSubmit}
+      {...form}
       className="flex flex-col gap-3 rounded-lg border border-[var(--border)] p-4"
     >
       {/* Stacked on a phone, one row from `sm` up. Four controls sharing a
@@ -144,7 +143,7 @@ export function ChannelEditor({
   }
 
   return (
-    <form action={form.action} onSubmit={form.onSubmit} className="mt-2 flex w-full flex-col gap-3">
+    <form {...form} className="mt-2 flex w-full flex-col gap-3">
       <input type="hidden" name="id" value={channel.id} />
       <input type="hidden" name="type" value={type} />
 
@@ -362,7 +361,7 @@ export function WebchatSettings({
   }
 
   return (
-    <form action={form.action} onSubmit={form.onSubmit} className="flex flex-col gap-3">
+    <form {...form} className="flex flex-col gap-3">
       <input type="hidden" name="id" value={channel.id} />
       <input type="hidden" name="type" value="webchat" />
       <input type="hidden" name="name" value={channel.name} />

@@ -36,7 +36,7 @@ export function PhraseEditor({
   useRefreshOnSuccess(state);
 
   return (
-    <form action={form.action} onSubmit={form.onSubmit} className="flex flex-col gap-1">
+    <form {...form} className="flex flex-col gap-1">
       <div className="flex items-center gap-2">
         <input type="hidden" name="key" value={phraseKey} />
         <Input

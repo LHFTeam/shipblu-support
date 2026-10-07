@@ -15,8 +15,7 @@ export function CategoryForm() {
   return (
     <form
       key={key}
-      action={form.action}
-      onSubmit={form.onSubmit}
+      {...form}
       className="flex flex-wrap items-end gap-3 rounded-lg border border-[var(--border)] p-4"
     >
       <div className="min-w-40 flex-1">
@@ -53,8 +52,7 @@ export function FolderForm({
   return (
     <form
       key={key}
-      action={form.action}
-      onSubmit={form.onSubmit}
+      {...form}
       className="flex flex-wrap items-end gap-3 rounded-lg border border-[var(--border)] p-4"
     >
       <div className="min-w-40 flex-1">

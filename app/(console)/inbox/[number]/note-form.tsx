@@ -17,7 +17,7 @@ export function NoteForm({
   useRefreshOnSuccess(state, onSent);
 
   return (
-    <form key={key} action={form.action} onSubmit={form.onSubmit} className="flex flex-col gap-2">
+    <form key={key} {...form} className="flex flex-col gap-2">
       <input type="hidden" name="conversationId" value={conversationId} />
 
       <Textarea

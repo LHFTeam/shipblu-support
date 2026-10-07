@@ -72,7 +72,7 @@ export function ConsoleTicketForm({
   });
 
   return (
-    <form action={form.action} onSubmit={form.onSubmit} className="flex flex-col gap-4">
+    <form {...form} className="flex flex-col gap-4">
       <input type="hidden" name="slug" value={slug} />
 
       <div className="grid gap-3 sm:grid-cols-2">
