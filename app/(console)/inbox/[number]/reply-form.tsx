@@ -1,7 +1,7 @@
 'use client';
 
-import { useActionState, useCallback, useEffect, useRef, useState } from 'react';
-import { ErrorText, Select, Textarea } from '@/components/ui';
+import { useCallback, useRef, useState } from 'react';
+import { Button, ErrorText, Select, Textarea } from '@/components/ui';
 import type { CannedResponseOption } from '@/lib/tickets/lookups';
 import {
   availableLocales,
@@ -13,8 +13,7 @@ import {
 import { sendReply } from '../../reply-actions';
 import { KnowledgePanel } from './knowledge';
 import type { KnowledgeContext } from './types';
-import { INITIAL, useRefreshOnSuccess } from './form-state';
-import { SubmitButton } from '@/components/submit-button';
+import { useSubmitWithoutReset } from './form-state';
 
 /**
  * The language toggle's two buttons, each written in its own script.
@@ -55,9 +54,19 @@ export function ReplyForm({
   knowledge: KnowledgeContext | null;
   onSent?: () => void;
 }) {
-  const [state, action] = useActionState(sendReply, INITIAL);
+  /*
+    Submitted by hand rather than through `<form action>`, for the reason the
+    side-conversation forms are (`docs/PROJECT-STATE.md` §6.80): React resets a
+    form after every function action, a refused one included. Here that wiped
+    the reply the agent had just written, at exactly the moment the server told
+    them to fix one thing — a required field before resolving, a root cause, a
+    window — and kept the hidden canned-response pick while it did, so the
+    reply they typed again from nothing was counted as that response. A refusal
+    now leaves the box, the pick and the "Resolve after sending" tick exactly
+    as they were; a success still clears them through the key below.
+  */
+  const { state, busy, onSubmit } = useSubmitWithoutReset(sendReply, onSent);
   const [privately, setPrivately] = useState(false);
-  useRefreshOnSuccess(state, onSent);
 
   /*
     Which language the next canned response goes in.
@@ -74,7 +83,7 @@ export function ReplyForm({
   const [cannedLocale, setCannedLocale] = useState<CannedLocale>(customerLocale);
 
   return (
-    <form key={state.nonce ?? 0} action={action} className="flex flex-col gap-2">
+    <form key={state.nonce ?? 0} onSubmit={onSubmit} className="flex flex-col gap-2">
       <input type="hidden" name="conversationId" value={conversationId} />
       <input
         type="hidden"
@@ -116,7 +125,9 @@ export function ReplyForm({
           <input type="checkbox" name="resolveAfter" />
           Resolve after sending
         </label>
-        <SubmitButton className="ml-auto" idle="Send reply" busy="Sending…" />
+        <Button type="submit" disabled={busy} className="ml-auto">
+          {busy ? 'Sending…' : 'Send reply'}
+        </Button>
       </div>
     </form>
   );
@@ -184,14 +195,8 @@ function ReplyBody({
 
   /*
     An empty box carries no canned response, whatever was picked into it
-    earlier. Two things empty it without a send: the agent clearing it to write
-    their own — the "never mind" this column is meant not to score — and React,
-    which resets the form after a *refused* send (`docs/PROJECT-STATE.md`
-    §6.80). The second is why this exists. The textarea came back empty while
-    this state, and the hidden fields mirroring it, kept the earlier pick, so
-    the reply the agent then typed from nothing was counted as that response —
-    the §6.58 over-count again, by a different door. A refusal after an earlier
-    success remounts this component instead, which clears it the same way.
+    earlier: an agent who clears it to write their own has made the "never
+    mind" this column is meant not to score.
 
     Forgetting is final. An agent who empties the box and then undoes it, or
     cuts the whole text and pastes it back, sends the response uncounted. That
@@ -199,15 +204,13 @@ function ReplyBody({
     restoring the pick would mean tracking which inputs are undos. Replacing
     the whole text in one gesture without passing through empty still counts,
     as rewording does.
+
+    Nothing else empties the box without a send now. React's own reset after a
+    refused send did (§6.80), leaving the pick behind in this state and the
+    hidden fields; the form above no longer submits through `action`, so a
+    refusal keeps the text and the pick together.
   */
   const forget = useCallback(() => setUsed(null), []);
-
-  useEffect(() => {
-    const form = bodyRef.current?.form;
-    if (!form) return;
-    form.addEventListener('reset', forget);
-    return () => form.removeEventListener('reset', forget);
-  }, [forget]);
 
   /*
     Two things insert into this box now — a canned response and an article link

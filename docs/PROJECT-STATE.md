@@ -1994,11 +1994,12 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   cause, a closed window) has React reset the form (§6.80): the textarea came
   back empty while `ReplyBody` and its hidden field kept the earlier pick, and
   the reply the agent then wrote from nothing was counted as that response. And
-  **clearing the box** by hand kept the pick too. `ReplyBody` now forgets the
-  pick whenever the box is emptied, by the form's `reset` event or by the agent;
-  a reworded response still counts, as before. Moving the reply form onto
-  `useSubmitWithoutReset`, which would also keep the agent's text through a
-  refusal, is still open.
+  **clearing the box** by hand kept the pick too. The reply form now submits
+  through `useSubmitWithoutReset`, as the side-conversation forms do, so a
+  refusal no longer resets anything: the text, the pick and the "Resolve after
+  sending" tick stay exactly as the agent left them, and a success still clears
+  all three through the nonce key. `ReplyBody` forgets the pick when the agent
+  empties the box; a reworded response still counts, as before.
 
 - **The dead-scaffolding sweep, run rather than recommended.** §1 has said it is
   worth grepping for other columns nothing reads or writes; this is the answer as
@@ -4599,12 +4600,17 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     `action=`, so the same reset should reach them on a refusal; only the
     thread form was measured, and the hook is there for them to adopt.
 
-    The reply form was measured on 2026-10-07 and does lose the agent's text
+    The reply form was measured on 2026-10-07 and did lose the agent's text
     on a refusal. The canned-response pick it carries in a hidden field did
     not — React mirrors a controlled value into `defaultValue`, so a reset
     puts it straight back — and the next reply counted a response it no longer
-    contained. `ReplyBody` now clears the pick on `reset`; the reply form
-    itself still submits through `action=`.
+    contained. It now submits through `useSubmitWithoutReset` too (#340),
+    checked in Chromium: a refused send keeps the text, the pick and the
+    resolve tick; consecutive successes each clear the form; the button shows
+    "Sending…" while busy; on a phone a success collapses the composer and a
+    refusal leaves it open; and an ended session redirects to `/login` with
+    nothing written. The note form and the template form still submit through
+    `action=`.
 
 81. **An `sr-only` span scrolled the whole console off the screen.** _2026-10-05,
     caught in review before merge._ The inline image preview gave each
