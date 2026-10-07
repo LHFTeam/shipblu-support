@@ -1,7 +1,7 @@
 'use client';
 
-import { useActionState, useCallback, useRef, useState } from 'react';
-import { ErrorText, Select, Textarea } from '@/components/ui';
+import { useCallback, useRef, useState } from 'react';
+import { Button, ErrorText, Select, Textarea } from '@/components/ui';
 import type { CannedResponseOption } from '@/lib/tickets/lookups';
 import {
   availableLocales,
@@ -13,8 +13,7 @@ import {
 import { sendReply } from '../../reply-actions';
 import { KnowledgePanel } from './knowledge';
 import type { KnowledgeContext } from './types';
-import { INITIAL, useRefreshOnSuccess } from './form-state';
-import { SubmitButton } from '@/components/submit-button';
+import { useSubmitWithoutReset } from './form-state';
 
 /**
  * The language toggle's two buttons, each written in its own script.
@@ -55,9 +54,16 @@ export function ReplyForm({
   knowledge: KnowledgeContext | null;
   onSent?: () => void;
 }) {
-  const [state, action] = useActionState(sendReply, INITIAL);
+  // Submitted by hand rather than through `action`. React resets the form
+  // after a refusal too, and `sendReply` refuses at exactly the moment an agent
+  // means to fix one thing and press Send again — a field required on resolve,
+  // a missing root cause, a window that has closed. The reset emptied the
+  // reply, unticked "Resolve after sending", and unticked "Reply privately"
+  // while `metaSendKind` still said private, so the resend went out as the
+  // once-per-comment private reply under a box showing it would not
+  // (`docs/PROJECT-STATE.md` §6.80).
+  const { state, busy, onSubmit } = useSubmitWithoutReset(sendReply, onSent);
   const [privately, setPrivately] = useState(false);
-  useRefreshOnSuccess(state, onSent);
 
   /*
     Which language the next canned response goes in.
@@ -74,7 +80,7 @@ export function ReplyForm({
   const [cannedLocale, setCannedLocale] = useState<CannedLocale>(customerLocale);
 
   return (
-    <form key={state.nonce ?? 0} action={action} className="flex flex-col gap-2">
+    <form key={state.nonce ?? 0} onSubmit={onSubmit} className="flex flex-col gap-2">
       <input type="hidden" name="conversationId" value={conversationId} />
       <input
         type="hidden"
@@ -116,7 +122,11 @@ export function ReplyForm({
           <input type="checkbox" name="resolveAfter" />
           Resolve after sending
         </label>
-        <SubmitButton className="ml-auto" idle="Send reply" busy="Sending…" />
+        {/* Not `SubmitButton`: `useFormStatus` reports only a submission React
+            started, and this one is started by hand. */}
+        <Button type="submit" disabled={busy} className="ml-auto">
+          {busy ? 'Sending…' : 'Send reply'}
+        </Button>
       </div>
     </form>
   );
@@ -171,6 +181,12 @@ function ReplyBody({
     Last one wins. Inserting two into one reply is real — a greeting and a
     closing — but the column counts replies, not fragments, and attributing the
     reply to both would make the totals add up to more than the replies sent.
+
+    Forgotten by the remount after a success and by nothing else, so a refused
+    send keeps the pick along with the text it went into — which is right, since
+    the resend is the same reply. Anything added here that a send should clear
+    clears the same way, by living below the key: the form is submitted by hand,
+    so it never fires a `reset` event to listen for.
   */
   const [usedId, setUsedId] = useState('');
 

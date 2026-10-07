@@ -4556,6 +4556,19 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     `action=`, so the same reset should reach them on a refusal; only the
     thread form was measured, and the hook is there for them to adopt.
 
+    The inbox reply form moved onto it on 2026-10-07, after the wipe was
+    reproduced there in Chromium: pick a canned response, tick "Resolve after
+    sending" on a ticket with a field required on resolve, press Send, and the
+    refusal appeared over an empty box. The same reset unticked "Resolve after
+    sending" and, on a comment ticket, "Reply privately instead", while
+    `metaSendKind` still read `private_reply`. So a resend would have gone out
+    as Meta's once-per-comment private reply under a box saying it would not. A refusal
+    now leaves the text, the canned pick and both boxes as the agent left them.
+    A success still clears the form and collapses the composer on a phone. Its
+    button reads the hook's `busy`, because `useFormStatus` does not see a
+    submission React did not start. The notes, templates and new-ticket forms
+    and the admin and knowledge-base editors are still on `action=`.
+
 ## 7. Verification already done
 
 - **The knowledge-base role floor, against a real Postgres.** _2026-09-04._ The
