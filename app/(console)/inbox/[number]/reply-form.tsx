@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { ErrorText, Select, Textarea } from '@/components/ui';
 import type { CannedResponseOption } from '@/lib/tickets/lookups';
 import {
@@ -185,14 +185,17 @@ function ReplyBody({
 
   /*
     An empty box carries no canned response, whatever was picked into it
-    earlier. Two things empty it without a send: the agent clearing it to write
-    their own — the "never mind" this column is meant not to score — and React,
-    which resets the form after a *refused* send (`docs/PROJECT-STATE.md`
-    §6.80). The second is why this exists. The textarea came back empty while
+    earlier: the agent cleared it to write their own, which is the "never mind"
+    this column is meant not to score.
+
+    A refused send used to empty it too. React reset the form after one
+    (`docs/PROJECT-STATE.md` §6.80), and the textarea came back empty while
     this state, and the hidden fields mirroring it, kept the earlier pick, so
     the reply the agent then typed from nothing was counted as that response —
-    the §6.58 over-count again, by a different door. A refusal after an earlier
-    success remounts this component instead, which clears it the same way.
+    the §6.58 over-count again, by a different door. This component listened
+    for that `reset` until the form moved onto `useActionForm`, which queues
+    none: a refusal now keeps the draft and the pick together, and only a
+    success remounts this component, clearing both.
 
     Forgetting is final. An agent who empties the box and then undoes it, or
     cuts the whole text and pastes it back, sends the response uncounted. That
@@ -202,13 +205,6 @@ function ReplyBody({
     as rewording does.
   */
   const forget = useCallback(() => setUsed(null), []);
-
-  useEffect(() => {
-    const form = bodyRef.current?.form;
-    if (!form) return;
-    form.addEventListener('reset', forget);
-    return () => form.removeEventListener('reset', forget);
-  }, [forget]);
 
   /*
     Two things insert into this box now — a canned response and an article link

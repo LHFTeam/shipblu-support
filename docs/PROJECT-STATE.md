@@ -1991,14 +1991,14 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
 
   The same change closed two ways the composer over-counted, both reproduced in
   Chromium before the fix. **A refused send** (a required field, a missing root
-  cause, a closed window) has React reset the form (§6.80): the textarea came
+  cause, a closed window) had React reset the form (§6.80): the textarea came
   back empty while `ReplyBody` and its hidden field kept the earlier pick, and
   the reply the agent then wrote from nothing was counted as that response. And
   **clearing the box** by hand kept the pick too. `ReplyBody` now forgets the
-  pick whenever the box is emptied, by the form's `reset` event or by the agent;
-  a reworded response still counts, as before. Moving the reply form onto
-  `useSubmitWithoutReset`, which would also keep the agent's text through a
-  refusal, is still open.
+  pick whenever the agent empties the box; a reworded response still counts, as
+  before. The first it also caught on the form's `reset` event, until #337 moved
+  the reply form onto `useActionForm`: a refusal now keeps the agent's text and
+  the pick together, so there is no reset left to listen for.
 
 - **The dead-scaffolding sweep, run rather than recommended.** §1 has said it is
   worth grepping for other columns nothing reads or writes; this is the answer as
@@ -4763,12 +4763,14 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     React moves the control silently, and whatever reads React state goes on
     describing the old choice.
 
-    The reply form was measured on 2026-10-07 and does lose the agent's text
-    on a refusal. The canned-response pick it carries in a hidden field did
-    not — React mirrors a controlled value into `defaultValue`, so a reset
-    puts it straight back — and the next reply counted a response it no longer
-    contained. `ReplyBody` now clears the pick on `reset`; the reply form
-    itself still submits through `action=`.
+    The reply form was measured again on 2026-10-07, before it moved onto
+    `useActionForm`, and lost the agent's text on a refusal. The
+    canned-response pick it carries in a hidden field did not — React mirrors
+    a controlled value into `defaultValue`, so a reset puts it straight back —
+    and the next reply counted a response it no longer contained. `ReplyBody`
+    cleared the pick on `reset` until the conversion left no reset to listen
+    for. The pick now stays with the draft it credits, and is forgotten only
+    when the agent empties the box.
 
 81. **An `sr-only` span scrolled the whole console off the screen.** _2026-10-05,
     caught in review before merge._ The inline image preview gave each
