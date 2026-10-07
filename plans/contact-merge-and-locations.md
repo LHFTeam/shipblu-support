@@ -204,7 +204,7 @@ A closed hub is marked not operating rather than deleted, so its code still
 reads in the tickets that mention it. Deleting is for one entered by mistake.
 Side conversations were the first thing to reference a location, and the delete
 gained its in-use guard after them: one a thread has gone to is marked not
-operating instead (`lib/locations/remove.ts`), because
+operating instead (`removeEntry`, `lib/side-conversations/directory.ts`), because
 `side_conversations.location_id` is `on delete set null` and an unguarded delete
 would strip the hub off the thread without a word.
 

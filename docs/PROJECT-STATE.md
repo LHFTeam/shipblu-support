@@ -1064,10 +1064,15 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   is `on delete set null` and would quietly strip the hub from a real thread,
   leaving only the address in `to_addresses`. That check is the SQL's to make by
   hand; the Delete button on `/admin/locations` makes it itself. `deleteLocation`
-  goes through `removeLocation` (`lib/locations/remove.ts`), which locks the row,
-  counts the threads, and marks a hub any thread has used not operating instead
-  of deleting it — the rule `deleteInternalRecipient` already applied to the
-  picker's other register.
+  goes through `removeEntry` (`lib/side-conversations/directory.ts`), which
+  locks the row, counts the threads, and marks a hub any thread has used not
+  operating instead of deleting it — the same function, and so the same rule,
+  `deleteInternalRecipient` applies to the picker's other register. Starting a
+  thread re-reads its hub or recipient under a share lock (`holdEntry`) before
+  inserting, so one deleted or switched off while the agent wrote is refused
+  with a sentence. Before, a deleted one died on the foreign key and the
+  composer said the send "may or may not have gone through" when nothing was
+  written, and a retired one was sent to anyway.
 
 - ~~**SLA policies and automation rules are both empty.**~~ `sla_policies` holds
   **4** rows and `automation_rules` **1** as of 2026-09-20, so neither cron runs
