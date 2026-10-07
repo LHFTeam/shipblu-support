@@ -4685,7 +4685,9 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     input. Enter in a single-line input is the browser's implicit submission
     of the form around it. So an agent who typed half a reply, opened the
     panel, searched and pressed Enter sent that half to the customer.
-    Reproduced in Chromium on a desktop and on a phone. The search already
+    Reproduced in Chromium at desktop width and in a 390px touch-emulated
+    viewport. It was not tried on a real phone's keyboard, whose Go key
+    reaches the page as the same Enter keydown. The search already
     runs as the agent types, so Enter there now does nothing: the input's
     `onKeyDown` calls `preventDefault()`, as `shipments-field.tsx` already
     did. The guard is on the input rather than the panel, because a keydown
