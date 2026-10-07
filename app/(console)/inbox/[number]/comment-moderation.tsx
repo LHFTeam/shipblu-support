@@ -1,9 +1,9 @@
 'use client';
 
-import { useActionState, useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useActionState, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Badge, Button, ErrorText } from '@/components/ui';
+import { useRefreshOnSuccess } from '@/components/use-refresh-on-success';
 import { labelFor, moderatableComment, readCommentModeration } from '@/lib/meta/moderation';
 import type { ActionState } from '../../action-state';
 import { moderateComment } from '../../meta-actions';
@@ -91,13 +91,10 @@ function ModerationForm({
 }) {
   const [state, formAction] = useActionState(moderateComment, INITIAL);
   const [armed, setArmed] = useState(false);
-  const router = useRouter();
 
   // The comment's own state lives on the message row, so the strip only tells
   // the truth again once the page has re-read it.
-  useEffect(() => {
-    if (state.ok) router.refresh();
-  }, [state.ok, state.nonce, router]);
+  useRefreshOnSuccess(state);
 
   return (
     <form action={formAction} className="inline-flex items-center gap-1.5">

@@ -1,9 +1,9 @@
 'use client';
 
-import { useActionState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useActionState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Button } from '@/components/ui';
+import { useRefreshOnSuccess } from '@/components/use-refresh-on-success';
 import type { ActionState } from '../../action-state';
 import { refreshRequesterProfile } from '../../meta-actions';
 
@@ -33,14 +33,11 @@ export function ProfileRefresh({
   hasName: boolean;
 }) {
   const [state, formAction] = useActionState(refreshRequesterProfile, INITIAL);
-  const router = useRouter();
 
   // The name and picture land on the contact, which the header reads through
   // the page's own query — so the header only tells the truth again once the
   // route has been re-read.
-  useEffect(() => {
-    if (state.ok) router.refresh();
-  }, [state.ok, state.nonce, router]);
+  useRefreshOnSuccess(state);
 
   return (
     <>

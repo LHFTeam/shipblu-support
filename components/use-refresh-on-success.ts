@@ -21,7 +21,8 @@ import type { ActionState } from '@/lib/http/action-state';
  * The admin editors pass an inline one, and got away with it only because their
  * callback unmounts the form that calls this.
  *
- * Written once; the admin editors and the inbox composers each kept a copy.
+ * Written once: the admin editors and the inbox composers each kept a copy,
+ * and five more components wrote the same effect out by hand.
  */
 export function useRefreshOnSuccess(state: ActionState, onSuccess?: () => void) {
   const router = useRouter();
