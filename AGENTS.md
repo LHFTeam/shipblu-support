@@ -507,6 +507,14 @@ screen, and `InfoTip` when it should be one gesture away. Never `title=` on a DO
 element — it never appears on a phone, which is where the console is read, and
 CI rejects it.
 
+**A text box rendered inside a form it is not a field of is a `SearchInput`.**
+Enter in a single-line input submits the form that owns it, so a search or filter
+box there sends whatever that form sends: the knowledge panel's
+search, inside the reply form, sent half-written replies (§6.83).
+`components/search-input.tsx` owns no form, so no key path reaches one, and Enter
+puts a phone's keyboard away instead. No repo rule checks this, because the box
+and the form are usually in different files.
+
 **One palette, light.** The console, the help centre and the widget render the
 same colours whatever the reader's operating system asks for. So: no
 `@media (prefers-color-scheme: dark)`, no Tailwind `dark:` variant — it is that

@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { BookIcon, ChevronDownIcon, ChevronUpIcon } from '@/components/icons';
 import { InfoTip } from '@/components/tooltip';
-import { Badge, Input } from '@/components/ui';
+import { SearchInput } from '@/components/search-input';
+import { Badge } from '@/components/ui';
 import type { AgentArticleHit } from '@/lib/kb/agent-search';
 
 /**
@@ -146,7 +147,10 @@ export function KnowledgePanel({
       */}
       <div id={panelId} hidden={!open} className="border-t border-[var(--border)] p-2">
         <div className="flex items-center gap-2">
-          <Input
+          {/* Not `Input`: this panel renders inside the reply form, and Enter
+              in a plain text box here sent the agent's half-written reply to
+              the customer. */}
+          <SearchInput
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search articles…"
