@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { BookIcon, ChevronDownIcon, ChevronUpIcon } from '@/components/icons';
 import { InfoTip } from '@/components/tooltip';
-import { Badge, Input } from '@/components/ui';
+import { SearchInput } from '@/components/search-input';
+import { Badge } from '@/components/ui';
 import type { AgentArticleHit } from '@/lib/kb/agent-search';
 
 /**
@@ -146,21 +147,12 @@ export function KnowledgePanel({
       */}
       <div id={panelId} hidden={!open} className="border-t border-[var(--border)] p-2">
         <div className="flex items-center gap-2">
-          <Input
+          {/* Not `Input`: this panel renders inside the reply form, and Enter
+              in a plain text box here sent the agent's half-written reply to
+              the customer. */}
+          <SearchInput
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            /*
-              This panel renders inside the reply form, so Enter here is the
-              browser's implicit submission of *that* form: the agent's
-              half-written reply went to the customer because they pressed the
-              key every search box teaches them to press. The search already
-              runs as they type, so Enter has nothing of its own to do and is
-              swallowed. On the input rather than the panel, because a keydown
-              guard on the panel would also stop Enter activating its buttons.
-            */
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') event.preventDefault();
-            }}
             placeholder="Search articles…"
             aria-label="Search knowledge base articles"
             className="min-w-0 flex-1"
