@@ -42,14 +42,14 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
   const conversationId = String(formData.get('conversationId') ?? '');
   const body = text(formData, 'body');
   const resolveAfter = formData.get('resolveAfter') === 'on';
-  // A malformed id is dropped here rather than handed to the update, where
-  // Postgres would refuse it with 22P02 and the only trace would be a warning.
+  // Which canned response went into this reply, and the language the composer
+  // inserted it in — not the toggle beside the picker, which can be flipped
+  // after the pick. Both are only claims: `recordCannedUse` re-reads the
+  // response and checks them against it. A malformed id is dropped here rather
+  // than handed to Postgres, which would refuse it with 22P02, and a missing
+  // language (a tab rendered before the composer sent one) moves the total
+  // alone.
   const cannedResponseId = uuidField(formData, 'cannedResponseId');
-  // The language the composer inserted, not the toggle beside the picker: an
-  // agent can flip the toggle after picking, and a response written in one
-  // language inserts that one whichever is selected. Anything else — including
-  // nothing, from a tab rendered before the composer sent it — is a use in no
-  // known language, and moves the total alone.
   const cannedLocaleField = text(formData, 'cannedLocale');
   const cannedLocale = isLocale(cannedLocaleField) ? cannedLocaleField : null;
 
@@ -159,7 +159,7 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
           : {},
   });
 
-  if (cannedResponseId) await recordCannedUse(cannedResponseId, cannedLocale);
+  if (cannedResponseId) await recordCannedUse(agent.id, cannedResponseId, cannedLocale);
 
   if (resolveAfter) {
     await applyStatusCategory(agent, conversation.id, 'resolved');

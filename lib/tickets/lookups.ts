@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, or } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, or, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   agents,
@@ -98,10 +98,7 @@ export async function getTicketField(key: string): Promise<TicketFieldDef | null
  * account number still in it — and a group's belongs to a team this agent may
  * not be on.
  *
- * `agent_id` and `group_id` are only meaningful for their own visibility, so
- * each arm tests both: a `global` row with a stale `agent_id` left on it from an
- * earlier edit is still global, and a `personal` row whose `agent_id` is null is
- * visible to nobody rather than to everybody.
+ * The rule itself is `cannedVisibleTo`, shared with the usage counter.
  */
 export async function listCannedResponses(agent: SessionAgent) {
   return db
@@ -116,23 +113,39 @@ export async function listCannedResponses(agent: SessionAgent) {
       bodyTextEn: cannedResponses.bodyTextEn,
     })
     .from(cannedResponses)
-    .where(
-      or(
-        eq(cannedResponses.visibility, 'global'),
-        and(eq(cannedResponses.visibility, 'personal'), eq(cannedResponses.agentId, agent.id)),
-        and(
-          eq(cannedResponses.visibility, 'group'),
-          inArray(
-            cannedResponses.groupId,
-            db
-              .select({ id: groupMembers.groupId })
-              .from(groupMembers)
-              .where(eq(groupMembers.agentId, agent.id)),
-          ),
-        ),
-      ),
-    )
+    .where(cannedVisibleTo(agent.id))
     .orderBy(asc(cannedResponses.folder), asc(cannedResponses.title));
+}
+
+/**
+ * Whether a canned response is one this agent may insert.
+ *
+ * One predicate for the two places that ask: the composer's list, and
+ * `recordCannedUse`, which re-reads the row a reply's `cannedResponseId` names
+ * rather than trusting the form — so an agent cannot score a use against
+ * somebody else's personal response, or a team's they are not on, by posting
+ * its id.
+ *
+ * `agent_id` and `group_id` are only meaningful for their own visibility, so
+ * each arm tests both: a `global` row with a stale `agent_id` left on it from an
+ * earlier edit is still global, and a `personal` row whose `agent_id` is null is
+ * visible to nobody rather than to everybody.
+ */
+export function cannedVisibleTo(agentId: string): SQL {
+  return or(
+    eq(cannedResponses.visibility, 'global'),
+    and(eq(cannedResponses.visibility, 'personal'), eq(cannedResponses.agentId, agentId)),
+    and(
+      eq(cannedResponses.visibility, 'group'),
+      inArray(
+        cannedResponses.groupId,
+        db
+          .select({ id: groupMembers.groupId })
+          .from(groupMembers)
+          .where(eq(groupMembers.agentId, agentId)),
+      ),
+    ),
+  )!;
 }
 
 export type CannedResponseOption = Awaited<ReturnType<typeof listCannedResponses>>[number];

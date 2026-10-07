@@ -58,7 +58,10 @@ async function ticketFrom(text: string) {
       channel: 'email',
       statusId: open!.id,
       requesterContactId: contact!.id,
-      lastCustomerMessageAt: new Date(),
+      // A minute back, so the rule's event is after it whatever the gap
+      // between this process's clock and the database's — `alreadyReplied`
+      // compares the two.
+      lastCustomerMessageAt: new Date(Date.now() - 60_000),
     })
     .returning({ id: conversations.id });
   await db.insert(messages).values({

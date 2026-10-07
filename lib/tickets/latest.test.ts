@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversations } from '@/db/schema';
 import { withTestEnv } from '@/lib/testing/env';
-import { latest } from './latest';
+import { firstAt, latest } from './latest';
 
 /**
  * The fast half of the check AGENTS.md asks of any `sql` fragment holding an
@@ -32,6 +32,23 @@ describe('latest', () => {
     expect(params.some((param) => param instanceof Date)).toBe(false);
     expect(params).toContain(AT.toISOString());
     expect(text).toContain('"last_message_at" = greatest("conversations"."last_message_at", $');
+    expect(text).toContain('::timestamptz');
+  });
+});
+
+describe('firstAt', () => {
+  it('sets the column only while it is empty, binding the instant the same way', () => {
+    const { sql: text, params } = db
+      .update(conversations)
+      .set({ firstAutoRepliedAt: firstAt(conversations.firstAutoRepliedAt, AT) })
+      .where(eq(conversations.id, '00000000-0000-0000-0000-000000000000'))
+      .toSQL();
+
+    expect(params.some((param) => param instanceof Date)).toBe(false);
+    expect(params).toContain(AT.toISOString());
+    expect(text).toContain(
+      '"first_auto_replied_at" = coalesce("conversations"."first_auto_replied_at", $',
+    );
     expect(text).toContain('::timestamptz');
   });
 });

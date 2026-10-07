@@ -1,12 +1,11 @@
-import { eq, sql, type SQL } from 'drizzle-orm';
+import { and, eq, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { cannedResponses } from '@/db/schema';
 import { logger } from '@/lib/log';
-import type { CannedLocale } from './canned';
+import { resolveLocale, type CannedLocale } from './canned';
+import { cannedVisibleTo } from './lookups';
 
 const log = logger('canned');
-
-type UsageColumn = 'usageCount' | 'usageCountAr' | 'usageCountEn';
 
 /**
  * The column that counts a use in each language.
@@ -18,7 +17,14 @@ type UsageColumn = 'usageCount' | 'usageCountAr' | 'usageCountEn';
 const LOCALE_COLUMN = {
   ar: 'usageCountAr',
   en: 'usageCountEn',
-} as const satisfies Record<CannedLocale, UsageColumn>;
+} as const satisfies Record<CannedLocale, 'usageCountAr' | 'usageCountEn'>;
+
+/**
+ * What one use moves. The total is a required key, not a `Partial` entry, so an
+ * edit that dropped it would stop compiling rather than quietly stop counting
+ * the column the split is a breakdown of.
+ */
+type Increment = { usageCount: SQL } & Partial<Record<(typeof LOCALE_COLUMN)[CannedLocale], SQL>>;
 
 /**
  * Records that an agent sent a reply carrying a canned response, and in which
@@ -31,29 +37,46 @@ const LOCALE_COLUMN = {
  * can run the statement, which nothing else does before production.
  *
  * After the send rather than before it: the column ranks what the team actually
- * sends, so a reply that failed validation and never left must not count. The
- * id comes from the composer, so it is incremented rather than trusted for
- * anything — an id that matches nothing updates no rows, which is the whole
- * blast radius. The language is the same: whatever the composer says it
- * inserted, or null when it did not say, in which case only the total moves.
+ * sends, so a reply that failed validation and never left must not count.
  *
- * One statement, so the total and the language's own count cannot disagree
+ * Both the id and the language arrive in the reply's form, so neither is
+ * trusted. The row is re-read through `cannedVisibleTo`, the rule the
+ * composer's list is built from, so a posted id for somebody else's personal
+ * response, or a team's this agent is not on, counts nothing. And the language
+ * is put through `resolveLocale` against the bodies just read, exactly as the
+ * composer chose it, so a use can only land in a language the response is
+ * written in. `wanted` is null when the composer did not say — a console tab
+ * rendered before it sent one — and then only the total moves.
+ *
+ * The total and the language move in one statement, so they cannot disagree
  * about whether a use happened.
  *
  * It never throws. A lost increment costs a ranking column one point, and
  * failing an agent's reply, which has already been stored and queued, because
  * a counter did not move would be the wrong trade.
  */
-export async function recordCannedUse(id: string, locale: CannedLocale | null): Promise<void> {
-  const increment: Partial<Record<UsageColumn, SQL>> = {
-    usageCount: sql`${cannedResponses.usageCount} + 1`,
-  };
-  if (locale) {
-    const column = LOCALE_COLUMN[locale];
-    increment[column] = sql`${cannedResponses[column]} + 1`;
-  }
-
+export async function recordCannedUse(
+  agentId: string,
+  id: string,
+  wanted: CannedLocale | null,
+): Promise<void> {
   try {
+    const [response] = await db
+      .select({ ar: cannedResponses.bodyTextAr, en: cannedResponses.bodyTextEn })
+      .from(cannedResponses)
+      .where(and(eq(cannedResponses.id, id), cannedVisibleTo(agentId)))
+      .limit(1);
+
+    // Deleted since the composer rendered, or never this agent's to use.
+    if (!response) return;
+
+    const increment: Increment = { usageCount: sql`${cannedResponses.usageCount} + 1` };
+    const locale = wanted ? resolveLocale(response, wanted) : null;
+    if (locale) {
+      const column = LOCALE_COLUMN[locale];
+      increment[column] = sql`${cannedResponses[column]} + 1`;
+    }
+
     await db.update(cannedResponses).set(increment).where(eq(cannedResponses.id, id));
   } catch (error) {
     log.warn('could not record a use', error);

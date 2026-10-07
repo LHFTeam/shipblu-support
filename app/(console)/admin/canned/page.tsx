@@ -34,10 +34,10 @@ export default async function CannedPage() {
             Used{' '}
             <InfoTip label="Used">
               Replies agents sent with this response inserted from the composer, counted when the
-              reply is sent — a reply the channel later fails to deliver still counts. One inserted
-              and then cleared from the box does not score; one inserted and then reworded does.
-              When two go into one reply, only the last counts. An automation rule sending it is not
-              counted at all.
+              reply is sent — a reply the channel later fails to deliver still counts. Emptying the
+              reply box forgets the response; deleting only the inserted text, or rewording it, does
+              not. When two go into one reply, only the last counts. An automation rule sending it
+              is not counted at all.
               <br />
               <br />
               <b>Arabic</b> and <b>English</b> split the same replies by the language of the version

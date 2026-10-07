@@ -1971,8 +1971,13 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   The language is the body the composer inserted — posted as `cannedLocale`
   beside `cannedResponseId`, and the one `resolveLocale` chose rather than what
   the toggle says, so an Arabic-only response picked with the toggle on English
-  counts as Arabic. `recordCannedUse` in `lib/tickets/canned-usage.ts` moves the
-  total and the language in one statement and never throws. The total stays the
+  counts as Arabic. `recordCannedUse` in `lib/tickets/canned-usage.ts` treats
+  both the posted id and the posted language as claims: it re-reads the response
+  through `cannedVisibleTo`, the rule the picker's list is built from (so
+  somebody else's personal response, or a team's the agent is not on, counts
+  nothing), and puts the language through `resolveLocale` against the bodies it
+  just read. Then it moves the total and the language in one statement, and it
+  never throws. The total stays the
   authority and the split is a breakdown of it: a use posted without a language
   (a console tab rendered before the deploy) moves the total alone, so Arabic
   plus English can be less than Used. Nothing can backfill it — no message row
@@ -4740,11 +4745,14 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     the out-of-hours reply is inactive (its row last changed on 2026-09-02,
     the day of the last `auto_replied` event), no rule has ever had a
     `send_reply` action, and `first_auto_replied_at` is set on no
-    conversation. Fixed by binding `now.toISOString()` behind `::timestamptz`.
-    `lib/tickets/outbound.db.test.ts` now runs the write against Postgres, and `outbound.test.ts` asserts no
-    `Date` survives in the fragment. The unit test had checked the fragment's
-    shape against a mocked client, which is how a statement Postgres never
-    saw passed for a tested one.
+    conversation. Fixed by binding `now.toISOString()` behind `::timestamptz`,
+    through `firstAt()` beside `latest()` in `lib/tickets/latest.ts`, so the
+    coalesce form has one audited implementation as the greatest form does.
+    `lib/tickets/outbound.db.test.ts` now runs the write against Postgres,
+    and `outbound.test.ts` and `latest.test.ts` assert no `Date` survives in
+    the fragment. The unit test had checked the fragment's shape against a
+    mocked client, which is how a statement Postgres never saw passed for a
+    tested one.
 
 ## 7. Verification already done
 
