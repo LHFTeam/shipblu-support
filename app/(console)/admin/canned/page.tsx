@@ -33,13 +33,21 @@ export default async function CannedPage() {
           <>
             Used{' '}
             <InfoTip label="Used">
-              How many replies went out carrying this response — counted when the reply is sent, so
-              one an agent inserted and then thought better of does not score. Both paths count: an
-              agent inserting it from the composer, and an automation sending it as an
-              auto-acknowledgement. Counts start from the day this began being recorded, so a
-              response the team has sent for months still starts at zero.
+              Replies agents sent with this response inserted from the composer, counted when the
+              reply is sent — a reply the channel later fails to deliver still counts. One inserted
+              and then cleared from the box does not score; one inserted and then reworded does.
+              When two go into one reply, only the last counts. An automation rule sending it is not
+              counted at all.
+              <br />
+              <br />
+              <b>Arabic</b> and <b>English</b> split the same replies by the language of the version
+              inserted. A use whose language was not recorded — one from before the split, or sent
+              from a console tab opened before it — counts in Used alone, so the two can add up to
+              less.
             </InfoTip>
           </>,
+          'Arabic',
+          'English',
           '',
         ]}
       >
@@ -50,6 +58,8 @@ export default async function CannedPage() {
             </Cell>
             <Cell className="text-xs text-[var(--muted-foreground)]">{response.folder ?? '—'}</Cell>
             <Cell className="text-xs text-[var(--muted-foreground)]">{response.usageCount}</Cell>
+            <Cell className="text-xs text-[var(--muted-foreground)]">{response.usageCountAr}</Cell>
+            <Cell className="text-xs text-[var(--muted-foreground)]">{response.usageCountEn}</Cell>
             <Cell className="text-end">
               <CannedEditor response={response} deleteOnly />
             </Cell>

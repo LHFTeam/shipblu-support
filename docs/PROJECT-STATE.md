@@ -1931,9 +1931,10 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   tests its own key too, so an orphaned `personal` row with a null `agent_id` is
   visible to nobody rather than to everybody.
 
-  `usage_count` is incremented by both senders — the agent's composer and the
+  ~~`usage_count` is incremented by both senders — the agent's composer and the
   automation's `send_reply`, which had been reading the body and leaving the
-  count alone. **Counted on send, not on insert**, so a response an agent
+  count alone.~~ Agents only since 2026-10-07; see below. **Counted on send, not
+  on insert**, so a response an agent
   reached for and thought better of does not score. It over-counts in one
   direction on purpose: an agent who inserts one and rewrites every word still
   registers a use, because the alternative is diffing the sent body against the
@@ -1941,9 +1942,10 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   in one reply attribute to the last one picked, because the column counts
   replies rather than fragments.
 
-  The figures start from this change, so **a response the team has sent for
+  ~~The figures start from this change, so **a response the team has sent for
   months still starts at zero** and the ranking is only meaningful once some
-  traffic has gone through it. The tooltip says so.
+  traffic has gone through it. The tooltip says so.~~ It never applied to a
+  production row, and the tooltip no longer says it; see below.
 
   **A response is now two bodies, one per language, and the picker carries a
   toggle beside it.** It opens on the language the customer is writing in — the
@@ -1956,6 +1958,42 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
   ticket through `requesterLocale()` rather than at the rule — one rule serves
   both halves of the queue. `usage_count` still counts replies rather than
   languages: which language a response goes out in is not what the column ranks.
+  (The split below sits beside it rather than changing what it counts.)
+
+  **Since 2026-10-07: agents only, and split by language.** Two changes the team
+  asked for together. An automation's `send_reply` **no longer counts** — the
+  column says which responses agents reach for, and a rule sends its response to
+  every ticket it matches, so one acknowledgement rule would outrank everything
+  chosen by hand. Production had never had a `send_reply` rule and every one of
+  its 62 responses stood at 0 that day, so nothing already counted needed taking
+  back. And the agents' uses are now split by language in `usage_count_ar` and
+  `usage_count_en`, beside the total, with `/admin/canned` showing all three.
+  The language is the body the composer inserted — posted as `cannedLocale`
+  beside `cannedResponseId`, and the one `resolveLocale` chose rather than what
+  the toggle says, so an Arabic-only response picked with the toggle on English
+  counts as Arabic. `recordCannedUse` in `lib/tickets/canned-usage.ts` moves the
+  total and the language in one statement and never throws. The total stays the
+  authority and the split is a breakdown of it: a use posted without a language
+  (a console tab rendered before the deploy) moves the total alone, so Arabic
+  plus English can be less than Used. Nothing can backfill it — no message row
+  records which canned response it came from.
+
+  The old tooltip's "a response the team has sent for months still starts at
+  zero" never applied to a production row, and it is gone. Counting went live
+  on 2026-08-22 (#70), and all 62 responses were created on 2026-10-06, so each
+  has been counted since it existed. Their zeros mean no agent had sent one: the
+  last agent reply in production was on 2026-09-26.
+
+  The same change closed two ways the composer over-counted, both reproduced in
+  Chromium before the fix. **A refused send** (a required field, a missing root
+  cause, a closed window) has React reset the form (§6.80): the textarea came
+  back empty while `ReplyBody` and its hidden field kept the earlier pick, and
+  the reply the agent then wrote from nothing was counted as that response. And
+  **clearing the box** by hand kept the pick too. `ReplyBody` now forgets the
+  pick whenever the box is emptied, by the form's `reset` event or by the agent;
+  a reworded response still counts, as before. Moving the reply form onto
+  `useSubmitWithoutReset`, which would also keep the agent's text through a
+  refusal, is still open.
 
 - **The dead-scaffolding sweep, run rather than recommended.** §1 has said it is
   worth grepping for other columns nothing reads or writes; this is the answer as
@@ -4555,6 +4593,13 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     on "Choose…". The other forms in the console still submit through
     `action=`, so the same reset should reach them on a refusal; only the
     thread form was measured, and the hook is there for them to adopt.
+
+    The reply form was measured on 2026-10-07 and does lose the agent's text
+    on a refusal. The canned-response pick it carries in a hidden field did
+    not — React mirrors a controlled value into `defaultValue`, so a reset
+    puts it straight back — and the next reply counted a response it no longer
+    contained. `ReplyBody` now clears the pick on `reset`; the reply form
+    itself still submits through `action=`.
 
 81. **An `sr-only` span scrolled the whole console off the screen.** _2026-10-05,
     caught in review before merge._ The inline image preview gave each

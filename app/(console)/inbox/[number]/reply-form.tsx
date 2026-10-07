@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useCallback, useRef, useState } from 'react';
+import { useActionState, useCallback, useEffect, useRef, useState } from 'react';
 import { ErrorText, Select, Textarea } from '@/components/ui';
 import type { CannedResponseOption } from '@/lib/tickets/lookups';
 import {
@@ -129,7 +129,7 @@ export function ReplyForm({
  * remembers. React state lives with the component that declares it, and
  * `usedId` declared in `ReplyForm` outlived the remount that clears the
  * textarea: the reply after one that used a canned response posted the same
- * `cannedResponseId` again, and `countCannedUse` incremented `usage_count` for
+ * `cannedResponseId` again, and the server incremented `usage_count` for
  * a response that reply never contained — once more for every reply the agent
  * sent before leaving the ticket. The column exists to rank what the team
  * reaches for, so an over-count that compounds with traffic is worse than no
@@ -159,20 +159,55 @@ function ReplyBody({
   const bodyRef = useRef<HTMLTextAreaElement>(null);
 
   /*
-    Which canned response went into this reply, for `usage_count`.
+    Which canned response went into this reply, and in which language, for
+    `usage_count` and its per-language split.
 
     Counted on send rather than on insert, because the column exists to rank
     which responses are worth keeping and "reached for and then abandoned" is
     not a use. It is still an over-count in one direction: an agent who inserts
     one and then rewrites every word of it is recorded as having used it. The
     alternative is diffing the sent body against the stored one and picking a
-    similarity threshold, which is a number nobody can defend.
+    similarity threshold, which is a number nobody can defend. An empty box is
+    the one comparison that needs no threshold — see `forget` below.
 
-    Last one wins. Inserting two into one reply is real — a greeting and a
-    closing — but the column counts replies, not fragments, and attributing the
-    reply to both would make the totals add up to more than the replies sent.
+    Last one wins, language included. Inserting two into one reply is real — a
+    greeting and a closing — but the column counts replies, not fragments, and
+    attributing the reply to both would make the totals add up to more than the
+    replies sent.
+
+    The language is the one `resolveLocale` actually inserted, not the toggle.
+    The toggle's state lives in `ReplyForm` above the key and posts no field,
+    so it survives a send — and it can be flipped after the pick, or name a
+    language the response was never written in.
   */
-  const [usedId, setUsedId] = useState('');
+  const [used, setUsed] = useState<{ id: string; locale: CannedLocale } | null>(null);
+
+  /*
+    An empty box carries no canned response, whatever was picked into it
+    earlier. Two things empty it without a send: the agent clearing it to write
+    their own — the "never mind" this column is meant not to score — and React,
+    which resets the form after a *refused* send (`docs/PROJECT-STATE.md`
+    §6.80). The second is why this exists. The textarea came back empty while
+    this state, and the hidden fields mirroring it, kept the earlier pick, so
+    the reply the agent then typed from nothing was counted as that response —
+    the §6.58 over-count again, by a different door. A refusal after an earlier
+    success remounts this component instead, which clears it the same way.
+
+    Forgetting is final. An agent who empties the box and then undoes it, or
+    cuts the whole text and pastes it back, sends the response uncounted. That
+    under-counts, which is the cheaper direction for a ranking column, and
+    restoring the pick would mean tracking which inputs are undos. Replacing
+    the whole text in one gesture without passing through empty still counts,
+    as rewording does.
+  */
+  const forget = useCallback(() => setUsed(null), []);
+
+  useEffect(() => {
+    const form = bodyRef.current?.form;
+    if (!form) return;
+    form.addEventListener('reset', forget);
+    return () => form.removeEventListener('reset', forget);
+  }, [forget]);
 
   /*
     Two things insert into this box now — a canned response and an article link
@@ -207,14 +242,15 @@ function ReplyBody({
       if (!chosen) return;
 
       insertText(bodies[chosen]);
-      setUsedId(response.id);
+      setUsed({ id: response.id, locale: chosen });
     },
     [insertText],
   );
 
   return (
     <>
-      <input type="hidden" name="cannedResponseId" value={usedId} />
+      <input type="hidden" name="cannedResponseId" value={used?.id ?? ''} />
+      <input type="hidden" name="cannedLocale" value={used?.locale ?? ''} />
 
       <Textarea
         ref={bodyRef}
@@ -228,6 +264,9 @@ function ReplyBody({
             : 'Write a reply to the customer…'
         }
         required
+        onInput={(event) => {
+          if (!event.currentTarget.value.trim()) forget();
+        }}
       />
 
       <CannedPicker

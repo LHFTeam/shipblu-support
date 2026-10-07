@@ -34,9 +34,10 @@ import { logger } from '@/lib/log';
  *    `textToHtml` read as the team having edited every seeded response, and
  *    the only way to ship it would be the overwrite that reverts their real
  *    edits along with it.
- *  - `visibility`, `agent_id`, `group_id` and `usage_count` are never touched
- *    after insert. Narrowing a response to one team is a decision somebody
- *    made, and the count is the team's record of what it actually sends.
+ *  - `visibility`, `agent_id`, `group_id` and the usage counts (`usage_count`
+ *    and its per-language pair) are never touched after insert. Narrowing a
+ *    response to one team is a decision somebody made, and the counts are the
+ *    team's record of what it actually sends.
  *
  * **`overwrite=true` has no undo**, because a canned response, unlike a
  * handbook article, has no version table. So it is scoped with `keys=` to the
