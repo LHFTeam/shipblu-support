@@ -151,7 +151,17 @@ export async function deliverAutomatedReply(reply: AutomatedReply): Promise<stri
       // Coalesced rather than overwritten: this records that the customer has
       // been acknowledged at all, so the second automated reply on a ticket
       // must not move it and make a rule keyed off it fire again.
-      firstAutoRepliedAt: sql`coalesce(${conversations.firstAutoRepliedAt}, ${now})`,
+      //
+      // The instant goes in as an ISO string behind `::timestamptz`, never as
+      // the `Date`: inside a `sql` template postgres.js receives it untyped and
+      // refuses it (AGENTS.md, Tests). It did, on every call, after the message
+      // row above was written: on every carrier channel the reply was left
+      // `pending` with no send job, never sent, and on web chat — where the row
+      // is the delivery — the visitor saw it. Either way no event was written,
+      // so a time-based rule wrote it again on its next sweep. Unseen only
+      // because production had no rule that replies and the out-of-hours reply
+      // switched off.
+      firstAutoRepliedAt: sql`coalesce(${conversations.firstAutoRepliedAt}, ${now.toISOString()}::timestamptz)`,
     })
     .where(eq(conversations.id, reply.conversationId));
 

@@ -4679,6 +4679,28 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     after the redirect, what it does when that URL expires, and whether
     `play()` after `load()` works without a new tap.
 
+83. **A bare `Date` in a `sql` template stranded every automated reply.**
+    _2026-10-07, found by the first database test of `send_reply`; never
+    reached a customer._ `deliverAutomatedReply` stamped
+    `first_auto_replied_at` with ``sql`coalesce(..., ${now})` ``, which
+    postgres.js refuses with `ERR_INVALID_ARG_TYPE` — the trap AGENTS.md
+    describes under Tests, on the same `prepare: false` client production
+    uses. It runs after the message insert and before the event and the send
+    job, so every automated reply — the out-of-hours one and every automation
+    rule's — would have been left `pending` on the timeline for good and never
+    sent on a carrier channel. On web chat, where the row is the delivery, the
+    visitor would have seen it. Either way no `auto_replied` event was written,
+    so a time-based rule would have sent it again each sweep. Production
+    never ran it, though the deployed worker (`8426c35`) carries the line:
+    the out-of-hours reply is inactive (its row last changed on 2026-09-02,
+    the day of the last `auto_replied` event), no rule has ever had a
+    `send_reply` action, and `first_auto_replied_at` is set on no
+    conversation. Fixed by binding `now.toISOString()` behind `::timestamptz`.
+    `lib/tickets/outbound.db.test.ts` now runs the write against Postgres, and `outbound.test.ts` asserts no
+    `Date` survives in the fragment. The unit test had checked the fragment's
+    shape against a mocked client, which is how a statement Postgres never
+    saw passed for a tested one.
+
 ## 7. Verification already done
 
 - **The knowledge-base role floor, against a real Postgres.** _2026-09-04._ The
