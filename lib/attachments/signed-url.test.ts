@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ATTACHMENT_URL_TTL_SECONDS, reloadDelayMs, shouldRefresh } from './signed-url';
+import { ATTACHMENT_URL_TTL_SECONDS, shouldRefresh } from './signed-url';
 
 const minutes = (n: number) => n * 60_000;
 const note = { duration: 12.4, buffered: [[0, 12.4]] as Array<[number, number]> };
@@ -110,11 +110,5 @@ describe('shouldRefresh', () => {
     expect(play((ATTACHMENT_URL_TTL_SECONDS - 61) * 1000)).toBe(false);
     expect(play((ATTACHMENT_URL_TTL_SECONDS - 60) * 1000)).toBe(true);
     expect(play((ATTACHMENT_URL_TTL_SECONDS - 30) * 1000)).toBe(true);
-  });
-});
-
-describe('reloadDelayMs', () => {
-  it('reloads at once after one error, and spaces out the reloads that themselves failed', () => {
-    expect([1, 2, 3].map(reloadDelayMs)).toEqual([0, 1_000, 2_000]);
   });
 });

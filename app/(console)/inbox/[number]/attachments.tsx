@@ -22,7 +22,7 @@ import {
   previewFile,
   previewReducer,
 } from '@/lib/attachments/previews';
-import { type MediaTrigger, reloadDelayMs, shouldRefresh } from '@/lib/attachments/signed-url';
+import { type MediaTrigger, shouldRefresh } from '@/lib/attachments/signed-url';
 import { formatBytes } from '@/lib/format';
 
 type Attachment = { id: string; filename: string; contentType: string; sizeBytes: number };
@@ -77,10 +77,9 @@ function canPlay(media: PlayableMedia): boolean {
  * The files on one message: a row of chips, where a picture opens under the row
  * instead of in a new tab.
  *
- * In place rather than in a lightbox. Nothing in the console opens a dialog over
- * a ticket's content, and the timeline's order is its information: the
- * photograph of a crushed box belongs beside the sentence complaining about it,
- * not in a layer over the whole ticket. Anything that is not a picture is left
+ * In place rather than in a lightbox, because the timeline's order is its
+ * information: the photograph of a crushed box belongs beside the sentence
+ * complaining about it, not in a layer over the whole ticket. Anything that is not a picture is left
  * as it was, because a PDF or a spreadsheet has nothing to show in a bubble.
  *
  * A picture's chip is still a link to the file, and only a plain click is taken
@@ -510,29 +509,11 @@ const MAX_FAILURES = 3;
 const PROGRESS_SECONDS = 5;
 
 /**
- * How long seeking has to go quiet before a seek is decided. A drag on the
- * timeline seeks at every step, and so does a held arrow key; a reload at the
- * first step past the buffer emptied the element under the pointer and dropped
- * the rest of the drag.
+ * How recently before an error focus has to have left a player for nowhere for
+ * the error to have taken it. Chromium 141 blurs the control a few
+ * milliseconds before it reports one; a click elsewhere is not that close.
  */
-const SEEK_SETTLE_MS = 500;
-
-/**
- * How close behind a playing element's `pause` a seek has to come for the pause
- * to be the controls' — made for a click or a drag on the timeline, to be
- * undone on the release — rather than the agent's. Measured: Chromium fires
- * the two in the same millisecond, Firefox within about twelve. A person's
- * Space and then an arrow key, or a click on pause and then on the timeline,
- * take well over a hundred.
- */
-const CONTROLS_PAUSE_MS = 50;
-
-/**
- * How long after a reload starts a blur to nowhere is the reload's doing, and
- * how recently before an error one has to be for the error to have caused it.
- * Measured at a few milliseconds; a click elsewhere is not that close.
- */
-const REFOCUS_MS = 100;
+const DROPPED_FOCUS_MS = 100;
 
 /**
  * A voice note or a video, with the native controls — which already carry play,
@@ -709,41 +690,25 @@ function anotherPlaying(media: HTMLMediaElement) {
  * neither one can make a dead URL look young.
  *
  * Whether to play on is taken from `play`, `pause` and `ended` as they arrive,
- * and from the element itself, rather than from `paused` alone. Chromium has
- * already set `paused` by the time it reports a failed range, and fires `pause`
- * only after the `error`; and a `play()` can land while a reload is in flight.
- *
- * A seek is decided once seeking settles (`SEEK_SETTLE_MS`), and the stall it
- * causes in the meantime is left to it, so a drag on the timeline reloads once,
- * from where it was released, whether the video was playing or paused. On a
- * playing video Chrome's and Firefox's controls pause for the drag or the click
- * and play again on the release; that `play` decides at once, and the reload
- * keeps the video playing. A seek right behind such a pause marks the pause as
- * the controls' (`CONTROLS_PAUSE_MS`), so that a release which lands while the
- * reload is in flight, and plays nothing, does not leave the video stopped.
- * The mark lasts one gesture: a key, any later pause, the release's `play` or
- * the settled seek clears it, so it cannot turn a later reload into an order
- * to play.
+ * and from the element itself: Chromium fires `pause` only after it reports a
+ * failed range, and a `play()` can land while a reload is in flight.
  *
  * A reload's resume is a promise to play again, not an order. If the video was
  * hidden while the reload was in flight, or the agent started another player,
  * `load()` has already set the element paused without firing `pause`, so
  * nothing else could have cancelled it. It is checked when the metadata lands.
- * A reload that waits (`reloadDelayMs`) takes the position and the playing
- * state again when it goes, because Firefox plays on from what it holds in the
- * meantime, and the agent may have paused or moved it.
  *
- * While a reload is in flight a video keeps the box it had. `load()` drops the
- * picture's size until the metadata is back, and the default 300 × 150 it fell
- * back to moved the controls out from under the pointer and the conversation
- * below by hundreds of pixels.
+ * While a reload ahead of an expiry is in flight, a video keeps the box it had.
+ * `load()` drops the picture's size until the metadata is back, and the default
+ * 300 × 150 it fell back to moved the controls out from under the pointer and
+ * the conversation below by hundreds of pixels. A reload after an error is left
+ * alone: measuring an element in its error state lets Chrome render that state,
+ * and Chrome then takes focus off the control the agent was on.
  *
  * Focus stays with the player through a reload. `document.activeElement` is
  * the element itself while one of its native controls — play, the scrubber —
- * has focus, and the browsers take focus off that control to nowhere when the
- * element resets: Chromium 141 inside `load()` and just before it reports an
- * error, Chrome 155 once the element has sat in its error state across a
- * frame, Firefox a few milliseconds after `load()`. Left there, the next key
+ * has focus, and Chromium 141 takes focus off that control to nowhere inside
+ * `load()`, and just before it reports an error. Left there, the next key
  * reached nothing, and a screen reader lost its place in the ticket.
  *
  * An error before the first metadata is not an expiry. The format, the file or
@@ -762,64 +727,26 @@ function useFreshMedia({
   const failures = useRef(0);
   const failedAt = useRef<number | null>(null);
   const resume = useRef<{ at: number; rate: number; play: boolean } | null>(null);
-  /** When a playing element was last paused, as an event time stamp. */
-  const pausedAt = useRef<number | null>(null);
-  /** The controls paused a playing element for the gesture now settling. */
-  const gesture = useRef(false);
-  const settling = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   /** When bytes last arrived, for telling a slow response from a refused one. */
   const lastData = useRef<number | null>(null);
   /** When focus last left the player for nowhere. */
   const focusDropped = useRef<number | null>(null);
-  /** Until when a blur to nowhere is a reload's, to be undone. */
-  const refocusUntil = useRef(0);
-  const pendingLoad = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-
-  useEffect(() => {
-    const timers = [pendingLoad, settling];
-    return () => {
-      for (const timer of timers) clearTimeout(timer.current);
-    };
-  }, []);
 
   const ageMs = () =>
     minted.current === null
       ? null
       : Math.max(Date.now() - minted.current.wall, performance.now() - minted.current.mono);
 
-  const unsettle = () => {
-    clearTimeout(settling.current);
-    settling.current = undefined;
-  };
-
   const giveUp = (media: HTMLMediaElement) => {
-    clearTimeout(pendingLoad.current);
-    unsettle();
     resume.current = null;
     playing.current = false;
-    gesture.current = false;
     // Back on the element first, so `settle` hands it to the failure line as
     // it would from the element itself.
     const dropped = focusDropped.current;
-    if (nothingFocused() && dropped !== null && performance.now() - dropped < REFOCUS_MS) {
+    if (nothingFocused() && dropped !== null && performance.now() - dropped < DROPPED_FOCUS_MS) {
       media.focus({ preventScroll: true });
     }
     onFail();
-  };
-
-  const restart = (media: HTMLMediaElement, hadFocus: boolean) => {
-    if (media instanceof HTMLVideoElement) {
-      const box = media.getBoundingClientRect();
-      if (box.width > 0) {
-        media.style.width = `${box.width}px`;
-        media.style.height = `${box.height}px`;
-      }
-    }
-    media.load();
-    if (hadFocus) {
-      refocusUntil.current = performance.now() + REFOCUS_MS;
-      if (nothingFocused()) media.focus({ preventScroll: true });
-    }
   };
 
   const reload = (media: HTMLMediaElement, failed: boolean) => {
@@ -831,36 +758,26 @@ function useFreshMedia({
     resume.current ??= {
       at: media.currentTime,
       rate: media.playbackRate,
-      // Not on a failure: Firefox fails a drag's own request at the press, and
-      // the release will say whether to play.
-      play: playing.current || (gesture.current && !failed) || !media.paused,
+      play: playing.current || !media.paused,
     };
-    gesture.current = false;
-    unsettle();
     minted.current = null;
     lastData.current = null;
     // `load()` resets the speed to the default, so the default becomes the
     // speed the agent chose.
     media.defaultPlaybackRate = resume.current.rate;
-    clearTimeout(pendingLoad.current);
-    const hadFocus = document.activeElement === media;
-    const wait = failed ? reloadDelayMs(failures.current) : 0;
-    if (wait === 0) return restart(media, hadFocus);
-    const playedOn = !media.paused;
-    pendingLoad.current = setTimeout(() => {
-      const back = resume.current;
-      if (back && playedOn) {
-        back.at = media.currentTime;
-        back.play = !media.paused;
+    if (!failed && media instanceof HTMLVideoElement) {
+      const box = media.getBoundingClientRect();
+      if (box.width > 0) {
+        media.style.width = `${box.width}px`;
+        media.style.height = `${box.height}px`;
       }
-      restart(media, hadFocus);
-    }, wait);
+    }
+    const focused = document.activeElement === media;
+    media.load();
+    if (focused && document.activeElement !== media) media.focus({ preventScroll: true });
   };
 
   const consider = (trigger: MediaTrigger, media: HTMLMediaElement) => {
-    if (settling.current !== undefined && (trigger === 'waiting' || trigger === 'stalled')) {
-      return false;
-    }
     const buffered: Array<[number, number]> = [];
     for (let range = 0; range < media.buffered.length; range++) {
       buffered.push([media.buffered.start(range), media.buffered.end(range)]);
@@ -913,26 +830,14 @@ function useFreshMedia({
     },
     onPlay: (event: MediaEvent) => {
       playing.current = true;
-      pausedAt.current = null;
-      unsettle();
       pauseOthers(event.currentTarget);
       consider('play', event.currentTarget);
-      gesture.current = false;
     },
-    onPause: (event: MediaEvent) => {
-      pausedAt.current = playing.current ? event.timeStamp : null;
-      gesture.current = false;
+    onPause: () => {
       playing.current = false;
     },
     onEnded: () => {
       playing.current = false;
-      gesture.current = false;
-    },
-    onKeyDown: () => {
-      // A key is always the agent's: Space and then an arrow pauses and seeks
-      // as a press on the timeline does.
-      pausedAt.current = null;
-      gesture.current = false;
     },
     onTimeUpdate: (event: MediaEvent) => {
       if (
@@ -944,16 +849,7 @@ function useFreshMedia({
       }
     },
     onSeeking: (event: MediaEvent) => {
-      const media = event.currentTarget;
-      const paused = pausedAt.current;
-      if (paused !== null && event.timeStamp - paused < CONTROLS_PAUSE_MS) gesture.current = true;
-      pausedAt.current = null;
-      clearTimeout(settling.current);
-      settling.current = setTimeout(() => {
-        settling.current = undefined;
-        consider('seeking', media);
-        gesture.current = false;
-      }, SEEK_SETTLE_MS);
+      consider('seeking', event.currentTarget);
     },
     onWaiting: (event: MediaEvent) => {
       consider('waiting', event.currentTarget);
@@ -968,19 +864,7 @@ function useFreshMedia({
       focusDropped.current = null;
     },
     onBlur: (event: FocusEvent<HTMLMediaElement>) => {
-      if (event.relatedTarget !== null) {
-        focusDropped.current = null;
-        return;
-      }
-      focusDropped.current = performance.now();
-      if (performance.now() < refocusUntil.current) {
-        // After the blur has run its course: focus taken back inside the
-        // handler is undone by the rest of it.
-        const media = event.currentTarget;
-        setTimeout(() => {
-          if (nothingFocused()) media.focus({ preventScroll: true });
-        }, 0);
-      }
+      focusDropped.current = event.relatedTarget === null ? performance.now() : null;
     },
     onError: (event: MediaEvent) => {
       const media = event.currentTarget;

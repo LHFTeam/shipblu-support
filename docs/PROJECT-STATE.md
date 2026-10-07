@@ -4605,9 +4605,9 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
       the picture for 13 to 34 seconds.
     - **How.** The reload calls `load()`, which goes back through the route
       for a new signature, and puts back the position, the speed and the
-      playing state. A video keeps its box while the reload is in flight, and
-      focus stays on the player: Chromium blurs a focused native control inside
-      `load()`.
+      playing state. A video keeps its box while a reload ahead of an expiry
+      is in flight, and focus stays on the player: Chromium 141 blurs a
+      focused native control inside `load()`.
     - **Timed from metadata.** The URL's age runs from `loadedmetadata`, not
       `loadstart`. With `preload="none"`, `loadstart` fires at render, so a
       voice note played four minutes after the page opened would reload on its
@@ -4615,21 +4615,6 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     - **`waiting` is not starvation on its own.** Chrome fires it on every
       seek, into buffered data too. Treating it as starvation reloaded a
       replayed voice note and cut the replay off.
-    - **Not in the middle of a drag.** A drag on the timeline seeks at every
-      step, and a reload at the first step past the buffer dropped the rest of
-      it. A seek is decided once seeking has been quiet for half a second, so a
-      drag reloads once, from where it was released. On a playing video
-      Chrome's and Firefox's controls pause for the gesture and play on the
-      release, and that `play` reloads at once and keeps it playing. A pause
-      followed within 50 ms by a seek is taken as theirs, so a release that
-      lands in the reload still plays; a person's own pause and seek are never
-      that close, and a key or the gesture's end clears the mark.
-    - **Spaced out when they fail.** A reload made because of an error goes at
-      once; one after a reload that itself failed waits a second, then two.
-      Firefox fails a request at once while the network is down, and three
-      back-to-back reloads spent the whole allowance inside one short outage.
-      Firefox plays on from what it holds while a reload waits, so the reload
-      takes the position, and whether the agent paused, when it goes.
 
     The route marks its redirect `no-store` and must stay a 307. A 301 or 308
     can be cached, and then the browser would reuse a dead signature.
@@ -4644,10 +4629,27 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     `canPlayType` in the browser, and any phone that cannot play a note keeps
     the download link.
 
+    Known gaps, left on purpose after three rounds of measuring them, because
+    every fix tried brought a worse problem with it. Each needs a URL more
+    than four minutes old:
+    - A click or a drag on the timeline past what was buffered reloads at the
+      first seek past the buffer. A drag lands there rather than where it was
+      released, and when the reload outlasts the click the video comes back
+      paused. Treating a seek close behind the controls' pause as a drag
+      latched on a person's own pause-and-arrow and later played a paused
+      video by itself; deciding seeks only once seeking settled reloaded in
+      the middle of a drag held still, and let Firefox spend its reloads on
+      every stale seek.
+    - Firefox fails a request at once while the network is down, so a short
+      outage that refuses connections can spend all three reloads in
+      milliseconds and show the failure line. Spacing the reloads out let
+      Chromium's own late `pause` stop the video it was meant to resume.
+    - In Firefox, focus on a player's native control can fall to the page
+      after an error reload, because Firefox blurs it after `load()` returns.
+
     Not verified on a real Safari: whether it keeps requesting the signed URL
-    after the redirect, what it does when that URL expires, whether `play()`
-    after `load()` works without a new tap, and whether its controls pause
-    for a drag the way Chrome's and Firefox's do.
+    after the redirect, what it does when that URL expires, and whether
+    `play()` after `load()` works without a new tap.
 
 ## 7. Verification already done
 

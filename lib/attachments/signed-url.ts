@@ -121,19 +121,3 @@ export function shouldRefresh(
       start <= media.position && (end - media.position >= AHEAD_SECONDS || end >= media.duration),
   );
 }
-
-/**
- * How long a player waits before the reload it is about to make, counting the
- * reloads made because of an error in a row, this one included.
- *
- * The first goes at once: one error after metadata is most often a connection
- * that dropped on a network that is still there. A reload that itself failed is
- * different. Firefox reports a failed request at once and does not retry, so
- * while the network is down each reload fails within milliseconds, and three
- * made back to back spent the whole allowance inside a single short outage.
- * Spacing them out turns the cap into seconds of outage rather than round
- * trips.
- */
-export function reloadDelayMs(failedReloads: number): number {
-  return failedReloads <= 1 ? 0 : 1000 * 2 ** (failedReloads - 2);
-}
