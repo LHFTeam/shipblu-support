@@ -1,10 +1,11 @@
 'use client';
 
-import { useActionState, useState } from 'react';
+import { useState } from 'react';
 import { Badge, Button, ErrorText, Field, Input, Select } from '@/components/ui';
 import type { AdminState } from '../settings-shared';
 import { saveChannel } from './actions';
 import { SubmitButton } from '@/components/submit-button';
+import { useActionForm } from '@/components/use-action-form';
 
 const INITIAL: AdminState = { error: null };
 
@@ -45,12 +46,17 @@ export function ChannelForm({
   groups: Choice[];
   whatsappAccounts: Choice[];
 }) {
-  const [state, action] = useActionState(saveChannel, INITIAL);
+  const { state, key, form } = useActionForm(saveChannel, INITIAL);
   const [type, setType] = useState<ChannelType>('email');
 
+  // Keyed on the last success, so an added channel clears the fields. `type`
+  // is above the key and survives, and the select mounts showing it — React's
+  // reset, which used to do the clearing, put the select back on Email while
+  // the address fields below it still followed the type the admin had chosen.
   return (
     <form
-      action={action}
+      key={key}
+      {...form}
       className="flex flex-col gap-3 rounded-lg border border-[var(--border)] p-4"
     >
       {/* Stacked on a phone, one row from `sm` up. Four controls sharing a
@@ -114,7 +120,7 @@ export function ChannelEditor({
   groups: Choice[];
   whatsappAccounts: Choice[];
 }) {
-  const [state, action] = useActionState(saveChannel, INITIAL);
+  const { state, form } = useActionForm(saveChannel, INITIAL);
   const [open, setOpen] = useState(false);
 
   const type = editableType(channel.type);
@@ -137,7 +143,7 @@ export function ChannelEditor({
   }
 
   return (
-    <form action={action} className="mt-2 flex w-full flex-col gap-3">
+    <form {...form} className="mt-2 flex w-full flex-col gap-3">
       <input type="hidden" name="id" value={channel.id} />
       <input type="hidden" name="type" value={type} />
 
@@ -326,7 +332,7 @@ export function WebchatSettings({
   groups: { id: string; name: string }[];
   folders: FaqFolderChoice[];
 }) {
-  const [state, action] = useActionState(saveChannel, INITIAL);
+  const { state, form } = useActionForm(saveChannel, INITIAL);
   const [editing, setEditing] = useState(false);
 
   const chosen = (['ar', 'en'] as const)
@@ -355,7 +361,7 @@ export function WebchatSettings({
   }
 
   return (
-    <form action={action} className="flex flex-col gap-3">
+    <form {...form} className="flex flex-col gap-3">
       <input type="hidden" name="id" value={channel.id} />
       <input type="hidden" name="type" value="webchat" />
       <input type="hidden" name="name" value={channel.name} />

@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Badge, Button, ErrorText, Input, Label, Select, Textarea } from '@/components/ui';
+import { Badge, ErrorText, Input, Label, Select, Textarea } from '@/components/ui';
 import { formatDateTime, formatRelative } from '@/lib/format';
 import type { PickerEntry, SideConversationView } from '@/lib/side-conversations/queries';
 import {
@@ -13,13 +13,15 @@ import {
 } from '@/lib/side-conversations/format';
 import type { ConversationDetail } from '@/lib/tickets/conversation';
 import type { ActionState } from '../../action-state';
+import { SubmitButton } from '@/components/submit-button';
+import { useActionForm, type FormHandlers } from '@/components/use-action-form';
+import { LOST_SEND, useRefreshOnSuccess } from './form-state';
 import {
   replyToSideConversation,
   setSideConversationState,
   startSideConversation,
 } from '../../side-conversation-actions';
 import { AttachmentList } from './attachments';
-import { useSubmitWithoutReset } from './form-state';
 
 const INITIAL: ActionState = { error: null };
 
@@ -199,11 +201,13 @@ export function SideConversationCard({
 }
 
 function SideReplyForm({ side }: { side: SideConversationView }) {
-  // A refused reply keeps what the agent wrote — see `useSubmitWithoutReset`.
-  const { state, busy, onSubmit } = useSubmitWithoutReset(replyToSideConversation);
+  const { state, key, form } = useActionForm(replyToSideConversation, INITIAL, {
+    lost: LOST_SEND,
+  });
+  useRefreshOnSuccess(state);
 
   return (
-    <form key={state.nonce ?? 0} onSubmit={onSubmit} className="mt-2 flex flex-col gap-1.5">
+    <form key={key} {...form} className="mt-2 flex flex-col gap-1.5">
       <input type="hidden" name="sideConversationId" value={side.id} />
       <Textarea
         name="body"
@@ -215,9 +219,7 @@ function SideReplyForm({ side }: { side: SideConversationView }) {
       <ErrorText>{state.error}</ErrorText>
       <div className="flex items-center gap-2">
         <NotVisible />
-        <Button type="submit" disabled={busy} className="ms-auto">
-          {busy ? 'Sending…' : 'Send'}
-        </Button>
+        <SubmitButton idle="Send" busy="Sending…" className="ms-auto" />
       </div>
     </form>
   );
@@ -276,20 +278,22 @@ export function StartSideConversationForm({
   /** Lets the composer put itself away on a phone once the thread is started. */
   onSent?: () => void;
 }) {
-  // Submitted by hand rather than through `action`, which matters more here
-  // than anywhere: React's reset after a refusal put the first hub back in the
-  // picker while the component still held the agent's choice, and the next Send
-  // went to that hub (`docs/PROJECT-STATE.md` §6.80).
-  const { state, busy, onSubmit } = useSubmitWithoutReset(startSideConversation, onSent);
+  // Through `useActionForm`, which matters more here than anywhere: React's
+  // reset after a refusal put the first hub back in the picker while the
+  // component still held the agent's choice, and the next Send went to that
+  // hub (`docs/PROJECT-STATE.md` §6.80).
+  const { state, key, form } = useActionForm(startSideConversation, INITIAL, {
+    lost: LOST_SEND,
+  });
+  useRefreshOnSuccess(state, onSent);
 
   return (
     <SideConversationDraft
-      key={state.nonce ?? 0}
+      key={key}
       conversation={conversation}
       recipients={recipients}
       error={state.error}
-      busy={busy}
-      onSubmit={onSubmit}
+      form={form}
     />
   );
 }
@@ -305,14 +309,12 @@ function SideConversationDraft({
   conversation,
   recipients,
   error,
-  busy,
-  onSubmit,
+  form,
 }: {
   conversation: ConversationDetail;
   recipients: PickerEntry[];
   error: string | null;
-  busy: boolean;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  form: FormHandlers;
 }) {
   // Nobody is preselected. Opening on the first entry meant an agent who sent
   // without touching the picker asked whichever hub sorts first by name —
@@ -339,7 +341,7 @@ function SideConversationDraft({
   ];
 
   return (
-    <form onSubmit={onSubmit} className="flex flex-col gap-2">
+    <form {...form} className="flex flex-col gap-2">
       <input type="hidden" name="conversationId" value={conversation.id} />
       <input type="hidden" name="anchorMessageId" value={anchor?.id ?? ''} />
 
@@ -461,9 +463,7 @@ function SideConversationDraft({
           Set this ticket to Pending
         </label>
         <NotVisible />
-        <Button type="submit" disabled={busy} className="ms-auto">
-          {busy ? 'Sending…' : 'Send'}
-        </Button>
+        <SubmitButton idle="Send" busy="Sending…" className="ms-auto" />
       </div>
     </form>
   );

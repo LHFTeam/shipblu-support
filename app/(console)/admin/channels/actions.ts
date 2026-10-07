@@ -272,5 +272,5 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
   }
 
   revalidatePath('/admin/channels');
-  return { error: null };
+  return ok();
 }

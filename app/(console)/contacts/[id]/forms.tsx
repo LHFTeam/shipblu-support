@@ -1,9 +1,10 @@
 'use client';
 
-import { useActionState, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Badge, ErrorText } from '@/components/ui';
+import { useActionForm } from '@/components/use-action-form';
 import type { LinkedShippingAccount } from '@/lib/shipments/queries';
 import {
   linkContactToAccount,
@@ -89,7 +90,7 @@ export function AccountLinks({
   editable: boolean;
 }) {
   const router = useRouter();
-  const [state, action, pending] = useActionState(linkContactToAccount, INITIAL);
+  const { state, key, form, pending } = useActionForm(linkContactToAccount, INITIAL);
   const [removing, setRemoving] = useState<string | null>(null);
 
   async function remove(shippingAccountId: string) {
@@ -136,13 +137,10 @@ export function AccountLinks({
       </ul>
 
       {editable ? (
-        <form
-          action={(formData) => {
-            action(formData);
-            router.refresh();
-          }}
-          className="flex gap-2"
-        >
+        // No refresh of its own: `linkContactToAccount` revalidates this page,
+        // so the action's answer already carries it, and a refresh fired from
+        // the submit ran before the action answered and after a refusal too.
+        <form key={key} {...form} className="flex gap-2">
           <input type="hidden" name="contactId" value={contactId} />
           <input
             name="sbid"

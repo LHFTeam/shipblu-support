@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useCallback, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { ErrorText, Select, Textarea } from '@/components/ui';
 import type { CannedResponseOption } from '@/lib/tickets/lookups';
 import {
@@ -13,8 +13,9 @@ import {
 import { sendReply } from '../../reply-actions';
 import { KnowledgePanel } from './knowledge';
 import type { KnowledgeContext } from './types';
-import { INITIAL, useRefreshOnSuccess } from './form-state';
+import { INITIAL, LOST_SEND, useRefreshOnSuccess } from './form-state';
 import { SubmitButton } from '@/components/submit-button';
+import { useActionForm } from '@/components/use-action-form';
 
 /**
  * The language toggle's two buttons, each written in its own script.
@@ -55,14 +56,14 @@ export function ReplyForm({
   knowledge: KnowledgeContext | null;
   onSent?: () => void;
 }) {
-  const [state, action] = useActionState(sendReply, INITIAL);
+  const { state, key, form } = useActionForm(sendReply, INITIAL, { lost: LOST_SEND });
   const [privately, setPrivately] = useState(false);
   useRefreshOnSuccess(state, onSent);
 
   /*
     Which language the next canned response goes in.
 
-    Above the `key={state.nonce}` boundary deliberately, beside `privately`, and
+    Above the form's `key` boundary deliberately, beside `privately`, and
     for the reason `docs/PROJECT-STATE.md` §6.58 gives: what may survive a send
     here is a *visible control*, never a hidden field. The toggle is on screen showing which
     language the next insertion will use, so an agent can see what carried over
@@ -74,7 +75,7 @@ export function ReplyForm({
   const [cannedLocale, setCannedLocale] = useState<CannedLocale>(customerLocale);
 
   return (
-    <form key={state.nonce ?? 0} action={action} className="flex flex-col gap-2">
+    <form key={key} {...form} className="flex flex-col gap-2">
       <input type="hidden" name="conversationId" value={conversationId} />
       <input
         type="hidden"

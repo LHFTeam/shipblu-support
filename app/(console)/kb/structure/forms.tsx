@@ -1,20 +1,21 @@
 'use client';
 
-import { useActionState, useState } from 'react';
+import { useState } from 'react';
 import { ErrorText, Input, Label, Select } from '@/components/ui';
 import { FLOOR_LABELS, SELECTABLE_FLOORS } from '@/lib/kb/floors';
 import { createCategory, createFolder, type KbState } from '../actions';
 import { SubmitButton } from '@/components/submit-button';
+import { useActionForm } from '@/components/use-action-form';
 
 const INITIAL: KbState = { error: null };
 
 export function CategoryForm() {
-  const [state, action] = useActionState(createCategory, INITIAL);
+  const { state, key, form } = useActionForm(createCategory, INITIAL);
 
   return (
     <form
-      key={state.nonce ?? 0}
-      action={action}
+      key={key}
+      {...form}
       className="flex flex-wrap items-end gap-3 rounded-lg border border-[var(--border)] p-4"
     >
       <div className="min-w-40 flex-1">
@@ -46,12 +47,12 @@ export function FolderForm({
 }: {
   categories: { id: string; name: string; locale: string }[];
 }) {
-  const [state, action] = useActionState(createFolder, INITIAL);
+  const { state, key, form } = useActionForm(createFolder, INITIAL);
 
   return (
     <form
-      key={state.nonce ?? 0}
-      action={action}
+      key={key}
+      {...form}
       className="flex flex-wrap items-end gap-3 rounded-lg border border-[var(--border)] p-4"
     >
       <div className="min-w-40 flex-1">
