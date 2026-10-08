@@ -48,11 +48,15 @@ export async function enqueuePriorityClassification(message: {
   //
   // 30: behind every send a customer is waiting on — webhooks and agent replies
   // at 10, profiles at 20, and the out-of-hours acknowledgement and automated
-  // replies at 20 (`deliverAutomatedReply`), which this message's own
-  // `afterInboundMessage` queues a moment after this. A slow provider holds a
-  // worker slot for up to its timeout, and that must not be the reason an
-  // acknowledgement goes out late. Ahead of notification email (40) and bulk
-  // work, because the first-response targets it moves are minutes long.
+  // replies at 20 (`deliverAutomatedReply`). That orders a claim and no more: the
+  // worker runs a claimed batch to the end before it claims again
+  // (`worker/index.ts`), so a slow answer here — up to the client's 15-second
+  // timeout — holds back whatever is queued while it runs, a send included.
+  // For WhatsApp and Meta this message's own acknowledgement is queued by the
+  // same `process_webhook` job, so the next claim takes it first; a web-chat
+  // message queues both from the request, and an idle worker can claim this job
+  // alone before the acknowledgement exists. Ahead of notification email (40)
+  // and bulk work, because the first-response targets it moves are minutes long.
   await enqueue(
     'classify_priority',
     { messageId: message.messageId },

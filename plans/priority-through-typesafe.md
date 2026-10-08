@@ -32,12 +32,16 @@ tests.
 ## The rules, and what each closes
 
 - **Somebody else's priority is never touched.** Any `priority_changed` event not
-  written by the classifier, an `opened_by_agent` event, or a form with a default
-  priority. And because a form default and an agent-chosen priority write no
-  event, the classifier also refuses whenever the column does not hold what it
-  expects — what it last wrote, or `medium` if it never has. The check runs inside
-  a transaction holding the ticket row `FOR UPDATE`, so an agent's change cannot
-  land between the read and the write.
+  written by the classifier, or an `opened_by_agent` event. A form's default
+  priority, or a customer's answer to a form's priority question, is recorded as
+  a `priority_changed` by `form:<slug>` when the ticket is created — the form is
+  not read as it stands now, or a default added later would claim every ticket
+  the form had ever filed. And because anything else that writes the column
+  without an event is still somebody's choice, the classifier also refuses
+  whenever the column does not hold what it expects — what it last wrote, or
+  `medium` if it never has. The check runs inside a transaction holding the
+  ticket row `FOR UPDATE`, so an agent's change cannot land between the read and
+  the write.
 - **A threshold, on the winner's own share.** `PRIORITY_AI_MIN_PROBABILITY`,
   default 0.6. It is a guess: there was nothing to calibrate it against, which is
   the next point.
@@ -70,6 +74,11 @@ tests.
   model, told to answer `low` for a message too short to judge, did; on an
   opening message that lowered a ticket whose photo might be of the damaged
   parcel. It still counts as the opening, so the words after it only raise.
+- **Only the ticket's own customer is asked about.** On a public comment
+  thread anybody may reply under the customer's comment, and ingest files the
+  reply on the customer's ticket; a passer-by's threat would otherwise raise it.
+  A colleague copied on an email is left out by the same rule, and their
+  earlier messages are left out of the context sent as the customer's.
 - **`low` is the answer for a message too vague to judge.** The categoriser
   offers `meta.unclassified` for the same reason: most of this archive is a
   22-to-39 character fragment, and a model with no way out pushes "؟" upwards.
@@ -83,6 +92,11 @@ distribution and an `outcome`: `applied`, `would_apply` (shadow), `unchanged`,
 labelled tickets when this shipped, so these rows are the first: an `applied`
 row followed by an agent's `priority_changed` on the same ticket is a
 disagreement, and the threshold is tuned from those.
+
+A `failed` row is a gap rather than an answer: the job's dedupe key is spent, so
+after a wrong key is fixed the message is re-run by hand
+(`npm run job -- classify_priority messageId=…`), and its first real answer
+replaces the failure. A purge cancels the job if it is still pending.
 
 Shadow mode weighs each answer against its own last `would_apply` as though it
 had been written. Otherwise every later message on a shadowed ticket is compared

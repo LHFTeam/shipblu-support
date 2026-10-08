@@ -21,8 +21,15 @@ import { messages } from '@/db/schema';
  */
 const CONTEXT_MESSAGES = 3;
 
-/** The inbound messages just before this one, oldest first. */
-export async function earlierMessages(conversationId: string, before: Date): Promise<string[]> {
+/**
+ * The inbound messages just before this one, oldest first — only `author`'s,
+ * when given, since the request calls them the same customer's.
+ */
+export async function earlierMessages(
+  conversationId: string,
+  before: Date,
+  author?: string | null,
+): Promise<string[]> {
   const rows = await db
     .select({ bodyText: messages.bodyText })
     .from(messages)
@@ -33,6 +40,7 @@ export async function earlierMessages(conversationId: string, before: Date): Pro
         eq(messages.direction, 'inbound'),
         sql`${messages.createdAt} < ${before.toISOString()}::timestamptz`,
         sql`btrim(${messages.bodyText}) <> ''`,
+        author ? eq(messages.authorContactId, author) : undefined,
       ),
     )
     .orderBy(sql`${messages.createdAt} desc`)

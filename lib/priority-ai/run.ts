@@ -1,12 +1,6 @@
 import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
-import {
-  aiPriorityRuns,
-  conversationEvents,
-  conversations,
-  messages,
-  ticketForms,
-} from '@/db/schema';
+import { aiPriorityRuns, conversationEvents, conversations, messages } from '@/db/schema';
 import { isCategorisableMessage } from '@/lib/categorise/apply';
 import { earlierMessages } from '@/lib/categorise-ai/context';
 import { predictionFrom, type AiPrediction } from '@/lib/categorise-ai/map';
@@ -80,6 +74,8 @@ export async function classifyMessagePriority(
       bodyText: messages.bodyText,
       createdAt: messages.createdAt,
       meta: messages.meta,
+      authorContactId: messages.authorContactId,
+      requesterContactId: conversations.requesterContactId,
       channel: conversations.channel,
       isSpam: conversations.isSpam,
       deletedAt: conversations.deletedAt,
@@ -95,16 +91,19 @@ export async function classifyMessagePriority(
   if (skip) return { status: 'skipped', reason: skip };
 
   // A redelivered job — the worker died after committing — finds its own row
-  // and stops, rather than paying for a second answer it could not record.
+  // and stops, rather than paying for a second answer it could not record. A
+  // `failed` row is not an answer: it is a gap, and a run by hand after the key
+  // is fixed fills it — which is the only way it can be, since the job's dedupe
+  // key is spent.
   const [existing] = await db
     .select({ id: aiPriorityRuns.id })
     .from(aiPriorityRuns)
-    .where(eq(aiPriorityRuns.messageId, messageId))
+    .where(and(eq(aiPriorityRuns.messageId, messageId), ne(aiPriorityRuns.outcome, 'failed')))
     .limit(1);
   if (existing) return { status: 'already_classified' };
 
   const withContext = true;
-  const earlier = await earlierMessages(row.conversationId, row.createdAt);
+  const earlier = await earlierMessages(row.conversationId, row.createdAt, row.authorContactId);
   const request = priorityRequest(
     { channel: row.channel, bodyText: row.bodyText, earlier },
     typesafeModel(),
@@ -160,7 +159,7 @@ export async function classifyMessagePriority(
   // already over — and it is the same row an agent's priority change locks.
   const outcome = await db.transaction(async (tx) => {
     const [ticket] = await tx
-      .select({ priority: conversations.priority, formId: conversations.formId })
+      .select({ priority: conversations.priority })
       .from(conversations)
       .where(eq(conversations.id, row.conversationId))
       .for('update')
@@ -169,7 +168,6 @@ export async function classifyMessagePriority(
 
     const facts = await priorityFacts(tx, {
       conversationId: row.conversationId,
-      formId: ticket.formId,
       mode,
       messageId,
       createdAt: row.createdAt,
@@ -213,16 +211,22 @@ export async function classifyMessagePriority(
     // write and decides it unchanged — but its own answer has nowhere to go:
     // one row per message is the table's promise. So the unique index settles
     // which delivery's answer is the record, and the loser writes nothing
-    // further and reports nothing it did not record.
+    // further and reports nothing it did not record. Only a `failed` row gives
+    // way, to the first real answer for its message.
+    const run = {
+      ...runFields,
+      priorityBefore: ticket.priority,
+      outcome: decision.outcome,
+      createdAt: lockedAt,
+    };
     const inserted = await tx
       .insert(aiPriorityRuns)
-      .values({
-        ...runFields,
-        priorityBefore: ticket.priority,
-        outcome: decision.outcome,
-        createdAt: lockedAt,
+      .values(run)
+      .onConflictDoUpdate({
+        target: aiPriorityRuns.messageId,
+        set: run,
+        setWhere: eq(aiPriorityRuns.outcome, 'failed'),
       })
-      .onConflictDoNothing({ target: aiPriorityRuns.messageId })
       .returning({ id: aiPriorityRuns.id });
     if (inserted.length === 0) return 'duplicate';
 
@@ -276,6 +280,8 @@ type LoadedRow = {
   direction: string;
   bodyText: string;
   meta: unknown;
+  authorContactId: string | null;
+  requesterContactId: string | null;
   channel: string;
   isSpam: boolean;
   deletedAt: Date | null;
@@ -283,6 +289,14 @@ type LoadedRow = {
 
 /**
  * Why this message is not one to classify, or null if it is.
+ *
+ * Only the ticket's own customer is asked about. On a public comment thread
+ * anybody may reply under the customer's comment, and ingest files the reply on
+ * the customer's ticket — so a passer-by's "scammers, I'll sue" would otherwise
+ * raise somebody else's ticket, and go to the model as that customer's words.
+ * The same rule takes a colleague copied on an email thread out too; their
+ * urgency reaches the ticket when the customer writes, and a wrong raise moves
+ * a deadline where a missed one only leaves it.
  *
  * The categoriser's own test for "a customer wrote something", so the two
  * questions are asked of the same messages; the bot channel through
@@ -293,6 +307,13 @@ type LoadedRow = {
  */
 function skipReason(row: LoadedRow): string | null {
   if (!isCategorisableMessage(row.kind, row.direction)) return 'not an inbound reply';
+  if (
+    row.authorContactId &&
+    row.requesterContactId &&
+    row.authorContactId !== row.requesterContactId
+  ) {
+    return 'not written by the requester';
+  }
   if (!hasCustomerText(row.bodyText)) return 'no text';
   if (isReadOnlyChannel(row.channel)) return `read-only channel ${row.channel}`;
   if (row.isSpam) return 'spam';
@@ -331,13 +352,11 @@ async function priorityFacts(
   tx: Tx,
   {
     conversationId,
-    formId,
     mode,
     messageId,
     createdAt,
   }: {
     conversationId: string;
-    formId: string | null;
     mode: Exclude<PriorityAiMode, 'off'>;
     messageId: string;
     createdAt: Date;
@@ -368,7 +387,10 @@ async function priorityFacts(
   let lastApplied: Priority | null = null;
   for (const event of events) {
     // An agent who opened the ticket on the customer's behalf chose its priority
-    // on the new-ticket form, and that choice writes no `priority_changed`.
+    // on the new-ticket form — leaving it at the default is a choice too, and
+    // that one writes no `priority_changed`. A form's own default or a
+    // customer's answer does, as `form:<slug>` (`createTicket`), so it falls to
+    // the branch below and the form is never read as it stands now.
     if (event.type === 'opened_by_agent') {
       ownedElsewhere = true;
       continue;
@@ -379,17 +401,6 @@ async function priorityFacts(
     }
     const to = (event.data as Record<string, unknown> | null)?.to;
     if (isPriority(to)) lastApplied = to;
-  }
-
-  // A form with a default priority was configured by an admin to file its
-  // tickets at that level, and the ticket was created holding it.
-  if (!ownedElsewhere && formId) {
-    const [form] = await tx
-      .select({ defaultPriority: ticketForms.defaultPriority })
-      .from(ticketForms)
-      .where(eq(ticketForms.id, formId))
-      .limit(1);
-    if (form?.defaultPriority) ownedElsewhere = true;
   }
 
   let lastWouldApply: Priority | null = null;

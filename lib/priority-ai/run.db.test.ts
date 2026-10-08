@@ -469,14 +469,49 @@ describe('classifyMessagePriority: somebody else owns the priority', () => {
       .insert(ticketForms)
       .values({ slug: 'cod', nameEn: 'COD', defaultPriority: 'medium' })
       .returning({ id: ticketForms.id });
-    const id = await ticket({ formId: form!.id });
-    const messageId = await inbound(id, 'هرفع قضية');
+    const [contact] = await db
+      .insert(contacts)
+      .values({ name: 'Amira' })
+      .returning({ id: contacts.id });
+    const created = await createTicket(contact!.id, {
+      subject: 'COD',
+      body: 'هرفع قضية',
+      formId: form!.id,
+      priority: 'medium',
+      priorityChosenBy: 'form:cod',
+    });
     answers('urgent');
 
-    expect(await classifyMessagePriority(messageId, { baseUrl: BASE })).toMatchObject({
+    expect(await classifyMessagePriority(created.messageId, { baseUrl: BASE })).toMatchObject({
       outcome: 'set_by_person',
     });
-    expect(await priorityOf(id)).toBe('medium');
+    expect(await priorityOf(created.conversationId)).toBe('medium');
+  });
+
+  it('still raises a ticket whose form was given a default after it was filed', async () => {
+    const [form] = await db
+      .insert(ticketForms)
+      .values({ slug: 'cod', nameEn: 'COD' })
+      .returning({ id: ticketForms.id });
+    const id = await ticket({ formId: form!.id });
+    const opening = await inbound(id, 'ازاي اغير العنوان؟', {
+      createdAt: new Date(Date.now() - MINUTE),
+    });
+    answers('low');
+    await classifyMessagePriority(opening, { baseUrl: BASE });
+
+    // An admin edits the form later; the ticket was not filed holding it.
+    await db
+      .update(ticketForms)
+      .set({ defaultPriority: 'high' })
+      .where(eq(ticketForms.id, form!.id));
+
+    const later = await inbound(id, 'هرفع قضية');
+    answers('urgent');
+    expect(await classifyMessagePriority(later, { baseUrl: BASE })).toMatchObject({
+      outcome: 'applied',
+    });
+    expect(await priorityOf(id)).toBe('urgent');
   });
 
   it('leaves a priority that is not the one it expects, though no event says who moved it', async () => {
@@ -579,6 +614,44 @@ describe('classifyMessagePriority: shadow, skips and failures', () => {
     expect(await priorityOf(id)).toBe('medium');
   });
 
+  it('asks only about what the ticket’s own customer wrote', async () => {
+    // A public comment thread: anybody may reply under the customer's comment,
+    // and ingest files the reply on the customer's ticket.
+    const [customer] = await db
+      .insert(contacts)
+      .values({ name: 'Amira' })
+      .returning({ id: contacts.id });
+    const [stranger] = await db
+      .insert(contacts)
+      .values({ name: 'Passer-by' })
+      .returning({ id: contacts.id });
+    const id = await ticket({
+      requesterContactId: customer!.id,
+      externalId: 'facebook:comment:1',
+    });
+    await inbound(id, 'هرفع قضية عليكم كلكم', {
+      authorContactId: stranger!.id,
+      createdAt: new Date(Date.now() - 2 * MINUTE),
+    });
+    const theirs = await inbound(id, 'نصابين محدش بيرد', { authorContactId: stranger!.id });
+
+    answers('urgent', 0.95);
+    expect(await classifyMessagePriority(theirs, { baseUrl: BASE })).toEqual({
+      status: 'skipped',
+      reason: 'not written by the requester',
+    });
+    expect(await priorityOf(id)).toBe('medium');
+
+    // The customer's own words are asked about, without the stranger's as context.
+    const own = await inbound(id, 'الطلب وصل؟', { authorContactId: customer!.id });
+    const mock = answers('low', 0.95);
+    await classifyMessagePriority(own, { baseUrl: BASE });
+    const body = JSON.parse(String((mock.mock.calls[0]![1] as RequestInit).body)) as {
+      state: Record<string, unknown>;
+    };
+    expect(JSON.stringify(body.state)).not.toContain('هرفع قضية');
+  });
+
   it('classifies a person writing from a mailing-list address', async () => {
     // `isAutomated` is set by a List-Id header; a merchant's Google Group has one.
     const id = await ticket({ channel: 'email' });
@@ -617,6 +690,22 @@ describe('classifyMessagePriority: shadow, skips and failures', () => {
     });
     expect(await runOf(messageId)).toMatchObject({ outcome: 'failed', predicted: null });
     expect(await priorityOf(id)).toBe('medium');
+  });
+
+  it('answers a message whose earlier attempt failed, when it is run again', async () => {
+    // A wrong key fails every message; once it is fixed, `npm run job` re-runs one.
+    const id = await ticket();
+    const messageId = await inbound(id, 'هرفع قضية');
+    stubFetch(() => new Response('bad key', { status: 401 }));
+    await classifyMessagePriority(messageId, { baseUrl: BASE });
+
+    answers('urgent');
+    expect(await classifyMessagePriority(messageId, { baseUrl: BASE })).toMatchObject({
+      status: 'recorded',
+      outcome: 'applied',
+    });
+    expect(await runOf(messageId)).toMatchObject({ outcome: 'applied', error: null });
+    expect(await priorityOf(id)).toBe('urgent');
   });
 
   it('does nothing the second time a job is delivered', async () => {

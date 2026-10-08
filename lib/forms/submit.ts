@@ -264,13 +264,17 @@ export async function submitForm(input: {
   const description = (resolved.system.description ?? '').trim();
   const body = [description, answers].filter(Boolean).join('\n\n');
 
+  const priority = priorityFrom(resolved.system) ?? form.defaultPriority;
   const created = await createTicket(requester.contactId, {
     subject,
     body,
     customFields: resolved.custom,
     formId: form.id,
     groupId: form.defaultGroupId,
-    priority: priorityFrom(resolved.system) ?? form.defaultPriority,
+    priority,
+    // The customer's answer or the form's default: either way chosen, and the
+    // priority classifier leaves a chosen priority alone (`NewTicket`).
+    priorityChosenBy: priority ? `form:${form.slug}` : undefined,
     type: form.defaultType,
     tags: form.defaultTags,
     // Recorded because `ticket.create` is justified as a reporting-integrity
