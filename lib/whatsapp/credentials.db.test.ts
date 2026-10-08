@@ -227,6 +227,26 @@ describe('storing a business token', () => {
       .where(eq(whatsappAccounts.id, egypt.id));
     expect(row!.tokenEnvVar).toBe('WHATSAPP_TOKEN_DBTEST');
   });
+
+  /**
+   * Drizzle's own error quotes the statement and its parameters, and this
+   * one's parameters hold the envelope. Forced here with an agent that does
+   * not exist, which the foreign key refuses.
+   */
+  it('fails with Postgres’s sentence, never the statement or the envelope in it', async () => {
+    const egypt = await account('Egypt', '111111');
+    const ghost = { id: '00000000-0000-4000-8000-000000000000', label: 'Nobody' };
+
+    const failure = await store(egypt, ghost).then(
+      () => null,
+      (error: unknown) => error as Error,
+    );
+
+    expect(failure?.message).toMatch(/^storing the credential failed \(23503\): /);
+    expect(failure?.message).not.toMatch(/v1\.|params|insert into/i);
+    expect(failure && 'cause' in failure).toBe(false);
+    expect(await envelopeOf(egypt.id)).toBeNull();
+  });
 });
 
 describe('which token a send resolves to', () => {

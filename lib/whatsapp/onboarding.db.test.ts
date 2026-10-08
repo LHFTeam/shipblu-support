@@ -7,7 +7,7 @@ import { withCleanDatabase } from '@/lib/testing/db';
 import { stubFetch } from '@/lib/testing/fetch';
 import { parseCoexistence } from './coexistence';
 import { recordSyncRequest } from './coexistence-state';
-import { credentialStatuses } from './credentials';
+import { credentialStatuses, forgetStoredCredential } from './credentials';
 import { beginCoexistenceOnboarding, retryOnboarding } from './onboarding';
 import { completeOnboarding } from './onboarding-complete';
 
@@ -65,7 +65,10 @@ function graph(routes: Route[]) {
     if (!route)
       return new Response(`unrouted ${method} ${url.pathname}${url.search}`, { status: 599 });
     const body = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
-    return new Response(JSON.stringify(route.answer(url, body)), { status: route.status ?? 200 });
+    const answer = route.answer(url, body);
+    // A route that answers per request — one sync type refused, the other not.
+    if (answer instanceof Response) return answer;
+    return new Response(JSON.stringify(answer), { status: route.status ?? 200 });
   });
 }
 
@@ -479,7 +482,7 @@ describe('the second phase: connecting the number', () => {
     expect(await queued('sync_whatsapp_templates')).toHaveLength(1);
   });
 
-  it('keeps the connection when the phone refuses the history, and says why', async () => {
+  it('keeps the connection when Meta refuses the copy request, and says why', async () => {
     const id = await exchanged(
       completeRoutes({
         sync: {
@@ -601,6 +604,63 @@ describe('the second phase: connecting the number', () => {
     expect(parseCoexistence(after!.config)?.syncs).toEqual({});
   });
 
+  it('on a reconnect, asks for what the earlier connection did not get — refused, or declined', async () => {
+    const first = await exchanged(
+      completeRoutes({
+        sync: {
+          method: 'POST',
+          path: new RegExp(`/${PHONE}/smb_app_data$`),
+          answer: (_url, body) =>
+            (body as { sync_type: string }).sync_type === 'history'
+              ? new Response(JSON.stringify({ error: { message: 'Try again later', code: 100 } }), {
+                  status: 400,
+                })
+              : { messaging_product: 'whatsapp', request_id: 'req-contacts-1' },
+        },
+      }),
+    );
+    await completeOnboarding(first, { job: JOB });
+    await db.update(jobs).set({ status: 'completed' });
+
+    const fetch = graph(completeRoutes());
+    const again = await beginCoexistenceOnboarding(claim(), await admin2());
+    if (!again.ok) throw new Error(again.error);
+    await completeOnboarding(again.onboardingId, { job: JOB });
+
+    const { steps } = await onboardingRow(again.onboardingId);
+    expect(steps.channel).toMatchObject({ outcome: 'reconnected', previouslyCopied: ['contacts'] });
+    expect(steps.contacts).toMatchObject({ ok: true, outcome: 'previously_copied' });
+    expect(steps.history).toMatchObject({ ok: true, detail: expect.stringMatching(/req-history/) });
+    const asked = fetch.mock.calls
+      .filter(([url]) => String(url).includes('smb_app_data'))
+      .map(([, init]) => JSON.parse(String(init?.body)).sync_type);
+    expect(asked).toEqual(['history']);
+  });
+
+  it('on a reconnect, asks again for a history the business declined on the phone', async () => {
+    const first = await exchanged();
+    await completeOnboarding(first, { job: JOB });
+    const channel = await channelFor();
+    await db.execute(
+      sql`update channels set config = jsonb_set(config, '{coexistence,syncs,history,declined}', 'true') where id = ${channel!.id}`,
+    );
+    await db.update(jobs).set({ status: 'completed' });
+
+    const fetch = graph(completeRoutes());
+    const again = await beginCoexistenceOnboarding(claim(), await admin2());
+    if (!again.ok) throw new Error(again.error);
+    await completeOnboarding(again.onboardingId, { job: JOB });
+
+    const { steps } = await onboardingRow(again.onboardingId);
+    expect(steps.channel).toMatchObject({ outcome: 'reconnected', previouslyCopied: ['contacts'] });
+    expect(steps.contacts).toMatchObject({ ok: true, outcome: 'previously_copied' });
+    expect(steps.history).toMatchObject({ ok: true, detail: expect.stringMatching(/req-history/) });
+    const asked = fetch.mock.calls
+      .filter(([url]) => String(url).includes('smb_app_data'))
+      .map(([, init]) => JSON.parse(String(init?.body)).sync_type);
+    expect(asked).toEqual(['history']);
+  });
+
   it('runs a named step alone on a connected number — the "copy again" button', async () => {
     const id = await exchanged(
       completeRoutes({
@@ -621,6 +681,146 @@ describe('the second phase: connecting the number', () => {
     expect(syncs?.history).toEqual({ requestId: 'req-history', requestedAt: expect.any(String) });
     // Not asked again: only the history was named.
     expect(syncs?.contacts).toMatchObject({ error: 'Try again later' });
+  });
+
+  it('stops copying when Meta says the number is not on the Business app, and warns of a platform', async () => {
+    const fetch = graph(
+      completeRoutes({
+        platform: {
+          method: 'GET',
+          path: new RegExp(`/${PHONE}\\?fields=is_on_biz_app,platform_type$`),
+          answer: () => ({ is_on_biz_app: false, platform_type: 'ON_PREMISE', id: PHONE }),
+        },
+      }),
+    );
+    const id = await beginCoexistenceOnboarding(claim(), await admin()).then((outcome) => {
+      if (!outcome.ok) throw new Error(outcome.error);
+      return outcome.onboardingId;
+    });
+
+    expect(await completeOnboarding(id, { job: JOB })).toBe('connected');
+
+    const { steps } = await onboardingRow(id);
+    expect(steps.number?.warning).toMatch(
+      /not on the WhatsApp Business app.*ON_PREMISE, not CLOUD_API/,
+    );
+    expect(steps.contacts).toMatchObject({ ok: true, outcome: 'not_applicable' });
+    expect(steps.history).toMatchObject({ ok: true, outcome: 'not_applicable' });
+    expect(fetch.mock.calls.some(([url]) => String(url).includes('smb_app_data'))).toBe(false);
+  });
+
+  it('reads Meta’s "already asked" after a lost answer as the first request having gone through', async () => {
+    const outage: Route = {
+      method: 'POST',
+      path: new RegExp(`/${PHONE}/smb_app_data$`),
+      status: 503,
+      answer: () => ({ error: { message: 'Service temporarily unavailable', code: 2 } }),
+    };
+    const id = await exchanged(completeRoutes({ sync: outage }));
+    await expect(
+      completeOnboarding(id, { job: { attempts: 1, maxAttempts: 5 } }),
+    ).rejects.toThrow();
+    expect((await onboardingRow(id)).steps.contacts).toMatchObject({ outcome: 'sending' });
+
+    graph(
+      completeRoutes({
+        sync: {
+          method: 'POST',
+          path: new RegExp(`/${PHONE}/smb_app_data$`),
+          status: 400,
+          answer: () => ({ error: { message: 'Sync already called', code: 2593107 } }),
+        },
+      }),
+    );
+    expect(await completeOnboarding(id, { job: { attempts: 2, maxAttempts: 5 } })).toBe(
+      'connected',
+    );
+
+    expect((await onboardingRow(id)).steps.contacts).toMatchObject({
+      ok: true,
+      detail: expect.stringMatching(/answer was lost/),
+    });
+    expect(parseCoexistence((await channelFor())!.config)?.syncs.contacts).toMatchObject({
+      requestId: 'unconfirmed',
+    });
+  });
+
+  it('finishes connected, not failed, when the last attempt dies after the channel exists', async () => {
+    const id = await exchanged(
+      completeRoutes({
+        sync: {
+          method: 'POST',
+          path: new RegExp(`/${PHONE}/smb_app_data$`),
+          status: 503,
+          answer: () => ({ error: { message: 'Service temporarily unavailable', code: 2 } }),
+        },
+      }),
+    );
+
+    expect(await completeOnboarding(id, { job: { attempts: 5, maxAttempts: 5 } })).toBe(
+      'connected',
+    );
+
+    const row = await onboardingRow(id);
+    expect(row).toMatchObject({
+      status: 'connected',
+      lastTransientError: null,
+      nextAttemptAt: null,
+    });
+    expect(row.steps.contacts).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/Meta answered 503.*gave up after 5 attempts/),
+    });
+    expect(await channelFor()).not.toBeNull();
+    expect(await queued('sync_whatsapp_templates')).toHaveLength(1);
+  });
+
+  it('fails, rather than connecting with another token, when the stored credential was forgotten', async () => {
+    const id = await exchanged();
+    const row = await onboardingRow(id);
+    await forgetStoredCredential(row.whatsappAccountId, null);
+    process.env.META_PAGE_ACCESS_TOKEN = 'shared-token';
+    resetEnvCache();
+
+    expect(await completeOnboarding(id, { job: JOB })).toBe('failed');
+    expect(await onboardingRow(id)).toMatchObject({
+      status: 'failed',
+      error: expect.stringMatching(/has since been forgotten/),
+    });
+    expect(await channelFor()).toBeNull();
+  });
+
+  it('re-running into its own channel neither rewrites it nor calls its own requests refused', async () => {
+    const id = await exchanged();
+    await completeOnboarding(id, { job: JOB });
+    const before = await channelFor();
+    // A run that died after the channel's writes and before the steps' records.
+    await db
+      .update(whatsappOnboardings)
+      .set({
+        status: 'exchanged',
+        finishedAt: null,
+        steps: sql`${whatsappOnboardings.steps} - 'channel' - 'contacts' - 'history'`,
+      })
+      .where(eq(whatsappOnboardings.id, id));
+    const fetch = graph(completeRoutes());
+
+    expect(await completeOnboarding(id, { job: JOB })).toBe('connected');
+
+    const { steps } = await onboardingRow(id);
+    expect(steps.channel).toMatchObject({ ok: true, outcome: 'connected' });
+    expect(steps.history).toMatchObject({ ok: true, detail: expect.stringMatching(/earlier/) });
+    expect((await channelFor())!.config).toEqual(before!.config);
+    expect(fetch.mock.calls.some(([url]) => String(url).includes('smb_app_data'))).toBe(false);
+  });
+
+  it('queues the template sync again when asked by name, though it already ran once', async () => {
+    const id = await exchanged();
+    await completeOnboarding(id, { job: JOB });
+    expect(await queued('sync_whatsapp_templates')).toHaveLength(1);
+
+    expect(await completeOnboarding(id, { only: ['templates'], job: JOB })).toBe('connected');
+    expect(await queued('sync_whatsapp_templates')).toHaveLength(2);
   });
 
   it('does nothing for an attempt that is no longer connecting', async () => {
@@ -665,6 +865,65 @@ describe('retrying a failed attempt', () => {
       error: expect.stringMatching(/already being connected/),
     });
     expect(await retryOnboarding(id)).toMatchObject({ ok: false });
+  });
+});
+
+describe('retrying an attempt something has replaced, or that stalled', () => {
+  const attempt = (values: Partial<typeof whatsappOnboardings.$inferInsert> = {}) =>
+    db
+      .insert(whatsappOnboardings)
+      .values({
+        whatsappAccountId: crypto.randomUUID(),
+        wabaId: WABA,
+        phoneNumberId: PHONE,
+        status: 'failed',
+        ...values,
+      })
+      .returning({ id: whatsappOnboardings.id })
+      .then((rows) => rows[0]!.id);
+
+  it('refuses one a newer attempt superseded, or that is simply older than another', async () => {
+    const superseded = await attempt({ error: 'superseded' });
+    const older = await attempt({ createdAt: new Date(Date.now() - 60 * 60 * 1000) });
+    await attempt();
+
+    for (const id of [superseded, older]) {
+      expect(await retryOnboarding(id)).toMatchObject({
+        ok: false,
+        error: expect.stringMatching(/newer connection/),
+      });
+      expect((await onboardingRow(id)).status).toBe('failed');
+    }
+    expect(await queued('complete_coexistence_onboarding')).toEqual([]);
+  });
+
+  it('reopens an exchanged attempt whose job died, and refuses one still live', async () => {
+    const stalled = await attempt({
+      status: 'exchanged',
+      startedAt: new Date(Date.now() - 20 * 60 * 1000),
+      lastTransientError: 'Meta answered 503 on subscribe',
+    });
+
+    expect(await retryOnboarding(stalled)).toEqual({ ok: true });
+    const row = await onboardingRow(stalled);
+    expect(row).toMatchObject({ status: 'exchanged', lastTransientError: null });
+    expect(row.startedAt.getTime()).toBeGreaterThan(Date.now() - 60 * 1000);
+    expect(await queued('complete_coexistence_onboarding')).toHaveLength(1);
+
+    // Now it is live — just started, and its job queued.
+    expect(await retryOnboarding(stalled)).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/already being connected/),
+    });
+    expect(await queued('complete_coexistence_onboarding')).toHaveLength(1);
+  });
+
+  it('refuses a connected one', async () => {
+    const connected = await attempt({ status: 'connected' });
+    expect(await retryOnboarding(connected)).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/already connected/),
+    });
   });
 });
 

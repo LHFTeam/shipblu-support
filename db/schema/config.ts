@@ -887,14 +887,31 @@ export const ONBOARDING_STEPS = [
 export type OnboardingStep = (typeof ONBOARDING_STEPS)[number];
 
 /**
+ * The steps that may be run again on their own, on a number already connected:
+ * the copy, which an admin may ask for again inside its window, and the
+ * template sync. The others change what the connection *is* — run alone, the
+ * channel step would rewrite a live connection's state from nothing — so a
+ * failed one is retried by running the attempt again (`retryOnboarding`).
+ */
+export const RERUNNABLE_STEPS = ['contacts', 'history', 'templates'] as const;
+
+/**
  * One step's outcome. `ok` with a `warning` is a step that did its job but
  * found something a person has to do — the app-level webhook fields, today.
  */
 export type OnboardingStepRecord = {
   at: string;
   ok: boolean;
-  /** A step's result in a word, where a re-run needs it: the channel's `reconnected`. */
+  /**
+   * A step's result in a word, where a re-run or the page needs it: the
+   * channel's `created`, `connected` or `reconnected`; a copy's `sending` while
+   * its request is out, which is how a retry tells an answer that was lost from
+   * a refusal, and `not_applicable` or `previously_copied` for one that was
+   * deliberately not asked.
+   */
   outcome?: string;
+  /** On a reconnect's channel step: what the previous connection copied. */
+  previouslyCopied?: ('contacts' | 'history')[];
   detail?: string;
   warning?: string;
   error?: string;

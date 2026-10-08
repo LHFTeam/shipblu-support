@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { LOCALES } from '@/lib/kb/locale';
-import { ONBOARDING_STEPS } from '@/db/schema';
+import { RERUNNABLE_STEPS } from '@/db/schema';
 import { PermanentJobError, type ClaimedJob, type JobType } from '@/lib/queue';
 
 /**
@@ -220,15 +220,17 @@ const JOB_PAYLOADS = {
   complete_coexistence_onboarding: z.strictObject({
     onboardingId: z.uuid(),
     /**
-     * Run only these steps — a retry of one, or "copy the history" after the
-     * connection. Comma-separated when typed (`steps=contacts,history`), since
-     * `npm run job` hands every value over as a string.
+     * Run only these steps on a connected number — "copy the history" after
+     * the connection, or the template sync. Only the steps that may be run
+     * alone (`RERUNNABLE_STEPS` says why the others may not). Comma-separated
+     * when typed (`steps=contacts,history`), since `npm run job` hands every
+     * value over as a string.
      */
     steps: z
       .preprocess(
         (value) =>
           typeof value === 'string' ? value.split(',').map((step) => step.trim()) : value,
-        z.array(z.enum(ONBOARDING_STEPS)).nonempty(),
+        z.array(z.enum(RERUNNABLE_STEPS)).nonempty(),
       )
       .optional(),
   }),

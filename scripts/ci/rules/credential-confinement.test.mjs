@@ -184,6 +184,25 @@ export const relational = () => db.query.whatsappAccountCredentials.findMany();
     ]);
   });
 
+  it('refuses a module outside the worker importing one of its handlers', async () => {
+    const found = await runRule('credential-confinement', {
+      ...TREE,
+      'lib/whatsapp/resend.ts':
+        "import { sync } from '@/worker/handlers/sync';\nexport const resend = (a) => sync(a);\n",
+      'lib/whatsapp/resend.test.ts':
+        "import { sync } from '@/worker/handlers/sync';\nexport const check = sync;\n",
+      'lib/whatsapp/shape.ts':
+        "import type { sync } from '@/worker/handlers/sync';\nexport type Sync = typeof sync;\n",
+    });
+
+    expect(found).toEqual([
+      expect.objectContaining({
+        where: 'lib/whatsapp/resend.ts',
+        message: expect.stringMatching(/imports worker\/handlers\/sync\.ts from outside worker\//),
+      }),
+    ]);
+  });
+
   it('keeps the reseal, which opens every envelope, to the rotation job', async () => {
     const found = await runRule('credential-confinement', {
       ...TREE,

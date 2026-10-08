@@ -203,10 +203,14 @@ export async function storeBusinessToken(
     lastRefusal: null,
   };
 
-  await tx
-    .insert(credentials)
-    .values({ whatsappAccountId: input.accountId, ...values })
-    .onConflictDoUpdate({ target: credentials.whatsappAccountId, set: values });
+  try {
+    await tx
+      .insert(credentials)
+      .values({ whatsappAccountId: input.accountId, ...values })
+      .onConflictDoUpdate({ target: credentials.whatsappAccountId, set: values });
+  } catch (error) {
+    throw withoutStatement(error);
+  }
 
   if (account.tokenEnvVar) {
     await tx
@@ -234,6 +238,22 @@ export async function storeBusinessToken(
   });
 
   return { keyId, previousKeyId: previous?.keyId ?? null, replacedVariable: account.tokenEnvVar };
+}
+
+/**
+ * A failed credential write, without its statement. Drizzle's error quotes the
+ * query and every bound parameter, the envelope among them — sealed, but a
+ * credential all the same, and the error goes on to a log line and the job's
+ * `last_error`. Postgres's own code and sentence are what anyone debugging the
+ * failure needs; the parameters never are.
+ */
+function withoutStatement(error: unknown): Error {
+  const cause = (error as { cause?: unknown } | null)?.cause ?? error;
+  const code = (cause as { code?: unknown } | null)?.code;
+  const sentence = cause instanceof Error ? cause.message : 'an error that was not an Error';
+  return new Error(
+    `storing the credential failed${typeof code === 'string' ? ` (${code})` : ''}: ${sentence}`,
+  );
 }
 
 /**

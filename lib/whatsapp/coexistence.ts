@@ -29,10 +29,13 @@ export const META_SYNC_TYPE: Record<SyncType, 'smb_app_state_sync' | 'history'> 
  *
  * Meta's words: "After you onboard the business customer, you have 24 hours to
  * synchronize their contacts and messaging history, otherwise they must be
- * offboarded and complete the flow again." Measured from `onboardedAt`, which the
- * job writes when it finishes the channel step — later than the moment Meta
- * counts from, so this errs towards refusing a request Meta might still have
- * taken, never towards sending one it will refuse.
+ * offboarded and complete the flow again." Measured from `onboardedAt`, which
+ * is the moment the sign-in code was exchanged — the attempt row's
+ * `created_at`, which a retry does not move. Meta's own clock starts a few
+ * seconds before that, inside its window, so the window here closes a few
+ * seconds late: a request in those seconds is refused by Meta (2593108) and
+ * says so, which is the cheaper side to be wrong on than refusing the one
+ * request a business gets.
  */
 export const SYNC_WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -62,6 +65,12 @@ export type HistorySync = (SyncRequested | SyncRefused) & {
 };
 
 export type Coexistence = {
+  /**
+   * The attempt that wrote this object. A re-run of the same attempt finds its
+   * own connection here and leaves it be; a different attempt finding one is a
+   * reconnect.
+   */
+  onboardingId: string | null;
   onboardedAt: string;
   wabaId: string;
   displayPhoneNumber: string | null;
@@ -97,6 +106,7 @@ export function parseCoexistence(config: unknown): Coexistence | null {
   const syncs = isRecord(raw.syncs) ? raw.syncs : {};
 
   return {
+    onboardingId: text(raw.onboardingId),
     onboardedAt,
     wabaId,
     displayPhoneNumber: text(raw.displayPhoneNumber),

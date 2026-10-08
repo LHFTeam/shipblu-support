@@ -287,8 +287,10 @@ export type GraphRequest = {
  * Sends `request` authenticated with `token`.
  *
  * Null for exactly the case `graph` answers null for: a write Meta accepted
- * whose answer was lost. The caller decides what that means — for a
- * subscription, nothing; for a request whose id it needed, a retry.
+ * whose answer was lost. The caller decides what that means, and neither caller
+ * today retries: a subscription reads itself back, and a copy request — which
+ * Meta accepts once per connection, so asking again is refused — is recorded as
+ * asked, without the id the lost answer carried.
  */
 export async function callGraph<T>(request: GraphRequest, token: string): Promise<T | null> {
   return graph<T>(request.path, { method: request.method, token, body: request.body });

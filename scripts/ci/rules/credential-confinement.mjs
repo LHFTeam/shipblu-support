@@ -39,7 +39,9 @@ import {
 //     app/. A module outside worker/ that genuinely needs one is named in
 //     RESOLVER_IMPORTERS with its reason, so it arrives as a reviewed edit.
 //     Nothing re-exports those names, and nothing imports the three modules
-//     wholesale, because either would launder an import past the check.
+//     wholesale, because either would launder an import past the check. And
+//     nothing outside worker/ imports a module under it: a handler resolves
+//     with no name on the importing edge to say so.
 //
 // What it cannot see: a new export of accounts.ts itself that calls a resolver
 // and is imported by a page or action. The resolvers' doc comments say they
@@ -162,7 +164,21 @@ export function checkCredentialConfinement() {
 
     for (const edge of moduleEdges(file)) {
       const target = resolveModule(edge.spec, file);
-      if (target === null || !guarded.has(target) || edge.typeOnly) continue;
+      if (target === null || edge.typeOnly) continue;
+
+      // The worker's own modules import resolvers freely — that is what being
+      // the worker means — so importing one of them from outside it reaches a
+      // resolver with no sensitive name on the edge for the check below to see.
+      if (target.startsWith('worker/') && !file.startsWith('worker/')) {
+        fail(
+          rule,
+          file,
+          `imports ${target} from outside worker/ — the worker's modules resolve stored credentials, so anything importing one is a road for them into the web service; move what is shared into lib/`,
+        );
+        continue;
+      }
+
+      if (!guarded.has(target)) continue;
 
       if (edge.namespace) {
         fail(

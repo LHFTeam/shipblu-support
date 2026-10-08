@@ -12,10 +12,13 @@ import { errorMessage } from '@/lib/errors';
  * rather than a page or phone number, and it takes an *app* access token, which
  * the page token cannot stand in for.
  *
- * This is configuration, not traffic. It runs from `npm run job --
+ * This is configuration, not traffic. Its writes run from `npm run job --
  * subscribe_meta_webhooks` and nowhere else, which is why nothing here retries:
  * a person is watching the output, and a failure they can read beats a retry
- * that hides which half of a two-step change actually landed.
+ * that hides which half of a two-step change actually landed. The one other
+ * caller only reads: `complete_coexistence_onboarding` calls
+ * `readSubscription` to name the WhatsApp fields a Business-app number needs
+ * and the app is not subscribed to, which it cannot fix for itself.
  *
  * **A webhook has two subscriptions, not one, and this module writes both.**
  * Meta's own sentence is that "only fields with subscriptions at both the page

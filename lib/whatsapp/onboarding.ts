@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, gt, ne, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { groups, jobs, whatsappOnboardings } from '@/db/schema';
 import { env, metaAppSecret } from '@/lib/env';
@@ -128,6 +128,9 @@ export type BeginOutcome =
 /** How long an `exchanged` attempt counts as live before another may replace it. */
 export const LIVE_ATTEMPT_MS = 15 * 60 * 1000;
 
+/** The `error` on an attempt a newer one retired. */
+const SUPERSEDED = 'superseded';
+
 const ALREADY_CONNECTING =
   'This number is already being connected — watch the progress below. If it stops ' +
   'moving, it can be started again in fifteen minutes.';
@@ -247,7 +250,7 @@ export async function beginCoexistenceOnboarding(
         .update(whatsappOnboardings)
         .set({
           status: 'failed',
-          error: 'superseded',
+          error: SUPERSEDED,
           finishedAt: new Date(),
           updatedAt: new Date(),
         })
@@ -505,13 +508,73 @@ async function exchangeCode(
   };
 }
 
-/** Starts a failed or stalled attempt's job again — the "Retry connection" button. */
+/**
+ * Starts an attempt's job again — the "Retry connection" button — for an
+ * attempt that failed, or one still `exchanged` whose job died without saying
+ * so (no longer live: older than fifteen minutes and nothing queued for it).
+ *
+ * Refused for an attempt something newer has replaced — retired as superseded,
+ * or simply older than another attempt on the same number — because reopening
+ * it would connect the number with the older sign-in's account and group, over
+ * whatever the newer one decided. The row is locked before it is judged, and
+ * the newer-attempt check is a second statement after the lock, so its
+ * snapshot is taken once a concurrent retry of the same row has committed
+ * (the reason `storedCredentialEditRefusal` in `./credentials` gives). A
+ * newer attempt inserted concurrently is the partial unique index's to refuse.
+ */
 export async function retryOnboarding(
   onboardingId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const reopened = await db
-    .transaction(async (tx) => {
+  const outcome = await db
+    .transaction(async (tx): Promise<{ ok: true } | { ok: false; error: string }> => {
       const [row] = await tx
+        .select({
+          id: whatsappOnboardings.id,
+          status: whatsappOnboardings.status,
+          error: whatsappOnboardings.error,
+          phoneNumberId: whatsappOnboardings.phoneNumberId,
+          createdAt: whatsappOnboardings.createdAt,
+        })
+        .from(whatsappOnboardings)
+        .where(eq(whatsappOnboardings.id, onboardingId))
+        .for('update')
+        .limit(1);
+
+      if (!row) return { ok: false, error: 'That connection no longer exists — reload the page.' };
+      if (row.status === 'connected') {
+        return { ok: false, error: 'That number is already connected — reload the page.' };
+      }
+
+      const [newer] = await tx
+        .select({ id: whatsappOnboardings.id })
+        .from(whatsappOnboardings)
+        .where(
+          and(
+            eq(whatsappOnboardings.phoneNumberId, row.phoneNumberId),
+            ne(whatsappOnboardings.id, row.id),
+            gt(whatsappOnboardings.createdAt, row.createdAt),
+          ),
+        )
+        .limit(1);
+      if (row.error === SUPERSEDED || newer) {
+        return {
+          ok: false,
+          error:
+            'A newer connection of this number has replaced this one, so it cannot be ' +
+            'started again — retry the newer one, or connect the number again.',
+        };
+      }
+
+      if (row.status === 'exchanged') {
+        const [live] = await tx
+          .select({ id: whatsappOnboardings.id })
+          .from(whatsappOnboardings)
+          .where(and(eq(whatsappOnboardings.id, row.id), liveAttempt()))
+          .limit(1);
+        if (live) return { ok: false, error: ALREADY_CONNECTING };
+      }
+
+      await tx
         .update(whatsappOnboardings)
         .set({
           status: 'exchanged',
@@ -522,26 +585,19 @@ export async function retryOnboarding(
           startedAt: new Date(),
           updatedAt: new Date(),
         })
-        .where(
-          and(
-            eq(whatsappOnboardings.id, onboardingId),
-            inArray(whatsappOnboardings.status, ['failed']),
-          ),
-        )
-        .returning({ id: whatsappOnboardings.id });
-      return row ?? null;
+        .where(eq(whatsappOnboardings.id, row.id));
+      return { ok: true };
     })
     .catch((error: unknown) => {
       // The partial unique index: another attempt on this number is live.
-      if (isUniqueViolation(error)) return 'live' as const;
+      if (isUniqueViolation(error)) return { ok: false as const, error: ALREADY_CONNECTING };
       throw error;
     });
 
-  if (reopened === 'live') return { ok: false, error: ALREADY_CONNECTING };
-  if (!reopened) {
-    return { ok: false, error: 'That connection is not one that failed — reload the page.' };
-  }
+  if (!outcome.ok) return outcome;
 
+  // After the commit, as in the first phase. A job of the attempt's that is
+  // still dead or failed in the table stays there as its record.
   await enqueue('complete_coexistence_onboarding', { onboardingId }, { priority: 10 });
   return { ok: true };
 }

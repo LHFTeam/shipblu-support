@@ -10,6 +10,10 @@ import { subjectGone } from './subject-gone';
  *
  *   npm run job -- complete_coexistence_onboarding onboardingId=<uuid> [steps=history]
  *
+ * A run by hand is one attempt and the last: a failure Meta might not repeat is
+ * written on the row as final — failed if the number never connected, the
+ * step's error if it did — rather than promising a retry nobody queued.
+ *
  * The attempt row is written before this is enqueued, so a missing one is gone
  * for good, not "not yet".
  */
