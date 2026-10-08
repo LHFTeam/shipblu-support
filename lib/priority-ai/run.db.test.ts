@@ -1,4 +1,5 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, sql } from 'drizzle-orm';
+import { PgDatabase } from 'drizzle-orm/pg-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
 import {
@@ -294,6 +295,98 @@ describe('classifyMessagePriority: apply', () => {
     });
     expect(await priorityOf(id)).toBe('medium');
   });
+
+  it('does not take a message sent in the same second as the opening for the opening', async () => {
+    // WhatsApp stamps a message to the whole second, so a burst shares one.
+    const sameSecond = new Date(Math.floor(Date.now() / 1000) * 1000 - MINUTE);
+    const id = await ticket({ channel: 'whatsapp' });
+    const opening = await inbound(id, 'الشحنة اتفتحت ومش موجود فيها حاجة', {
+      createdAt: sameSecond,
+    });
+    const burst = await inbound(id, '؟', { createdAt: sameSecond });
+
+    answers('urgent', 0.5);
+    expect(await classifyMessagePriority(opening, { baseUrl: BASE })).toMatchObject({
+      outcome: 'below_threshold',
+    });
+    answers('low', 0.95);
+    expect(await classifyMessagePriority(burst, { baseUrl: BASE })).toMatchObject({
+      outcome: 'not_raised',
+    });
+    expect(await priorityOf(id)).toBe('medium');
+  });
+
+  it('lets the opening message lower though a later one, answered first, was refused', async () => {
+    const id = await ticket();
+    const opening = await inbound(id, 'ازاي اغير عنوان التوصيل؟', {
+      createdAt: new Date(Date.now() - MINUTE),
+    });
+    const later = await inbound(id, 'شكرا');
+
+    // A refusal to lower moved nothing, so it has not judged the opening: the
+    // ticket ends where it would have had the jobs run in order.
+    answers('low', 0.9);
+    expect(await classifyMessagePriority(later, { baseUrl: BASE })).toMatchObject({
+      outcome: 'not_raised',
+    });
+    answers('low', 0.9);
+    expect(await classifyMessagePriority(opening, { baseUrl: BASE })).toMatchObject({
+      outcome: 'applied',
+    });
+    expect(await priorityOf(id)).toBe('low');
+  });
+
+  it('reads its own last write by the order the writes landed in, not the order they began', async () => {
+    const id = await ticket();
+    await inbound(id, 'السلام عليكم', { createdAt: new Date(Date.now() - 2 * MINUTE) });
+    const slower = await inbound(id, 'هرفع قضية', { createdAt: new Date(Date.now() - MINUTE) });
+    const faster = await inbound(id, 'الشحنة متأخرة اسبوع');
+
+    // The slower job opens its transaction first and is held before the row
+    // lock; the faster one takes the lock, raises to high and commits. Both
+    // transactions' `now()` is when they began, so the slower one's later write
+    // would carry the earlier stamp.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let reached!: () => void;
+    const atLock = new Promise<void>((resolve) => (reached = resolve));
+    const real = PgDatabase.prototype.transaction;
+    const spy = vi.spyOn(PgDatabase.prototype, 'transaction').mockImplementationOnce(function (
+      this: PgDatabase<never>,
+      run,
+      config,
+    ) {
+      return real.call(
+        this,
+        async (tx) => {
+          await tx.execute(sql`select 1`);
+          reached();
+          await held;
+          return run(tx);
+        },
+        config,
+      ) as never;
+    });
+
+    answers('urgent');
+    const slow = classifyMessagePriority(slower, { baseUrl: BASE });
+    await atLock;
+    spy.mockRestore();
+    answers('high');
+    expect(await classifyMessagePriority(faster, { baseUrl: BASE })).toMatchObject({
+      outcome: 'applied',
+    });
+    release();
+    expect(await slow).toMatchObject({ outcome: 'applied', predicted: 'urgent' });
+    expect(await priorityOf(id)).toBe('urgent');
+
+    // Its own write, so the next answer is weighed and not refused as somebody else's.
+    const next = await inbound(id, 'لسه مفيش رد');
+    answers('urgent');
+    expect(await classifyMessagePriority(next, { baseUrl: BASE })).toMatchObject({
+      outcome: 'unchanged',
+    });
+  });
 });
 
 describe('classifyMessagePriority: somebody else owns the priority', () => {
@@ -467,6 +560,25 @@ describe('classifyMessagePriority: shadow, skips and failures', () => {
     expect(await priorityOf(id)).toBe('medium');
   });
 
+  it('skips a photo or a voice note sent with no words, which the model cannot see', async () => {
+    const id = await ticket({ channel: 'whatsapp' });
+    for (const placeholder of [
+      '[image]',
+      '[voice note]',
+      '[document: invoice.pdf]',
+      '[2 attachments]',
+    ]) {
+      const messageId = await inbound(id, placeholder);
+      answers('low', 0.95);
+      expect(await classifyMessagePriority(messageId, { baseUrl: BASE })).toEqual({
+        status: 'skipped',
+        reason: 'no text',
+      });
+    }
+    expect(await db.select().from(aiPriorityRuns)).toEqual([]);
+    expect(await priorityOf(id)).toBe('medium');
+  });
+
   it('classifies a person writing from a mailing-list address', async () => {
     // `isAutomated` is set by a List-Id header; a merchant's Google Group has one.
     const id = await ticket({ channel: 'email' });
@@ -589,6 +701,20 @@ describe('enqueuePriorityClassification', () => {
       conversationId: id,
       messageId,
       bodyText: 'هرفع قضية',
+      kind: 'reply',
+      direction: 'inbound',
+    });
+
+    expect(await queued()).toEqual([]);
+  });
+
+  it('never queues a caption-less photo, whose text is ours and not the customer’s', async () => {
+    const id = await ticket({ channel: 'whatsapp' });
+    const messageId = await inbound(id, '[voice note]');
+    await enqueuePriorityClassification({
+      conversationId: id,
+      messageId,
+      bodyText: '[voice note]',
       kind: 'reply',
       direction: 'inbound',
     });

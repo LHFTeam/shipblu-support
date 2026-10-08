@@ -1299,10 +1299,11 @@ Everything below passes unit tests. Each is a round trip, or the half of one
 nobody has run, that somebody has to actually watch against the real provider:
 
 - **The priority classifier, in shadow first** (`plans/priority-through-typesafe.md`).
-  It ships off. Set `PRIORITY_AI=shadow` on web and worker (with
-  `TYPESAFE_API_KEY`), let a day of inbound traffic through, and read the rows
-  back by hand before `apply` — no real Jev response has been parsed by this
-  code. Per channel, since one channel is most of the volume:
+  It ships off. Set `PRIORITY_AI=shadow` in the `shipblu-support-production`
+  env group, beside `TYPESAFE_API_KEY` — never on a service, which would
+  silently win over the group — let a day of inbound traffic through, and read
+  the rows back by hand before `apply` — no real Jev response has been parsed
+  by this code. Per channel, since one channel is most of the volume:
 
   ```sql
   select c.channel, r.outcome, r.predicted, count(*),

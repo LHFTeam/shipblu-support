@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, ne } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   aiPriorityRuns,
@@ -24,7 +24,7 @@ import {
   typesafeModel,
 } from '@/lib/typesafe/client';
 import { CONFIDENT_OUTCOMES, DEFAULT_PRIORITY, decide, type PriorityOutcome } from './decide';
-import { PRIORITY_QUESTION, priorityRequest } from './request';
+import { PRIORITY_QUESTION, hasCustomerText, priorityRequest } from './request';
 import { priorityAiMinProbability, priorityAiMode, type PriorityAiMode } from './settings';
 
 const log = logger('classify_priority');
@@ -104,8 +104,6 @@ export async function classifyMessagePriority(
   if (existing) return { status: 'already_classified' };
 
   const withContext = true;
-  // Also what says whether this is the customer's opening message — the only
-  // one whose answer may lower a ticket (`decide.ts`, rule 3).
   const earlier = await earlierMessages(row.conversationId, row.createdAt);
   const request = priorityRequest(
     { channel: row.channel, bodyText: row.bodyText, earlier },
@@ -169,7 +167,13 @@ export async function classifyMessagePriority(
       .limit(1);
     if (!ticket) return null;
 
-    const facts = await priorityFacts(tx, row.conversationId, ticket.formId, mode, messageId);
+    const facts = await priorityFacts(tx, {
+      conversationId: row.conversationId,
+      formId: ticket.formId,
+      mode,
+      messageId,
+      createdAt: row.createdAt,
+    });
 
     // Shadow mode writes nothing, so left alone every later message on a ticket
     // would be weighed against `medium` and never against the level shadow mode
@@ -193,8 +197,16 @@ export async function classifyMessagePriority(
       // out of order, so the opening message can be answered after a later one
       // has already raised the ticket. Without the second test its "hello"
       // would then lower a ticket another message made urgent.
-      firstMessage: earlier.length === 0 && !facts.otherConfident,
+      firstMessage: facts.opening && !facts.otherConfident,
     });
+
+    // Stamped now, under the lock, rather than with the column default: `now()`
+    // is when the transaction began, and two jobs for one ticket can begin in
+    // one order and take the lock in the other. `priorityFacts` reads the
+    // classifier's last write by these stamps, so a later write carrying the
+    // earlier one reads as overwritten — the column then disagrees with what it
+    // "last applied", and every answer after is refused as somebody else's.
+    const lockedAt = sql<Date>`clock_timestamp()`;
 
     // The run row first. Two deliveries of one job racing past the check above
     // are already serialised by the row lock — the second reads the first's
@@ -204,7 +216,12 @@ export async function classifyMessagePriority(
     // further and reports nothing it did not record.
     const inserted = await tx
       .insert(aiPriorityRuns)
-      .values({ ...runFields, priorityBefore: ticket.priority, outcome: decision.outcome })
+      .values({
+        ...runFields,
+        priorityBefore: ticket.priority,
+        outcome: decision.outcome,
+        createdAt: lockedAt,
+      })
       .onConflictDoNothing({ target: aiPriorityRuns.messageId })
       .returning({ id: aiPriorityRuns.id });
     if (inserted.length === 0) return 'duplicate';
@@ -218,6 +235,7 @@ export async function classifyMessagePriority(
         conversationId: row.conversationId,
         type: 'priority_changed',
         actorLabel: PRIORITY_AI_ACTOR,
+        createdAt: lockedAt,
         data: {
           to: decision.to,
           from: ticket.priority,
@@ -275,7 +293,7 @@ type LoadedRow = {
  */
 function skipReason(row: LoadedRow): string | null {
   if (!isCategorisableMessage(row.kind, row.direction)) return 'not an inbound reply';
-  if (!row.bodyText.trim()) return 'no text';
+  if (!hasCustomerText(row.bodyText)) return 'no text';
   if (isReadOnlyChannel(row.channel)) return `read-only channel ${row.channel}`;
   if (row.isSpam) return 'spam';
   if (row.deletedAt) return 'deleted';
@@ -311,14 +329,24 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  */
 async function priorityFacts(
   tx: Tx,
-  conversationId: string,
-  formId: string | null,
-  mode: Exclude<PriorityAiMode, 'off'>,
-  messageId: string,
+  {
+    conversationId,
+    formId,
+    mode,
+    messageId,
+    createdAt,
+  }: {
+    conversationId: string;
+    formId: string | null;
+    mode: Exclude<PriorityAiMode, 'off'>;
+    messageId: string;
+    createdAt: Date;
+  },
 ): Promise<{
   ownedElsewhere: boolean;
   lastApplied: Priority | null;
   lastWouldApply: Priority | null;
+  opening: boolean;
   otherConfident: boolean;
 }> {
   const events = await tx
@@ -392,7 +420,34 @@ async function priorityFacts(
     )
     .limit(1);
 
-  return { ownedElsewhere, lastApplied, lastWouldApply, otherConfident: Boolean(confident) };
+  // The customer's opening message: no other inbound reply at or before it.
+  // At, and not only before: WhatsApp stamps a message to the whole second, so
+  // a burst shares one, and the strict `<` that is right for choosing context
+  // would let each message of the burst count as the opening — and lower. With
+  // a tie neither does, which is the direction rule 3 errs in. A caption-less
+  // photo counts: it was the opening, though there was nothing to ask about it.
+  const [before] = await tx
+    .select({ id: messages.id })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.conversationId, conversationId),
+        eq(messages.kind, 'reply'),
+        eq(messages.direction, 'inbound'),
+        ne(messages.id, messageId),
+        sql`${messages.createdAt} <= ${createdAt.toISOString()}::timestamptz`,
+        sql`btrim(${messages.bodyText}) <> ''`,
+      ),
+    )
+    .limit(1);
+
+  return {
+    ownedElsewhere,
+    lastApplied,
+    lastWouldApply,
+    opening: !before,
+    otherConfident: Boolean(confident),
+  };
 }
 
 async function recordFailure(

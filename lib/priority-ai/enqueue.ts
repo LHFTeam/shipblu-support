@@ -4,6 +4,7 @@ import { conversations } from '@/db/schema';
 import { isCategorisableMessage } from '@/lib/categorise/apply';
 import { enqueue } from '@/lib/queue';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
+import { hasCustomerText } from './request';
 import { priorityAiMode } from './settings';
 
 /**
@@ -32,7 +33,7 @@ export async function enqueuePriorityClassification(message: {
 }): Promise<void> {
   if (priorityAiMode() === 'off') return;
   if (!isCategorisableMessage(message.kind, message.direction)) return;
-  if (!message.bodyText.trim()) return;
+  if (!hasCustomerText(message.bodyText)) return;
 
   const [conversation] = await db
     .select({ channel: conversations.channel })

@@ -61,6 +61,26 @@ const INSTRUCTIONS = [
   'judge; that is a real answer, not a last resort.',
 ].join(' ');
 
+/**
+ * Whether a message carries words the customer wrote.
+ *
+ * A photo, a voice note or a document sent without a caption is stored as our
+ * own label for it — `[image]`, `[voice note]`, `[2 attachments]`, from the
+ * `displayText` in `lib/whatsapp/parse.ts` and `lib/meta/parse.ts` — so the
+ * console shows a bubble rather than a blank. Asked about that label, the model
+ * sees a message too short to judge and answers `low`, as `INSTRUCTIONS` tell
+ * it to; on an opening message that lowers a ticket whose photo may well be of
+ * the damaged parcel. The model cannot see the photo, so it is not asked about
+ * one. The message still counts as the ticket's opening, so the words that
+ * follow it may raise and never lower.
+ */
+export function hasCustomerText(bodyText: string): boolean {
+  const text = bodyText.trim();
+  return text !== '' && !PLACEHOLDER.test(text);
+}
+
+const PLACEHOLDER = /^\[[^\]\n]*\]$/;
+
 export function priorityQuestion(): ChoiceQuestion {
   const criteria: Record<string, string> = {};
   // In `PRIORITIES` order, so the request is the same bytes every time.

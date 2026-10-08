@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { MAX_TEXT_LENGTH } from '@/lib/categorise/normalise';
 import { PRIORITIES } from '@/lib/tickets/vocabulary';
-import { PRIORITY_QUESTION, priorityQuestion, priorityRequest } from './request';
+import { PRIORITY_QUESTION, hasCustomerText, priorityQuestion, priorityRequest } from './request';
 
 /**
  * The question as it goes over the wire. A `choice` question keyed wrongly does
@@ -60,5 +60,28 @@ describe('priorityRequest', () => {
     const long = { channel: 'email', bodyText: 'x'.repeat(MAX_TEXT_LENGTH + 50) };
     const state = priorityRequest(long, 'jev-latest', false).state as { message: string };
     expect(state.message).toHaveLength(MAX_TEXT_LENGTH);
+  });
+});
+
+describe('hasCustomerText', () => {
+  it('refuses the labels ingest writes for a message with no words', () => {
+    for (const label of [
+      '',
+      '  ',
+      '[image]',
+      '[voice note]',
+      '[sticker]',
+      '[document: فاتورة.pdf]',
+      '[2 attachments]',
+      ' [video] ',
+    ]) {
+      expect(hasCustomerText(label), label).toBe(false);
+    }
+  });
+
+  it('takes anything the customer wrote, a caption or a bracket included', () => {
+    for (const text of ['؟', 'الشحنة [اتفتحت]', '[urgent] where is my COD', 'ok']) {
+      expect(hasCustomerText(text), text).toBe(true);
+    }
   });
 });

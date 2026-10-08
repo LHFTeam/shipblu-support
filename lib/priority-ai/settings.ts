@@ -49,7 +49,7 @@ export function priorityAiMode(): PriorityAiMode {
 }
 
 export function priorityAiMinProbability(): number {
-  const raw = process.env.PRIORITY_AI_MIN_PROBABILITY;
+  const raw = process.env.PRIORITY_AI_MIN_PROBABILITY?.trim();
   if (!raw) return DEFAULT_MIN_PROBABILITY;
   const value = Number(raw);
   if (!Number.isFinite(value) || value < 0 || value > 1) {

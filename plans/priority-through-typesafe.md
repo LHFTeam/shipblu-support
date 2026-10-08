@@ -59,7 +59,17 @@ tests.
 - **"Opening message" is judged by evidence as well as by timestamp.** Jobs run
   concurrently and retry out of order, so the opening message can be answered
   after a later one has already raised the ticket. Lowering therefore also
-  needs no other message on the ticket to have had a confident answer yet.
+  needs no other message on the ticket to have set or confirmed its level yet —
+  `applied`, `would_apply` or `unchanged`. Not `not_raised`: a later message
+  refused the lowering it asked for moved nothing, and counting it made the
+  opening's answer depend on which job ran first. The timestamp test is `<=`
+  and not `<`, because WhatsApp stamps a message to the whole second: in a
+  burst sharing one, no message is the opening, so none may lower.
+- **A photo or voice note with no words is not asked about.** Ingest stores it
+  as our own label — `[image]`, `[voice note]`, `[2 attachments]` — and the
+  model, told to answer `low` for a message too short to judge, did; on an
+  opening message that lowered a ticket whose photo might be of the damaged
+  parcel. It still counts as the opening, so the words after it only raise.
 - **`low` is the answer for a message too vague to judge.** The categoriser
   offers `meta.unclassified` for the same reason: most of this archive is a
   22-to-39 character fragment, and a model with no way out pushes "؟" upwards.
@@ -116,8 +126,9 @@ over a typo.
 
 1. Deploy with it unset. Nothing changes; `afterMessageStored` returns before
    any query.
-2. `PRIORITY_AI=shadow` on web and worker. Read the first twenty rows by hand,
-   per channel — no real Jev response has been parsed by this code yet.
+2. `PRIORITY_AI=shadow` in the production env group, which web and worker
+   both link — not on either service, whose value would silently win. Read the
+   first twenty rows by hand, per channel — no real Jev response has been parsed by this code yet.
 3. `PRIORITY_AI=apply`. Setting it back to `off` stops it with no deploy.
 
 ## Shape

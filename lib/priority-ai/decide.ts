@@ -50,16 +50,18 @@ export type PriorityOutcome =
   | 'failed';
 
 /**
- * The outcomes that are a confident answer about some message on the ticket.
- * Once one exists the ticket's opening has been judged, whatever order the jobs
- * ran in, so no other message's answer may lower it (rule 3).
- * `set_by_person` is not one: it says only that the answer was not allowed to act.
+ * The outcomes that judged the ticket: a confident answer about some message on
+ * it that set, or confirmed, its level. Once one exists the ticket's opening has
+ * been judged, whatever order the jobs ran in, so no other message's answer may
+ * lower it (rule 3). `not_raised` is not one: it was refused the lowering it
+ * asked for and moved nothing, so counting it would let the opening's own
+ * answer be refused or not by which job ran first. Nor is `set_by_person`,
+ * which says only that the answer was not allowed to act.
  */
 export const CONFIDENT_OUTCOMES = [
   'applied',
   'would_apply',
   'unchanged',
-  'not_raised',
 ] as const satisfies readonly PriorityOutcome[];
 
 /** The value of the column a ticket is created with (`conversations.priority`). */

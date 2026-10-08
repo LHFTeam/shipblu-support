@@ -46,4 +46,12 @@ describe('priorityAiMinProbability', () => {
     expect(priorityAiMinProbability()).toBe(0.6);
     warn.mockRestore();
   });
+
+  it('reads a value pasted with spaces as unset, not as a threshold of zero', () => {
+    // `Number(' ')` is 0, which would apply every answer the model gave.
+    setTestEnv({ PRIORITY_AI_MIN_PROBABILITY: ' ' });
+    expect(priorityAiMinProbability()).toBe(0.6);
+    setTestEnv({ PRIORITY_AI_MIN_PROBABILITY: ' 0.8\n' });
+    expect(priorityAiMinProbability()).toBe(0.8);
+  });
 });
