@@ -1,7 +1,9 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { ErrorText, Select, Textarea } from '@/components/ui';
+import { InfoTip } from '@/components/tooltip';
+import { suggestionKey } from '@/lib/canned-suggest/keyboard';
 import type { CannedResponseOption } from '@/lib/tickets/lookups';
 import {
   availableLocales,
@@ -16,6 +18,7 @@ import type { KnowledgeContext } from './types';
 import { INITIAL, LOST_SEND, useRefreshOnSuccess } from './form-state';
 import { SubmitButton } from '@/components/submit-button';
 import { useActionForm } from '@/components/use-action-form';
+import { useCannedSuggestion } from './use-canned-suggestion';
 
 /**
  * The language toggle's two buttons, each written in its own script.
@@ -47,6 +50,8 @@ export function ReplyForm({
   canned,
   customerLocale,
   knowledge,
+  suggest = false,
+  anchorMessageId = null,
   onSent,
 }: {
   conversationId: string;
@@ -54,6 +59,10 @@ export function ReplyForm({
   canned: CannedResponseOption[];
   customerLocale: CannedLocale;
   knowledge: KnowledgeContext | null;
+  /** Whether to ask Jev for a canned response when the box takes focus. */
+  suggest?: boolean;
+  /** The newest reply on the ticket — what a suggestion answers. See `CannedSuggestion`. */
+  anchorMessageId?: string | null;
   onSent?: () => void;
 }) {
   const { state, key, form } = useActionForm(sendReply, INITIAL, { lost: LOST_SEND });
@@ -84,12 +93,15 @@ export function ReplyForm({
       />
 
       <ReplyBody
+        conversationId={conversationId}
         isCommentThread={isCommentThread}
         privately={privately}
         canned={canned}
         locale={cannedLocale}
         onLocaleChange={setCannedLocale}
         knowledge={knowledge}
+        suggest={suggest}
+        anchorMessageId={anchorMessageId}
       />
 
       {isCommentThread ? (
@@ -142,13 +154,17 @@ export function ReplyForm({
  * goes.
  */
 function ReplyBody({
+  conversationId,
   isCommentThread,
   privately,
   canned,
   locale,
   onLocaleChange,
   knowledge,
+  suggest,
+  anchorMessageId,
 }: {
+  conversationId: string;
   isCommentThread: boolean;
   privately: boolean;
   canned: CannedResponseOption[];
@@ -156,6 +172,8 @@ function ReplyBody({
   locale: CannedLocale;
   onLocaleChange: (locale: CannedLocale) => void;
   knowledge: KnowledgeContext | null;
+  suggest: boolean;
+  anchorMessageId: string | null;
 }) {
   const bodyRef = useRef<HTMLTextAreaElement>(null);
 
@@ -207,6 +225,13 @@ function ReplyBody({
   const forget = useCallback(() => setUsed(null), []);
 
   /*
+    Whether the box is empty — the one condition every part of the suggestion
+    turns on. The text lives in the DOM, so this mirrors it: told by `onInput`
+    when the agent types, and by `insertText` when a pick or a link goes in.
+  */
+  const [empty, setEmpty] = useState(true);
+
+  /*
     Two things insert into this box now — a canned response and an article link
     — and they want identical caret handling and different bookkeeping. Taking
     text rather than a row keeps `insertCanned`'s off-by-one in one place and
@@ -226,6 +251,9 @@ function ReplyBody({
     box.value = text;
     box.focus();
     box.setSelectionRange(caret, caret);
+    // A value set from code fires no `input`, so the box's emptiness — which
+    // decides whether a suggestion shows — is told here.
+    setEmpty(!text.trim());
   }, []);
 
   const insertCannedResponse = useCallback(
@@ -244,27 +272,118 @@ function ReplyBody({
     [insertText],
   );
 
+  const suggestion = useCannedSuggestion({ conversationId, suggest, anchorMessageId, bodyRef });
+
+  // The suggested response as it would go in: in the language the toggle names,
+  // or the one it was written in — exactly what Tab will insert.
+  const suggested = suggestion.showable
+    ? (canned.find((response) => response.id === suggestion.showable?.cannedResponseId) ?? null)
+    : null;
+  const suggestedLocale = suggested ? resolveLocale(bodiesOf(suggested), locale) : null;
+  const ghost = suggested && suggestedLocale ? bodiesOf(suggested)[suggestedLocale] : null;
+  const showing = Boolean(ghost && empty);
+  const hintId = useId();
+
+  const { markShown } = suggestion;
+  useEffect(() => {
+    if (showing) markShown();
+  }, [showing, markShown]);
+
+  const acceptSuggestion = () => {
+    if (!suggested) return;
+    insertCannedResponse(suggested, locale);
+    suggestion.accept();
+  };
+
   return (
     <>
       <input type="hidden" name="cannedResponseId" value={used?.id ?? ''} />
       <input type="hidden" name="cannedLocale" value={used?.locale ?? ''} />
+      <input type="hidden" name="cannedSuggestionId" value={suggestion.linkId ?? ''} />
 
       <Textarea
         ref={bodyRef}
         name="body"
         rows={4}
+        // The suggestion is the placeholder: grey, gone the moment the agent
+        // types, and never sent by accident — the box is still empty and still
+        // `required`, so Send refuses it until Tab or Use has put the text in.
         placeholder={
-          isCommentThread
+          ghost ??
+          (isCommentThread
             ? privately
               ? 'Send this privately to the commenter — one chance per comment.'
               : 'Reply under the comment, where everyone can see it…'
-            : 'Write a reply to the customer…'
+            : 'Write a reply to the customer…')
         }
         required
+        aria-describedby={showing ? hintId : undefined}
+        onFocus={(event) => {
+          if (!event.currentTarget.value.trim()) suggestion.ask();
+        }}
+        onKeyDown={(event) => {
+          if (!showing) return;
+          const action = suggestionKey({
+            key: event.key,
+            shiftKey: event.shiftKey,
+            altKey: event.altKey,
+            ctrlKey: event.ctrlKey,
+            metaKey: event.metaKey,
+            isComposing: event.nativeEvent.isComposing,
+            keyCode: event.keyCode,
+          });
+          if (!action) return;
+          event.preventDefault();
+          if (action === 'accept') acceptSuggestion();
+          else suggestion.dismiss();
+        }}
         onInput={(event) => {
-          if (!event.currentTarget.value.trim()) forget();
+          const isEmpty = !event.currentTarget.value.trim();
+          setEmpty(isEmpty);
+          if (isEmpty) forget();
         }}
       />
+
+      {/*
+        Always rendered while suggestions are on, so a screen reader is already
+        listening to the region when a suggestion arrives in it — a live region
+        added together with its content is not announced.
+
+        Use and × are buttons as well as keys because the console is read on
+        phones, which have no Tab key.
+      */}
+      {suggest ? (
+        <div id={hintId} aria-live="polite" className="text-xs text-[var(--muted-foreground)]">
+          {showing && suggested ? (
+            <div className="flex items-center gap-2">
+              <span className="min-w-0 truncate">
+                Suggested: <span className="font-medium">{suggested.title}</span>
+              </span>
+              <InfoTip label="the suggested response">
+                Picked by TypeSafe&rsquo;s Jev model from your canned responses, after reading the
+                last messages on this ticket (never the private notes). Use it as it stands or edit
+                it first &mdash; nothing is sent until you press Send.
+              </InfoTip>
+              <span className="hidden shrink-0 lg:inline">Tab to use · Esc to dismiss</span>
+              <button
+                type="button"
+                onClick={acceptSuggestion}
+                className="ms-auto shrink-0 rounded-md border border-[var(--border)] px-2 py-0.5 font-medium text-[var(--foreground)] hover:bg-[var(--muted)]"
+              >
+                Use
+              </button>
+              <button
+                type="button"
+                onClick={suggestion.dismiss}
+                aria-label="Dismiss the suggested response"
+                className="shrink-0 rounded-md px-1.5 py-0.5 hover:bg-[var(--muted)]"
+              >
+                ×
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       <CannedPicker
         responses={canned}

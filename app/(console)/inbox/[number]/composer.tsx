@@ -28,6 +28,7 @@ export function Composer({
   canned,
   customerLocale,
   knowledge,
+  suggestCanned,
   canSideConversation,
 }: {
   conversation: ConversationDetail;
@@ -43,6 +44,8 @@ export function Composer({
    */
   customerLocale: CannedLocale;
   knowledge: KnowledgeContext | null;
+  /** Whether the reply box asks Jev for a canned response. See `lib/canned-suggest/`. */
+  suggestCanned: boolean;
   canSideConversation: boolean;
 }) {
   const isWhatsApp = conversation.channel === 'whatsapp';
@@ -78,6 +81,12 @@ export function Composer({
   // message ticket can be locked out.
   const metaSendable =
     !threadBlocked && (!isMeta || isCommentThread || now === null || !metaState.isClosed);
+
+  // The newest reply either way — the message a canned suggestion answers. The
+  // timeline arrives in the order the server reads it (`created_at`, then `id`),
+  // so this is the same message `lib/canned-suggest/history.ts` calls the anchor.
+  const anchorMessageId =
+    conversation.messages.findLast((message) => message.kind === 'reply')?.id ?? null;
 
   const [requestedTab, setRequestedTab] = useState<Tab>('reply');
 
@@ -253,6 +262,8 @@ export function Composer({
                 canned={canned}
                 customerLocale={customerLocale}
                 knowledge={knowledge}
+                suggest={suggestCanned}
+                anchorMessageId={anchorMessageId}
                 onSent={onSent}
               />
             )
