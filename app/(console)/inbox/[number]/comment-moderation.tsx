@@ -5,10 +5,8 @@ import { useFormStatus } from 'react-dom';
 import { Badge, Button, ErrorText } from '@/components/ui';
 import { useRefreshOnSuccess } from '@/components/use-refresh-on-success';
 import { labelFor, moderatableComment, readCommentModeration } from '@/lib/meta/moderation';
-import type { ActionState } from '../../action-state';
 import { moderateComment } from '../../meta-actions';
-
-const INITIAL: ActionState = { error: null };
+import { INITIAL } from './form-state';
 
 /**
  * Hide, unhide and delete, under a customer's public comment.

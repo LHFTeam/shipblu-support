@@ -4,10 +4,8 @@ import { useActionState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Button } from '@/components/ui';
 import { useRefreshOnSuccess } from '@/components/use-refresh-on-success';
-import type { ActionState } from '../../action-state';
 import { claimThreadControl } from '../../meta-actions';
-
-const INITIAL: ActionState = { error: null };
+import { INITIAL } from './form-state';
 
 /**
  * Takes the thread off whichever app is answering it, so this one can reply.

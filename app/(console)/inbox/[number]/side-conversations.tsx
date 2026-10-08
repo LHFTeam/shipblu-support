@@ -12,19 +12,16 @@ import {
   trackingPrefill,
 } from '@/lib/side-conversations/format';
 import type { ConversationDetail } from '@/lib/tickets/conversation';
-import type { ActionState } from '../../action-state';
 import { SubmitButton } from '@/components/submit-button';
 import { useActionForm, type FormHandlers } from '@/components/use-action-form';
 import { useRefreshOnSuccess } from '@/components/use-refresh-on-success';
-import { LOST_SEND } from './form-state';
+import { INITIAL, LOST_SEND } from './form-state';
 import {
   replyToSideConversation,
   setSideConversationState,
   startSideConversation,
 } from '../../side-conversation-actions';
 import { AttachmentList } from './attachments';
-
-const INITIAL: ActionState = { error: null };
 
 /**
  * Side conversations in the agent console.
