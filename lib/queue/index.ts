@@ -35,6 +35,7 @@ export type JobType =
   | 'normalise_kb_formatting'
   | 'seed_console_handbook'
   | 'seed_canned_responses'
+  | 'rotate_whatsapp_credentials'
   | 'cleanup';
 
 export type EnqueueOptions = {

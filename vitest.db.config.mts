@@ -32,6 +32,9 @@ export default defineConfig({
       // Long enough for the Zod schema, and a placeholder: nothing a test here
       // signs is ever read by anything outside it.
       APP_SECRET: 'db-test-placeholder-secret-at-least-32-characters',
+      // A key the credential tests seal under. A test of a different key sets
+      // its own; nothing sealed here is ever opened outside the test that did it.
+      WHATSAPP_CREDENTIAL_KEY: 'db-test-placeholder-credential-key-32-characters',
     },
   },
   resolve: {

@@ -6,10 +6,12 @@ import {
   credentialsForAccount,
   ensureEnvironmentAccount,
   listActiveAccounts,
+  resolveCredentialSource,
   type WhatsAppAccount,
 } from '@/lib/whatsapp/accounts';
 import { listTemplates, WhatsAppApiError } from '@/lib/whatsapp/client';
-import { explainAuthError } from '@/lib/whatsapp/errors';
+import { recordCredentialRefusal, recordCredentialVerified } from '@/lib/whatsapp/credentials';
+import { ACCESS_TOKEN_CODE, explainAuthError } from '@/lib/whatsapp/errors';
 import { errorMessage } from '@/lib/errors';
 import { logger } from '@/lib/log';
 
@@ -84,7 +86,11 @@ export async function syncWhatsAppTemplates(): Promise<void> {
   // was waiting on a shared token — with no lastSyncError recorded anywhere,
   // so the admin screen showed both as merely "never synced". Below, the loop
   // fails that one account by itself and `tokenForAccount` names the variable.
-  if (!env().META_PAGE_ACCESS_TOKEN && accounts.every((account) => !account.tokenEnvVar)) {
+  // An account with a stored credential is a working account in the same way.
+  if (
+    !env().META_PAGE_ACCESS_TOKEN &&
+    accounts.every((account) => !account.tokenEnvVar && !account.hasStoredToken)
+  ) {
     log.info('META_PAGE_ACCESS_TOKEN is not set and every account relies on it — skipping');
     return;
   }
@@ -99,12 +105,36 @@ export async function syncWhatsAppTemplates(): Promise<void> {
       await syncAccount(account);
     } catch (error) {
       const reason = errorMessage(error);
+      // From the listing rather than from the resolution that failed: the
+      // resolution may be what threw, and a credential stored or forgotten in
+      // the last second only changes which sentence the next run prints.
+      const source = resolveCredentialSource(account, account.hasStoredToken);
       const explained =
-        error instanceof WhatsAppApiError ? explainAuthError(error.code, error.message) : reason;
+        error instanceof WhatsAppApiError
+          ? explainAuthError(error.code, error.message, {
+              source,
+              tokenEnvVar: account.tokenEnvVar,
+            })
+          : reason;
 
       log.error(`${account.name}: ${explained}`);
       await recordSync(account.id, explained);
       failures.push(`${account.name}: ${reason}`);
+
+      // A stored credential Meta refused is recorded on the credential too,
+      // which is what the console's badge and the audit trail read. Never
+      // allowed to cost the run its other accounts.
+      if (
+        source === 'stored' &&
+        error instanceof WhatsAppApiError &&
+        error.code === ACCESS_TOKEN_CODE
+      ) {
+        try {
+          await recordCredentialRefusal(account.id, explained);
+        } catch (recordError) {
+          log.error(`${account.name}: recording the refusal failed`, recordError);
+        }
+      }
     }
   }
 
@@ -117,8 +147,12 @@ export async function syncWhatsAppTemplates(): Promise<void> {
 }
 
 async function syncAccount(account: WhatsAppAccount): Promise<void> {
-  const { token, wabaId } = credentialsForAccount(account);
+  const { token, wabaId, source } = await credentialsForAccount(account);
   const templates = await listTemplates({ wabaId, token });
+
+  // The hourly proof that a stored credential still works: the console's
+  // "refused" badge clears on the first success after a reconnect.
+  if (source === 'stored') await recordCredentialVerified(account.id);
 
   if (templates.length === 0) {
     // Deliberately not treated as "delete everything": an API hiccup returning

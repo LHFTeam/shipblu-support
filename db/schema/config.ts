@@ -689,6 +689,11 @@ export const cannedResponses = pgTable(
  * ordinary case: a Business Manager with several WABAs installs one app on all
  * of them and one system-user token serves the lot.
  *
+ * The one exception is a token Meta minted through Embedded Signup, which no
+ * person holds and no variable can name. That is stored — sealed, and in
+ * `whatsapp_account_credentials` below rather than on this row, because this
+ * row is read with a star select and spread into a page's props.
+ *
  * What is deliberately *not* per-account is the app secret and the verify
  * token. Those belong to the Meta app, not to the business account, and
  * `X-Hub-Signature-256` is verified with a single secret in
@@ -707,7 +712,9 @@ export const whatsappAccounts = pgTable(
 
     /**
      * Name of the environment variable holding this account's access token.
-     * Null uses `META_PAGE_ACCESS_TOKEN`. Constrained to a prefix in
+     * Null uses `META_PAGE_ACCESS_TOKEN`, unless a sealed credential is stored
+     * for the account, which wins over both — and storing one clears this, so a
+     * row never names two sources. Constrained to a prefix in
      * `lib/whatsapp/accounts.ts` — an admin naming an arbitrary variable would
      * otherwise be choosing which of the process's secrets gets sent to Meta as
      * a bearer token.
@@ -744,11 +751,132 @@ export const whatsappAccounts = pgTable(
 );
 
 /**
+ * The one secret this database holds: a WhatsApp business token, sealed.
+ *
+ * Everything else here names its credential (`tokenEnvVar` above). A token
+ * minted by Meta's Embedded Signup cannot be named — Meta hands it to the server
+ * for a business account the signup may have just created, and no person ever
+ * holds it — so the alternative to storing it was a step on Render per number,
+ * during which a newly connected number answers nobody. `plans/
+ * whatsapp-coexistence.md` has that decision and the alternatives it rejected.
+ *
+ * What keeps "a dump contains no usable credential" true is that `envelope` is
+ * AES-256-GCM under `WHATSAPP_CREDENTIAL_KEY`, which lives in the environment
+ * group and never here, with the account and WABA id in its authenticated data
+ * (`lib/whatsapp/credential-envelope.ts`). Its own table rather than a column
+ * on `whatsapp_accounts`, because that row is read with a star select and its
+ * fields spread into the admin page's props: a column there would be one
+ * refactor away from an RSC payload.
+ *
+ * `lib/whatsapp/credentials.ts` is the only module that names this table, and
+ * CI holds it to that (`credential-confinement`): no other module may select
+ * from it, and that one never selects `envelope` without opening it.
+ *
+ * One row per account, keyed on the account and cascading with it: a credential
+ * has no meaning once the account it reaches is gone, and keeping one would be
+ * keeping a live token for nothing. The audit of what happened to it survives
+ * in `whatsapp_credential_events`.
+ */
+export const whatsappAccountCredentials = pgTable('whatsapp_account_credentials', {
+  whatsappAccountId: uuid('whatsapp_account_id')
+    .primaryKey()
+    .references(() => whatsappAccounts.id, { onDelete: 'cascade' }),
+
+  /** `v1.<keyId>.<iv>.<ciphertext>.<tag>`, base64url. Never selected unopened. */
+  envelope: text('envelope').notNull(),
+  /**
+   * The key id inside the envelope, kept beside it so a page can say whether
+   * this deployment holds that key — and the reseal job can find the rows a
+   * rotation has to move — without decrypting anything.
+   */
+  keyId: text('key_id').notNull(),
+  /** How it was obtained. `embedded_signup` is the only writer today. */
+  source: text('source').notNull(),
+
+  /**
+   * What Meta's `debug_token` said about it. Null throughout when the
+   * inspection call itself failed; `inspectedAt` says which, because a null
+   * `expiresAt` otherwise means both "never expires" and "nobody asked".
+   */
+  tokenType: text('token_type'),
+  appId: text('app_id'),
+  scopes: jsonb('scopes').$type<string[]>(),
+  businessId: text('business_id'),
+  issuedAt: timestamp('issued_at', { withTimezone: true }),
+  /** Null with `inspectedAt` set is Meta's `expires_at: 0` — never. */
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  dataAccessExpiresAt: timestamp('data_access_expires_at', { withTimezone: true }),
+  inspectedAt: timestamp('inspected_at', { withTimezone: true }),
+
+  obtainedByAgentId: uuid('obtained_by_agent_id').references(() => agents.id, {
+    onDelete: 'set null',
+  }),
+  /**
+   * When this token was stored. A reconnect replaces the token on the same row,
+   * so this moves with it where `created_at` would keep the first connection's
+   * date — and "stored on" is the date an admin is asking about.
+   */
+  storedAt: timestamp('stored_at', { withTimezone: true }).notNull().defaultNow(),
+
+  /**
+   * The last time Meta accepted it, and the last time it refused (190), as the
+   * hourly template sync observed them. A refusal after the last success is
+   * what the console badges; a success clears the refusal.
+   */
+  lastVerifiedAt: timestamp('last_verified_at', { withTimezone: true }),
+  lastRefusedAt: timestamp('last_refused_at', { withTimezone: true }),
+  lastRefusal: text('last_refusal'),
+
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type CredentialEventKind = 'stored' | 'resealed' | 'refused' | 'removed';
+
+/**
+ * Everything that happened to a stored credential, and who did it.
+ *
+ * Append-only, and **deliberately not a foreign key to the account or the
+ * credential** — the shape `admin_deletions` takes for the same reason. The
+ * question this answers is asked after the fact: "who removed the credential
+ * for WABA X, and when?" must still have an answer once both the credential row
+ * and the account are gone, so `whatsapp_account_id` is a bare uuid and
+ * `waba_id` carries the identity it can no longer be resolved to.
+ *
+ * `detail` holds what Meta said — type, scopes, expiry, a refusal's sentence —
+ * and never a secret: the module that writes it never puts the token or the
+ * envelope in it, and a refusal is written once per transition rather than
+ * hourly, so the table reads as a history rather than a log.
+ */
+export const whatsappCredentialEvents = pgTable(
+  'whatsapp_credential_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    whatsappAccountId: uuid('whatsapp_account_id').notNull(),
+    wabaId: text('waba_id').notNull(),
+    /** Plain text, typed in code — the convention `admin_deletions.subject` follows. */
+    event: text('event').$type<CredentialEventKind>().notNull(),
+    keyId: text('key_id'),
+
+    /** Null when a job did it rather than a person. */
+    agentId: uuid('agent_id').references(() => agents.id, { onDelete: 'set null' }),
+    /** Kept beside the id so a departed agent is still named. */
+    agentLabel: text('agent_label'),
+
+    detail: jsonb('detail').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('whatsapp_credential_events_account_idx').on(t.whatsappAccountId, t.createdAt)],
+);
+
+/**
  * A configured inbox: one support mailbox, or one WhatsApp number.
  *
  * `config` holds non-secret settings only (addresses, display names, defaults).
- * Credentials stay in environment variables and are referenced by name, so a
- * database dump never contains a usable access token.
+ * Credentials stay out of it: they live in environment variables referenced by
+ * name, or — for a WhatsApp token minted by Embedded Signup — sealed in
+ * `whatsapp_account_credentials` under a key the database never sees. Either
+ * way a database dump contains no usable access token.
  */
 export const channels = pgTable(
   'channels',

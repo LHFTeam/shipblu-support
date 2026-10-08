@@ -210,6 +210,10 @@ const JOB_PAYLOADS = {
      */
     keys: z.string().optional(),
   }),
+  rotate_whatsapp_credentials: z.strictObject({
+    /** Open every envelope it would move, and write nothing. */
+    dryRun: z.boolean().optional(),
+  }),
 } satisfies Partial<Record<JobType, z.ZodType>>;
 
 type CheckedJob = keyof typeof JOB_PAYLOADS;

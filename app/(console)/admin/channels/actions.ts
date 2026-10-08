@@ -7,6 +7,7 @@ import { requirePermission } from '@/lib/auth/guard';
 import { ok } from '@/lib/http/action-state';
 import { text, uuidField } from '@/lib/http/form-data';
 import { parseTokenEnvVar } from '@/lib/whatsapp/accounts';
+import { removeStoredCredential, storedCredentialEditRefusal } from '@/lib/whatsapp/credentials';
 import { GONE, refresh, type SettingsState, type AdminState } from '../settings-shared';
 import { revalidatePath } from 'next/cache';
 import { canonicalUuid } from '@/lib/http/uuid';
@@ -24,6 +25,12 @@ import { resolveFaqFolders } from '@/lib/widget/config';
  * it: an admin free to type any variable name would be choosing which of the
  * process's secrets gets posted to Meta as a bearer token, and would never see
  * the value to know it had happened.
+ *
+ * An account connected through Meta's Embedded Signup has a sealed credential
+ * instead, and this never writes one. It refuses the two edits that would break
+ * it — naming a variable beside it, and moving it to another WABA id — with the
+ * check and the update in one transaction, so a credential stored in between
+ * cannot be overwritten by a form rendered before it existed.
  */
 export async function saveWhatsAppAccount(
   _state: SettingsState,
@@ -70,15 +77,31 @@ export async function saveWhatsAppAccount(
     updatedAt: new Date(),
   };
 
-  const saved = id
-    ? await db
-        .update(whatsappAccounts)
-        .set(values)
-        .where(eq(whatsappAccounts.id, id))
-        .returning({ id: whatsappAccounts.id })
-    : await db.insert(whatsappAccounts).values(values).returning({ id: whatsappAccounts.id });
+  const outcome: { refusal: string } | { rows: { id: string }[] } = id
+    ? await db.transaction(async (tx) => {
+        const refusal = await storedCredentialEditRefusal(tx, id, {
+          wabaId,
+          tokenEnvVar: token.value,
+        });
+        if (refusal) return { refusal };
 
-  const savedId = saved[0]?.id;
+        const rows = await tx
+          .update(whatsappAccounts)
+          .set(values)
+          .where(eq(whatsappAccounts.id, id))
+          .returning({ id: whatsappAccounts.id });
+        return { rows };
+      })
+    : {
+        rows: await db
+          .insert(whatsappAccounts)
+          .values(values)
+          .returning({ id: whatsappAccounts.id }),
+      };
+
+  if ('refusal' in outcome) return { error: outcome.refusal };
+
+  const savedId = outcome.rows[0]?.id;
   if (!savedId) return { error: 'That business account no longer exists.' };
 
   // Exactly one default, enforced here rather than by a partial unique index:
@@ -109,7 +132,7 @@ export async function deleteWhatsAppAccount(
   _state: SettingsState,
   formData: FormData,
 ): Promise<SettingsState> {
-  await requirePermission('admin.channels');
+  const agent = await requirePermission('admin.channels');
 
   const id = uuidField(formData, 'id');
   if (!id) return { error: 'Nothing to delete' };
@@ -135,7 +158,13 @@ export async function deleteWhatsAppAccount(
     };
   }
 
-  await db.delete(whatsappAccounts).where(eq(whatsappAccounts.id, id));
+  // A stored credential goes with the account by cascade; removing it first, in
+  // the same transaction, is what records who disconnected it — the audit row
+  // outlives both.
+  await db.transaction(async (tx) => {
+    await removeStoredCredential(tx, id, { id: agent.id, label: agent.name });
+    await tx.delete(whatsappAccounts).where(eq(whatsappAccounts.id, id));
+  });
 
   refresh('/admin/channels');
   return ok();

@@ -8,6 +8,7 @@ import { subjectGone } from './subject-gone';
 import { credentialsForPhoneNumberId } from '@/lib/whatsapp/accounts';
 import { sendingNumberFor } from '@/lib/whatsapp/conversation';
 import { WhatsAppApiError, sendTemplate, sendText } from '@/lib/whatsapp/client';
+import { explainAuthError } from '@/lib/whatsapp/errors';
 import type { WhatsAppTemplateComponent } from '@/lib/whatsapp/templates';
 import { windowState } from '@/lib/whatsapp/window';
 import { errorMessage } from '@/lib/errors';
@@ -136,7 +137,19 @@ export async function sendWhatsApp(job: ClaimedJob): Promise<void> {
       `${messageId} sent as ${result.wamid ?? 'an unknown wamid: Meta accepted it and its answer was lost'}`,
     );
   } catch (error) {
-    await markFailed(messageId, row.message.meta, errorMessage(error));
+    // An expired credential is explained on the message, naming the one this
+    // send used — a stored credential is fixed by reconnecting the number, a
+    // named variable on Render, and the agent reading this needs to know which.
+    await markFailed(
+      messageId,
+      row.message.meta,
+      error instanceof WhatsAppApiError
+        ? explainAuthError(error.code, error.message, {
+            source: credentials.source,
+            tokenEnvVar: credentials.tokenEnvVar,
+          })
+        : errorMessage(error),
+    );
 
     // Only retry what a retry could fix. A rejected template or an invalid
     // number fails identically every time, and retrying it four more times just

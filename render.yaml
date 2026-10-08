@@ -206,6 +206,15 @@ projects:
             #   KB_NOTICE_TONE           info | warning | danger
             #   TYPESAFE_MODEL           pins a shadow run to one Jev version
             #                            instead of the moving `jev-latest`
+            #   WHATSAPP_CREDENTIAL_KEY  seals the WhatsApp business tokens
+            #                            Embedded Signup stores in the database
+            #                            (`openssl rand -base64 32`). Its own
+            #                            value per environment, never derived
+            #                            from APP_SECRET, and never named
+            #                            WHATSAPP_TOKEN_* — see lib/env.ts.
+            #   WHATSAPP_CREDENTIAL_KEY_PREVIOUS
+            #                            the key being retired, set only while
+            #                            rotate_whatsapp_credentials runs
             #
             # APP_SECRET must be identical across every service in an
             # environment — the worker signs a reply token when sending and the
@@ -527,6 +536,14 @@ projects:
             #   WHATSAPP_VERIFY_TOKEN
             #   META_SYSTEM_ADMIN_TOKEN
             #   FB_PAGE_ACCESS_TOKEN_ALI
+            #
+            # Read by the code, set nowhere today, and belonging here when set:
+            #
+            #   WHATSAPP_CREDENTIAL_KEY    staging's own key, not production's —
+            #                              an envelope sealed in one environment
+            #                              must not open in the other
+            #   WHATSAPP_CREDENTIAL_KEY_PREVIOUS
+            #                              only during a rotation
             envVars: []
 
         services:

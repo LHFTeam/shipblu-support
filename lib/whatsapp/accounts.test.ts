@@ -1,6 +1,24 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { setTestEnv, withTestEnv } from '@/lib/testing/env';
-import { parseTokenEnvVar, resolveAccount, tokenForAccount } from './accounts';
+import {
+  parseTokenEnvVar,
+  resolveAccount,
+  resolveCredentialSource,
+  tokenForAccount,
+} from './accounts';
+import { CredentialKeyError } from './credential-envelope';
+
+/** The stored credential, per account id — what `storedTokenFor` would open. */
+const stored = vi.hoisted(() => new Map<string, string | Error>());
+
+vi.mock('./credentials', () => ({
+  storedCredentialExists: () => null,
+  storedTokenFor: async (account: { id: string }) => {
+    const value = stored.get(account.id);
+    if (value instanceof Error) throw value;
+    return value ?? null;
+  },
+}));
 
 /**
  * The two decisions in this module that have no database in them, and both of
@@ -16,9 +34,15 @@ import { parseTokenEnvVar, resolveAccount, tokenForAccount } from './accounts';
  */
 
 const ACCOUNTS = {
-  egypt: { id: 'a', isDefault: true, isActive: true, tokenEnvVar: null },
-  saudi: { id: 'b', isDefault: false, isActive: true, tokenEnvVar: 'WHATSAPP_TOKEN_SAUDI' },
-  retired: { id: 'c', isDefault: false, isActive: false, tokenEnvVar: null },
+  egypt: { id: 'a', wabaId: '111', isDefault: true, isActive: true, tokenEnvVar: null },
+  saudi: {
+    id: 'b',
+    wabaId: '222',
+    isDefault: false,
+    isActive: true,
+    tokenEnvVar: 'WHATSAPP_TOKEN_SAUDI',
+  },
+  retired: { id: 'c', wabaId: '333', isDefault: false, isActive: false, tokenEnvVar: null },
 };
 
 describe('parseTokenEnvVar', () => {
@@ -103,16 +127,54 @@ describe('resolveAccount', () => {
   });
 });
 
+describe('resolveCredentialSource', () => {
+  it('prefers a stored credential, then a named variable, then the shared token', () => {
+    expect(resolveCredentialSource(ACCOUNTS.saudi, true)).toBe('stored');
+    expect(resolveCredentialSource(ACCOUNTS.egypt, true)).toBe('stored');
+    expect(resolveCredentialSource(ACCOUNTS.saudi, false)).toBe('variable');
+    expect(resolveCredentialSource(ACCOUNTS.egypt, false)).toBe('shared');
+    expect(resolveCredentialSource(null, false)).toBe('shared');
+  });
+});
+
 describe('tokenForAccount', () => {
   withTestEnv({ META_PAGE_ACCESS_TOKEN: 'shared-token', WHATSAPP_TOKEN_SAUDI: 'saudi-token' });
+  beforeEach(() => stored.clear());
 
-  it('uses the shared token when the account names none', () => {
-    expect(tokenForAccount(ACCOUNTS.egypt)).toBe('shared-token');
-    expect(tokenForAccount(null)).toBe('shared-token');
+  it('uses the shared token when the account names none', async () => {
+    expect(await tokenForAccount(ACCOUNTS.egypt)).toEqual({
+      token: 'shared-token',
+      source: 'shared',
+    });
+    expect(await tokenForAccount(null)).toEqual({ token: 'shared-token', source: 'shared' });
   });
 
-  it('reads the variable the account names', () => {
-    expect(tokenForAccount(ACCOUNTS.saudi)).toBe('saudi-token');
+  it('reads the variable the account names', async () => {
+    expect(await tokenForAccount(ACCOUNTS.saudi)).toEqual({
+      token: 'saudi-token',
+      source: 'variable',
+    });
+  });
+
+  it('sends with a stored credential ahead of a variable on the same row', async () => {
+    stored.set('b', 'stored-saudi-token');
+    expect(await tokenForAccount(ACCOUNTS.saudi)).toEqual({
+      token: 'stored-saudi-token',
+      source: 'stored',
+    });
+  });
+
+  /**
+   * The failure this order exists to prevent. A stored credential that cannot
+   * be opened — the key is unset, rotated away, or the envelope was moved —
+   * must stop the send, not quietly authenticate it as the shared token.
+   */
+  it('throws when a stored credential cannot be opened, rather than falling through', async () => {
+    stored.set(
+      'a',
+      new CredentialKeyError('unset', 'WHATSAPP_CREDENTIAL_KEY is not set, so no stored …'),
+    );
+    await expect(tokenForAccount(ACCOUNTS.egypt)).rejects.toThrow(CredentialKeyError);
   });
 
   /**
@@ -120,13 +182,15 @@ describe('tokenForAccount', () => {
    * row can be saved before the value is added to the environment group, and
    * that gap is the ordinary way this is set up.
    */
-  it('names the missing variable when it is not set', () => {
+  it('names the missing variable when it is not set', async () => {
     setTestEnv({ WHATSAPP_TOKEN_SAUDI: undefined });
-    expect(() => tokenForAccount(ACCOUNTS.saudi)).toThrow(/WHATSAPP_TOKEN_SAUDI/);
+    await expect(tokenForAccount(ACCOUNTS.saudi)).rejects.toThrow(/WHATSAPP_TOKEN_SAUDI/);
   });
 
   /** The row could predate the rule, or have been edited straight in the database. */
-  it('refuses a variable a save would never have accepted', () => {
-    expect(() => tokenForAccount({ tokenEnvVar: 'DATABASE_URL' })).toThrow(/not a usable token/);
+  it('refuses a variable a save would never have accepted', async () => {
+    await expect(
+      tokenForAccount({ id: 'x', wabaId: '444', tokenEnvVar: 'DATABASE_URL' }),
+    ).rejects.toThrow(/not a usable token/);
   });
 });
