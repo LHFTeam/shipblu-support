@@ -43,11 +43,18 @@ export async function enqueuePriorityClassification(message: {
 
   // Keyed on the message, which is once-ever work: one answer per message is
   // what `ai_priority_runs` holds, so a spent key is the right answer to a
-  // webhook retry delivering the same message twice. Ahead of bulk work and
-  // behind sends — the first-response targets this moves are minutes long.
+  // webhook retry delivering the same message twice.
+  //
+  // 30: behind every send a customer is waiting on — webhooks and agent replies
+  // at 10, profiles at 20, and the out-of-hours acknowledgement and automated
+  // replies at 20 (`deliverAutomatedReply`), which this message's own
+  // `afterInboundMessage` queues a moment after this. A slow provider holds a
+  // worker slot for up to its timeout, and that must not be the reason an
+  // acknowledgement goes out late. Ahead of notification email (40) and bulk
+  // work, because the first-response targets it moves are minutes long.
   await enqueue(
     'classify_priority',
     { messageId: message.messageId },
-    { priority: 15, dedupeKey: `classify_priority:${message.messageId}` },
+    { priority: 30, dedupeKey: `classify_priority:${message.messageId}` },
   );
 }

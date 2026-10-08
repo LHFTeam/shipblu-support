@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, ne } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   aiPriorityRuns,
@@ -23,7 +23,7 @@ import {
   typesafeConfigured,
   typesafeModel,
 } from '@/lib/typesafe/client';
-import { CONFIDENT_OUTCOMES, decide, type PriorityOutcome } from './decide';
+import { DEFAULT_PRIORITY, decide, type PriorityOutcome } from './decide';
 import { PRIORITY_QUESTION, priorityRequest } from './request';
 import { priorityAiMinProbability, priorityAiMode, type PriorityAiMode } from './settings';
 
@@ -104,12 +104,11 @@ export async function classifyMessagePriority(
   if (existing) return { status: 'already_classified' };
 
   const withContext = true;
+  // Also what says whether this is the customer's opening message — the only
+  // one whose answer may lower a ticket (`decide.ts`, rule 3).
+  const earlier = await earlierMessages(row.conversationId, row.createdAt);
   const request = priorityRequest(
-    {
-      channel: row.channel,
-      bodyText: row.bodyText,
-      earlier: await earlierMessages(row.conversationId, row.createdAt),
-    },
+    { channel: row.channel, bodyText: row.bodyText, earlier },
     typesafeModel(),
     withContext,
   );
@@ -170,16 +169,27 @@ export async function classifyMessagePriority(
       .limit(1);
     if (!ticket) return null;
 
-    const facts = await priorityFacts(tx, row.conversationId, ticket.formId, messageId);
+    const facts = await priorityFacts(tx, row.conversationId, ticket.formId, mode);
+
+    // Shadow mode writes nothing, so left alone every later message on a ticket
+    // would be weighed against `medium` and never against the level shadow mode
+    // itself said it would have set — measuring a classifier that cannot ratchet,
+    // which is not the one `apply` turns on. So it weighs each answer against
+    // its own last `would_apply`, as though that had been written. Only while
+    // the column still holds the default: anything else is somebody's choice,
+    // and the real value has to win the ownership check.
+    const simulated =
+      mode === 'shadow' && ticket.priority === DEFAULT_PRIORITY ? facts.lastWouldApply : null;
+
     const decision = decide({
       mode,
       predicted,
       probability: prediction.probability,
       minProbability: priorityAiMinProbability(),
-      current: ticket.priority,
-      lastApplied: facts.lastApplied,
+      current: simulated ?? ticket.priority,
+      lastApplied: simulated ?? facts.lastApplied,
       ownedElsewhere: facts.ownedElsewhere,
-      firstConfident: facts.firstConfident,
+      firstMessage: earlier.length === 0,
     });
 
     // The run row first. Two deliveries of one job racing past the check above
@@ -255,9 +265,9 @@ type LoadedRow = {
  * The categoriser's own test for "a customer wrote something", so the two
  * questions are asked of the same messages; the bot channel through
  * `isReadOnlyChannel`, since nobody on the team works it and it is nearly all of
- * the volume. An autoresponder is not the customer — the email ingest flags it
- * and keeps its time off the customer's clock — and a spam or deleted ticket is
- * not in anybody's queue.
+ * the volume. Machine mail is not the customer — the email ingest flags it and
+ * keeps an autoresponder's time off the customer's clock — and a spam or
+ * deleted ticket is not in anybody's queue.
  */
 function skipReason(row: LoadedRow): string | null {
   if (!isCategorisableMessage(row.kind, row.direction)) return 'not an inbound reply';
@@ -265,16 +275,20 @@ function skipReason(row: LoadedRow): string | null {
   if (isReadOnlyChannel(row.channel)) return `read-only channel ${row.channel}`;
   if (row.isSpam) return 'spam';
   if (row.deletedAt) return 'deleted';
-  if (isAutoReply(row.meta)) return 'an autoresponder';
+  if (isMachineMail(row.meta)) return 'an automated email';
   return null;
 }
 
-function isAutoReply(meta: unknown): boolean {
-  return (
-    typeof meta === 'object' &&
-    meta !== null &&
-    (meta as Record<string, unknown>).isAutoReply === true
-  );
+/**
+ * An autoresponder, a bounce, or anything else `lib/email/loop-protection.ts`
+ * found a machine's signature on. None of them is the customer saying how
+ * urgent anything is, and a bounce's text — "delivery failed", "permanent
+ * error" — reads as urgent to anything that has not been told what it is.
+ */
+function isMachineMail(meta: unknown): boolean {
+  if (typeof meta !== 'object' || meta === null) return false;
+  const flags = meta as Record<string, unknown>;
+  return flags.isAutoReply === true || flags.isBounce === true || flags.isAutomated === true;
 }
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -289,8 +303,12 @@ async function priorityFacts(
   tx: Tx,
   conversationId: string,
   formId: string | null,
-  messageId: string,
-): Promise<{ ownedElsewhere: boolean; lastApplied: Priority | null; firstConfident: boolean }> {
+  mode: Exclude<PriorityAiMode, 'off'>,
+): Promise<{
+  ownedElsewhere: boolean;
+  lastApplied: Priority | null;
+  lastWouldApply: Priority | null;
+}> {
   const events = await tx
     .select({
       type: conversationEvents.type,
@@ -334,19 +352,23 @@ async function priorityFacts(
     if (form?.defaultPriority) ownedElsewhere = true;
   }
 
-  const [confident] = await tx
-    .select({ id: aiPriorityRuns.id })
-    .from(aiPriorityRuns)
-    .where(
-      and(
-        eq(aiPriorityRuns.conversationId, conversationId),
-        ne(aiPriorityRuns.messageId, messageId),
-        inArray(aiPriorityRuns.outcome, [...CONFIDENT_OUTCOMES]),
-      ),
-    )
-    .limit(1);
+  let lastWouldApply: Priority | null = null;
+  if (mode === 'shadow') {
+    const [shadowed] = await tx
+      .select({ predicted: aiPriorityRuns.predicted })
+      .from(aiPriorityRuns)
+      .where(
+        and(
+          eq(aiPriorityRuns.conversationId, conversationId),
+          eq(aiPriorityRuns.outcome, 'would_apply'),
+        ),
+      )
+      .orderBy(desc(aiPriorityRuns.createdAt))
+      .limit(1);
+    lastWouldApply = shadowed?.predicted ?? null;
+  }
 
-  return { ownedElsewhere, lastApplied, firstConfident: !confident };
+  return { ownedElsewhere, lastApplied, lastWouldApply };
 }
 
 async function recordFailure(

@@ -16,7 +16,7 @@ const BASE: DecisionInput = {
   current: 'medium',
   lastApplied: null,
   ownedElsewhere: false,
-  firstConfident: true,
+  firstMessage: true,
 };
 
 function run(overrides: Partial<DecisionInput>) {
@@ -39,7 +39,7 @@ describe('decide: who owns the priority', () => {
   });
 
   it('reads a priority moved since its own last write as somebody else’s', () => {
-    expect(run({ lastApplied: 'high', current: 'low', firstConfident: false })).toEqual({
+    expect(run({ lastApplied: 'high', current: 'low', firstMessage: false })).toEqual({
       outcome: 'set_by_person',
       to: null,
     });
@@ -64,26 +64,31 @@ describe('decide: the threshold', () => {
   });
 });
 
-describe('decide: up only after the first confident answer', () => {
-  it('lets the first confident answer lower an untouched ticket', () => {
+describe('decide: down only on the first message, up at any time', () => {
+  it('lets the answer to the opening message lower an untouched ticket', () => {
     expect(run({ predicted: 'low' })).toEqual({ outcome: 'applied', to: 'low' });
   });
 
-  it('does not lower a ticket once an earlier answer was confident', () => {
+  it('does not lower a ticket on a later message', () => {
     // "thanks" after the message that made it urgent.
     expect(
-      run({ predicted: 'low', current: 'urgent', lastApplied: 'urgent', firstConfident: false }),
+      run({ predicted: 'low', current: 'urgent', lastApplied: 'urgent', firstMessage: false }),
     ).toEqual({ outcome: 'not_raised', to: null });
   });
 
-  it('does not lower one an earlier answer left at the default either', () => {
-    // The first message was confidently medium; the second is "ok".
-    expect(run({ predicted: 'low', firstConfident: false }).outcome).toBe('not_raised');
+  it('does not lower a later message even when nothing before it was confident', () => {
+    // A legal threat split between urgent and high fell below the threshold;
+    // the "thanks" after it is the most confident answer on the ticket. Rule 3
+    // was once "the first confident answer may lower", and that lowered this.
+    expect(run({ predicted: 'low', probability: 0.92, firstMessage: false })).toEqual({
+      outcome: 'not_raised',
+      to: null,
+    });
   });
 
   it('still raises a ticket it set earlier', () => {
     expect(
-      run({ predicted: 'urgent', current: 'high', lastApplied: 'high', firstConfident: false }),
+      run({ predicted: 'urgent', current: 'high', lastApplied: 'high', firstMessage: false }),
     ).toEqual({ outcome: 'applied', to: 'urgent' });
   });
 

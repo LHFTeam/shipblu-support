@@ -14,6 +14,7 @@ import {
   ticketStatuses,
 } from '@/db/schema';
 import { resetEnvCache } from '@/lib/env';
+import { createTicket } from '@/lib/portal/tickets';
 import { applySlaOnCreate } from '@/lib/sla';
 import { stubFetch } from '@/lib/testing/fetch';
 import { withCleanDatabase } from '@/lib/testing/db';
@@ -250,6 +251,23 @@ describe('classifyMessagePriority: apply', () => {
     expect(result).toMatchObject({ outcome: 'not_raised', predicted: 'low' });
     expect(await priorityOf(id)).toBe('urgent');
   });
+  it('does not lower on a later message though nothing before it was confident', async () => {
+    const id = await ticket();
+    const first = await inbound(id, 'هرفع قضية لو فلوس التحصيل موصلتش', {
+      createdAt: new Date(Date.now() - MINUTE),
+    });
+    answers('urgent', 0.55);
+    expect(await classifyMessagePriority(first, { baseUrl: BASE })).toMatchObject({
+      outcome: 'below_threshold',
+    });
+
+    const second = await inbound(id, 'تمام شكرا');
+    answers('low', 0.92);
+    expect(await classifyMessagePriority(second, { baseUrl: BASE })).toMatchObject({
+      outcome: 'not_raised',
+    });
+    expect(await priorityOf(id)).toBe('medium');
+  });
 });
 
 describe('classifyMessagePriority: somebody else owns the priority', () => {
@@ -299,6 +317,30 @@ describe('classifyMessagePriority: somebody else owns the priority', () => {
     answers('urgent');
 
     expect(await classifyMessagePriority(messageId, { baseUrl: BASE })).toMatchObject({
+      outcome: 'set_by_person',
+    });
+  });
+
+  it('sees the agent-opened event already, when the job runs before the form returns', async () => {
+    const [agent] = await db
+      .insert(agents)
+      .values({ name: 'Mona', email: 'mona@shipblu.test', role: 'agent' })
+      .returning({ id: agents.id });
+    const [contact] = await db
+      .insert(contacts)
+      .values({ name: 'Amira' })
+      .returning({ id: contacts.id });
+
+    const created = await createTicket(contact!.id, {
+      subject: 'COD',
+      body: 'هرفع قضية',
+      openedBy: { agentId: agent!.id, form: 'cod' },
+    });
+    // The event is written in the transaction that created the ticket, so it
+    // is there the moment the queued job can see the message.
+    answers('urgent');
+
+    expect(await classifyMessagePriority(created.messageId, { baseUrl: BASE })).toMatchObject({
       outcome: 'set_by_person',
     });
   });
@@ -364,9 +406,39 @@ describe('classifyMessagePriority: shadow, skips and failures', () => {
 
     expect(await classifyMessagePriority(messageId, { baseUrl: BASE })).toEqual({
       status: 'skipped',
-      reason: 'an autoresponder',
+      reason: 'an automated email',
     });
     expect(mock).not.toHaveBeenCalled();
+  });
+
+  it('skips a bounce on an existing ticket, whose text reads as urgent', async () => {
+    const id = await ticket({ channel: 'email' });
+    const messageId = await inbound(id, 'Delivery failed: permanent error', {
+      meta: { isBounce: true, isAutomated: true },
+    });
+    const mock = answers('urgent');
+
+    expect(await classifyMessagePriority(messageId, { baseUrl: BASE })).toMatchObject({
+      status: 'skipped',
+    });
+    expect(mock).not.toHaveBeenCalled();
+  });
+
+  it('weighs shadow answers against its own earlier would-apply, as apply would', async () => {
+    vi.stubEnv('PRIORITY_AI', 'shadow');
+    const id = await ticket();
+    const first = await inbound(id, 'هرفع قضية', { createdAt: new Date(Date.now() - MINUTE) });
+    answers('urgent');
+    await classifyMessagePriority(first, { baseUrl: BASE });
+
+    const second = await inbound(id, 'الشحنة متأخرة');
+    answers('high');
+
+    // Under apply the ticket would be urgent by now, so high is not a raise.
+    expect(await classifyMessagePriority(second, { baseUrl: BASE })).toMatchObject({
+      outcome: 'not_raised',
+    });
+    expect(await priorityOf(id)).toBe('medium');
   });
 
   it('answers gone for a message that does not exist', async () => {

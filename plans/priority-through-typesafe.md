@@ -41,11 +41,20 @@ tests.
 - **A threshold, on the winner's own share.** `PRIORITY_AI_MIN_PROBABILITY`,
   default 0.6. It is a guess: there was nothing to calibrate it against, which is
   the next point.
-- **Up only, after the first confident answer.** The first confident answer may
-  set any level, `low` included. Later messages may raise it and never lower it —
-  the customer who threatened legal action and then wrote "ok" is still the
-  customer who threatened legal action. Lowering is a judgement about the whole
-  ticket, and a person makes it.
+- **Down only on the opening message; up at any time.** The answer to the
+  customer's first message may set any level, `low` included. Later messages may
+  raise it and never lower it — the customer who threatened legal action and
+  then wrote "ok" is still the customer who threatened legal action. The first
+  draft said "the first _confident_ answer", and review found what that does: a
+  real complaint splits its probability between urgent and high and falls below
+  the threshold, while "thanks" is the most confident answer a four-way
+  classifier gives, so the first confident answer was most often a `low` for
+  content-free text. Lowering is a judgement about the whole ticket, and only
+  the opening message is the whole ticket.
+- **Machine mail is skipped.** An autoresponder, a bounce or anything
+  `lib/email/loop-protection.ts` flags as automated is not the customer — and a
+  bounce's "delivery failed: permanent error" reads as urgent to anything not
+  told what it is.
 - **`low` is the answer for a message too vague to judge.** The categoriser
   offers `meta.unclassified` for the same reason: most of this archive is a
   22-to-39 character fragment, and a model with no way out pushes "؟" upwards.
@@ -60,16 +69,37 @@ labelled tickets when this shipped, so these rows are the first: an `applied`
 row followed by an agent's `priority_changed` on the same ticket is a
 disagreement, and the threshold is tuned from those.
 
+Shadow mode weighs each answer against its own last `would_apply` as though it
+had been written. Otherwise every later message on a shadowed ticket is compared
+with `medium`, and the shadow measures a classifier that cannot ratchet — not
+the one `apply` turns on.
+
 ## The SLA follows the priority — every writer's, not only this one's
 
 Due dates were computed once, in `applySlaOnCreate`, and nothing recomputed them
 when priority changed later. An agent raising a ticket to urgent changed the
-badge and kept medium's deadline. The classifier runs as a job, after the SLA is
-applied, so without a fix its answer would have done the same. `onPriorityChanged`
-in `lib/sla/index.ts` re-times the clocks still owed, sharing the recompute
-`onGroupChanged` already had, and the console, the `set_priority` automation and
-the classifier all call it. A raise can put a due date in the past; that is the
-honest answer, and the breach sweep reports it.
+badge and kept medium's deadline, and the classifier's answer would have done
+the same. `onPriorityChanged` in `lib/sla/index.ts` re-times the clocks still
+owed, sharing the recompute `onGroupChanged` already had, and the console, the
+`set_priority` automation and the classifier all call it. A raise can put a due
+date in the past; that is the honest answer, and the breach sweep reports it.
+
+The job is queued in `afterMessageStored`, which every ingest path runs
+_before_ `afterInboundMessage` applies the SLA — so on a new ticket the
+classifier can answer before, during or after `applySlaOnCreate`. Before: that
+function reads the raised priority. After: `onPriorityChanged` re-times. During
+is the case that needed code: `applySlaOnCreate` and `onCustomerReply` now write
+only if the priority still holds the value they computed from, and recompute
+when it does not, where an unconditional write stored the old targets under the
+new badge for good.
+
+Review also found two faults in the shared recompute that predate this change
+and that every priority change would now have reached. It added the ticket's
+lifetime of paused minutes to the next-response clock, which is anchored at the
+customer's latest message and owes nothing for a pause that ended before it —
+raising a ticket parked for two days last week pushed its reply deadline back two
+days. And it credited a pause still open, which the resume credits again in
+full. Both are fixed, with tests that fail on the old code.
 
 ## Rollout
 

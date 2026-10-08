@@ -21,12 +21,16 @@ import type { PriorityAiMode } from './settings';
  * 2. **Below the threshold, nothing.** The probability is the winner's own
  *    share, the number a threshold sweep over `ai_priority_runs` is drawn from.
  *
- * 3. **Up only, after the first confident answer.** The first confident answer
- *    on a ticket may set any level, including `low`. After that a later message
- *    may raise the priority and never lower it: a ticket that turned urgent on
- *    its third message does not go back to medium because the fourth said
- *    "thanks". Lowering is a judgement about the whole ticket, and only a person
- *    has read the whole ticket.
+ * 3. **Down only on the ticket's first message; up at any time.** The answer to
+ *    the customer's opening message may set any level, `low` included. Every
+ *    later message may raise the priority and never lower it. Not "the first
+ *    *confident* answer", which is what this said first: a legal threat that
+ *    splits its probability between urgent and high is below the threshold, and
+ *    the "thanks" after it is the most confident answer a four-way classifier
+ *    ever gives — so the first confident answer on a ticket was most often a
+ *    `low` for content-free text, lowering exactly the tickets this exists to
+ *    raise. Lowering is a judgement about the whole ticket, and only the opening
+ *    message is the whole ticket.
  */
 
 export type PriorityOutcome =
@@ -36,7 +40,7 @@ export type PriorityOutcome =
   | 'would_apply'
   /** Confident, and already the ticket's priority. */
   | 'unchanged'
-  /** Confident, and lower than the priority an earlier answer set. */
+  /** Confident, and lower than the ticket's priority on a later message. */
   | 'not_raised'
   /** Not confident enough to act on. */
   | 'below_threshold'
@@ -44,18 +48,6 @@ export type PriorityOutcome =
   | 'set_by_person'
   /** No answer: the provider refused permanently. */
   | 'failed';
-
-/**
- * The outcomes that count as a confident answer on the ticket, for rule 3.
- * `set_by_person` is not one: it says nothing about what the classifier thought
- * of the level, only that it was not allowed to act on it.
- */
-export const CONFIDENT_OUTCOMES = [
-  'applied',
-  'would_apply',
-  'unchanged',
-  'not_raised',
-] as const satisfies readonly PriorityOutcome[];
 
 /** The value of the column a ticket is created with (`conversations.priority`). */
 export const DEFAULT_PRIORITY: Priority = 'medium';
@@ -72,8 +64,8 @@ export type DecisionInput = {
   lastApplied: Priority | null;
   /** A person, a rule, a form or an agent-opened ticket chose the priority. */
   ownedElsewhere: boolean;
-  /** No earlier message on this ticket has had a confident answer. */
-  firstConfident: boolean;
+  /** This is the customer's first message on the ticket. */
+  firstMessage: boolean;
 };
 
 export type Decision = {
@@ -82,7 +74,7 @@ export type Decision = {
   to: Priority | null;
 };
 
-export function rankOf(level: Priority): number {
+function rankOf(level: Priority): number {
   return PRIORITIES.indexOf(level);
 }
 
@@ -101,7 +93,7 @@ export function decide(input: DecisionInput): Decision {
   if (input.predicted === input.current) return { outcome: 'unchanged', to: null };
 
   const lowering = rankOf(input.predicted) < rankOf(input.current);
-  if (lowering && !input.firstConfident) return { outcome: 'not_raised', to: null };
+  if (lowering && !input.firstMessage) return { outcome: 'not_raised', to: null };
 
   return input.mode === 'apply'
     ? { outcome: 'applied', to: input.predicted }

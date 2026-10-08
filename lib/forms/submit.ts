@@ -273,20 +273,16 @@ export async function submitForm(input: {
     priority: priorityFrom(resolved.system) ?? form.defaultPriority,
     type: form.defaultType,
     tags: form.defaultTags,
-  });
-
-  if (input.requester.kind === 'agent') {
     // Recorded because `ticket.create` is justified as a reporting-integrity
     // permission — "every ticket an agent opens counts in first-response time,
     // in volume per channel". Nothing distinguished those tickets, so the
-    // integrity the permission protects was unmeasurable.
-    await db.insert(conversationEvents).values({
-      conversationId: created.conversationId,
-      type: 'opened_by_agent',
-      actorAgentId: input.requester.agentId,
-      data: { form: form.slug },
-    });
-  }
+    // integrity the permission protects was unmeasurable. Written by
+    // `createTicket`, in its transaction, for the reason `NewTicket` gives.
+    openedBy:
+      input.requester.kind === 'agent'
+        ? { agentId: input.requester.agentId, form: form.slug }
+        : undefined,
+  });
 
   if (requester.unverifiedEmail) {
     await db.insert(conversationEvents).values({

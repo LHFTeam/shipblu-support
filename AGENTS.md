@@ -680,13 +680,13 @@ an evidence grade, and one ticket in the archive had a priority set by hand.
 What it may not do is overrule anybody: `lib/priority-ai/decide.ts` is the only
 place that decides whether an answer may be written, and its rules are tests. A
 priority set by a person, a rule, a form default or an agent opening the ticket
-is never touched; after the first confident answer on a ticket it only ever
-raises; and every answer, applied or not, is a row in `ai_priority_runs` with
-its full distribution, because those rows are the only labels priority has. A
-new writer of `conversations.priority` calls `onPriorityChanged` after its write
-commits, as the console, the `set_priority` automation and the classifier do —
-the policies price their targets per priority. See
-`plans/priority-through-typesafe.md`.
+is never touched; only the answer to the customer's opening message may lower a
+ticket, and later ones only raise; and every answer, applied or not, is a row in
+`ai_priority_runs` with its full distribution, because those rows are the only
+labels priority has. A new writer of `conversations.priority` calls
+`onPriorityChanged` after its write commits, as the console, the `set_priority`
+automation and the classifier do — the policies price their targets per
+priority. See `plans/priority-through-typesafe.md`.
 
 **Knowledge base article formatting.** `lib/kb/format.ts` is the standard, and
 it is code rather than prose because it is enforced: `normaliseArticleHtml`
