@@ -10,7 +10,8 @@ const handler = vi.hoisted(() => vi.fn<(job: ClaimedJob) => Promise<void>>());
 vi.mock('@/lib/queue', () => queue);
 vi.mock('./handlers', () => ({ resolveHandler: () => handler }));
 
-const { executeJob } = await import('./execute');
+const { executeJob, RECORD_RETRY_MS } = await import('./execute');
+const RETRYING = RECORD_RETRY_MS.reduce((sum, ms) => sum + ms, 0);
 
 function job(): ClaimedJob {
   return {
@@ -43,7 +44,10 @@ beforeEach(() => {
   vi.spyOn(console, 'warn').mockImplementation((...args) => logged.warn.push(args));
 });
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 describe('executeJob', () => {
   it('records a success', async () => {
@@ -65,20 +69,40 @@ describe('executeJob', () => {
 
   // The duplicate send: a success that could not be written used to be failed,
   // and a failed job is retried.
-  it('never fails a job that succeeded because its success could not be written', async () => {
+  it('records a success once the database takes the write, and never fails it', async () => {
+    vi.useFakeTimers();
+    queue.completeJob.mockRejectedValueOnce(new Error('connect ECONNREFUSED'));
+
+    const run = executeJob(job());
+    await vi.advanceTimersByTimeAsync(RECORD_RETRY_MS[0]!);
+    await run;
+
+    expect(queue.completeJob).toHaveBeenCalledTimes(2);
+    expect(queue.failJob).not.toHaveBeenCalled();
+    expect(logged.error).toEqual([]);
+  });
+
+  it('gives up on the write after about half a minute, logs it, and still never fails the job', async () => {
+    vi.useFakeTimers();
     queue.completeJob.mockRejectedValue(new Error('connect ECONNREFUSED'));
 
-    await expect(executeJob(job())).resolves.toBeUndefined();
+    const run = executeJob(job());
+    await vi.advanceTimersByTimeAsync(RETRYING);
+    await expect(run).resolves.toBeUndefined();
 
+    expect(queue.completeJob).toHaveBeenCalledTimes(RECORD_RETRY_MS.length + 1);
     expect(queue.failJob).not.toHaveBeenCalled();
     expect(String(logged.error[0]?.[0])).toMatch(/succeeded but the outcome was not recorded/);
   });
 
   it('resolves when the failure cannot be written either', async () => {
+    vi.useFakeTimers();
     handler.mockRejectedValue(new Error('boom'));
     queue.failJob.mockRejectedValue(new Error('connect ECONNREFUSED'));
 
-    await expect(executeJob(job())).resolves.toBeUndefined();
+    const run = executeJob(job());
+    await vi.advanceTimersByTimeAsync(RETRYING);
+    await expect(run).resolves.toBeUndefined();
     expect(String(logged.error[0]?.[0])).toMatch(/failed but the outcome was not recorded/);
   });
 

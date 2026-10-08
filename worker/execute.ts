@@ -13,10 +13,13 @@ const log = logger('worker');
  * used to share one `catch`, so a `completeJob` that could not reach the
  * database sent a job that had *succeeded* to `failJob` — and back into the
  * queue ten seconds later, which for a send is the customer's message going out
- * twice. A success that cannot be recorded is now logged and left alone: the
- * worker stops refreshing its lock once it leaves the pool, so the stalled sweep
- * hands it back within `STALLED_AFTER_MS` if the row really is still ours, which
- * is the queue's ordinary at-least-once promise and no worse.
+ * twice. Now the outcome's write is retried on its own, for about half a
+ * minute, while the job still holds its slot and the pool still refreshes its
+ * lock — so a database that blinked records the job once. Past that it is
+ * logged and left: the lock goes stale, a sweep returns the row five to ten
+ * minutes later, and the job runs again. That is the queue's ordinary
+ * at-least-once promise, which handlers are written to; what it no longer takes
+ * is one dropped write.
  *
  * The two log lines a run ends in are word for word what they were, because
  * Render's log search quotes them.
@@ -33,13 +36,14 @@ export async function executeJob(job: ClaimedJob): Promise<void> {
 
   try {
     if (failure) {
-      const recorded = await failJob(job, failure.error);
-      log.error(`${job.type} ${job.id} failed (attempt ${job.attempts})`, failure.error);
+      const { error } = failure;
+      const recorded = await persistently(() => failJob(job, error));
+      log.error(`${job.type} ${job.id} failed (attempt ${job.attempts})`, error);
       if (!recorded) lostHold(job);
       return;
     }
 
-    const recorded = await completeJob(job);
+    const recorded = await persistently(() => completeJob(job));
     log.info(`${job.type} ${job.id} ok in ${Date.now() - started}ms`);
     if (!recorded) lostHold(job);
   } catch (error) {
@@ -48,6 +52,26 @@ export async function executeJob(job: ClaimedJob): Promise<void> {
       error,
     );
   }
+}
+
+/** Waits between tries of the outcome's write: about half a minute in all. */
+export const RECORD_RETRY_MS = [1_000, 5_000, 25_000];
+
+/**
+ * The write, tried again after each wait in `RECORD_RETRY_MS` if it throws.
+ * Both writes are guarded by the attempt that holds the row, so a try that
+ * landed but whose answer was lost finds the row done and answers `false` —
+ * which reads as lost ownership, the honest reading of a row already written.
+ */
+async function persistently<T>(write: () => Promise<T>): Promise<T> {
+  for (const wait of RECORD_RETRY_MS) {
+    try {
+      return await write();
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, wait));
+    }
+  }
+  return write();
 }
 
 /**

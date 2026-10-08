@@ -4964,11 +4964,21 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
       `HEARTBEAT_EVERY_MS` (`touchJobs`), on its own timer, because the loop's
       error backoff can outlast the window.
     - **A late finisher overwrote whoever held the job by then, and a success
-      that could not be recorded was retried.** `completeJob` and `failJob`
-      now match only the attempt that holds the row (`locked_by` _and_
-      `attempts`, since the same process can claim a reclaimed job again), and
-      `worker/execute.ts` no longer sends a job whose `completeJob` threw to
-      `failJob` — which put a delivered send back in the queue.
+      that could not be recorded was retried in ten seconds.** `completeJob`
+      and `failJob` now match only the attempt that holds the row (`locked_by`
+      _and_ `attempts`, since the same process can claim a reclaimed job
+      again), and `completeJob` also takes the same attempt reclaimed but not
+      yet claimed again. `worker/execute.ts` no longer sends a job whose
+      `completeJob` threw to `failJob`; it retries the write for about half a
+      minute while the job still holds its slot and its lock. That narrows the
+      duplicate rather than ending it: if the database cannot take the write
+      for that long, the row comes back from the sweep five to ten minutes
+      later and runs again.
+    - **A pool's own sweep could hand back a job the pool was still running**,
+      if its heartbeat failed for the whole window. The sweep now skips the
+      sweeping worker's running jobs, and the pool tracks each run rather than
+      each job id, so a job claimed again beside its first run is counted,
+      refreshed and drained as the separate run it is.
 
     A request with no deadline now holds its own slot for good, since the
     heartbeat keeps the sweep off it: per-request deadlines are what end a hung

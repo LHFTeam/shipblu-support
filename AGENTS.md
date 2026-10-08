@@ -367,7 +367,9 @@ every outbound call in a job path carries a deadline (`lib/http/deadline.ts`).
 And a job still runs at least once, not exactly once: a worker stopped
 mid-job — a deploy's shutdown window is short — leaves its job to be run again,
 so a handler must tolerate a second run. `completeJob` and `failJob` write only
-over the attempt that holds the row (§6.85).
+over the attempt that holds the row — `completeJob` also over that attempt
+reclaimed and not yet claimed again, since a run that finished needs no second
+one (§6.85).
 
 `npm run job -- <type>` takes trailing `key=value` pairs as the payload
 (`npm run job -- backfill_meta_profiles force=true limit=50`), so a handler's

@@ -333,12 +333,12 @@ describe('PostmarkEmailProvider.send', () => {
 
 /**
  * Every Postmark send runs in a job, and it had no deadline of its own: `fetch`
- * gives up only after five minutes without a response, and every queued job
- * waited behind it, because the worker awaits a batch before it claims the
- * next. A send's deadline has two edges — below about a minute, an email
- * Postmark was still accepting is given up on and sent again; past the
- * stalled-job window, a deploy's new worker can reclaim the job mid-send and
- * run it twice.
+ * gives up only after five minutes without a response, and nothing else frees
+ * the worker slot it holds (when the worker still ran in batches, every queued
+ * job waited behind it). A send's deadline has two edges — below about a
+ * minute, an email Postmark was still accepting is given up on and sent again;
+ * past the stalled-job window, a send whose lock stopped being refreshed — its
+ * worker's heartbeat failing that whole time — is reclaimed and run twice.
  */
 describe('PostmarkEmailProvider.send deadline', () => {
   const email = {

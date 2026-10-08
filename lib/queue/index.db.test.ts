@@ -181,6 +181,19 @@ describe('reclaimStalledJobs', () => {
   });
 });
 
+describe('reclaimStalledJobs, from a worker still running some of them', () => {
+  it('leaves the jobs it says it is running, whatever their locks say', async () => {
+    const mine = await enqueued('import_freshdesk_kb', {}, { priority: 1 });
+    const orphan = await enqueued('cleanup', {}, { priority: 2 });
+    await claimJobs(2, 'worker-a');
+    await db.update(jobs).set({ lockedAt: new Date(Date.now() - STALLED_AFTER_MS - 1_000) });
+
+    expect(await reclaimStalledJobs(STALLED_AFTER_MS, [mine])).toBe(1);
+    expect((await row(mine)).status).toBe('processing');
+    expect((await row(orphan)).status).toBe('pending');
+  });
+});
+
 describe('touchJobs', () => {
   it('refreshes only the running jobs this worker holds, and says which', async () => {
     const mine = await enqueued('cleanup', {}, { priority: 1 });

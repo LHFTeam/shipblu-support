@@ -24,7 +24,7 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
-function job(id: string, priority = 100): ClaimedJob {
+function job(id: string, priority = 100, attempts = 1): ClaimedJob {
   return {
     id,
     type: 'send_email',
@@ -32,7 +32,7 @@ function job(id: string, priority = 100): ClaimedJob {
     status: 'processing',
     priority,
     runAt: new Date(),
-    attempts: 1,
+    attempts,
     maxAttempts: 5,
     lastError: null,
     dedupeKey: null,
@@ -70,7 +70,7 @@ function harness(overrides: Partial<Omit<PoolDeps, keyof Mocks | 'signal'> & Moc
     claim: vi.fn<PoolDeps['claim']>((limit) => Promise.resolve(queue.splice(0, limit))),
     run: vi.fn<PoolDeps['run']>((claimed) => {
       const d = deferred<void>();
-      runs.set(claimed.id, d);
+      runs.set(claimed.attempts > 1 ? `${claimed.id}#${claimed.attempts}` : claimed.id, d);
       return d.promise;
     }),
     touch: vi.fn<PoolDeps['touch']>((ids) => Promise.resolve(ids)),
@@ -381,6 +381,46 @@ describe('startPool', () => {
     expect(h.started()).toEqual(['ours']);
     await h.finish('ours');
     await expect(h.pool.done).resolves.toBeUndefined();
+  });
+
+  // Its heartbeat failed for the whole window, another worker's sweep returned
+  // the job, and this pool claimed it again while the first run went on.
+  it('counts, refreshes and waits for a job claimed again while its first run goes on', async () => {
+    const h = harness();
+    h.queue.push(job('x', 100, 1));
+    await h.tick(0);
+    expect(h.started()).toEqual(['x']);
+
+    h.queue.push(job('x', 100, 2), job('y'), job('z'));
+    h.pool.jobArrived();
+    await h.tick(0);
+    expect(h.started()).toEqual(['x', 'x#2']);
+    expect(warnings.some((line) => line.includes('claimed again'))).toBe(true);
+
+    // The first run's end must not take the second one's place with it.
+    await h.finish('x');
+    expect(h.started()).toEqual(['x', 'x#2', 'y']);
+
+    await h.tick(HEARTBEAT);
+    expect(h.deps.touch).toHaveBeenLastCalledWith(['x', 'y']);
+
+    let done = false;
+    void h.pool.done.then(() => (done = true));
+    h.stop();
+    await h.finish('y');
+    expect(done).toBe(false);
+    await h.finish('x#2');
+    expect(done).toBe(true);
+  });
+
+  it('never asks the sweep to return a job this pool is running', async () => {
+    const h = harness();
+    h.enqueue('a');
+    await h.tick(0);
+    expect(h.deps.reclaim).toHaveBeenLastCalledWith([]);
+
+    await h.tick(RECLAIM);
+    expect(h.deps.reclaim).toHaveBeenLastCalledWith(['a']);
   });
 
   it('frees the slot of a job whose runner threw anyway, and keeps going', async () => {

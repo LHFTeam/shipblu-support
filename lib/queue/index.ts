@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, notInArray, or, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { jobs } from '@/db/schema';
 import type { JobPayload } from './payloads';
@@ -415,8 +415,15 @@ export async function touchJobs(ids: string[], workerId: string): Promise<string
  *
  * The cutoff is taken on the database's clock, which stamped the lock, rather
  * than the worker's, so a skew between the two does not eat into the margin.
+ *
+ * `stillRunning` is the sweeping worker's own jobs: whatever their locks say —
+ * a heartbeat that failed for the whole window, say — the worker knows they are
+ * not orphans, and returning one would start a second run beside it.
  */
-export async function reclaimStalledJobs(olderThanMs = STALLED_AFTER_MS): Promise<number> {
+export async function reclaimStalledJobs(
+  olderThanMs = STALLED_AFTER_MS,
+  stillRunning: string[] = [],
+): Promise<number> {
   const reclaimed = await db
     .update(jobs)
     .set({ status: 'pending', lockedAt: null, lockedBy: null })
@@ -424,6 +431,7 @@ export async function reclaimStalledJobs(olderThanMs = STALLED_AFTER_MS): Promis
       and(
         eq(jobs.status, 'processing'),
         sql`${jobs.lockedAt} <= now() - make_interval(secs => ${olderThanMs / 1000})`,
+        stillRunning.length > 0 ? notInArray(jobs.id, stillRunning) : undefined,
       ),
     )
     .returning({ id: jobs.id });

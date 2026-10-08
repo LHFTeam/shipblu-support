@@ -87,11 +87,11 @@ async function main() {
     listener = null;
   }
 
-  // A deploy kills the previous worker mid-job, and the pool's first pass returns
-  // those rows to the queue. Not here and not fatal: this used to run unguarded,
-  // so a database briefly unreachable at boot took the process down, and Render
-  // restarting a dead worker at once turned a blip into a crash loop. In the
-  // pool a failing sweep backs off like any other loop error.
+  // The stalled sweep runs in the pool, its first pass included. Not here and not
+  // fatal: it used to run here unguarded, so a database briefly unreachable at
+  // boot took the process down, and Render restarting a dead worker at once
+  // turned a blip into a crash loop. In the pool a failing sweep backs off like
+  // any other loop error.
   const controller = new AbortController();
   pool = startPool({
     concurrency: effectiveConcurrency(env().WORKER_CONCURRENCY, POOL_MAX),
@@ -102,7 +102,7 @@ async function main() {
     claim: (limit) => claimJobs(limit, workerId),
     run: executeJob,
     touch: (ids) => touchJobs(ids, workerId),
-    reclaim: () => reclaimStalledJobs(),
+    reclaim: (running) => reclaimStalledJobs(STALLED_AFTER_MS, running),
     loopDelay,
     signal: controller.signal,
   });

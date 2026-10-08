@@ -41,7 +41,8 @@ export type PoolDeps = {
   run(job: ClaimedJob): Promise<void>;
   /** Refreshes the locks of the given jobs and returns the ids it still holds. */
   touch(ids: string[]): Promise<string[]>;
-  reclaim(): Promise<number>;
+  /** Returns stalled jobs to the queue, never the ones given: this pool is running them. */
+  reclaim(running: string[]): Promise<number>;
   /** How long to wait after the loop's own query failed, for the nth time running. */
   loopDelay(error: unknown, consecutiveFailures: number): number;
   /** Aborted to stop claiming; `done` resolves once the jobs in flight finish. */
@@ -65,7 +66,13 @@ type Running = {
 };
 
 export function startPool(deps: PoolDeps): Pool {
-  const running = new Map<string, Running>();
+  // One entry per run, not per job id. The same job can be in here twice: if
+  // this pool's heartbeat failed for the whole stalled window, another worker's
+  // sweep can return a job it is still running, and its next claim take it
+  // again. Keyed by id, the second run overwrote the first, the first one's end
+  // deleted the second, and the pool then ran past its concurrency, stopped
+  // refreshing the live run's lock, and could exit in the middle of it.
+  const running = new Set<Running>();
   const stopped = () => deps.signal.aborted;
 
   // Whether a claim could find anything. A claim that came back short says the
@@ -120,7 +127,19 @@ export function startPool(deps: PoolDeps): Pool {
   }
 
   function start(job: ClaimedJob) {
-    const settled = Promise.resolve()
+    if (runningIds().includes(job.id)) {
+      log.warn(
+        `${job.type} ${job.id} was claimed again (attempt ${job.attempts}) while this worker still runs an earlier attempt`,
+      );
+    }
+    const entry: Running = {
+      job,
+      startedAt: Date.now(),
+      settled: Promise.resolve(),
+      missed: 0,
+      reportedSlow: false,
+    };
+    entry.settled = Promise.resolve()
       .then(() => deps.run(job))
       .catch((error: unknown) => {
         // `run` records every outcome itself; anything reaching here is a bug
@@ -128,21 +147,26 @@ export function startPool(deps: PoolDeps): Pool {
         log.error(`${job.type} ${job.id} escaped its runner`, error);
       })
       .finally(() => {
-        running.delete(job.id);
+        running.delete(entry);
         wake();
       });
-    running.set(job.id, { job, startedAt: Date.now(), settled, missed: 0, reportedSlow: false });
+    running.add(entry);
+  }
+
+  function runningIds(): string[] {
+    return [...new Set([...running].map((entry) => entry.job.id))];
   }
 
   async function beat() {
-    const ids = [...running.keys()];
+    const entries = [...running];
+    const ids = runningIds();
     if (ids.length === 0) return;
     try {
       const held = new Set(await deps.touch(ids));
-      for (const id of ids) {
-        const entry = running.get(id);
-        if (!entry) continue; // finished while the refresh was in flight
+      for (const entry of entries) {
+        if (!running.has(entry)) continue; // finished while the refresh was in flight
         const { job } = entry;
+        const id = job.id;
 
         // Two misses rather than one: a job can finish between the list being
         // read and the refresh landing, and be gone from the map only a moment
@@ -178,8 +202,12 @@ export function startPool(deps: PoolDeps): Pool {
 
   async function loop() {
     let consecutiveFailures = 0;
-    // The first pass sweeps. A deploy kills the previous worker mid-job, and its
-    // rows wait in 'processing' until somebody returns them to the queue.
+    // The first pass sweeps, for the rows of a worker that died more than
+    // `STALLED_AFTER_MS` ago. One that died a moment ago — a deploy's previous
+    // worker — refreshed its locks within the last beat, so its rows come back
+    // at a later sweep, once they have gone unrefreshed for the whole window.
+    // Never this pool's own runs: a failed heartbeat must not hand back a job
+    // that is still going.
     let nextReclaimAt = 0;
     let nextPollAt = 0;
 
@@ -189,7 +217,7 @@ export function startPool(deps: PoolDeps): Pool {
         let queried = false;
 
         if (Date.now() >= nextReclaimAt) {
-          const reclaimed = await deps.reclaim();
+          const reclaimed = await deps.reclaim(runningIds());
           queried = true;
           nextReclaimAt = Date.now() + deps.reclaimEveryMs;
           if (reclaimed > 0) {
@@ -235,7 +263,7 @@ export function startPool(deps: PoolDeps): Pool {
 
   async function drain() {
     while (running.size > 0) {
-      await Promise.allSettled([...running.values()].map((entry) => entry.settled));
+      await Promise.allSettled([...running].map((entry) => entry.settled));
     }
     // Only now: a job still draining keeps its lock fresh until it is done.
     clearInterval(heartbeat);
