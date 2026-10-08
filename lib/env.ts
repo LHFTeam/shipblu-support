@@ -314,6 +314,18 @@ const schema = z.object({
   WHATSAPP_CREDENTIAL_KEY_PREVIOUS: z.string().optional(),
 
   /**
+   * The Facebook Login for Business configuration that opens Meta's Embedded
+   * Signup for a number already on the WhatsApp Business app (coexistence).
+   *
+   * An id, not a secret — the browser hands it to Meta's SDK — but per
+   * environment, because each environment has its own Meta app and a
+   * configuration belongs to one app. Unset means the "Connect a WhatsApp
+   * number" button says what is missing instead of opening a window Meta will
+   * refuse (`coexistenceReadiness` in `lib/whatsapp/onboarding.ts`).
+   */
+  META_EMBEDDED_SIGNUP_CONFIG_ID: z.string().optional(),
+
+  /**
    * Freshdesk, for the knowledge base importer only. Unset means the import
    * job skips rather than fails, so the cron that runs it is green before the
    * migration is scheduled.

@@ -271,6 +271,29 @@ async function graph<T>(
   return parsed as T;
 }
 
+/**
+ * A Graph request whose shape is written down somewhere it can be asserted
+ * against Meta's reference — `lib/whatsapp/onboarding-requests.ts` — and sent
+ * here, with this client's deadlines and its reading of Meta's refusals.
+ */
+export type GraphRequest = {
+  method: 'GET' | 'POST';
+  /** Relative to `GRAPH_BASE`, query string included. */
+  path: string;
+  body?: unknown;
+};
+
+/**
+ * Sends `request` authenticated with `token`.
+ *
+ * Null for exactly the case `graph` answers null for: a write Meta accepted
+ * whose answer was lost. The caller decides what that means — for a
+ * subscription, nothing; for a request whose id it needed, a retry.
+ */
+export async function callGraph<T>(request: GraphRequest, token: string): Promise<T | null> {
+  return graph<T>(request.path, { method: request.method, token, body: request.body });
+}
+
 export type SendResult = {
   /**
    * The wamid Meta assigned. Delivery-status webhooks arrive keyed on this.

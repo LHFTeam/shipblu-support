@@ -61,11 +61,17 @@ const IMPORTERS = new Map([
 ]);
 
 /**
- * Modules outside `worker/` that may import a resolver, each with why. Empty
- * today: every caller is a job handler. A module named here must not be
- * imported by anything under app/ — that is the whole point of the list.
+ * Modules outside `worker/` that may import a resolver, each with why. A module
+ * named here may itself be imported only from `worker/` (checked below) — that
+ * is the whole point of the list: it extends the worker, it does not open a
+ * second road into the web service.
  */
-const RESOLVER_IMPORTERS = new Map();
+const RESOLVER_IMPORTERS = new Map([
+  [
+    'lib/whatsapp/onboarding-complete.ts',
+    'the second phase of connecting a number through Embedded Signup — subscribing, creating the channel, requesting the copy — runs in complete_coexistence_onboarding with the stored credential; it lives in lib/ beside the first phase, which the server action runs',
+  ],
+]);
 
 const isTest = (file) => /\.test\.(ts|tsx|mts|mjs)$/.test(file);
 const mayResolve = (file) => file.startsWith('worker/') || RESOLVER_IMPORTERS.has(file);
@@ -150,7 +156,7 @@ export function checkCredentialConfinement() {
   }
 
   // 4. The road out of decryption.
-  const guarded = new Set([OWNER, ENVELOPE, ACCOUNTS]);
+  const guarded = new Set([OWNER, ENVELOPE, ACCOUNTS, ...RESOLVER_IMPORTERS.keys()]);
   for (const file of scannableSource) {
     if (isTest(file)) continue;
 
@@ -163,6 +169,17 @@ export function checkCredentialConfinement() {
           rule,
           file,
           `imports ${target} wholesale — name what it uses, so credential-confinement can see whether that includes a resolver`,
+        );
+        continue;
+      }
+
+      // A module allowed to resolve tokens is part of the worker, and only the
+      // worker may import it — or the allowlist would be a way round itself.
+      if (RESOLVER_IMPORTERS.has(target) && !file.startsWith('worker/')) {
+        fail(
+          rule,
+          file,
+          `imports ${target}, which resolves stored credentials on the worker's behalf — only modules under worker/ may import it (${RESOLVER_IMPORTERS.get(target)})`,
         );
         continue;
       }

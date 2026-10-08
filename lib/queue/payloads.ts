@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { LOCALES } from '@/lib/kb/locale';
+import { ONBOARDING_STEPS } from '@/db/schema';
 import { PermanentJobError, type ClaimedJob, type JobType } from '@/lib/queue';
 
 /**
@@ -213,6 +214,23 @@ const JOB_PAYLOADS = {
   rotate_whatsapp_credentials: z.strictObject({
     /** Open every envelope it would move, and write nothing. */
     dryRun: z.boolean().optional(),
+  }),
+  // Strict, though code writes it: `npm run job` reaches it too, and a mistyped
+  // `step=history` dropped by a lax schema would run every step instead of one.
+  complete_coexistence_onboarding: z.strictObject({
+    onboardingId: z.uuid(),
+    /**
+     * Run only these steps — a retry of one, or "copy the history" after the
+     * connection. Comma-separated when typed (`steps=contacts,history`), since
+     * `npm run job` hands every value over as a string.
+     */
+    steps: z
+      .preprocess(
+        (value) =>
+          typeof value === 'string' ? value.split(',').map((step) => step.trim()) : value,
+        z.array(z.enum(ONBOARDING_STEPS)).nonempty(),
+      )
+      .optional(),
   }),
 } satisfies Partial<Record<JobType, z.ZodType>>;
 

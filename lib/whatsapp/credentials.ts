@@ -85,6 +85,22 @@ function keyringForStatus(): { keyring: Keyring | null; problem: string | null }
   }
 }
 
+/**
+ * Why no credential could be stored right now, or null when one could — the
+ * key's half of `coexistenceReadiness`, asked before Meta's window is opened so
+ * a missing key is a sentence on the page rather than a code burnt on a store
+ * that was always going to fail.
+ */
+export function credentialKeyProblem(): string | null {
+  try {
+    keyring();
+    return null;
+  } catch (error) {
+    if (error instanceof CredentialKeyError) return error.message;
+    throw error;
+  }
+}
+
 async function appendEvent(
   executor: Executor,
   event: {

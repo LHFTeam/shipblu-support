@@ -215,6 +215,10 @@ projects:
             #   WHATSAPP_CREDENTIAL_KEY_PREVIOUS
             #                            the key being retired, set only while
             #                            rotate_whatsapp_credentials runs
+            #   META_EMBEDDED_SIGNUP_CONFIG_ID
+            #                            the Facebook Login for Business
+            #                            configuration Embedded Signup opens
+            #                            with; an id, but this app's own
             #
             # APP_SECRET must be identical across every service in an
             # environment — the worker signs a reply token when sending and the
@@ -544,6 +548,9 @@ projects:
             #                              must not open in the other
             #   WHATSAPP_CREDENTIAL_KEY_PREVIOUS
             #                              only during a rotation
+            #   META_EMBEDDED_SIGNUP_CONFIG_ID
+            #                              a configuration on staging's own
+            #                              Meta app
             envVars: []
 
         services:

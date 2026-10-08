@@ -403,15 +403,95 @@ async function insertEnvironmentAccount(wabaId: string): Promise<WhatsAppAccount
  * that is already taken by the time this runs. The WABA id disambiguates
  * without inventing a numbering scheme, and reads as what it is in the picker.
  */
-function freeName(taken: Set<string>, wabaId: string): string {
-  if (!taken.has('WhatsApp')) return 'WhatsApp';
+function freeName(taken: Set<string>, wabaId: string, preferred = 'WhatsApp'): string {
+  if (!taken.has(preferred)) return preferred;
 
-  const withId = `WhatsApp ${wabaId}`;
+  const withId = `${preferred} ${wabaId}`;
   if (!taken.has(withId)) return withId;
 
   let n = 2;
   while (taken.has(`${withId} (${n})`)) n += 1;
   return `${withId} (${n})`;
+}
+
+/**
+ * The account row for a WABA connected through Embedded Signup: found by its
+ * WABA id, or inserted under the name Meta gave the WABA.
+ *
+ * Takes the transaction the credential is stored in, so the account and its
+ * credential commit together. A row switched off is switched back on — the
+ * admin connecting it through Meta is saying they want it — and the variable it
+ * named is reported, because storing the credential clears it and the admin
+ * should be told what it used to send with.
+ *
+ * Inserted with an untargeted `on conflict do nothing` and read back, for the
+ * reason `insertEnvironmentAccount` gives: a second connection for the same
+ * WABA racing this one, or a name another row holds, must not raise 23505.
+ */
+export async function ensureAccountForWaba(
+  tx: typeof db,
+  wabaId: string,
+  wabaName: string | null,
+): Promise<{
+  id: string;
+  created: boolean;
+  reactivated: boolean;
+  previousVariable: string | null;
+}> {
+  const found = async () =>
+    (
+      await tx
+        .select({
+          id: whatsappAccounts.id,
+          isActive: whatsappAccounts.isActive,
+          tokenEnvVar: whatsappAccounts.tokenEnvVar,
+        })
+        .from(whatsappAccounts)
+        .where(eq(whatsappAccounts.wabaId, wabaId))
+        .for('update')
+    )[0];
+
+  const existing = await found();
+  if (existing) {
+    if (!existing.isActive) {
+      await tx
+        .update(whatsappAccounts)
+        .set({ isActive: true, updatedAt: new Date() })
+        .where(eq(whatsappAccounts.id, existing.id));
+    }
+    return {
+      id: existing.id,
+      created: false,
+      reactivated: !existing.isActive,
+      previousVariable: existing.tokenEnvVar,
+    };
+  }
+
+  const others = await tx
+    .select({ name: whatsappAccounts.name, isDefault: whatsappAccounts.isDefault })
+    .from(whatsappAccounts);
+
+  const [inserted] = await tx
+    .insert(whatsappAccounts)
+    .values({
+      name: freeName(
+        new Set(others.map((row) => row.name)),
+        wabaId,
+        wabaName?.trim() || 'WhatsApp',
+      ),
+      wabaId,
+      tokenEnvVar: null,
+      isDefault: !others.some((row) => row.isDefault),
+    })
+    .onConflictDoNothing()
+    .returning({ id: whatsappAccounts.id });
+
+  if (inserted)
+    return { id: inserted.id, created: true, reactivated: false, previousVariable: null };
+
+  const raced = await found();
+  if (!raced) throw new Error(`could not create a business account row for WABA ${wabaId}`);
+  return { id: raced.id, created: false, reactivated: false, previousVariable: raced.tokenEnvVar };
 }
 
 /**

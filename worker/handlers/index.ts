@@ -5,6 +5,7 @@ import { backfillMessageLocations } from './backfill-message-locations';
 import { backfillMetaProfiles } from './backfill-meta-profiles';
 import { backfillShipmentLinks } from './backfill-shipment-links';
 import { checkMetaPermissions } from './check-meta-permissions';
+import { completeCoexistenceOnboarding } from './complete-coexistence-onboarding';
 import { cleanup } from './cleanup';
 import { downloadMediaJob } from './download-media';
 import { fetchMetaProfile } from './fetch-meta-profile';
@@ -52,6 +53,7 @@ export const handlers: Partial<Record<JobType, JobHandler>> = {
   check_meta_permissions: () => checkMetaPermissions(),
   test_comment_permission: (job) => testCommentPermission(job),
   cleanup,
+  complete_coexistence_onboarding: completeCoexistenceOnboarding,
   download_media: downloadMediaJob,
   fetch_meta_profile: fetchMetaProfile,
   import_freshdesk_kb: () => importFreshdeskKb(),

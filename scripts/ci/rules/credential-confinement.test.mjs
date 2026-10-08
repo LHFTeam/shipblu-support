@@ -165,6 +165,25 @@ export const relational = () => db.query.whatsappAccountCredentials.findMany();
     ]);
   });
 
+  it('lets the onboarding job module resolve, and refuses it to anything but the worker', async () => {
+    const found = await runRule('credential-confinement', {
+      ...TREE,
+      'lib/whatsapp/onboarding-complete.ts':
+        "import { credentialsForAccount } from './accounts';\nexport async function completeOnboarding(a) {\n  return credentialsForAccount(a);\n}\n",
+      'worker/handlers/complete-coexistence-onboarding.ts':
+        "import { completeOnboarding } from '@/lib/whatsapp/onboarding-complete';\nexport const run = (a) => completeOnboarding(a);\n",
+      'app/(console)/admin/channels/actions.ts':
+        "'use server';\nimport { completeOnboarding } from '@/lib/whatsapp/onboarding-complete';\nexport async function retry(a) {\n  return completeOnboarding(a);\n}\n",
+    });
+
+    expect(found).toEqual([
+      expect.objectContaining({
+        where: 'app/(console)/admin/channels/actions.ts',
+        message: expect.stringMatching(/only modules under worker\/ may import it/),
+      }),
+    ]);
+  });
+
   it('keeps the reseal, which opens every envelope, to the rotation job', async () => {
     const found = await runRule('credential-confinement', {
       ...TREE,

@@ -214,3 +214,30 @@ async function enqueueIsTypedFromTheSchema(messageId: string) {
   await enqueue('moderate_meta_comment', { messageId, action: 'pin' });
 }
 void enqueueIsTypedFromTheSchema;
+
+describe('complete_coexistence_onboarding', () => {
+  const parse = (payload: Record<string, unknown>) =>
+    parseJobPayload(
+      { ...job(payload), type: 'complete_coexistence_onboarding' } as ClaimedJob,
+      'complete_coexistence_onboarding',
+    );
+  const id = '7d1f4c1e-0000-4000-8000-000000000001';
+
+  it('reads steps typed at `npm run job` as a comma-separated list', () => {
+    expect(parse({ onboardingId: id, steps: 'contacts, history' })).toEqual({
+      onboardingId: id,
+      steps: ['contacts', 'history'],
+    });
+    expect(parse({ onboardingId: id, steps: ['history'] })).toEqual({
+      onboardingId: id,
+      steps: ['history'],
+    });
+  });
+
+  /** A dropped `step=history` would run every step instead of one. */
+  it('refuses a step it does not know and a key it does not know', () => {
+    expect(() => parse({ onboardingId: id, steps: 'histroy' })).toThrow(PermanentJobError);
+    expect(() => parse({ onboardingId: id, step: 'history' })).toThrow(PermanentJobError);
+    expect(() => parse({ onboardingId: 'not-a-uuid' })).toThrow(PermanentJobError);
+  });
+});

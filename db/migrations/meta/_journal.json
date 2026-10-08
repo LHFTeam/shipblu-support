@@ -232,6 +232,13 @@
       "when": 1791480490342,
       "tag": "0032_rare_tattoo",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1791484610988,
+      "tag": "0033_clear_the_liberteens",
+      "breakpoints": true
     }
   ]
 }

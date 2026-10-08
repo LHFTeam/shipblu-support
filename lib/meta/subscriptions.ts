@@ -80,6 +80,29 @@ export const PAGE_OBJECT = 'page';
 export const REQUIRED_WHATSAPP_FIELDS = ['messages'] as const;
 
 /**
+ * The app-level `whatsapp_business_account` fields a number on the WhatsApp
+ * Business app needs beyond `messages`: its chat history and contacts as they
+ * are copied, the replies typed on the phone, and the account being
+ * disconnected from the phone. The first three are the coexistence guide's
+ * step 1; `account_update` is the reconnect guide's, which needs it to see a
+ * number offboarded and re-onboarded. All four are spelled as the webhooks
+ * overview's field table spells them.
+ *
+ * Not yet in `REQUIRED_WHATSAPP_FIELDS`, so `subscribe_meta_webhooks` does not
+ * write them: nothing reads those deliveries until the ingest that handles them
+ * lands, and an unverified name in that list fails every run of the job. Until
+ * then the onboarding job reads the app's subscription and says which of these
+ * are missing, rather than letting a connected number's history fall silently on
+ * the floor.
+ */
+export const COEXISTENCE_WHATSAPP_FIELDS = [
+  'history',
+  'smb_app_state_sync',
+  'smb_message_echoes',
+  'account_update',
+] as const;
+
+/**
  * What the Instagram pipeline needs delivered.
  *
  * `comments` is the field this whole feature rests on and **it has never been
