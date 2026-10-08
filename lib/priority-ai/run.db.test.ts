@@ -148,7 +148,15 @@ async function runOf(messageId: string) {
 }
 
 async function defaultPolicy() {
-  await db.insert(slaPolicies).values({ name: 'Live support', targets: TARGETS, isDefault: true });
+  // Round the clock, so a target is a fixed number of wall-clock minutes. Under
+  // the seeded Cairo calendar, 60 and 120 working minutes from 15:30 land either
+  // side of the 17:00 close, and the assertions would hold or not by time of day.
+  await db.insert(slaPolicies).values({
+    name: 'Live support',
+    hoursSource: 'round_the_clock',
+    targets: TARGETS,
+    isDefault: true,
+  });
 }
 
 async function firstResponseDue(conversationId: string): Promise<Date | null> {
