@@ -1,4 +1,4 @@
-import { and, asc, eq, exists, gte, inArray, isNull, lte, notInArray, sql } from 'drizzle-orm';
+import { and, asc, eq, exists, gte, inArray, isNull, lte, ne, notInArray, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { aiCategoryRuns, conversationCategories, conversations, messages } from '@/db/schema';
@@ -173,6 +173,10 @@ async function candidateFilter(payload: Payload, runLabel: string): Promise<SQL[
     eq(messages.kind, 'reply'),
     eq(messages.direction, 'inbound'),
     sql`btrim(${messages.bodyText}) <> ''`,
+    // A copied WhatsApp history is never categorised by the rules path
+    // (`afterMessageStored` does not run for it), so a shadow run over it
+    // would compare the model with a detector that was never asked.
+    ne(messages.sourceSystem, 'import'),
   ];
 
   const channels = requestedChannels(payload.channels);

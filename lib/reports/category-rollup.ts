@@ -106,6 +106,9 @@ export async function computeCategoryDay(
     where c.created_at >= ${start.toISOString()}
       and c.created_at < ${end.toISOString()}
       and c.deleted_at is null
+      -- A copied WhatsApp history did not arrive on its created_at; an agent
+      -- labelling one is not that day's demand.
+      and c.source_system <> 'import'
       and cc.review_state <> 'rejected'
     group by cc.category_key, c.channel
   `);

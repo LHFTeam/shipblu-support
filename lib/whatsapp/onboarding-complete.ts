@@ -470,7 +470,7 @@ async function subscribeStep(row: Onboarding, token: string): Promise<string> {
       warning =
         `This app is not subscribed to ${missing.join(', ')} for WhatsApp, so the copied history ` +
         `and contacts, and replies typed on the phone, will not arrive until it is. ` +
-        `\`npm run job -- subscribe_meta_webhooks\` adds them once the release that reads them is out.`;
+        `\`npm run job -- subscribe_meta_webhooks\` adds them.`;
     }
   } catch (error) {
     warning = `Could not read this app's webhook fields to check them: ${errorMessage(error)}.`;

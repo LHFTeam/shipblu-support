@@ -1,4 +1,4 @@
-import { and, eq, gt, inArray, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNull, ne, notInArray, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   automationRules,
@@ -475,7 +475,11 @@ async function sendCannedReply(
  * Spam is excluded because acting on it is how an automation ends up replying to
  * a bounce loop. Read-only channels are excluded because a rule that fires on
  * "no reply in 4 hours" would otherwise send an auto-reply into a conversation
- * the customer is having with a bot.
+ * the customer is having with a bot. Imports are excluded because they are a
+ * record of conversations that ended before this system saw them — a
+ * WhatsApp Business app history filed resolved — and a rule closing "resolved
+ * for three days" tickets would otherwise sweep six months of them on its
+ * next run.
  */
 export async function liveTickets(limit: number): Promise<TicketRow[]> {
   return db
@@ -494,6 +498,7 @@ export async function liveTickets(limit: number): Promise<TicketRow[]> {
         isNull(conversations.deletedAt),
         eq(conversations.isSpam, false),
         notInArray(conversations.channel, readOnlyChannels()),
+        ne(conversations.sourceSystem, 'import'),
         inArray(ticketStatuses.category, ['open', 'pending', 'resolved']),
       ),
     )

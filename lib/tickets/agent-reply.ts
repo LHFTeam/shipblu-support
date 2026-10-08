@@ -17,10 +17,12 @@ export type AgentReplyMessage = Omit<
  * free-text reply and a WhatsApp template.
  *
  * Kept apart from `deliverAutomatedReply` in `outbound.ts` on purpose. This is
- * the one path that moves `lastAgentMessageAt` and stops the SLA clocks, and
- * the `automated-reply-boundary` check forbids the first in `outbound.ts`: an
- * acknowledgement written by software must leave the ticket in the unanswered
- * queue. What each sender checks before it gets here — permission, read-only
+ * the path that moves `lastAgentMessageAt` and stops the SLA clocks for a reply
+ * written in the console, and the `automated-reply-boundary` check forbids the
+ * first in `outbound.ts`: an acknowledgement written by software must leave the
+ * ticket in the unanswered queue. (The one other path is a person too: a reply
+ * the business typed on the WhatsApp Business app of a number connected
+ * through coexistence, which `ingestWhatsAppEcho` counts the same way.) What each sender checks before it gets here — permission, read-only
  * channels, the messaging windows, the template's account — stays in its action.
  *
  * Returns the new message's id.

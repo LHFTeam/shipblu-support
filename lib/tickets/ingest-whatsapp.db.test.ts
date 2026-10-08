@@ -441,3 +441,129 @@ describe('ingestWhatsAppEcho', () => {
     expect(await db.select().from(messages)).toHaveLength(1);
   });
 });
+
+/**
+ * A support number connected through coexistence is also on the WhatsApp
+ * Business app, so its echoes are the business typing on the phone — nothing
+ * else wrote them, and the business decided they count as the team's reply.
+ */
+describe('ingestWhatsAppEcho on a number connected through coexistence', () => {
+  const COEX_NUMBER = '106540352242922';
+  const EARLIER = new Date('2026-09-20T09:00:00Z');
+
+  async function coexistenceChannel() {
+    const [row] = await db
+      .insert(channels)
+      .values({
+        type: 'whatsapp',
+        name: 'ShipBlu on the phone',
+        config: {
+          phoneNumberId: COEX_NUMBER,
+          coexistence: {
+            onboardedAt: '2026-09-19T08:00:00.000Z',
+            wabaId: '102290129340398',
+            syncs: {},
+          },
+        },
+      })
+      .returning({ id: channels.id });
+    return row!.id;
+  }
+
+  const phoneEcho = (overrides: Partial<NormalisedEcho> = {}) =>
+    echo({
+      wamid: 'wamid.phone-1',
+      from: '15550783881',
+      phoneNumberId: COEX_NUMBER,
+      text: 'On its way — it leaves the hub this afternoon.',
+      sentAt: LATER,
+      ...overrides,
+    });
+
+  async function clocks(id: string) {
+    const [row] = await db
+      .select({
+        lastAgentMessageAt: conversations.lastAgentMessageAt,
+        lastCustomerMessageAt: conversations.lastCustomerMessageAt,
+        lastMessageAt: conversations.lastMessageAt,
+        firstRespondedAt: conversations.firstRespondedAt,
+        nextResponseDueAt: conversations.nextResponseDueAt,
+      })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+    return row!;
+  }
+
+  it("appends the phone's reply as the team's: answered, and no window opened", async () => {
+    const channelId = await coexistenceChannel();
+    const asked = await ingestWhatsAppMessage(inbound({ phoneNumberId: COEX_NUMBER }));
+
+    const answered = await ingestWhatsAppEcho(phoneEcho());
+
+    expect(answered).toMatchObject({
+      conversationId: asked.conversationId,
+      createdConversation: false,
+      duplicate: false,
+      ignored: false,
+    });
+    expect(await conversation(asked.conversationId)).toMatchObject({ channelId });
+    expect(await clocks(asked.conversationId)).toMatchObject({
+      lastAgentMessageAt: LATER,
+      lastMessageAt: LATER,
+      firstRespondedAt: LATER,
+      nextResponseDueAt: null,
+      // The customer's alone: the business writing opens no 24-hour window.
+      lastCustomerMessageAt: SENT,
+    });
+    const [, reply] = await messagesOf(asked.conversationId);
+    expect(reply).toMatchObject({
+      direction: 'outbound',
+      authorAgentId: null,
+      authorContactId: null,
+      deliveryStatus: 'sent',
+      meta: { echo: true, echoSource: 'business_app', phoneNumberId: COEX_NUMBER },
+    });
+  });
+
+  it('never moves the team’s clock back for an echo processed late', async () => {
+    await coexistenceChannel();
+    const asked = await ingestWhatsAppMessage(
+      inbound({ phoneNumberId: COEX_NUMBER, sentAt: EARLIER }),
+    );
+    await ingestWhatsAppEcho(phoneEcho());
+
+    await ingestWhatsAppEcho(phoneEcho({ wamid: 'wamid.phone-0', sentAt: SENT }));
+
+    expect(await clocks(asked.conversationId)).toMatchObject({
+      lastAgentMessageAt: LATER,
+      lastMessageAt: LATER,
+      firstRespondedAt: LATER,
+    });
+  });
+
+  it('opens the conversation when the business writes first, already answered', async () => {
+    await coexistenceChannel();
+
+    const opened = await ingestWhatsAppEcho(phoneEcho());
+
+    expect(opened).toMatchObject({ createdConversation: true, ignored: false });
+    expect(await clocks(opened.conversationId!)).toMatchObject({
+      lastAgentMessageAt: LATER,
+      firstRespondedAt: LATER,
+      lastCustomerMessageAt: null,
+    });
+  });
+
+  it('stops no clock a second time for a redelivered echo', async () => {
+    await coexistenceChannel();
+    const asked = await ingestWhatsAppMessage(inbound({ phoneNumberId: COEX_NUMBER }));
+    await ingestWhatsAppEcho(phoneEcho());
+    await db
+      .update(conversations)
+      .set({ firstRespondedAt: null })
+      .where(eq(conversations.id, asked.conversationId));
+
+    expect(await ingestWhatsAppEcho(phoneEcho())).toMatchObject({ duplicate: true });
+    expect((await clocks(asked.conversationId)).firstRespondedAt).toBeNull();
+  });
+});

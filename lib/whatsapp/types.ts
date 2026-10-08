@@ -60,6 +60,12 @@ export type WhatsAppInboundMessage = {
   };
   order?: unknown;
   system?: { body?: string; type?: string; wa_id?: string };
+  /**
+   * A message changed or withdrawn after it was sent — supported once a number
+   * runs on the WhatsApp Business app and Cloud API together.
+   */
+  edit?: { original_message_id?: string; message?: WhatsAppInboundMessage };
+  revoke?: { original_message_id?: string };
   errors?: { code: number; title: string; message?: string; error_data?: { details?: string } }[];
 
   /** Present when the customer replied to a specific earlier message. */
@@ -107,6 +113,39 @@ export type WhatsAppContactProfile = {
   wa_id: string;
 };
 
+type WhatsAppError = {
+  code: number;
+  title?: string;
+  message?: string;
+  error_data?: { details?: string };
+};
+
+/**
+ * One message out of a number's chat history, copied from the WhatsApp Business
+ * app after a coexistence onboarding. Structurally an ordinary message — `from`
+ * is the business for what it sent and the customer for what they sent — with
+ * the phone's own delivery state, and `media_placeholder` where a file was.
+ */
+export type WhatsAppHistoryMessage = WhatsAppEcho & {
+  history_context?: { status?: string };
+};
+
+/** One `history` webhook's chunk: some threads, and how far the copy has got. */
+export type WhatsAppHistoryChunk = {
+  metadata?: { phase?: number; chunk_order?: number; progress?: number };
+  threads?: { id?: string; messages?: WhatsAppHistoryMessage[] }[];
+  /** Present instead of threads when the business declined to share (2593109). */
+  errors?: WhatsAppError[];
+};
+
+/** One contact from the phone's address book (`smb_app_state_sync`). */
+export type WhatsAppStateSyncItem = {
+  type?: string;
+  contact?: { full_name?: string; first_name?: string; phone_number?: string };
+  action?: string;
+  metadata?: { timestamp?: string | number };
+};
+
 export type WhatsAppValue = {
   messaging_product?: string;
   metadata?: { display_phone_number?: string; phone_number_id?: string };
@@ -115,6 +154,18 @@ export type WhatsAppValue = {
   message_echoes?: WhatsAppEcho[];
   statuses?: WhatsAppStatus[];
   errors?: { code: number; title: string; message?: string }[];
+
+  /** `history`: the copy of the phone's chats. */
+  history?: WhatsAppHistoryChunk[];
+  /** `smb_app_state_sync`: the phone's contacts, and later changes to them. */
+  state_sync?: WhatsAppStateSyncItem[];
+
+  /** `account_update`: what happened to the account. */
+  event?: string;
+  /** `account_update`'s business number, on the coexistence events. */
+  phone_number?: string;
+  waba_info?: { waba_id?: string; owner_business_id?: string };
+  disconnection_info?: { reason?: string; initiated_by?: string };
 };
 
 export type WhatsAppChange = {
@@ -124,7 +175,7 @@ export type WhatsAppChange = {
 
 export type WhatsAppWebhookPayload = {
   object?: string;
-  entry?: { id?: string; changes?: WhatsAppChange[] }[];
+  entry?: { id?: string; time?: number | string; changes?: WhatsAppChange[] }[];
 };
 
 // --- Normalised forms the rest of the app works with -----------------------
@@ -214,6 +265,71 @@ export type NormalisedStatus = {
   conversationExpiresAt: Date | null;
 };
 
+/**
+ * One message of a number's copied history, with the customer it belongs to
+ * resolved: the thread's id, which is the customer whichever side wrote.
+ */
+export type NormalisedHistoryMessage = {
+  wamid: string;
+  /** The customer — the thread — whichever side wrote this message. */
+  customer: string;
+  direction: 'inbound' | 'outbound';
+  sentAt: Date;
+  type: WhatsAppMessageType | string;
+  text: string;
+  /** The phone had a file here that the copy does not carry. */
+  mediaPlaceholder: boolean;
+  location: NormalisedLocation | null;
+  replyToWamid: string | null;
+  /** The phone's own state for it — READ, DELIVERED, PLAYED, ERROR, … */
+  phoneStatus: string | null;
+  raw: Record<string, unknown>;
+};
+
+export type NormalisedHistoryChunk = {
+  phoneNumberId: string | null;
+  /** 0: the last day; 1: up to 90 days; 2: up to 180 days. */
+  phase: number | null;
+  chunkOrder: number | null;
+  /** 0–100 within the phase; 100 may never arrive for a phase with no chats. */
+  progress: number | null;
+  messages: NormalisedHistoryMessage[];
+  /** The business turned history sharing off on the phone. */
+  declined: { code: number; message: string } | null;
+};
+
+/**
+ * The file behind a `media_placeholder`, sent separately under the same
+ * `history` field — as a top-level `messages` array, which is why that array
+ * means something different under this field than under `messages`.
+ */
+export type NormalisedHistoryMedia = {
+  wamid: string;
+  phoneNumberId: string | null;
+  text: string;
+  media: NormalisedMedia;
+};
+
+export type NormalisedContactSync = {
+  phoneNumberId: string | null;
+  /** The contact's number, as the phone's address book holds it. */
+  phone: string;
+  name: string | null;
+  action: 'add' | 'remove';
+  at: Date;
+};
+
+export type NormalisedAccountUpdate = {
+  /** `waba_info.waba_id` when Meta names it, else the entry's id. */
+  wabaId: string | null;
+  /** The business number, when the event names one. */
+  phoneNumber: string | null;
+  event: string;
+  reason: string | null;
+  initiatedBy: string | null;
+  at: Date;
+};
+
 export type NormalisedWebhook = {
   messages: NormalisedInboundMessage[];
   /** Messages sent from our own number, by us or by another service on it. */
@@ -221,4 +337,8 @@ export type NormalisedWebhook = {
   statuses: NormalisedStatus[];
   /** Account-level errors Meta reports outside any message. */
   errors: string[];
+  history: NormalisedHistoryChunk[];
+  historyMedia: NormalisedHistoryMedia[];
+  contactSyncs: NormalisedContactSync[];
+  accountUpdates: NormalisedAccountUpdate[];
 };

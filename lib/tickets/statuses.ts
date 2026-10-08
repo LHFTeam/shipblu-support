@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, asc, desc, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { ticketStatuses } from '@/db/schema';
 
@@ -58,4 +58,29 @@ export async function requireDefaultOpenStatusId(tx: typeof db): Promise<string>
     throw new Error('No default open ticket status configured — run `npm run db:seed`');
   }
   return statusId;
+}
+
+/**
+ * The status a conversation that was already over when it reached us is filed
+ * in — a WhatsApp Business app chat copied in after a coexistence onboarding.
+ *
+ * Resolved, not open: nobody here owes it an answer, and an open import would
+ * put six months of finished chats in front of the team. Not closed either: an
+ * agent can still write on it (with a template — its window shut long ago).
+ * The default resolved status first, then the lowest-positioned one, for the
+ * reason `defaultOpenStatusId` gives: an admin clearing a flag must not stop
+ * an import. Throws only for a database with no resolved status at all, which
+ * was never seeded.
+ */
+export async function requireResolvedStatusId(tx: typeof db): Promise<string> {
+  const [status] = await tx
+    .select({ id: ticketStatuses.id })
+    .from(ticketStatuses)
+    .where(eq(ticketStatuses.category, 'resolved'))
+    .orderBy(desc(ticketStatuses.isDefault), asc(ticketStatuses.position))
+    .limit(1);
+  if (!status) {
+    throw new Error('No resolved ticket status configured — run `npm run db:seed`');
+  }
+  return status.id;
 }

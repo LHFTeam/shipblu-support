@@ -2,7 +2,9 @@ import { and, desc, eq, inArray } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels, conversations, messages } from '@/db/schema';
 import { enqueue } from '@/lib/queue';
+import { onAgentReply } from '@/lib/sla';
 import { afterInboundMessage, afterMessageStored } from '@/lib/tickets/lifecycle';
+import { parseCoexistence } from '@/lib/whatsapp/coexistence';
 import { explainDeliveryError } from '@/lib/whatsapp/errors';
 import type {
   NormalisedEcho,
@@ -12,6 +14,7 @@ import type {
 import { windowState } from '@/lib/whatsapp/window';
 import { isReadOnlyChannel } from './channel-policy';
 import { resolveContact } from './contacts';
+import { latest } from './latest';
 import { findLiveConversation } from './live-conversation';
 import { reopenResolved } from './reopen';
 import { requireDefaultOpenStatusId } from './statuses';
@@ -202,12 +205,22 @@ export async function ingestWhatsAppMessage(
 }
 
 /**
- * A message the bot sent, mirrored onto the conversation it belongs to.
+ * A message sent from one of our numbers by something other than this system,
+ * mirrored onto the conversation it belongs to. Two senders do that:
  *
- * Filed as outbound with no author, because nobody here wrote it — the timeline
- * labels it as the bot. It can arrive before any inbound message, since the bot
- * often opens the conversation, so this creates the conversation when needed
- * rather than assuming one exists.
+ * - **The customer bot**, on its read-only channel. Filed as outbound with no
+ *   author, because nobody here wrote it — the timeline labels it as the bot.
+ * - **The WhatsApp Business app**, on a support number connected through
+ *   coexistence: a reply the business typed on the phone. That one counts as
+ *   the team's reply — the business decided so — so it moves
+ *   `lastAgentMessageAt` and stops the SLA's response clocks, as an agent's
+ *   reply in the console does. It still has no author, because no agent here
+ *   wrote it, and it never touches `lastCustomerMessageAt`, which opens the
+ *   24-hour window and is the customer's alone. The timeline labels it as the
+ *   Business app.
+ *
+ * Either can arrive before any inbound message, so this creates the
+ * conversation when needed rather than assuming one exists.
  */
 export type WhatsAppEchoResult = {
   conversationId: string | null;
@@ -231,11 +244,13 @@ const IGNORED: WhatsAppEchoResult = {
 export async function ingestWhatsAppEcho(echo: NormalisedEcho): Promise<WhatsAppEchoResult> {
   const channel = await resolveWhatsAppChannel(echo.phoneNumberId);
 
-  // An echo from the support number is our own outbound message coming back. We
-  // already wrote that row when we sent it, and the delivery status webhook
-  // maintains it, so there is nothing to add. Mirroring it would double every
-  // reply the team sends.
-  if (!isReadOnlyChannel(channel.kind)) return IGNORED;
+  // An echo from an ordinary support number is our own outbound message coming
+  // back. We already wrote that row when we sent it, and the delivery status
+  // webhook maintains it, so there is nothing to add. Mirroring it would double
+  // every reply the team sends. A coexistence number is the exception: its
+  // echoes are what the business typed on the phone, which nothing else wrote.
+  const fromBusinessApp = channel.coexistence && !isReadOnlyChannel(channel.kind);
+  if (!isReadOnlyChannel(channel.kind) && !fromBusinessApp) return IGNORED;
 
   const seen = await db
     .select({ id: messages.id, conversationId: messages.conversationId })
@@ -259,6 +274,11 @@ export async function ingestWhatsAppEcho(echo: NormalisedEcho): Promise<WhatsApp
       ignored: false,
     };
   }
+
+  // Checked above, before any clock moves: a redelivered echo — or one of our
+  // own Cloud API sends coming back, whose row already carries its wamid — is a
+  // duplicate, and stopping the SLA clock a second time would be a lie about
+  // when the reply happened.
 
   // The identity is still a WhatsApp one: it is the same person and the same
   // phone number whichever of our numbers they wrote to, so they resolve to one
@@ -288,6 +308,7 @@ export async function ingestWhatsAppEcho(echo: NormalisedEcho): Promise<WhatsApp
           requesterContactId: contactId,
           groupId: channel.defaultGroupId,
           lastMessageAt: echo.sentAt,
+          ...(fromBusinessApp ? { lastAgentMessageAt: echo.sentAt } : {}),
         })
         .returning({ id: conversations.id, number: conversations.number });
 
@@ -319,6 +340,9 @@ export async function ingestWhatsAppEcho(echo: NormalisedEcho): Promise<WhatsApp
           whatsappType: echo.type,
           phoneNumberId: echo.phoneNumberId,
           echo: true,
+          // Who sent it, for the timeline's label: the bot's echoes predate
+          // this field and are read as the bot when it is absent.
+          ...(fromBusinessApp ? { echoSource: 'business_app' } : {}),
           ...(echo.creationType ? { creationType: echo.creationType } : {}),
           ...(echo.media
             ? {
@@ -339,12 +363,21 @@ export async function ingestWhatsAppEcho(echo: NormalisedEcho): Promise<WhatsApp
       })
       .returning({ id: messages.id });
 
-    // lastCustomerMessageAt is deliberately untouched: the bot writing does not
-    // open a 24-hour window for us, and this channel cannot be replied to
-    // anyway.
+    // lastCustomerMessageAt is deliberately untouched: neither the bot nor the
+    // business writing opens a 24-hour window for us. The business's reply
+    // moves the team's column, forward only (`latest`): echoes arrive in no
+    // guaranteed order, and an older one must not make the ticket read as
+    // answered earlier than it was.
     await tx
       .update(conversations)
-      .set({ lastMessageAt: echo.sentAt })
+      .set(
+        fromBusinessApp
+          ? {
+              lastMessageAt: latest(conversations.lastMessageAt, echo.sentAt),
+              lastAgentMessageAt: latest(conversations.lastAgentMessageAt, echo.sentAt),
+            }
+          : { lastMessageAt: echo.sentAt },
+      )
       .where(eq(conversations.id, conversationId));
 
     return {
@@ -362,6 +395,11 @@ export async function ingestWhatsAppEcho(echo: NormalisedEcho): Promise<WhatsApp
       { priority: 5, dedupeKey: `download_media:${echo.media.mediaId}` },
     );
   }
+
+  // The business answered: the response clocks stop, at the moment it did.
+  // After the transaction, as `storeAgentReply` does, so a failure here is a
+  // logged SLA write and never a lost message.
+  if (fromBusinessApp) await onAgentReply(result.conversationId, echo.sentAt);
 
   // The bot's own half of the transcript carries tracking numbers too, and is
   // often the only half that does.
@@ -478,6 +516,11 @@ export type ResolvedChannel = {
   defaultGroupId: string | null;
   /** The conversation channel to file under — `whatsapp` or `whatsapp_bot`. */
   kind: 'whatsapp' | 'whatsapp_bot';
+  /**
+   * The number is also live on the WhatsApp Business app (coexistence), so an
+   * echo on it is the business typing on the phone rather than our own send.
+   */
+  coexistence: boolean;
 };
 
 /**
@@ -512,6 +555,7 @@ export async function resolveWhatsAppChannel(
       id: byNumber.id,
       defaultGroupId: byNumber.defaultGroupId,
       kind: byNumber.type === 'whatsapp_bot' ? 'whatsapp_bot' : 'whatsapp',
+      coexistence: byNumber.type === 'whatsapp' && parseCoexistence(byNumber.config) !== null,
     };
   }
 
@@ -519,10 +563,13 @@ export async function resolveWhatsAppChannel(
   // known by its row, and inferring "bot" from the absence of one would hide
   // real customer messages from the team.
   const support = rows.find((c) => c.type === 'whatsapp');
+  // Not coexistence, whatever the support row is: the event came in on a
+  // number no row names, and only a number's own row can say it is on the app.
   return {
     id: support?.id ?? null,
     defaultGroupId: support?.defaultGroupId ?? null,
     kind: 'whatsapp',
+    coexistence: false,
   };
 }
 
