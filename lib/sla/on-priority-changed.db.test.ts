@@ -137,3 +137,71 @@ describe('onPriorityChanged', () => {
     );
   });
 });
+
+describe('onPriorityChanged around pauses', () => {
+  async function pauseFor(id: string, from: Date, minutes: number) {
+    await db.insert(conversationEvents).values([
+      { conversationId: id, type: 'sla_paused', actorLabel: 'sla', createdAt: from },
+      {
+        conversationId: id,
+        type: 'sla_resumed',
+        actorLabel: 'sla',
+        data: { pausedMinutes: minutes },
+        createdAt: new Date(from.getTime() + minutes * MINUTE),
+      },
+    ]);
+  }
+
+  it('does not excuse the reply clock for a pause that ended before the customer last wrote', async () => {
+    const lastWrote = new Date(Date.now() - 5 * MINUTE);
+
+    /** Answered, reopened, the customer wrote five minutes ago; raised to urgent. */
+    async function raisedReplyClock(parkedBefore: boolean): Promise<number> {
+      const id = await ticketUnderPolicy();
+      const created = (await clocks(id)).createdAt;
+      await onAgentReply(id, created);
+      if (parkedBefore) {
+        // Two days on Pending, finished a day before the customer wrote.
+        await pauseFor(id, new Date(lastWrote.getTime() - 3 * 24 * 60 * MINUTE), 2 * 24 * 60);
+      }
+      await db
+        .update(conversations)
+        .set({ lastCustomerMessageAt: lastWrote, nextResponseDueAt: lastWrote })
+        .where(eq(conversations.id, id));
+      await db.update(conversations).set({ priority: 'urgent' }).where(eq(conversations.id, id));
+      await onPriorityChanged(id);
+
+      const [row] = await db
+        .select({ due: conversations.nextResponseDueAt })
+        .from(conversations)
+        .where(eq(conversations.id, id));
+      return row!.due!.getTime();
+    }
+
+    // The policy is shared, so the second ticket creates its own default; only
+    // one may be the default at a time, which is why each is read in turn.
+    const without = await raisedReplyClock(false);
+    await db.delete(slaPolicies);
+    const withPause = await raisedReplyClock(true);
+
+    expect(withPause).toBe(without);
+  });
+
+  it('does not credit a pause still open, which the resume credits in full', async () => {
+    const id = await ticketUnderPolicy();
+    const before = await clocks(id);
+    await db.insert(conversationEvents).values({
+      conversationId: id,
+      type: 'sla_paused',
+      actorLabel: 'sla',
+      createdAt: new Date(Date.now() - 30 * MINUTE),
+    });
+
+    await db.update(conversations).set({ priority: 'urgent' }).where(eq(conversations.id, id));
+    await onPriorityChanged(id);
+
+    expect((await clocks(id)).resolutionDueAt!.getTime()).toBe(
+      before.resolutionDueAt!.getTime() - 240 * MINUTE,
+    );
+  });
+});
