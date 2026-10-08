@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import {
@@ -149,6 +149,54 @@ describe('onPriorityChanged', () => {
     expect((await clocks(id)).firstResponseDueAt!.getTime()).toBe(
       before.firstResponseDueAt!.getTime() - 60 * MINUTE,
     );
+  });
+});
+
+describe('onPriorityChanged against another priority change', () => {
+  it('does not write one priority’s deadlines over a newer priority’s', async () => {
+    const id = await ticketUnderPolicy();
+    const { createdAt } = await clocks(id);
+    await db.update(conversations).set({ priority: 'urgent' }).where(eq(conversations.id, id));
+
+    // Another writer holds the row: it moves the priority back to medium and
+    // re-times the ticket for it, while this re-time — computed from urgent —
+    // is waiting to write.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let locked!: () => void;
+    const lockTaken = new Promise<void>((resolve) => (locked = resolve));
+    const other = db.transaction(async (tx) => {
+      await tx.select().from(conversations).where(eq(conversations.id, id)).for('update');
+      locked();
+      await held;
+      await tx
+        .update(conversations)
+        .set({
+          priority: 'medium',
+          firstResponseDueAt: new Date(createdAt.getTime() + 120 * MINUTE),
+          resolutionDueAt: new Date(createdAt.getTime() + 480 * MINUTE),
+        })
+        .where(eq(conversations.id, id));
+    });
+    await lockTaken;
+
+    const stale = onPriorityChanged(id);
+    // Until its write is queued behind the lock.
+    for (let i = 0; i < 100; i++) {
+      const [{ waiting }] = (await db.execute(
+        sql`select count(*)::int as waiting from pg_stat_activity
+            where datname = current_database() and wait_event_type = 'Lock'`,
+      )) as unknown as [{ waiting: number }];
+      if (waiting > 0) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    release();
+    await other;
+    await stale;
+
+    const after = await clocks(id);
+    expect(after.firstResponseDueAt!.getTime()).toBe(createdAt.getTime() + 120 * MINUTE);
+    expect(after.resolutionDueAt!.getTime()).toBe(createdAt.getTime() + 480 * MINUTE);
   });
 });
 

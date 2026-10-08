@@ -455,14 +455,30 @@ async function recomputeOwedClocks(
 
     if (!moved) return;
 
-    await db
+    // Only over the priority and group these were computed from. Every writer
+    // of either re-times after its own commit, and two of them on one ticket —
+    // two classifier jobs, an agent and a rule — can interleave: this one reads
+    // `high`, the other commits `urgent` and writes urgent's deadlines, and an
+    // unconditional write here then lands last, leaving the urgent badge on
+    // high's deadlines until something re-times it. On a miss the newer value's
+    // own writer has re-timed, or is about to, so there is nothing to retry.
+    const written = await db
       .update(conversations)
       .set({
         firstResponseDueAt: firstResponse,
         nextResponseDueAt: nextResponse,
         resolutionDueAt: resolution,
       })
-      .where(eq(conversations.id, conversationId));
+      .where(
+        and(
+          samePriority(conversationId, priority),
+          conversation.groupId
+            ? eq(conversations.groupId, conversation.groupId)
+            : isNull(conversations.groupId),
+        ),
+      )
+      .returning({ id: conversations.id });
+    if (written.length === 0) return;
 
     // On the timeline for the same reason a pause is: an agent who sees a due
     // date jump is owed the reason, and "the new group keeps different hours" is
