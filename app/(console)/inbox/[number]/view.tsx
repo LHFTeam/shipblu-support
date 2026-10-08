@@ -74,6 +74,7 @@ export function ConversationView({
   canned,
   customerLocale,
   knowledge,
+  suggestCanned,
   canSideConversation,
   canModerateComments,
   canEditContact,
@@ -100,6 +101,8 @@ export function ConversationView({
   customerLocale: CannedLocale;
   /** Null when the agent lacks `kb.view`, or on a channel with no composer. */
   knowledge: KnowledgeContext | null;
+  /** Whether the reply box asks Jev for a canned response. */
+  suggestCanned: boolean;
   canSideConversation: boolean;
   /** Whether this agent may hide or delete a public comment. */
   canModerateComments: boolean;
@@ -150,6 +153,7 @@ export function ConversationView({
             canned={canned}
             customerLocale={customerLocale}
             knowledge={knowledge}
+            suggestCanned={suggestCanned}
             canSideConversation={canSideConversation}
           />
         )}

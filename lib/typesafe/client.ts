@@ -39,7 +39,11 @@ export const TYPESAFE_API_URL = 'https://api.typesafe.ai';
  */
 export const DEFAULT_TYPESAFE_MODEL = 'jev-latest';
 
-/** A classification is not a page render; it can afford to wait, but not forever. */
+/**
+ * A classification is not a page render; it can afford to wait, but not forever.
+ * The reply box's suggestion is closer to a page render and passes its own,
+ * shorter `timeoutMs` (`SUGGEST_TIMEOUT_MS`).
+ */
 export const DEFAULT_TIMEOUT_MS = 15_000;
 
 /**
@@ -137,7 +141,15 @@ function issuesOf(error: z.ZodError): string {
     .join('; ');
 }
 
-/** Whether a call can be made at all. Presence of the credential is the feature flag. */
+/**
+ * Whether a call can be made at all.
+ *
+ * For the shadow categoriser, presence of the credential is the feature flag.
+ * For the reply box's suggestions it is only half of one — `suggestionsLive()`
+ * in `lib/canned-suggest/settings.ts` also needs the admin switch, because
+ * production holds this key for the shadow run and a key-as-flag would have
+ * turned suggestions on for every agent the day they deployed.
+ */
 export function typesafeConfigured(): boolean {
   return Boolean(env().TYPESAFE_API_KEY);
 }

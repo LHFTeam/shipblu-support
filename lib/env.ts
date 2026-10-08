@@ -294,14 +294,18 @@ const schema = z.object({
   FRESHDESK_API_KEY: z.string().optional(),
 
   /**
-   * TypeSafe's System One API, read by the shadow categorisation run in
-   * `lib/categorise-ai/` and by nothing else.
+   * TypeSafe's System One API, read by two things: the hand-run shadow
+   * categorisation in `lib/categorise-ai/`, and the reply box's canned-response
+   * suggestions in `lib/canned-suggest/`.
    *
-   * Unset is the resting state rather than a misconfiguration. Presence of the
-   * key is what enables the job — the device `instagramLoginConfigured()` uses —
-   * so this ships inert and stays inert until somebody deliberately starts a
-   * measurement. No page and no action reads either value; the only reader is a
-   * hand-run job, which is why a missing key here can never fail a request.
+   * Unset is the resting state rather than a misconfiguration. For the shadow
+   * run, presence of the key is what enables the job — the device
+   * `instagramLoginConfigured()` uses. For the suggestions it is only a
+   * precondition: production holds the key for the shadow run, so the decision
+   * is the admin switch in `canned_suggestion_settings`, and the composer asks
+   * nothing while that is off whatever the key says. The suggestion route is the
+   * one request path that reads the key, and it answers "no suggestion" when it
+   * is missing, so a missing key here still cannot fail a request.
    *
    * `TYPESAFE_MODEL` pins a run to one Jev version. Left unset the request asks
    * for the `jev-latest` alias, and every row records the version the *response*

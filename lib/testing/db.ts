@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import { afterAll, beforeEach } from 'vitest';
 import { seedBaseline } from '@/db/baseline';
 import { closeDb, db } from '@/db/client';
+import { forgetSuggestionSettings } from '@/lib/canned-suggest/settings';
 import { forgetCategoryIds } from '@/lib/categorise/apply';
 import { forgetHoursCatalog } from '@/lib/hours/catalog';
 import { forgetPresencePolicy } from '@/lib/presence/policy';
@@ -48,6 +49,7 @@ function forgetDatabaseCaches(): void {
   forgetCategoryIds();
   forgetHoursCatalog();
   forgetPresencePolicy();
+  forgetSuggestionSettings();
 }
 
 /**

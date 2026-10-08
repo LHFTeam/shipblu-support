@@ -116,6 +116,16 @@ export default async function ReportsPage({
         >
           What tickets are about
         </Link>
+        {/*
+          Also `report.view`: how the reply box's suggestions are doing is a
+          question about the team's replies, the same audience as this page.
+        */}
+        <Link
+          href={`/reports/canned-suggestions?days=${days}`}
+          className="rounded-md border border-[var(--border)] px-2.5 py-1 text-sm hover:bg-[var(--muted)]"
+        >
+          Suggested responses
+        </Link>
         <p className="ml-auto text-xs opacity-50">
           {range.from} to {range.to}, in {zone}. Rolled up nightly — today is not included yet.
         </p>

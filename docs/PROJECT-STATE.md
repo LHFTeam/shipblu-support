@@ -1293,6 +1293,25 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   pattern is right: it splits links into those the detector found and those
   agents made by hand, and says so plainly when the second number is larger.
 
+- **Canned-response suggestions in the reply box are built and switched off.**
+  When an agent clicks into an empty reply box, TypeSafe's Jev picks the canned
+  response that fits the conversation — or none — and it appears as grey text
+  that Tab or **Use** puts in (`lib/canned-suggest/`,
+  `plans/canned-suggestions-through-typesafe.md`). This makes TypeSafe a
+  **request-path dependency for the first time**: `/api/canned-suggestions`
+  reads `TYPESAFE_API_KEY` from a web request, where until now only the hand-run
+  shadow job did. The flag is not the key — production already holds that — but
+  the switch on `/admin/canned` (`canned_suggestion_settings`, no row = off).
+  Turn it on at cutover, once agents are replying, and read
+  `/reports/canned-suggestions` after the first couple of hundred replies; until
+  then the report has nothing to say and says so. Before turning it on, settle
+  TypeSafe's data-processing terms: each suggestion sends the ticket's last ten
+  replies, both directions, and the titles and texts of every canned response
+  the agent can see. Rollback is the switch, effective within thirty seconds per
+  instance. The first call measures what has only been estimated — about 5–6k
+  input tokens and well under a second, by analogy with the 647 shadow
+  categorisation calls (p50 234 ms) — and every row stores both.
+
 ### 5.2 Live-provider verification
 
 Everything below passes unit tests. Each is a round trip, or the half of one

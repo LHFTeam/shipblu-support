@@ -20,6 +20,7 @@ import {
   listTicketFields,
 } from '@/lib/tickets/lookups';
 import { readOnlyReason } from '@/lib/tickets/channel-policy';
+import { suggestionsLive } from '@/lib/canned-suggest/settings';
 import { accountIdForConversation } from '@/lib/whatsapp/conversation';
 import { InboxShell } from '../shell';
 import { FocusBeat } from './focus';
@@ -103,7 +104,13 @@ export default async function ConversationPage({
   // which is only the same thing once that domain serves this app.
   const kbOrigin = requestBaseUrl(await headers());
 
-  const [statuses, agentList, groupList, fields, canned, templates, recipients, suggestions] =
+  // Whether the reply box asks Jev for a canned response: only where there is a
+  // reply box, for an agent who may reply, and while the admin switch is on and
+  // this environment holds a key. The switch is memoised, so this is not a query
+  // on most renders.
+  const mayReply = can(agent, 'ticket.reply') && !readOnlyReason(conversation.channel);
+
+  const [statuses, agentList, groupList, fields, canned, templates, recipients, suggestions, live] =
     await Promise.all([
       listStatuses(),
       listActiveAgents(),
@@ -128,6 +135,7 @@ export default async function ConversationPage({
       // ticket with nothing to go on costs no query and renders no panel
       // furniture, the same way the help centre's blocks remove themselves.
       terms.length ? suggestForAgent(kbOrigin, agent.role, kbLocale, terms) : Promise.resolve([]),
+      mayReply ? suggestionsLive() : Promise.resolve(false),
     ]);
 
   return (
@@ -145,6 +153,7 @@ export default async function ConversationPage({
         canned={canned}
         customerLocale={kbLocale}
         knowledge={wantsKnowledge ? { suggestions, locale: kbLocale } : null}
+        suggestCanned={live && canned.length > 0}
         templates={templates}
         recipients={recipients}
         canSideConversation={canSideConversation}
