@@ -143,9 +143,9 @@ function unanswered(what: string, error: unknown, timeoutMs: number): WhatsAppAp
 /**
  * `fetch` with a deadline.
  *
- * A deadline because every caller is a job, and the worker claims nothing new
- * until its whole batch is done — and `fetch` with no signal waits five minutes
- * for a response that is not coming. The signal governs reading the body too,
+ * A deadline because every caller is a job, and nothing else frees the worker
+ * slot a request holds — and `fetch` with no signal waits five minutes for a
+ * response that is not coming. The signal governs reading the body too,
  * so each caller reads it inside the same handling.
  */
 async function request(

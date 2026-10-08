@@ -50,13 +50,15 @@ export const READ_TIMEOUT_MS = 15_000;
  *
  * The deadline sits in a window with two edges. Below about a minute, a send
  * the provider was still accepting is given up on and retried — a duplicate
- * message. Past `STALLED_AFTER_MS`, the job can be reclaimed while the send is
- * still waiting — by a deploy's new worker, which cannot tell a slow job from an
- * orphaned one — and run again: the same duplicate by another route.
+ * message. Past `STALLED_AFTER_MS`, a send still waiting when its worker is
+ * stopped — a deploy's shutdown window is short — is reclaimed once the lock
+ * stops being refreshed, and run again: the same duplicate by another route.
  *
- * And there has to be one. The worker claims nothing new until every job in its
- * batch is done, and `fetch` with no signal gives up only after five minutes
- * without a response — never, on a body that keeps trickling in — so one slow
- * request held every queued job behind it for the length of the reclaim window.
+ * And there has to be one. `fetch` with no signal gives up only after five
+ * minutes without a response — never, on a body that keeps trickling in — and
+ * the worker refreshes the lock of every job it is running, so nothing else
+ * ends it: a request with no deadline holds its worker slot for good, and a
+ * handful of them stop the queue. Before the worker refilled slots one at a
+ * time, the same request held every queued job behind it.
  */
 export const WRITE_TIMEOUT_MS = 90_000;
