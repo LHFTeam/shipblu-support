@@ -173,7 +173,13 @@ export async function readGraph<T>(
     if (isTimeout(error)) {
       throw new Error(`${url.host}${url.pathname} did not answer in ${timeoutMs / 1000}s`);
     }
-    throw new Error(`${url.host}${url.pathname} could not be reached: ${errorMessage(error)}`);
+    // The cause, because a bare "fetch failed" is undici's whole message and
+    // the reason — a DNS failure, a refused connection — is only on the cause.
+    const cause =
+      error instanceof Error && error.cause !== undefined ? ` (${errorMessage(error.cause)})` : '';
+    throw new Error(
+      `${url.host}${url.pathname} could not be reached: ${errorMessage(error)}${cause}`,
+    );
   }
 
   let body: T | null = null;

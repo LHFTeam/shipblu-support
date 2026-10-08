@@ -751,7 +751,9 @@ export const whatsappAccounts = pgTable(
 );
 
 /**
- * The one secret this database holds: a WhatsApp business token, sealed.
+ * The one Meta credential this database holds: a WhatsApp business token,
+ * sealed — as `invites.token_ciphertext` seals an invite link, but under a key
+ * of its own.
  *
  * Everything else here names its credential (`tokenEnvVar` above). A token
  * minted by Meta's Embedded Signup cannot be named — Meta hands it to the server
@@ -770,7 +772,8 @@ export const whatsappAccounts = pgTable(
  *
  * `lib/whatsapp/credentials.ts` is the only module that names this table, and
  * CI holds it to that (`credential-confinement`): no other module may select
- * from it, and that one never selects `envelope` without opening it.
+ * from it, and that one never selects a whole row; that it names `envelope`
+ * only where it opens it is review's.
  *
  * One row per account, keyed on the account and cascading with it: a credential
  * has no meaning once the account it reaches is gone, and keeping one would be
@@ -782,7 +785,7 @@ export const whatsappAccountCredentials = pgTable('whatsapp_account_credentials'
     .primaryKey()
     .references(() => whatsappAccounts.id, { onDelete: 'cascade' }),
 
-  /** `v1.<keyId>.<iv>.<ciphertext>.<tag>`, base64url. Never selected unopened. */
+  /** `v1.<keyId>.<iv>.<ciphertext>.<tag>`, base64url. Read only to be opened. */
   envelope: text('envelope').notNull(),
   /**
    * The key id inside the envelope, kept beside it so a page can say whether

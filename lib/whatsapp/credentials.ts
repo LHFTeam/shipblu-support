@@ -28,15 +28,18 @@ import type { CredentialStatus } from './credential-status';
  * caller's good intentions:
  *
  * - **The plaintext leaves this module through one export.** `storedTokenFor`
- *   opens an envelope; `lib/whatsapp/accounts.ts` is the only module allowed to
- *   call it, and the resolvers there are imported by the worker and never by
- *   anything under `app/`. So no code path on the web service decrypts a stored
- *   token — the web service only ever seals one, on the way in. CI holds both
- *   halves (`credential-confinement`). The reseal below opens envelopes too,
- *   and never lets what it opened out of the function.
- * - **`envelope` is never selected unopened.** Every read names its columns,
- *   and none but `storedTokenFor` and the reseal names that one, so no list,
- *   status or join can carry ciphertext into a page's props.
+ *   opens an envelope and returns what it opened; `lib/whatsapp/accounts.ts` is
+ *   the only module allowed to call it, and the resolvers there may be imported
+ *   only by the worker. `resealStoredCredentials` opens envelopes too, returns
+ *   none of them, and may be imported only by the rotation job. So no code path
+ *   on the web service decrypts a stored token — the web service only ever
+ *   seals one, on the way in. CI holds the imports (`credential-confinement`);
+ *   what it cannot see is a new export of `accounts.ts` that calls a resolver on
+ *   a page's behalf, and that is review's.
+ * - **No read selects a whole row.** Every read names its columns, and only
+ *   `storedTokenFor` and the reseal name `envelope` — CI refuses the empty
+ *   `select()` and `returning()` that would carry it out unopened; naming it
+ *   anywhere else is review's.
  * - **One source per account.** Storing a credential clears the account's
  *   token variable, and an account with a stored credential refuses a variable
  *   and a change of WABA id (`storedCredentialEditRefusal`): the envelope is
@@ -220,8 +223,8 @@ export async function storeBusinessToken(
 /**
  * The stored token for an account, opened — or null when none is stored.
  *
- * **The only export that decrypts**, and `lib/whatsapp/accounts.ts` the only
- * module that may call it (CI). Throws `CredentialKeyError` when the envelope
+ * **The only export that returns a plaintext token**, and
+ * `lib/whatsapp/accounts.ts` the only module that may call it (CI). Throws `CredentialKeyError` when the envelope
  * cannot be opened rather than answering null: null means "there is no stored
  * credential", and a caller that heard it would fall back to another token.
  *
@@ -261,6 +264,25 @@ export function storedCredentialExists() {
 }
 
 /**
+ * Whether an account has a stored credential, read in a statement of its own.
+ *
+ * For a caller that has just locked the account row. Under READ COMMITTED a
+ * statement's snapshot is taken before it waits for a lock, so an `exists()`
+ * read in the same statement as the `for update` sees the table as it was
+ * before the lock holder committed — a credential stored while this waited
+ * would read as absent. A second statement takes a fresh snapshot after the
+ * lock is granted, and sees it.
+ */
+async function lockedAccountHasCredential(tx: Executor, accountId: string): Promise<boolean> {
+  const [row] = await tx
+    .select({ keyId: credentials.keyId })
+    .from(credentials)
+    .where(eq(credentials.whatsappAccountId, accountId))
+    .limit(1);
+  return row !== undefined;
+}
+
+/**
  * Why an admin's edit of an account would break its stored credential, or null
  * when it would not.
  *
@@ -271,9 +293,11 @@ export function storedCredentialExists() {
  * sentence about authentication, and the cure would be the same "forget it
  * first" this sentence says now.
  *
- * Locks the account row, so a credential stored by a concurrent connection
- * cannot land between this check and the caller's update in the same
- * transaction.
+ * Locks the account row — the lock `storeBusinessToken` takes too — and only
+ * then asks whether a credential exists, in a separate statement
+ * (`lockedAccountHasCredential` says why it must be separate). So a credential
+ * stored by a concurrent connection is either seen here, or stored after the
+ * caller's update has committed and found the row as the update left it.
  */
 export async function storedCredentialEditRefusal(
   tx: Executor,
@@ -281,12 +305,12 @@ export async function storedCredentialEditRefusal(
   change: { wabaId: string; tokenEnvVar: string | null },
 ): Promise<string | null> {
   const [row] = await tx
-    .select({ wabaId: whatsappAccounts.wabaId, stored: storedCredentialExists() })
+    .select({ wabaId: whatsappAccounts.wabaId })
     .from(whatsappAccounts)
     .where(eq(whatsappAccounts.id, accountId))
     .for('update');
 
-  if (!row?.stored) return null;
+  if (!row || !(await lockedAccountHasCredential(tx, accountId))) return null;
 
   if (change.tokenEnvVar) {
     return (
@@ -348,8 +372,8 @@ export async function credentialStatuses(
 }
 
 /**
- * Meta refused the stored credential (190): record it on the row, and as an
- * event once per refusal rather than once per hourly sync.
+ * Meta refused the stored credential (190): record Meta's sentence on the row,
+ * and an event once per refusal rather than once per hourly sync.
  *
  * "Once per refusal" is a transition: the row was not already refused. A
  * success in between (`recordCredentialVerified`) clears the refusal, so the
@@ -404,7 +428,14 @@ export async function recordCredentialVerified(accountId: string): Promise<void>
  *
  * Separate from `forgetStoredCredential` so disconnecting the whole account can
  * write the `removed` event in the transaction that deletes the account: the
- * cascade would take the credential either way, and only this says who.
+ * cascade would take the credential either way, and only this says who. So it
+ * must run **before** the account row is deleted — afterwards the cascade has
+ * already taken the credential, and nothing is recorded.
+ *
+ * Locks the account row first, as `storeBusinessToken` does, and looks for the
+ * credential in a later statement, so a credential stored while this waited is
+ * the one removed and recorded rather than one the caller's delete cascades
+ * away in silence.
  *
  * Deliberately nothing at Meta. Unsubscribing the app from the WABA would
  * silence the number's inbound tickets as a side effect of a decision about a
@@ -416,6 +447,15 @@ export async function removeStoredCredential(
   accountId: string,
   actor: CredentialActor,
 ): Promise<boolean> {
+  const [account] = await tx
+    .select({ wabaId: whatsappAccounts.wabaId })
+    .from(whatsappAccounts)
+    .where(eq(whatsappAccounts.id, accountId))
+    .for('update');
+
+  // No account, no credential: the foreign key cascades.
+  if (!account) return false;
+
   const [removed] = await tx
     .delete(credentials)
     .where(eq(credentials.whatsappAccountId, accountId))
@@ -423,16 +463,9 @@ export async function removeStoredCredential(
 
   if (!removed) return false;
 
-  const [account] = await tx
-    .select({ wabaId: whatsappAccounts.wabaId })
-    .from(whatsappAccounts)
-    .where(eq(whatsappAccounts.id, accountId));
-
   await appendEvent(tx, {
     accountId,
-    // The account outlives the credential in this transaction; the fallback is
-    // for a caller that deleted the account first, and says so.
-    wabaId: account?.wabaId ?? 'unknown',
+    wabaId: account.wabaId,
     kind: 'removed',
     keyId: removed.keyId,
     actor,

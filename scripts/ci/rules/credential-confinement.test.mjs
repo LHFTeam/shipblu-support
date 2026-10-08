@@ -104,7 +104,14 @@ export const relational = () => db.query.whatsappAccountCredentials.findMany();
   });
 
   it('refuses a status type that grows a field able to hold the secret', async () => {
-    for (const field of ['envelope', 'ciphertext', 'token', 'accessToken', 'secretValue']) {
+    for (const field of [
+      'envelope',
+      'ciphertext',
+      'token',
+      'accessToken',
+      'storedToken',
+      'secretValue',
+    ]) {
       const found = await runRule('credential-confinement', {
         ...TREE,
         'lib/whatsapp/credential-status.ts': STATUS.replace(
@@ -130,9 +137,48 @@ export const relational = () => db.query.whatsappAccountCredentials.findMany();
     expect(found).toEqual([
       expect.objectContaining({
         where: 'app/(console)/inbox/page.tsx',
-        message: expect.stringMatching(/tokenForAccount into the web service/),
+        message: expect.stringMatching(/imports tokenForAccount outside the worker/),
       }),
       expect.objectContaining({ where: 'components/token-debug.tsx' }),
+    ]);
+  });
+
+  /**
+   * The shape AGENTS.md recommends for a job and an action that do the same
+   * thing — one shared lib/ function — is exactly how a resolver would reach
+   * the web service without anything under app/ naming it.
+   */
+  it('refuses a lib/ module wrapping a resolver, which a server action could import', async () => {
+    const found = await runRule('credential-confinement', {
+      ...TREE,
+      'lib/whatsapp/profile-refresh.ts':
+        "import { credentialsForPhoneNumberId } from './accounts';\nexport async function refreshProfile(id) {\n  return credentialsForPhoneNumberId(id);\n}\n",
+      'app/(console)/contacts/contact-actions.ts':
+        "'use server';\nimport { refreshProfile } from '@/lib/whatsapp/profile-refresh';\nexport async function refresh() {\n  return refreshProfile('1');\n}\n",
+    });
+
+    expect(found).toEqual([
+      expect.objectContaining({
+        where: 'lib/whatsapp/profile-refresh.ts',
+        message: expect.stringMatching(/credentialsForPhoneNumberId outside the worker/),
+      }),
+    ]);
+  });
+
+  it('keeps the reseal, which opens every envelope, to the rotation job', async () => {
+    const found = await runRule('credential-confinement', {
+      ...TREE,
+      'worker/handlers/rotate-whatsapp-credentials.ts':
+        "import { resealStoredCredentials } from '@/lib/whatsapp/credentials';\nexport const rotate = () => resealStoredCredentials({ dryRun: true });\n",
+      'app/(console)/admin/channels/rotate-actions.ts':
+        "'use server';\nimport { resealStoredCredentials } from '@/lib/whatsapp/credentials';\nexport async function rotate() {\n  return resealStoredCredentials({ dryRun: false });\n}\n",
+    });
+
+    expect(found).toEqual([
+      expect.objectContaining({
+        where: 'app/(console)/admin/channels/rotate-actions.ts',
+        message: expect.stringMatching(/imports resealStoredCredentials — only worker\/handlers/),
+      }),
     ]);
   });
 

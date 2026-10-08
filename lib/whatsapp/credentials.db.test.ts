@@ -231,9 +231,11 @@ describe('storing a business token', () => {
 
 describe('which token a send resolves to', () => {
   /**
-   * Pins the correlation in `storedCredentialExists`, which drizzle would
-   * otherwise render unqualified: two accounts, one credential, and only its
-   * own account may read as holding it.
+   * The correlation in `storedCredentialExists`: two accounts, one credential,
+   * and only its own account may read as holding it. Today the unqualified
+   * spelling would pass this too — the table has no `id` of its own for a bare
+   * name to find — so this is what fails, in the PR that gives it one, if the
+   * hand-written qualification is ever "tidied" back into `${table.column}`.
    */
   it('says which accounts hold a stored credential, and only those', async () => {
     const egypt = await account('Egypt', '111111');
@@ -326,6 +328,74 @@ describe("an admin's edit of an account with a stored credential", () => {
     expect(
       await refusal(plain.id, { wabaId: '555555', tokenEnvVar: 'WHATSAPP_TOKEN_DBTEST' }),
     ).toBeNull();
+  });
+});
+
+/**
+ * A credential stored while an admin's save or disconnect waits for the
+ * account's row lock. Under READ COMMITTED a statement's snapshot predates the
+ * lock it waits on, so a check folded into the locking statement would not see
+ * the credential the lock holder just committed — the save would then move the
+ * row to another WABA, or the disconnect would cascade the credential away with
+ * no record. Two connections, the store holding the lock while the other waits.
+ */
+describe('a credential stored while an edit waits for the row', () => {
+  async function storeHoldingTheLock(target: { id: string; wabaId: string }) {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let stored!: () => void;
+    const locked = new Promise<void>((resolve) => (stored = resolve));
+
+    const committing = db.transaction(async (tx) => {
+      await storeBusinessToken(tx, {
+        accountId: target.id,
+        wabaId: target.wabaId,
+        token: TOKEN,
+        inspection: null,
+        businessId: null,
+        actor: null,
+      });
+      stored();
+      await held;
+    });
+
+    await locked;
+    return { committing, release };
+  }
+
+  /** Long enough for the second connection to reach the lock and wait on it. */
+  const waitOnTheLock = () => new Promise((resolve) => setTimeout(resolve, 300));
+
+  it('the save sees it, and refuses to move the row to another WABA', async () => {
+    const egypt = await account('Egypt', '111111');
+    const { committing, release } = await storeHoldingTheLock(egypt);
+
+    const refusal = db.transaction((tx) =>
+      storedCredentialEditRefusal(tx, egypt.id, { wabaId: '444444', tokenEnvVar: null }),
+    );
+    await waitOnTheLock();
+    release();
+    await committing;
+
+    expect(await refusal).toMatch(/belongs to business account 111111/);
+  });
+
+  it('the disconnect removes it and records who did', async () => {
+    const egypt = await account('Egypt', '111111');
+    const mona = await admin();
+    const { committing, release } = await storeHoldingTheLock(egypt);
+
+    const removed = db.transaction(async (tx) => {
+      const found = await removeStoredCredential(tx, egypt.id, mona);
+      await tx.delete(whatsappAccounts).where(eq(whatsappAccounts.id, egypt.id));
+      return found;
+    });
+    await waitOnTheLock();
+    release();
+    await committing;
+
+    expect(await removed).toBe(true);
+    expect((await eventsFor(egypt.id)).map((event) => event.event)).toEqual(['stored', 'removed']);
   });
 });
 

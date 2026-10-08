@@ -76,7 +76,7 @@ export type WhatsAppCredentials = {
  * could put `DATABASE_URL` in the box and have it posted to graph.facebook.com.
  * They never see the value, which is precisely why the leak would be silent.
  *
- * The one credential the database does hold is a token Meta minted through
+ * The one Meta credential the database does hold is a token Meta minted through
  * Embedded Signup, which no person holds and so no variable could name; it is
  * sealed, and `./credentials` is the only module that touches it.
  */
@@ -160,9 +160,10 @@ export function resolveCredentialSource(
 /**
  * The access token for an account, and which credential it is.
  *
- * Worker-only, with the other resolvers below: nothing under `app/` may import
- * them (CI, `credential-confinement`), which is what makes "the web service
- * never decrypts a stored token" a property of the code rather than a promise.
+ * Worker-only, with the other resolvers below: only modules under `worker/`
+ * may import them (CI, `credential-confinement`), which is what makes "the web
+ * service never decrypts a stored token" a property of the code rather than a
+ * promise.
  *
  * The stored credential is asked for every time rather than trusted from the
  * row's `hasStoredToken`, so a credential stored or forgotten since the account

@@ -130,7 +130,9 @@ export async function syncWhatsAppTemplates(): Promise<void> {
         error.code === ACCESS_TOKEN_CODE
       ) {
         try {
-          await recordCredentialRefusal(account.id, explained);
+          // Meta's sentence, not ours: the credential's record is what Meta
+          // said about it, and the explanation is already on the account.
+          await recordCredentialRefusal(account.id, error.message);
         } catch (recordError) {
           log.error(`${account.name}: recording the refusal failed`, recordError);
         }
@@ -227,7 +229,10 @@ async function recordSync(accountId: string, error: string | null): Promise<void
       // Only on success: keeping the last good sync time visible is what makes
       // "connected, but stale since Tuesday" readable at a glance.
       ...(error ? {} : { lastSyncedAt: new Date() }),
-      lastSyncError: error?.slice(0, 500) ?? null,
+      // 2000, as a message's delivery error is: Meta's sentence plus the
+      // explanation after it runs past 500, and a cut there fell on the
+      // explanation — the half that says what to do.
+      lastSyncError: error?.slice(0, 2000) ?? null,
       updatedAt: new Date(),
     })
     .where(eq(whatsappAccounts.id, accountId));

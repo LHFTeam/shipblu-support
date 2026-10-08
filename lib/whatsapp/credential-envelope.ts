@@ -4,8 +4,9 @@ import type { KeyState } from './credential-status';
 /**
  * Sealing a WhatsApp business token for storage, and opening it again.
  *
- * The one credential this database holds. Everything else Meta-shaped lives in
- * the environment and is named from a row, so a dump contains nothing usable;
+ * The one Meta credential this database holds. Everything else Meta-shaped
+ * lives in the environment and is named from a row, so a dump contains nothing
+ * usable;
  * a token minted by Embedded Signup has no human holding it and no variable to
  * be named by, so it is stored — sealed, under a key the database never sees.
  * `plans/whatsapp-coexistence.md` has the decision and the alternatives it

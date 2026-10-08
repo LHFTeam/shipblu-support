@@ -76,14 +76,24 @@ describe('seal and unseal', () => {
     ]) {
       expect(() => unseal(envelope, ring(), binding)).toThrow(CredentialKeyError);
     }
+  });
 
-    // The key id is in the authenticated data too: relabelling an envelope
-    // with the previous key's id sends it to the other key and fails there.
-    const relabelled = envelope.replace(
-      `v1.${ring(KEY_A, KEY_B).current.id}.`,
-      `v1.${ring(KEY_B).current.id}.`,
+  /**
+   * The key id is in the authenticated data, not only in the label. Relabelling
+   * an envelope to a different key would fail anyway, at that key; this seals
+   * and opens with the *same* bytes under two ids, so the only thing that can
+   * refuse it is the id inside the authenticated data.
+   */
+  it('binds the key id: the same key under another id does not open it', () => {
+    const genuine = ring();
+    const sameBytesOtherId = { current: { ...genuine.current, id: 'deadbeef' }, previous: null };
+
+    const relabelled = seal(TOKEN, sameBytesOtherId, ROW).replace(
+      'v1.deadbeef.',
+      `v1.${genuine.current.id}.`,
     );
-    expect(() => unseal(relabelled, ring(KEY_A, KEY_B), ROW)).toThrow(/failed authentication/);
+
+    expect(() => unseal(relabelled, genuine, ROW)).toThrow(/failed authentication/);
   });
 
   it('refuses an envelope altered anywhere — IV, ciphertext or tag', () => {

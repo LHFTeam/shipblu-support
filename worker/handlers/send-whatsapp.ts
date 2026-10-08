@@ -5,7 +5,7 @@ import type { ClaimedJob } from '@/lib/queue';
 import { parseJobPayload } from '@/lib/queue/payloads';
 import { alreadySent } from './already-sent';
 import { subjectGone } from './subject-gone';
-import { credentialsForPhoneNumberId } from '@/lib/whatsapp/accounts';
+import { credentialsForPhoneNumberId, type WhatsAppCredentials } from '@/lib/whatsapp/accounts';
 import { sendingNumberFor } from '@/lib/whatsapp/conversation';
 import { WhatsAppApiError, sendTemplate, sendText } from '@/lib/whatsapp/client';
 import { explainAuthError } from '@/lib/whatsapp/errors';
@@ -60,7 +60,20 @@ export async function sendWhatsApp(job: ClaimedJob): Promise<void> {
   // The token belongs to the business account that owns `from`, not to the
   // installation: with two WABAs connected, sending with the wrong one is
   // rejected as a number the credential has no access to.
-  const credentials = await credentialsForPhoneNumberId(from);
+  //
+  // A credential that cannot be resolved — a stored one whose key is wrong or
+  // unset, a named variable missing from the group — fails every attempt the
+  // same way until a person fixes it, so the reason goes on the message where
+  // the agent is looking, rather than leaving it "sending" for good. Rethrown
+  // so the queue retries: `alreadySent` reads `failed` as unsent, and the
+  // attempt after the fix still delivers.
+  let credentials: WhatsAppCredentials;
+  try {
+    credentials = await credentialsForPhoneNumberId(from);
+  } catch (error) {
+    await markFailed(messageId, row.message.meta, errorMessage(error));
+    throw error;
+  }
 
   const meta = row.message.meta as SendMeta & Record<string, unknown>;
   const kind = meta.sendKind ?? 'text';

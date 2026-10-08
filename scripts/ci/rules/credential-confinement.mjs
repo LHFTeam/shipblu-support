@@ -29,15 +29,21 @@ import {
 //  3. `CredentialStatus`, the shape the admin page is handed, has no field that
 //     could hold the secret — that page renders its props into an RSC payload.
 //  4. Decryption has one road out: `unseal` is imported only by the owner,
-//     `storedTokenFor` only by `lib/whatsapp/accounts.ts`, and nothing under
-//     `app/` or `components/` imports the resolvers built on it. That is what
-//     "the web service never decrypts a stored token" means in code. Nothing
-//     re-exports those names, and nothing imports the three modules wholesale,
-//     because either would launder an import past the check above.
+//     `storedTokenFor` only by `lib/whatsapp/accounts.ts`,
+//     `resealStoredCredentials` only by the rotation job, and the resolvers
+//     built on `storedTokenFor` only by the worker. That is what "the web
+//     service never decrypts a stored token" means in code. An allowlist
+//     rather than "not from app/": a lib/ module wrapping a resolver — the
+//     shared-function shape `lib/meta/profile-refresh.ts` has, which a server
+//     action may import — reaches the web service without ever being under
+//     app/. A module outside worker/ that genuinely needs one is named in
+//     RESOLVER_IMPORTERS with its reason, so it arrives as a reviewed edit.
+//     Nothing re-exports those names, and nothing imports the three modules
+//     wholesale, because either would launder an import past the check.
 //
-// What it cannot see: a new export of accounts.ts that calls the resolvers and
-// is itself imported by a page. The resolvers' doc comments say they are
-// worker-only; that half is review's.
+// What it cannot see: a new export of accounts.ts itself that calls a resolver
+// and is imported by a page or action. The resolvers' doc comments say they
+// are worker-only; that half is review's.
 // ---------------------------------------------------------------------------
 
 const OWNER = 'lib/whatsapp/credentials.ts';
@@ -46,15 +52,23 @@ const ENVELOPE = 'lib/whatsapp/credential-envelope.ts';
 const ACCOUNTS = 'lib/whatsapp/accounts.ts';
 const STATUS = 'lib/whatsapp/credential-status.ts';
 
-/** The names that hand back a plaintext token, and who may import each. */
+/** The names that open an envelope, and who may import each. */
 const RESOLVERS = ['tokenForAccount', 'credentialsForAccount', 'credentialsForPhoneNumberId'];
 const IMPORTERS = new Map([
   ['unseal', new Set([OWNER])],
   ['storedTokenFor', new Set([ACCOUNTS])],
+  ['resealStoredCredentials', new Set(['worker/handlers/rotate-whatsapp-credentials.ts'])],
 ]);
 
+/**
+ * Modules outside `worker/` that may import a resolver, each with why. Empty
+ * today: every caller is a job handler. A module named here must not be
+ * imported by anything under app/ — that is the whole point of the list.
+ */
+const RESOLVER_IMPORTERS = new Map();
+
 const isTest = (file) => /\.test\.(ts|tsx|mts|mjs)$/.test(file);
-const isWebOnly = (file) => file.startsWith('app/') || file.startsWith('components/');
+const mayResolve = (file) => file.startsWith('worker/') || RESOLVER_IMPORTERS.has(file);
 
 export function checkCredentialConfinement() {
   const rule = 'credential-confinement';
@@ -122,7 +136,9 @@ export function checkCredentialConfinement() {
     } else {
       for (const field of shape[1].matchAll(/^\s{2}([A-Za-z0-9_$]+)\??:/gm)) {
         const name = field[1];
-        if (/envelope|cipher|plaintext|secret/i.test(name) || /^(access)?token$/i.test(name)) {
+        // `token` at the end catches `storedToken` and `accessToken`, and
+        // leaves `tokenType` — Meta's word for what kind of token, not one.
+        if (/envelope|cipher|plaintext|secret/i.test(name) || /token$/i.test(name)) {
           fail(
             rule,
             STATUS,
@@ -171,11 +187,11 @@ export function checkCredentialConfinement() {
             file,
             `imports ${name} — only ${[...allowed].join(', ')} may, so a decrypted token has one road out of lib/whatsapp/credentials.ts`,
           );
-        } else if (isWebOnly(file)) {
+        } else if (RESOLVERS.includes(name) && !mayResolve(file)) {
           fail(
             rule,
             file,
-            `imports ${name} into the web service — resolving a token opens the stored credential, and only the worker may (enqueue a job instead)`,
+            `imports ${name} outside the worker — resolving a token opens the stored credential, and a module outside worker/ can be reached from the web service (enqueue a job instead, or name this module in RESOLVER_IMPORTERS with its reason)`,
           );
         }
       }
