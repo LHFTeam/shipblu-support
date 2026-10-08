@@ -11,3 +11,4 @@ export * from './ops';
 export * from './kb';
 export * from './metrics';
 export * from './categorise-ai';
+export * from './canned-suggestions';

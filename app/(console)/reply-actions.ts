@@ -11,6 +11,7 @@ import { sendsByEmail } from '@/lib/tickets/outbound';
 import { htmlToText, sanitiseEmailHtml, textToHtml } from '@/lib/html/sanitize';
 import { afterMessageStored } from '@/lib/tickets/lifecycle';
 import { recordCannedUse } from '@/lib/tickets/canned-usage';
+import { recordSuggestionOutcome } from '@/lib/canned-suggest/outcome';
 import { isLocale } from '@/lib/kb/locale';
 import { storeAgentReply } from '@/lib/tickets/agent-reply';
 import {
@@ -52,6 +53,11 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
   const cannedResponseId = uuidField(formData, 'cannedResponseId');
   const cannedLocaleField = text(formData, 'cannedLocale');
   const cannedLocale = isLocale(cannedLocaleField) ? cannedLocaleField : null;
+  // The suggestion Jev made for this reply box, if the composer was showing
+  // one — posted whether or not the agent took it, so the report can grade Jev
+  // against what was sent either way. Also only a claim: the row is matched on
+  // this agent and this ticket before anything is written to it.
+  const cannedSuggestionId = uuidField(formData, 'cannedSuggestionId');
 
   if (!body) return { error: 'Write something first' };
 
@@ -132,7 +138,7 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
 
   const parentMessageId = await lastInboundChannelMessageId(conversationId);
 
-  await storeAgentReply(conversationId, conversation.channel, {
+  const messageId = await storeAgentReply(conversationId, conversation.channel, {
     authorAgentId: agent.id,
     bodyText: isEmail && html ? htmlToText(html) : body,
     bodyHtml: html,
@@ -159,7 +165,17 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
           : {},
   });
 
-  if (cannedResponseId) await recordCannedUse(agent.id, cannedResponseId, cannedLocale);
+  const used = cannedResponseId
+    ? await recordCannedUse(agent.id, cannedResponseId, cannedLocale)
+    : null;
+  if (cannedSuggestionId) {
+    await recordSuggestionOutcome(agent.id, cannedSuggestionId, {
+      conversationId,
+      messageId,
+      body,
+      used,
+    });
+  }
 
   if (resolveAfter) {
     await applyStatusCategory(agent, conversation.id, 'resolved');

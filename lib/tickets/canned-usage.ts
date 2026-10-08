@@ -2,7 +2,7 @@ import { and, eq, sql, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { cannedResponses } from '@/db/schema';
 import { logger } from '@/lib/log';
-import { resolveLocale, type CannedLocale } from './canned';
+import { resolveLocale, type BilingualBody, type CannedLocale } from './canned';
 import { cannedVisibleTo } from './lookups';
 
 const log = logger('canned');
@@ -25,6 +25,15 @@ const LOCALE_COLUMN = {
  * the column the split is a breakdown of.
  */
 type Increment = { usageCount: SQL } & Partial<Record<(typeof LOCALE_COLUMN)[CannedLocale], SQL>>;
+
+/** A use that was counted: the response, and the language it went out in. */
+export type CannedUse = {
+  id: string;
+  title: string;
+  /** Null when the composer did not say, and only the total moved. */
+  locale: CannedLocale | null;
+  bodies: BilingualBody;
+};
 
 /**
  * Records that an agent sent a reply carrying a canned response, and in which
@@ -54,21 +63,30 @@ type Increment = { usageCount: SQL } & Partial<Record<(typeof LOCALE_COLUMN)[Can
  * It never throws. A lost increment costs a ranking column one point, and
  * failing an agent's reply, which has already been stored and queued, because
  * a counter did not move would be the wrong trade.
+ *
+ * It answers with the response it counted, or null for none — so the one read
+ * that decided this was a real, visible use is also what a canned suggestion's
+ * outcome is scored against (`lib/canned-suggest/outcome.ts`), rather than a
+ * second read that could disagree with it about the same reply.
  */
 export async function recordCannedUse(
   agentId: string,
   id: string,
   wanted: CannedLocale | null,
-): Promise<void> {
+): Promise<CannedUse | null> {
   try {
     const [response] = await db
-      .select({ ar: cannedResponses.bodyTextAr, en: cannedResponses.bodyTextEn })
+      .select({
+        title: cannedResponses.title,
+        ar: cannedResponses.bodyTextAr,
+        en: cannedResponses.bodyTextEn,
+      })
       .from(cannedResponses)
       .where(and(eq(cannedResponses.id, id), cannedVisibleTo(agentId)))
       .limit(1);
 
     // Deleted since the composer rendered, or never this agent's to use.
-    if (!response) return;
+    if (!response) return null;
 
     const increment: Increment = { usageCount: sql`${cannedResponses.usageCount} + 1` };
     const locale = wanted ? resolveLocale(response, wanted) : null;
@@ -78,7 +96,9 @@ export async function recordCannedUse(
     }
 
     await db.update(cannedResponses).set(increment).where(eq(cannedResponses.id, id));
+    return { id, title: response.title, locale, bodies: { ar: response.ar, en: response.en } };
   } catch (error) {
     log.warn('could not record a use', error);
+    return null;
   }
 }

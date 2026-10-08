@@ -336,15 +336,21 @@ a call answered after 21:00 UTC reads as the previous day in UTC.
 **Background work.** Anything slow, external or retryable is a job — with one
 narrow exception, written down because it looks like a violation: a control an
 agent presses and _waits on_, whose entire output is the provider's answer, calls
-the provider in the action instead. `refreshRequesterProfile` is the only one
-today. The rule exists so a customer's ticket never depends on Graph being up and
+the provider in the action instead. `refreshRequesterProfile`, `claimThreadControl`
+and `refreshShipment` are the three today. The rule exists so a customer's ticket never depends on Graph being up and
 so unattended work gets retried; a person clicking a button is neither, and
 queueing it would put the one sentence they are waiting for into a worker log
 they cannot read — which is exactly how a missing Meta approval hid for a month
 (`docs/PROJECT-STATE.md` §6.27). Where this applies, the provider call itself
 stays in one shared function the job and the action both use
 (`lib/meta/profile-refresh.ts`), so the two paths cannot answer differently for
-the same subject. Everything else is a job: add the type
+the same subject. The reply box's canned-response suggestion
+(`/api/canned-suggestions`) is the same exception in a different shape: started
+by focus rather than a press, and a route rather than an action, because Next
+sends a client's actions one at a time and a provider call made as one would
+queue the agent's Send behind it. It is also _perishable_ — an answer arriving
+after the agent has started typing is never shown — so there is nothing for a
+queued retry to rescue, and a failure is recorded on its row instead. Everything else is a job: add the type
 to `JobType` in `lib/queue/index.ts`, a handler under `worker/handlers/`, and
 register it in `worker/handlers/index.ts`. CI checks that the three agree, and
 that every cron in `render.yaml` names a type that exists. Use `dedupeKey` for anything a webhook retry could
@@ -635,21 +641,25 @@ rule that contributed rather than from how many did, so a pile of single
 keywords is held below the auto band however many of them agree.
 See `plans/ticket-categorisation.md`.
 
-**The one AI provider, and the one thing it is allowed to touch.**
-`lib/typesafe/` calls TypeSafe's System One endpoint and `lib/categorise-ai/`
-asks it the categorisation question — the repo's first and only model call. It is
-a **shadow**: every answer lands in `ai_category_runs` and nothing else, so no
-rollup, no review queue and no primary ladder can see it. That separation is not
-caution to be tidied away later. `conversation_categories.confidence` is an
-evidence grade, hand-assigned and combined by noisy-OR, and three screens explain
-it as one; TypeSafe returns a probability. One column holding both would be
-undetectable from the outside. Anything wanting to promote a result argues for it
-in its own change.
+**The one AI provider, and the two things it is allowed to touch.**
+`lib/typesafe/` calls TypeSafe's System One endpoint, and two modules ask it a
+question: `lib/categorise-ai/` asks which category a message belongs to, and
+`lib/canned-suggest/` asks which canned response an agent would send next. Jev
+answers a `choice` over options the request offered, so neither can be handed a
+word of free text — the categoriser gets a key, the composer gets an id.
 
-Four rules hold, and the module is inert until somebody starts it — presence of
-`TYPESAFE_API_KEY` is the flag, the `instagramLoginConfigured()` device, and the
-key lives in the environment groups rather than the shared one because the job
-sends real customer text to a third party:
+The categoriser is a **shadow**: every answer lands in `ai_category_runs` and
+nothing else, so no rollup, no review queue and no primary ladder can see it.
+That separation is not caution to be tidied away later.
+`conversation_categories.confidence` is an evidence grade, hand-assigned and
+combined by noisy-OR, and three screens explain it as one; TypeSafe returns a
+probability. One column holding both would be undetectable from the outside.
+Anything wanting to promote a result argues for it in its own change.
+
+Four rules hold there, and the job is inert until somebody starts it — presence of
+`TYPESAFE_API_KEY` is its flag, the `instagramLoginConfigured()` device, and the
+key lives in the environment groups rather than the shared one because both uses
+send real customer text to a third party:
 
 - **The option list comes from `ticket_categories`, never from `TAXONOMY`.** A
   retired category leaves the rules path at once; if it did not leave the model's
@@ -671,6 +681,42 @@ The job is hand-run and on no cron — a shadow run is an experiment with a labe
 on it. `dryRun=true` builds every request, calls nothing and writes nothing, which
 is why it can sit in CI's `database` job loop and put the selection and report
 queries in front of real Postgres. See `plans/categorisation-through-typesafe.md`.
+
+The suggestion is **live**: its answer is shown to an agent, as grey text in an
+empty reply box that Tab (or Use, on a phone) puts in. It is still never
+_applied_, and that is the line it argues from — nothing reaches a customer
+without the agent taking the text and pressing Send, so `messages.author_agent_id`
+stays the agent and the `HUMAN_AGENT` rule above is untouched: it is the same act
+as picking from the list. Six rules hold:
+
+- **The admin switch is the flag; the key is a precondition.** Production holds
+  `TYPESAFE_API_KEY` for the shadow run, so key-as-flag would have switched
+  suggestions on for every agent on deploy. `canned_suggestion_settings` is a
+  one-row table (`suggestionsLive()` reads it through a 30-second memo), off
+  until an admin turns it on at `/admin/canned`, per database — so staging stays
+  off although it holds a key.
+- **The options are exactly the agent's own list, plus a `none` added in code.**
+  `listCannedResponses(agent)`, through `cannedVisibleTo`, so another agent's
+  personal response never leaves the building; and `none` is offered and named in
+  the instructions on every request rather than depending on a row that happens
+  to exist — the lesson of `meta.unclassified`.
+- **The history is read on the server, and only `reply` rows go.** The route takes
+  a ticket id and nothing else. Notes are an agent's private working and never
+  leave; `system` and `forward` rows are not the conversation.
+- **One call per agent, per ticket, per newest message.** The unique index on
+  `canned_suggestions (conversation_id, agent_id, anchor_message_id)` is the cache
+  and the race guard, so clicking in and out of the box, or two tabs, costs one
+  call. Nothing retries; a failure is a row with `error`.
+- **The text inserted is the stored body.** The route returns an id; the composer
+  resolves it against the list it already holds, through the same
+  `insertCannedResponse` the picker uses — so an accepted suggestion is counted in
+  `usage_count` exactly like a pick, and Jev's answer never becomes text.
+- **The grade is frozen at send.** `sendReply` posts the suggestion's id back,
+  shown or not, and `recordSuggestionOutcome` records what the reply carried and
+  whether that was Jev's choice (`sent_matches`, `sent_edit`). The report at
+  `/reports/canned-suggestions` counts those columns; it never re-judges them, so
+  deleting a canned response cannot re-grade the past. See
+  `plans/canned-suggestions-through-typesafe.md`.
 
 **Knowledge base article formatting.** `lib/kb/format.ts` is the standard, and
 it is code rather than prose because it is enforced: `normaliseArticleHtml`

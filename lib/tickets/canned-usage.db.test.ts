@@ -60,6 +60,20 @@ describe('recordCannedUse', () => {
     expect(await countsOf(id)).toEqual({ total: 3, ar: 2, en: 1 });
   });
 
+  // The answer is what a canned suggestion's outcome is graded against, so it
+  // has to be the response and the language that were actually counted.
+  it('answers with the response it counted and the language it counted it in', async () => {
+    const me = await agent();
+    const id = await insertResponse({ bodyTextEn: '' });
+
+    expect(await recordCannedUse(me, id, 'en')).toEqual({
+      id,
+      title: 'Where is my order',
+      locale: 'ar',
+      bodies: { ar: 'في الطريق.', en: '' },
+    });
+  });
+
   it('moves the total alone when the language is not known', async () => {
     const me = await agent();
     const id = await insertResponse();
@@ -140,7 +154,7 @@ describe('recordCannedUse', () => {
     const me = await agent();
     await expect(
       recordCannedUse(me, '00000000-0000-4000-8000-000000000000', 'ar'),
-    ).resolves.toBeUndefined();
-    await expect(recordCannedUse(me, 'not-a-uuid', 'en')).resolves.toBeUndefined();
+    ).resolves.toBeNull();
+    await expect(recordCannedUse(me, 'not-a-uuid', 'en')).resolves.toBeNull();
   });
 });
