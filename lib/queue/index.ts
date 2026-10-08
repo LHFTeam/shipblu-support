@@ -32,6 +32,7 @@ export type JobType =
   | 'backfill_message_locations'
   | 'backfill_meta_profiles'
   | 'backfill_categorise_ai'
+  | 'classify_priority'
   | 'normalise_kb_formatting'
   | 'seed_console_handbook'
   | 'seed_canned_responses'

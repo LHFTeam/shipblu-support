@@ -2,6 +2,7 @@ import { assignConversation } from '@/lib/assignment';
 import { maybeSendAutoResponse } from '@/lib/auto-response';
 import { runAutomations } from '@/lib/automations';
 import { categoriseFromMessage } from '@/lib/categorise/apply';
+import { enqueuePriorityClassification } from '@/lib/priority-ai/enqueue';
 import { linkShipmentsFromMessage } from '@/lib/shipments/links';
 import { scheduleSurvey } from '@/lib/csat';
 import { applySlaOnCreate, onCustomerReply } from '@/lib/sla';
@@ -182,5 +183,14 @@ export async function afterMessageStored(message: StoredMessage): Promise<void> 
     await categoriseFromMessage(message, 'notify');
   } catch (error) {
     log.error(`categorisation failed for message ${message.messageId}`, error);
+  }
+
+  // Only queued here; the provider call is a job (`classify_priority`). Every
+  // caller runs this after the message's insert has committed, which is what
+  // lets the job treat a missing row as gone rather than not yet written.
+  try {
+    await enqueuePriorityClassification(message);
+  } catch (error) {
+    log.error(`could not queue priority classification for ${message.messageId}`, error);
   }
 }

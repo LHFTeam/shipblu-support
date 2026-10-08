@@ -635,9 +635,9 @@ rule that contributed rather than from how many did, so a pile of single
 keywords is held below the auto band however many of them agree.
 See `plans/ticket-categorisation.md`.
 
-**The one AI provider, and the one thing it is allowed to touch.**
-`lib/typesafe/` calls TypeSafe's System One endpoint and `lib/categorise-ai/`
-asks it the categorisation question — the repo's first and only model call. It is
+**The one AI provider, and the two things it is allowed to touch.**
+`lib/typesafe/` calls TypeSafe's System One endpoint, and two modules ask it
+questions. `lib/categorise-ai/` asks the categorisation question, and it is
 a **shadow**: every answer lands in `ai_category_runs` and nothing else, so no
 rollup, no review queue and no primary ladder can see it. That separation is not
 caution to be tidied away later. `conversation_categories.confidence` is an
@@ -671,6 +671,22 @@ The job is hand-run and on no cron — a shadow run is an experiment with a labe
 on it. `dryRun=true` builds every request, calls nothing and writes nothing, which
 is why it can sit in CI's `database` job loop and put the selection and report
 queries in front of real Postgres. See `plans/categorisation-through-typesafe.md`.
+
+`lib/priority-ai/` asks how urgent each inbound customer message is, and it is
+**not** a shadow: under `PRIORITY_AI=apply` it writes `conversations.priority`,
+which moves SLA deadlines. It earns that where the categoriser could not because
+priority has no second quantity to be confused with — the column is a level, not
+an evidence grade, and one ticket in the archive had a priority set by hand.
+What it may not do is overrule anybody: `lib/priority-ai/decide.ts` is the only
+place that decides whether an answer may be written, and its rules are tests. A
+priority set by a person, a rule, a form default or an agent opening the ticket
+is never touched; after the first confident answer on a ticket it only ever
+raises; and every answer, applied or not, is a row in `ai_priority_runs` with
+its full distribution, because those rows are the only labels priority has. A
+new writer of `conversations.priority` calls `onPriorityChanged` after its write
+commits, as the console, the `set_priority` automation and the classifier do —
+the policies price their targets per priority. See
+`plans/priority-through-typesafe.md`.
 
 **Knowledge base article formatting.** `lib/kb/format.ts` is the standard, and
 it is code rather than prose because it is enforced: `normaliseArticleHtml`

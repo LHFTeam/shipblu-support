@@ -225,6 +225,13 @@
       "when": 1791357863041,
       "tag": "0031_material_snowbird",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1791417541754,
+      "tag": "0032_wild_hitman",
+      "breakpoints": true
     }
   ]
 }

@@ -2,6 +2,7 @@ import { and, asc, eq, exists, gte, inArray, isNull, lte, notInArray, sql } from
 import type { SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { aiCategoryRuns, conversationCategories, conversations, messages } from '@/db/schema';
+import { earlierMessages } from '@/lib/categorise-ai/context';
 import { categoryOptionsForAi } from '@/lib/categorise-ai/options';
 import { formatReport, reportFor } from '@/lib/categorise-ai/report';
 import { runOne, type MessageToRun, type RunSettings } from '@/lib/categorise-ai/run';
@@ -45,16 +46,6 @@ import { logger } from '@/lib/log';
 type Payload = ReturnType<typeof parseJobPayload<'backfill_categorise_ai'>>;
 
 const BATCH = 200;
-
-/**
- * How many earlier messages ride along as context.
- *
- * Three rather than the whole thread. These messages average 22 to 39 characters,
- * so three of them is a couple of lines and costs almost nothing; the whole thread
- * would let a long ticket's opening complaint dominate the classification of a
- * later "ok thanks", which is a different message about a different thing.
- */
-const CONTEXT_MESSAGES = 3;
 
 const TAG = '[backfill_categorise_ai]';
 const log = logger('backfill_categorise_ai');
@@ -243,24 +234,4 @@ function requestedChannels(raw: string | undefined): ConversationChannel[] | nul
   }
 
   return channels.length > 0 ? channels : null;
-}
-
-/** The inbound messages just before this one, oldest first. */
-async function earlierMessages(conversationId: string, before: Date): Promise<string[]> {
-  const rows = await db
-    .select({ bodyText: messages.bodyText })
-    .from(messages)
-    .where(
-      and(
-        eq(messages.conversationId, conversationId),
-        eq(messages.kind, 'reply'),
-        eq(messages.direction, 'inbound'),
-        sql`${messages.createdAt} < ${before.toISOString()}::timestamptz`,
-        sql`btrim(${messages.bodyText}) <> ''`,
-      ),
-    )
-    .orderBy(sql`${messages.createdAt} desc`)
-    .limit(CONTEXT_MESSAGES);
-
-  return rows.map((row) => row.bodyText).reverse();
 }

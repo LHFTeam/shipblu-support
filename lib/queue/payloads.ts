@@ -43,6 +43,9 @@ const JOB_PAYLOADS = {
   }),
 
   process_webhook: z.object({ webhookEventId: z.string() }),
+  // Written only by `enqueuePriorityClassification`, so `z.object`; a uuid
+  // because the id goes straight into a query, where a malformed one is 22P02.
+  classify_priority: z.object({ messageId: z.uuid() }),
   send_csat: z.object({ conversationId: z.string().min(1) }),
   // Facebook and Instagram hand over a URL, WhatsApp an id to exchange for one.
   // The WhatsApp half names no source, so a Meta payload that lost its URL
