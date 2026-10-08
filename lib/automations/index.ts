@@ -19,7 +19,7 @@ import { requesterLocale } from '@/lib/tickets/locale';
 import { automatedReplyBlocked, deliverAutomatedReply } from '@/lib/tickets/outbound';
 import { matches } from '@/lib/rules/conditions';
 import { conversationFacts } from '@/lib/rules/facts';
-import { onGroupChanged, onStatusChanged } from '@/lib/sla';
+import { onGroupChanged, onPriorityChanged, onStatusChanged } from '@/lib/sla';
 import { parseActions, type Action } from './actions';
 import { logger } from '@/lib/log';
 
@@ -181,6 +181,10 @@ async function applyAction(action: Action, ticket: TicketRow, ruleName: string):
         .set({ priority: action.value })
         .where(eq(conversations.id, conversationId));
       await record('priority_changed', { to: action.value });
+      // An on_create rule runs before the SLA is applied, so this is a no-op
+      // there and `applySlaOnCreate` reads the raised priority itself. An
+      // on_update or time rule escalating a live ticket is the case it is for.
+      await onPriorityChanged(conversationId);
       return;
 
     case 'set_status': {

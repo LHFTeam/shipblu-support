@@ -20,6 +20,15 @@ describe('describeEvent', () => {
     );
   });
 
+  it('names why the due dates moved', () => {
+    expect(describeEvent('sla_recalculated', { reason: 'priority', priority: 'urgent' })).toBe(
+      're-counted the due dates for urgent priority',
+    );
+    expect(describeEvent('sla_recalculated', { reason: 'group_hours' })).toBe(
+      "re-counted the due dates on the new group's business hours",
+    );
+  });
+
   it('explains a skipped assignment, and falls back to the raw reason it does not know', () => {
     expect(describeEvent('assignment_skipped', { reason: 'all_at_capacity' })).toBe(
       'could not assign it: everybody available was at their ticket limit',

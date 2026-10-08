@@ -296,6 +296,50 @@ export async function onStatusChanged(
  * same hours in every group.
  */
 export async function onGroupChanged(conversationId: string): Promise<void> {
+  await recomputeOwedClocks(conversationId, 'group_hours');
+}
+
+/**
+ * The ticket's priority changed: the clocks still owed take the new targets.
+ *
+ * Every policy prices its targets per priority — in production a high or urgent
+ * ticket is owed a first response in half the time a medium one is — and the
+ * policy's own targets were only ever read once, in `applySlaOnCreate`. So before
+ * this an agent who raised a ticket to urgent changed the badge and left the
+ * deadline at medium's, and the breach report measured the ticket against a
+ * target nobody was working to.
+ *
+ * The policy is not re-selected, for the reason `onGroupChanged` gives: which
+ * policy holds a ticket is what it was told when it arrived. What moves is which
+ * row of that policy's table applies, which is exactly what priority means. A
+ * raise can bring a due date into the past; that is the honest answer — the
+ * ticket was owed an urgent ticket's response from the moment it arrived — and
+ * the breach sweep reports it on its next pass.
+ *
+ * Called by every writer of `conversations.priority` after its write commits:
+ * the console, the `set_priority` automation and the priority classifier
+ * (`lib/priority-ai/run.ts`). On a ticket created a moment ago it is a no-op,
+ * because `applySlaOnCreate` has not written clocks yet and reads the priority
+ * as it then stands.
+ */
+export async function onPriorityChanged(conversationId: string): Promise<void> {
+  await recomputeOwedClocks(conversationId, 'priority');
+}
+
+/**
+ * Re-times every clock still owed, from the anchors it was first set from,
+ * against the ticket's current group and priority.
+ *
+ * Only a clock that is running moves. A target the old priority left unset is
+ * not created here, and one the new priority leaves unset keeps its due date:
+ * both are a policy configured differently per priority, which none of the
+ * policies in production are, and inventing or dropping an obligation mid-ticket
+ * is a different decision from re-timing one.
+ */
+async function recomputeOwedClocks(
+  conversationId: string,
+  reason: 'group_hours' | 'priority',
+): Promise<void> {
   try {
     const row = await loadConversation(conversationId);
     if (!row) return;
@@ -320,7 +364,7 @@ export async function onGroupChanged(conversationId: string): Promise<void> {
     const priority = conversation.priority as Priority;
     const target = targetFor(policy, priority);
 
-    /** The target plus the time already excused, in the new group's hours. */
+    /** The target plus the time already excused, in the ticket's current hours. */
     const recompute = (
       minutes: number | null,
       from: Date | null,
@@ -375,7 +419,8 @@ export async function onGroupChanged(conversationId: string): Promise<void> {
       type: 'sla_recalculated',
       actorLabel: 'sla',
       data: {
-        reason: 'group_hours',
+        reason,
+        priority,
         timezone: hours?.timezone ?? null,
         firstResponseDueAt: firstResponse?.toISOString() ?? null,
         nextResponseDueAt: nextResponse?.toISOString() ?? null,

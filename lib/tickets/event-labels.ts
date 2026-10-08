@@ -151,9 +151,13 @@ export function describeEvent(type: string, data: Record<string, unknown>): stri
     case 'comment_deleted':
       return 'deleted the comment from the post';
     case 'sla_recalculated':
-      return data.reason === 'group_hours'
-        ? "re-counted the due dates on the new group's business hours"
-        : 're-counted the due dates';
+      if (data.reason === 'group_hours') {
+        return "re-counted the due dates on the new group's business hours";
+      }
+      if (data.reason === 'priority') {
+        return `re-counted the due dates for ${String(data.priority ?? 'the new')} priority`;
+      }
+      return 're-counted the due dates';
 
     // The six categorisation events, and they need cases here for exactly the
     // reason `unverified_submitter` above does: the default prints the type
