@@ -260,6 +260,7 @@ export async function onStatusChanged(
         conversationId,
         type: 'sla_paused',
         actorLabel: 'sla',
+        createdAt: at,
         data: { at: at.toISOString() },
       });
       return;
@@ -291,8 +292,15 @@ export async function onStatusChanged(
     // before they wrote excuse nothing. `recomputeOwedClocks` counts it the same
     // way (`excusedSince`), so re-timing a ticket afterwards does not move a
     // deadline nothing changed — which crediting the whole pause here did.
+    //
+    // And it is the pause exactly as `completedPauses` will rebuild it — ending
+    // at `at`, which the event below is stamped with, and starting the recorded
+    // minutes before — so a re-time later credits the same minutes to the
+    // second. Stamped by the database instead, the event ended rounds after
+    // `at`, and a re-time of a ticket nothing had changed moved its reply
+    // deadline by a minute whenever the gap crossed a rounding boundary.
     const replyPaused = excusedSince(
-      [{ from: pausedSince, to: at }],
+      [{ from: new Date(at.getTime() - pausedMinutes * 60_000), to: at }],
       conversation.lastCustomerMessageAt ?? conversation.createdAt,
     );
 
@@ -317,6 +325,7 @@ export async function onStatusChanged(
       conversationId,
       type: 'sla_resumed',
       actorLabel: 'sla',
+      createdAt: at,
       data: { pausedMinutes },
     });
   } catch (error) {

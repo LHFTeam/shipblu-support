@@ -313,4 +313,43 @@ describe('onPriorityChanged around pauses', () => {
       );
     expect(recalculated.map((r) => r.data)).toEqual([]);
   });
+
+  it('rebuilds the pause the resume credited, not one ending when its event was written', async () => {
+    // The resume's shift is computed from `at`, taken when the call starts; its
+    // event used to be stamped by the database rounds later. A re-time rebuilt
+    // the pause to the stamp, so it disagreed by however far apart the two
+    // were — a minute, across a rounding boundary. Ten here, to see it at all.
+    const id = await ticketUnderPolicy();
+    const created = new Date(Date.now() - 6 * 60 * MINUTE);
+    await db.update(conversations).set({ createdAt: created }).where(eq(conversations.id, id));
+    await applySlaOnCreate(id);
+    await onAgentReply(id, new Date(created.getTime() + 30 * MINUTE));
+
+    const parkedAt = new Date(Date.now() - 4 * 60 * MINUTE);
+    const wroteAt = new Date(Date.now() - 2 * 60 * MINUTE);
+    const resumedAt = new Date(Date.now() - 10 * MINUTE);
+    await db
+      .insert(conversationEvents)
+      .values({ conversationId: id, type: 'sla_paused', actorLabel: 'sla', createdAt: parkedAt });
+    await db
+      .update(conversations)
+      .set({ lastCustomerMessageAt: wroteAt })
+      .where(eq(conversations.id, id));
+    await onCustomerReply(id, wroteAt);
+    await onStatusChanged(id, false, resumedAt);
+
+    const [resumed] = await db
+      .select({ due: conversations.nextResponseDueAt })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+
+    await db.update(conversations).set({ priority: 'low' }).where(eq(conversations.id, id));
+    await onPriorityChanged(id);
+
+    const [after] = await db
+      .select({ due: conversations.nextResponseDueAt })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+    expect(after!.due).toEqual(resumed!.due);
+  });
 });
