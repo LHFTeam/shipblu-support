@@ -251,6 +251,24 @@ describe('classifyMessagePriority: apply', () => {
     expect(result).toMatchObject({ outcome: 'not_raised', predicted: 'low' });
     expect(await priorityOf(id)).toBe('urgent');
   });
+  it('does not let the opening message lower a ticket a later one already raised', async () => {
+    const id = await ticket();
+    const opening = await inbound(id, 'السلام عليكم', { createdAt: new Date(Date.now() - MINUTE) });
+    const later = await inbound(id, 'هرفع قضية لو فلوس التحصيل موصلتش');
+
+    // The later message's job runs first — concurrency, or the opening one's retry.
+    answers('urgent');
+    expect(await classifyMessagePriority(later, { baseUrl: BASE })).toMatchObject({
+      outcome: 'applied',
+    });
+
+    answers('low', 0.9);
+    expect(await classifyMessagePriority(opening, { baseUrl: BASE })).toMatchObject({
+      outcome: 'not_raised',
+    });
+    expect(await priorityOf(id)).toBe('urgent');
+  });
+
   it('does not lower on a later message though nothing before it was confident', async () => {
     const id = await ticket();
     const first = await inbound(id, 'هرفع قضية لو فلوس التحصيل موصلتش', {
@@ -439,6 +457,19 @@ describe('classifyMessagePriority: shadow, skips and failures', () => {
       outcome: 'not_raised',
     });
     expect(await priorityOf(id)).toBe('medium');
+  });
+
+  it('classifies a person writing from a mailing-list address', async () => {
+    // `isAutomated` is set by a List-Id header; a merchant's Google Group has one.
+    const id = await ticket({ channel: 'email' });
+    const messageId = await inbound(id, 'We will take legal action: COD for 40 orders is missing', {
+      meta: { isAutomated: true, isAutoReply: false, isBounce: false },
+    });
+    answers('urgent');
+
+    expect(await classifyMessagePriority(messageId, { baseUrl: BASE })).toMatchObject({
+      outcome: 'applied',
+    });
   });
 
   it('answers gone for a message that does not exist', async () => {

@@ -280,17 +280,36 @@ export async function onStatusChanged(
     // first-response due date of a ticket that was answered hours ago would
     // rewrite history rather than pause it.
     const conversation = row.conversation;
-    const shift = (due: Date | null, satisfied: Date | null): Date | null => {
+    const shift = (due: Date | null, satisfied: Date | null, minutes: number): Date | null => {
       if (!due || satisfied) return due;
-      return dueAt(hours, pausedMinutes, due);
+      return dueAt(hours, minutes, due);
     };
+
+    // The reply clock is owed only the part of the pause after the customer's
+    // latest message, which is where `onCustomerReply` started it: a customer
+    // writing to a parked ticket set it from that instant, and the hours parked
+    // before they wrote excuse nothing. `recomputeOwedClocks` counts it the same
+    // way (`excusedSince`), so re-timing a ticket afterwards does not move a
+    // deadline nothing changed — which crediting the whole pause here did.
+    const replyPaused = excusedSince(
+      [{ from: pausedSince, to: at }],
+      conversation.lastCustomerMessageAt ?? conversation.createdAt,
+    );
 
     await db
       .update(conversations)
       .set({
-        firstResponseDueAt: shift(conversation.firstResponseDueAt, conversation.firstRespondedAt),
-        nextResponseDueAt: shift(conversation.nextResponseDueAt, null),
-        resolutionDueAt: shift(conversation.resolutionDueAt, conversation.resolvedAt),
+        firstResponseDueAt: shift(
+          conversation.firstResponseDueAt,
+          conversation.firstRespondedAt,
+          pausedMinutes,
+        ),
+        nextResponseDueAt: shift(conversation.nextResponseDueAt, null, replyPaused),
+        resolutionDueAt: shift(
+          conversation.resolutionDueAt,
+          conversation.resolvedAt,
+          pausedMinutes,
+        ),
       })
       .where(eq(conversations.id, conversationId));
 
@@ -512,8 +531,10 @@ async function completedPauses(conversationId: string): Promise<Pause[]> {
       continue;
     }
 
-    // The resume records the minutes it credited, and that figure is what the
-    // due dates were actually moved by; the pause event is the fallback.
+    // The resume records the whole pause, which is what it moved the clocks
+    // anchored at `created_at` by — the reply clock it moved by the part after
+    // its own anchor, the same clipping `excusedSince` applies. The pause event
+    // is the fallback.
     const recorded = (row.data as { pausedMinutes?: unknown } | null)?.pausedMinutes;
     const minutes =
       typeof recorded === 'number' && Number.isFinite(recorded)

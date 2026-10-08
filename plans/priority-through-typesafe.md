@@ -51,10 +51,15 @@ tests.
   classifier gives, so the first confident answer was most often a `low` for
   content-free text. Lowering is a judgement about the whole ticket, and only
   the opening message is the whole ticket.
-- **Machine mail is skipped.** An autoresponder, a bounce or anything
-  `lib/email/loop-protection.ts` flags as automated is not the customer — and a
+- **Autoresponders and bounces are skipped.** Neither is the customer, and a
   bounce's "delivery failed: permanent error" reads as urgent to anything not
-  told what it is.
+  told what it is. Not the broader `isAutomated` flag: a `List-Id` header sets
+  it, so a merchant writing from a Google Group carries it, and a skip writes no
+  run row that would show the gap.
+- **"Opening message" is judged by evidence as well as by timestamp.** Jobs run
+  concurrently and retry out of order, so the opening message can be answered
+  after a later one has already raised the ticket. Lowering therefore also
+  needs no other message on the ticket to have had a confident answer yet.
 - **`low` is the answer for a message too vague to judge.** The categoriser
   offers `meta.unclassified` for the same reason: most of this archive is a
   22-to-39 character fragment, and a model with no way out pushes "؟" upwards.

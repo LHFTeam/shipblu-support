@@ -49,6 +49,19 @@ export type PriorityOutcome =
   /** No answer: the provider refused permanently. */
   | 'failed';
 
+/**
+ * The outcomes that are a confident answer about some message on the ticket.
+ * Once one exists the ticket's opening has been judged, whatever order the jobs
+ * ran in, so no other message's answer may lower it (rule 3).
+ * `set_by_person` is not one: it says only that the answer was not allowed to act.
+ */
+export const CONFIDENT_OUTCOMES = [
+  'applied',
+  'would_apply',
+  'unchanged',
+  'not_raised',
+] as const satisfies readonly PriorityOutcome[];
+
 /** The value of the column a ticket is created with (`conversations.priority`). */
 export const DEFAULT_PRIORITY: Priority = 'medium';
 
@@ -64,7 +77,10 @@ export type DecisionInput = {
   lastApplied: Priority | null;
   /** A person, a rule, a form or an agent-opened ticket chose the priority. */
   ownedElsewhere: boolean;
-  /** This is the customer's first message on the ticket. */
+  /**
+   * This is the customer's opening message, and no other message on the ticket
+   * has had a confident answer yet — see `CONFIDENT_OUTCOMES`.
+   */
   firstMessage: boolean;
 };
 

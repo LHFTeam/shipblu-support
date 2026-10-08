@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, ne } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   aiPriorityRuns,
@@ -23,7 +23,7 @@ import {
   typesafeConfigured,
   typesafeModel,
 } from '@/lib/typesafe/client';
-import { DEFAULT_PRIORITY, decide, type PriorityOutcome } from './decide';
+import { CONFIDENT_OUTCOMES, DEFAULT_PRIORITY, decide, type PriorityOutcome } from './decide';
 import { PRIORITY_QUESTION, priorityRequest } from './request';
 import { priorityAiMinProbability, priorityAiMode, type PriorityAiMode } from './settings';
 
@@ -169,7 +169,7 @@ export async function classifyMessagePriority(
       .limit(1);
     if (!ticket) return null;
 
-    const facts = await priorityFacts(tx, row.conversationId, ticket.formId, mode);
+    const facts = await priorityFacts(tx, row.conversationId, ticket.formId, mode, messageId);
 
     // Shadow mode writes nothing, so left alone every later message on a ticket
     // would be weighed against `medium` and never against the level shadow mode
@@ -189,7 +189,11 @@ export async function classifyMessagePriority(
       current: simulated ?? ticket.priority,
       lastApplied: simulated ?? facts.lastApplied,
       ownedElsewhere: facts.ownedElsewhere,
-      firstMessage: earlier.length === 0,
+      // Opening by timestamp *and* by evidence: jobs run concurrently and retry
+      // out of order, so the opening message can be answered after a later one
+      // has already raised the ticket. Without the second test its "hello"
+      // would then lower a ticket another message made urgent.
+      firstMessage: earlier.length === 0 && !facts.otherConfident,
     });
 
     // The run row first. Two deliveries of one job racing past the check above
@@ -280,15 +284,21 @@ function skipReason(row: LoadedRow): string | null {
 }
 
 /**
- * An autoresponder, a bounce, or anything else `lib/email/loop-protection.ts`
- * found a machine's signature on. None of them is the customer saying how
- * urgent anything is, and a bounce's text — "delivery failed", "permanent
- * error" — reads as urgent to anything that has not been told what it is.
+ * An autoresponder or a bounce: neither is the customer saying how urgent
+ * anything is, and a bounce's text — "delivery failed", "permanent error" —
+ * reads as urgent to anything that has not been told what it is.
+ *
+ * Not `isAutomated`, which `lib/email/loop-protection.ts` documents as the broad
+ * guess for "do not auto-reply", where a wrong yes costs nothing: it is set by a
+ * `List-Id` header and by a `notifications@` sender, so a merchant writing from
+ * a Google Group about forty missing COD payments carries it. Here a wrong yes
+ * would hide exactly that ticket, and a skip writes no run row, so nothing
+ * would show the gap.
  */
 function isMachineMail(meta: unknown): boolean {
   if (typeof meta !== 'object' || meta === null) return false;
   const flags = meta as Record<string, unknown>;
-  return flags.isAutoReply === true || flags.isBounce === true || flags.isAutomated === true;
+  return flags.isAutoReply === true || flags.isBounce === true;
 }
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -304,10 +314,12 @@ async function priorityFacts(
   conversationId: string,
   formId: string | null,
   mode: Exclude<PriorityAiMode, 'off'>,
+  messageId: string,
 ): Promise<{
   ownedElsewhere: boolean;
   lastApplied: Priority | null;
   lastWouldApply: Priority | null;
+  otherConfident: boolean;
 }> {
   const events = await tx
     .select({
@@ -368,7 +380,19 @@ async function priorityFacts(
     lastWouldApply = shadowed?.predicted ?? null;
   }
 
-  return { ownedElsewhere, lastApplied, lastWouldApply };
+  const [confident] = await tx
+    .select({ id: aiPriorityRuns.id })
+    .from(aiPriorityRuns)
+    .where(
+      and(
+        eq(aiPriorityRuns.conversationId, conversationId),
+        ne(aiPriorityRuns.messageId, messageId),
+        inArray(aiPriorityRuns.outcome, [...CONFIDENT_OUTCOMES]),
+      ),
+    )
+    .limit(1);
+
+  return { ownedElsewhere, lastApplied, lastWouldApply, otherConfident: Boolean(confident) };
 }
 
 async function recordFailure(

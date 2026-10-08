@@ -11,7 +11,13 @@ import {
 } from '@/db/schema';
 import { runAutomations } from '@/lib/automations';
 import { withCleanDatabase } from '@/lib/testing/db';
-import { applySlaOnCreate, onAgentReply, onPriorityChanged } from './index';
+import {
+  applySlaOnCreate,
+  onAgentReply,
+  onCustomerReply,
+  onPriorityChanged,
+  onStatusChanged,
+} from './index';
 
 /**
  * A priority change re-times the clocks still owed.
@@ -203,5 +209,52 @@ describe('onPriorityChanged around pauses', () => {
     expect((await clocks(id)).resolutionDueAt!.getTime()).toBe(
       before.resolutionDueAt!.getTime() - 240 * MINUTE,
     );
+  });
+
+  it('agrees with the resume about a pause the customer wrote in the middle of', async () => {
+    const id = await ticketUnderPolicy();
+    // Opened six hours ago, so the pause below falls inside its life.
+    const created = new Date(Date.now() - 6 * 60 * MINUTE);
+    await db.update(conversations).set({ createdAt: created }).where(eq(conversations.id, id));
+    await applySlaOnCreate(id);
+    await onAgentReply(id, new Date(created.getTime() + 30 * MINUTE));
+
+    // Parked, the customer writes while it is parked, then it is reopened now.
+    const parkedAt = new Date(Date.now() - 4 * 60 * MINUTE);
+    const wroteAt = new Date(Date.now() - 2 * 60 * MINUTE);
+    await db
+      .insert(conversationEvents)
+      .values({ conversationId: id, type: 'sla_paused', actorLabel: 'sla', createdAt: parkedAt });
+    await db
+      .update(conversations)
+      .set({ lastCustomerMessageAt: wroteAt })
+      .where(eq(conversations.id, id));
+    await onCustomerReply(id, wroteAt);
+    await onStatusChanged(id, false);
+
+    const [resumed] = await db
+      .select({ due: conversations.nextResponseDueAt })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+
+    // Same targets as medium: a re-time must change nothing and say nothing.
+    await db.update(conversations).set({ priority: 'low' }).where(eq(conversations.id, id));
+    await onPriorityChanged(id);
+
+    const [after] = await db
+      .select({ due: conversations.nextResponseDueAt })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+    expect(after!.due).toEqual(resumed!.due);
+    const recalculated = await db
+      .select()
+      .from(conversationEvents)
+      .where(
+        and(
+          eq(conversationEvents.conversationId, id),
+          eq(conversationEvents.type, 'sla_recalculated'),
+        ),
+      );
+    expect(recalculated.map((r) => r.data)).toEqual([]);
   });
 });
