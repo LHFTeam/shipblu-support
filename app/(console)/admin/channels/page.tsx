@@ -8,24 +8,57 @@ import {
   listWhatsAppAccounts,
 } from '@/lib/admin/settings';
 import { requirePermission } from '@/lib/auth/guard';
+import { can } from '@/lib/auth/permissions';
 import { env } from '@/lib/env';
 import { listFolderOptions } from '@/lib/kb/admin';
+import { canRequestSync, parseCoexistence, SYNC_TYPES } from '@/lib/whatsapp/coexistence';
+import { credentialStatuses } from '@/lib/whatsapp/credentials';
+import { coexistenceReadiness } from '@/lib/whatsapp/onboarding';
+import { listLatestOnboardings } from '@/lib/whatsapp/onboarding-reads';
+import { isOnboardingShown } from '@/lib/whatsapp/onboarding-view';
 import { offerableFaqFolders, parseWidgetConfig } from '@/lib/widget/config';
+import {
+  CoexistenceBadges,
+  ConnectBusinessAppNumber,
+  OnboardingProgress,
+  RequestSyncAgain,
+} from './coexistence-forms';
 import { ChannelEditor, ChannelForm, WebchatSettings } from './forms';
 import { NewWhatsAppAccount, WhatsAppAccountEditor, type WhatsAppAccountRow } from './waba-forms';
 
 export const dynamic = 'force-dynamic';
 
 export default async function ChannelsPage() {
-  await requirePermission('admin.channels');
+  const agent = await requirePermission('admin.channels');
+  // Connecting a number stores a credential and imports a business's chats,
+  // which is a separate thing to hand out from renaming a channel; the page
+  // offers the button, the copy buttons and "forget" only to those who have it.
+  const canConnect = can(agent, 'admin.channels.connect');
 
-  const [channelList, groupList, accountList, templateCounts, folderList] = await Promise.all([
+  const [
+    channelList,
+    groupList,
+    accountList,
+    templateCounts,
+    folderList,
+    credentials,
+    onboardings,
+  ] = await Promise.all([
     listChannelsForAdmin(),
     listGroupNames(),
     listWhatsAppAccounts(),
     countTemplatesByAccount(),
     listFolderOptions(),
+    credentialStatuses(),
+    listLatestOnboardings(),
   ]);
+
+  // Read on the server, where the variables are. Not ready is still a page:
+  // the card names what is missing and where to set it.
+  const readiness = coexistenceReadiness();
+  // One clock for every sentence on the page, so the badge on a row and the
+  // card above it cannot disagree about whether a window has closed.
+  const now = new Date();
 
   // The same rule `saveChannel` validates against, so the picker cannot offer a
   // folder the action would refuse.
@@ -55,6 +88,7 @@ export default async function ChannelsPage() {
       .map((channel) => channel.name),
     templateCount: templatesByAccount.get(account.id)?.approved ?? 0,
     templateTotal: templatesByAccount.get(account.id)?.total ?? 0,
+    credential: credentials.get(account.id) ?? null,
   }));
 
   // The WABA the environment already names, offered as a starting value when no
@@ -67,6 +101,20 @@ export default async function ChannelsPage() {
       ? configuredWabaId
       : null;
 
+  // The group a new number most likely wants: the one the existing WhatsApp
+  // number routes to, when there is exactly one to copy. Two numbers in two
+  // groups is a question the card asks rather than guesses.
+  const whatsappChannels = channelList.filter((channel) => channel.type === 'whatsapp');
+  const suggestedGroupId =
+    whatsappChannels.length === 1 ? (whatsappChannels[0]?.defaultGroupId ?? null) : null;
+
+  const connectProps = { readiness, groups: groupList, suggestedGroupId };
+
+  // The latest attempt per number, while there is something to watch: running,
+  // failed, or connected within the day. A card per number rather than per
+  // attempt, so a retry replaces its predecessor instead of stacking under it.
+  const shownOnboardings = onboardings.filter((onboarding) => isOnboardingShown(onboarding, now));
+
   return (
     <div className="flex flex-col gap-8">
       <section>
@@ -74,7 +122,10 @@ export default async function ChannelsPage() {
           title="WhatsApp business accounts"
           description="One connection per WABA. Numbers, templates and media are all scoped to a business account by Meta, so which one a number belongs to decides which credential it sends with and which templates an agent may pick."
           actions={
-            <NewWhatsAppAccount suggestedWabaId={unadopted} isFirst={accountList.length === 0} />
+            <>
+              {canConnect ? <ConnectBusinessAppNumber {...connectProps} mode="connect" /> : null}
+              <NewWhatsAppAccount suggestedWabaId={unadopted} isFirst={accountList.length === 0} />
+            </>
           }
         />
 
@@ -85,14 +136,21 @@ export default async function ChannelsPage() {
             second app secret nobody can configure. */}
         <p className="mb-3 text-xs text-[var(--muted-foreground)]">
           Every account here must sit under the same Meta app: one app secret verifies every inbound
-          webhook and one verify token answers every handshake. A separate token per account is fine
-          — an account that needs one names the variable holding it.
+          webhook and one verify token answers every handshake. A number connected through
+          Meta&rsquo;s window is under this app by construction — the window is opened as it, and
+          the credential it mints is stored sealed. An account added by its ids sends with the
+          shared token, or with a variable it names.
         </p>
 
         <div className="flex flex-col gap-2">
           {accounts.map((account) => (
             <Card key={account.id}>
-              <WhatsAppAccountEditor account={account} />
+              <WhatsAppAccountEditor
+                account={account}
+                connect={connectProps}
+                canConnect={canConnect}
+                now={now}
+              />
             </Card>
           ))}
         </div>
@@ -109,8 +167,31 @@ export default async function ChannelsPage() {
       <section>
         <PageHeader
           title="Channels"
-          description="Addresses and routing only. Access tokens and webhook secrets are hardcoded and live as server environment variables, so a database dump never contains a usable credential."
+          description="Addresses and routing only. Credentials live in the environment — or, for a number connected through Meta, sealed in the database under a key the database never sees — so a dump never contains a usable token."
         />
+
+        {shownOnboardings.length > 0 ? (
+          <div className="mb-4 flex flex-col gap-2">
+            {shownOnboardings.map((onboarding) => {
+              const channel = onboarding.channelId
+                ? channelList.find((row) => row.id === onboarding.channelId)
+                : undefined;
+              const account = accountList.find((row) => row.wabaId === onboarding.wabaId);
+              return (
+                <OnboardingProgress
+                  key={onboarding.id}
+                  onboarding={onboarding}
+                  coexistence={channel ? parseCoexistence(channel.config) : null}
+                  channelName={channel?.name ?? null}
+                  accountName={account?.name ?? null}
+                  credential={account ? (credentials.get(account.id) ?? null) : null}
+                  canConnect={canConnect}
+                  now={now}
+                />
+              );
+            })}
+          </div>
+        ) : null}
 
         <ul className="mb-4 divide-y divide-[var(--border)] rounded-xl border border-[var(--border)] bg-[var(--surface)] text-sm">
           {channelList.length === 0 ? (
@@ -121,12 +202,27 @@ export default async function ChannelsPage() {
           {channelList.map((channel) => {
             const account = accounts.find((row) => row.id === channel.whatsappAccountId);
             const isWhatsApp = channel.type === 'whatsapp' || channel.type === 'whatsapp_bot';
+            const coexistence =
+              channel.type === 'whatsapp' ? parseCoexistence(channel.config) : null;
+
+            // A number that was disconnected on the phone, or whose copy window
+            // closed with a copy never made, is reconnected through the same
+            // window it was connected through.
+            const windowClosed =
+              coexistence !== null &&
+              SYNC_TYPES.some((type) => {
+                const permission = canRequestSync(coexistence, type, now);
+                return !permission.ok && permission.reason === 'window_closed';
+              });
+            const reconnectable =
+              coexistence !== null && (coexistence.disconnected !== undefined || windowClosed);
 
             return (
               <li key={channel.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
                 <ChannelBadge channel={channel.type} />
                 <span className="font-medium">{channel.name}</span>
                 {!channel.isActive ? <Badge tone="neutral">inactive</Badge> : null}
+                {coexistence ? <CoexistenceBadges config={channel.config} now={now} /> : null}
                 {/* A number with no account sends with the default one's
                     credential. Fine while there is exactly one account, and a
                     real hazard once there are two — so it is only called out
@@ -137,21 +233,46 @@ export default async function ChannelsPage() {
                   <Badge tone="warning">no business account</Badge>
                 ) : null}
                 <span className="ms-auto text-xs text-[var(--muted-foreground)]">
-                  {isWhatsApp
-                    ? `${(channel.config.phoneNumberId as string) || 'no phone number id'}${
-                        account ? ` · ${account.name}` : ''
-                      }`
-                    : channel.type === 'facebook' || channel.type === 'instagram'
-                      ? 'hardcoded in server environment variables'
-                      : channel.type === 'webchat'
-                        ? 'the widget'
-                        : (channel.config.address as string) || 'no address'}
+                  {coexistence
+                    ? `${coexistence.displayPhoneNumber ?? (channel.config.phoneNumberId as string)}${
+                        coexistence.verifiedName ? ` · ${coexistence.verifiedName}` : ''
+                      }${account ? ` · ${account.name}` : ''}`
+                    : isWhatsApp
+                      ? `${(channel.config.phoneNumberId as string) || 'no phone number id'}${
+                          account ? ` · ${account.name}` : ''
+                        }`
+                      : channel.type === 'facebook' || channel.type === 'instagram'
+                        ? 'hardcoded in server environment variables'
+                        : channel.type === 'webchat'
+                          ? 'the widget'
+                          : (channel.config.address as string) || 'no address'}
                 </span>
+                {coexistence && canConnect && channel.isActive
+                  ? SYNC_TYPES.map((type) => {
+                      if (!canRequestSync(coexistence, type, now).ok) return null;
+                      const slot = coexistence.syncs[type];
+                      return (
+                        <RequestSyncAgain
+                          key={type}
+                          channelId={channel.id}
+                          type={type}
+                          again={Boolean(slot && 'error' in slot)}
+                        />
+                      );
+                    })
+                  : null}
                 <ChannelEditor
                   channel={channel}
                   groups={groupList}
                   whatsappAccounts={accountChoices}
                 />
+                {reconnectable && canConnect ? (
+                  <ConnectBusinessAppNumber
+                    {...connectProps}
+                    suggestedGroupId={channel.defaultGroupId}
+                    mode="reconnect"
+                  />
+                ) : null}
               </li>
             );
           })}

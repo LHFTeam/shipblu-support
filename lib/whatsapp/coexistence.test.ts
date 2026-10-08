@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { canRequestSync, parseCoexistence, SYNC_WINDOW_MS } from './coexistence';
+import {
+  canRequestSync,
+  coexistenceBadges,
+  historyDone,
+  isSyncing,
+  parseCoexistence,
+  SYNC_STALE_MS,
+  SYNC_WINDOW_MS,
+} from './coexistence';
 
 /**
  * The copy window is the one decision here that costs a business something
@@ -86,5 +94,146 @@ describe('canRequestSync', () => {
       reason: 'window_closed',
       sentence: expect.stringMatching(/24 hours/),
     });
+  });
+});
+
+describe('historyDone and isSyncing', () => {
+  const requested = (extra = {}) => ({
+    history: { requestId: 'r-1', requestedAt: ONBOARDED, ...extra },
+  });
+
+  it('is done when every phase reached 100, whatever order they finished in', () => {
+    expect(historyDone(connected())).toBe(false);
+    expect(historyDone(connected(requested()))).toBe(false);
+    expect(
+      historyDone(connected(requested({ progressByPhase: { '0': 100, '2': 100 }, chunks: 9 }))),
+    ).toBe(false);
+    expect(
+      historyDone(
+        connected(requested({ progressByPhase: { '2': 100, '0': 100, '1': 100 }, chunks: 17 })),
+      ),
+    ).toBe(true);
+  });
+
+  it('is done once the business declined on the phone — there is nothing more to wait for', () => {
+    expect(historyDone(connected(requested({ declined: { at: ONBOARDED, code: 2593109 } })))).toBe(
+      true,
+    );
+  });
+
+  it('is syncing only while a requested copy is unfinished and still moving', () => {
+    expect(isSyncing(connected(), at(60_000))).toBe(false);
+    expect(isSyncing(connected(requested()), at(60_000))).toBe(true);
+    // A day with nothing arriving: the phone is closed, and the page stops asking.
+    expect(isSyncing(connected(requested()), at(SYNC_STALE_MS + 1))).toBe(false);
+    // Unless a chunk moved it since.
+    const movedAt = new Date(Date.parse(ONBOARDED) + SYNC_STALE_MS).toISOString();
+    expect(
+      isSyncing(connected(requested({ lastReceivedAt: movedAt })), at(SYNC_STALE_MS + 1)),
+    ).toBe(true);
+    expect(
+      isSyncing(
+        connected(requested({ progressByPhase: { '0': 100, '1': 100, '2': 100 } })),
+        at(60_000),
+      ),
+    ).toBe(false);
+  });
+});
+
+describe('coexistenceBadges', () => {
+  const labels = (syncs = {}, now = at(60_000), extra = {}) =>
+    coexistenceBadges(
+      parseCoexistence({
+        coexistence: {
+          onboardedAt: ONBOARDED,
+          wabaId: '102030405',
+          displayPhoneNumber: '+20 10 1234 5678',
+          verifiedName: 'ShipBlu',
+          subscribedAt: ONBOARDED,
+          syncs,
+          ...extra,
+        },
+      })!,
+      now,
+    ).map((badge) => badge.label);
+
+  it('always names the connection, and every badge explains itself', () => {
+    const badges = coexistenceBadges(connected(), at(60_000));
+    expect(badges[0]).toMatchObject({ label: 'WhatsApp Business app', tone: 'brand' });
+    expect(badges[0]!.explain).toMatch(/phone-typed|typed there/);
+    for (const badge of badges) expect(badge.explain.length).toBeGreaterThan(20);
+  });
+
+  it('follows the history through its states', () => {
+    expect(labels({ history: { requestId: 'r', requestedAt: ONBOARDED } })).toContain(
+      'copying history · waiting for the phone',
+    );
+    expect(
+      labels({
+        history: {
+          requestId: 'r',
+          requestedAt: ONBOARDED,
+          chunks: 17,
+          progressByPhase: { '0': 100, '1': 100, '2': 40 },
+        },
+      }),
+    ).toContain('copying history 2/3 · 40%');
+    expect(
+      labels({
+        history: {
+          requestId: 'r',
+          requestedAt: ONBOARDED,
+          chunks: 30,
+          progressByPhase: { '0': 100, '1': 100, '2': 100 },
+        },
+      }),
+    ).toContain('history copied');
+    expect(
+      labels({
+        history: {
+          requestId: 'r',
+          requestedAt: ONBOARDED,
+          declined: { at: ONBOARDED, code: 2593109 },
+        },
+      }),
+    ).toContain('history declined on the phone');
+    expect(labels({ history: { error: 'Service unavailable', attemptedAt: ONBOARDED } })).toContain(
+      'history failed',
+    );
+    // A copy nothing has moved for a day is a closed phone, not a copy in progress.
+    expect(
+      labels(
+        { history: { requestId: 'r', requestedAt: ONBOARDED, progressByPhase: { '0': 40 } } },
+        at(SYNC_STALE_MS + 1),
+      ),
+    ).toContain('history stalled at 0%');
+  });
+
+  it('counts the contacts, and names a disconnection and a window that closed unused', () => {
+    expect(
+      labels({ contacts: { requestId: 'c', requestedAt: ONBOARDED, received: 412 } }),
+    ).toContain('412 contacts');
+    expect(labels({ contacts: { requestId: 'c', requestedAt: ONBOARDED } })).toContain(
+      'waiting for contacts',
+    );
+    expect(
+      labels({}, at(60_000), {
+        disconnected: { at: ONBOARDED, event: 'PARTNER_REMOVED', reason: 'user removed' },
+      }),
+    ).toContain('disconnected on the phone');
+
+    // Inside the window nothing is said about a copy not yet asked for; after it, it is.
+    expect(labels({})).not.toContain('copy window closed');
+    expect(labels({}, at(SYNC_WINDOW_MS + 1))).toContain('copy window closed');
+    // Requested in time: the window closing is nothing to report.
+    expect(
+      labels(
+        {
+          contacts: { requestId: 'c', requestedAt: ONBOARDED, received: 1 },
+          history: { requestId: 'r', requestedAt: ONBOARDED, progressByPhase: { '0': 100 } },
+        },
+        at(SYNC_WINDOW_MS + 1),
+      ),
+    ).not.toContain('copy window closed');
   });
 });

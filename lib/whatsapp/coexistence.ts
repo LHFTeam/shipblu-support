@@ -1,3 +1,5 @@
+import { formatDateTime } from '@/lib/format';
+
 /**
  * What a WhatsApp channel connected through Meta's coexistence onboarding
  * remembers about it — the `coexistence` object in `channels.config`.
@@ -171,4 +173,231 @@ export function canRequestSync(
   }
 
   return { ok: true };
+}
+
+/**
+ * How many phases Meta copies the history in. Each `history` webhook names its
+ * phase (0, 1, 2) and that phase's progress, and the phases finish in no
+ * particular order — so "done" is every one of them at 100, not the last one.
+ */
+export const HISTORY_PHASES = 3;
+
+/** What the console can say about the copy of the chat history. */
+export type HistoryProgress = {
+  /** A request went out and Meta accepted it. */
+  requested: boolean;
+  /** Meta refused the request itself (the slot holds an error). */
+  refused: string | null;
+  declined: boolean;
+  chunks: number;
+  /** Phases at 100, out of `HISTORY_PHASES`. */
+  phasesDone: number;
+  /** The least-finished phase's progress, which is what is still to come. */
+  percent: number;
+  done: boolean;
+};
+
+export function historyProgress(coexistence: Coexistence): HistoryProgress {
+  const slot = coexistence.syncs.history;
+  const requested = Boolean(slot && 'requestId' in slot && slot.requestId);
+  const refused = slot && 'error' in slot && !requested ? slot.error : null;
+  const declined = Boolean(slot?.declined);
+  const chunks = slot?.chunks ?? 0;
+
+  const byPhase = slot?.progressByPhase ?? {};
+  const phases = Array.from({ length: HISTORY_PHASES }, (_, phase) => byPhase[String(phase)] ?? 0);
+  const phasesDone = phases.filter((progress) => progress >= 100).length;
+  const percent = Math.min(...phases);
+
+  return {
+    requested,
+    refused,
+    declined,
+    chunks,
+    phasesDone,
+    percent,
+    done: declined || (requested && phasesDone === HISTORY_PHASES),
+  };
+}
+
+/**
+ * Whether there is nothing more to wait for from the phone's chat history:
+ * every phase arrived, or the business declined to share it. A copy that was
+ * never requested, or that Meta refused, is not done — it is not started, and
+ * the "copy again" button is what that case is for.
+ */
+export function historyDone(coexistence: Coexistence): boolean {
+  return historyProgress(coexistence).done;
+}
+
+/**
+ * How long a copy in progress is waited on before the page stops asking.
+ *
+ * Six months of chats can take hours, but not days: a copy that has moved
+ * nothing for a day is a phone that was closed, and a page polling for it
+ * every fifteen seconds for ever is a tab nobody will notice is still asking.
+ * The same length as the copy window, because that is the only duration Meta
+ * states about the process.
+ */
+export const SYNC_STALE_MS = SYNC_WINDOW_MS;
+
+/** When a sync last did anything: the latest chunk, else the request itself. */
+function lastMovedAt(slot: SyncRequested & { lastReceivedAt?: string }): number {
+  return Math.max(
+    Date.parse(slot.requestedAt) || 0,
+    slot.lastReceivedAt ? Date.parse(slot.lastReceivedAt) || 0 : 0,
+  );
+}
+
+/**
+ * Whether the phone is still expected to send more: the history was requested,
+ * is not done, and has moved inside the last day. What the progress card and
+ * the channel row poll on.
+ */
+export function isSyncing(coexistence: Coexistence, now: Date): boolean {
+  const slot = coexistence.syncs.history;
+  if (!slot || !('requestId' in slot) || !slot.requestId) return false;
+  if (historyDone(coexistence)) return false;
+  return now.getTime() - lastMovedAt(slot) <= SYNC_STALE_MS;
+}
+
+export type CoexistenceBadge = {
+  label: string;
+  tone: 'brand' | 'neutral' | 'pending' | 'success' | 'warning' | 'danger';
+  /** The sentence behind the ⓘ: what the badge means and what, if anything, to do. */
+  explain: string;
+};
+
+/**
+ * The badges a connected channel earns, in the order the row shows them: what
+ * it is, then what is still happening or went wrong with it.
+ *
+ * Every label is short enough for a table row and every `explain` says what to
+ * do, because the row has no other way to: a badge reading "copy window
+ * closed" with nothing behind it is a mystery, and one reading "copy window
+ * closed — reconnect to open another" is a sentence long enough to break the
+ * row. The pure half of the admin page; `CoexistenceBadges` draws these.
+ */
+export function coexistenceBadges(coexistence: Coexistence, now: Date): CoexistenceBadge[] {
+  const badges: CoexistenceBadge[] = [
+    {
+      label: 'WhatsApp Business app',
+      tone: 'brand',
+      explain:
+        `Connected through Meta on ${formatDateTime(coexistence.onboardedAt)}. The number keeps ` +
+        `working on the phone: replies typed there count as the team's and appear on tickets ` +
+        `as "WhatsApp Business app"; console replies go out over Cloud API.`,
+    },
+  ];
+
+  if (coexistence.disconnected) {
+    const { event, reason, at } = coexistence.disconnected;
+    badges.push({
+      label: 'disconnected on the phone',
+      tone: 'danger',
+      explain:
+        `Meta reported ${event || 'a disconnection'}${reason ? ` (${reason})` : ''} on ` +
+        `${formatDateTime(at || now)}. Sends from this number fail until it is reconnected ` +
+        `through Meta — press Reconnect and complete the window again.`,
+    });
+  }
+
+  const history = historyProgress(coexistence);
+  const historySlot = coexistence.syncs.history;
+  if (history.refused) {
+    badges.push({
+      label: 'history failed',
+      tone: 'danger',
+      explain: `Meta refused the request for the chat history: ${history.refused}`,
+    });
+  } else if (history.declined) {
+    badges.push({
+      label: 'history declined on the phone',
+      tone: 'warning',
+      explain:
+        'The business chose not to share its chat history when the number was connected: ' +
+        'the WhatsApp Business app asked on the phone and the answer was no. Turn sharing ' +
+        'on there and press "Copy history again" while the 24-hour window is open.',
+    });
+  } else if (history.requested && history.done) {
+    badges.push({
+      label: 'history copied',
+      tone: 'success',
+      explain: `Up to six months of chats arrived from the phone in ${history.chunks} chunk${
+        history.chunks === 1 ? '' : 's'
+      }. Each past conversation is a resolved ticket.`,
+    });
+  } else if (history.requested && historySlot && 'requestId' in historySlot) {
+    const stalled = now.getTime() - lastMovedAt(historySlot) > SYNC_STALE_MS;
+    badges.push(
+      stalled
+        ? {
+            label: `history stalled at ${history.percent}%`,
+            tone: 'warning',
+            explain:
+              'Nothing has arrived from the phone for a day. The copy only runs while the ' +
+              'WhatsApp Business app is open on the phone; open it and the copy resumes. ' +
+              'If it was open all along, reconnecting the number opens a new copy window.',
+          }
+        : {
+            label:
+              history.chunks === 0
+                ? 'copying history · waiting for the phone'
+                : `copying history ${history.phasesDone}/${HISTORY_PHASES} · ${history.percent}%`,
+            tone: 'pending',
+            explain:
+              'The phone is sending up to six months of chats, in three phases that finish in ' +
+              'no particular order. Keep the WhatsApp Business app open on the phone until ' +
+              'every phase reaches 100% — it can take hours.',
+          },
+    );
+  }
+
+  // A slot holds a request id or an error, never both: a success clears the
+  // error and a refusal never overwrites a request (`recordSyncRequest`).
+  const contacts = coexistence.syncs.contacts;
+  if (contacts && 'requestId' in contacts && contacts.requestId) {
+    const received = contacts.received ?? 0;
+    badges.push(
+      received > 0
+        ? {
+            label: `${received} contact${received === 1 ? '' : 's'}`,
+            tone: 'neutral',
+            explain:
+              `${received} contact${received === 1 ? '' : 's'} arrived from the phone's address ` +
+              `book, named as the business saved them.`,
+          }
+        : {
+            label: 'waiting for contacts',
+            tone: 'pending',
+            explain:
+              "The phone's contacts were requested and none has arrived yet. They arrive " +
+              'while the WhatsApp Business app is open on the phone.',
+          },
+    );
+  } else if (contacts && 'error' in contacts) {
+    badges.push({
+      label: 'contacts failed',
+      tone: 'danger',
+      explain: `Meta refused the request for the phone's contacts: ${contacts.error}`,
+    });
+  }
+
+  const neverCopied = SYNC_TYPES.filter((type) => {
+    const permission = canRequestSync(coexistence, type, now);
+    return !permission.ok && permission.reason === 'window_closed';
+  });
+  if (neverCopied.length > 0) {
+    badges.push({
+      label: 'copy window closed',
+      tone: 'warning',
+      explain:
+        `The 24 hours after connecting have passed and the ${neverCopied
+          .map((type) => (type === 'contacts' ? 'contacts' : 'chat history'))
+          .join(' and ')} ${neverCopied.length === 1 ? 'was' : 'were'} never copied. ` +
+        `Reconnecting the number through Meta opens a new window.`,
+    });
+  }
+
+  return badges;
 }

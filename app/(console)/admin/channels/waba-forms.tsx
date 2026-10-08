@@ -2,11 +2,18 @@
 
 import { useState } from 'react';
 import { Badge, Field, Button, Input, Toggle } from '@/components/ui';
+import type { CredentialStatus } from '@/lib/whatsapp/credential-status';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
 import { deleteWhatsAppAccount, saveWhatsAppAccount } from './actions';
+import {
+  ConnectBusinessAppNumber,
+  type ConnectReadiness,
+  CredentialCard,
+  ForgetCredential,
+} from './coexistence-forms';
 
 /**
- * Connecting a WhatsApp Business Account.
+ * Connecting a WhatsApp Business Account by its ids.
  *
  * The form is three ids and a switch, and every one of them is a thing an admin
  * copies out of Meta rather than invents — so each field says where it comes
@@ -14,6 +21,13 @@ import { deleteWhatsAppAccount, saveWhatsAppAccount } from './actions';
  * it is not entered here at all, only *named*, and the hint has to carry that
  * because a box labelled "access token" that refuses an access token is
  * otherwise just broken.
+ *
+ * An account connected through Meta's window (`coexistence-forms.tsx`) has a
+ * credential stored instead of named. Its row shows that credential's status
+ * — everything about it but the secret — and its form offers neither the
+ * variable box nor a change of WABA id, because `saveWhatsAppAccount` refuses
+ * both while a credential is stored and a form that offered them would be
+ * promising an edit the save then declines.
  */
 
 export type WhatsAppAccountRow = {
@@ -30,6 +44,15 @@ export type WhatsAppAccountRow = {
   templateCount: number;
   /** Every row the sync has stored, whatever its status. Zero is the interesting case. */
   templateTotal: number;
+  /** The stored credential's status, when one was stored by Meta's window; never the credential. */
+  credential: CredentialStatus | null;
+};
+
+/** What the connect card needs, read once by the page and handed to every row. */
+export type ConnectProps = {
+  readiness: ConnectReadiness;
+  groups: { id: string; name: string }[];
+  suggestedGroupId: string | null;
 };
 
 function Fields({
@@ -41,6 +64,8 @@ function Fields({
   suggestedWabaId?: string | null;
   isFirst: boolean;
 }) {
+  const stored = Boolean(account?.credential);
+
   return (
     <>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -48,47 +73,65 @@ function Fields({
           <Input name="name" defaultValue={account?.name} required placeholder="ShipBlu Egypt" />
         </Field>
 
-        <Field
-          label="WhatsApp Business Account ID"
-          explain={
-            <>
-              The numeric WABA id from Meta&rsquo;s WhatsApp Manager — Account tools → Business
-              account ID. Not the phone number and not the phone number ID. Templates are listed
-              against it, so a wrong one syncs nothing and the console offers agents no templates at
-              all.
-            </>
-          }
-        >
-          <Input
-            name="wabaId"
-            defaultValue={account?.wabaId ?? suggestedWabaId ?? ''}
-            required
-            inputMode="numeric"
-            placeholder="102290129340398"
-          />
-        </Field>
+        {stored ? (
+          // Read-only rather than left out: the save still reads the field,
+          // and submitting the stored id unchanged is what passes its check.
+          <Field
+            label="WhatsApp Business Account ID"
+            hint="Fixed while a credential is stored: the credential is sealed to this business account and cannot be moved to another. Forget the credential first, or connect the other account as a new row."
+          >
+            <Input name="wabaId" value={account?.wabaId ?? ''} readOnly inputMode="numeric" />
+          </Field>
+        ) : (
+          <Field
+            label="WhatsApp Business Account ID"
+            explain={
+              <>
+                The numeric WABA id from Meta&rsquo;s WhatsApp Manager — Account tools → Business
+                account ID. Not the phone number and not the phone number ID. Templates are listed
+                against it, so a wrong one syncs nothing and the console offers agents no templates
+                at all.
+              </>
+            }
+          >
+            <Input
+              name="wabaId"
+              defaultValue={account?.wabaId ?? suggestedWabaId ?? ''}
+              required
+              inputMode="numeric"
+              placeholder="102290129340398"
+            />
+          </Field>
+        )}
       </div>
 
-      <Field
-        label="Access token variable"
-        explain={
-          <>
-            The <em>name</em> of the environment variable holding this account&rsquo;s access token,
-            never the token itself — so a database dump carries no usable credential. It must start{' '}
-            <code>WHATSAPP_TOKEN_</code>, and the value is set in the
-            <code> shipblu-support-production</code> environment group on Render.
-          </>
-        }
-        hint="Leave blank when this account is reachable with the shared META_PAGE_ACCESS_TOKEN, which is the case whenever the accounts sit under one Meta app."
-      >
-        <Input
-          name="tokenEnvVar"
-          defaultValue={account?.tokenEnvVar ?? ''}
-          placeholder="WHATSAPP_TOKEN_EGYPT"
-          autoComplete="off"
-          spellCheck={false}
-        />
-      </Field>
+      {stored ? (
+        <p className="text-xs text-[var(--muted-foreground)]">
+          This account sends with the credential stored when it was connected through Meta, so it
+          names no token variable. Forget the credential to name one instead.
+        </p>
+      ) : (
+        <Field
+          label="Access token variable"
+          explain={
+            <>
+              The <em>name</em> of the environment variable holding this account&rsquo;s access
+              token, never the token itself — so a database dump carries no usable credential. It
+              must start <code>WHATSAPP_TOKEN_</code>, and the value is set in the
+              <code> shipblu-support-production</code> environment group on Render.
+            </>
+          }
+          hint="Leave blank when this account is reachable with the shared META_PAGE_ACCESS_TOKEN, which is the case whenever the accounts sit under one Meta app."
+        >
+          <Input
+            name="tokenEnvVar"
+            defaultValue={account?.tokenEnvVar ?? ''}
+            placeholder="WHATSAPP_TOKEN_EGYPT"
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </Field>
+      )}
 
       <Toggle
         name="isDefault"
@@ -125,7 +168,18 @@ export function NewWhatsAppAccount({
   );
 }
 
-export function WhatsAppAccountEditor({ account }: { account: WhatsAppAccountRow }) {
+export function WhatsAppAccountEditor({
+  account,
+  connect,
+  canConnect,
+  now,
+}: {
+  account: WhatsAppAccountRow;
+  connect: ConnectProps;
+  /** Whether the viewer holds `admin.channels.connect`: Reconnect and Forget are theirs. */
+  canConnect: boolean;
+  now: Date;
+}) {
   const [editing, setEditing] = useState(false);
 
   if (editing) {
@@ -170,10 +224,20 @@ export function WhatsAppAccountEditor({ account }: { account: WhatsAppAccountRow
         </h3>
 
         <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">
-          {account.wabaId} · {account.tokenEnvVar ?? 'META_PAGE_ACCESS_TOKEN'} ·{' '}
+          {account.wabaId}
+          {account.credential ? '' : ` · ${account.tokenEnvVar ?? 'META_PAGE_ACCESS_TOKEN'}`} ·{' '}
           {account.numbers.length === 0 ? 'no numbers yet' : `${account.numbers.join(', ')}`} ·{' '}
           {account.templateCount} template{account.templateCount === 1 ? '' : 's'}
         </p>
+
+        {/* The credential's own line, in place of the variable's name: what it
+            is, when it was stored, when it expires and which key sealed it —
+            and never the credential, which `CredentialStatus` cannot carry. */}
+        {account.credential ? (
+          <div className="mt-1">
+            <CredentialCard status={account.credential} now={now} />
+          </div>
+        ) : null}
 
         {account.lastSyncError ? (
           <p className="mt-1 text-xs text-red-600">{account.lastSyncError}</p>
@@ -196,10 +260,16 @@ export function WhatsAppAccountEditor({ account }: { account: WhatsAppAccountRow
         )}
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Button variant="secondary" size="sm" onClick={() => setEditing(true)}>
           Edit
         </Button>
+        {account.credential && canConnect ? (
+          <>
+            <ConnectBusinessAppNumber {...connect} mode="reconnect" />
+            <ForgetCredential accountId={account.id} />
+          </>
+        ) : null}
         <DangerAction action={deleteWhatsAppAccount} id={account.id} label="Disconnect" />
       </div>
     </div>

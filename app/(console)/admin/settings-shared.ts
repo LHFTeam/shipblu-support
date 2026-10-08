@@ -38,6 +38,19 @@ export type AdminState = ActionState & {
    * opposite next actions.
    */
   inviteQueuedFor?: string;
+  /**
+   * What a successful write wants the admin to read before the page re-renders
+   * — "stored the token; connecting the number now", "asked the phone for its
+   * contacts". A success with nothing to say omits it. Separate from `error`,
+   * because a form keyed on the nonce clears itself on a success and the
+   * sentence has to survive that: it is rendered from the state, not the form.
+   */
+  notice?: string;
+  /**
+   * The attempt a successful connect started, so the client that started it
+   * can tell its own progress card from another number's on the same page.
+   */
+  onboardingId?: string;
 };
 
 export function refresh(path: string) {

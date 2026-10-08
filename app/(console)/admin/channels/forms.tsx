@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Badge, Button, ErrorText, Field, Input, Select } from '@/components/ui';
+import { parseCoexistence } from '@/lib/whatsapp/coexistence';
 import type { AdminState } from '../settings-shared';
 import { saveChannel } from './actions';
 import { SubmitButton } from '@/components/submit-button';
@@ -193,6 +194,21 @@ function AddressField({ type, config }: { type: ChannelType; config?: Record<str
       <p className="text-xs text-[var(--muted-foreground)] sm:flex-1 sm:pt-6">
         The widget needs no address — only a default group.
       </p>
+    );
+  }
+
+  // A number connected through Meta's window has its id from Meta, not from a
+  // form, and `saveChannel` keeps the stored one whatever is submitted. Shown
+  // as text rather than as a box that would appear to accept a change.
+  if (type === 'whatsapp' && config && parseCoexistence(config)) {
+    return (
+      <Field
+        label="Phone number ID"
+        className="sm:flex-1"
+        hint="Reported by Meta when the number was connected; it is not edited here."
+      >
+        <Input name="phoneNumberId" value={(config.phoneNumberId as string) ?? ''} readOnly />
+      </Field>
     );
   }
 
