@@ -290,7 +290,7 @@ export default async function CannedSuggestionsReportPage({
               <div className="mb-8">
                 <Table head={['Jev suggested', 'The reply carried', 'Times']}>
                   {pairs.map((pair) => (
-                    <Row key={`${pair.suggested}→${pair.sent}`}>
+                    <Row key={`${pair.suggestedId}→${pair.sentId}`}>
                       <Cell>{pair.suggested === NONE_KEY ? 'None fits' : pair.suggested}</Cell>
                       <Cell>{pair.sent}</Cell>
                       <Cell>{pair.count}</Cell>

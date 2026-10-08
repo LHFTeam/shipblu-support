@@ -186,6 +186,7 @@ describe('recordSuggestionOutcome', () => {
       messageId,
       body: `${BODY_AR}\r\n`,
       used,
+      inserted: [],
     });
 
     expect(await row(id)).toMatchObject({
@@ -214,12 +215,14 @@ describe('recordSuggestionOutcome', () => {
       messageId: await reply(conversationId, me, 'a'),
       body: `Hi Amira,\n\n${BODY_EN}`,
       used,
+      inserted: [],
     });
     await recordSuggestionOutcome(me, rewritten, {
       conversationId,
       messageId: await reply(conversationId, me, 'b'),
       body: 'It will arrive tomorrow.',
       used,
+      inserted: [],
     });
 
     expect((await row(added)).sentEdit).toBe('extended');
@@ -244,28 +247,86 @@ describe('recordSuggestionOutcome', () => {
       messageId: await reply(conversationId, me, 'r'),
       body: BODY_EN,
       used: await recordCannedUse(me, refund, 'en'),
+      inserted: [],
     });
     await recordSuggestionOutcome(me, ignored, {
       conversationId,
       messageId: await reply(conversationId, me, 'i'),
       body: 'typed by hand',
       used: null,
+      inserted: [],
     });
     await recordSuggestionOutcome(me, none, {
       conversationId,
       messageId: await reply(conversationId, me, 'n'),
       body: 'typed by hand',
       used: null,
+      inserted: [],
     });
 
     expect(await row(replaced)).toMatchObject({
+      sentChoice: refund,
       sentMatches: false,
       sentCannedResponseId: refund,
       sentCannedTitle: 'Refund',
       sentEdit: null,
     });
-    expect(await row(ignored)).toMatchObject({ sentMatches: false, sentCannedResponseId: null });
-    expect(await row(none)).toMatchObject({ sentMatches: true, sentEdit: null });
+    expect(await row(ignored)).toMatchObject({
+      sentChoice: NONE_KEY,
+      sentMatches: false,
+      sentCannedResponseId: null,
+    });
+    expect(await row(none)).toMatchObject({
+      sentChoice: NONE_KEY,
+      sentMatches: true,
+      sentEdit: null,
+    });
+  });
+
+  // The starter library has two closings for exactly this: take the suggestion
+  // with Tab, then add "anything else?" from the list. The last pick is the
+  // closing, and a grade read off it alone would call Jev wrong.
+  it('grades a reply that carried the suggestion and then a closing as right', async () => {
+    const me = await agent();
+    const conversationId = await ticket();
+    const where = await canned();
+    const closing = await canned('Closing — anything else?');
+    const id = await suggestion(conversationId, me, where);
+
+    await recordSuggestionOutcome(me, id, {
+      conversationId,
+      messageId: await reply(conversationId, me, 'x'),
+      body: `${BODY_EN}\n\nRefund`,
+      used: await recordCannedUse(me, closing, 'en'),
+      inserted: [where, closing],
+    });
+
+    expect(await row(id)).toMatchObject({
+      sentChoice: where,
+      sentMatches: true,
+      sentCannedResponseId: where,
+      sentCannedTitle: 'Where is my parcel',
+      // Its language was not the last one recorded, so both bodies were tried.
+      sentLocale: null,
+      sentEdit: 'extended',
+    });
+  });
+
+  it('grades none as wrong when the reply carried any canned response at all', async () => {
+    const me = await agent();
+    const conversationId = await ticket();
+    const where = await canned();
+    const id = await suggestion(conversationId, me, NONE_KEY);
+
+    await recordSuggestionOutcome(me, id, {
+      conversationId,
+      messageId: await reply(conversationId, me, 'x'),
+      body: BODY_EN,
+      used: null,
+      inserted: [where],
+    });
+
+    expect(await row(id)).toMatchObject({ sentChoice: where, sentMatches: false });
   });
 
   it('links nothing for another agent, another ticket, or a suggestion already linked', async () => {
@@ -283,12 +344,14 @@ describe('recordSuggestionOutcome', () => {
       messageId: first,
       body: BODY_EN,
       used: null,
+      inserted: [],
     });
     await recordSuggestionOutcome(me, mine, {
       conversationId: elsewhere,
       messageId: first,
       body: BODY_EN,
       used: null,
+      inserted: [],
     });
     expect((await row(theirs)).messageId).toBeNull();
     expect((await row(mine)).messageId).toBeNull();
@@ -298,6 +361,7 @@ describe('recordSuggestionOutcome', () => {
       messageId: first,
       body: BODY_EN,
       used: null,
+      inserted: [],
     });
     const second = await reply(conversationId, me, 'two');
     await recordSuggestionOutcome(me, mine, {
@@ -305,6 +369,7 @@ describe('recordSuggestionOutcome', () => {
       messageId: second,
       body: BODY_EN,
       used: null,
+      inserted: [],
     });
     expect((await row(mine)).messageId).toBe(first);
   });
@@ -318,13 +383,20 @@ describe('recordSuggestionOutcome', () => {
     });
     const messageId = await reply(conversationId, me, 'x');
 
-    await recordSuggestionOutcome(me, failed, { conversationId, messageId, body: 'x', used: null });
+    await recordSuggestionOutcome(me, failed, {
+      conversationId,
+      messageId,
+      body: 'x',
+      used: null,
+      inserted: [],
+    });
     await expect(
       recordSuggestionOutcome(me, 'not-a-uuid', {
         conversationId,
         messageId,
         body: 'x',
         used: null,
+        inserted: [],
       }),
     ).resolves.toBeUndefined();
 

@@ -33,6 +33,7 @@ CREATE TABLE "canned_suggestions" (
 	"dismissed_at" timestamp with time zone,
 	"message_id" uuid,
 	"replied_at" timestamp with time zone,
+	"sent_choice" text,
 	"sent_canned_response_id" uuid,
 	"sent_canned_title" text,
 	"sent_locale" text,

@@ -1,5 +1,5 @@
 {
-  "id": "dfe401ee-de74-4d00-bee1-b635337e5bab",
+  "id": "b94d4399-0230-4c84-a03d-6dff7c754db3",
   "prevId": "7b0615e2-2620-49f9-8c16-2c245d8afe2a",
   "version": "7",
   "dialect": "postgresql",
@@ -9965,6 +9965,12 @@
         "replied_at": {
           "name": "replied_at",
           "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sent_choice": {
+          "name": "sent_choice",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },

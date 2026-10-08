@@ -77,6 +77,7 @@ export async function recordCannedUse(
   try {
     const [response] = await db
       .select({
+        id: cannedResponses.id,
         title: cannedResponses.title,
         ar: cannedResponses.bodyTextAr,
         en: cannedResponses.bodyTextEn,
@@ -96,7 +97,14 @@ export async function recordCannedUse(
     }
 
     await db.update(cannedResponses).set(increment).where(eq(cannedResponses.id, id));
-    return { id, title: response.title, locale, bodies: { ar: response.ar, en: response.en } };
+    // The id as the database spells it, so a grade comparing it with a stored
+    // choice is not thrown by the case of a uuid a form posted.
+    return {
+      id: response.id,
+      title: response.title,
+      locale,
+      bodies: { ar: response.ar, en: response.en },
+    };
   } catch (error) {
     log.warn('could not record a use', error);
     return null;

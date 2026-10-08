@@ -25,8 +25,11 @@ const log = logger('canned_suggest');
  * Called from a route handler rather than queued, which is the narrow exception
  * AGENTS.md's "Background work" section names: the whole output is the
  * provider's answer, somebody is looking at the box waiting for it, and it is
- * perishable — an answer that arrived after the agent started typing is worth
- * nothing, so there is nothing for a retry to rescue. Nothing here retries.
+ * worth little late — an answer that lands after the agent started typing is
+ * held rather than drawn, shown only if the box is emptied again or on a later
+ * focus — so a retry, landing later still, would buy almost nothing. Nothing
+ * here retries; a failure is recorded on the row, and that message gets no
+ * suggestion.
  *
  * And not a server action, because Next sends a client's actions one at a time:
  * a Jev call made as one would queue the agent's Send behind it.
@@ -35,8 +38,8 @@ const log = logger('canned_suggest');
 /**
  * How long a suggestion may take. Measured calls answer in a quarter of a
  * second (the shadow run's p90 is 274 ms); five seconds is room for a slow day
- * and still well short of the point where the agent has given up and started
- * typing, which is when the answer stops being shown at all.
+ * and still short of the point where the agent has given up and started
+ * typing, after which the answer is held rather than drawn.
  */
 export const SUGGEST_TIMEOUT_MS = 5_000;
 

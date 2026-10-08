@@ -58,8 +58,11 @@ export function useCannedSuggestion({
   // anchor disappears the moment the customer writes again, rather than
   // offering an answer to the message before.
   const current = suggestion?.anchorMessageId === anchorMessageId ? suggestion : null;
+  // Nothing to show once the switch is off, even for an answer already held:
+  // the switch is the rollback, and an open composer learns it on its next
+  // refresh — a ghost left behind would still take Tab with no hint saying so.
   const showable =
-    current?.cannedResponseId && current.id !== dismissedId && current.id !== acceptedId
+    suggest && current?.cannedResponseId && current.id !== dismissedId && current.id !== acceptedId
       ? current
       : null;
 
@@ -152,11 +155,14 @@ export function useCannedSuggestion({
     /** The suggestion to draw, or null — nothing to show, waved away, or already taken. */
     showable,
     /**
-     * Which suggestion the reply should be graded against: the one the agent
-     * took, or else the one this box was offered for the current message — shown
-     * or not, `none` included. Posted with Send; the server re-reads it.
+     * Which suggestion the reply should be graded against: the one this box was
+     * offered for the message on screen — shown or not, `none` included — or,
+     * when the conversation moved on and nothing newer was asked, the one the
+     * agent took earlier, whose text is presumably still in the box. The newer
+     * one wins, because the reply answers the newer message. Posted with Send;
+     * the server re-reads it.
      */
-    linkId: acceptedId ?? current?.id ?? null,
+    linkId: current?.id ?? acceptedId ?? null,
     ask,
     accept,
     dismiss,

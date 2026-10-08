@@ -73,16 +73,22 @@ spend (one call per agent per new message).
 
 **Transport.** A route with a `fetch`, not a server action: Next dispatches a
 client's actions one at a time, so a provider call made as one would hold the
-agent's Send behind it. `SUGGEST_TIMEOUT_MS` is five seconds. Nothing retries —
-an answer that arrives after the agent has typed is never shown, so a retry has
-nothing to rescue.
+agent's Send behind it. `SUGGEST_TIMEOUT_MS` is five seconds. Nothing retries.
+An answer that lands after the agent has started typing is held rather than
+drawn — it appears only if the box is emptied again, or from the stored row on a
+later focus — so a retry landing later still would buy almost nothing; a failure
+is recorded on its row, and that message gets no suggestion.
 
 **Recording.** A row per question, settled with the model id from the response,
 the choice (frozen as text, since canned responses are hard-deleted), the full
 distribution keyed by canned id, input tokens and latency — or with the error.
 Then `shown_at`, `accepted_at`, `dismissed_at` from the composer, and at send
-`message_id`, what the reply carried (`sent_canned_response_id`, title, language),
-`sent_matches` and `sent_edit`. `db/sql/003_constraints.sql` holds the two
+`message_id`, what the reply carried (`sent_choice`, frozen as text like `choice`,
+beside the live `sent_canned_response_id`, the title and the language),
+`sent_matches` and `sent_edit`. "Carried" is every canned response inserted since
+the box was last empty — the composer posts the list — so taking the suggestion
+and then adding a closing from the picker is still right; `usage_count` stays
+last-one-wins. `db/sql/003_constraints.sql` holds the two
 invariants a request could otherwise break: a row is an answer or a failure, and
 taken or waved away, never both.
 

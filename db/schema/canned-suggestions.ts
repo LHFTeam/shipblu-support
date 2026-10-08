@@ -157,10 +157,15 @@ export const cannedSuggestions = pgTable(
     repliedAt: timestamp('replied_at', { withTimezone: true }),
 
     /**
-     * Which canned response the sent reply actually carried — through this
-     * suggestion or the picker, whichever the agent used last. The ground truth
-     * the report scores Jev against.
+     * What the sent reply carried, as the grade read it: Jev's choice when the
+     * reply carried it (taken with Tab or picked from the list, whatever else went
+     * in beside it), otherwise the last canned response inserted, or `none`.
+     * Frozen as text for the reason `choice` is: the report groups and filters on
+     * this, and a column a deleted response can null would re-grade history.
      */
+    sentChoice: text('sent_choice'),
+
+    /** The live link for `sent_choice`, for the current title. Null once that response is deleted. */
     sentCannedResponseId: uuid('sent_canned_response_id').references(() => cannedResponses.id, {
       onDelete: 'set null',
     }),

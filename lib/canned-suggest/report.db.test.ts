@@ -119,8 +119,17 @@ async function suggestion(f: Fixture, values: Partial<typeof cannedSuggestions.$
 async function nineOutcomes(f: Fixture) {
   const shown = { shownAt: IN_WINDOW };
   const where = { choice: f.where, cannedResponseId: f.where, cannedTitle: 'Where is my parcel' };
-  const sentWhere = { sentCannedResponseId: f.where, sentCannedTitle: 'Where is my parcel' };
-  const sentRefund = { sentCannedResponseId: f.refund, sentCannedTitle: 'Refund' };
+  const sentWhere = {
+    sentChoice: f.where,
+    sentCannedResponseId: f.where,
+    sentCannedTitle: 'Where is my parcel',
+  };
+  const sentRefund = {
+    sentChoice: f.refund,
+    sentCannedResponseId: f.refund,
+    sentCannedTitle: 'Refund',
+  };
+  const sentNothing = { sentChoice: NONE_KEY };
 
   await suggestion(f, {
     ...where,
@@ -167,6 +176,7 @@ async function nineOutcomes(f: Fixture) {
     inputTokens: 5000,
     messageId: await reply(f),
     repliedAt: IN_WINDOW,
+    ...sentNothing,
     sentMatches: false,
   });
   await suggestion(f, {
@@ -196,6 +206,7 @@ async function nineOutcomes(f: Fixture) {
     inputTokens: 5000,
     messageId: await reply(f),
     repliedAt: IN_WINDOW,
+    ...sentNothing,
     sentMatches: true,
   });
   await suggestion(f, { error: 'TypeSafe returned 429', latencyMs: 50 });
@@ -225,7 +236,8 @@ describe('headline', () => {
       noneReplied: 2,
       noneMissed: 1,
       rightViaTab: 1,
-      rightViaPicker: 2,
+      // Of the two shown and right; the blind one is in neither.
+      rightViaPicker: 1,
       unchanged: 1,
       extended: 1,
       reworded: 1,
@@ -278,7 +290,7 @@ describe('byResponse', () => {
         shownRight: 2,
         sentAsSuggested: 3,
         viaTab: 1,
-        viaPicker: 2,
+        viaPicker: 1,
         unchanged: 1,
         edited: 2,
         replaced: 1,
@@ -322,6 +334,30 @@ describe('byResponse', () => {
   });
 });
 
+// The grade was frozen at send. Deleting both responses afterwards must move no
+// figure but the live titles — the report's promise that the past is not re-graded.
+describe('after the responses are deleted', () => {
+  it('counts every outcome exactly as before', async () => {
+    const f = await fixture();
+    await nineOutcomes(f);
+    const before = {
+      headline: await headline(WINDOW),
+      responses: await byResponse(WINDOW),
+      pairs: await confusions(WINDOW),
+    };
+
+    await db.delete(cannedResponses).where(eq(cannedResponses.id, f.where));
+    await db.delete(cannedResponses).where(eq(cannedResponses.id, f.refund));
+
+    expect(await headline(WINDOW)).toEqual(before.headline);
+    expect(await byResponse(WINDOW)).toEqual(
+      before.responses.map((row) => ({ ...row, gone: true })),
+    );
+    expect(await confusions(WINDOW)).toEqual(expect.arrayContaining(before.pairs));
+    expect(await confusions(WINDOW)).toHaveLength(before.pairs.length);
+  });
+});
+
 describe('confusions', () => {
   it('pairs what Jev chose with what was sent instead, none included', async () => {
     const f = await fixture();
@@ -333,8 +369,14 @@ describe('confusions', () => {
     expect(pairs).toHaveLength(2);
     expect(pairs).toEqual(
       expect.arrayContaining([
-        { suggested: NONE_KEY, sent: 'Refund', count: 1 },
-        { suggested: 'Where is my parcel', sent: 'Refund', count: 1 },
+        { suggestedId: NONE_KEY, suggested: NONE_KEY, sentId: f.refund, sent: 'Refund', count: 1 },
+        {
+          suggestedId: f.where,
+          suggested: 'Where is my parcel',
+          sentId: f.refund,
+          sent: 'Refund',
+          count: 1,
+        },
       ]),
     );
   });

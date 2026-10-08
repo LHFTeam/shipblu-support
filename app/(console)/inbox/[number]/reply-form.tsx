@@ -202,6 +202,15 @@ function ReplyBody({
   const [used, setUsed] = useState<{ id: string; locale: CannedLocale } | null>(null);
 
   /*
+    Every canned response inserted since the box was last empty, for grading a
+    canned suggestion — not for `usage_count`, which stays last-one-wins above.
+    A suggestion taken with Tab and then followed by a closing from the list
+    went out in the reply, and a grade read off `used` alone would call Jev
+    wrong for it. Forgotten with `used`, on the same empty box.
+  */
+  const [inserted, setInserted] = useState<string[]>([]);
+
+  /*
     An empty box carries no canned response, whatever was picked into it
     earlier: the agent cleared it to write their own, which is the "never mind"
     this column is meant not to score.
@@ -222,7 +231,10 @@ function ReplyBody({
     the whole text in one gesture without passing through empty still counts,
     as rewording does.
   */
-  const forget = useCallback(() => setUsed(null), []);
+  const forget = useCallback(() => {
+    setUsed(null);
+    setInserted([]);
+  }, []);
 
   /*
     Whether the box is empty — the one condition every part of the suggestion
@@ -268,6 +280,7 @@ function ReplyBody({
 
       insertText(bodies[chosen]);
       setUsed({ id: response.id, locale: chosen });
+      setInserted((ids) => (ids.includes(response.id) ? ids : [...ids, response.id]));
     },
     [insertText],
   );
@@ -300,6 +313,7 @@ function ReplyBody({
       <input type="hidden" name="cannedResponseId" value={used?.id ?? ''} />
       <input type="hidden" name="cannedLocale" value={used?.locale ?? ''} />
       <input type="hidden" name="cannedSuggestionId" value={suggestion.linkId ?? ''} />
+      <input type="hidden" name="cannedInsertedIds" value={inserted.join(',')} />
 
       <Textarea
         ref={bodyRef}
@@ -353,7 +367,14 @@ function ReplyBody({
         phones, which have no Tab key.
       */}
       {suggest ? (
-        <div id={hintId} aria-live="polite" className="text-xs text-[var(--muted-foreground)]">
+        // `relative` because the key hint below can be `sr-only`, which is
+        // `position: absolute` — unpositioned, it is placed against the page
+        // and lengthens it (PROJECT-STATE §6.81).
+        <div
+          id={hintId}
+          aria-live="polite"
+          className="relative text-xs text-[var(--muted-foreground)]"
+        >
           {showing && suggested ? (
             <div className="flex items-center gap-2">
               <span className="min-w-0 truncate">
@@ -364,7 +385,15 @@ function ReplyBody({
                 last messages on this ticket (never the private notes). Use it as it stands or edit
                 it first &mdash; nothing is sent until you press Send.
               </InfoTip>
-              <span className="hidden shrink-0 lg:inline">Tab to use · Esc to dismiss</span>
+              {/*
+                Said wherever a keyboard can press it: on screen with any fine
+                pointer — a laptop zoomed past the breakpoint still has a Tab
+                key — and always to a screen reader through aria-describedby.
+                Hidden only on screen on a touch-only phone, which has no Tab.
+              */}
+              <span className="sr-only shrink-0 any-pointer-fine:not-sr-only">
+                Tab to use · Esc to dismiss
+              </span>
               <button
                 type="button"
                 onClick={acceptSuggestion}

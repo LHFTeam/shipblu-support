@@ -5,6 +5,7 @@ import { db } from '@/db/client';
 import { messages, whatsappTemplates } from '@/db/schema';
 import { requireAgent } from '@/lib/auth/guard';
 import { text, uuidField } from '@/lib/http/form-data';
+import { canonicalUuid } from '@/lib/http/uuid';
 import { ok } from '@/lib/http/action-state';
 import { can } from '@/lib/auth/permissions';
 import { sendsByEmail } from '@/lib/tickets/outbound';
@@ -58,6 +59,14 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
   // against what was sent either way. Also only a claim: the row is matched on
   // this agent and this ticket before anything is written to it.
   const cannedSuggestionId = uuidField(formData, 'cannedSuggestionId');
+  // Every canned response inserted since the box was last empty, for grading
+  // that suggestion; `cannedResponseId` above is only the last of them. Capped,
+  // and each one a uuid or nothing, since it is a claim like the rest.
+  const cannedInsertedIds = text(formData, 'cannedInsertedIds')
+    .split(',')
+    .slice(0, 20)
+    .map(canonicalUuid)
+    .filter((id): id is string => id !== null);
 
   if (!body) return { error: 'Write something first' };
 
@@ -174,6 +183,7 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
       messageId,
       body,
       used,
+      inserted: cannedInsertedIds,
     });
   }
 

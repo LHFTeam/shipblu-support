@@ -8,7 +8,7 @@ import { NONE_KEY } from './request';
  * which picks are right.
  *
  * Read from `canned_suggestions` alone, apart from the coverage figure. The
- * grade on each row — `sent_matches`, `sent_edit` — was frozen when its reply
+ * grade on each row — `sent_choice`, `sent_matches`, `sent_edit` — was frozen when its reply
  * was sent (`outcome.ts`), so these queries count rather than judge, and a
  * response deleted since cannot re-grade the past.
  *
@@ -54,7 +54,7 @@ export type Headline = {
   noneReplied: number;
   /** …but the agent used a canned response after all. */
   noneMissed: number;
-  /** Right, by how the reply came to carry it. */
+  /** Shown and right, by how the reply came to carry it — the two add up to `shownRight`. */
   rightViaTab: number;
   rightViaPicker: number;
   /** Right, by how much of the text survived. */
@@ -84,9 +84,9 @@ export async function headline(window: ReportWindow): Promise<Headline> {
       count(*) filter (where ${SUGGESTED} and cs.shown_at is null and cs.replied_at is not null)::int as "blindReplied",
       count(*) filter (where ${SUGGESTED} and cs.shown_at is null and cs.replied_at is not null and cs.sent_matches)::int as "blindRight",
       count(*) filter (where cs.choice = ${NONE_KEY} and cs.replied_at is not null)::int as "noneReplied",
-      count(*) filter (where cs.choice = ${NONE_KEY} and cs.replied_at is not null and cs.sent_canned_response_id is not null)::int as "noneMissed",
-      count(*) filter (where ${SUGGESTED} and cs.sent_matches and cs.accepted_at is not null)::int as "rightViaTab",
-      count(*) filter (where ${SUGGESTED} and cs.sent_matches and cs.accepted_at is null)::int as "rightViaPicker",
+      count(*) filter (where cs.choice = ${NONE_KEY} and cs.replied_at is not null and cs.sent_choice <> ${NONE_KEY})::int as "noneMissed",
+      count(*) filter (where ${SUGGESTED} and cs.shown_at is not null and cs.sent_matches and cs.accepted_at is not null)::int as "rightViaTab",
+      count(*) filter (where ${SUGGESTED} and cs.shown_at is not null and cs.sent_matches and cs.accepted_at is null)::int as "rightViaPicker",
       count(*) filter (where cs.sent_edit = 'unchanged')::int as "unchanged",
       count(*) filter (where cs.sent_edit = 'extended')::int as "extended",
       count(*) filter (where cs.sent_edit = 'reworded')::int as "reworded",
@@ -145,6 +145,7 @@ export type ResponseRow = {
   shownRight: number;
   /** Replies that carried it after Jev suggested it, by either route. */
   sentAsSuggested: number;
+  /** Shown and right, taken with Tab or picked from the list — the two add up to `shownRight`. */
   viaTab: number;
   viaPicker: number;
   unchanged: number;
@@ -193,26 +194,26 @@ export async function byResponse(window: ReportWindow): Promise<ResponseRow[]> {
              count(*) filter (where cs.shown_at is not null and cs.replied_at is not null)::int as shown_replied,
              count(*) filter (where cs.shown_at is not null and cs.replied_at is not null and cs.sent_matches)::int as shown_right,
              count(*) filter (where cs.sent_matches)::int as sent_as_suggested,
-             count(*) filter (where cs.sent_matches and cs.accepted_at is not null)::int as via_tab,
-             count(*) filter (where cs.sent_matches and cs.accepted_at is null)::int as via_picker,
+             count(*) filter (where cs.shown_at is not null and cs.sent_matches and cs.accepted_at is not null)::int as via_tab,
+             count(*) filter (where cs.shown_at is not null and cs.sent_matches and cs.accepted_at is null)::int as via_picker,
              count(*) filter (where cs.sent_edit = 'unchanged')::int as unchanged,
              count(*) filter (where cs.sent_edit in ('extended', 'reworded'))::int as edited,
              count(*) filter (where cs.replied_at is not null and not cs.sent_matches
-                                and cs.sent_canned_response_id is not null)::int as replaced,
-             count(*) filter (where cs.replied_at is not null and cs.sent_canned_response_id is null)::int as own_words
+                                and cs.sent_choice <> ${NONE_KEY})::int as replaced,
+             count(*) filter (where cs.replied_at is not null and cs.sent_choice = ${NONE_KEY})::int as own_words
       from windowed cs
       where ${SUGGESTED}
       group by cs.choice
     ),
     missed as (
-      select cs.sent_canned_response_id::text as id,
+      select cs.sent_choice as id,
              max(cs.sent_canned_title) as frozen_title,
              count(*)::int as missed
       from windowed cs
       where cs.replied_at is not null
-        and cs.sent_canned_response_id is not null
+        and cs.sent_choice <> ${NONE_KEY}
         and not cs.sent_matches
-      group by cs.sent_canned_response_id
+      group by cs.sent_choice
     )
     select coalesce(s.id, m.id) as id,
            coalesce(s.frozen_title, m.frozen_title) as frozen_title,
@@ -256,7 +257,14 @@ export async function byResponse(window: ReportWindow): Promise<ResponseRow[]> {
   }));
 }
 
-export type ConfusionRow = { suggested: string; sent: string; count: number };
+export type ConfusionRow = {
+  /** A canned response id or `none` — the row's identity, since titles repeat. */
+  suggestedId: string;
+  suggested: string;
+  sentId: string;
+  sent: string;
+  count: number;
+};
 
 /**
  * Where Jev and the agent disagreed about which response, most frequent first —
@@ -264,23 +272,39 @@ export type ConfusionRow = { suggested: string; sent: string; count: number };
  * Jev away from shows up.
  */
 export async function confusions(window: ReportWindow, limit = 10): Promise<ConfusionRow[]> {
-  const rows = await db.execute<{ suggested: string; sent: string; count: number }>(sql`
-    select case when cs.choice = ${NONE_KEY} then ${NONE_KEY}
-                else coalesce(sc.title, max(cs.canned_title)) end as suggested,
-           coalesce(rc.title, max(cs.sent_canned_title)) as sent,
+  // Grouped on the frozen `choice` and `sent_choice`, so a response deleted
+  // since keeps its pairs; titles are the live ones where they still exist.
+  const rows = await db.execute<{
+    suggested_id: string;
+    suggested: string;
+    sent_id: string;
+    sent: string;
+    count: number;
+  }>(sql`
+    select cs.choice as suggested_id,
+           case when cs.choice = ${NONE_KEY} then ${NONE_KEY}
+                else coalesce(sc.title, max(cs.canned_title), '(untitled)') end as suggested,
+           cs.sent_choice as sent_id,
+           coalesce(rc.title, max(cs.sent_canned_title), '(untitled)') as sent,
            count(*)::int as count
     from canned_suggestions cs
     left join canned_responses sc on sc.id::text = cs.choice
-    left join canned_responses rc on rc.id = cs.sent_canned_response_id
+    left join canned_responses rc on rc.id::text = cs.sent_choice
     where ${within(sql`cs.created_at`, window)}
       and cs.replied_at is not null
-      and cs.sent_canned_response_id is not null
+      and cs.sent_choice <> ${NONE_KEY}
       and not cs.sent_matches
-    group by cs.choice, sc.title, cs.sent_canned_response_id, rc.title
+    group by cs.choice, sc.title, cs.sent_choice, rc.title
     order by count desc, suggested, sent
     limit ${limit}
   `);
-  return rows.map((row) => ({ ...row, count: Number(row.count) }));
+  return rows.map((row) => ({
+    suggestedId: row.suggested_id,
+    suggested: row.suggested,
+    sentId: row.sent_id,
+    sent: row.sent,
+    count: Number(row.count),
+  }));
 }
 
 export type BandRow = {

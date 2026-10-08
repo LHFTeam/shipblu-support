@@ -348,9 +348,11 @@ the same subject. The reply box's canned-response suggestion
 (`/api/canned-suggestions`) is the same exception in a different shape: started
 by focus rather than a press, and a route rather than an action, because Next
 sends a client's actions one at a time and a provider call made as one would
-queue the agent's Send behind it. It is also _perishable_ — an answer arriving
-after the agent has started typing is never shown — so there is nothing for a
-queued retry to rescue, and a failure is recorded on its row instead. Everything else is a job: add the type
+queue the agent's Send behind it. It is also worth little late — an answer that
+lands after the agent has started typing is held, not drawn, and appears only if
+the box is emptied again or on a later focus — so a queued retry, landing later
+still, buys almost nothing. Nothing retries: a failure is recorded on its row,
+and that message gets no suggestion. Everything else is a job: add the type
 to `JobType` in `lib/queue/index.ts`, a handler under `worker/handlers/`, and
 register it in `worker/handlers/index.ts`. CI checks that the three agree, and
 that every cron in `render.yaml` names a type that exists. Use `dedupeKey` for anything a webhook retry could
@@ -713,7 +715,9 @@ as picking from the list. Six rules hold:
   `usage_count` exactly like a pick, and Jev's answer never becomes text.
 - **The grade is frozen at send.** `sendReply` posts the suggestion's id back,
   shown or not, and `recordSuggestionOutcome` records what the reply carried and
-  whether that was Jev's choice (`sent_matches`, `sent_edit`). The report at
+  whether that was Jev's choice (`sent_choice`, `sent_matches`, `sent_edit`) —
+  "carried" meaning every canned response inserted since the box was last
+  empty, so a suggestion followed by a closing from the list still counts. The report at
   `/reports/canned-suggestions` counts those columns; it never re-judges them, so
   deleting a canned response cannot re-grade the past. See
   `plans/canned-suggestions-through-typesafe.md`.
