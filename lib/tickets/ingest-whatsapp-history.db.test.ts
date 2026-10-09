@@ -13,6 +13,7 @@ import {
 } from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { parseCoexistence } from '@/lib/whatsapp/coexistence';
+import { findCoexistenceChannel } from '@/lib/whatsapp/coexistence-state';
 import type {
   NormalisedHistoryChunk,
   NormalisedHistoryMessage,
@@ -428,31 +429,32 @@ describe('applyWhatsAppContactSync', () => {
     return row ?? null;
   }
 
-  it('adds a contact named from the address book, and counts it', async () => {
+  /** The channel the caller resolves once per number (`processWhatsAppWebhook`). */
+  const connected = () => findCoexistenceChannel(NUMBER);
+
+  it('adds a contact named from the address book, and leaves the counting to its caller', async () => {
     const channelId = await coexistenceChannel();
 
-    expect(await applyWhatsAppContactSync(sync(), RECEIVED)).toBe('applied');
+    expect(await applyWhatsAppContactSync(sync(), await connected())).toBe('applied');
 
     expect(await identityOf(PABLO)).toEqual({
       name: 'Pablo Morales',
       displayName: 'Pablo Morales',
     });
+    // Counted once per delivery by the handler, not once per entry here.
     const [row] = await db
       .select({ config: channels.config })
       .from(channels)
       .where(eq(channels.id, channelId));
-    expect(parseCoexistence(row!.config)?.syncs.contacts).toMatchObject({
-      received: 1,
-      lastReceivedAt: RECEIVED.toISOString(),
-    });
+    expect(parseCoexistence(row!.config)?.syncs.contacts).toBeUndefined();
   });
 
   it('never renames a contact somebody already named', async () => {
     await coexistenceChannel();
-    await applyWhatsAppContactSync(sync({ name: 'Pablo M.' }), RECEIVED);
+    await applyWhatsAppContactSync(sync({ name: 'Pablo M.' }), await connected());
     await db.update(contacts).set({ name: 'Pablo (VIP, Maadi)' });
 
-    await applyWhatsAppContactSync(sync({ name: 'Pablo Morales' }), RECEIVED);
+    await applyWhatsAppContactSync(sync({ name: 'Pablo Morales' }), await connected());
 
     expect(await identityOf(PABLO)).toEqual({
       name: 'Pablo (VIP, Maadi)',
@@ -461,12 +463,12 @@ describe('applyWhatsAppContactSync', () => {
   });
 
   it('changes nothing on a removal, for an unconnected number, or for an entry with no number', async () => {
-    expect(await applyWhatsAppContactSync(sync(), RECEIVED)).toBe('not_coexistence');
+    expect(await applyWhatsAppContactSync(sync(), await connected())).toBe('not_coexistence');
     await coexistenceChannel();
-    expect(await applyWhatsAppContactSync(sync({ action: 'remove', name: null }), RECEIVED)).toBe(
-      'removed',
-    );
-    expect(await applyWhatsAppContactSync(sync({ phone: 'Office' }), RECEIVED)).toBe(
+    expect(
+      await applyWhatsAppContactSync(sync({ action: 'remove', name: null }), await connected()),
+    ).toBe('removed');
+    expect(await applyWhatsAppContactSync(sync({ phone: 'Office' }), await connected())).toBe(
       'not_a_number',
     );
     expect(await db.select({ id: contacts.id }).from(contacts)).toEqual([]);

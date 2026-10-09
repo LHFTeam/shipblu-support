@@ -28,6 +28,10 @@ Decisions taken with the user:
 - **A phone-sent reply counts as the team's reply**: outbound, no author,
   labelled "WhatsApp Business app", moves `lastAgentMessageAt`, calls
   `onAgentReply`. Never touches `lastCustomerMessageAt`; never reopens.
+  `onAgentReply` stops the next-response clock only for customer messages no
+  newer than the reply, and records the earliest reply as the first response;
+  with no live conversation the echo opens one resolved, which the customer's
+  answer reopens.
 - **The backend stores the business token, sealed.** The user's instruction
   ("if the coexistence mode will require a token to be stored by the backend,
   it should do it securely and properly") overrides AGENTS.md's "the token is
@@ -175,8 +179,17 @@ the onboarding ask Meta one question through one function (the
 `explainAuthError(code, message, source)` (gains `source`, so the sentence says
 "press Reconnect" for a stored credential instead of blaming
 `META_PAGE_ACCESS_TOKEN`), and on `source === 'stored'` the handler calls
-`recordCredentialRefusal` / `recordCredentialVerified`. `send_whatsapp` and
-`download_media` pass `source` into `explainDeliveryError`. Before it fails:
+`recordCredentialRefusal` / `recordCredentialVerified`. `send_whatsapp`
+explains a 190 on the message through `explainAuthError` with the source the
+send used, and both it and `download_media` record a 190 on a stored
+credential through `recordCredentialRefusal`, with Meta's sentence
+(`recordRefusalIfStored`, `worker/handlers/stored-refusal.ts`): the number's
+credential is resolved again first and the refusal recorded only if the same
+stored token is still current, so a Reconnect mid-call does not badge the fresh
+credential, and the recording never stops the job from rethrowing — a 190 is
+retryable, so the reply or the file still goes through after the reconnect.
+`download_media` explains nothing on the message; Meta's sentence is the job's
+`last_error`. Before it fails:
 `credentialBadges` renders `expires in N days` within 7 days (each badge has a
 stable `kind` and a label of a few words; the key id, the variable and the date
 are in its explanation, one tap away). `check_meta_permissions` gains a section
@@ -184,10 +197,13 @@ per stored credential (kid, valid, type, scopes, expiry — never the token); it
 prints and writes nothing back, so a credential whose expiry was unknown at
 storing stays `expiry unknown` until a Reconnect stores a token Meta's
 inspection answered for. `applyWhatsAppAccountUpdate` records a refusal — and so
-a `refused` event — for `PARTNER_REMOVED` only. `ACCOUNT_OFFBOARDED` is Meta
-re-onboarding the number after it moved phone or was registered again; the
-partner keeps its access, so the credential is left alone and the badge clears
-on `ACCOUNT_RECONNECTED`.
+a `refused` event — for `PARTNER_REMOVED` only, and only on a channel the event
+was applied to, and only for a credential stored no later than the event
+(`recordCredentialRefusal`'s `observedAt`, compared under its lock at whole
+seconds), so a stale removal processed after a reconnect stored a new token
+refuses nothing. `ACCOUNT_OFFBOARDED` is Meta re-onboarding the number after it
+moved phone or was registered again; the partner keeps its access, so the
+credential is left alone and the badge clears on `ACCOUNT_RECONNECTED`.
 
 **Disconnect** — _Forget credential_ (new `DangerAction` on the WABA row):
 deletes the row, appends `removed`, leaves the account and numbers. Sends and
@@ -348,7 +364,11 @@ with the extras in **one constant** (`lib/whatsapp/embedded-signup.ts`).
    nothing.
 8. One transaction: `ensureAccountForWaba(tx, wabaId, name)` (find by
    `wabaId`; else insert with `freeName`, `tokenEnvVar: null`, `isDefault` if
-   none) → clear `tokenEnvVar` → `storeBusinessToken(tx, …)` → insert
+   none — and when the insert loses to `whatsapp_accounts_name_idx`, two WABAs
+   with the same Meta name connecting at once, re-read the names and insert
+   again, up to three rounds, throwing only after that rather than on the
+   first clash, since the code is already spent) → clear `tokenEnvVar` →
+   `storeBusinessToken(tx, …)` → insert
    `whatsapp_onboardings {status: 'exchanged'}`. After commit:
    `enqueue('complete_coexistence_onboarding', {onboardingId}, {priority: 10})`
    (a job is enqueued only after its row commits).
@@ -443,9 +463,9 @@ audience of one admin watching six states. Invalidation, not data, as
 
 > **Connected.** +20 10… (ShipBlu) is live as channel "<name>" under business
 > account "<WABA name>" · credential stored (never expires).
-> Contacts: 412 received. History: phase 0 100% · phase 1 100% · phase 2 40%
-> (17 chunks). Keep the WhatsApp Business app open on the phone until this
-> reaches 100% — six months of chats can take hours.
+> Contacts: 412 address-book entries received. History: 40% (17 chunks). Keep
+> the WhatsApp Business app open on the phone until this reaches 100% — six
+> months of chats can take hours.
 > Replies typed on the phone appear on tickets as "WhatsApp Business app".
 > Console replies go out over Cloud API. Nothing else to do.
 
@@ -484,8 +504,11 @@ finish (`phoneRepliesUnconfirmed`).
   on <date>; phone-typed replies count as the team's) — `connected through Meta`
   instead for a number Meta said is not on the Business app (`notOnBusinessApp`,
   written on the channel, so the row offers it no copy and no reconnect for one)
-  · `copying history 2/3 · 40%` / `history stalled at 40%` / `history copied` /
-  `history declined on the phone` / `history failed` · `412 contacts` ·
+  · `copying history · 40%` / `history stalled at 40%` (chunks arrived, then
+  nothing for a day; Reconnect offered) / `no history arrived` (neutral:
+  nothing at all for a day, which is no chats in six months or an app never
+  opened; no Reconnect) / `history copied` / `history declined on the phone` /
+  `history failed` · `412 address-book entries` ·
   `disconnected on the phone` (warning and "Meta reconnects it on its own" for
   `ACCOUNT_OFFBOARDED`, danger for anything else) ·
   `contacts and history copied before` (`carriedOver`, what an earlier
@@ -493,9 +516,10 @@ finish (`phoneRepliesUnconfirmed`).
   then `RequestSyncAgain` buttons where `canRequestSyncAgain` allows and the
   attempt the channel names has finished connecting, and _Reconnect_ where
   `needsReconnect` says (disconnected, a window that closed on something never
-  copied, or history declined on the phone). `ChannelEditor`'s Edit still works;
-  it shows the phone number id and the business account as text, and
-  `saveChannel` leaves a connected number's `config` and account to the UPDATE
+  copied, history declined on the phone, or a history copy that stalled
+  part-way — chunks arrived, then nothing for a day). `ChannelEditor`'s Edit
+  still works; it shows the phone number id and the business account as text,
+  and `saveChannel` leaves a connected number's `config` and account to the UPDATE
   (`whatsappEditColumns`) — a rename once wiped the connection, and a copy taken
   from a read wrote back over concurrent progress — and refuses a change of
   account.
@@ -567,20 +591,31 @@ replaces `listWhatsAppAccounts()` with a named-column `listAccountsForAdmin()`.
       }
     },
     "disconnected": { "at": "…", "event": "PARTNER_REMOVED", "reason": "…", "initiatedBy": "USER" },
+    "accountEventAt": "…",
     "carriedOver": ["contacts"],
     "notOnBusinessApp": true
   }
 }
 ```
 
-A failed request is `{"error", "attemptedAt"}` in the same slot. `carriedOver`
-is what an earlier connection copied and a reconnect did not ask for again;
-`notOnBusinessApp` is written when Meta's number check says the number is not
-on the Business app, so the row offers it neither a copy nor a reconnect for a
-copy it could never make. Both are absent when they do not apply. Parsed by
-`lib/whatsapp/coexistence.ts` (pure); written after onboarding only by
-`lib/whatsapp/coexistence-state.ts` with atomic `jsonb_set` (chunks are
-processed concurrently). History conversations: `source_system='import'`,
+A failed request is `{"error", "attemptedAt"}` in the same slot.
+`contacts.received` counts address-book entries applied, not distinct people —
+an entry the phone sends again, or edits later, counts again — and is added to
+once per delivery. `progressByPhase` is kept per phase, but each value is the
+highest overall `progress` that phase's chunks reported: Meta's `progress` is
+the whole copy's percentage, so the copy's progress is the maximum across
+phases and it is done at 100. `accountEventAt` is when the newest
+`account_update` applied to this connection happened, the high-water mark
+that keeps an older event processed late from undoing a newer one; a
+reconnect writes the object without it. `carriedOver` is what an earlier
+connection finished copying — history at 100% and not declined, contacts with
+at least one received — and a reconnect did not ask for again, not merely
+what it asked for; `notOnBusinessApp` is written when Meta's number check says
+the number is not on the Business app, so the row offers it neither a copy nor
+a reconnect for a copy it could never make. Those three are absent when they
+do not apply. Parsed by `lib/whatsapp/coexistence.ts` (pure); written after
+onboarding only by `lib/whatsapp/coexistence-state.ts` with atomic `jsonb_set`
+(chunks are processed concurrently). History conversations: `source_system='import'`,
 `external_id='whatsapp:history:<phoneNumberId>:<customer>'`, status resolved,
 `resolved_at` **null** (no rollup counts an import as a resolution),
 `last_*_message_at` null, `created_at` = earliest message. History messages:
@@ -612,7 +647,8 @@ return IGNORED;`; on a coexistence channel `meta.echoSource = 'business_app'`,
   `(import, externalId)`, a `history_imported` event; batched message insert
   with untargeted `onConflictDoNothing()`; never `download_media`,
   `afterMessageStored`, `afterInboundMessage`; then `recordHistoryProgress`)
-  and `applyWhatsAppContactSync` (`add` → `resolveContact` +
+  and `applyWhatsAppContactSync(sync, channel)` (handed the channel the
+  handler resolved, and counting nothing; `add` → `resolveContact` +
   `applyChannelProfile` (`lib/tickets/contacts.ts:144`: identity name always,
   `contacts.name` only when empty); `remove` → no-op).
 - `lib/whatsapp/coexistence-state.ts`: `recordSyncRequest`,
@@ -620,7 +656,15 @@ return IGNORED;`; on a coexistence channel `meta.echoSource = 'business_app'`,
   `applyWhatsAppAccountUpdate`; every statement one `jsonb_set` update;
   instants as `toISOString()` inside the patch.
 - `worker/handlers/process-whatsapp-webhook.ts`: three more loops, skips
-  counted as `process-meta-webhook.ts` counts them.
+  counted as `process-meta-webhook.ts` counts them. The address book's channel
+  is resolved once per `phoneNumberId` per delivery, and
+  `recordContactSync(channelId, at, count)` runs once per channel with what
+  was applied to it. A failed history chunk or history media item retries the
+  whole delivery — the exception to "retried only when every item failed",
+  because a chunk that throws part-way leaves threads unimported and the copy
+  short of 100% with nothing saying why, and every part of a delivery is safe
+  to run again; what a retry counts twice is the display-only chunk and
+  contact counters.
 - `lib/meta/subscriptions.ts`: `REQUIRED_WHATSAPP_FIELDS = ['messages',
 'smb_message_echoes', 'smb_app_state_sync', 'history', 'account_update']`;
   the comment block rewritten (its "silence is the proof" argument is now
@@ -693,16 +737,16 @@ be separated without a migration of meaning later.
 
 ## Idempotency
 
-| case                                        | absorbed by                                                                                                                                                                                         |
-| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| exchange action re-posted                   | the partial unique index refuses a second `exchanged` row while the first's job is live; a stale one is superseded (`failed: 'superseded'`); a used code is refused by Meta and nothing was written |
-| job dies / worker never runs                | final attempt marks `failed`; a 15-minute-old `exchanged` row no longer blocks a new attempt                                                                                                        |
-| job re-run / retry                          | steps already `ok` skipped; channel upsert keyed on `phoneNumberId`; syncs refused by `canRequestSyncAgain` once a `requestId` exists                                                               |
-| history chunk redelivered                   | `hm:<wamid>` → 200 at the door; `(import, wamid)` and `channel_message_id` on replay; progress via `greatest()`                                                                                     |
-| echo redelivered / echo of a Cloud-API send | `messages_channel_message_idx`; `duplicate` before any clock moves                                                                                                                                  |
-| contact sync redelivered                    | `c:<phone>:<action>:<ts>`; `resolveContact`/`applyChannelProfile` idempotent                                                                                                                        |
-| re-onboarding (same number)                 | credential upsert on the PK (`stored` event names the previous key id); channel rewritten in place; no second ticket                                                                                |
-| `ACCOUNT_RECONNECTED`                       | clears `disconnected`, nothing else (the admin re-runs the popup)                                                                                                                                   |
+| case                                        | absorbed by                                                                                                                                                                                                                                                                            |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| exchange action re-posted                   | the partial unique index refuses a second `exchanged` row while the first's job is live; a stale one is superseded (`failed: 'superseded'`); a used code is refused by Meta and nothing was written                                                                                    |
+| job dies / worker never runs                | final attempt marks `failed`; a 15-minute-old `exchanged` row no longer blocks a new attempt                                                                                                                                                                                           |
+| job re-run / retry                          | steps already `ok` skipped; channel upsert keyed on `phoneNumberId`; syncs refused by `canRequestSyncAgain` once a `requestId` exists                                                                                                                                                  |
+| history chunk redelivered                   | `hm:<wamid>` → 200 at the door; `(import, wamid)` and `channel_message_id` on replay; progress via `greatest()`                                                                                                                                                                        |
+| echo redelivered / echo of a Cloud-API send | `messages_channel_message_idx`; `duplicate` before any clock moves                                                                                                                                                                                                                     |
+| contact sync redelivered                    | `c:<phone>:<action>:<ts>`; `resolveContact`/`applyChannelProfile` idempotent                                                                                                                                                                                                           |
+| re-onboarding (same number)                 | credential upsert on the PK (`stored` event names the previous key id); channel rewritten in place; no second ticket                                                                                                                                                                   |
+| `ACCOUNT_RECONNECTED`                       | clears `disconnected`, nothing else — and, like every `account_update`, only when the event is at least as new as the connection (`onboardedAt`, to the second) and as the last `account_update` applied (`coexistence.accountEventAt`); an older event processed late changes nothing |
 
 ## Tests
 
@@ -791,9 +835,14 @@ dryRun=true` once on production to prove the rotation path plans.
   `oauth/access_token` accepts a POST form (fallback: GET kept outside
   `graph()`). Scopes the login configuration requests (`business_management`?).
 - **Payload shapes** from the dashboard's test payloads: `threads[].id`
-  meaning, `media_placeholder` form, where 2593109 arrives, per-phase
-  `progress`, `account_update` keys, `smb_message_echoes` carrying `to`;
-  `normaliseIdentifier('whatsapp', '+20…')` with the leading `+`.
+  meaning, `media_placeholder` form, where 2593109 arrives, `account_update`
+  keys, `smb_message_echoes` carrying `to`;
+  `normaliseIdentifier('whatsapp', '+20…')` with the leading `+`. Per-phase
+  `progress` is settled: per Meta it is the copy's overall percentage, 100
+  means the copy is complete, and a phase with no chats sends no webhook at
+  all (`historyProgress`). Confirm it on the first live onboarding from the
+  per-chunk `history <number> phase <n> <progress>%` line
+  `process-whatsapp-webhook.ts` logs.
 - **No server-side revocation**: an exfiltrated plaintext stays valid until
   the business removes the app; key rotation does not help against that. The
   runbook mitigates; a hybrid asymmetric `v2` envelope is the future answer.
@@ -803,7 +852,8 @@ dryRun=true` once on production to prove the rotation path plans.
   number and returns a fresh token — confirm on staging before relying on it
   as the 190 recovery.
 - **Hourly refusal detection** is only as frequent as the sync; a failed send
-  is the earlier signal.
+  or media download is the earlier signal, and records the refusal on the
+  stored credential when it happens (`recordRefusalIfStored`).
 - **Reports/retention**: check `lib/reports/rollup.ts` and
   `worker/handlers/cleanup.ts` predicates against imported rows.
 - **Service-level override** of `WHATSAPP_CREDENTIAL_KEY` anywhere would
@@ -855,16 +905,19 @@ the tree, this is where it went:
   connected number stays connected whatever a later step does; a sync refusal
   is explained by code (2593107 already asked, 2593108 window passed); a
   reconnect carries `previouslyCopied` on the channel step so it does not ask
-  again for what an earlier connection copied — any earlier one, since the
-  list is also written onto the channel as `coexistence.carriedOver` and read
-  back by the next reconnect. A number Meta says is not on the Business app is
-  written `notOnBusinessApp: true`, so the row offers it no copy.
+  again for what an earlier connection **finished** copying (`copiedSoFar`) —
+  any earlier one, since the list is also written onto the channel as
+  `coexistence.carriedOver` and read back by the next reconnect. A copy that
+  was only requested — stalled, never delivered, or declined on the phone — is
+  asked for again. A number Meta says is not on the Business app is written
+  `notOnBusinessApp: true`, so the row offers it no copy.
 - **`lib/whatsapp/coexistence.ts`** holds `Coexistence` (with `onboardingId`),
   `parseCoexistence`, `canRequestSync(coexistence, type, now)` (not
   `canRequestSyncAgain`; it also refuses `not_on_business_app`), `SYNC_TYPES`,
   `META_SYNC_TYPE`, `SYNC_WINDOW_MS`, `historyProgress`, `historyDone`,
-  `isSyncing`, `uncopiedAfterWindow`, `needsReconnect` and `coexistenceBadges`
-  — all pure, so the page draws the badges the job decides from.
+  `copiedSoFar`, `isSyncing`, `uncopiedAfterWindow`, `needsReconnect` and
+  `coexistenceBadges` — all pure, so the page draws the badges the job decides
+  from.
   `lib/whatsapp/onboarding-view.ts` is the view model of an attempt
   (`toOnboardingView`, `STEP_LABELS`, `describeOnboarding`, `retryable`,
   `recoveryFor`, `pollIntervalMs`, `connectedFollowUps`,
@@ -880,7 +933,9 @@ the tree, this is where it went:
 actor})`, `storedTokenFor`, `storedCredentialExists()` (the `exists()`
   fragment behind `WhatsAppAccount.hasStoredToken`),
   `storedCredentialEditRefusal(tx, id, {wabaId, tokenEnvVar})`,
-  `credentialStatuses()`, `recordCredentialRefusal`, `recordCredentialVerified`,
+  `credentialStatuses()`, `recordCredentialRefusal(id, sentence, observedAt?)`
+  (`observedAt` for an event Meta reported, so a credential stored after it is
+  left alone), `recordCredentialVerified`,
   `removeStoredCredential(tx, id, actor)` (used inside `deleteWhatsAppAccount`'s
   transaction, so the `removed` event is cut before the cascade),
   `storedCredentialRemovalRefusal(tx, id, mayForget)` (the same transaction,

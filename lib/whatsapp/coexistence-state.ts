@@ -1,4 +1,4 @@
-import { and, eq, type SQL, sql } from 'drizzle-orm';
+import { and, eq, inArray, type SQL, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels } from '@/db/schema';
 import { type Coexistence, parseCoexistence, type SyncType } from './coexistence';
@@ -226,14 +226,24 @@ export async function recordHistoryDeclined(
   );
 }
 
-/** One contact received from the phone's address book. */
-export async function recordContactSync(channelId: string, at: Date): Promise<void> {
+/**
+ * `count` address-book entries applied from one delivery: added to the
+ * counter in one write, rather than one per entry — a phone with 5,000
+ * contacts would otherwise be 5,000 updates of this row. One when not given,
+ * for a caller holding a single entry.
+ *
+ * It counts entries applied, not distinct people: an entry Meta sends again,
+ * or an edit the phone sends later, is counted again. Distinct counting would
+ * need a per-number record that does not belong in this jsonb.
+ */
+export async function recordContactSync(channelId: string, at: Date, count = 1): Promise<void> {
+  if (count <= 0) return;
   const slot = sql`coalesce(${channels.config} #> '{coexistence,syncs,contacts}', '{}'::jsonb)`;
   await updateSlot(
     channelId,
     'contacts',
     sql`${slot} || jsonb_build_object(
-      'received', coalesce((${slot} ->> 'received')::int, 0) + 1,
+      'received', coalesce((${slot} ->> 'received')::int, 0) + ${count}::int,
       'lastReceivedAt', ${at.toISOString()}::text
     )`,
   );
@@ -257,8 +267,9 @@ const RECONNECTING = new Set(['ACCOUNT_RECONNECTED']);
 
 /**
  * Applies an `account_update` to the coexistence channels it is about. Answers
- * how many channels it touched; zero for an event that is not about
- * coexistence, or a WABA with no such channel here.
+ * how many channels it changed; zero for an event that is not about
+ * coexistence, a WABA with no such channel here, or an event older than the
+ * state it would overwrite.
  *
  * - `PARTNER_REMOVED`: the business disconnected this app from the phone
  *   (Settings → Business Platform → Disconnect), or Meta did — with a reason.
@@ -271,8 +282,28 @@ const RECONNECTING = new Set(['ACCOUNT_RECONNECTED']);
  * - `ACCOUNT_RECONNECTED`: that re-onboarding finished. The badge clears;
  *   nothing else changes.
  *
- * Idempotent, because it is not deduplicated at the door (`./delivery-id`
- * says why): the same event applied twice writes the same state twice.
+ * **Applied in the order the events happened, not the order they are
+ * processed.** Deliveries are processed in no order (`docs/PROJECT-STATE.md`
+ * §6.77), and each of these overwrites the last: a late `ACCOUNT_RECONNECTED`
+ * from an earlier offboarding would clear a newer `PARTNER_REMOVED` and stop
+ * offering Reconnect while the credential is gone; a late `ACCOUNT_OFFBOARDED`
+ * would badge a number that has since come back; and a `PARTNER_REMOVED` about
+ * the connection before a reconnect would badge the new one and refuse its
+ * fresh credential. So an event is applied only when it is at least as new as
+ * the connection (`onboardedAt`, the exchange) and as the last event applied
+ * to it (`accountEventAt`, a high-water mark kept beside the badge — the badge
+ * itself cannot be the mark, because `ACCOUNT_RECONNECTED` deletes it and
+ * leaves a late `ACCOUNT_OFFBOARDED` nothing to compare against). Both are
+ * compared in the UPDATE, against the row as it is when the write lands: two
+ * deliveries run concurrently, and a check in JavaScript between the read
+ * and the write would let the older one land second. A reconnect writes the
+ * whole object again (`writeOnboardedCoexistence`), which resets the mark.
+ *
+ * Meta's `entry.time` is whole seconds, so `onboardedAt` is compared at that
+ * precision; two events in the same second fall back to processing order,
+ * which nothing can improve on. `<=` rather than `<` keeps it idempotent —
+ * it is not deduplicated at the door (`./delivery-id` says why), and the same
+ * event applied twice writes the same state twice.
  */
 export async function applyWhatsAppAccountUpdate(update: {
   wabaId: string | null;
@@ -289,7 +320,6 @@ export async function applyWhatsAppAccountUpdate(update: {
   const rows = await db
     .select({
       id: channels.id,
-      whatsappAccountId: channels.whatsappAccountId,
       config: channels.config,
     })
     .from(channels)
@@ -306,34 +336,78 @@ export async function applyWhatsAppAccountUpdate(update: {
     const known = parseCoexistence(row.config)?.displayPhoneNumber?.replace(/\D/g, '');
     return !known || known === number;
   });
+  if (matching.length === 0) return 0;
 
-  for (const row of matching) {
-    await db
-      .update(channels)
-      .set({
-        config: disconnecting
-          ? sql`jsonb_set(${channels.config}, '{coexistence,disconnected}', ${JSON.stringify({
-              at: update.at.toISOString(),
-              event: update.event,
-              reason: update.reason,
-              initiatedBy: update.initiatedBy,
-            })}::jsonb, true)`
-          : sql`${channels.config} #- '{coexistence,disconnected}'`,
-        updatedAt: new Date(),
-      })
-      .where(eq(channels.id, row.id));
+  // Bound as text behind `::timestamptz`: a bare Date in a `sql` template
+  // reaches postgres.js untyped (AGENTS.md, Tests).
+  const instant = update.at.toISOString();
+  const marked = disconnecting
+    ? sql`jsonb_set(${channels.config}, '{coexistence,disconnected}', ${JSON.stringify({
+        at: instant,
+        event: update.event,
+        reason: update.reason,
+        initiatedBy: update.initiatedBy,
+      })}::jsonb, true)`
+    : sql`(${channels.config} #- '{coexistence,disconnected}')`;
 
-    if (update.event === 'PARTNER_REMOVED' && row.whatsappAccountId) {
-      const why = [update.reason, update.initiatedBy && `by ${update.initiatedBy.toLowerCase()}`]
-        .filter(Boolean)
-        .join(', ');
-      await recordCredentialRefusal(
-        row.whatsappAccountId,
-        `Meta reports this number was disconnected from the WhatsApp Business app` +
-          `${why ? ` (${why})` : ''}. Reconnect it through Meta to send from it again.`,
-      );
-    }
+  const applied = await db
+    .update(channels)
+    .set({
+      config: sql`jsonb_set(${marked}, '{coexistence,accountEventAt}', ${JSON.stringify(instant)}::jsonb, true)`,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        inArray(
+          channels.id,
+          matching.map((row) => row.id),
+        ),
+        // Again here: a reconnect to another WABA between the read and this
+        // write leaves the row about a different account.
+        sql`${channels.config} #>> '{coexistence,wabaId}' = ${update.wabaId}`,
+        sql`date_trunc('second', (${channels.config} #>> '{coexistence,onboardedAt}')::timestamptz) <= ${instant}::timestamptz`,
+        sql`coalesce((${channels.config} #>> '{coexistence,accountEventAt}')::timestamptz, '-infinity') <= ${instant}::timestamptz`,
+      ),
+    )
+    .returning({ id: channels.id, whatsappAccountId: channels.whatsappAccountId });
+
+  if (update.event === 'PARTNER_REMOVED') {
+    await refuseCredentialsOlderThan(
+      new Set(applied.flatMap((row) => (row.whatsappAccountId ? [row.whatsappAccountId] : []))),
+      update,
+    );
   }
 
-  return matching.length;
+  return applied.length;
+}
+
+/**
+ * The credential half of `PARTNER_REMOVED`: a refusal on each account whose
+ * credential the event can be about.
+ *
+ * Only for channels the event was applied to, and only for a credential stored
+ * no later than the event. The channel's guard is not enough on its own: a
+ * reconnect stores the new token in the action, and the job that writes the
+ * new `onboardedAt` runs after it — so a stale `PARTNER_REMOVED` processed in
+ * that gap still passes the channel's guard, and without this would refuse the
+ * credential the business has just granted. The comparison is
+ * `recordCredentialRefusal`'s, made under its lock on the credential, so a
+ * reconnect committing while this runs is seen rather than refused; an
+ * account with no stored credential is a no-op there, since a variable or the
+ * shared token is somebody else's to rotate.
+ */
+async function refuseCredentialsOlderThan(
+  accountIds: Set<string>,
+  update: { reason: string | null; initiatedBy: string | null; at: Date },
+): Promise<void> {
+  const why = [update.reason, update.initiatedBy && `by ${update.initiatedBy.toLowerCase()}`]
+    .filter(Boolean)
+    .join(', ');
+  const sentence =
+    `Meta reports this number was disconnected from the WhatsApp Business app` +
+    `${why ? ` (${why})` : ''}. Reconnect it through Meta to send from it again.`;
+
+  for (const accountId of accountIds) {
+    await recordCredentialRefusal(accountId, sentence, update.at);
+  }
 }

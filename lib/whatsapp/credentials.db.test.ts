@@ -478,6 +478,28 @@ describe('refusals', () => {
     await recordCredentialRefusal(egypt.id, 'nope');
     expect(await eventsFor(egypt.id)).toEqual([]);
   });
+
+  /**
+   * An event Meta reported about the connection before a reconnect, processed
+   * after the reconnect stored its token, must not refuse the new grant — and
+   * the comparison is made under the credential's lock, so it holds however
+   * late the caller read anything.
+   */
+  it('refuses no credential stored after the instant the refusal was observed', async () => {
+    const egypt = await account('Egypt', '111111');
+    await store(egypt);
+    const { storedAt } = (await credentialStatuses()).get(egypt.id)!;
+
+    await recordCredentialRefusal(egypt.id, 'Removed', new Date(storedAt.getTime() - 60_000));
+    expect((await credentialStatuses()).get(egypt.id)?.lastRefusal).toBeNull();
+    expect((await eventsFor(egypt.id)).map((event) => event.event)).toEqual(['stored']);
+
+    // Meta's event time is whole seconds: the same second as the store counts
+    // as "not after", the precision `onboardedAt` is compared at too.
+    const sameSecond = new Date(Math.floor(storedAt.getTime() / 1000) * 1000);
+    await recordCredentialRefusal(egypt.id, 'Removed', sameSecond);
+    expect((await credentialStatuses()).get(egypt.id)?.lastRefusal).toBe('Removed');
+  });
 });
 
 describe('rotating the key', () => {

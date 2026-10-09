@@ -3,8 +3,8 @@ import { db } from '@/db/client';
 import { conversationEvents, conversations, messages } from '@/db/schema';
 import { normaliseIdentifier } from '@/lib/auth/normalise';
 import {
+  type CoexistenceChannel,
   findCoexistenceChannel,
-  recordContactSync,
   recordHistoryDeclined,
   recordHistoryProgress,
 } from '@/lib/whatsapp/coexistence-state';
@@ -321,12 +321,18 @@ export type ContactSyncResult = 'applied' | 'removed' | 'not_coexistence' | 'not
  * nobody has named it. `remove` changes nothing — the business deleting a
  * number from its phone says nothing about whether that person is a customer,
  * and the conversations on the contact still happened.
+ *
+ * Handed the channel rather than finding it, and counting nothing: a phone's
+ * address book arrives as thousands of entries, often many to a delivery, and
+ * looking the channel up and moving its counter once per entry was two round
+ * trips and a dead `channels` tuple per contact. The caller resolves the
+ * channel once per number and adds the delivery's entries to the counter in
+ * one write (`processWhatsAppWebhook`).
  */
 export async function applyWhatsAppContactSync(
   sync: NormalisedContactSync,
-  receivedAt: Date,
+  channel: CoexistenceChannel | null,
 ): Promise<ContactSyncResult> {
-  const channel = await findCoexistenceChannel(sync.phoneNumberId);
   if (!channel) return 'not_coexistence';
   if (sync.action === 'remove') return 'removed';
   // An address-book entry is typed by hand; one with no digits in it is not a
@@ -348,6 +354,5 @@ export async function applyWhatsAppContactSync(
       markFetched: false,
     });
   }
-  await recordContactSync(channel.id, receivedAt);
   return 'applied';
 }

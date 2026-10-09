@@ -17,7 +17,7 @@ import { resolveContact } from './contacts';
 import { latest } from './latest';
 import { findLiveConversation } from './live-conversation';
 import { reopenResolved } from './reopen';
-import { requireDefaultOpenStatusId } from './statuses';
+import { requireDefaultOpenStatusId, requireResolvedStatusId } from './statuses';
 
 /**
  * Inbound WhatsApp → conversation.
@@ -160,13 +160,29 @@ export async function ingestWhatsAppMessage(
     // lastCustomerMessageAt is what opens the 24-hour window, so it must be the
     // customer's timestamp from Meta, not now(): a delayed webhook would
     // otherwise hand us hours of window we do not actually have.
-    await tx
+    //
+    // Forward only (`latest`), as email's columns are: deliveries are processed
+    // in no order (§6.77), and an older message processed after a newer one
+    // would drag the window shut early, and leave `onAgentReply` comparing a
+    // late phone reply against the wrong message.
+    const [clocks] = await tx
       .update(conversations)
-      .set({ lastMessageAt: message.sentAt, lastCustomerMessageAt: message.sentAt })
-      .where(eq(conversations.id, conversationId));
+      .set({
+        lastMessageAt: latest(conversations.lastMessageAt, message.sentAt),
+        lastCustomerMessageAt: latest(conversations.lastCustomerMessageAt, message.sentAt),
+      })
+      .where(eq(conversations.id, conversationId))
+      .returning({ lastCustomerMessageAt: conversations.lastCustomerMessageAt });
 
-    return { conversationId, conversationNumber, messageId, createdConversation };
+    return {
+      conversationId,
+      conversationNumber,
+      messageId,
+      createdConversation,
+      customerWroteAt: clocks?.lastCustomerMessageAt ?? message.sentAt,
+    };
   });
+  const { customerWroteAt, ...stored } = result;
 
   // Meta's media URLs expire in about five minutes, so the download is queued
   // immediately and at high priority rather than fetched when an agent opens
@@ -174,7 +190,7 @@ export async function ingestWhatsAppMessage(
   if (message.media) {
     await enqueue(
       'download_media',
-      { messageId: result.messageId, mediaId: message.media.mediaId },
+      { messageId: stored.messageId, mediaId: message.media.mediaId },
       { priority: 5, dedupeKey: `download_media:${message.media.mediaId}` },
     );
   }
@@ -184,8 +200,8 @@ export async function ingestWhatsAppMessage(
   // automations stay out of it — but it is full of tracking numbers, and it is
   // exactly what a "conversations for this shipment" query should find.
   await afterMessageStored({
-    conversationId: result.conversationId,
-    messageId: result.messageId,
+    conversationId: stored.conversationId,
+    messageId: stored.messageId,
     bodyText: message.text,
     kind: 'reply',
     direction: 'inbound',
@@ -197,11 +213,16 @@ export async function ingestWhatsAppMessage(
   // minutes for the rest of time, automations could assign it to a person who
   // cannot answer it, and CSAT would ask the customer to rate a conversation
   // they had with a bot.
+  //
+  // The next-response clock counts from the customer's newest message on the
+  // ticket, not from this one, for the reason the columns above move forward
+  // only: an older message processed late would restart it from its own
+  // earlier instant and pull back a due date the newer one had set.
   if (!isReadOnlyChannel(channel.kind)) {
-    await afterInboundMessage(result.conversationId, result.createdConversation, message.sentAt);
+    await afterInboundMessage(stored.conversationId, stored.createdConversation, customerWroteAt);
   }
 
-  return { ...result, duplicate: false };
+  return { ...stored, duplicate: false };
 }
 
 /**
@@ -220,7 +241,9 @@ export async function ingestWhatsAppMessage(
  *   Business app.
  *
  * Either can arrive before any inbound message, so this creates the
- * conversation when needed rather than assuming one exists.
+ * conversation when needed rather than assuming one exists — open for the bot,
+ * and resolved for the Business app, whose message asks nothing of the team
+ * until the customer answers it.
  */
 export type WhatsAppEchoResult = {
   conversationId: string | null;
@@ -296,7 +319,21 @@ export async function ingestWhatsAppEcho(echo: NormalisedEcho): Promise<WhatsApp
       conversationId = existing.id;
       conversationNumber = existing.number;
     } else {
-      const statusId = await requireDefaultOpenStatusId(tx);
+      // The business writing first from the phone files a resolved
+      // conversation, not an open one. Nothing is owed on it — the team's own
+      // message never makes a ticket need attention, which is why an echo
+      // never reopens one — and right after onboarding this is the common
+      // case, because every customer whose only conversation is the import has
+      // no live one. Open, each would sit in the queue holding nothing but the
+      // business's reply. The customer answering reopens it through the
+      // ordinary path (`reopenResolved`), at the moment something is owed.
+      // `resolvedAt` stays null, as an import's does, so no rollup counts a
+      // resolution nobody made, and no survey is scheduled. The bot's channel
+      // keeps opening, as it always has: it is read-only, and nothing queues on
+      // it.
+      const statusId = fromBusinessApp
+        ? await requireResolvedStatusId(tx)
+        : await requireDefaultOpenStatusId(tx);
 
       const inserted = await tx
         .insert(conversations)
@@ -396,9 +433,11 @@ export async function ingestWhatsAppEcho(echo: NormalisedEcho): Promise<WhatsApp
     );
   }
 
-  // The business answered: the response clocks stop, at the moment it did.
-  // After the transaction, as `storeAgentReply` does, so a failure here is a
-  // logged SLA write and never a lost message.
+  // The business answered: the response clocks stop, at the moment it did —
+  // and only for what came before it. An echo processed after a newer customer
+  // message did not answer that message, and `onAgentReply` leaves its clock
+  // running. After the transaction, as `storeAgentReply` does, so a failure
+  // here is a logged SLA write and never a lost message.
   if (fromBusinessApp) await onAgentReply(result.conversationId, echo.sentAt);
 
   // The bot's own half of the transcript carries tracking numbers too, and is

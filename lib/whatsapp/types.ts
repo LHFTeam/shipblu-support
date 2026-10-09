@@ -291,7 +291,11 @@ export type NormalisedHistoryChunk = {
   /** 0: the last day; 1: up to 90 days; 2: up to 180 days. */
   phase: number | null;
   chunkOrder: number | null;
-  /** 0–100 within the phase; 100 may never arrive for a phase with no chats. */
+  /**
+   * 0–100, the whole copy's percentage rather than this phase's: 100 means the
+   * copy is complete. A phase with no chats sends no webhook at all, so its
+   * own figure may never arrive (`historyProgress`).
+   */
   progress: number | null;
   messages: NormalisedHistoryMessage[];
   /** The business turned history sharing off on the phone. */

@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { DateTime } from 'luxon';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
 import { channels, conversations, jobs, messages, webhookEvents } from '@/db/schema';
 import type { ClaimedJob } from '@/lib/queue';
@@ -8,6 +8,7 @@ import { computeDay, earliestDay, reportingContext } from '@/lib/reports/rollup'
 import { withCleanDatabase } from '@/lib/testing/db';
 import { ingestWhatsAppMessage } from '@/lib/tickets/ingest-whatsapp';
 import { parseCoexistence } from '@/lib/whatsapp/coexistence';
+import { findCoexistenceChannel, recordContactSync } from '@/lib/whatsapp/coexistence-state';
 import { processWebhook } from './process-webhook';
 
 /**
@@ -17,7 +18,47 @@ import { processWebhook } from './process-webhook';
  * test of either half alone can see.
  */
 
+/**
+ * Both mocks pass through to the real modules. One counts the calls a delivery
+ * makes; the other lets a test make one contact lookup fail, as a dropped
+ * database connection would, to see what the delivery does with a chunk that
+ * stopped part-way.
+ */
+const failing = vi.hoisted(() => ({ numbers: new Set<string>() }));
+
+vi.mock('@/lib/tickets/contacts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/tickets/contacts')>();
+  return {
+    ...actual,
+    resolveContact: vi.fn(async (input: Parameters<typeof actual.resolveContact>[0]) => {
+      if (failing.numbers.delete(input.identifier.replace(/\D/g, ''))) {
+        throw new Error('Connection terminated unexpectedly');
+      }
+      return actual.resolveContact(input);
+    }),
+  };
+});
+
+vi.mock('@/lib/whatsapp/coexistence-state', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/whatsapp/coexistence-state')>();
+  return {
+    ...actual,
+    findCoexistenceChannel: vi.fn(actual.findCoexistenceChannel),
+    recordContactSync: vi.fn(actual.recordContactSync),
+  };
+});
+
 withCleanDatabase();
+
+beforeEach(() => {
+  failing.numbers.clear();
+  vi.mocked(findCoexistenceChannel).mockClear();
+  vi.mocked(recordContactSync).mockClear();
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 const NUMBER = '106540352242922';
 const RECEIVED = new Date('2026-10-08T12:00:00Z');
@@ -41,7 +82,7 @@ async function coexistenceChannel() {
   return row!.id;
 }
 
-async function deliver(payload: unknown, receivedAt = RECEIVED): Promise<string> {
+async function store(payload: unknown, receivedAt = RECEIVED): Promise<string> {
   const [event] = await db
     .insert(webhookEvents)
     .values({
@@ -52,12 +93,30 @@ async function deliver(payload: unknown, receivedAt = RECEIVED): Promise<string>
       receivedAt,
     })
     .returning({ id: webhookEvents.id });
-  await processWebhook({
+  return event!.id;
+}
+
+/** One run of the job for a stored delivery, as the queue makes on each attempt. */
+function run(webhookEventId: string): Promise<void> {
+  return processWebhook({
     id: 'job-1',
     type: 'process_webhook',
-    payload: { webhookEventId: event!.id },
+    payload: { webhookEventId },
   } as unknown as ClaimedJob);
-  return event!.id;
+}
+
+async function deliver(payload: unknown, receivedAt = RECEIVED): Promise<string> {
+  const id = await store(payload, receivedAt);
+  await run(id);
+  return id;
+}
+
+async function coexistenceOf(channelId: string) {
+  const [row] = await db
+    .select({ config: channels.config })
+    .from(channels)
+    .where(eq(channels.id, channelId));
+  return parseCoexistence(row!.config);
 }
 
 const value = (field: string, body: Record<string, unknown>) => ({
@@ -165,6 +224,7 @@ describe('processWhatsAppWebhook: a number on the WhatsApp Business app', () => 
 
   it('adds an address-book contact and marks a disconnected phone, in one batch each', async () => {
     const channelId = await coexistenceChannel();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     await deliver(
       value('smb_app_state_sync', {
@@ -187,7 +247,9 @@ describe('processWhatsAppWebhook: a number on the WhatsApp Business app', () => 
       entry: [
         {
           id: '102290129340398',
-          time: 1739212624,
+          // After the connection was made: one from before it is about an
+          // earlier connection, and is not applied.
+          time: Math.floor(RECEIVED.getTime() / 1000),
           changes: [
             {
               field: 'account_update',
@@ -209,6 +271,130 @@ describe('processWhatsAppWebhook: a number on the WhatsApp Business app', () => 
     const coexistence = parseCoexistence(row!.config);
     expect(coexistence?.syncs.contacts).toMatchObject({ received: 1 });
     expect(coexistence?.disconnected).toMatchObject({ event: 'PARTNER_REMOVED' });
+    // Meta's reason on the line itself, where a log search for it finds it.
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^\[whatsapp\] account_update PARTNER_REMOVED .* reason=PRIMARY_INACTIVITY initiatedBy=SYSTEM$/,
+      ),
+    );
+  });
+
+  it('finds the channel and moves its counter once for a whole address book', async () => {
+    const channelId = await coexistenceChannel();
+    const entry = (phone: string, action: 'add' | 'remove') => ({
+      type: 'contact',
+      contact: { full_name: `Contact ${phone}`, phone_number: phone },
+      action,
+      metadata: { timestamp: '1739321024' },
+    });
+
+    await deliver(
+      value('smb_app_state_sync', {
+        state_sync: [
+          entry('16505551234', 'add'),
+          entry('12125557890', 'add'),
+          entry('14155550000', 'remove'),
+        ],
+      }),
+    );
+
+    expect(findCoexistenceChannel).toHaveBeenCalledTimes(1);
+    expect(recordContactSync).toHaveBeenCalledTimes(1);
+    // The two added, and not the removal.
+    expect((await coexistenceOf(channelId))?.syncs.contacts).toMatchObject({
+      received: 2,
+      lastReceivedAt: RECEIVED.toISOString(),
+    });
+  });
+
+  /**
+   * A chunk that throws part-way has imported some threads and not the rest,
+   * and recorded no progress. A status beside it succeeding used to mark the
+   * delivery processed, and the copy then waited for ever on threads nothing
+   * would send again.
+   */
+  it('retries a delivery whose history chunk failed part-way, and the retry completes it', async () => {
+    const channelId = await coexistenceChannel();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const at = DateTime.fromISO('2026-10-08T09:00:00', { zone: 'Africa/Cairo' });
+    const thread = (customer: string, wamid: string) => ({
+      id: customer,
+      messages: [
+        {
+          from: customer,
+          id: wamid,
+          timestamp: String(at.toSeconds()),
+          type: 'text',
+          text: { body: 'Where is it?' },
+        },
+      ],
+    });
+    const payload = {
+      object: 'whatsapp_business_account',
+      entry: [
+        {
+          id: '102290129340398',
+          changes: [
+            {
+              field: 'history',
+              value: {
+                messaging_product: 'whatsapp',
+                metadata: { display_phone_number: '15550783881', phone_number_id: NUMBER },
+                history: [
+                  {
+                    metadata: { phase: 0, chunk_order: 1, progress: 100 },
+                    threads: [
+                      thread('16505551234', 'wamid.pablo'),
+                      thread('12125557890', 'wamid.rosa'),
+                    ],
+                  },
+                ],
+              },
+            },
+            {
+              field: 'messages',
+              value: {
+                messaging_product: 'whatsapp',
+                metadata: { display_phone_number: '15550783881', phone_number_id: NUMBER },
+                statuses: [
+                  {
+                    id: 'wamid.sent-earlier',
+                    status: 'delivered',
+                    timestamp: String(at.toSeconds()),
+                    recipient_id: '16505551234',
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const eventId = await store(payload);
+    // The second thread's lookup fails, after the first thread is in.
+    failing.numbers.add('12125557890');
+
+    await expect(run(eventId)).rejects.toThrow(/history/);
+
+    const [event] = await db
+      .select({ processedAt: webhookEvents.processedAt })
+      .from(webhookEvents)
+      .where(eq(webhookEvents.id, eventId));
+    expect(event?.processedAt).toBeNull();
+    expect(await db.select({ wamid: messages.channelMessageId }).from(messages)).toEqual([
+      { wamid: 'wamid.pablo' },
+    ]);
+
+    await run(eventId);
+
+    const wamids = await db
+      .select({ wamid: messages.channelMessageId })
+      .from(messages)
+      .orderBy(messages.channelMessageId);
+    expect(wamids).toEqual([{ wamid: 'wamid.pablo' }, { wamid: 'wamid.rosa' }]);
+    expect((await coexistenceOf(channelId))?.syncs.history).toMatchObject({
+      progressByPhase: { '0': 100 },
+    });
   });
 
   it('keeps an import out of the day it is dated, and a live ticket in it', async () => {

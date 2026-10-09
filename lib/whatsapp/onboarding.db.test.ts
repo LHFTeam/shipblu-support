@@ -6,7 +6,7 @@ import { resetEnvCache } from '@/lib/env';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { stubFetch } from '@/lib/testing/fetch';
 import { canRequestSync, parseCoexistence } from './coexistence';
-import { recordSyncRequest } from './coexistence-state';
+import { recordContactSync, recordHistoryProgress, recordSyncRequest } from './coexistence-state';
 import { credentialStatuses, forgetStoredCredential } from './credentials';
 import { beginCoexistenceOnboarding, retryOnboarding } from './onboarding';
 import { completeOnboarding } from './onboarding-complete';
@@ -339,6 +339,29 @@ describe('the first phase: exchanging the code', () => {
     expect(await credentialStatuses()).toEqual(new Map());
   });
 
+  /**
+   * The one check of the group: the action used to run its own copy, and two
+   * copies of a refusal drift. Before the exchange, because a refusal after it
+   * would cost the business its one-use code and another pass through Meta's
+   * window.
+   */
+  it('refuses a default group that no longer exists, before spending the code', async () => {
+    const fetch = stubFetch(async () => new Response('unrouted', { status: 599 }));
+
+    const outcome = await beginCoexistenceOnboarding(
+      claim({ defaultGroupId: '00000000-0000-4000-8000-000000000001' }),
+      await admin(),
+    );
+
+    expect(outcome).toEqual({
+      ok: false,
+      error: 'That default group no longer exists — reload the page.',
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(await db.select().from(whatsappOnboardings)).toEqual([]);
+    expect(await credentialStatuses()).toEqual(new Map());
+  });
+
   it('names every missing setting, and calls nothing', async () => {
     delete process.env.META_EMBEDDED_SIGNUP_CONFIG_ID;
     process.env.APP_URL = 'http://localhost:3000';
@@ -509,6 +532,27 @@ async function channelFor(phone = PHONE) {
   return rows.find((row) => row.config.phoneNumberId === phone) ?? null;
 }
 
+/**
+ * The phone answering the connection's copies, through the writers its
+ * webhooks use: some contacts, and history chunks at `historyAt` percent.
+ * Without it a copy was only asked for, and a reconnect asks for it again
+ * (`copiedSoFar`) — so the reconnect tests below say what the phone sent.
+ */
+async function phoneSent({
+  contacts = 3,
+  historyAt = 100 as number | null,
+}: { contacts?: number; historyAt?: number | null } = {}) {
+  const channel = await channelFor();
+  const at = new Date();
+  // One write per delivery, as the webhook handler counts them.
+  await recordContactSync(channel!.id, at, contacts);
+  if (historyAt === null) return;
+  // Each phase, as Meta sends them: the last one reported carries the figure.
+  for (const phase of [0, 1, 2]) {
+    await recordHistoryProgress(channel!.id, { phase, progress: historyAt }, at);
+  }
+}
+
 describe('the second phase: connecting the number', () => {
   it('connects, creates the channel, asks for the copy and names the webhook fields it lacks', async () => {
     const id = await exchanged();
@@ -648,6 +692,7 @@ describe('the second phase: connecting the number', () => {
   it('on a reconnect, keeps the channel and does not copy six months of chats again', async () => {
     const first = await exchanged();
     await completeOnboarding(first, { job: JOB });
+    await phoneSent();
     const before = await channelFor();
     await db.update(channels).set({ name: 'Support line' }).where(eq(channels.id, before!.id));
     await db.update(jobs).set({ status: 'completed' });
@@ -682,6 +727,7 @@ describe('the second phase: connecting the number', () => {
   it('on a second reconnect, still does not copy what the first connection copied', async () => {
     const first = await exchanged();
     await completeOnboarding(first, { job: JOB });
+    await phoneSent();
     await db.update(jobs).set({ status: 'completed' });
 
     graph(completeRoutes());
@@ -724,6 +770,7 @@ describe('the second phase: connecting the number', () => {
       }),
     );
     await completeOnboarding(first, { job: JOB });
+    await phoneSent({ historyAt: null });
     await db.update(jobs).set({ status: 'completed' });
 
     const fetch = graph(completeRoutes());
@@ -744,6 +791,7 @@ describe('the second phase: connecting the number', () => {
   it('on a reconnect, asks again for a history the business declined on the phone', async () => {
     const first = await exchanged();
     await completeOnboarding(first, { job: JOB });
+    await phoneSent({ historyAt: null });
     const channel = await channelFor();
     await db.execute(
       sql`update channels set config = jsonb_set(config, '{coexistence,syncs,history,declined}', 'true') where id = ${channel!.id}`,
@@ -763,6 +811,57 @@ describe('the second phase: connecting the number', () => {
       .filter(([url]) => String(url).includes('smb_app_data'))
       .map(([, init]) => JSON.parse(String(init?.body)).sync_type);
     expect(asked).toEqual(['history']);
+  });
+
+  /**
+   * The case the "history stalled" badge sends an admin to Reconnect for. The
+   * stalled copy holds a request id, and counting that as copied had the
+   * reconnect skip the one copy it was made for — and, carried over, never
+   * offer it again.
+   */
+  it('on a reconnect, asks again for a history copy that stalled part-way', async () => {
+    const first = await exchanged();
+    await completeOnboarding(first, { job: JOB });
+    await phoneSent({ historyAt: 30 });
+    await db.update(jobs).set({ status: 'completed' });
+
+    const fetch = graph(completeRoutes());
+    const again = await beginCoexistenceOnboarding(claim(), await admin2());
+    if (!again.ok) throw new Error(again.error);
+    await completeOnboarding(again.onboardingId, { job: JOB });
+
+    const { steps } = await onboardingRow(again.onboardingId);
+    expect(steps.channel).toMatchObject({ outcome: 'reconnected', previouslyCopied: ['contacts'] });
+    expect(steps.history).toMatchObject({ ok: true, detail: expect.stringMatching(/req-history/) });
+    const asked = fetch.mock.calls
+      .filter(([url]) => String(url).includes('smb_app_data'))
+      .map(([, init]) => JSON.parse(String(init?.body)).sync_type);
+    expect(asked).toEqual(['history']);
+    expect(parseCoexistence((await channelFor())!.config)?.carriedOver).toEqual(['contacts']);
+  });
+
+  /** Nor a contacts copy that never delivered one: Meta sends no "finished" for those. */
+  it('on a reconnect, asks again for contacts that never arrived', async () => {
+    const first = await exchanged();
+    await completeOnboarding(first, { job: JOB });
+    await phoneSent({ contacts: 0 });
+    await db.update(jobs).set({ status: 'completed' });
+
+    const fetch = graph(completeRoutes());
+    const again = await beginCoexistenceOnboarding(claim(), await admin2());
+    if (!again.ok) throw new Error(again.error);
+    await completeOnboarding(again.onboardingId, { job: JOB });
+
+    const { steps } = await onboardingRow(again.onboardingId);
+    expect(steps.channel).toMatchObject({ outcome: 'reconnected', previouslyCopied: ['history'] });
+    expect(steps.contacts).toMatchObject({
+      ok: true,
+      detail: expect.stringMatching(/req-smb_app_state_sync/),
+    });
+    const asked = fetch.mock.calls
+      .filter(([url]) => String(url).includes('smb_app_data'))
+      .map(([, init]) => JSON.parse(String(init?.body)).sync_type);
+    expect(asked).toEqual(['smb_app_state_sync']);
   });
 
   it('runs a named step alone on a connected number — the "copy again" button', async () => {
@@ -964,6 +1063,7 @@ describe('the second phase: connecting the number', () => {
   it('re-running a reconnect into its own channel still skips what it carried over', async () => {
     const first = await exchanged();
     await completeOnboarding(first, { job: JOB });
+    await phoneSent();
     await db.update(jobs).set({ status: 'completed' });
 
     graph(completeRoutes());

@@ -605,7 +605,13 @@ continues an imported conversation. A reply the business typed on the phone
 arrives as an `smb_message_echoes` delivery and is the team's reply: outbound,
 no author, labelled "WhatsApp Business app", moving `last_agent_message_at`
 forward and never `last_customer_message_at` — on a plain support number the
-same echo is our own send coming back and stays ignored. The copy of contacts
+same echo is our own send coming back and stays ignored. It answers only what
+came before it: `onAgentReply` stops the next-response clock only when the
+reply is at least as new as `last_customer_message_at`, and
+`first_responded_at` takes the earliest reply, so the SLA does not depend on
+the order deliveries are processed in. With no live conversation, the business
+writing first files a _resolved_ conversation (`resolved_at` null, no survey)
+that the customer's reply reopens. The copy of contacts
 and history is once per onboarding, inside 24 hours of the exchange, with the
 Business app open on the phone (`canRequestSync`; Meta's 2593107 and 2593108
 both mean "reconnect"). And `saveChannel` carries `coexistence` and the stored

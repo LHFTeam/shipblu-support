@@ -414,13 +414,29 @@ export async function credentialStatuses(
  * "Once per refusal" is a transition: the row was not already refused. A
  * success in between (`recordCredentialVerified`) clears the refusal, so the
  * next one is a new event.
+ *
+ * `observedAt` is for a refusal Meta reported as an event of its own — an
+ * `account_update` — rather than as the answer to a call made with the token:
+ * a credential stored after that instant is a newer grant the event cannot be
+ * about, and refusing it would badge the reconnect that answered the event.
+ * Compared inside this lock, against the row as it is when the write lands,
+ * so a credential stored between a caller's read and this write is still
+ * seen; at whole seconds, because Meta's event time has no more. A caller
+ * whose refusal is the answer to its own call passes nothing: the token it
+ * used is the evidence, and whether that token is still the one stored is a
+ * comparison of tokens, not of clocks (`worker/handlers/stored-refusal.ts`).
  */
-export async function recordCredentialRefusal(accountId: string, sentence: string): Promise<void> {
+export async function recordCredentialRefusal(
+  accountId: string,
+  sentence: string,
+  observedAt?: Date,
+): Promise<void> {
   await db.transaction(async (tx) => {
     const [row] = await tx
       .select({
         keyId: credentials.keyId,
         lastRefusedAt: credentials.lastRefusedAt,
+        storedAt: credentials.storedAt,
         wabaId: whatsappAccounts.wabaId,
       })
       .from(credentials)
@@ -429,6 +445,9 @@ export async function recordCredentialRefusal(accountId: string, sentence: strin
       .for('update', { of: credentials });
 
     if (!row) return;
+    if (observedAt && Math.floor(row.storedAt.getTime() / 1000) * 1000 > observedAt.getTime()) {
+      return;
+    }
 
     const refusal = sentence.slice(0, 500);
     await tx

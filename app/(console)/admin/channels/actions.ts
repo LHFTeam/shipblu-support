@@ -418,16 +418,11 @@ export async function connectBusinessAppNumber(
     };
   }
 
+  // Parsed here, because a malformed uuid reaching the lib's lookup is a
+  // 22P02 and an action that throws answers nothing. Whether the group still
+  // exists is the lib's question alone: every caller passes through it.
   const defaultGroupId = uuidField(formData, 'defaultGroupId');
   if (defaultGroupId === undefined) return { error: 'Unknown default group' };
-  if (defaultGroupId) {
-    const [group] = await db
-      .select({ id: groups.id })
-      .from(groups)
-      .where(eq(groups.id, defaultGroupId))
-      .limit(1);
-    if (!group) return { error: 'That default group no longer exists — reload the page' };
-  }
 
   const outcome = await beginCoexistenceOnboarding(
     {

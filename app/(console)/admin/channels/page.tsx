@@ -222,10 +222,10 @@ export default async function ChannelsPage() {
               channel.type === 'whatsapp' ? parseCoexistence(channel.config) : null;
 
             // A number that was disconnected on the phone, whose copy window
-            // closed with a copy never made, or whose history the phone
-            // declined, is reconnected through the same window it was
-            // connected through — `needsReconnect`, drawn from the same facts
-            // as the badge that says which.
+            // closed with a copy never made, whose history the phone declined,
+            // or whose history copy stalled part-way, is reconnected through
+            // the same window it was connected through — `needsReconnect`,
+            // drawn from the same facts as the badge that says which.
             const reconnectable = coexistence !== null && needsReconnect(coexistence, now);
             // The copy buttons wait for the attempt that wrote this object to
             // finish connecting: until then the copy is one of its own steps,

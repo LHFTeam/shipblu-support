@@ -467,31 +467,51 @@ export async function ensureAccountForWaba(
     };
   }
 
-  const others = await tx
-    .select({ name: whatsappAccounts.name, isDefault: whatsappAccounts.isDefault })
-    .from(whatsappAccounts);
+  // Round again when the insert lost to the name index rather than to this
+  // WABA's own row: two different WABAs with the same Meta name connecting at
+  // once both read the names before either commits and both choose "Acme".
+  // This runs after the sign-in code was spent, so throwing here costs the
+  // business another pass through Meta's window, which unlinks the phone's
+  // devices again. The loser's insert waits for the winner to commit, and under
+  // READ COMMITTED the next statement reads afresh, so the second round sees
+  // "Acme" taken and chooses "Acme <wabaId>". `on conflict do nothing` leaves
+  // the transaction usable, which a 23505 would not. Bounded, because each
+  // round only loses to a commit that happened during it.
+  for (let round = 0; round < 3; round += 1) {
+    const others = await tx
+      .select({ name: whatsappAccounts.name, isDefault: whatsappAccounts.isDefault })
+      .from(whatsappAccounts);
 
-  const [inserted] = await tx
-    .insert(whatsappAccounts)
-    .values({
-      name: freeName(
-        new Set(others.map((row) => row.name)),
+    const [inserted] = await tx
+      .insert(whatsappAccounts)
+      .values({
+        name: freeName(
+          new Set(others.map((row) => row.name)),
+          wabaId,
+          wabaName?.trim() || 'WhatsApp',
+        ),
         wabaId,
-        wabaName?.trim() || 'WhatsApp',
-      ),
-      wabaId,
-      tokenEnvVar: null,
-      isDefault: !others.some((row) => row.isDefault),
-    })
-    .onConflictDoNothing()
-    .returning({ id: whatsappAccounts.id });
+        tokenEnvVar: null,
+        isDefault: !others.some((row) => row.isDefault),
+      })
+      .onConflictDoNothing()
+      .returning({ id: whatsappAccounts.id });
 
-  if (inserted)
-    return { id: inserted.id, created: true, reactivated: false, previousVariable: null };
+    if (inserted)
+      return { id: inserted.id, created: true, reactivated: false, previousVariable: null };
 
-  const raced = await found();
-  if (!raced) throw new Error(`could not create a business account row for WABA ${wabaId}`);
-  return { id: raced.id, created: false, reactivated: false, previousVariable: raced.tokenEnvVar };
+    const raced = await found();
+    if (raced) {
+      return {
+        id: raced.id,
+        created: false,
+        reactivated: false,
+        previousVariable: raced.tokenEnvVar,
+      };
+    }
+  }
+
+  throw new Error(`could not create a business account row for WABA ${wabaId}`);
 }
 
 /**

@@ -20,8 +20,8 @@ import { callGraph, WhatsAppApiError } from './client';
 import {
   canRequestSync,
   type Coexistence,
+  copiedSoFar,
   parseCoexistence,
-  SYNC_TYPES,
   type SyncType,
 } from './coexistence';
 import { recordSyncRequest, writeOnboardedCoexistence } from './coexistence-state';
@@ -520,7 +520,8 @@ async function subscribeStep(row: Onboarding, token: string): Promise<string> {
  *   was lost: left exactly as it is, since rewriting it would reset the copy
  *   window and forget the requests already made;
  * - **an earlier connection's** — a reconnect: rewritten for this one, and
- *   what that connection copied is passed on so it is not asked for twice;
+ *   what that connection finished copying is passed on so it is not asked
+ *   for twice;
  * - **none**, a plain Cloud API channel for this number: taken over.
  *
  * The channel write and its step record share one transaction, so a run that
@@ -594,17 +595,13 @@ async function channelStep(
       return { id: current.id, previouslyCopied };
     }
 
-    // Copied means copied by any earlier connection, not only the last one: a
-    // reconnect asks for nothing it carried over, so its own slots are empty,
-    // and reading only those would have the reconnect after it ask the phone
-    // for six months of chats again.
-    const previouslyCopied = SYNC_TYPES.filter((type) => {
-      const slot = previous?.syncs[type];
-      const requested = Boolean(slot && 'requestId' in slot && slot.requestId);
-      // Declined on the phone: the business said no then, and may say yes now.
-      const declined = type === 'history' && Boolean(previous?.syncs.history?.declined);
-      return (requested && !declined) || Boolean(previous?.carriedOver?.includes(type));
-    });
+    // What an earlier connection finished copying — any earlier one, not only
+    // the last: a reconnect asks for nothing it carried over, so its own slots
+    // are empty, and reading only those would have the reconnect after it ask
+    // the phone for six months of chats again. Finished, not merely asked for:
+    // a copy that stalled is what its badge sends the admin here to fix, and
+    // one declined on the phone may be shared this time (`copiedSoFar`).
+    const previouslyCopied = previous ? copiedSoFar(previous) : [];
 
     await db.transaction(async (tx) => {
       // Pointed at this account and switched on: the number now sends with

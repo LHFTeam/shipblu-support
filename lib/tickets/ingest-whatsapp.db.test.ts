@@ -16,6 +16,7 @@ import {
 import { withCleanDatabase } from '@/lib/testing/db';
 import type { NormalisedEcho, NormalisedInboundMessage } from '@/lib/whatsapp/types';
 import { ingestWhatsAppEcho, ingestWhatsAppMessage } from './ingest-whatsapp';
+import { ingestWhatsAppHistoryChunk } from './ingest-whatsapp-history';
 
 /**
  * What the two WhatsApp ingest paths write today, quirks included, so the
@@ -494,6 +495,18 @@ describe('ingestWhatsAppEcho on a number connected through coexistence', () => {
     return row!;
   }
 
+  async function categories() {
+    return db
+      .select({
+        id: conversations.id,
+        sourceSystem: conversations.sourceSystem,
+        category: ticketStatuses.category,
+      })
+      .from(conversations)
+      .innerJoin(ticketStatuses, eq(ticketStatuses.id, conversations.statusId))
+      .orderBy(asc(conversations.createdAt));
+  }
+
   it("appends the phone's reply as the team's: answered, and no window opened", async () => {
     const channelId = await coexistenceChannel();
     const asked = await ingestWhatsAppMessage(inbound({ phoneNumberId: COEX_NUMBER }));
@@ -537,11 +550,12 @@ describe('ingestWhatsAppEcho on a number connected through coexistence', () => {
     expect(await clocks(asked.conversationId)).toMatchObject({
       lastAgentMessageAt: LATER,
       lastMessageAt: LATER,
-      firstRespondedAt: LATER,
+      // The first answer is the earliest one, whichever was processed first.
+      firstRespondedAt: SENT,
     });
   });
 
-  it('opens the conversation when the business writes first, already answered', async () => {
+  it('opens the conversation resolved when the business writes first, already answered', async () => {
     await coexistenceChannel();
 
     const opened = await ingestWhatsAppEcho(phoneEcho());
@@ -551,6 +565,206 @@ describe('ingestWhatsAppEcho on a number connected through coexistence', () => {
       lastAgentMessageAt: LATER,
       firstRespondedAt: LATER,
       lastCustomerMessageAt: null,
+    });
+    // Nothing is owed on the business's own message, so it is not in the
+    // queue — and nobody resolved it, so no rollup counts a resolution.
+    expect(await conversation(opened.conversationId!)).toMatchObject({
+      status: 'Resolved',
+      resolvedAt: null,
+    });
+  });
+
+  it('files the phone’s first message beside an import, and the customer’s answer reopens it', async () => {
+    await coexistenceChannel();
+    await ingestWhatsAppHistoryChunk(
+      {
+        phoneNumberId: COEX_NUMBER,
+        phase: 0,
+        chunkOrder: 1,
+        progress: 100,
+        declined: null,
+        messages: [
+          {
+            wamid: 'wamid.history-1',
+            customer: CUSTOMER,
+            direction: 'inbound',
+            sentAt: EARLIER,
+            type: 'text',
+            text: 'Is it shipped?',
+            mediaPlaceholder: false,
+            location: null,
+            replyToWamid: null,
+            phoneStatus: null,
+            raw: { id: 'wamid.history-1', from: CUSTOMER },
+          },
+        ],
+      },
+      EARLIER,
+    );
+    const [archive] = await db
+      .select({ id: conversations.id })
+      .from(conversations)
+      .where(eq(conversations.sourceSystem, 'import'));
+
+    const opened = await ingestWhatsAppEcho(phoneEcho({ sentAt: SENT }));
+    const again = await ingestWhatsAppEcho(phoneEcho({ wamid: 'wamid.phone-2', sentAt: LATER }));
+
+    expect(opened).toMatchObject({ createdConversation: true });
+    expect(opened.conversationId).not.toBe(archive!.id);
+    expect(again).toMatchObject({
+      conversationId: opened.conversationId,
+      createdConversation: false,
+    });
+    expect(await categories()).toEqual([
+      { id: archive!.id, sourceSystem: 'import', category: 'resolved' },
+      { id: opened.conversationId, sourceSystem: 'native', category: 'resolved' },
+    ]);
+    expect(await messagesOf(archive!.id)).toHaveLength(1);
+
+    const answer = await ingestWhatsAppMessage(
+      inbound({
+        phoneNumberId: COEX_NUMBER,
+        sentAt: new Date('2026-09-20T12:00:00Z'),
+      }),
+    );
+
+    expect(answer).toMatchObject({
+      conversationId: opened.conversationId,
+      createdConversation: false,
+    });
+    expect(await categories()).toEqual([
+      { id: archive!.id, sourceSystem: 'import', category: 'resolved' },
+      { id: opened.conversationId, sourceSystem: 'native', category: 'open' },
+    ]);
+    expect((await clocks(opened.conversationId!)).lastCustomerMessageAt).toEqual(
+      new Date('2026-09-20T12:00:00Z'),
+    );
+  });
+
+  /**
+   * A reply typed on the phone answers what came before it. Deliveries are
+   * processed in no order, so a phone reply can be processed after a customer
+   * message it never saw; the clocks must come out as they would have in
+   * arrival order, whichever worker got there first.
+   */
+  describe('the response clocks, whatever order the deliveries are processed in', () => {
+    const at = (time: string) => new Date(`2026-09-20T${time}:00Z`);
+    let sequence = 0;
+
+    async function hourlyPolicy() {
+      const target = { firstResponseMins: 60, nextResponseMins: null, resolutionMins: 1440 };
+      await db.insert(slaPolicies).values({
+        name: 'default',
+        isDefault: true,
+        // Wall-clock, so a due date is the instant plus an hour.
+        hoursSource: 'round_the_clock',
+        targets: { low: target, medium: target, high: target, urgent: target },
+      });
+    }
+
+    const customer = (time: string) =>
+      ingestWhatsAppMessage(
+        inbound({
+          wamid: `wamid.customer-${++sequence}`,
+          phoneNumberId: COEX_NUMBER,
+          sentAt: at(time),
+        }),
+      );
+    const phone = (time: string) =>
+      ingestWhatsAppEcho(phoneEcho({ wamid: `wamid.phone-${++sequence}`, sentAt: at(time) }));
+
+    it('keeps the clock a newer customer message started when an older phone reply lands late', async () => {
+      await coexistenceChannel();
+      await hourlyPolicy();
+      const { conversationId } = await customer('09:00');
+      await phone('09:30');
+      await customer('10:05');
+
+      await phone('10:00');
+
+      expect(await clocks(conversationId)).toMatchObject({
+        nextResponseDueAt: at('11:05'),
+        lastAgentMessageAt: at('10:00'),
+        firstRespondedAt: at('09:30'),
+      });
+    });
+
+    it('starts the clock for a message that came in before anybody had answered', async () => {
+      await coexistenceChannel();
+      await hourlyPolicy();
+      const { conversationId } = await customer('09:55');
+      await customer('10:05');
+
+      await phone('10:00');
+
+      expect(await clocks(conversationId)).toMatchObject({
+        firstRespondedAt: at('10:00'),
+        nextResponseDueAt: at('11:05'),
+      });
+    });
+
+    it('owes nothing when a later reply already answered the newer message', async () => {
+      await coexistenceChannel();
+      await hourlyPolicy();
+      const { conversationId } = await customer('09:55');
+      await customer('10:05');
+      await phone('10:20');
+
+      await phone('10:00');
+
+      expect(await clocks(conversationId)).toMatchObject({
+        firstRespondedAt: at('10:00'),
+        lastAgentMessageAt: at('10:20'),
+        nextResponseDueAt: null,
+      });
+    });
+
+    it('leaves a running clock where it is, pause credit included', async () => {
+      await coexistenceChannel();
+      await hourlyPolicy();
+      const { conversationId } = await customer('09:00');
+      await phone('09:30');
+      await customer('10:05');
+      // Half an hour on a status that stops the clock, credited on resume.
+      await db
+        .update(conversations)
+        .set({ nextResponseDueAt: at('11:35') })
+        .where(eq(conversations.id, conversationId));
+
+      await phone('10:00');
+
+      expect((await clocks(conversationId)).nextResponseDueAt).toEqual(at('11:35'));
+    });
+
+    it('stops the clock for a reply newer than everything the customer wrote', async () => {
+      await coexistenceChannel();
+      await hourlyPolicy();
+      const { conversationId } = await customer('09:00');
+      await phone('09:30');
+      await customer('10:05');
+
+      await phone('10:10');
+
+      expect(await clocks(conversationId)).toMatchObject({
+        nextResponseDueAt: null,
+        lastAgentMessageAt: at('10:10'),
+      });
+    });
+
+    it('never moves the customer’s clocks back for a message processed late', async () => {
+      await coexistenceChannel();
+      await hourlyPolicy();
+      const { conversationId } = await customer('09:00');
+      await phone('09:30');
+      await customer('10:05');
+
+      await customer('09:50');
+
+      expect(await clocks(conversationId)).toMatchObject({
+        lastCustomerMessageAt: at('10:05'),
+        lastMessageAt: at('10:05'),
+        nextResponseDueAt: at('11:05'),
+      });
     });
   });
 

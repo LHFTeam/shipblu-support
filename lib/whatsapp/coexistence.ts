@@ -61,7 +61,13 @@ export type ContactsSync = (SyncRequested | SyncRefused) & {
 
 export type HistorySync = (SyncRequested | SyncRefused) & {
   chunks?: number;
-  /** Meta reports history in phases; each phase's progress, 0–100. */
+  /**
+   * The highest `progress` each phase's chunks have reported, 0–100. Meta's
+   * `progress` is the whole copy's percentage, not the phase's, so the highest
+   * value across phases is how far the copy has got (`historyProgress`). Kept
+   * per phase because that is the shape already stored, and the per-phase
+   * high-water marks still yield the overall one.
+   */
   progressByPhase?: Record<string, number>;
   /** The business turned history sharing off on the phone (Meta's 2593109). */
   declined?: { at: string; code: number };
@@ -83,6 +89,14 @@ export type Coexistence = {
   /** Meta told us the number was disconnected from the phone (`account_update`). */
   disconnected?: { at: string; event: string; reason: string | null };
   /**
+   * When the newest `account_update` applied to this connection happened —
+   * the high-water mark that keeps an older event processed late from undoing
+   * a newer one (`applyWhatsAppAccountUpdate`). Not `disconnected.at`, which
+   * `ACCOUNT_RECONNECTED` deletes. Only that UPDATE's SQL compares it today; a
+   * reconnect writes the object afresh without it.
+   */
+  accountEventAt?: string;
+  /**
    * Meta said, when this connection was made, that the number is not on the
    * WhatsApp Business app (`is_on_biz_app: false`). There is no phone to copy
    * from, so nothing may be asked for and a closed window is nothing missed.
@@ -91,12 +105,14 @@ export type Coexistence = {
    */
   notOnBusinessApp?: true;
   /**
-   * What an earlier connection of this number already copied, carried over on
-   * a reconnect that did not ask for it again. Without it, the fresh `syncs: {}`
-   * a reconnect writes reads as "never copied": the row would badge a closed
-   * window and offer Reconnect for ever, and the next reconnect would ask the
-   * phone for six months of chats the helpdesk already holds. History the
-   * phone declined is never in it — the business may say yes next time.
+   * What an earlier connection of this number finished copying, carried over
+   * on a reconnect that did not ask for it again (`copiedSoFar`). Without it,
+   * the fresh `syncs: {}` a reconnect writes reads as "never copied": the row
+   * would badge a closed window and offer Reconnect for ever, and the next
+   * reconnect would ask the phone for six months of chats the helpdesk already
+   * holds. A copy that was only asked for — stalled, or never delivered — is
+   * never in it, and nor is history the phone declined: the reconnect is how
+   * those are asked for again.
    */
   carriedOver?: SyncType[];
 };
@@ -126,6 +142,7 @@ export function parseCoexistence(config: unknown): Coexistence | null {
   const syncs = isRecord(raw.syncs) ? raw.syncs : {};
   const carried = Array.isArray(raw.carriedOver) ? (raw.carriedOver as unknown[]) : [];
   const carriedOver = SYNC_TYPES.filter((type) => carried.includes(type));
+  const accountEventAt = text(raw.accountEventAt);
 
   return {
     onboardingId: text(raw.onboardingId),
@@ -147,6 +164,7 @@ export function parseCoexistence(config: unknown): Coexistence | null {
           },
         }
       : {}),
+    ...(accountEventAt ? { accountEventAt } : {}),
     // Only a literal `true`: a hand-written "false" string must not stop a copy.
     ...(raw.notOnBusinessApp === true ? { notOnBusinessApp: true as const } : {}),
     ...(carriedOver.length > 0 ? { carriedOver } : {}),
@@ -237,13 +255,6 @@ export function uncopiedAfterWindow(coexistence: Coexistence, now: Date): SyncTy
   });
 }
 
-/**
- * How many phases Meta copies the history in. Each `history` webhook names its
- * phase (0, 1, 2) and that phase's progress, and the phases finish in no
- * particular order — so "done" is every one of them at 100, not the last one.
- */
-export const HISTORY_PHASES = 3;
-
 /** What the console can say about the copy of the chat history. */
 export type HistoryProgress = {
   /** A request went out and Meta accepted it. */
@@ -252,13 +263,26 @@ export type HistoryProgress = {
   refused: string | null;
   declined: boolean;
   chunks: number;
-  /** Phases at 100, out of `HISTORY_PHASES`. */
-  phasesDone: number;
-  /** The least-finished phase's progress, which is what is still to come. */
+  /** How far the whole copy has got, 0–100: the highest `progress` any chunk reported. */
   percent: number;
   done: boolean;
 };
 
+/**
+ * Where the copy of the phone's chat history stands.
+ *
+ * Each `history` webhook names a phase (0: the last day, 1: up to 90 days, 2:
+ * up to 180) and a `progress`, which Meta documents as the copy's overall
+ * percentage — 100 is the copy complete — not the phase's. So the copy is
+ * done when any chunk says 100, and how far it has got is the highest value
+ * seen, chunks arriving in no order. Reading it per phase and waiting for all
+ * three to reach 100 is the obvious reading of the field names, and it may
+ * never finish: Meta sends no webhook at all for a phase with no chats, so a
+ * business with nothing older than a day never reports phase 1 or 2, and
+ * under the documented meaning phase 0's last chunk reports the share of the
+ * whole copy done by then, short of 100 whenever older chats follow. The row
+ * then polled for a day and told the admin the copy had stalled.
+ */
 export function historyProgress(coexistence: Coexistence): HistoryProgress {
   const slot = coexistence.syncs.history;
   const requested = Boolean(slot && 'requestId' in slot && slot.requestId);
@@ -266,30 +290,61 @@ export function historyProgress(coexistence: Coexistence): HistoryProgress {
   const declined = Boolean(slot?.declined);
   const chunks = slot?.chunks ?? 0;
 
-  const byPhase = slot?.progressByPhase ?? {};
-  const phases = Array.from({ length: HISTORY_PHASES }, (_, phase) => byPhase[String(phase)] ?? 0);
-  const phasesDone = phases.filter((progress) => progress >= 100).length;
-  const percent = Math.min(...phases);
+  // Tolerant of shape like `parseCoexistence`: a hand-written string reads as
+  // nothing reported rather than as NaN on the badge.
+  const reported = Object.values(slot?.progressByPhase ?? {}).filter(Number.isFinite);
+  const percent = Math.min(100, Math.max(0, ...reported));
 
   return {
     requested,
     refused,
     declined,
     chunks,
-    phasesDone,
     percent,
-    done: declined || (requested && phasesDone === HISTORY_PHASES),
+    done: declined || (requested && percent >= 100),
   };
 }
 
 /**
  * Whether there is nothing more to wait for from the phone's chat history:
- * every phase arrived, or the business declined to share it. A copy that was
+ * the copy reached 100%, or the business declined to share it. A copy that was
  * never requested, or that Meta refused, is not done — it is not started, and
  * the "copy again" button is what that case is for.
  */
 export function historyDone(coexistence: Coexistence): boolean {
   return historyProgress(coexistence).done;
+}
+
+/**
+ * What this number already holds a copy of: what this connection's copies
+ * finished, and what an earlier connection's did (`carriedOver`). What a
+ * reconnect leaves out of what it asks the phone for, and carries over in turn.
+ *
+ * Finished, not asked for. A request id says the phone was asked, not that it
+ * answered: a history copy stalled at 30% — the case whose badge recommends a
+ * reconnect — or a request whose answer was lost and that delivered nothing
+ * would count as copied, and the reconnect would skip exactly the copy it was
+ * made for, then never offer it again, since nothing carried over is "missed".
+ *
+ * - **History** reached 100% and was not declined. Not `historyDone`, which is
+ *   true for a declined copy too — the business may say yes next time.
+ * - **Contacts** delivered at least one. Meta sends no "finished" for the
+ *   address book, and asking again re-sends contacts the helpdesk applies as
+ *   upserts, so erring towards asking costs a few webhooks, where erring the
+ *   other way costs the address book.
+ */
+export function copiedSoFar(coexistence: Coexistence): SyncType[] {
+  const history = historyProgress(coexistence);
+  const contacts = coexistence.syncs.contacts;
+  const finished: Record<SyncType, boolean> = {
+    history: history.requested && !history.declined && history.percent >= 100,
+    contacts: Boolean(
+      contacts && 'requestId' in contacts && contacts.requestId && (contacts.received ?? 0) > 0,
+    ),
+  };
+  return SYNC_TYPES.filter(
+    (type) => finished[type] || Boolean(coexistence.carriedOver?.includes(type)),
+  );
 }
 
 /**
@@ -305,16 +360,24 @@ export function historyDone(coexistence: Coexistence): boolean {
  * - **History declined on the phone.** Meta asks the phone once per
  *   connection, and the declined request holds a request id, so no copy button
  *   is offered for it inside the window or after. A reconnect asks again —
- *   `channelStep` leaves declined history out of what it carries over.
+ *   `copiedSoFar` leaves declined history out of what it carries over.
+ * - **History that stalled part-way** — chunks arrived, then nothing for a
+ *   day. Its badge says a reconnect opens a new copy window, and the request
+ *   id it holds means no copy button can; a reconnect asks again, because
+ *   `copiedSoFar` counts only a copy that finished. Not a copy that never
+ *   delivered a chunk: that is as likely a business with no chats to copy,
+ *   for which a reconnect only unlinks the phone's devices again.
  *
  * Pure, so the page's condition has a test and the badges are drawn from the
  * same facts.
  */
 export function needsReconnect(coexistence: Coexistence, now: Date): boolean {
+  const history = historyProgress(coexistence);
   return (
     coexistence.disconnected !== undefined ||
     uncopiedAfterWindow(coexistence, now).length > 0 ||
-    historyProgress(coexistence).declined
+    history.declined ||
+    (historyStalled(coexistence, now) && history.chunks > 0)
   );
 }
 
@@ -347,6 +410,18 @@ export function isSyncing(coexistence: Coexistence, now: Date): boolean {
   if (!slot || !('requestId' in slot) || !slot.requestId) return false;
   if (historyDone(coexistence)) return false;
   return now.getTime() - lastMovedAt(slot) <= SYNC_STALE_MS;
+}
+
+/**
+ * The other side of `isSyncing`: requested, not done, and nothing for a day.
+ * One rule, so the badge that says "stalled" and the Reconnect button beside
+ * it cannot disagree about which copies it covers.
+ */
+function historyStalled(coexistence: Coexistence, now: Date): boolean {
+  const slot = coexistence.syncs.history;
+  if (!slot || !('requestId' in slot) || !slot.requestId) return false;
+  if (historyDone(coexistence)) return false;
+  return now.getTime() - lastMovedAt(slot) > SYNC_STALE_MS;
 }
 
 export type CoexistenceBadge = {
@@ -422,7 +497,6 @@ export function coexistenceBadges(coexistence: Coexistence, now: Date): Coexiste
   }
 
   const history = historyProgress(coexistence);
-  const historySlot = coexistence.syncs.history;
   if (history.refused) {
     badges.push({
       label: 'history failed',
@@ -451,30 +525,43 @@ export function coexistenceBadges(coexistence: Coexistence, now: Date): Coexiste
         history.chunks === 1 ? '' : 's'
       }. Each past conversation is a resolved ticket.`,
     });
-  } else if (history.requested && historySlot && 'requestId' in historySlot) {
-    const stalled = now.getTime() - lastMovedAt(historySlot) > SYNC_STALE_MS;
+  } else if (history.requested && historyStalled(coexistence, now)) {
     badges.push(
-      stalled
+      history.chunks === 0
         ? {
+            // Not "stalled", and no Reconnect (`needsReconnect`): Meta sends
+            // nothing at all for a business with no chats in six months, which
+            // looks exactly like a phone that was never opened. Warning about
+            // the first sends an admin through Meta's window for nothing, and
+            // that unlinks the phone's devices.
+            label: 'no history arrived',
+            tone: 'neutral',
+            explain:
+              'Nothing has arrived from the phone in the day since the chat history was ' +
+              'requested. Either the business had no chats in the last six months — Meta then ' +
+              'sends nothing — or the WhatsApp Business app has not been open on the phone ' +
+              'since; the copy only runs while it is, so open it and the copy starts.',
+          }
+        : {
             label: `history stalled at ${history.percent}%`,
             tone: 'warning',
             explain:
               'Nothing has arrived from the phone for a day. The copy only runs while the ' +
               'WhatsApp Business app is open on the phone; open it and the copy resumes. ' +
               'If it was open all along, reconnecting the number opens a new copy window.',
-          }
-        : {
-            label:
-              history.chunks === 0
-                ? 'copying history · waiting for the phone'
-                : `copying history ${history.phasesDone}/${HISTORY_PHASES} · ${history.percent}%`,
-            tone: 'pending',
-            explain:
-              'The phone is sending up to six months of chats, in three phases that finish in ' +
-              'no particular order. Keep the WhatsApp Business app open on the phone until ' +
-              'every phase reaches 100% — it can take hours.',
           },
     );
+  } else if (history.requested && !history.done) {
+    badges.push({
+      label:
+        history.chunks === 0
+          ? 'copying history · waiting for the phone'
+          : `copying history · ${history.percent}%`,
+      tone: 'pending',
+      explain:
+        'The phone is sending up to six months of chats. Keep the WhatsApp Business app open ' +
+        'on the phone until it reaches 100% — it can take hours.',
+    });
   }
 
   // A slot holds a request id or an error, never both: a success clears the
@@ -482,14 +569,19 @@ export function coexistenceBadges(coexistence: Coexistence, now: Date): Coexiste
   const contacts = coexistence.syncs.contacts;
   if (contacts && 'requestId' in contacts && contacts.requestId) {
     const received = contacts.received ?? 0;
+    const entries = `${received} address-book entr${received === 1 ? 'y' : 'ies'}`;
     badges.push(
       received > 0
         ? {
-            label: `${received} contact${received === 1 ? '' : 's'}`,
+            label: entries,
             tone: 'neutral',
+            // Entries, not people: the counter adds every entry the phone
+            // sends, and one sent again or edited later counts again
+            // (`recordContactSync`).
             explain:
-              `${received} contact${received === 1 ? '' : 's'} arrived from the phone's address ` +
-              `book, named as the business saved them.`,
+              `${entries} received from the phone, each applied to the contact it names as ` +
+              `the business saved it. An entry the phone sends again, or edits later, is ` +
+              `counted again, so this is not a count of distinct people.`,
           }
         : {
             label: 'waiting for contacts',

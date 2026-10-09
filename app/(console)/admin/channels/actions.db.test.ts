@@ -2,7 +2,9 @@ import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
 import { agents, channels, whatsappAccounts, whatsappCredentialEvents } from '@/db/schema';
+import { resetEnvCache } from '@/lib/env';
 import { withCleanDatabase } from '@/lib/testing/db';
+import { stubFetch } from '@/lib/testing/fetch';
 import { parseCoexistence } from '@/lib/whatsapp/coexistence';
 import { credentialStatuses, storeBusinessToken } from '@/lib/whatsapp/credentials';
 
@@ -38,6 +40,7 @@ const { connectBusinessAppNumber, deleteWhatsAppAccount, saveChannel } = await i
 withCleanDatabase();
 
 const INITIAL = { error: null };
+const saved = { ...process.env };
 const WABA = '102290129340398';
 const OTHER_WABA = '109999999999999';
 const PHONE = '106540352242922';
@@ -242,5 +245,37 @@ describe('connectBusinessAppNumber', () => {
       error: expect.stringMatching(/Too many attempts/),
       wait: true,
     });
+  });
+
+  /**
+   * The group's existence is checked once, in the lib, and its sentence is
+   * what comes back; the action keeps only the parse, because a malformed
+   * uuid reaching the lib's lookup is a 22P02 and a thrown action answers
+   * nothing. Neither costs the business its one-use code.
+   */
+  it("answers a deleted or malformed default group with a sentence, before Meta's code is spent", async () => {
+    process.env.META_APP_ID = '1234567890';
+    process.env.META_APP_SECRET = 'app-secret-value-0123456789abcdef';
+    process.env.META_EMBEDDED_SIGNUP_CONFIG_ID = '987654321';
+    process.env.APP_URL = 'https://support.example.test';
+    resetEnvCache();
+    const fetch = stubFetch(async () => new Response('unrouted', { status: 599 }));
+
+    try {
+      const attempt = (defaultGroupId: string) =>
+        connectBusinessAppNumber(
+          INITIAL,
+          form({ code: 'AQD-sign-in-code', wabaId: WABA, phoneNumberId: PHONE, defaultGroupId }),
+        );
+
+      expect(await attempt('00000000-0000-4000-8000-000000000001')).toMatchObject({
+        error: 'That default group no longer exists — reload the page.',
+      });
+      expect(await attempt('not-a-uuid')).toMatchObject({ error: 'Unknown default group' });
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      process.env = { ...saved };
+      resetEnvCache();
+    }
   });
 });

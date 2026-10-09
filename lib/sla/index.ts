@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, notInArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, notInArray, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   conversationEvents,
@@ -13,6 +13,7 @@ import { loadHoursCatalog } from '@/lib/hours/catalog';
 import { ticketHours, type HoursCatalog } from '@/lib/hours/resolve';
 import { conversationFacts } from '@/lib/rules/facts';
 import { readOnlyChannels } from '@/lib/tickets/channel-policy';
+import { earliest } from '@/lib/tickets/latest';
 import {
   dueAt,
   dueDatesOnCreate,
@@ -150,20 +151,67 @@ export async function applySlaOnCreate(conversationId: string): Promise<void> {
  *
  * `firstRespondedAt` is recorded even when the ticket has no policy, because
  * reporting measures response time whether or not anyone committed to a target.
+ *
+ * `at` is when the reply was written, and it need not be the newest thing on
+ * the ticket. A reply typed on the WhatsApp Business app arrives as an echo,
+ * and deliveries are processed in no order (`docs/PROJECT-STATE.md` §6.77), so
+ * a phone reply typed at 10:00 can be processed after the customer's 10:05
+ * message. It answered what came before it, not that message, so the clocks
+ * come out as they would have in arrival order — the SLA must not depend on
+ * which worker got there first:
+ *
+ * - **The next-response clock stops only when the reply is at least as new as
+ *   the customer's newest message.** Decided in the UPDATE, against the row as
+ *   it is when the write lands: a check in JavaScript after a read would lose
+ *   the clock to a customer message committed in between.
+ * - **`firstRespondedAt` takes the earliest reply** (`earliest()`, which
+ *   ignores the null of a ticket nobody has answered), so an older phone reply
+ *   processed late records the true first response rather than whichever was
+ *   processed first.
+ * - **A customer message the clock never started for is picked up here.** One
+ *   that arrived before anybody had answered left the next-response clock
+ *   alone — `onCustomerReply` waits for a first response — and this late reply
+ *   has just become that first response. So when the customer's newest message
+ *   is newer than every reply the team has sent and no clock is running, the
+ *   clock starts from that message. Not when one is already running: it was
+ *   started for that same message, and recomputing it would throw away any time
+ *   a pause has since credited to it.
+ *
+ * In the console `at` is now, which no customer message is later than, so
+ * there this is the plain "answered, nothing owed" it always was.
  */
 export async function onAgentReply(conversationId: string, at: Date = new Date()): Promise<void> {
   try {
-    const row = await loadConversation(conversationId);
-    if (!row) return;
-
-    await db
+    // Bound as text behind `::timestamptz`: a bare Date in a `sql` template
+    // reaches postgres.js untyped (AGENTS.md, Tests).
+    const instant = at.toISOString();
+    const [row] = await db
       .update(conversations)
       .set({
-        firstRespondedAt: row.conversation.firstRespondedAt ?? at,
-        // Answered, so nothing is owed until the customer writes again.
-        nextResponseDueAt: null,
+        firstRespondedAt: earliest(conversations.firstRespondedAt, at),
+        // Answered, so nothing is owed until the customer writes again — unless
+        // they already have, after this reply was written.
+        nextResponseDueAt: sql`case when ${conversations.lastCustomerMessageAt} > ${instant}::timestamptz
+                                    then ${conversations.nextResponseDueAt} else null end`,
       })
-      .where(eq(conversations.id, conversationId));
+      .where(eq(conversations.id, conversationId))
+      .returning({
+        lastCustomerMessageAt: conversations.lastCustomerMessageAt,
+        lastAgentMessageAt: conversations.lastAgentMessageAt,
+        nextResponseDueAt: conversations.nextResponseDueAt,
+      });
+
+    const customerWroteAt = row?.lastCustomerMessageAt;
+    if (!customerWroteAt || row.nextResponseDueAt) return;
+
+    // The team's newest reply, this one included: the caller moves
+    // `lastAgentMessageAt` before calling, and `at` covers one that does not.
+    // A console reply sent after the customer's message answered it, even
+    // though this older one did not.
+    const answeredAt = Math.max(at.getTime(), row.lastAgentMessageAt?.getTime() ?? 0);
+    if (customerWroteAt.getTime() > answeredAt) {
+      await onCustomerReply(conversationId, customerWroteAt);
+    }
   } catch (error) {
     log.error(`could not record an agent reply on ${conversationId}`, error);
   }

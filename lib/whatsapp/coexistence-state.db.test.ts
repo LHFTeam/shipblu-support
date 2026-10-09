@@ -88,6 +88,9 @@ describe('applyWhatsAppAccountUpdate', () => {
     const accountId = await connectedAccount();
     const removed = await channel(accountId, '106540352242922', '+1 555-078-3881');
     const other = await channel(accountId, '106540352242999', '+1 555-078-9999');
+    // After the credential was stored, which is stamped with the wall clock: a
+    // disconnection from before it is about an earlier one (below).
+    const at = new Date();
 
     const update = {
       wabaId: WABA,
@@ -95,14 +98,14 @@ describe('applyWhatsAppAccountUpdate', () => {
       event: 'PARTNER_REMOVED',
       reason: 'PRIMARY_INACTIVITY',
       initiatedBy: 'SYSTEM',
-      at: AT,
+      at,
     };
     expect(await applyWhatsAppAccountUpdate(update)).toBe(1);
     // Twice, as a replayed delivery would: the same state, no second effect.
     expect(await applyWhatsAppAccountUpdate(update)).toBe(1);
 
     expect(await disconnected(removed)).toMatchObject({
-      at: AT.toISOString(),
+      at: at.toISOString(),
       event: 'PARTNER_REMOVED',
       reason: 'PRIMARY_INACTIVITY',
     });
@@ -143,6 +146,95 @@ describe('applyWhatsAppAccountUpdate', () => {
     expect(await applyWhatsAppAccountUpdate({ ...base, event: 'ACCOUNT_RECONNECTED' })).toBe(1);
 
     expect(await disconnected(id)).toBeNull();
+  });
+
+  /**
+   * Deliveries are processed in no order, and each of these events overwrites
+   * the last, so the one that happened last must win whichever was processed
+   * last.
+   */
+  describe('in the order the events happened, not the order they are processed', () => {
+    const T1 = new Date('2026-10-08T09:00:00Z');
+    const T2 = new Date('2026-10-08T09:05:00Z');
+    const T3 = new Date('2026-10-08T09:10:00Z');
+    const event = (name: string, at: Date) => ({
+      wabaId: WABA,
+      phoneNumber: null,
+      event: name,
+      reason: null,
+      initiatedBy: null,
+      at,
+    });
+
+    it('keeps a newer disconnection when an older reconnection lands late', async () => {
+      const id = await channel(null, '106540352242922', '15550783881');
+      await applyWhatsAppAccountUpdate(event('ACCOUNT_OFFBOARDED', T1));
+      await applyWhatsAppAccountUpdate(event('PARTNER_REMOVED', T3));
+
+      expect(await applyWhatsAppAccountUpdate(event('ACCOUNT_RECONNECTED', T2))).toBe(0);
+
+      expect(await disconnected(id)).toMatchObject({
+        event: 'PARTNER_REMOVED',
+        at: T3.toISOString(),
+      });
+    });
+
+    it('leaves a reconnected number unbadged when the offboarding before it lands late', async () => {
+      const id = await channel(null, '106540352242922', '15550783881');
+      await applyWhatsAppAccountUpdate(event('ACCOUNT_RECONNECTED', T2));
+
+      expect(await applyWhatsAppAccountUpdate(event('ACCOUNT_OFFBOARDED', T1))).toBe(0);
+
+      expect(await disconnected(id)).toBeNull();
+    });
+
+    it('never downgrades a removal to the offboarding that came before it', async () => {
+      const id = await channel(null, '106540352242922', '15550783881');
+      await applyWhatsAppAccountUpdate(event('PARTNER_REMOVED', T3));
+
+      await applyWhatsAppAccountUpdate(event('ACCOUNT_OFFBOARDED', T1));
+
+      expect(await disconnected(id)).toMatchObject({ event: 'PARTNER_REMOVED' });
+    });
+
+    it('ignores a removal of the connection before a reconnect, and its credential', async () => {
+      const accountId = await connectedAccount();
+      const id = await channel(accountId, '106540352242922', '15550783881');
+      const reconnectedAt = new Date();
+      await writeOnboardedCoexistence(db, id, {
+        onboardingId: null,
+        onboardedAt: reconnectedAt.toISOString(),
+        wabaId: WABA,
+        displayPhoneNumber: '15550783881',
+        verifiedName: null,
+        subscribedAt: null,
+        syncs: {},
+      });
+
+      const stale = event('PARTNER_REMOVED', new Date(reconnectedAt.getTime() - 60 * 60_000));
+      expect(await applyWhatsAppAccountUpdate(stale)).toBe(0);
+
+      expect(await disconnected(id)).toBeNull();
+      expect((await credentialStatuses()).get(accountId)?.lastRefusal).toBeNull();
+    });
+
+    /**
+     * The action stores the new credential before the job writes the new
+     * connection, so in between the channel still carries the old
+     * `onboardedAt` — and only the credential's own instant says the removal
+     * is about the one before.
+     */
+    it('refuses no credential stored after the removal, before the job has rewritten the channel', async () => {
+      const accountId = await connectedAccount();
+      const id = await channel(accountId, '106540352242922', '15550783881');
+
+      const stale = event('PARTNER_REMOVED', new Date(Date.now() - 60 * 60_000));
+      expect(await applyWhatsAppAccountUpdate(stale)).toBe(1);
+
+      // The old connection's object is badged until the job replaces it.
+      expect(await disconnected(id)).toMatchObject({ event: 'PARTNER_REMOVED' });
+      expect((await credentialStatuses()).get(accountId)?.lastRefusal).toBeNull();
+    });
   });
 
   it('touches nothing for another WABA, or an event that is not about the connection', async () => {

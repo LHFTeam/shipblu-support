@@ -4,6 +4,7 @@ import { contactIdentities, conversations, messages } from '@/db/schema';
 import type { ClaimedJob } from '@/lib/queue';
 import { parseJobPayload } from '@/lib/queue/payloads';
 import { alreadySent } from './already-sent';
+import { recordRefusalIfStored } from './stored-refusal';
 import { subjectGone } from './subject-gone';
 import { credentialsForPhoneNumberId, type WhatsAppCredentials } from '@/lib/whatsapp/accounts';
 import { sendingNumberFor } from '@/lib/whatsapp/conversation';
@@ -163,6 +164,10 @@ export async function sendWhatsApp(job: ClaimedJob): Promise<void> {
           })
         : errorMessage(error),
     );
+
+    // On the credential too, while it is still the one stored — what sends an
+    // admin to Reconnect (`./stored-refusal`).
+    await recordRefusalIfStored(log, messageId, from, credentials, error);
 
     // Only retry what a retry could fix. A rejected template or an invalid
     // number fails identically every time, and retrying it four more times just

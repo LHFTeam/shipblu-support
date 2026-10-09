@@ -515,12 +515,12 @@ A number connected through coexistence adds four fields to the WhatsApp route,
 parsed by `lib/whatsapp/parse.ts` and handed out by
 `worker/handlers/process-whatsapp-webhook.ts`:
 
-| Field                | Carries                                                                              | Ingested by                                                                                         |
-| -------------------- | ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
-| `history`            | Chunks of the phone's past chats, per phase; a decline (2593109); media placeholders | `ingestWhatsAppHistoryChunk`, `attachHistoryMedia` (`lib/tickets/ingest-whatsapp-history.ts`)       |
-| `smb_app_state_sync` | Entries from the phone's address book, `add` or `remove`                             | `applyWhatsAppContactSync` (same module)                                                            |
-| `smb_message_echoes` | A reply the business typed on the phone                                              | `ingestWhatsAppEcho` (`lib/tickets/ingest-whatsapp.ts`) — the team's reply on a coexistence channel |
-| `account_update`     | `PARTNER_REMOVED`, `ACCOUNT_OFFBOARDED`, `ACCOUNT_RECONNECTED`                       | `applyWhatsAppAccountUpdate` (`lib/whatsapp/coexistence-state.ts`)                                  |
+| Field                | Carries                                                                                                                                       | Ingested by                                                                                         |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `history`            | Chunks of the phone's past chats, per phase, each with the whole copy's `progress` (100 is complete); a decline (2593109); media placeholders | `ingestWhatsAppHistoryChunk`, `attachHistoryMedia` (`lib/tickets/ingest-whatsapp-history.ts`)       |
+| `smb_app_state_sync` | Entries from the phone's address book, `add` or `remove`                                                                                      | `applyWhatsAppContactSync` (same module)                                                            |
+| `smb_message_echoes` | A reply the business typed on the phone                                                                                                       | `ingestWhatsAppEcho` (`lib/tickets/ingest-whatsapp.ts`) — the team's reply on a coexistence channel |
+| `account_update`     | `PARTNER_REMOVED`, `ACCOUNT_OFFBOARDED`, `ACCOUNT_RECONNECTED`                                                                                | `applyWhatsAppAccountUpdate` (`lib/whatsapp/coexistence-state.ts`)                                  |
 
 Each delivery's idempotency key comes from `lib/whatsapp/delivery-id.ts`:
 `hm:<wamid>` per history message — distinct from `m:`, because the file behind
@@ -528,10 +528,12 @@ a placeholder arrives later under the same wamid — and
 `c:<phone>:<action>:<timestamp>` per contact. **Nothing for `account_update`**:
 the index behind the key is spent for good, and a number disconnected,
 reconnected and disconnected again sends the same body twice, so its handler is
-idempotent instead. History is a record rather than traffic — no window, no
-clocks, no automations, no media download — and the echo on a plain support
-number is still our own send coming back and still ignored; AGENTS.md carries
-the rules.
+idempotent instead — and applies an event only when it is at least as new as
+the connection and as the last one applied (`coexistence.accountEventAt`), so
+an older event processed late changes nothing. History is a record rather than
+traffic — no window, no clocks, no automations, no media download — and the
+echo on a plain support number is still our own send coming back and still
+ignored; AGENTS.md carries the rules.
 
 ## 7. Endpoints deliberately not used
 

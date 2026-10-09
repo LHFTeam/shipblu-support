@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   canRequestSync,
   coexistenceBadges,
+  copiedSoFar,
   historyDone,
+  historyProgress,
   isSyncing,
   needsReconnect,
   parseCoexistence,
@@ -56,6 +58,8 @@ describe('parseCoexistence', () => {
     expect(parsed).toMatchObject({ displayPhoneNumber: null, syncs: {} });
     expect(parsed?.disconnected).toEqual({ at: '', event: '', reason: null });
     expect(parseCoexistence({ coexistence: { wabaId: '1' } })).toBeNull();
+    expect(connected({}, { accountEventAt: 7 }).accountEventAt).toBeUndefined();
+    expect(connected({}, { accountEventAt: ONBOARDED }).accountEventAt).toBe(ONBOARDED);
   });
 
   /** The two facts the row reads to stop offering what cannot or need not happen. */
@@ -135,17 +139,41 @@ describe('historyDone and isSyncing', () => {
     history: { requestId: 'r-1', requestedAt: ONBOARDED, ...extra },
   });
 
-  it('is done when every phase reached 100, whatever order they finished in', () => {
+  /**
+   * Meta's `progress` is the whole copy's percentage, so one 100 is the end of
+   * it, and a phase with no chats sends nothing at all. Waiting for every phase
+   * to reach 100 polled for a day and then told the admin the copy had stalled.
+   */
+  it('is done once any chunk reports 100, whichever phases reported', () => {
     expect(historyDone(connected())).toBe(false);
     expect(historyDone(connected(requested()))).toBe(false);
+    // No phase 2: the business had no chats older than 90 days.
+    expect(
+      historyDone(connected(requested({ progressByPhase: { '0': 100, '1': 100 }, chunks: 9 }))),
+    ).toBe(true);
     expect(
       historyDone(connected(requested({ progressByPhase: { '0': 100, '2': 100 }, chunks: 9 }))),
-    ).toBe(false);
+    ).toBe(true);
+    // The earlier phases' last chunks report the share of the whole copy done by then.
     expect(
       historyDone(
-        connected(requested({ progressByPhase: { '2': 100, '0': 100, '1': 100 }, chunks: 17 })),
+        connected(requested({ progressByPhase: { '0': 8, '1': 61, '2': 100 }, chunks: 17 })),
       ),
     ).toBe(true);
+    expect(
+      historyDone(connected(requested({ progressByPhase: { '0': 8, '1': 61 }, chunks: 12 }))),
+    ).toBe(false);
+  });
+
+  it('reports the highest progress any chunk reported, and ignores a value that is not a number', () => {
+    expect(
+      historyProgress(connected(requested({ progressByPhase: { '2': 30, '0': 8, '1': 61 } })))
+        .percent,
+    ).toBe(61);
+    expect(
+      historyProgress(connected(requested({ progressByPhase: { '0': 'most', '1': 20 } }))).percent,
+    ).toBe(20);
+    expect(historyProgress(connected(requested())).percent).toBe(0);
   });
 
   it('is done once the business declined on the phone — there is nothing more to wait for', () => {
@@ -170,6 +198,72 @@ describe('historyDone and isSyncing', () => {
         at(60_000),
       ),
     ).toBe(false);
+    // The page stops polling the moment a 100 arrives, whichever phase it named.
+    expect(
+      isSyncing(
+        connected(
+          requested({
+            progressByPhase: { '0': 100 },
+            chunks: 1,
+            lastReceivedAt: at(60_000).toISOString(),
+          }),
+        ),
+        at(61_000),
+      ),
+    ).toBe(false);
+  });
+});
+
+describe('copiedSoFar', () => {
+  const history = (extra = {}) => ({
+    history: { requestId: 'r-1', requestedAt: ONBOARDED, ...extra },
+  });
+  const contacts = (extra = {}) => ({
+    contacts: { requestId: 'c-1', requestedAt: ONBOARDED, ...extra },
+  });
+
+  /**
+   * What a reconnect skips. A request id says the phone was asked, not that it
+   * answered: counting one as copied had the reconnect a stalled copy's badge
+   * recommends skip exactly that copy, and never offer it again.
+   */
+  it('counts a copy that finished, not one that was only asked for', () => {
+    expect(copiedSoFar(connected(history({ progressByPhase: { '0': 30 }, chunks: 4 })))).toEqual(
+      [],
+    );
+    expect(copiedSoFar(connected(history({ requestId: 'unconfirmed' })))).toEqual([]);
+    expect(copiedSoFar(connected(contacts({ received: 0 })))).toEqual([]);
+    expect(copiedSoFar(connected(contacts()))).toEqual([]);
+
+    expect(
+      copiedSoFar(
+        connected({
+          ...history({ progressByPhase: { '0': 100, '1': 100, '2': 100 }, chunks: 30 }),
+          ...contacts({ received: 412 }),
+        }),
+      ),
+    ).toEqual(['contacts', 'history']);
+    expect(copiedSoFar(connected(history({ progressByPhase: { '1': 100 }, chunks: 2 })))).toEqual([
+      'history',
+    ]);
+  });
+
+  /** Done, for the progress card, but the business may say yes on the next connection. */
+  it('never counts history the phone declined, though there is nothing more to wait for', () => {
+    const declined = connected(history({ declined: { at: ONBOARDED, code: 2593109 } }));
+    expect(historyDone(declined)).toBe(true);
+    expect(copiedSoFar(declined)).toEqual([]);
+  });
+
+  /** Or the reconnect after a reconnect asks the phone for six months again. */
+  it('keeps what an earlier connection copied', () => {
+    expect(copiedSoFar(connected({}, { carriedOver: ['history', 'contacts'] }))).toEqual([
+      'contacts',
+      'history',
+    ]);
+    expect(copiedSoFar(connected(contacts({ received: 3 }), { carriedOver: ['history'] }))).toEqual(
+      ['contacts', 'history'],
+    );
   });
 });
 
@@ -260,10 +354,10 @@ describe('coexistenceBadges', () => {
           requestId: 'r',
           requestedAt: ONBOARDED,
           chunks: 17,
-          progressByPhase: { '0': 100, '1': 100, '2': 40 },
+          progressByPhase: { '0': 12, '1': 40, '2': 25 },
         },
       }),
-    ).toContain('copying history 2/3 · 40%');
+    ).toContain('copying history · 40%');
     expect(
       labels({
         history: {
@@ -289,10 +383,68 @@ describe('coexistenceBadges', () => {
     // A copy nothing has moved for a day is a closed phone, not a copy in progress.
     expect(
       labels(
-        { history: { requestId: 'r', requestedAt: ONBOARDED, progressByPhase: { '0': 40 } } },
+        {
+          history: {
+            requestId: 'r',
+            requestedAt: ONBOARDED,
+            chunks: 3,
+            progressByPhase: { '0': 40 },
+          },
+        },
         at(SYNC_STALE_MS + 1),
       ),
-    ).toContain('history stalled at 0%');
+    ).toContain('history stalled at 40%');
+  });
+
+  /**
+   * A phase with no chats reports nothing, and the earlier phases' last chunks
+   * fall short of 100 — the per-phase reading badged both of these "stalled" a
+   * day later and sent the admin through Meta's window for a finished copy.
+   */
+  it('calls a copy that reached 100 copied, whichever phases reported, and never stalled', () => {
+    const later = at(27 * 60 * 60 * 1000);
+    for (const progressByPhase of [
+      { '0': 100, '1': 100 },
+      { '0': 8, '1': 61, '2': 100 },
+    ]) {
+      const finished = connected({
+        contacts: { requestId: 'c', requestedAt: ONBOARDED, received: 3 },
+        history: { requestId: 'r', requestedAt: ONBOARDED, chunks: 9, progressByPhase },
+      });
+      const shown = coexistenceBadges(finished, later).map((badge) => badge.label);
+      expect(shown).toContain('history copied');
+      expect(shown.filter((label) => /stalled|copying/.test(label))).toEqual([]);
+      expect(needsReconnect(finished, later)).toBe(false);
+    }
+  });
+
+  /**
+   * Chunks arrived and then nothing for a day: the badge recommends a
+   * reconnect, so the row offers one. Nothing at all arrived: Meta sends
+   * nothing for a business with no chats in six months, which looks exactly
+   * like a phone never opened, so that row neither warns nor offers Reconnect —
+   * going through Meta's window unlinks the phone's devices for nothing.
+   */
+  it('offers Reconnect for a copy that stalled part-way, not for one that never started', () => {
+    const stale = at(SYNC_STALE_MS + 1);
+    const partWay = connected({
+      contacts: { requestId: 'c', requestedAt: ONBOARDED, received: 3 },
+      history: { requestId: 'r', requestedAt: ONBOARDED, chunks: 3, progressByPhase: { '0': 30 } },
+    });
+    expect(needsReconnect(partWay, stale)).toBe(true);
+    expect(needsReconnect(partWay, at(60_000))).toBe(false);
+
+    const nothing = connected({
+      contacts: { requestId: 'c', requestedAt: ONBOARDED, received: 3 },
+      history: { requestId: 'r', requestedAt: ONBOARDED },
+    });
+    const badge = coexistenceBadges(nothing, stale).find(
+      (candidate) => candidate.label === 'no history arrived',
+    );
+    expect(badge?.tone).toBe('neutral');
+    expect(badge?.explain).toMatch(/no chats in the last six months/);
+    expect(badge?.explain).not.toMatch(/reconnect/i);
+    expect(needsReconnect(nothing, stale)).toBe(false);
   });
 
   /**
@@ -364,10 +516,14 @@ describe('coexistenceBadges', () => {
     ).toBe(true);
   });
 
-  it('counts the contacts, and names a disconnection and a window that closed unused', () => {
+  it('counts the address book, and names a disconnection and a window that closed unused', () => {
+    // Entries received, not people: an entry the phone re-sends counts again.
     expect(
       labels({ contacts: { requestId: 'c', requestedAt: ONBOARDED, received: 412 } }),
-    ).toContain('412 contacts');
+    ).toContain('412 address-book entries');
+    expect(labels({ contacts: { requestId: 'c', requestedAt: ONBOARDED, received: 1 } })).toContain(
+      '1 address-book entry',
+    );
     expect(labels({ contacts: { requestId: 'c', requestedAt: ONBOARDED } })).toContain(
       'waiting for contacts',
     );

@@ -4499,7 +4499,13 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
       it arrived, so the one processed last is not always the newest. The worker
       claims several jobs at once, and a failed attempt retries behind a later
       mail. `latest()` moves them forward only, as `interactionWindowSet`
-      already did for Meta.
+      already did for Meta. WhatsApp inbound's `last_message_at` and
+      `last_customer_message_at` now move forward only too (2026-10-09, with
+      coexistence, where a reply typed on the phone made the order matter),
+      and its next-response clock counts from the newest customer message on
+      the ticket rather than from the message being processed.
+      `onAgentReply` stops that clock only for customer messages no newer
+      than the reply, and keeps the earliest reply as the first response.
     - **The fallback Message-ID** for a payload carrying none was minted from
       `Date.now()`. A retry after the message had committed got a new id,
       missed the duplicate check, and stored the mail twice. It is now derived
@@ -5062,7 +5068,9 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     download, each thread one resolved `import` ticket); `account_update` by
     `applyWhatsAppAccountUpdate`, idempotent because it is deliberately not
     deduplicated at the door — the key is spent for good and a second
-    disconnect of the same number must not be swallowed. The bot number's half
+    disconnect of the same number must not be swallowed — and applied in event
+    order: an event older than the connection or than the last one applied is
+    dropped (`coexistence.accountEventAt`). The bot number's half
     is still unreachable: it is sent through Cloud API by another service,
     where Meta offers no echo. The general lesson is one step out from §6.43's:
     **a count of zero is evidence about the configuration that produced it,

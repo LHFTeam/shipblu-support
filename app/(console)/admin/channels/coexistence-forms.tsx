@@ -19,7 +19,6 @@ import { RefreshScheduler } from '@/lib/realtime/refresh-scheduler';
 import {
   type Coexistence,
   coexistenceBadges,
-  HISTORY_PHASES,
   historyProgress,
   parseCoexistence,
   type SyncType,
@@ -981,22 +980,23 @@ function ConnectedSummary({
   const stepSentence = (step: 'contacts' | 'history') =>
     onboarding.steps.find((candidate) => candidate.step === step)?.sentence ?? 'not requested';
 
+  // Entries, not people: an entry the phone re-sends or edits counts again
+  // (`recordContactSync`), so the line says what the counter counts.
   const contacts = coexistence?.syncs.contacts;
+  const received = contacts?.received ?? 0;
   const contactsLine =
     contacts && 'requestId' in contacts && contacts.requestId
-      ? `Contacts: ${contacts.received ?? 0} received.`
+      ? `Contacts: ${received} address-book entr${received === 1 ? 'y' : 'ies'} received.`
       : `Contacts: ${stepSentence('contacts')}`;
 
+  // One overall figure, not one per phase: Meta's `progress` is the whole
+  // copy's, and a phase with no chats never reports at all (`historyProgress`).
   const history = coexistence ? historyProgress(coexistence) : null;
-  const phases = coexistence?.syncs.history?.progressByPhase ?? {};
   const historyLine = !history?.requested
     ? `History: ${stepSentence('history')}`
     : history.declined
       ? 'History: declined on the phone.'
-      : `History: ${Array.from(
-          { length: HISTORY_PHASES },
-          (_, phase) => `phase ${phase} ${phases[String(phase)] ?? 0}%`,
-        ).join(' · ')} (${history.chunks} chunk${history.chunks === 1 ? '' : 's'}).`;
+      : `History: ${history.percent}% (${history.chunks} chunk${history.chunks === 1 ? '' : 's'}).`;
 
   const { todo, notes } = connectedFollowUps(onboarding);
   const allClear = todo.length === 0 && credential !== null;
