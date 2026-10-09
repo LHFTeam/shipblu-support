@@ -8,8 +8,8 @@ import { useActionForm } from './use-action-form';
 /**
  * The hook's contract with the forms that use it, in a DOM. Each case is a way
  * it has gone wrong, or would: `onSuccess` re-run by the render its own
- * callback causes (§6.87), a refresh after a success that the action's answer
- * already made redundant (§6.87), and a refusal that wipes the draft (§6.80).
+ * callback causes (§6.89), a refresh after a success that the action's answer
+ * already made redundant (§6.89), and a refusal that wipes the draft (§6.80).
  *
  * `.ts` rather than `.tsx`, with `createElement`, because vitest collects
  * `*.test.ts` only; the DOM is happy-dom for this file alone, through the

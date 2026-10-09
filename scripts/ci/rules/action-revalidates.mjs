@@ -9,7 +9,7 @@ import { directiveOf, fail, read, requireAtLeast, resolveModule, scannable } fro
  * action marked something revalidated (`pathWasRevalidated` in
  * next/dist/server/app-render/action-handler.js), and the client applies that
  * tree. So the console's forms no longer re-read the page after a success —
- * that was a second full server render, alongside LiveUpdates' own (§6.87). The
+ * that was a second full server render, alongside LiveUpdates' own (§6.89). The
  * cost is that a success which skipped `revalidatePath` now leaves the screen
  * showing what was there before it: the row the agent deleted is still in the
  * list.

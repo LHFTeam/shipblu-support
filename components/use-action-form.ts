@@ -65,7 +65,7 @@ const LOST =
  * delivers the answer, and not at all if that commit unmounts the form — a row
  * the success removed takes its form with it. Nothing here re-reads the page:
  * an action that revalidates has the re-rendered page sent back with its
- * answer, and a `router.refresh()` after it was a second full render (§6.87).
+ * answer, and a `router.refresh()` after it was a second full render (§6.89).
  * It is read as an effect event, so an inline function is fine, and keyed on
  * the nonce, which only a success moves. A form whose `error` is a key takes
  * no `onSuccess`: no help-centre action answers `ok: true`, so it would never

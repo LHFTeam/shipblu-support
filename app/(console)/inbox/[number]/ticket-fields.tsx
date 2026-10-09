@@ -43,7 +43,7 @@ export function SidebarField({
  * Saves on change with no explicit save button, matching Freshdesk.
  * `updateTicket` revalidates the ticket before it succeeds, so the re-rendered
  * page comes back with its answer and the timeline already holds the audit
- * entry it wrote (§6.87).
+ * entry it wrote (§6.89).
  */
 export function FieldSelect({
   conversationId,

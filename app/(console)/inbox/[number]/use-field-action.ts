@@ -16,7 +16,7 @@ export type LinkAction = (
  * the ticket before it succeeds, and Next sends the re-rendered page back with
  * the action's answer, so the timeline already holds the audit entry the action
  * wrote; a `router.refresh()` after it was a second render of the whole ticket
- * page (§6.87).
+ * page (§6.89).
  *
  * Nine controls on the ticket page spelled this out by hand, and they did not
  * all do it the same way, so the differences are options rather than lost:
