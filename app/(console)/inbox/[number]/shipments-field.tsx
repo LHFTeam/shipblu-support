@@ -205,13 +205,14 @@ function RefreshShipmentButton({
   trackingNumber: string;
   lastSyncedAt: Date | null;
 }) {
-  // Refreshed even on a refusal: `not_found` is written to the row by the
-  // sync, so the line above this button has changed and needs re-reading.
+  // A refusal re-reads the page: a shipment that is gone, or was unlinked by
+  // somebody else, has changed under the agent. (`not_found` revalidates
+  // itself, since the sync writes it to the row.)
   const {
     pending: busy,
     error,
     run: submit,
-  } = useFieldAction(refreshShipment, { refresh: 'always' });
+  } = useFieldAction(refreshShipment, { rereadOnRefusal: true });
 
   async function run() {
     await submit({ conversationId, shipmentId });

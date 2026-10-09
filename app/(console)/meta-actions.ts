@@ -282,10 +282,7 @@ export async function claimThreadControl(
 
   refresh(row.conversation.number);
 
-  return {
-    ...ok(),
-    message:
-      'Thread control taken — you can reply now. The other tool has been told, and it can ' +
-      'take the thread back at any time.',
-  };
+  // No message: `ThreadControl` is gone by the time this answer renders, replaced
+  // by the reply box in the commit that brings the re-read page (its docblock).
+  return ok();
 }

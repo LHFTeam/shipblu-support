@@ -8,7 +8,6 @@ import type { TemplateOption } from './types';
 import { INITIAL, LOST_SEND } from './form-state';
 import { SubmitButton } from '@/components/submit-button';
 import { useActionForm, type FormHandlers } from '@/components/use-action-form';
-import { useRefreshOnSuccess } from '@/components/use-refresh-on-success';
 
 /**
  * Template send.
@@ -28,8 +27,10 @@ export function TemplateForm({
   templates: TemplateOption[];
   onSent?: () => void;
 }) {
-  const { state, key, form } = useActionForm(sendTemplateReply, INITIAL, { lost: LOST_SEND });
-  useRefreshOnSuccess(state, onSent);
+  const { state, key, form } = useActionForm(sendTemplateReply, INITIAL, {
+    lost: LOST_SEND,
+    onSuccess: onSent,
+  });
 
   if (templates.length === 0) {
     return (

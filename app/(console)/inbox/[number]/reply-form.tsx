@@ -16,7 +16,6 @@ import type { KnowledgeContext } from './types';
 import { INITIAL, LOST_SEND } from './form-state';
 import { SubmitButton } from '@/components/submit-button';
 import { useActionForm } from '@/components/use-action-form';
-import { useRefreshOnSuccess } from '@/components/use-refresh-on-success';
 
 /**
  * The language toggle's two buttons, each written in its own script.
@@ -57,9 +56,11 @@ export function ReplyForm({
   knowledge: KnowledgeContext | null;
   onSent?: () => void;
 }) {
-  const { state, key, form } = useActionForm(sendReply, INITIAL, { lost: LOST_SEND });
+  const { state, key, form } = useActionForm(sendReply, INITIAL, {
+    lost: LOST_SEND,
+    onSuccess: onSent,
+  });
   const [privately, setPrivately] = useState(false);
-  useRefreshOnSuccess(state, onSent);
 
   /*
     Which language the next canned response goes in.

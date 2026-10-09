@@ -19,7 +19,7 @@ export function UnlinkButton({
   label: string;
 }) {
   const [armed, setArmed] = useState(false);
-  const { pending: busy, run } = useFieldAction(action, { refresh: 'always' });
+  const { pending: busy, run } = useFieldAction(action, { rereadOnRefusal: true });
 
   async function remove() {
     await run(fields);

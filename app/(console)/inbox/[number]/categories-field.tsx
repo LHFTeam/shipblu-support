@@ -189,7 +189,7 @@ function ReviewButton({
   label: string;
   glyph: string;
 }) {
-  const { pending: busy, run: submit } = useFieldAction(action, { refresh: 'always' });
+  const { pending: busy, run: submit } = useFieldAction(action, { rereadOnRefusal: true });
 
   async function run() {
     await submit({ conversationId, categoryId });

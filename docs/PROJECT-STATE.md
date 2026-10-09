@@ -4782,8 +4782,9 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
       `action` would send its fields to the page's own URL as a query string.
       That one replayed submission takes React's own path, reset included.
     - Only a success moves its `key`. A success is what `ok()` answers; one
-      without a nonce is given a fresh one, so the key and everything keyed on
-      it still move. Any other answer keeps the nonce the state already had.
+      without a nonce is given a fresh one, so the key still moves, and so
+      does the hook's `onSuccess`, keyed on it since §6.86. Any other answer
+      keeps the nonce the state already had.
     - An action that throws becomes a refusal saying no answer came back, with
       the draft kept and the page re-read in case it landed. The forms whose
       retry reaches a customer or a hub (reply, template, both side
@@ -5267,6 +5268,62 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     its own under `scripts/ci/rules/`, refusing an instrumentation file that
     does not keep both hosts out, rather than in `credential-confinement`,
     which is about the stored credential.
+
+89. **Every console save rendered its page twice, and the second render went
+    round the ticket page's backpressure.** _2026-10-09._ Forms ran
+    `router.refresh()` after a successful action, through `useRefreshOnSuccess`
+    and by hand at eleven direct-call sites. But Next 16 renders the current
+    page into a server action's own response whenever the action revalidated
+    anything (`pathWasRevalidated`, `action-handler.js`), and the client applies
+    it with the answer, so by the time the refresh ran the page was already
+    fresh. Measured on a minimal app built against this repo's Next 16.3.1,
+    `next build` + `next start`, driven by Chromium:
+    - an action that revalidates its page: two full renders per submit with the
+      refresh (one inside the POST, then a `?_rsc=` GET), one without, and the
+      screen updated either way — the success effect already saw the new value;
+    - the same when the action revalidates a _different_ path (`revalidate.js`:
+      "TODO: only revalidate if the path matches"), and when the action is
+      awaited directly in a click handler rather than submitted by a form
+      (`callServer` dispatches in a transition either way);
+    - an action that revalidates nothing: no render, and the screen stays stale
+      without a refresh. That is the only case a refresh did any work;
+    - with verbatim copies of `LiveUpdates` and its scheduler, a ticket-page send
+      cost three renders with the refresh and two without, and at 800 ms per
+      render the refresh and the scheduler's were in flight together — the
+      overlap entry 23's single-flight scheduler exists to prevent.
+
+    Production agrees, though it cannot attribute the second render to one call
+    site: action POSTs on `/inbox/<n>` come back at 17–26.5 KB, a page's worth,
+    against about 120 B for a bare answer.
+
+    So the success refresh is gone: `useRefreshOnSuccess` was deleted, what a
+    form does next is `useActionForm`'s `onSuccess`, and the direct-call sites
+    re-read nothing on a success. A refusal revalidates nothing, so a control
+    whose refusal mostly means the page was stale — another agent unlinked or
+    decided it first — still re-reads it then (`rereadOnRefusal`), as does
+    `useActionForm` when an action throws, since no answer means no page. Three
+    things turned up on the way:
+    - **One success revalidated nothing.** `deleteField` answered `ok()` early
+      when the row was already gone, so the client refresh was the only thing
+      that cleared a field another admin had deleted. It revalidates now, and the
+      `action-revalidates` repo rule refuses any `ok()` an action returns
+      without a `revalidatePath`, `redirect` or the shared `refresh()` before it
+      on the same path. It cannot check _which_ path: everything here relies on
+      Next re-rendering the current page whatever path was named, and if that
+      TODO is ever done, an action revalidating a path other than its page's
+      will leave that page stale.
+    - **Half the hook's refreshes never ran.** A form whose row leaves the page
+      on success — an admin delete, a merge row, comment moderation, thread
+      control — unmounts in the commit that delivers the answer, so its success
+      effect never fired. The page refreshed through the action all along.
+    - **Thread control's success message was never on screen.** The same commit
+      replaces the control with the reply box, so the sentence it returned was
+      painted in zero frames. The action now answers `ok()`; refusals, the case
+      the control's docblock is about, are unchanged.
+
+    The real console was not exercised end to end — there is no database in the
+    session that measured this — so every call site was checked by reading which
+    path its action revalidates, against the behaviour measured above.
 
 ## 7. Verification already done
 

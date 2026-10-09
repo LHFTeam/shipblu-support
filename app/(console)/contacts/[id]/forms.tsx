@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { Badge, ErrorText } from '@/components/ui';
 import { useActionForm } from '@/components/use-action-form';
 import type { LinkedShippingAccount } from '@/lib/shipments/queries';
@@ -31,7 +30,6 @@ export function RoleToggles({
   isShipper: boolean;
   isRecipient: boolean;
 }) {
-  const router = useRouter();
   const [shipper, setShipper] = useState(isShipper);
   const [recipient, setRecipient] = useState(isRecipient);
   const [error, setError] = useState<string | null>(null);
@@ -44,7 +42,6 @@ export function RoleToggles({
 
     const result = await setContactRoles(INITIAL, formData);
     setError(result.error);
-    if (!result.error) router.refresh();
   }
 
   return (
@@ -89,7 +86,6 @@ export function AccountLinks({
   accounts: LinkedShippingAccount[];
   editable: boolean;
 }) {
-  const router = useRouter();
   const { state, key, form, pending } = useActionForm(linkContactToAccount, INITIAL);
   const [removing, setRemoving] = useState<string | null>(null);
 
@@ -100,7 +96,6 @@ export function AccountLinks({
     formData.set('shippingAccountId', shippingAccountId);
     await unlinkContactFromAccount(INITIAL, formData);
     setRemoving(null);
-    router.refresh();
   }
 
   return (

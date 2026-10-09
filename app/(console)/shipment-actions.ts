@@ -173,7 +173,9 @@ export async function refreshShipment(
       return { error: `The shipping platform refused the lookup: ${result.error.message}` };
     case 'skipped':
       // Unreachable with `force`, and enumerated so a new result kind is a type
-      // error here rather than a silent success in front of an agent.
+      // error here rather than a silent success in front of an agent. Revalidated
+      // all the same, as every success is (`action-revalidates`).
+      refresh(row.conversation.number);
       return ok();
   }
 }

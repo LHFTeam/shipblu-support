@@ -7,7 +7,6 @@ import type { AgentRole } from '@/lib/auth/permissions';
 import type { FolderOption } from '@/lib/kb/admin';
 import { FLOOR_LABELS, SELECTABLE_FLOORS } from '@/lib/kb/floors';
 import { useActionForm } from '@/components/use-action-form';
-import { useRefreshOnSuccess } from '@/components/use-refresh-on-success';
 import { saveArticle, type KbState } from './actions';
 
 const INITIAL: KbState = { error: null };
@@ -44,10 +43,6 @@ export function ArticleEditor({
   folders: FolderOption[];
 }) {
   const { state, key, form } = useActionForm(saveArticle, INITIAL);
-
-  // Re-reads the server components after a save, so the version list and the
-  // status badge match what was just written.
-  useRefreshOnSuccess(state);
 
   const [locale, setLocale] = useState(article?.locale ?? 'en');
   const [body, setBody] = useState(article?.bodyHtml ?? '');

@@ -3,7 +3,6 @@
 import { useActionState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Button } from '@/components/ui';
-import { useRefreshOnSuccess } from '@/components/use-refresh-on-success';
 import { refreshRequesterProfile } from '../../meta-actions';
 import { INITIAL } from './form-state';
 
@@ -31,11 +30,6 @@ export function ProfileRefresh({
   hasName: boolean;
 }) {
   const [state, formAction] = useActionState(refreshRequesterProfile, INITIAL);
-
-  // The name and picture land on the contact, which the header reads through
-  // the page's own query — so the header only tells the truth again once the
-  // route has been re-read.
-  useRefreshOnSuccess(state);
 
   return (
     <>
