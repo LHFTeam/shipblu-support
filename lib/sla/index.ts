@@ -216,7 +216,10 @@ export async function applySlaOnCreate(conversationId: string): Promise<void> {
  *   is newer than every reply the team has sent and no clock is running, the
  *   clock starts from that message. Not when one is already running: it was
  *   started for that same message, and recomputing it would throw away any time
- *   a pause has since credited to it.
+ *   a pause has since credited to it. That decision is taken again under the
+ *   ticket's lock, from the row as it is then (`startReplyClock`), and it never
+ *   touches a pause: this is the team's reply, and a reopen committing after
+ *   the UPDATE above is the customer's own message to account for.
  *
  * In the console `at` is now, which no customer message is later than, so
  * there this is the plain "answered, nothing owed" it always was.
@@ -242,17 +245,19 @@ export async function onAgentReply(conversationId: string, at: Date = new Date()
         nextResponseDueAt: conversations.nextResponseDueAt,
       });
 
-    const customerWroteAt = row?.lastCustomerMessageAt;
-    if (!customerWroteAt || row.nextResponseDueAt) return;
+    // Nothing to pick up as of this write, which is every console reply. A
+    // customer message committed after it is that message's own path to clock.
+    if (!row || !unanswered(row, at)) return;
 
-    // The team's newest reply, this one included: the caller moves
-    // `lastAgentMessageAt` before calling, and `at` covers one that does not.
-    // A console reply sent after the customer's message answered it, even
-    // though this older one did not.
-    const answeredAt = Math.max(at.getTime(), row.lastAgentMessageAt?.getTime() ?? 0);
-    if (customerWroteAt.getTime() > answeredAt) {
-      await onCustomerReply(conversationId, customerWroteAt);
-    }
+    // Asked again under the lock, rather than handing what the UPDATE returned
+    // to `onCustomerReply`. That instant was read before the lock, and a
+    // reopen can commit in between: `onCustomerReply`'s `closeStrayPause`
+    // would then end the reopen's pause at an instant earlier than the pause,
+    // which it clamps to the pause's own start — a resume crediting nothing,
+    // which a later re-time pairs with the pause in place of the real one.
+    await startReplyClock(conversationId, ({ conversation }) =>
+      unanswered(conversation, at) ? conversation.lastCustomerMessageAt : null,
+    );
   } catch (error) {
     log.error(`could not record an agent reply on ${conversationId}`, error);
   }
@@ -270,7 +275,39 @@ export async function onCustomerReply(
   at: Date = new Date(),
 ): Promise<void> {
   await closeStrayPause(conversationId, at);
+  await startReplyClock(conversationId, () => at);
+}
 
+/**
+ * Whether the customer's newest message is newer than every reply the team has
+ * sent, `at` included — the caller moves `lastAgentMessageAt` before calling,
+ * and `at` covers one that does not — with no next-response clock running for
+ * it. A console reply sent after the customer's message answered it, even
+ * though an older phone reply processed later did not.
+ */
+function unanswered(
+  row: {
+    lastCustomerMessageAt: Date | null;
+    lastAgentMessageAt: Date | null;
+    nextResponseDueAt: Date | null;
+  },
+  at: Date,
+): boolean {
+  if (!row.lastCustomerMessageAt || row.nextResponseDueAt) return false;
+  const answeredAt = Math.max(at.getTime(), row.lastAgentMessageAt?.getTime() ?? 0);
+  return row.lastCustomerMessageAt.getTime() > answeredAt;
+}
+
+/**
+ * Starts the next-response clock from the instant `from` picks off the row read
+ * under the ticket's lock, or leaves it alone when that is null. The half of
+ * `onCustomerReply` that is about the clock and not about a pause, so the
+ * team's late reply in `onAgentReply` can start one without ending anything.
+ */
+async function startReplyClock(
+  conversationId: string,
+  from: (row: ConversationRow) => Date | null,
+): Promise<void> {
   try {
     const policies = await loadPolicies();
     const catalog = await loadHoursCatalog();
@@ -279,6 +316,8 @@ export async function onCustomerReply(
     // this same message can commit between the read and the write.
     await withTicketLocked(conversationId, async (tx, row) => {
       if (!row.conversation.firstRespondedAt) return;
+      const at = from(row);
+      if (!at) return;
 
       const policy = policyIn(policies, row.conversation.slaPolicyId);
       if (!policy) return;

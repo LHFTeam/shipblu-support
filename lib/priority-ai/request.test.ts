@@ -79,6 +79,17 @@ describe('hasCustomerText', () => {
     }
   });
 
+  it('refuses a WhatsApp edit, however its words are laid out', () => {
+    for (const label of [
+      '[edited a message]',
+      '[edited a message: Tomorrow at 10]',
+      '[edited a message: بكرة الساعة 10\nمش النهارده]',
+      '[edited a message: see [the photo] again]',
+    ]) {
+      expect(hasCustomerText(label), label).toBe(false);
+    }
+  });
+
   it('takes anything the customer wrote, a caption or a bracket included', () => {
     for (const text of ['؟', 'الشحنة [اتفتحت]', '[urgent] where is my COD', 'ok']) {
       expect(hasCustomerText(text), text).toBe(true);
