@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, notInArray } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, notInArray } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
   conversationEvents,
@@ -8,7 +8,7 @@ import {
   ticketForms,
   ticketStatuses,
 } from '@/db/schema';
-import type { HoursConfig } from '@/lib/hours';
+import { businessMinutesBetween, type HoursConfig } from '@/lib/hours';
 import { loadHoursCatalog } from '@/lib/hours/catalog';
 import { ticketHours, type HoursCatalog } from '@/lib/hours/resolve';
 import { conversationFacts } from '@/lib/rules/facts';
@@ -203,6 +203,8 @@ export async function onCustomerReply(
   conversationId: string,
   at: Date = new Date(),
 ): Promise<void> {
+  await closeStrayPause(conversationId, at);
+
   try {
     // Conditional on the priority it was computed from, for the reason
     // `PRIORITY_RACE_ATTEMPTS` gives: the classifier answering this same message
@@ -234,6 +236,51 @@ export async function onCustomerReply(
     log.warn(`priority kept changing under ${conversationId}; next response not re-timed`);
   } catch (error) {
     log.error(`could not record a customer reply on ${conversationId}`, error);
+  }
+}
+
+/**
+ * Resume a clock left paused on a ticket whose status no longer stops it.
+ *
+ * Resolving pauses the clock, and `reopenResolved` — the five inbound paths
+ * that put a resolved ticket back to Open — changes the status inside its
+ * caller's transaction and never resumed it. The reopened ticket then owed its
+ * resolution clock nothing for the time it sat resolved, and breached on the
+ * spot; and its next trip to Pending found the clock "already paused", so the
+ * resume after it credited everything since the resolve. Every reopen is a
+ * customer writing, and every one of them ends here after its transaction
+ * commits, so this is the one place that sees all five — where a call in each
+ * would be five copies of a rule that only has to be missed once.
+ *
+ * The pause ends at the reopen, not at this message: the `reopened` event is
+ * when the status stopped stopping the clock. That also repairs a ticket left
+ * like this before the fix — production had one, reopened on 21 August — on
+ * its next message, with the credit it was owed rather than everything since.
+ */
+async function closeStrayPause(conversationId: string, at: Date): Promise<void> {
+  try {
+    const pausedSince = await pausedSinceAt(conversationId);
+    if (!pausedSince) return;
+
+    const row = await loadConversation(conversationId);
+    if (!row || row.stopsSlaClock) return;
+
+    const [reopened] = await db
+      .select({ createdAt: conversationEvents.createdAt })
+      .from(conversationEvents)
+      .where(
+        and(
+          eq(conversationEvents.conversationId, conversationId),
+          eq(conversationEvents.type, 'reopened'),
+          gte(conversationEvents.createdAt, pausedSince),
+        ),
+      )
+      .orderBy(desc(conversationEvents.createdAt))
+      .limit(1);
+
+    await onStatusChanged(conversationId, false, reopened?.createdAt ?? at);
+  } catch (error) {
+    log.error(`could not close the paused clock on ${conversationId}`, error);
   }
 }
 
@@ -274,7 +321,10 @@ export async function onStatusChanged(
     const policy = await policyFor(row.conversation.slaPolicyId);
     const catalog = await loadHoursCatalog();
     const hours = hoursForTicket(catalog, row.conversation.groupId, policy);
-    const pausedMinutes = Math.max(0, Math.round((at.getTime() - pausedSince.getTime()) / 60_000));
+    // Wall-clock, for the timeline's "resumed after N minutes"; what a clock is
+    // credited is the working time inside the pause, below.
+    const pausedMinutes = minutesBetween(pausedSince, at);
+    const pause: Pause = { from: pausedSince, to: at };
 
     // Push each live clock forward by the time the ticket spent parked. Clocks
     // that have already been satisfied are left alone — extending the
@@ -286,21 +336,22 @@ export async function onStatusChanged(
       return dueAt(hours, minutes, due);
     };
 
+    // In the hours the clock counts. Adding the pause's wall-clock minutes as
+    // working minutes, which this did, moved a ticket parked from Thursday
+    // afternoon to Sunday morning by 3,960 working minutes — about ten days on a
+    // five-day week — where the clock had been stopped for two working hours.
+    const excused = excusedSince(hours, [pause], conversation.createdAt);
+
     // The reply clock is owed only the part of the pause after the customer's
     // latest message, which is where `onCustomerReply` started it: a customer
     // writing to a parked ticket set it from that instant, and the hours parked
     // before they wrote excuse nothing. `recomputeOwedClocks` counts it the same
-    // way (`excusedSince`), so re-timing a ticket afterwards does not move a
-    // deadline nothing changed — which crediting the whole pause here did.
-    //
-    // And it is the pause exactly as `completedPauses` will rebuild it — ending
-    // at `at`, which the event below is stamped with, and starting the recorded
-    // minutes before — so a re-time later credits the same minutes to the
-    // second. Stamped by the database instead, the event ended rounds after
-    // `at`, and a re-time of a ticket nothing had changed moved its reply
-    // deadline by a minute whenever the gap crossed a rounding boundary.
+    // way, from the same instants — the event below is stamped with `at` and
+    // records where the pause began — so re-timing a ticket afterwards does not
+    // move a deadline nothing changed.
     const replyPaused = excusedSince(
-      [{ from: new Date(at.getTime() - pausedMinutes * 60_000), to: at }],
+      hours,
+      [pause],
       conversation.lastCustomerMessageAt ?? conversation.createdAt,
     );
 
@@ -310,14 +361,10 @@ export async function onStatusChanged(
         firstResponseDueAt: shift(
           conversation.firstResponseDueAt,
           conversation.firstRespondedAt,
-          pausedMinutes,
+          excused,
         ),
         nextResponseDueAt: shift(conversation.nextResponseDueAt, null, replyPaused),
-        resolutionDueAt: shift(
-          conversation.resolutionDueAt,
-          conversation.resolvedAt,
-          pausedMinutes,
-        ),
+        resolutionDueAt: shift(conversation.resolutionDueAt, conversation.resolvedAt, excused),
       })
       .where(eq(conversations.id, conversationId));
 
@@ -326,7 +373,7 @@ export async function onStatusChanged(
       type: 'sla_resumed',
       actorLabel: 'sla',
       createdAt: at,
-      data: { pausedMinutes },
+      data: { pausedMinutes, from: pausedSince.toISOString() },
     });
   } catch (error) {
     log.error(`could not pause or resume the clock on ${conversationId}`, error);
@@ -435,7 +482,7 @@ async function recomputeOwedClocks(
     ): Date | null => {
       if (satisfied || !existing) return existing;
       if (minutes === null || !from) return existing;
-      return dueAt(hours, minutes + excusedSince(pauses, from), from);
+      return dueAt(hours, minutes + excusedSince(hours, pauses, from), from);
     };
 
     const firstResponse = recompute(
@@ -556,18 +603,22 @@ async function completedPauses(conversationId: string): Promise<Pause[]> {
       continue;
     }
 
-    // The resume records the whole pause, which is what it moved the clocks
-    // anchored at `created_at` by — the reply clock it moved by the part after
-    // its own anchor, the same clipping `excusedSince` applies. The pause event
-    // is the fallback.
-    const recorded = (row.data as { pausedMinutes?: unknown } | null)?.pausedMinutes;
-    const minutes =
-      typeof recorded === 'number' && Number.isFinite(recorded)
-        ? Math.max(0, recorded)
-        : openedAt
-          ? minutesBetween(openedAt, row.createdAt)
-          : 0;
-    pauses.push({ from: new Date(row.createdAt.getTime() - minutes * 60_000), to: row.createdAt });
+    // The pause as the resume credited it: from where it began — which the
+    // resume records, since the credit is working time and cannot be turned back
+    // into instants — to the resume, which is stamped with the instant it
+    // computed from. A resume written before it recorded `from` falls back to
+    // the pause event that opened it, then to its own wall-clock minutes.
+    const data = row.data as { from?: unknown; pausedMinutes?: unknown } | null;
+    const recordedFrom = typeof data?.from === 'string' ? new Date(data.from) : null;
+    const recordedMinutes =
+      typeof data?.pausedMinutes === 'number' && Number.isFinite(data.pausedMinutes)
+        ? Math.max(0, data.pausedMinutes)
+        : 0;
+    const from =
+      recordedFrom && !Number.isNaN(recordedFrom.getTime())
+        ? recordedFrom
+        : (openedAt ?? new Date(row.createdAt.getTime() - recordedMinutes * 60_000));
+    pauses.push({ from, to: row.createdAt });
     openedAt = null;
   }
 
@@ -575,7 +626,10 @@ async function completedPauses(conversationId: string): Promise<Pause[]> {
 }
 
 /**
- * The paused minutes a clock anchored at `anchor` has been excused.
+ * The paused minutes a clock anchored at `anchor` has been excused, counted in
+ * `hours` — the calendar the clock itself counts in, or wall-clock time when it
+ * runs round the clock. A pause over a weekend excuses the working time inside
+ * it, not the weekend.
  *
  * Only the part of each pause after the anchor. First response and resolution
  * count from `created_at`, so that is all of them. Next response counts from
@@ -584,11 +638,14 @@ async function completedPauses(conversationId: string): Promise<Pause[]> {
  * wrote excuses nothing, and adding the ticket's lifetime total to it, which
  * this once did, pushed a raised ticket's reply deadline back by days.
  */
-function excusedSince(pauses: readonly Pause[], anchor: Date): number {
+function excusedSince(hours: HoursConfig | null, pauses: readonly Pause[], anchor: Date): number {
   let total = 0;
   for (const pause of pauses) {
     const from = pause.from > anchor ? pause.from : anchor;
-    total += minutesBetween(from, pause.to);
+    if (pause.to <= from) continue;
+    total += hours
+      ? Math.round(businessMinutesBetween(hours, from, pause.to))
+      : minutesBetween(from, pause.to);
   }
   return total;
 }
