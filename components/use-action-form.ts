@@ -46,8 +46,8 @@ const LOST =
  *   back, it turned the key from the last success's back to 0 and the remount
  *   wiped the form just as the reset did, on the second send rather than the
  *   first. A success is what `ok()` answers, `ok: true`; one that arrives
- *   without a nonce is given a fresh one, so the key and every effect keyed on
- *   it still move. Anything else keeps the nonce it found.
+ *   without a nonce is given a fresh one, so the key still moves. Anything
+ *   else keeps the nonce it found.
  * - **An action that throws becomes a refusal.** Without this, `useActionState`
  *   rethrows it while rendering, the console falls through to `global-error`,
  *   and the draft goes with it. Next's own redirect and not-found go through

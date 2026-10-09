@@ -1,13 +1,11 @@
 'use client';
 
-import { useActionState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useActionState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Button } from '@/components/ui';
-import type { ActionState } from '../../action-state';
+import { useRefreshOnSuccess } from '@/components/use-refresh-on-success';
 import { claimThreadControl } from '../../meta-actions';
-
-const INITIAL: ActionState = { error: null };
+import { INITIAL } from './form-state';
 
 /**
  * Takes the thread off whichever app is answering it, so this one can reply.
@@ -24,15 +22,12 @@ const INITIAL: ActionState = { error: null };
  */
 export function ThreadControl({ conversationId }: { conversationId: string }) {
   const [state, formAction] = useActionState(claimThreadControl, INITIAL);
-  const router = useRouter();
 
   // The composer is server-computed from the ticket's newest facts, and taking
   // control adds one. Nothing on this page can open the reply box on its own —
   // only the route being re-read can — so a success that did not refresh would
   // report itself and change nothing an agent could see.
-  useEffect(() => {
-    if (state.ok) router.refresh();
-  }, [state.ok, state.nonce, router]);
+  useRefreshOnSuccess(state);
 
   return (
     <div className="mt-3">

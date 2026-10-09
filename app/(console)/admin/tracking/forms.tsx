@@ -3,7 +3,8 @@
 import { ErrorText, Input } from '@/components/ui';
 import { SubmitButton } from '@/components/submit-button';
 import { useActionForm } from '@/components/use-action-form';
-import { INITIAL, useRefreshOnSuccess } from '../forms-shared';
+import { useRefreshOnSuccess } from '@/components/use-refresh-on-success';
+import { INITIAL } from '../forms-shared';
 import { saveTrackingPhrase } from './actions';
 
 /**

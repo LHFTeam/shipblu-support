@@ -1,11 +1,11 @@
 'use client';
 
-import { useActionState, useEffect, useState, type ReactNode } from 'react';
-import { useRouter } from 'next/navigation';
+import { useActionState, useState, type ReactNode } from 'react';
 import { Button, Card, ErrorText } from '@/components/ui';
 import type { ActionState } from '@/lib/http/action-state';
 import { SubmitButton } from '@/components/submit-button';
 import { useActionForm } from '@/components/use-action-form';
+import { useRefreshOnSuccess } from '@/components/use-refresh-on-success';
 
 /**
  * The shape every admin editor shares: a disclosure that opens a form, submits
@@ -17,16 +17,6 @@ import { useActionForm } from '@/components/use-action-form';
  */
 
 export const INITIAL: ActionState = { error: null };
-/** Refreshes the server components after a successful write. */
-export function useRefreshOnSuccess(state: ActionState, onSuccess?: () => void) {
-  const router = useRouter();
-  useEffect(() => {
-    if (!state.ok) return;
-    router.refresh();
-    onSuccess?.();
-    // `nonce` changes on every success, so two consecutive saves both fire.
-  }, [state.ok, state.nonce, router, onSuccess]);
-}
 
 export function EditorForm({
   action,
