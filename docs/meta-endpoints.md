@@ -557,7 +557,7 @@ the discontinued `message_echoes` as not worth reaching for, because 0 of
 395,391 deliveries carried it — which proved only that no number was operated
 from the WhatsApp Business app, and a number connected through coexistence is
 exactly that. It is required and ingested now (§3, §6);
-`docs/PROJECT-STATE.md` §6.85 has the correction, so the next reader does not
+`docs/PROJECT-STATE.md` §6.87 has the correction, so the next reader does not
 drop it from `REQUIRED_WHATSAPP_FIELDS` as dead.
 
 ## 8. What each call needs, and what currently gates one

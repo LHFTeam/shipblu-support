@@ -1,9 +1,10 @@
 'use client';
 
-import { useActionState, useState } from 'react';
+import { useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Button, ErrorText, Input, Label, Textarea } from '@/components/ui';
 import { TicketFieldInput } from '@/components/ticket-field-input';
+import { useActionForm } from '@/components/use-action-form';
 import { ACCEPT_ATTRIBUTE, MAX_FORM_FILES } from '@/lib/forms/files';
 import {
   elementHelp,
@@ -62,7 +63,7 @@ export function TicketForm({
   /** Seeded from the query string, the way the tracking page hands over a number. */
   subject?: string;
 }) {
-  const [state, action] = useActionState(submitTicketForm, INITIAL);
+  const { state, form } = useActionForm(submitTicketForm, INITIAL, { lost: 'errorNoAnswer' });
   const [custom, setCustom] = useState<CustomFieldValues>({});
   const [system, setSystem] = useState<SystemValues>(subject ? { subject } : {});
   const [fileCount, setFileCount] = useState(0);
@@ -75,7 +76,7 @@ export function TicketForm({
   });
 
   return (
-    <form action={action} className="flex flex-col gap-4">
+    <form {...form} className="flex flex-col gap-4">
       <input type="hidden" name="locale" value={locale} />
       <input type="hidden" name="slug" value={slug} />
       {/* Kept even when no subject question is on the form — it is the fallback

@@ -45,7 +45,7 @@ function id(value: string, what: string): string {
  * hosts' query strings out of every span in the same change — `ignoreUrls` for
  * both hosts with `@vercel/otel`, a span processor stripping the query with
  * anything else. `NEXT_OTEL_FETCH_DISABLED=1` is not that fix: it hides Next's
- * span only, and `@vercel/otel` sets it itself (`docs/PROJECT-STATE.md` §6.86).
+ * span only, and `@vercel/otel` sets it itself (`docs/PROJECT-STATE.md` §6.88).
  */
 export function tokenExchangeUrl(
   base: string,

@@ -9,7 +9,8 @@ import type { ActionState } from '@/lib/http/action-state';
  * failed, a deploy cut the request off. Whether the write landed is unknown,
  * so the sentence says so rather than inviting a blind retry, and points at the
  * page the hook has just re-read. A form whose retry reaches a customer says
- * where to look instead — `lost` below.
+ * where to look instead, and one whose `error` is a key says it in its own
+ * words — `lost` below.
  */
 const LOST =
   'No answer came back, so this may or may not have gone through. Check the page before trying again.';
@@ -27,7 +28,8 @@ const LOST =
  * and a controlled checkbox on what it showed at mount. The component still
  * holds the agent's choice, so the screen drawn from it says one thing and the
  * control, which is what gets submitted, says another. Measured in Chromium
- * across the console's forms; `docs/PROJECT-STATE.md` §6.80.
+ * across the console's forms, then the help centre's and the sign-in pages';
+ * `docs/PROJECT-STATE.md` §6.80.
  *
  * So the form submits from `onSubmit`, which cancels the native submission and
  * starts the action in a transition of its own. React then takes the path it
@@ -44,8 +46,8 @@ const LOST =
  *   back, it turned the key from the last success's back to 0 and the remount
  *   wiped the form just as the reset did, on the second send rather than the
  *   first. A success is what `ok()` answers, `ok: true`; one that arrives
- *   without a nonce is given a fresh one, so the key and every effect keyed on
- *   it still move. Anything else keeps the nonce it found.
+ *   without a nonce is given a fresh one, so the key still moves. Anything
+ *   else keeps the nonce it found.
  * - **An action that throws becomes a refusal.** Without this, `useActionState`
  *   rethrows it while rendering, the console falls through to `global-error`,
  *   and the draft goes with it. Next's own redirect and not-found go through
@@ -55,14 +57,16 @@ const LOST =
  * `form` is spread onto the `<form>` — `<form {...form} key={key}>` — rather
  * than wired as two props, because a form given only `action` still submits:
  * through React's own path, reset and all, which is the bug this exists to
- * close. The `form-reset` repo rule refuses a console form that does that.
+ * close. The `form-reset` repo rule refuses a form anywhere under `app/` that
+ * does that.
  */
 export function useActionForm<State extends ActionState>(
   action: (state: Awaited<State>, formData: FormData) => Promise<State>,
   initial: Awaited<State>,
-  { lost = LOST }: { lost?: string } = {},
+  ...[options]: Options<Awaited<State>>
 ): { state: Awaited<State>; key: number; form: FormHandlers; pending: boolean } {
   const router = useRouter();
+  const lost: string = options?.lost ?? LOST;
 
   async function answer(previous: Awaited<State>, formData: FormData) {
     try {
@@ -96,6 +100,19 @@ export function useActionForm<State extends ActionState>(
 
   return { state, key: state.nonce ?? 0, form: { action: dispatch, onSubmit }, pending };
 }
+
+/**
+ * What a thrown action answers with. A form whose `error` is a sentence may
+ * leave it to `LOST`. One whose `error` is a key its page translates — the help
+ * centre's `StringKey` — must name its own: `t()` looks the English sentence up
+ * as a key, finds nothing, and `ErrorText` renders nothing, so the customer is
+ * not told their reply may not have gone. Required by type rather than by
+ * convention, because forgetting it fails silently.
+ */
+type Options<State extends ActionState> =
+  string extends NonNullable<State['error']>
+    ? [options?: { lost?: string }]
+    : [options: { lost: NonNullable<State['error']> }];
 
 /** Spread onto the `<form>`; a component rendering it for a parent takes this. */
 export type FormHandlers = {

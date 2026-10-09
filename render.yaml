@@ -181,8 +181,9 @@ projects:
             #   WHATSAPP_TOKEN_SHIPBLU     a connected WABA's own credential,
             #                              named on its `whatsapp_accounts` row
             #
-            #   TYPESAFE_API_KEY           TypeSafe System One, read only by the
-            #                              shadow categorisation job
+            #   TYPESAFE_API_KEY           TypeSafe System One, read by the
+            #                              shadow categorisation job and the
+            #                              priority classifier
             #
             # Present, and read by nothing in this repo:
             #
@@ -218,7 +219,15 @@ projects:
             #   META_EMBEDDED_SIGNUP_CONFIG_ID
             #                            the Facebook Login for Business
             #                            configuration Embedded Signup opens
-            #                            with; an id, but this app's own
+            #                            with; an id, but this environment's
+            #                            Meta app's own
+            #   PRIORITY_AI              off | shadow | apply. Here and not in
+            #                            shared: it sends customer text to a
+            #                            third party, and `apply` moves SLA
+            #                            deadlines. Read on every ingest path,
+            #                            so web and worker both need it.
+            #   PRIORITY_AI_MIN_PROBABILITY  0..1, below which an answer is
+            #                            recorded and not applied (default 0.6)
             #
             # APP_SECRET must be identical across every service in an
             # environment — the worker signs a reply token when sending and the

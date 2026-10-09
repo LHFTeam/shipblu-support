@@ -211,9 +211,9 @@ export class GraphSubscriptionError extends Error {
 /**
  * One request and the body it answers with, under one deadline.
  *
- * A deadline because every caller runs in a job, and the worker claims nothing
- * new until its whole batch is done — see `graphTimeout`. The body is read
- * inside it because the signal governs the read too, and a deadline passing
+ * A deadline because every caller runs in a job, and nothing else frees the
+ * worker slot a request with no answer holds — see `graphTimeout`. The body is
+ * read inside it because the signal governs the read too, and a deadline passing
  * mid-body rejects with the signal's own reason, which names no host. None of
  * these calls is a message to a customer, so a write whose answer was lost is
  * simply failed and run again: subscribing twice is the same subscription.

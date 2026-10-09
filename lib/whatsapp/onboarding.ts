@@ -58,7 +58,7 @@ const log = logger('coexistence');
  * the process; the day an `instrumentation.ts` does, the exchange's URL and
  * `debug_token`'s `input_token` go to the tracing vendor with every Connect
  * unless the Graph hosts' query strings are kept out of spans
- * (`docs/PROJECT-STATE.md` §6.86). The exchange stays a GET regardless:
+ * (`docs/PROJECT-STATE.md` §6.88). The exchange stays a GET regardless:
  * it is the only shape Meta documents (`./onboarding-requests`), and trying
  * another spends a code that works once.
  */

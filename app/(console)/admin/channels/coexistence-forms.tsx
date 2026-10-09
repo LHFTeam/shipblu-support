@@ -12,6 +12,7 @@ import {
 } from 'react';
 import { unstable_rethrow, useRouter } from 'next/navigation';
 import { SubmitButton } from '@/components/submit-button';
+import { useRefreshOnSuccess } from '@/components/use-refresh-on-success';
 import { InfoTip } from '@/components/tooltip';
 import { Badge, Button, Card, ErrorText, Field, Select, SuccessText } from '@/components/ui';
 import { formatDateTime } from '@/lib/format';
@@ -52,7 +53,7 @@ import {
   pollIntervalMs,
   recoveryFor,
 } from '@/lib/whatsapp/onboarding-view';
-import { DangerAction, useRefreshOnSuccess } from '../forms-shared';
+import { DangerAction } from '../forms-shared';
 import type { AdminState } from '../settings-shared';
 import {
   connectBusinessAppNumber,

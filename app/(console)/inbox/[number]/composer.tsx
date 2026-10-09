@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useState } from 'react';
 import { ChevronDownIcon, ChevronUpIcon } from '@/components/icons';
 import { useNow } from '@/components/use-now';
 import type { ConversationDetail } from '@/lib/tickets/conversation';
@@ -96,9 +96,7 @@ export function Composer({
   */
   const [collapsed, setCollapsed] = useState(true);
 
-  // Stable, because it is an effect dependency down in the forms: a fresh
-  // closure every render would re-run the refresh effect on its own output.
-  const onSent = useCallback(() => setCollapsed(true), [setCollapsed]);
+  const onSent = () => setCollapsed(true);
 
   // Derived rather than forced through an effect: when free-form is impossible
   // the composer shows templates, and it goes back to the reply tab by itself

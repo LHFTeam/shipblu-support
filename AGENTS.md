@@ -263,22 +263,28 @@ and the help centre's are not a mistake to tidy: its `error` is a `StringKey`
 the page translates, not a sentence. A new action file anywhere else answers
 with `lib/http/action-state.ts`.
 
-A console form submits through `useActionForm`
-(`components/use-action-form.ts`), not a bare `<form action={…}>`, whenever a
-native reset could move one of its fields: anything uncontrolled, and any
-controlled select or checkbox. React 19 resets a form after every function
-action, a refusal included, so the bare shape wipes the reply an agent is
-about to correct and leaves a controlled `<select>` disagreeing with the state
-everything around it is drawn from (§6.80). The hook's `key` is also the one to
-clear a form on after a success: it holds the last success's nonce, where
-`state.nonce ?? 0` fell back to 0 on a refusal and remounted the form. A form
-of hidden fields, buttons and controlled text boxes has nothing a reset moves
-and may keep `action=`; the purge panel is one. Spread the hook's `form` onto
-the element, `<form {...form}>`: a form given only its `action` still submits,
-through React's reset. The `form-reset` repo rule refuses that shape where it
-can see a field the reset moves. The hook also turns an action that throws into
-a refusal, so a dropped connection keeps the draft rather than falling through
-to `global-error`; a form whose retry reaches a customer passes `LOST_SEND`.
+A form — in the console, the help centre or the sign-in pages — submits through
+`useActionForm` (`components/use-action-form.ts`), not a bare
+`<form action={…}>`, whenever a native reset could move one of its fields:
+anything uncontrolled, and any controlled select or checkbox. React 19 resets a
+form after every function action, a refusal included, so the bare shape wipes
+the reply an agent or a customer is about to correct and leaves a controlled
+`<select>` disagreeing with the state everything around it is drawn from
+(§6.80). The hook's `key` is also the one to clear a form on after a success: it
+holds the last success's nonce, where `state.nonce ?? 0` fell back to 0 on a
+refusal and remounted the form. A form whose success redirects needs no key,
+even back to its own route: Next remounts the page for a server action's
+redirect. A form of hidden fields, buttons and controlled text boxes has nothing
+a reset moves and may keep `action=`; the purge panel is one. Spread the hook's
+`form` onto the element, `<form {...form}>`: a form given only its `action`
+still submits, through React's reset. The `form-reset` repo rule refuses that
+shape anywhere under `app/` where it can see a field the reset moves. The hook
+also turns an action that throws into a refusal, so a dropped connection keeps
+the draft rather than falling through to `global-error`; a form whose retry
+reaches a customer passes `LOST_SEND`, and one whose `error` is a `StringKey`
+passes `{ lost: 'errorNoAnswer' }`. The type insists on that last: the hook's
+own sentence is not a key, `t()` finds nothing for it, and the customer would be
+told nothing at all.
 
 **Authorisation lives in code.** `proxy.ts` only checks that a session cookie
 exists; it cannot tell a revoked session from a live one. It runs on Node.js in
@@ -367,6 +373,19 @@ legitimately need to run again for the same subject — a profile refresh, a
 per-row backfill — must make its handler idempotent and enqueue without a key,
 or the retry silently does nothing. Webhooks persist to `webhook_events` and
 return 200 immediately; they never do the work inline.
+
+**The worker is a pool, and a running job's lock is kept fresh.**
+`worker/pool.ts` refills a slot as each job finishes, so a slow job holds only
+its own slot, and refreshes the lock of every job it is running each
+`HEARTBEAT_EVERY_MS` so the stalled sweep returns only a dead worker's jobs.
+Two consequences for handlers. Nothing but the job itself ends a hung job, so
+every outbound call in a job path carries a deadline (`lib/http/deadline.ts`).
+And a job still runs at least once, not exactly once: a worker stopped
+mid-job — a deploy's shutdown window is short — leaves its job to be run again,
+so a handler must tolerate a second run. `completeJob` and `failJob` write only
+over the attempt that holds the row — `completeJob` also over that attempt
+reclaimed and not yet claimed again, since a run that finished needs no second
+one (§6.85).
 
 `npm run job -- <type>` takes trailing `key=value` pairs as the payload
 (`npm run job -- backfill_meta_profiles force=true limit=50`), so a handler's
@@ -739,9 +758,9 @@ rule that contributed rather than from how many did, so a pile of single
 keywords is held below the auto band however many of them agree.
 See `plans/ticket-categorisation.md`.
 
-**The one AI provider, and the one thing it is allowed to touch.**
-`lib/typesafe/` calls TypeSafe's System One endpoint and `lib/categorise-ai/`
-asks it the categorisation question — the repo's first and only model call. It is
+**The one AI provider, and the two things it is allowed to touch.**
+`lib/typesafe/` calls TypeSafe's System One endpoint, and two modules ask it
+questions. `lib/categorise-ai/` asks the categorisation question, and it is
 a **shadow**: every answer lands in `ai_category_runs` and nothing else, so no
 rollup, no review queue and no primary ladder can see it. That separation is not
 caution to be tidied away later. `conversation_categories.confidence` is an
@@ -775,6 +794,26 @@ The job is hand-run and on no cron — a shadow run is an experiment with a labe
 on it. `dryRun=true` builds every request, calls nothing and writes nothing, which
 is why it can sit in CI's `database` job loop and put the selection and report
 queries in front of real Postgres. See `plans/categorisation-through-typesafe.md`.
+
+`lib/priority-ai/` asks how urgent each inbound customer message is, and it is
+**not** a shadow: under `PRIORITY_AI=apply` it writes `conversations.priority`,
+which moves SLA deadlines. It earns that where the categoriser could not because
+priority has no second quantity to be confused with — the column is a level, not
+an evidence grade, and one ticket in the archive had a priority set by hand.
+What it may not do is overrule anybody: `lib/priority-ai/decide.ts` is the only
+place that decides whether an answer may be written, and its rules are tests. A
+priority set by a person, a rule, a form default or an agent opening the ticket
+is never touched; only the answer to the customer's opening message may lower a
+ticket, and later ones only raise; and every answer, applied or not, is a row in
+`ai_priority_runs` with its full distribution, because those rows are the only
+labels priority has. A new writer of `conversations.priority` writes the column
+and its `priority_changed` event in one transaction, stamps the event with
+`PRIORITY_STAMP` (`lib/tickets/priority-stamp.ts`) so events sort in the order
+the column was written, and calls `onPriorityChanged` after it commits — as the
+console, the `set_priority` automation and the classifier do. The policies price
+their targets per priority, and the classifier decides whose priority a ticket
+carries from the column and those events read together. See
+`plans/priority-through-typesafe.md`.
 
 **Knowledge base article formatting.** `lib/kb/format.ts` is the standard, and
 it is code rather than prose because it is enforced: `normaliseArticleHtml`
@@ -1184,7 +1223,7 @@ deleting it, and drop the sections that genuinely do not apply.
   exposed this way. Nothing traces today; whoever adds an
   `instrumentation.ts` keeps the `graph.facebook.com` and `graph.instagram.com`
   query strings out of every span in the same change, and
-  `NEXT_OTEL_FETCH_DISABLED=1` alone does not (`docs/PROJECT-STATE.md` §6.86).
+  `NEXT_OTEL_FETCH_DISABLED=1` alone does not (`docs/PROJECT-STATE.md` §6.88).
 - Email bodies and imported KB HTML are attacker-controlled. **Sanitise on
   write, never on read**, through `lib/html/sanitize.ts`.
 - Attachment paths derive from ids we generate, never from a supplied filename.

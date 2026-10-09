@@ -46,6 +46,7 @@ skip: moderate_meta_comment — needs a comment to act on, and calls Graph
 skip: download_media — needs a message with media, and downloads it from Meta
 skip: fetch_meta_profile — needs a contact and a Meta user id, and calls Graph
 skip: sync_shipment — needs a tracking number, and calls api.shipblu.com
+skip: classify_priority — needs an inbound message, and calls TypeSafe; lib/priority-ai/run.db.test.ts runs its SQL
 skip: subscribe_meta_webhooks — has no SQL; it only calls Graph, with the app credential
 skip: complete_coexistence_onboarding — needs an onboarding attempt with a stored credential, and calls Graph; its SQL is planned by lib/whatsapp/onboarding.db.test.ts
 skip: check_meta_permissions — calls Graph, and refuses to start without the Meta app credentials, before its one query; listAccounts and credentialStatuses are planned by lib/whatsapp/credentials.db.test.ts

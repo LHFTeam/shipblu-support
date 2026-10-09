@@ -31,7 +31,7 @@ import { GRAPH_BASE, graphTimeout } from '@/lib/meta/graph';
  * OpenTelemetry's undici instrumentation. Nothing registers a tracer today (no
  * `instrumentation.ts`), so those spans go nowhere; whoever adds one keeps the
  * Graph hosts' query strings out of them, or this token is exported on every
- * call. `docs/PROJECT-STATE.md` §6.86 says how, and why
+ * call. `docs/PROJECT-STATE.md` §6.88 says how, and why
  * `NEXT_OTEL_FETCH_DISABLED` is not the answer.
  */
 

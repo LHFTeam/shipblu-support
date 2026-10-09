@@ -24,7 +24,7 @@ declare global {
   var __shipbluSql: ReturnType<typeof postgres> | undefined;
 }
 
-const POOL_MAX = 10;
+export const POOL_MAX = 10;
 
 /**
  * Queries in flight or waiting for one of the `POOL_MAX` slots.

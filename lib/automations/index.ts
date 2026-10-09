@@ -19,7 +19,8 @@ import { requesterLocale } from '@/lib/tickets/locale';
 import { automatedReplyBlocked, deliverAutomatedReply } from '@/lib/tickets/outbound';
 import { matches } from '@/lib/rules/conditions';
 import { conversationFacts } from '@/lib/rules/facts';
-import { onGroupChanged, onStatusChanged } from '@/lib/sla';
+import { onGroupChanged, onPriorityChanged, onStatusChanged } from '@/lib/sla';
+import { PRIORITY_STAMP } from '@/lib/tickets/priority-stamp';
 import { parseActions, type Action } from './actions';
 import { logger } from '@/lib/log';
 
@@ -176,11 +177,31 @@ async function applyAction(action: Action, ticket: TicketRow, ruleName: string):
 
   switch (action.type) {
     case 'set_priority':
-      await db
-        .update(conversations)
-        .set({ priority: action.value })
-        .where(eq(conversations.id, conversationId));
-      await record('priority_changed', { to: action.value });
+      // The column and its event in one transaction, as the console writes
+      // them. The priority classifier decides whose priority a ticket carries
+      // under the row lock, from the column and the `priority_changed` events
+      // together; between two autocommits it could see a rule's `medium` with no
+      // event owning it, take it for the default, and write over the rule's
+      // choice — with the rule's event then landing after, naming the rule for a
+      // value the column no longer held. The event is stamped once the update
+      // holds the lock, for the reason `PRIORITY_STAMP` gives.
+      await db.transaction(async (tx) => {
+        await tx
+          .update(conversations)
+          .set({ priority: action.value })
+          .where(eq(conversations.id, conversationId));
+        await tx.insert(conversationEvents).values({
+          conversationId,
+          type: 'priority_changed',
+          actorLabel: `automation:${ruleName}`,
+          createdAt: PRIORITY_STAMP,
+          data: { to: action.value },
+        });
+      });
+      // An on_create rule runs before the SLA is applied, so this is a no-op
+      // there and `applySlaOnCreate` reads the raised priority itself. An
+      // on_update or time rule escalating a live ticket is the case it is for.
+      await onPriorityChanged(conversationId);
       return;
 
     case 'set_status': {

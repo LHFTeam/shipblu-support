@@ -1030,7 +1030,7 @@ is code:
   Meta offers no echo to a third-party app. _Partly superseded 2026-10-08:_ the
   silence proved that about this number and nothing about the field, and a
   number connected through coexistence is operated from the phone — the field
-  is required and ingested now; §6.85.
+  is required and ingested now; §6.87.
 
   So the bot's half is **not reachable by webhook at all**, and the remaining
   routes are outside this system: the service that operates the number hands the
@@ -1105,10 +1105,16 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   is `on delete set null` and would quietly strip the hub from a real thread,
   leaving only the address in `to_addresses`. That check is the SQL's to make by
   hand; the Delete button on `/admin/locations` makes it itself. `deleteLocation`
-  goes through `removeLocation` (`lib/locations/remove.ts`), which locks the row,
-  counts the threads, and marks a hub any thread has used not operating instead
-  of deleting it — the rule `deleteInternalRecipient` already applied to the
-  picker's other register.
+  goes through `removeEntry` (`lib/side-conversations/directory.ts`), which
+  locks the row, counts the threads, and marks a hub any thread has used not
+  operating instead of deleting it — the same function, and so the same rule,
+  `deleteInternalRecipient` applies to the picker's other register. Starting a
+  thread reads its hub or recipient when Send is pressed, which already refused
+  one removed while the agent wrote, and now reads it again under a share lock
+  (`holdEntry`) inside the insert's transaction. That second read covers the
+  moment between the first and the insert: before it, a hub deleted there died
+  on the foreign key and the composer said the send "may or may not have been
+  sent" when nothing was written, and one retired there was sent to anyway.
 
 - ~~**SLA policies and automation rules are both empty.**~~ `sla_policies` holds
   **4** rows and `automation_rules` **1** as of 2026-09-20, so neither cron runs
@@ -1339,6 +1345,32 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
 Everything below passes unit tests. Each is a round trip, or the half of one
 nobody has run, that somebody has to actually watch against the real provider:
 
+- **The priority classifier, in shadow first** (`plans/priority-through-typesafe.md`).
+  It ships off. Set `PRIORITY_AI=shadow` in the `shipblu-support-production`
+  env group, beside `TYPESAFE_API_KEY` — never on a service, which would
+  silently win over the group — let a day of inbound traffic through, and read
+  the rows back by hand before `apply` — no real Jev response has been parsed
+  by this code. Per channel, since one channel is most of the volume:
+
+  ```sql
+  select c.channel, r.outcome, r.predicted, count(*),
+         round(avg(r.probability)::numeric, 2) as avg_p
+  from ai_priority_runs r join conversations c on c.id = r.conversation_id
+  group by 1, 2, 3 order by 1, 2, 3;
+  ```
+
+  Once it is on `apply`, the disagreements the threshold is tuned from are an
+  agent's `priority_changed` after the classifier's on the same ticket:
+
+  ```sql
+  select r.conversation_id, r.predicted, r.probability, e.data->>'to' as agent_set
+  from ai_priority_runs r
+  join conversation_events e on e.conversation_id = r.conversation_id
+   and e.type = 'priority_changed' and e.actor_agent_id is not null
+   and e.created_at > r.created_at
+  where r.outcome = 'applied';
+  ```
+
 - **Postmark, from Outlook.** The credentials are set (§5.1), and the Gmail half
   has been watched: on ticket #13777 on 2026-09-03 a Gmail message arrived, an
   agent replied through Postmark, and the Gmail answer threaded onto the same
@@ -1391,7 +1423,7 @@ shipblu.com` still serves Freshdesk, so each one took a reader out of this
     `npm run job -- subscribe_meta_webhooks` once per environment, **staging
     first**, because three of the four names come from the webhooks overview
     rather than from a subscription this app already holds, and one bad name
-    fails the whole write (§6.85). The onboarding job reads the list back and
+    fails the whole write (§6.87). The onboarding job reads the list back and
     records a warning per missing field; it cannot write the list itself.
   - The phone runs WhatsApp Business 2.24.17 or later and stays open until the
     history reaches 100%; onboarding unlinks companion devices; throughput on
@@ -4375,10 +4407,10 @@ null`, and argued it from write cost and 13 MB of disk. The read side turned
     as well as the status.** _2026-09-26._ Node 22's `fetch` gives up on its own
     only after five minutes without response headers, and never on a body that
     keeps trickling in (undici's `headersTimeout` and `bodyTimeout`, both
-    300 000 ms, read from Node's own source). The worker awaits a whole batch
-    before it claims the next, so one unresponsive provider held every queued
-    job — sends included — for at least that long, which is also exactly the
-    stalled-job reclaim window. And an `AbortSignal.timeout` passed to `fetch`
+    300 000 ms, read from Node's own source). The worker awaited a whole batch
+    before it claimed the next (until entry 85), so one unresponsive provider
+    held every queued job — sends included — for at least that long, which is
+    also exactly the stalled-job reclaim window. And an `AbortSignal.timeout` passed to `fetch`
     keeps running while the body is read: a deadline passing after the status
     rejects `text()`, `json()` or a stream reader with the signal's own
     `DOMException`, which names no call and is not the client's error type. A
@@ -4770,10 +4802,11 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     Its `form` is spread onto the element, `<form {...form}>`, rather than
     wired as `action` and `onSubmit`: a form given only `action` still submits,
     through React's own path, reset and all. The `form-reset` repo rule refuses
-    a console form with a function `action`, no spread and no `onSubmit`, that
-    holds a field a reset moves. Run against `main` before this change it named
-    15 of the converted forms; it cannot see a field another component renders
-    (`EditorForm`'s children, `Toggle`).
+    a form with a function `action`, no spread and no `onSubmit`, that holds a
+    field a reset moves. Run against `main` before this change it named 15 of
+    the converted forms; it cannot see a field another component renders
+    (`EditorForm`'s children, `Toggle`). It read only the console until the
+    help centre and the sign-in pages followed, below.
 
     Converted: the composer's reply, note, template and both side-conversation
     forms; the new-ticket form; `EditorForm`, and with it every admin editor
@@ -4824,8 +4857,9 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     nothing for a reset to move (`DangerAction`, thread control, profile
     refresh, comment moderation, the article status, restore and delete
     buttons, merge rows, the availability switches, the import and backfill
-    buttons, agent activate). The purge panel stays too, because its one typed
-    field is controlled and a reset leaves it alone. Those forms still get
+    buttons, agent activate, and the help centre's sign-out). The purge panel
+    stays too, because its one typed field is controlled and a reset leaves it
+    alone. Those forms still get
     React's reset, and it changes nothing in them. Nothing else in the console
     resets a form: there is no reset button and no `requestFormReset` call. So
     a converted form's controlled select cannot drift from what it submits.
@@ -4838,19 +4872,85 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     stays in the box rather than being put back, and resending it on every
     focus change repeated the refusal.
 
-    **Not changed: the help centre and the sign-in pages**, which this fix's
-    scope, the agent console, left out. Measured the same way on the same day,
-    every one of them reproduces. The ones that matter: the portal's reply box
-    empties a customer's whole reply when the ticket was closed while they
-    typed; the portal's new-ticket form wipes everything and puts an edited
-    subject back to the one it was opened with; registration empties the name,
-    email and password for an address the browser accepts and the server
-    refuses (`mona@shipblu`); both sign-in forms empty the email after a wrong
-    password; and the agent invite puts a corrected name back to the admin's
-    spelling, which a resend then writes onto the agent row. The help centre's
-    ticket form keeps its typed text, which is controlled, and loses its
-    dropdowns and ticks. The hook fits all of them: their `error` is a
-    `StringKey`, which is a string.
+    **The help centre and the sign-in pages followed on 2026-10-07.** The
+    console fix had left them out, and every one of them reproduced. The
+    portal's reply box emptied a customer's whole reply when the ticket was
+    closed while they typed. The portal's new-ticket form wiped everything and
+    put an edited subject back to the one it was opened with, so a ticket sent
+    again was stored without whichever answers the customer did not retype.
+    Registration emptied the name, email and password for an address the
+    browser accepts and the server refuses (`mona@shipblu`). Both sign-in forms
+    emptied the email after a wrong password. The agent invite put a corrected
+    name back to the admin's spelling, and the resend wrote that spelling onto
+    the agent row. Setup and the password reset emptied their fields; setup's
+    are `required`, so a refused first admin could not be resubmitted without
+    retyping them. The help centre's ticket form kept its typed text, which is
+    controlled, and lost its dropdowns, ticks and files under the state still
+    describing them. And an action that never answered took the form to the
+    error page, the draft with it, as it had the console's.
+
+    All ten now submit through `useActionForm`, spread as `<form {...form}>`,
+    the forgot-password form included: it has no realistic refusal, but
+    converting it cost nothing. None takes the key, because every success
+    leaves the form behind: a redirect, or the check-your-email panel in its
+    place.
+    - The portal reply is the one success that comes back to its own route
+      and renders the same form again (`?replied=1`); the anonymous ticket form
+      comes back to its own too (`?submitted=N`), but its page renders the
+      confirmation in place of the form. The router keeps a page mounted across
+      a change of search params, and the reply box empties anyway, and always
+      did: a server action's redirect rejects the action with a redirect error
+      marked handled, and `RedirectErrorBoundary` catches it in order to
+      remount the subtree. React's reset was never what cleared it.
+    - The two sign-in forms keep the address and still empty the password on a
+      refusal, which is what the reset did to it. A wrong password is usually
+      a near miss of the right one, and left in the box it can be revealed by
+      whoever sits down next. An effect clears it on the node rather than a key
+      remounting it, so focus stays in the box an Enter was pressed in, and
+      only on a refusal, so the initial state cannot wipe a password already
+      in the box when the form hydrates, which is where an autofill lands.
+    - A thrown action's refusal carries a `StringKey` in the help centre. The
+      hook's own sentence is English and not a key: `t()` looked it up, got
+      `undefined`, and `ErrorText` rendered nothing, so with the request
+      aborted the Arabic reply box and sign-in kept the draft and said nothing
+      at all. A form whose `error` is narrower than `string` must now pass
+      `{ lost }`, typed as that narrower key, and the help centre passes
+      `errorNoAnswer`.
+
+    `form-reset` now reads everything under `app/`, not only the console. Run
+    against the forms before this change it named nine of the ten; the tenth,
+    the help centre's ticket form, renders its fields through
+    `TicketFieldInput`, which it cannot see into. A `{`/${locale}/search`}`
+    action is a URL like a string one, so the search and tracking boxes pass.
+
+    One thing the hook costs every form it serves, and these more than the
+    console's, which needs JavaScript anyway: posting without it. To catch a
+    thrown action the hook hands React a client function rather than the server
+    action, so the server renders the form with a `javascript:` action where it
+    used to render a `POST` to the action. A submission made while the page is
+    still loading is captured and replayed once React arrives; one made with
+    JavaScript off does nothing. Keeping both would change the hook every
+    console form uses: a second `useActionState` over the server action
+    itself, handed to the form as `action` and seeding the wrapped one, would
+    let the server render the post again and still show its answer.
+
+    Measured twice. First on #338, where the conversion was written against the
+    hook as it stood before #337 (a positional third argument, not `{ lost }`):
+    a scratch harness of the ten real components on React's development and
+    production builds, 244 checks per build, the forms before failing the same
+    86 on each and the conversion none; and the real app against a local
+    Postgres under `next dev` and `next start`, with real refusals and a
+    database read after each success, 145 checks per build, the forms before
+    failing the same 54. Then again after the port onto `main`'s hook, under
+    `next start` in Chromium: setup refused and corrected, the console sign-in
+    refused and with its request aborted, the portal sign-in the same in
+    Arabic, and registration refusing `mona@shipblu` — 16 of 16. The same
+    script against `main` passed 6: setup emptied the name and email, so the
+    corrected submission could not be sent, and every console sign-in check
+    after it ran against `/setup` instead; the portal sign-in emptied the
+    email, and with the request aborted showed no message and lost the email;
+    registration emptied all three fields. The only page errors in the
+    converted run were the two aborted requests themselves.
 
     Generally: assume a native reset is a desync, not a clear. The default a
     controlled `<select>` or checkbox carries is the one it was rendered with,
@@ -5043,7 +5143,61 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     mocked client, which is how a statement Postgres never saw passed for a
     tested one.
 
-85. **`smb_message_echoes`'s silence proved only that no number was operated
+85. **The worker ran in batches, and its stalled-job sweep could not tell a
+    slow job from a dead worker's.** _2026-10-08._ `runOnce` claimed up to
+    `WORKER_CONCURRENCY` jobs and awaited the whole batch before claiming
+    again, so one slow job — a provider at its deadline, a large download, the
+    priority classifier's 15-second TypeSafe call — held back every job queued
+    behind it, sends included (entry 73 met the same barrier from the request
+    side). `worker/pool.ts` now refills a slot as each job finishes. Taking the
+    barrier away exposed two older faults, fixed with it:
+    - **Nothing refreshed a running job's lock.** The sweep returns any lock
+      older than `STALLED_AFTER_MS`, whoever holds it. It used to run only
+      between batches, when the worker held nothing, so only a deploy's new
+      worker re-ran a long job; in a pool it would run beside the worker's own.
+      The pool now refreshes every running job's lock each
+      `HEARTBEAT_EVERY_MS` (`touchJobs`), on its own timer, because the loop's
+      error backoff can outlast the window.
+    - **A late finisher overwrote whoever held the job by then, and a success
+      that could not be recorded was retried in ten seconds.** `completeJob`
+      and `failJob` now match only the attempt that holds the row (`locked_by`
+      _and_ `attempts`, since the same process can claim a reclaimed job
+      again), and `completeJob` also takes the same attempt reclaimed but not
+      yet claimed again. `worker/execute.ts` no longer sends a job whose
+      `completeJob` threw to `failJob`; it retries the write for about half a
+      minute while the job still holds its slot and its lock. That narrows the
+      duplicate rather than ending it: if the database cannot take the write
+      for that long, the row comes back from the sweep five to ten minutes
+      later and runs again.
+    - **A pool's own sweep could hand back a job the pool was still running**,
+      if its heartbeat failed for the whole window. The sweep now skips the
+      sweeping worker's running jobs, and the pool tracks each run rather than
+      each job id, so a job claimed again beside its first run is counted,
+      refreshed and drained as the separate run it is.
+
+    A request with no deadline now holds its own slot for good, since the
+    heartbeat keeps the sweep off it: per-request deadlines are what end a hung
+    job.
+
+86. **A pause was credited in wall-clock minutes, and a reopen never ended
+    one.** _2026-10-09, two pre-existing faults found in the review of #344._
+    The resume measured a pause by the clock and added it to the due dates as
+    working minutes, so a ticket parked from Thursday 16:00 to Sunday 10:00 on
+    the Cairo calendar — 3,960 minutes, two working hours — had its deadline
+    moved about ten days. And resolving pauses the clock while `reopenResolved`,
+    which the five inbound paths reopen through, never resumed it: the reopened
+    ticket's resolution clock was owed nothing for the time it sat resolved,
+    and its next trip to Pending found the clock "already paused", so the
+    resume after it credited everything since the resolve. A pause is now
+    credited in the hours its clock counts (`excusedSince` over
+    `businessMinutesBetween`), and `sla_resumed` records where the pause began
+    so a re-time rebuilds the same interval. `onCustomerReply` closes a pause
+    left on a ticket whose status no longer stops the clock, at the `reopened`
+    event's instant. Production had one such ticket on 2026-10-09, Open with a
+    pause from a reopen on 21 August; its next customer message closes it with
+    the credit it was owed.
+
+87. **`smb_message_echoes`'s silence proved only that no number was operated
     from the phone — and coexistence is exactly what changes that.**
     _2026-10-08; a reading corrected before it cost anything._ §5.1's
     bot-transcript entry argued that the field had been subscribed on this app
@@ -5078,8 +5232,8 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     meaning anything. None of this has run live (§5.2), which is also why the
     field list grows on staging first.
 
-86. **Every Graph credential this app sends rides in a URL, and a fetch
-    tracing span records the URL whole.** _2026-10-09, found in review of the
+88. **Some Graph credentials ride in a URL, and a fetch tracing span
+    records the URL whole.** _2026-10-09, found in review of the
     coexistence change; nothing traces yet, so nothing has left the process._
     Next 16's patched `fetch` wraps every server-side call in a span named
     `fetch GET <url>` with `'http.url': <url>`
@@ -5359,7 +5513,7 @@ configured?" questions in one call. Outbound HTTPS goes through an agent proxy;
   call, the app secret and code on the Embedded Signup exchange, the business
   token in `debug_token`. Nothing traces today; whoever adds an
   `instrumentation.ts` keeps both Graph hosts' query strings out of every span
-  first (§6.86).
+  first (§6.88).
 - RLS: enabled, zero policies, **never FORCE** (§2).
 - Email bodies and imported KB HTML are attacker-controlled. **Sanitise on
   write, never on read** — the stored row is then safe for every consumer, and

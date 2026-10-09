@@ -18,6 +18,7 @@ import { ok } from '@/lib/http/action-state';
 import { env } from '@/lib/env';
 import { can } from '@/lib/auth/permissions';
 import { enqueue } from '@/lib/queue';
+import { holdEntry } from '@/lib/side-conversations/directory';
 import { quoteAnchor, sideSubject } from '@/lib/side-conversations/format';
 import {
   normaliseAddress,
@@ -170,6 +171,17 @@ export async function startSideConversation(
   }
 
   const created = await db.transaction(async (tx) => {
+    // Checked again, under a lock, because the read that resolved the address
+    // took none: an admin could delete or retire the hub since, and the insert
+    // would then die on the foreign key or go to a hub just marked not operating.
+    // `holdEntry` says how the lock and the delete's wait for each other.
+    const open = resolvedLocationId
+      ? await holdEntry(tx, 'location', resolvedLocationId)
+      : resolvedRecipientId
+        ? await holdEntry(tx, 'recipient', resolvedRecipientId)
+        : true;
+    if (!open) return null;
+
     const inserted = await tx
       .insert(sideConversations)
       .values({
@@ -210,6 +222,14 @@ export async function startSideConversation(
 
     return { ...side, messageId: message[0]!.id };
   });
+
+  if (!created) {
+    return {
+      error: resolvedLocationId
+        ? 'That location is no longer available'
+        : 'That recipient is no longer available',
+    };
+  }
 
   await enqueue(
     'send_side_email',

@@ -2,6 +2,7 @@ import { assignConversation } from '@/lib/assignment';
 import { maybeSendAutoResponse } from '@/lib/auto-response';
 import { runAutomations } from '@/lib/automations';
 import { categoriseFromMessage } from '@/lib/categorise/apply';
+import { enqueuePriorityClassification } from '@/lib/priority-ai/enqueue';
 import { linkShipmentsFromMessage } from '@/lib/shipments/links';
 import { scheduleSurvey } from '@/lib/csat';
 import { applySlaOnCreate, onCustomerReply } from '@/lib/sla';
@@ -78,7 +79,12 @@ export async function afterInboundMessage(
   await maybeSendAutoResponse(conversationId);
 }
 
-/** An agent changed something in the console. */
+/**
+ * Something about the ticket changed that observer rules should see: an agent's
+ * edit in the console, or a priority the classifier applied
+ * (`lib/priority-ai/run.ts`), which calls this from a worker job with no agent
+ * session. So nothing here may assume a person or a request.
+ */
 export async function afterTicketUpdate(conversationId: string): Promise<void> {
   await runAutomations('on_update', conversationId);
   await autoAssign(conversationId);
@@ -182,5 +188,14 @@ export async function afterMessageStored(message: StoredMessage): Promise<void> 
     await categoriseFromMessage(message, 'notify');
   } catch (error) {
     log.error(`categorisation failed for message ${message.messageId}`, error);
+  }
+
+  // Only queued here; the provider call is a job (`classify_priority`). Every
+  // caller runs this after the message's insert has committed, which is what
+  // lets the job treat a missing row as gone rather than not yet written.
+  try {
+    await enqueuePriorityClassification(message);
+  } catch (error) {
+    log.error(`could not queue priority classification for ${message.messageId}`, error);
   }
 }
