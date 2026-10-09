@@ -5356,6 +5356,75 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     keying on `ok` alone, a refresh after a success, a bare `action=`, and a
     refusal that moves the key.
 
+90. **A button that turns into a submit inside its own click handler is
+    submitted by that click.** _2026-10-09, measured in Chromium 141 against
+    `main` at 4f47b15._ The contact page's merge row drew "Merge" as
+    `<Button type="button" onClick={() => setArmed(true)}>` and the armed
+    "Merge into this contact" as `<Button type="submit">`, in the two branches
+    of one ternary. Same element, same position, so React kept the DOM node and
+    changed its `type`. React commits a click's state update in the microtask
+    after the click's listeners return, which is before the browser runs the
+    click's default action, and that action reads the button's type as it is
+    by then. One click, logged:
+    `mousedown[d=1] on "Merge" → click[d=1] on "Merge" → submit(by "Merge into this contact")`.
+    So one click, one Enter, one Space or one tap merged a contact with the
+    confirm step on screen; a double-click, or holding Enter, merged twice. The
+    confirm was never disabled while the action ran, so `already_merged` in
+    `lib/contacts/merge.ts` was the only thing between a triple-click and three
+    calls.
+
+    The other three hand-written two-click controls had the other half.
+    `DangerAction` (every admin delete) and the comment strip's delete, which
+    removes a customer's public comment at Meta, rendered a different
+    component once armed. The arming click's node left the document, so it
+    submitted nothing. But the second click of a double-click, or of a
+    double-tap, landed on the confirm that had taken its place, and confirmed.
+    Arming also dropped focus to `<body>`, so a keyboard could arm either one
+    and never confirm it. The sidebar's unlink "×" (`UnlinkButton`) confirmed
+    on a double-click and on a held Enter: Chromium activates a focused button
+    on every Enter keydown, repeats included.
+
+    **The fix is `ConfirmSubmit`** (`components/confirm-submit.tsx`), with
+    `useConfirmClick` for the unlink button, which has no form. One `<button>`
+    for both steps:
+    - The arming click calls `preventDefault`, which cancels its default action,
+      so the type it flips cannot act on it.
+    - A click whose `detail` is above 1 is refused. `detail` is the platform's
+      count of clicks inside its double-click window, so this is the second
+      click of a double-click or a double-tap. Keyboard activation reports 0,
+      which is why the test is not `=== 1`.
+    - A repeated keydown is cancelled, which cancels the click it would make.
+    - It is disabled while the form's action runs (`useFormStatus`).
+
+    The cost is that a deliberate confirm inside the double-click window is
+    swallowed, and the next click confirms. A time-based guard instead (ignore
+    clicks for some milliseconds after arming) was measured in the prototype
+    and was worse: it also swallowed a quick keyboard confirm.
+
+    **How it was measured.** The method §6.80 describes: the four real
+    components bundled with esbuild against the React Next vendors, in its
+    development and production builds, `next/navigation` stubbed, and each
+    `'use server'` module replaced by a stub that counts its calls and answers
+    a refusal after 800ms. Playwright drove Chromium 141 through 13 gestures on
+    each control: a click, a double- and a triple-click, a second click 600ms
+    later, a double-click on an armed button, clicks during a three-second
+    flight, a second press inside the double-click window, Enter twice with
+    focus checked between, Space twice, Enter held, a tap, a double-tap and a
+    second tap 600ms later. `main` passed 43 of 80 checks in each build; the fix
+    passed 80 of 80 in each. The same script was the measure for both.
+
+    One caveat about what that proves. Playwright tells Chromium a mouse
+    click's count rather than letting the operating system time it, so the
+    mouse cases test what each count does, not where a real double-click
+    window ends. Touch taps do go through Chromium's own gesture timing. Not
+    measured at all: Firefox, and Safari on any platform.
+
+    The `button-type` repo rule refuses the merge row's shape anywhere else: a
+    button whose `type` is an expression, or one button element in each branch
+    of a conditional with different types. Run against `main`, it names the
+    merge row and nothing else. It cannot see the swapped-component shape: a
+    wrapper's name does not say whether it submits.
+
 ## 7. Verification already done
 
 - **The knowledge-base role floor, against a real Postgres.** _2026-09-04._ The

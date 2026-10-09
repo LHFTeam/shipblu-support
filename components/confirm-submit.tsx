@@ -9,7 +9,7 @@ import { Button } from '@/components/ui';
  * second, separate click confirms.
  *
  * Three things a plain `armed ? confirm : arm` gets wrong, each measured in
- * Chromium (§6.85):
+ * Chromium (§6.90):
  *
  * - **The arming click must not be the confirming one.** React commits a
  *   click's state update before the browser runs the click's default action, so

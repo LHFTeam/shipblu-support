@@ -3,7 +3,7 @@ import { runRule } from '../fixture.mjs';
 
 /**
  * A button whose `type` changes between renders is submitted by the click that
- * changed it (§6.85). Refused as an expression, and as the merge row's shape —
+ * changed it (§6.90). Refused as an expression, and as the merge row's shape —
  * one button element in each branch of a conditional, with different types.
  * Everything else about a button passes.
  */

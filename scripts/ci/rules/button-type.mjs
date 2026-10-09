@@ -9,7 +9,7 @@ import { fail, read, requireAtLeast, scannable } from '../lib.mjs';
  * handler is a submit button by the time that same click activates it, and the
  * click that was meant to arm a confirmation submits the form instead.
  * `MergeCandidateRow` merged a contact on one click that way, with its confirm
- * step on screen the whole time (§6.85). Two shapes produce it, and both are
+ * step on screen the whole time (§6.90). Two shapes produce it, and both are
  * refused here:
  *
  * - a `type` that is an expression rather than a string, on `<button>` or
@@ -22,7 +22,7 @@ import { fail, read, requireAtLeast, scannable } from '../lib.mjs';
  * it cancels the arming click so the change cannot act on it. A two-click
  * control is that component, or `useConfirmClick` for one that is not a submit.
  *
- * What this cannot see is the other half of §6.85: a confirm rendered as a
+ * What this cannot see is the other half of §6.90: a confirm rendered as a
  * different component in place of the arming button. That one is not submitted
  * by the arming click, but the second click of a double-click lands on it. A
  * wrapper's name says nothing about whether it submits, so no syntax check can
@@ -55,7 +55,7 @@ export function checkButtonTypeIsFixed() {
           fail(
             rule,
             at(type),
-            'a button whose type is decided at render can be submitted by the click that changed it — a two-click confirm is ConfirmSubmit from components/confirm-submit.tsx (§6.85)',
+            'a button whose type is decided at render can be submitted by the click that changed it — a two-click confirm is ConfirmSubmit from components/confirm-submit.tsx (§6.90)',
           );
         }
       }
@@ -67,7 +67,7 @@ export function checkButtonTypeIsFixed() {
           fail(
             rule,
             at(node),
-            `<${yes.tag} type="${yes.type}"> and <${no.tag} type="${no.type}"> in one position are one node whose type changes, so the click that switches them can submit — a two-click confirm is ConfirmSubmit from components/confirm-submit.tsx (§6.85)`,
+            `<${yes.tag} type="${yes.type}"> and <${no.tag} type="${no.type}"> in one position are one node whose type changes, so the click that switches them can submit — a two-click confirm is ConfirmSubmit from components/confirm-submit.tsx (§6.90)`,
           );
         }
       }

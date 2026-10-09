@@ -6,7 +6,7 @@ import { type LinkAction, useFieldAction } from './use-field-action';
 /**
  * Two-click removal. Not a `ConfirmSubmit`, because there is no form here — the
  * write goes through `useFieldAction` like the sidebar's other controls — but
- * the same click rule, so a double-click arms it and stops (§6.85).
+ * the same click rule, so a double-click arms it and stops (§6.90).
  */
 export function UnlinkButton({
   action,

@@ -73,7 +73,7 @@ const REASONS: Record<NonNullable<MergeCandidate['reason']>, string> = {
  * The row says what would move before it is moved, because "3 tickets" is the
  * whole difference between merging a stray duplicate and merging away somebody's
  * history. The confirm is a second, separate click on the same button. It was
- * the first click until §6.85: the button turned into a submit inside its own
+ * the first click until §6.90: the button turned into a submit inside its own
  * click handler, and that click then submitted it.
  */
 export function MergeCandidateRow({

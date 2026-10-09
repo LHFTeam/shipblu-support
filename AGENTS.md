@@ -673,7 +673,7 @@ and the form are usually in different files.
 **A two-click confirm is `ConfirmSubmit`** (`components/confirm-submit.tsx`), or
 `useConfirmClick` from the same module for a control that is not a submit
 button. Arm-then-confirm looks like two lines of state and was wrong in all four
-places it was written by hand (§6.85). A button that becomes a submit inside its
+places it was written by hand (§6.90). A button that becomes a submit inside its
 own click handler is submitted by that same click, because React commits the
 change before the browser acts on the click: the merge row merged a contact on
 one click. A confirm swapped in as a different button is where the second click
