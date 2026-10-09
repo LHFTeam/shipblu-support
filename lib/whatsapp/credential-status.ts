@@ -65,8 +65,30 @@ export type CredentialStatus = {
  */
 export const EXPIRY_WARNING_MS = 7 * 24 * 60 * 60 * 1000;
 
+/**
+ * Which badge it is. The console explains a badge by this, never by its label,
+ * so a label can be reworded — or shortened — without its explanation
+ * silently falling through to nothing.
+ */
+export type CredentialBadgeKind =
+  | 'key_misconfigured'
+  | 'key_not_set'
+  | 'key_unknown'
+  | 'key_previous'
+  | 'refused'
+  | 'expired'
+  | 'expires_soon'
+  | 'never_expires'
+  | 'expiry_unknown';
+
 export type CredentialBadge = {
+  kind: CredentialBadgeKind;
   tone: 'neutral' | 'warning' | 'danger';
+  /**
+   * A few words. A badge does not wrap, and the account card is a phone's
+   * width: a label carrying a key id or a variable name ran off its edge. The
+   * detail belongs to the explanation one tap away.
+   */
   label: string;
 };
 
@@ -84,19 +106,15 @@ export function credentialBadges(status: CredentialStatus, now: Date): Credentia
   const badges: CredentialBadge[] = [];
 
   if (status.keyState === 'no_key') {
-    badges.push({
-      tone: 'danger',
-      label: status.keyProblem
-        ? 'credential key misconfigured'
-        : 'credential key not set — WHATSAPP_CREDENTIAL_KEY',
-    });
+    badges.push(
+      status.keyProblem
+        ? { kind: 'key_misconfigured', tone: 'danger', label: 'key misconfigured' }
+        : { kind: 'key_not_set', tone: 'danger', label: 'key not set' },
+    );
   } else if (status.keyState === 'unknown') {
-    badges.push({
-      tone: 'danger',
-      label: `sealed under key ${status.keyId}, which this deployment does not hold`,
-    });
+    badges.push({ kind: 'key_unknown', tone: 'danger', label: 'key unknown' });
   } else if (status.keyState === 'previous') {
-    badges.push({ tone: 'warning', label: `sealed under the previous key — rotation pending` });
+    badges.push({ kind: 'key_previous', tone: 'warning', label: 'previous key' });
   }
 
   const refusedSinceVerified =
@@ -104,22 +122,23 @@ export function credentialBadges(status: CredentialStatus, now: Date): Credentia
     (status.lastVerifiedAt === null || status.lastRefusedAt > status.lastVerifiedAt);
 
   if (refusedSinceVerified) {
-    badges.push({ tone: 'danger', label: 'credential refused by Meta' });
+    badges.push({ kind: 'refused', tone: 'danger', label: 'refused by Meta' });
   }
 
   if (status.inspectedAt === null) {
-    badges.push({ tone: 'neutral', label: 'expiry unknown' });
+    badges.push({ kind: 'expiry_unknown', tone: 'neutral', label: 'expiry unknown' });
   } else if (status.expiresAt === null) {
-    badges.push({ tone: 'neutral', label: 'never expires' });
+    badges.push({ kind: 'never_expires', tone: 'neutral', label: 'never expires' });
   } else {
     const left = status.expiresAt.getTime() - now.getTime();
     if (left <= 0) {
-      badges.push({ tone: 'danger', label: 'credential expired' });
+      badges.push({ kind: 'expired', tone: 'danger', label: 'expired' });
     } else if (left <= EXPIRY_WARNING_MS) {
       const days = Math.ceil(left / DAY_MS);
       badges.push({
+        kind: 'expires_soon',
         tone: 'warning',
-        label: `credential expires in ${days} day${days === 1 ? '' : 's'}`,
+        label: `expires in ${days} day${days === 1 ? '' : 's'}`,
       });
     }
   }

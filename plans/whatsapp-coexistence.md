@@ -172,32 +172,42 @@ the onboarding ask Meta one question through one function (the
 
 **Expiry and revocation** — detected where the token is already used:
 `sync_whatsapp_templates` (hourly) → a 190 lands in `last_sync_error` via
-`explainAuthError(code, message, source)` (gains `source`, so the sentence
-says "press Reconnect" for a stored credential instead of blaming
+`explainAuthError(code, message, source)` (gains `source`, so the sentence says
+"press Reconnect" for a stored credential instead of blaming
 `META_PAGE_ACCESS_TOKEN`), and on `source === 'stored'` the handler calls
 `recordCredentialRefusal` / `recordCredentialVerified`. `send_whatsapp` and
 `download_media` pass `source` into `explainDeliveryError`. Before it fails:
-`credentialBadges` renders `credential expires in N days` within 7 days.
-`check_meta_permissions` gains a section per stored credential (kid, valid,
-type, scopes, expiry — never the token). `applyWhatsAppAccountUpdate`
-records a refusal — and so a `refused` event — for `PARTNER_REMOVED` only.
-`ACCOUNT_OFFBOARDED` is Meta re-onboarding the number after it moved phone or
-was registered again; the partner keeps its access, so the credential is left
-alone and the badge clears on `ACCOUNT_RECONNECTED`.
+`credentialBadges` renders `expires in N days` within 7 days (each badge has a
+stable `kind` and a label of a few words; the key id, the variable and the date
+are in its explanation, one tap away). `check_meta_permissions` gains a section
+per stored credential (kid, valid, type, scopes, expiry — never the token); it
+prints and writes nothing back, so a credential whose expiry was unknown at
+storing stays `expiry unknown` until a Reconnect stores a token Meta's
+inspection answered for. `applyWhatsAppAccountUpdate` records a refusal — and so
+a `refused` event — for `PARTNER_REMOVED` only. `ACCOUNT_OFFBOARDED` is Meta
+re-onboarding the number after it moved phone or was registered again; the
+partner keeps its access, so the credential is left alone and the badge clears
+on `ACCOUNT_RECONNECTED`.
 
 **Disconnect** — _Forget credential_ (new `DangerAction` on the WABA row):
-deletes the row, appends `removed`, leaves the account and numbers; the
-notice says sends and the sync fail until Reconnect or a `WHATSAPP_TOKEN_*`
-variable. Deliberately no `DELETE /{waba}/subscribed_apps` (it would silence
-inbound tickets as a side effect of a credential decision). _Disconnect_
-(`deleteWhatsAppAccount`) cascades; the `removed` event is appended inside the
-same transaction. Because the cascade removes the credential, an account
-holding one is disconnected only by an `admin.channels.connect` holder — the
-key Forget asks for — decided under the account row's lock
-(`storedCredentialRemovalRefusal`); anybody else is told who can. Meta-side
-revocation is done by the business (Business Settings → Integrations →
-Connected apps) or by offboarding on the phone; the console says so beside the
-button.
+deletes the row, appends `removed`, leaves the account and numbers. Sends and
+the sync then use `META_PAGE_ACCESS_TOKEN`, not a token variable: storing the
+credential cleared the variable and the save refuses one while a credential is
+stored, so a row written through the console has none to fall back to. The
+button's hint and its confirmation ("Forget — send with the shared token?") say
+so, because they are all the admin reads — the control unmounts with the
+credential on success and `DangerAction` prints only errors, so the action
+answers a bare `ok()`; if the shared token cannot reach the business, Reconnect
+or a `WHATSAPP_TOKEN_*` variable named with Edit afterwards. Deliberately no
+`DELETE /{waba}/subscribed_apps` (it would silence inbound tickets as a side
+effect of a credential decision). _Disconnect_ (`deleteWhatsAppAccount`)
+cascades; the `removed` event is appended inside the same transaction. Because
+the cascade removes the credential, an account holding one is disconnected only
+by an `admin.channels.connect` holder — the key Forget asks for — decided under
+the account row's lock (`storedCredentialRemovalRefusal`); anybody else is told
+who can. Meta-side revocation is done by the business (Business Settings →
+Integrations → Connected apps) or by offboarding on the phone; the console says
+so beside the button.
 
 **Rotation** — set `_PREVIOUS` = old, current = new (both services and the
 crons read the group), `npm run job -- rotate_whatsapp_credentials
@@ -257,7 +267,12 @@ appId, configId} | {ready: false, missing: [{variable, group, why}]}` over
 - The **WhatsApp business accounts** header gets a primary button `Connect a
 WhatsApp number` beside the existing by-ids form (the flow creates or reuses
   a WABA row and shows the credential it mints). Not ready → the card renders
-  the checklist with the button disabled, naming each variable and its group.
+  the checklist with the button disabled, naming each variable and why, under
+  one paragraph naming the group: this environment's own
+  (`shipblu-support-production` or `shipblu-support-staging`, each with its own
+  value), never `shipblu-support-shared` or a service — then a deploy of the web
+  service **and** the worker, because `env()` is read once per process and the
+  worker opens the sealed credential with the same key.
 - The card (`ConnectBusinessAppNumber`): three lines always on screen (sign in
   as an admin of the Business portfolio that owns the number; keep the
   WhatsApp Business app open on the phone until history finishes; linked
@@ -270,18 +285,18 @@ WhatsApp number` beside the existing by-ids form (the flow creates or reuses
 
 ### The popup — a `useReducer` phase machine
 
-| phase             | copy                                                                                                                                                                                                   | reached by                                                                                         |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
-| `loading_sdk`     | "Loading Meta's sign-in…"                                                                                                                                                                              | card open                                                                                          |
-| `sdk_blocked`     | "Meta's sign-in script could not be loaded — usually a content blocker. Allow `connect.facebook.net` for this page and reload."                                                                        | script `onerror` or no `FB` in 10 s                                                                |
-| `popup_open`      | "Meta's window is open. Finish the steps there — this page updates when you do."                                                                                                                       | after `FB.login`                                                                                   |
-| `popup_blocked`   | "Your browser blocked the window. Allow pop-ups for this site and press Continue again." + Try again (the 1 s heuristic can read a fast cancel as blocked; the recovery is the same either way)        | callback within 1 s, no `authResponse`, no message                                                 |
-| `cancelled`       | "You closed Meta's window at the _<step>_ step. Nothing was changed." + Try again — `<step>` via `signupStepLabel(current_step)` (`PHONE_NUMBER_SETUP` → "choosing the number"; unknown printed as-is) | `CANCEL {current_step}`                                                                            |
-| `meta_error`      | "Meta reported: _<message>_. Reference `<session_id>` — quote it to Meta support." + Try again                                                                                                         | `ERROR`                                                                                            |
-| `awaiting_number` | "Reading which number you chose…"                                                                                                                                                                      | the `code` arrived, `FINISH` not yet (≤ 2 s)                                                       |
-| `no_number`       | "Meta signed you in but did not say which number was chosen — the flow ended without a number set up. Try again and complete the number step."                                                         | the 2 s passed                                                                                     |
-| `finishing`       | "Verifying with Meta…"                                                                                                                                                                                 | `FINISH` ids (in a ref, reset per click) + the `code`; `startTransition(() => dispatch(formData))` |
-| `unanswered`      | "No answer came back. The progress below shows whether the number was connected; if it was, nothing is lost." + `router.refresh()`                                                                     | the action threw or the connection dropped                                                         |
+| phase             | copy                                                                                                                                                                                                                                                                                                                                                                                                   | reached by                                                                                                                                                                                                                     |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `loading_sdk`     | "Loading Meta's sign-in…"                                                                                                                                                                                                                                                                                                                                                                              | card open                                                                                                                                                                                                                      |
+| `sdk_blocked`     | by cause. `error`: "Meta's sign-in script could not be loaded — usually a content blocker. Allow `connect.facebook.net` for this page and reload." `timeout`: "Meta's sign-in has not loaded after ten seconds. A content blocker on connect.facebook.net is the usual cause — allow it for this page and reload. On a slow connection, wait instead: this card carries on by itself when it arrives." | `error`: the script's `error` event. `timeout`: no `fbAsyncInit` in 10 s — a guess, so a late `fbAsyncInit` (`sdk_ready`) returns the card to `idle`                                                                           |
+| `popup_open`      | "Meta's window is open. Finish the steps there — this page updates when you do." — plus, when the SDK opened nothing during the click: "No window? Your browser may have blocked it: allow pop-ups for this site, then close this card (Cancel, then Close anyway) and open it again."                                                                                                                 | after `FB.login`                                                                                                                                                                                                               |
+| `popup_blocked`   | "Your browser blocked the window. Allow pop-ups for this site and press Try again." + Try again (the 1 s heuristic can read a very fast cancel as blocked; the recovery is the same either way)                                                                                                                                                                                                        | `window.open` returned null while `FB.login` ran (`watchWindowOpen` — the SDK never calls back for a refused window), or a callback with no code within 1 s (`POPUP_BLOCKED_MS`: a blocker extension closing what it let open) |
+| `cancelled`       | "You closed Meta's window at the _<step>_ step. Nothing was changed." + Try again — `<step>` via `signupStepLabel(current_step)` (`PHONE_NUMBER_SETUP` → "choosing the number"; unknown printed as-is)                                                                                                                                                                                                 | `CANCEL {current_step}`                                                                                                                                                                                                        |
+| `meta_error`      | "Meta reported: _<message>_. Reference `<session_id>` — quote it to Meta support." + Try again                                                                                                                                                                                                                                                                                                         | `ERROR`                                                                                                                                                                                                                        |
+| `awaiting_number` | "Reading which number you chose…"                                                                                                                                                                                                                                                                                                                                                                      | the `code` arrived, `FINISH` not yet (≤ 2 s)                                                                                                                                                                                   |
+| `no_number`       | "Meta signed you in but did not say which number was chosen — the flow ended without a number set up. Try again and complete the number step."                                                                                                                                                                                                                                                         | the 2 s passed                                                                                                                                                                                                                 |
+| `finishing`       | "Verifying with Meta…"                                                                                                                                                                                                                                                                                                                                                                                 | `FINISH` ids (in a ref, reset per click) + the `code`; `startTransition(() => dispatch(formData))`                                                                                                                             |
+| `unanswered`      | "No answer came back. The progress below shows whether the number was connected; if it was, nothing is lost." + `router.refresh()`                                                                                                                                                                                                                                                                     | the action threw or the connection dropped                                                                                                                                                                                     |
 
 Origin filter `isFacebookOrigin` (hostname is `facebook.com` or
 `*.facebook.com` — a bare `endsWith` passes `evilfacebook.com`), parser
@@ -300,7 +315,15 @@ with the extras in **one constant** (`lib/whatsapp/embedded-signup.ts`).
    15 minutes or its job is `pending`/`processing`. Otherwise the new attempt
    supersedes it: the old row is marked `failed` with `error: 'superseded'`
    inside the same transaction as the new insert, so a worker that never ran
-   or a job that died cannot lock a number out short of SQL.
+   or a job that died cannot lock a number out short of SQL. Past the fifteen
+   minutes a queued job is the only thing keeping a row live, so that case is
+   refused in its own words — a job is waiting in the queue and no worker has
+   finished it; the worker service is what to check; nothing is lost — since
+   "again in fifteen minutes" would be false for as long as the worker is down.
+   The same choice is made wherever the partial unique index refuses instead:
+   at the insert, for a window that named no number (read off the WABA after
+   the code is spent, so the cheap check could not be asked), and in
+   `retryOnboarding`'s catch.
 5. `tokenExchangeRequest(code)` → **`POST oauth/access_token` with a form
    body** `{client_id, client_secret, code}`, own `fetch` with
    `graphTimeout('POST')`, outside `graph()` so no secret can sit in a URL it
@@ -313,8 +336,10 @@ with the extras in **one constant** (`lib/whatsapp/embedded-signup.ts`).
    `granularScopes` targets that exclude `wabaId` **when Meta populated
    them** (the field may be empty for a business token). When the inspection
    call itself fails, that is a warning on the notice and the metadata is
-   stored null for `check_meta_permissions` to fill later — step 7 is the
-   mandatory proof, not this. `lib/meta/debug-token.ts` error sentences name
+   stored null — step 7 is the mandatory proof, not this. Nothing fills it in
+   later: `check_meta_permissions` prints the expiry without storing it, so
+   the badge reads `expiry unknown` until a Reconnect stores a token Meta's
+   inspection answered for. `lib/meta/debug-token.ts` error sentences name
    `host + pathname` only, never `url.href` (the token rides in the query
    string, the endpoint's only shape).
 7. `readWabaRequest(wabaId)` → `GET /{waba}?fields=id,name,owner_business_info`
@@ -329,9 +354,10 @@ with the extras in **one constant** (`lib/whatsapp/embedded-signup.ts`).
    (a job is enqueued only after its row commits).
 9. `refresh('/admin/channels')`; return `{...ok(), notice, onboardingId}`
    (`AdminState` gains `notice?`, `onboardingId?` in `settings-shared.ts`).
-   When the WABA row already existed with a `tokenEnvVar`, the notice says
-   "now sends with the stored credential (was `WHATSAPP_TOKEN_X`)" — _Forget
-   credential_ restores the old source.
+   When the WABA row already existed with a `tokenEnvVar`, the notice says it
+   now sends with the stored credential instead of `WHATSAPP_TOKEN_X`, and that
+   forgetting the credential falls back to `META_PAGE_ACCESS_TOKEN`, not to that
+   variable — storing cleared it.
    Log `[coexistence] exchanged onboardingId=… accountId=… wabaId=… agentId=…
 tokenType=… expiresAt=…` — ids only; the code is never echoed.
 
@@ -385,19 +411,32 @@ stored credential and calls Graph`.
 
 ### Live progress — polling, not SSE
 
-`OnboardingProgress` runs `RefreshScheduler` (`lib/realtime/refresh-scheduler.ts`,
-single-flight, visibility-aware) → `router.refresh()` every 3 s while
-`status === 'exchanged'`, every 15 s while `connected && !historyDone`, and
-stops at a terminal state; props flow into the mounted client component without
-resetting its phase. While `exchanged`, the card renders each step from
-`steps` as it lands (◌ → … → ✓ / ✗ with the sentence), the backoff line from
-`last_transient_error` / `next_attempt_at`, and after 60 s with no step moved
-"No worker has picked this up yet — the connection is saved and will
-continue; you can leave this page." `/api/events` is a per-request session-mode `LISTEN`
-authorised per queue channel and conversation; an admin topic would need a
-NOTIFY trigger on config tables, a new authorisation branch and one more
-backend-holding connection per admin tab — the class that leaked in §62 — for
-an audience of one admin watching six states. Invalidation, not data, as
+`OnboardingProgress` runs `RefreshScheduler`
+(`lib/realtime/refresh-scheduler.ts`, single-flight, visibility-aware) →
+`router.refresh()` at the interval `pollIntervalMs` picks — two fixed values, so
+the effect is not rebuilt on every refresh: every 3 s while the job is stepping;
+every 15 s while it is only waiting — a backoff whose retry is more than 15 s
+off, a stall the card has already reported, an attempt past fifteen minutes that
+offers Retry — and not at all once that overdue attempt is an hour past its
+start (Retry restarts the asking; a reload reads what a late worker did). Once
+connected: 3 s for a minute while a "Copy again" request is out, at the
+backoff's pace while a retry of it is scheduled, 15 s while the history or a
+contacts copy is arriving, nothing once the attempt failed or every copy went
+quiet. A "Copy again" button also re-reads every 3 s for the 60 s after it
+answers, because the job records the request a claim and a Graph call later.
+Every band ends at a time measured against the server's `now`, so nothing polls
+for ever. Props flow into the mounted client component without resetting its
+phase. While `exchanged`, the card renders each step from `steps` as it lands (◌
+→ … → ✓ / ✗ with the sentence), the backoff line from `last_transient_error` /
+`next_attempt_at`, and after 60 s with no step moved "No worker has picked this
+up yet. The sign-in and its credential are saved, so Meta's window is not needed
+again: if nothing moves within fifteen minutes of the start, Retry connection
+appears on this card." — not "will continue", which holds only while a job
+exists, and the page cannot see one. `/api/events` is a per-request session-mode
+`LISTEN` authorised per queue channel and conversation; an admin topic would
+need a NOTIFY trigger on config tables, a new authorisation branch and one more
+backend-holding connection per admin tab — the class that leaked in §62 — for an
+audience of one admin watching six states. Invalidation, not data, as
 `LiveUpdates` states.
 
 ### Done
@@ -410,6 +449,17 @@ an audience of one admin watching six states. Invalidation, not data, as
 > Replies typed on the phone appear on tickets as "WhatsApp Business app".
 > Console replies go out over Cloud API. Nothing else to do.
 
+The last line is built from the steps (`connectedFollowUps`), never fixed.
+"Nothing else to do" is printed only when no step failed, no step warned of
+something a person must do — the subscribe step's missing or unreadable
+app-level webhook fields — and the credential is stored; otherwise **Still to
+do:** lists each such step. What Meta says about the number — not on the
+Business app, a platform other than `CLOUD_API`, or that it could not be asked
+— is the number step's warning, printed as a plain note: nothing on the page
+changes it, so it does not hold back "Nothing else to do". The phone-replies
+sentence is left out whenever the number or subscribe step warned or did not
+finish (`phoneRepliesUnconfirmed`).
+
 ### Failure states and recovery
 
 | state                                                                          | shown                                                                                                                                                   | recovery                                                                                                                                                                                                                                    |
@@ -419,35 +469,59 @@ an audience of one admin watching six states. Invalidation, not data, as
 | token refused at exchange (scopes, wrong app, not granted on this WABA)        | the specific sentence                                                                                                                                   | re-run signed in as the right Business admin / fix the login configuration                                                                                                                                                                  |
 | number already connected                                                       | **Reconnected**; `coexistence` rewritten                                                                                                                | nothing; contacts/history offered as buttons                                                                                                                                                                                                |
 | job failed on number/subscribe/channel                                         | `failed` with the step and Meta's sentence; _Retry connection_                                                                                          | `retryCoexistenceOnboarding` enqueues again — no popup                                                                                                                                                                                      |
+| connection overdue (`exchanged` past fifteen minutes, no retry scheduled)      | "This connection has not finished in fifteen minutes and nothing is scheduled to carry it on. Press Retry connection…"; _Retry connection_              | `retryOnboarding` reopens it when its job is gone; while a job for it is still queued it refuses, naming the worker service as the thing to check                                                                                           |
 | history declined on the phone (2593109)                                        | badge `history declined on the phone` + InfoTip with the phone-side path (wording confirmed on the test phone)                                          | _Reconnect_, and share the history when the phone asks: Meta asks once per connection and the declined request holds a request id, so no copy button can ask again; the reconnect asks for the history and carries the copied contacts over |
 | disconnected from the phone (`account_update` `PARTNER_REMOVED`)               | badge on channel (danger) and a refusal on the account's credential                                                                                     | _Reconnect_ = the same popup (its copy warns that Meta unlinks companion devices again); the exchange overwrites the credential, the job re-subscribes                                                                                      |
 | number moved phone or registered again (`account_update` `ACCOUNT_OFFBOARDED`) | badge on channel (warning) saying Meta reconnects it on its own                                                                                         | wait: Meta re-onboards it, usually within minutes, and `ACCOUNT_RECONNECTED` clears the badge; _Reconnect_ only if it stays                                                                                                                 |
 | credential expiring / refused (190)                                            | account badge + `last_sync_error` sentence                                                                                                              | _Reconnect_                                                                                                                                                                                                                                 |
-| credential unreadable (`keyState` unknown / no key)                            | badge naming the key id and `WHATSAPP_CREDENTIAL_KEY`                                                                                                   | set the key or rotate; _Reconnect_ re-stores under the current key                                                                                                                                                                          |
+| credential unreadable (`keyState` unknown / no key)                            | badge `key unknown` / `key not set`, its explanation naming the key id and `WHATSAPP_CREDENTIAL_KEY`                                                    | set the key or rotate; _Reconnect_ re-stores under the current key                                                                                                                                                                          |
 | copy window passed, sync never requested                                       | badge `copy window closed` + InfoTip — not for a number Meta says is not on the Business app, nor for a copy an earlier connection made (`carriedOver`) | _Reconnect_ opens a new window                                                                                                                                                                                                              |
 
 ### The rows afterwards
 
 - **Channel row**: `ChannelBadge whatsapp` · name · `+20 10… · ShipBlu` · badges
   from `coexistenceBadges`: `WhatsApp Business app` (brand; InfoTip: connected
-  on <date>; phone-typed replies count as the team's) · `copying history 2/3 ·
-40%` / `history copied` / `history declined` / `history failed` · `412
-contacts` · `disconnected on the phone` · `copy window closed`; then
-  `RequestSyncAgain` buttons where `canRequestSyncAgain` allows and the
+  on <date>; phone-typed replies count as the team's) — `connected through Meta`
+  instead for a number Meta said is not on the Business app (`notOnBusinessApp`,
+  written on the channel, so the row offers it no copy and no reconnect for one)
+  · `copying history 2/3 · 40%` / `history stalled at 40%` / `history copied` /
+  `history declined on the phone` / `history failed` · `412 contacts` ·
+  `disconnected on the phone` (warning and "Meta reconnects it on its own" for
+  `ACCOUNT_OFFBOARDED`, danger for anything else) ·
+  `contacts and history copied before` (`carriedOver`, what an earlier
+  connection copied and this one did not ask for again) · `copy window closed`;
+  then `RequestSyncAgain` buttons where `canRequestSyncAgain` allows and the
   attempt the channel names has finished connecting, and _Reconnect_ where
   `needsReconnect` says (disconnected, a window that closed on something never
-  copied, or history declined on the phone). `ChannelEditor`'s Edit still
-  works; it shows the phone number id and the business account as text, and
-  `saveChannel` leaves a connected number's `config` and account to the
-  UPDATE (`whatsappEditColumns`) — a rename once wiped the connection, and a
-  copy taken from a read wrote back over concurrent progress — and refuses a
-  change of account.
+  copied, or history declined on the phone). `ChannelEditor`'s Edit still works;
+  it shows the phone number id and the business account as text, and
+  `saveChannel` leaves a connected number's `config` and account to the UPDATE
+  (`whatsappEditColumns`) — a rename once wiped the connection, and a copy taken
+  from a read wrote back over concurrent progress — and refuses a change of
+  account.
 - **WABA row** (`WhatsAppAccountEditor`): the variable line becomes
-  `CredentialCard` — `Stored from Embedded Signup on <date> by <agent> ·
-<type> · never expires | expires <date> · key <id>` — plus
-  `credentialBadges`, _Reconnect_ and _Forget credential_; the edit form hides
-  the token-variable field and says why; `saveWhatsAppAccount` never writes
-  the credential.
+  `CredentialCard` —
+  `Stored from Embedded Signup on <date> by <agent> · <type> · never expires | expires <date> · key <id>`
+  — plus `credentialBadges`, _Reconnect_ and _Forget credential_; the edit form
+  hides the token-variable field and says why; `saveWhatsAppAccount` never
+  writes the credential. While _Reconnect_ waits on Meta's window or its answer,
+  Edit, Forget and Disconnect are off — each would unmount the card, and with it
+  the listener the answer arrives on; a failed attempt's progress card turns its
+  _Retry connection_ off for the same reason while its new sign-in runs. That
+  wait includes `meta_error` and `cancelled` until `FB.login`'s callback has
+  fired (and any code it gave is spent or dropped): an ERROR or a CANCEL leaves
+  Meta's window open and able to finish (`connectWaitingOn`'s `answerDue`).
+- **Which attempts the page shows** (`shownOnboardings`): every number's
+  latest, while it runs, for a day after it connected, and for a week after it
+  failed — the stored credential outlives the attempt, so Retry stays useful.
+  One failure is hidden sooner: a number step that recorded `not_on_account`
+  (Meta listed the business account's numbers without this one), once a later
+  attempt on the same account has connected — the wrong number picked in
+  Meta's window and then the right one, whose Retry would get the same list
+  back. Every other failure stays: an account can hold two Business-app numbers
+  under one stored credential, so the second connecting is no answer to a
+  first that gave up on a 5xx or had its token refused, and that Retry may now
+  go through.
 
 ### Components and actions
 
@@ -476,6 +550,7 @@ replaces `listWhatsAppAccounts()` with a named-column `listAccountsForAdmin()`.
 {
   "phoneNumberId": "1234…",
   "coexistence": {
+    "onboardingId": "…",
     "onboardedAt": "…",
     "wabaId": "…",
     "displayPhoneNumber": "+20 10…",
@@ -491,12 +566,18 @@ replaces `listWhatsAppAccounts()` with a named-column `listAccountsForAdmin()`.
         "declined": { "at": "…", "code": 2593109 }
       }
     },
-    "disconnected": { "at": "…", "event": "PARTNER_REMOVED", "reason": "…", "initiatedBy": "USER" }
+    "disconnected": { "at": "…", "event": "PARTNER_REMOVED", "reason": "…", "initiatedBy": "USER" },
+    "carriedOver": ["contacts"],
+    "notOnBusinessApp": true
   }
 }
 ```
 
-A failed request is `{"error", "attemptedAt"}` in the same slot. Parsed by
+A failed request is `{"error", "attemptedAt"}` in the same slot. `carriedOver`
+is what an earlier connection copied and a reconnect did not ask for again;
+`notOnBusinessApp` is written when Meta's number check says the number is not
+on the Business app, so the row offers it neither a copy nor a reconnect for a
+copy it could never make. Both are absent when they do not apply. Parsed by
 `lib/whatsapp/coexistence.ts` (pure); written after onboarding only by
 `lib/whatsapp/coexistence-state.ts` with atomic `jsonb_set` (chunks are
 processed concurrently). History conversations: `source_system='import'`,
@@ -744,9 +825,13 @@ the tree, this is where it went:
   carries only `waba_id`, so the server reads the number off the WABA when it is
   the account's only one (`onlyNumberOn`). `coexistenceReadiness()` returns
   `{ready: true, appId, configId} | {ready: false, missing: {variable, why}[]}`,
-  and `LIVE_ATTEMPT_MS` (fifteen minutes) is what decides whether an `exchanged`
-  attempt still blocks another. Retry is `retryOnboarding(onboardingId)`, which
-  refuses a superseded or live attempt.
+  and `LIVE_ATTEMPT_MS` (fifteen minutes, declared in
+  `lib/whatsapp/onboarding-view.ts` so the card offers Retry at the moment the
+  server would accept it) is what decides whether an `exchanged` attempt still
+  blocks another. Retry is `retryOnboarding(onboardingId)`, which refuses a
+  superseded or live attempt — a live one past fifteen minutes, kept live only
+  by a queued job, with the worker-service sentence rather than "already
+  being connected".
 - **The exchange is `GET /oauth/access_token`** with `client_id`,
   `client_secret` and `code` as query parameters — the shape Meta documents for
   a Tech Provider and the only one it documents — not the POST form body §
@@ -781,8 +866,12 @@ the tree, this is where it went:
   `isSyncing`, `uncopiedAfterWindow`, `needsReconnect` and `coexistenceBadges`
   — all pure, so the page draws the badges the job decides from.
   `lib/whatsapp/onboarding-view.ts` is the view model of an attempt
-  (`toOnboardingView`, `STEP_LABELS`, `describeOnboarding`, `pollIntervalMs`,
-  `STALL_AFTER_MS`, `isOnboardingShown`), and `lib/whatsapp/onboarding-reads.ts`
+  (`toOnboardingView`, `STEP_LABELS`, `describeOnboarding`, `retryable`,
+  `recoveryFor`, `pollIntervalMs`, `connectedFollowUps`,
+  `phoneRepliesUnconfirmed`, `STALL_AFTER_MS`, `LIVE_ATTEMPT_MS`,
+  `isOnboardingShown`, `shownOnboardings`, `NUMBER_NOT_ON_ACCOUNT` — the number
+  step's outcome the job writes and `shownOnboardings` reads), and
+  `lib/whatsapp/onboarding-reads.ts`
   (`listLatestOnboardings()`, and `copyRequestRefusal()` with the
   `runsNamedSteps` predicate the job's gate shares) the reads the page and its
   actions make, in `lib/` so the database tier reaches them.
@@ -799,8 +888,9 @@ actor})`, `storedTokenFor`, `storedCredentialExists()` (the `exists()`
   `forgetStoredCredential(id, actor)`, `resealStoredCredentials({dryRun})`,
   `credentialKeyProblem()` and `REQUIRED_BUSINESS_TOKEN_SCOPES`.
   `lib/whatsapp/credential-status.ts` carries `CredentialStatus` (`keyState`,
-  `keyProblem`, `inspectedAt`, `storedAt`, …), `credentialBadges` and
-  `EXPIRY_WARNING_MS`. `explainAuthError(code, message, {source,
+  `keyProblem`, `inspectedAt`, `storedAt`, …), `credentialBadges` (each
+  `CredentialBadge` a `kind` the explanation matches on, and a short label)
+  and `EXPIRY_WARNING_MS`. `explainAuthError(code, message, {source,
 tokenEnvVar})` takes a `TokenOrigin`; `CredentialSource` lives in
   `lib/whatsapp/errors.ts`. `inspectToken` and `readGraph` are
   `lib/meta/debug-token.ts`.

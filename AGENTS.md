@@ -1169,6 +1169,16 @@ deleting it, and drop the sections that genuinely do not apply.
   plaintext — and nothing but the worker opens one (`credential-confinement`).
   A second table holding a secret is a second place to look and a second
   argument to make; make it in its own change.
+- **Some Graph credentials ride in a URL, and a fetch tracing span records the
+  URL whole.** `lib/meta/client.ts` sends the Page token as `access_token`, the
+  Embedded Signup exchange sends the app secret and the code as query
+  parameters, and `debug_token` takes the inspected token as `input_token` —
+  the endpoint's only shape. WhatsApp's sends and media downloads, and the
+  app token on `debug_token`, go in an `Authorization` header and are not
+  exposed this way. Nothing traces today; whoever adds an
+  `instrumentation.ts` keeps the `graph.facebook.com` and `graph.instagram.com`
+  query strings out of every span in the same change, and
+  `NEXT_OTEL_FETCH_DISABLED=1` alone does not (`docs/PROJECT-STATE.md` §6.86).
 - Email bodies and imported KB HTML are attacker-controlled. **Sanitise on
   write, never on read**, through `lib/html/sanitize.ts`.
 - Attachment paths derive from ids we generate, never from a supplied filename.

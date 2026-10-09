@@ -306,10 +306,24 @@ export function reduceConnectPhase(phase: ConnectPhase, event: ConnectEvent): Co
  * What the card is waiting on, if anything: Meta's window, or the action
  * checking Meta's answer. While it waits, closing the card would unmount the
  * listener and the refs the answer lands in — the window stays open, the
- * business finishes in it, and nobody hears — so the card's Cancel asks first.
+ * business finishes in it, and nobody hears — so the card's Cancel asks first,
+ * and a row keeps the controls that would replace the card off.
+ *
+ * `answerDue` is what the phase cannot say: whether the window may still
+ * answer. The card sets it when it opens the window and clears it once
+ * `FB.login`'s callback has fired — or, when the callback handed over a code,
+ * once that code is spent or dropped. It counts only in `FINISH_AFTER`: an
+ * ERROR or a CANCEL leaves Meta's window open and a finish plus a code still
+ * moves the card to `finishing`, so until the callback says the window is gone
+ * the card is still waiting on it — and after, it is not, so a window that
+ * really closed does not keep a row's controls off.
  */
-export function connectWaitingOn(phase: ConnectPhase): 'window' | 'verifying' | null {
+export function connectWaitingOn(
+  phase: ConnectPhase,
+  answerDue: boolean,
+): 'window' | 'verifying' | null {
   if (WINDOW_OPEN.has(phase.name)) return 'window';
+  if (FINISH_AFTER.has(phase.name) && answerDue) return 'window';
   if (phase.name === 'finishing') return 'verifying';
   return null;
 }

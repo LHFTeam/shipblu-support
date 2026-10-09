@@ -446,9 +446,12 @@ export async function connectBusinessAppNumber(
 }
 
 /**
- * "Retry connection" on a failed attempt — the same job again, no popup: the
- * credential is stored, so nothing the browser had is needed. The lib refuses
- * an attempt a newer one has replaced, and one still running.
+ * "Retry connection" — the same job again, no popup: the credential is stored,
+ * so nothing the browser had is needed. For a failed attempt, and for one still
+ * `exchanged` past fifteen minutes whose job is gone, which nothing else would
+ * ever move. The lib refuses an attempt a newer one has replaced, one still
+ * inside its fifteen minutes, and one whose job is still queued — that last
+ * with a sentence naming the worker, since retrying it again would not help.
  */
 export async function retryCoexistenceOnboarding(
   _state: AdminState,
@@ -539,10 +542,15 @@ export async function requestCoexistenceSync(
 /**
  * "Forget credential" on a business account: deletes the sealed token and
  * records who did it, leaving the account and its numbers. The account then
- * sends with its token variable if it names one, else with
- * META_PAGE_ACCESS_TOKEN — which is a different business unless the WABA sits
- * under this app, and the notice says so. Nothing at Meta changes; the lib
- * says why, and the button's hint says where that is done.
+ * sends with META_PAGE_ACCESS_TOKEN — not with a token variable: storing the
+ * credential cleared the one it named, and the save refuses one while a
+ * credential is stored, so a row written through the console has none to fall
+ * back to. That token reaches a different business unless the WABA sits under
+ * this app, which `ForgetCredential`'s hint and confirmation say, because they
+ * are all the admin reads: on success the control unmounts with the
+ * credential it was shown for, and `DangerAction` prints only errors, so a
+ * notice here would never be seen. Nothing at Meta changes; the lib says why,
+ * and the hint says where that is done.
  */
 export async function forgetStoredCredential(
   _state: AdminState,
@@ -557,11 +565,5 @@ export async function forgetStoredCredential(
   if (!removed) return { error: 'No credential is stored for that business account.' };
 
   refresh('/admin/channels');
-  return {
-    ...ok(),
-    notice:
-      'The stored credential is gone. Sends from this account and the hourly template sync ' +
-      'now use its token variable, or META_PAGE_ACCESS_TOKEN when it names none — connect ' +
-      'the number through Meta again to store a new one.',
-  };
+  return ok();
 }

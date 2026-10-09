@@ -35,6 +35,17 @@ function id(value: string, what: string): string {
  * builds the URL and nothing else: the caller sends it with its own `fetch`,
  * outside every Graph client in this repo, and names the request by host and
  * path in anything it says — never the URL.
+ *
+ * "Never the URL" covers what this repo says, not what a tracer records. A URL
+ * is also recorded on fetch tracing spans: Next's patched `fetch` names its span
+ * `fetch GET <url>` and sets `http.url`, and `@vercel/otel` records a span of
+ * its own with the full URL. Nothing registers a tracer today, so nothing
+ * leaves the process; the day an `instrumentation.ts` does, this URL goes to
+ * the tracing vendor with every Connect. So whoever adds one keeps the Graph
+ * hosts' query strings out of every span in the same change — `ignoreUrls` for
+ * both hosts with `@vercel/otel`, a span processor stripping the query with
+ * anything else. `NEXT_OTEL_FETCH_DISABLED=1` is not that fix: it hides Next's
+ * span only, and `@vercel/otel` sets it itself (`docs/PROJECT-STATE.md` §6.86).
  */
 export function tokenExchangeUrl(
   base: string,

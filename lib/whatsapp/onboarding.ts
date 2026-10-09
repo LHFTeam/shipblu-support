@@ -22,6 +22,7 @@ import {
   readWabaRequest,
   tokenExchangeUrl,
 } from './onboarding-requests';
+import { LIVE_ATTEMPT_MS } from './onboarding-view';
 
 const log = logger('coexistence');
 
@@ -141,15 +142,27 @@ export type BeginOutcome =
   | { ok: true; onboardingId: string; accountId: string; notice: string }
   | { ok: false; error: string; wait?: true };
 
-/** How long an `exchanged` attempt counts as live before another may replace it. */
-export const LIVE_ATTEMPT_MS = 15 * 60 * 1000;
-
 /** The `error` on an attempt a newer one retired. */
 const SUPERSEDED = 'superseded';
 
 const ALREADY_CONNECTING =
   'This number is already being connected — watch the progress below. If it stops ' +
   'moving, it can be started again in fifteen minutes.';
+
+/**
+ * The refusal for an attempt live only because its job is still in the queue.
+ *
+ * Its own sentence, because past `LIVE_ATTEMPT_MS` that is the one way an
+ * attempt stays live, and `ALREADY_CONNECTING`'s "in fifteen minutes" is then
+ * false for ever: nothing changes until a worker takes the job. A running
+ * worker hands back a job whose holder died within minutes (`STALLED_AFTER_MS`
+ * in `lib/queue`), so a job still outstanding this long after the attempt
+ * started is one no worker is getting through.
+ */
+const JOB_WAITING =
+  'A job to connect this number is still waiting in the queue, and no worker has finished it in ' +
+  'fifteen minutes — the worker service is what to check. Nothing is lost: the sign-in and ' +
+  'its credential are saved, and the job carries on as soon as a worker picks it up.';
 
 /**
  * The first phase. Never throws for anything a person could cause: every
@@ -194,9 +207,8 @@ export async function beginCoexistenceOnboarding(
   // connection is still running costs nothing. The partial unique index below
   // is what makes it atomic; this only makes it cheap — and can only be asked
   // when the window named the number.
-  if (claim.phoneNumberId && (await hasLiveAttempt(claim.phoneNumberId))) {
-    return { ok: false, error: ALREADY_CONNECTING, wait: true };
-  }
+  const live = claim.phoneNumberId ? await liveAttemptOn(claim.phoneNumberId) : null;
+  if (live) return { ok: false, error: liveRefusal(live), wait: true };
 
   const appSecret = metaAppSecret()!;
   const exchanged = await exchangeCode(code, readiness.appId, appSecret);
@@ -313,7 +325,14 @@ export async function beginCoexistenceOnboarding(
       throw error;
     });
 
-  if (!committed) return { ok: false, error: ALREADY_CONNECTING, wait: true };
+  // Refused at the insert. The number may be known only now — read off the
+  // WABA after the code was spent, because the window did not name it — so
+  // why the attempt in the way is live is asked here too: one kept live only
+  // by its queued job is `JOB_WAITING`, where "in fifteen minutes" would stay
+  // false for as long as no worker runs.
+  if (!committed) {
+    return { ok: false, error: liveRefusal(await liveAttemptOn(phoneNumberId)), wait: true };
+  }
 
   // After the commit: a job is enqueued only once the row it names exists.
   await enqueue(
@@ -396,20 +415,32 @@ async function onlyNumberOn(wabaId: string, token: string): Promise<string | { e
  * in `./credentials` gives.
  */
 function liveAttempt() {
-  return sql`(
-    ${whatsappOnboardings}.started_at > now() - ${`${LIVE_ATTEMPT_MS} milliseconds`}::interval
-    or exists (
-      select 1 from ${jobs}
-      where ${jobs}.type = 'complete_coexistence_onboarding'
-        and ${jobs}.status in ('pending', 'processing')
-        and ${jobs}.payload ->> 'onboardingId' = ${whatsappOnboardings}.id::text
-    )
+  return sql`(${startedRecently()} or ${jobOutstanding()})`;
+}
+
+function startedRecently() {
+  return sql<boolean>`${whatsappOnboardings}.started_at > now() - ${`${LIVE_ATTEMPT_MS} milliseconds`}::interval`;
+}
+
+function jobOutstanding() {
+  return sql`exists (
+    select 1 from ${jobs}
+    where ${jobs}.type = 'complete_coexistence_onboarding'
+      and ${jobs}.status in ('pending', 'processing')
+      and ${jobs}.payload ->> 'onboardingId' = ${whatsappOnboardings}.id::text
   )`;
 }
 
-async function hasLiveAttempt(phoneNumberId: string): Promise<boolean> {
-  const rows = await db
-    .select({ id: whatsappOnboardings.id })
+type LiveAttempt = 'recent' | 'queued' | null;
+
+/**
+ * Why the number has a live attempt, for the sentence that refuses another
+ * beside it: `recent` while it is inside `LIVE_ATTEMPT_MS`, `queued` once that
+ * has passed and only its job keeps it — the case `JOB_WAITING` exists for.
+ */
+async function liveAttemptOn(phoneNumberId: string): Promise<LiveAttempt> {
+  const [row] = await db
+    .select({ recent: startedRecently() })
     .from(whatsappOnboardings)
     .where(
       and(
@@ -419,7 +450,17 @@ async function hasLiveAttempt(phoneNumberId: string): Promise<boolean> {
       ),
     )
     .limit(1);
-  return rows.length > 0;
+  if (!row) return null;
+  return row.recent ? 'recent' : 'queued';
+}
+
+/**
+ * The sentence refusing an attempt beside a live one. `ALREADY_CONNECTING` as
+ * well when the live one has finished since it was in the way: the refusal
+ * happened, and the progress card says what came of it.
+ */
+function liveRefusal(live: LiveAttempt): string {
+  return live === 'queued' ? JOB_WAITING : ALREADY_CONNECTING;
 }
 
 /**
@@ -528,6 +569,9 @@ async function exchangeCode(
  * Starts an attempt's job again — the "Retry connection" button — for an
  * attempt that failed, or one still `exchanged` whose job died without saying
  * so (no longer live: older than fifteen minutes and nothing queued for it).
+ * One older than that whose job is still queued is refused with `JOB_WAITING`
+ * rather than `ALREADY_CONNECTING`: a retry would only queue a second job
+ * behind the first for the same missing worker.
  *
  * Refused for an attempt something newer has replaced — retired as superseded,
  * or simply older than another attempt on the same number — because reopening
@@ -536,11 +580,16 @@ async function exchangeCode(
  * the newer-attempt check is a second statement after the lock, so its
  * snapshot is taken once a concurrent retry of the same row has committed
  * (the reason `storedCredentialEditRefusal` in `./credentials` gives). A
- * newer attempt inserted concurrently is the partial unique index's to refuse.
+ * newer attempt inserted concurrently is the partial unique index's to refuse,
+ * and the refusal picks between the same two sentences for whichever attempt
+ * on the number is live.
  */
 export async function retryOnboarding(
   onboardingId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+  // Kept outside the transaction for its refusal: the unique violation rolls
+  // the transaction back, and the catch below still has to name the number.
+  let phoneNumberId: string | null = null;
   const outcome = await db
     .transaction(async (tx): Promise<{ ok: true } | { ok: false; error: string }> => {
       const [row] = await tx
@@ -557,6 +606,7 @@ export async function retryOnboarding(
         .limit(1);
 
       if (!row) return { ok: false, error: 'That connection no longer exists — reload the page.' };
+      phoneNumberId = row.phoneNumberId;
       if (row.status === 'connected') {
         return { ok: false, error: 'That number is already connected — reload the page.' };
       }
@@ -583,11 +633,11 @@ export async function retryOnboarding(
 
       if (row.status === 'exchanged') {
         const [live] = await tx
-          .select({ id: whatsappOnboardings.id })
+          .select({ recent: startedRecently() })
           .from(whatsappOnboardings)
           .where(and(eq(whatsappOnboardings.id, row.id), liveAttempt()))
           .limit(1);
-        if (live) return { ok: false, error: ALREADY_CONNECTING };
+        if (live) return { ok: false, error: live.recent ? ALREADY_CONNECTING : JOB_WAITING };
       }
 
       await tx
@@ -604,9 +654,14 @@ export async function retryOnboarding(
         .where(eq(whatsappOnboardings.id, row.id));
       return { ok: true };
     })
-    .catch((error: unknown) => {
-      // The partial unique index: another attempt on this number is live.
-      if (isUniqueViolation(error)) return { ok: false as const, error: ALREADY_CONNECTING };
+    .catch(async (error: unknown) => {
+      // The partial unique index: another attempt on this number is live —
+      // and, as at the first phase's insert, asked why, so one kept live only
+      // by its queued job names the worker rather than "fifteen minutes".
+      if (isUniqueViolation(error)) {
+        const live = phoneNumberId ? await liveAttemptOn(phoneNumberId) : null;
+        return { ok: false as const, error: liveRefusal(live) };
+      }
       throw error;
     });
 

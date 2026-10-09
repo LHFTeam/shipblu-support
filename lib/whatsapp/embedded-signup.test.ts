@@ -368,11 +368,28 @@ describe('reduceConnectPhase', () => {
 });
 
 describe('connectWaitingOn', () => {
+  const ALL: ConnectPhase[] = [
+    { name: 'loading_sdk' },
+    { name: 'sdk_blocked', cause: 'timeout' },
+    { name: 'idle', error: null, wait: false },
+    { name: 'popup_open', unseen: false },
+    { name: 'popup_blocked' },
+    { name: 'cancelled', step: null },
+    { name: 'meta_error', message: null, sessionId: null },
+    { name: 'awaiting_number' },
+    { name: 'no_number' },
+    { name: 'finishing' },
+    { name: 'unanswered' },
+    { name: 'done', notice: 'ok' },
+  ];
+
   /** What the card's Cancel asks about: closing it then would lose Meta's answer. */
   it('waits on the window while it is open, on the action while it verifies, and else on nothing', () => {
-    expect(connectWaitingOn({ name: 'popup_open', unseen: false })).toBe('window');
-    expect(connectWaitingOn({ name: 'awaiting_number' })).toBe('window');
-    expect(connectWaitingOn({ name: 'finishing' })).toBe('verifying');
+    for (const answerDue of [true, false]) {
+      expect(connectWaitingOn({ name: 'popup_open', unseen: false }, answerDue)).toBe('window');
+      expect(connectWaitingOn({ name: 'awaiting_number' }, answerDue)).toBe('window');
+      expect(connectWaitingOn({ name: 'finishing' }, answerDue)).toBe('verifying');
+    }
     for (const phase of [
       { name: 'loading_sdk' },
       { name: 'sdk_blocked', cause: 'timeout' },
@@ -384,7 +401,35 @@ describe('connectWaitingOn', () => {
       { name: 'unanswered' },
       { name: 'done', notice: 'ok' },
     ] satisfies ConnectPhase[]) {
-      expect(connectWaitingOn(phase)).toBeNull();
+      expect(connectWaitingOn(phase, false)).toBeNull();
+    }
+  });
+
+  /**
+   * An ERROR or a CANCEL leaves Meta's window open, and the business can still
+   * finish in it; read as idle, a row let Edit or Disconnect unmount the card
+   * whose listener that finish — and its thirty-second code — arrives on.
+   */
+  it('keeps waiting on the window after an ERROR or a CANCEL until the login callback fires', () => {
+    expect(connectWaitingOn({ name: 'meta_error', message: 'x', sessionId: null }, true)).toBe(
+      'window',
+    );
+    expect(connectWaitingOn({ name: 'cancelled', step: 'PHONE_NUMBER_SETUP' }, true)).toBe(
+      'window',
+    );
+    expect(
+      connectWaitingOn({ name: 'meta_error', message: 'x', sessionId: null }, false),
+    ).toBeNull();
+    expect(connectWaitingOn({ name: 'cancelled', step: null }, false)).toBeNull();
+  });
+
+  /** One rule for both: the card waits wherever a finish could still move it on. */
+  it('waits in exactly the phases a finish can still move to finishing, while the answer is due', () => {
+    for (const phase of ALL) {
+      const finishable = reduceConnectPhase(phase, { type: 'finishing' }).name === 'finishing';
+      const waiting = connectWaitingOn(phase, true);
+      if (phase.name === 'finishing') expect(waiting).toBe('verifying');
+      else expect(waiting === 'window').toBe(finishable);
     }
   });
 });

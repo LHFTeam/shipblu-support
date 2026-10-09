@@ -20,7 +20,7 @@ import {
 import { credentialStatuses } from '@/lib/whatsapp/credentials';
 import { coexistenceReadiness } from '@/lib/whatsapp/onboarding';
 import { listLatestOnboardings } from '@/lib/whatsapp/onboarding-reads';
-import { isOnboardingShown } from '@/lib/whatsapp/onboarding-view';
+import { shownOnboardings } from '@/lib/whatsapp/onboarding-view';
 import { offerableFaqFolders, parseWidgetConfig } from '@/lib/widget/config';
 import {
   CoexistenceBadges,
@@ -116,9 +116,12 @@ export default async function ChannelsPage() {
   const connectProps = { readiness, groups: groupList, suggestedGroupId };
 
   // The latest attempt per number, while there is something to watch: running,
-  // failed, or connected within the day. A card per number rather than per
-  // attempt, so a retry replaces its predecessor instead of stacking under it.
-  const shownOnboardings = onboardings.filter((onboarding) => isOnboardingShown(onboarding, now));
+  // connected within the day, or failed within the week — except a number Meta
+  // did not list on the business account, once a later attempt on that account
+  // has connected: the wrong number picked and then the right one
+  // (`shownOnboardings`). A card per number rather than per attempt, so a retry
+  // replaces its predecessor instead of stacking under it.
+  const progressCards = shownOnboardings(onboardings, now);
 
   return (
     <div className="flex flex-col gap-8">
@@ -175,9 +178,9 @@ export default async function ChannelsPage() {
           description="Addresses and routing only. Credentials live in the environment — or, for a number connected through Meta, sealed in the database under a key the database never sees — so a dump never contains a usable token."
         />
 
-        {shownOnboardings.length > 0 ? (
+        {progressCards.length > 0 ? (
           <div className="mb-4 flex flex-col gap-2">
-            {shownOnboardings.map((onboarding) => {
+            {progressCards.map((onboarding) => {
               const channel = onboarding.channelId
                 ? channelList.find((row) => row.id === onboarding.channelId)
                 : undefined;

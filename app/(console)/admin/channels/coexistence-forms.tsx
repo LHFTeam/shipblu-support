@@ -234,6 +234,11 @@ const RETRYABLE = new Set<ConnectPhase['name']>([
  * than refused, so a login callback that never came cannot pin the card open
  * until a reload. `onBusyChange` tells a row the same thing, so it can keep its
  * own controls from replacing the card mid-flow.
+ *
+ * Focus follows the swap between the button and the card, because each
+ * replaces the other: opening moves it to the card's heading, and closing
+ * returns it to the button, which would otherwise leave a keyboard or screen
+ * reader user on a node that no longer exists — at the top of the document.
  */
 export function ConnectBusinessAppNumber({
   readiness,
@@ -256,6 +261,19 @@ export function ConnectBusinessAppNumber({
   const label = mode === 'reconnect' ? 'Reconnect' : 'Connect a WhatsApp number';
   const busy = waitingOn !== null;
 
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  // Set by the click that opens or closes the card and spent once the swap has
+  // rendered, because the element to focus does not exist until then — and so
+  // that a first render, or one caused by anything else, moves nothing.
+  const focusAfterSwap = useRef<'heading' | 'trigger' | null>(null);
+  useEffect(() => {
+    const target = focusAfterSwap.current;
+    focusAfterSwap.current = null;
+    if (target === 'heading') headingRef.current?.focus();
+    else if (target === 'trigger') triggerRef.current?.focus();
+  }, [open]);
+
   // Stable, so the card's effect reporting through it runs only when the
   // answer changes. A wait that ends disarms the Cancel: the next one asks
   // again rather than closing on a click made about the last.
@@ -264,11 +282,20 @@ export function ConnectBusinessAppNumber({
     if (next === null) setArmed(false);
   }, []);
 
+  // The cleanup reports idle, so a card unmounted mid-wait by something else
+  // does not leave its row's controls off until a reload.
   useEffect(() => {
     onBusyChange?.(busy);
+    return () => onBusyChange?.(false);
   }, [busy, onBusyChange]);
 
+  function openCard() {
+    focusAfterSwap.current = 'heading';
+    setOpen(true);
+  }
+
   function close() {
+    focusAfterSwap.current = 'trigger';
     setOpen(false);
     setWaitingOn(null);
     setArmed(false);
@@ -276,18 +303,22 @@ export function ConnectBusinessAppNumber({
 
   if (!open) {
     return mode === 'reconnect' ? (
-      <Button variant="ghost" size="sm" onClick={() => setOpen(true)}>
+      <Button ref={triggerRef} variant="ghost" size="sm" onClick={openCard}>
         {label}
       </Button>
     ) : (
-      <Button onClick={() => setOpen(true)}>{label}</Button>
+      <Button ref={triggerRef} onClick={openCard}>
+        {label}
+      </Button>
     );
   }
 
   return (
     <Card data-expanded className="w-full border-brand-500/30">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold">{label}</h2>
+        <h2 ref={headingRef} tabIndex={-1} className="text-sm font-semibold focus:outline-none">
+          {label}
+        </h2>
         <button
           type="button"
           onClick={() => (busy && !armed ? setArmed(true) : close())}
@@ -383,7 +414,12 @@ function ConnectCard({
     name: 'loading_sdk',
   } as ConnectPhase);
 
-  const waitingOn = connectWaitingOn(phase);
+  // Whether Meta's window may still answer: set when it opens, cleared once
+  // `FB.login`'s callback has fired and any code it handed over is spent or
+  // dropped. The phase alone cannot say it — an ERROR or a CANCEL leaves the
+  // window open and still able to finish (`connectWaitingOn`).
+  const [answerDue, setAnswerDue] = useState(false);
+  const waitingOn = connectWaitingOn(phase, answerDue);
   useEffect(() => {
     onWaitingChange(waitingOn);
   }, [waitingOn, onWaitingChange]);
@@ -478,6 +514,7 @@ function ConnectCard({
           // after this would otherwise call the action from a card that
           // has already said the flow ended without a number.
           codeRef.current = null;
+          setAnswerDue(false);
           dispatch({ type: 'no_number' });
         }, FINISH_WAIT_MS);
       }
@@ -489,6 +526,7 @@ function ConnectCard({
     // Spent: a second finish message, or a retry, starts from nothing.
     codeRef.current = null;
     finishRef.current = null;
+    setAnswerDue(false);
 
     const formData = new FormData();
     formData.set('code', code);
@@ -568,6 +606,7 @@ function ConnectCard({
     if (finishTimer.current) clearTimeout(finishTimer.current);
     finishTimer.current = null;
     const clickedAt = Date.now();
+    setAnswerDue(true);
     dispatch({ type: 'opened' });
 
     // The SDK never calls back for a window the browser refused, so the
@@ -582,6 +621,8 @@ function ConnectCard({
           tryFinish();
           return;
         }
+        // No code, so nothing more can come of this window.
+        setAnswerDue(false);
         // No code: a window that opened has shut — the SDK's monitor saw it
         // close, or the flow ended without a code. Meta's CANCEL or ERROR
         // usually lands around now, so it is given a moment to name the step
@@ -801,6 +842,12 @@ export function OnboardingProgress({
   // without a clock of its own.
   useRefreshEvery(pollIntervalMs(onboarding, coexistence, now));
 
+  // Retry is off while the sign-in beside it waits on Meta: a retry that starts
+  // turns this attempt back to `exchanged`, which takes both recoveries off the
+  // card — and unmounting the sign-in card unmounts the listener Meta's answer
+  // arrives on while the window is still open.
+  const [signingIn, setSigningIn] = useState(false);
+
   const lines = describeOnboarding(onboarding, now);
   const recovery = recoveryFor(onboarding, now, credential !== null);
   const number = coexistence?.displayPhoneNumber ?? onboarding.phoneNumberId;
@@ -870,7 +917,9 @@ export function OnboardingProgress({
 
       {canConnect && (recovery.retry || recovery.connect) ? (
         <div className="flex flex-wrap items-start gap-2">
-          {recovery.retry ? <RetryOnboarding onboardingId={onboarding.id} /> : null}
+          {recovery.retry ? (
+            <RetryOnboarding onboardingId={onboarding.id} disabled={signingIn} />
+          ) : null}
           {recovery.connect ? (
             // `reconnect` only where the attempt reached a channel: its hint
             // about the group being used "only if the window connects a
@@ -878,6 +927,7 @@ export function OnboardingProgress({
             <ConnectBusinessAppNumber
               {...connect}
               mode={onboarding.channelId ? 'reconnect' : 'connect'}
+              onBusyChange={setSigningIn}
             />
           ) : null}
         </div>
@@ -904,7 +954,10 @@ export function OnboardingProgress({
  * admin away from the one thing still to do — and the card, with the warning on
  * it, leaves the page after a day. So the phone-replies sentence is printed
  * only when the number and subscribe steps say nothing against it, and "Nothing
- * else to do" only when no step warned or failed and the credential is stored.
+ * else to do" only when no step failed or asked for something and the
+ * credential is stored. What Meta says about the number — not on the Business
+ * app, another platform — is printed as a note and does not hold that line
+ * back: nothing on this page changes it (`connectedFollowUps`).
  */
 function ConnectedSummary({
   onboarding,
@@ -945,8 +998,8 @@ function ConnectedSummary({
           (_, phase) => `phase ${phase} ${phases[String(phase)] ?? 0}%`,
         ).join(' · ')} (${history.chunks} chunk${history.chunks === 1 ? '' : 's'}).`;
 
-  const followUps = connectedFollowUps(onboarding);
-  const allClear = followUps.length === 0 && credential !== null;
+  const { todo, notes } = connectedFollowUps(onboarding);
+  const allClear = todo.length === 0 && credential !== null;
 
   return (
     <div className="flex flex-col gap-1 rounded-md bg-emerald-500/10 px-3 py-2 text-sm text-emerald-800">
@@ -967,17 +1020,32 @@ function ConnectedSummary({
           Console replies go out over Cloud API.
         </p>
       )}
+      {/* Pointed at rather than repeated: the step above already prints the
+          note in full, and a second copy here, in the success colour, read as
+          a different message. A note is a fact about the number, not a task,
+          so it does not stop "nothing else to do" being true. */}
+      {notes.length > 0 ? (
+        <p>
+          See the note under{' '}
+          {notes.map((item, index) => (
+            <span key={`note-${item.step}`}>
+              {index > 0 ? ', ' : ''}&ldquo;{item.label}&rdquo;
+            </span>
+          ))}{' '}
+          above.
+        </p>
+      ) : null}
       {allClear ? (
         <p>Nothing else to do.</p>
       ) : (
         <div className="text-amber-800">
-          {followUps.length > 0 ? (
+          {todo.length > 0 ? (
             <>
               <p>
                 <strong>Still to do:</strong>
               </p>
               <ul className="list-disc ps-5">
-                {followUps.map((item) => (
+                {todo.map((item) => (
                   <li key={`${item.step}-${item.kind}`}>
                     &ldquo;{item.label}&rdquo; — the {item.kind === 'warning' ? 'note' : 'reason'}{' '}
                     under it above says what is needed.
@@ -1002,14 +1070,25 @@ function ConnectedSummary({
 }
 
 /** "Retry connection" — hidden field and a button, so a plain form action is right (§6.80). */
-export function RetryOnboarding({ onboardingId }: { onboardingId: string }) {
+export function RetryOnboarding({
+  onboardingId,
+  disabled = false,
+}: {
+  onboardingId: string;
+  disabled?: boolean;
+}) {
   const [state, formAction] = useActionState(retryCoexistenceOnboarding, INITIAL);
   useRefreshOnSuccess(state);
 
   return (
     <form action={formAction} className="flex flex-col items-start gap-1">
       <input type="hidden" name="onboardingId" value={onboardingId} />
-      <SubmitButton idle="Retry connection" busy="Starting…" variant="secondary" />
+      <SubmitButton
+        idle="Retry connection"
+        busy="Starting…"
+        variant="secondary"
+        disabled={disabled}
+      />
       <ErrorText>{state.error}</ErrorText>
       {state.notice ? (
         <span className="text-xs text-[var(--muted-foreground)]">{state.notice}</span>
@@ -1105,35 +1184,34 @@ function expiryLabel(status: CredentialStatus): string {
   return `expires ${formatDateTime(status.expiresAt)}`;
 }
 
-/** What each of `credentialBadges`' labels means and what to do about it. */
+/**
+ * What each of `credentialBadges`' kinds means and what to do about it — with
+ * the detail its short label leaves out: which key, which variable, which date.
+ * Matched on `kind`, so a reworded label cannot lose its explanation.
+ */
 function explainCredentialBadge(badge: CredentialBadge, status: CredentialStatus): ReactNode {
-  const { label } = badge;
-  if (label === 'credential key misconfigured') return status.keyProblem;
-  if (label.startsWith('credential key not set')) {
-    return 'The key this credential is sealed under is not set on this service, so it cannot be opened and nothing can send with it. Set WHATSAPP_CREDENTIAL_KEY in the environment group.';
+  switch (badge.kind) {
+    case 'key_misconfigured':
+      return status.keyProblem ?? 'WHATSAPP_CREDENTIAL_KEY could not be read on this service.';
+    case 'key_not_set':
+      return `It is sealed under key ${status.keyId}, and WHATSAPP_CREDENTIAL_KEY is not set on this service, so it cannot be opened and nothing can send with it. Set WHATSAPP_CREDENTIAL_KEY in the environment group.`;
+    case 'key_unknown':
+      return `It was sealed under key ${status.keyId}, which this deployment does not hold. Set that key as WHATSAPP_CREDENTIAL_KEY_PREVIOUS and run the rotation job — or press Reconnect, which stores a fresh credential under the current key.`;
+    case 'key_previous':
+      return `It is sealed under key ${status.keyId}, the one WHATSAPP_CREDENTIAL_KEY_PREVIOUS holds. Run \`npm run job -- rotate_whatsapp_credentials\` to reseal it under the current key before WHATSAPP_CREDENTIAL_KEY_PREVIOUS is unset.`;
+    case 'refused':
+      return `${status.lastRefusal ?? 'Meta refused the stored credential.'} Press Reconnect to store a fresh one.`;
+    // Nothing fills the expiry in later: `check_meta_permissions` prints it and
+    // writes nothing back, and only storing a credential records an inspection.
+    case 'expiry_unknown':
+      return "Meta's token inspection did not answer when this credential was stored, so its expiry is unknown and no warning will appear before it lapses. `npm run job -- check_meta_permissions` prints the expiry without saving it. Reconnect stores a fresh token and records its expiry when Meta's inspection answers.";
+    case 'never_expires':
+      return 'Meta said so when the token was inspected.';
+    case 'expired':
+      return `It expired${status.expiresAt ? ` ${formatDateTime(status.expiresAt)}` : ''}. Sends and the template sync fail with it. Press Reconnect to store a fresh one.`;
+    case 'expires_soon':
+      return `Press Reconnect before ${status.expiresAt ? formatDateTime(status.expiresAt) : 'then'}; after it every send from this account fails.`;
   }
-  if (label.startsWith('sealed under key')) {
-    return `It was sealed under key ${status.keyId}, which this deployment does not hold. Set that key as WHATSAPP_CREDENTIAL_KEY_PREVIOUS and run the rotation job — or press Reconnect, which stores a fresh credential under the current key.`;
-  }
-  if (label.startsWith('sealed under the previous key')) {
-    return 'Run `npm run job -- rotate_whatsapp_credentials` to reseal it under the current key before WHATSAPP_CREDENTIAL_KEY_PREVIOUS is unset.';
-  }
-  if (label === 'credential refused by Meta') {
-    return `${status.lastRefusal ?? 'Meta refused the stored credential.'} Press Reconnect to store a fresh one.`;
-  }
-  // Nothing fills the expiry in later: `check_meta_permissions` prints it and
-  // writes nothing back, and only storing a credential records an inspection.
-  if (label === 'expiry unknown') {
-    return "Meta's token inspection did not answer when this credential was stored, so its expiry is unknown and no warning will appear before it lapses. `npm run job -- check_meta_permissions` prints the expiry without saving it. Reconnect stores a fresh token and records its expiry when Meta's inspection answers.";
-  }
-  if (label === 'never expires') return 'Meta said so when the token was inspected.';
-  if (label === 'credential expired') {
-    return 'Sends and the template sync fail with it. Press Reconnect to store a fresh one.';
-  }
-  if (label.startsWith('credential expires')) {
-    return `Press Reconnect before ${status.expiresAt ? formatDateTime(status.expiresAt) : 'then'}; after it every send from this account fails.`;
-  }
-  return label;
 }
 
 /** The business account row's account of its stored credential — everything but the credential. */
@@ -1148,7 +1226,7 @@ export function CredentialCard({ status, now }: { status: CredentialStatus; now:
       </p>
       <div className="flex flex-wrap gap-1">
         {credentialBadges(status, now).map((badge) => (
-          <Badge key={badge.label} tone={badge.tone}>
+          <Badge key={badge.kind} tone={badge.tone}>
             {badge.label}
             <InfoTip label={badge.label}>{explainCredentialBadge(badge, status)}</InfoTip>
           </Badge>
@@ -1170,7 +1248,13 @@ export function CredentialCard({ status, now }: { status: CredentialStatus; now:
  * and the edit form refuses one while a credential is stored, so a row written
  * through the console has none to fall back to.
  */
-export function ForgetCredential({ accountId }: { accountId: string }) {
+export function ForgetCredential({
+  accountId,
+  disabled = false,
+}: {
+  accountId: string;
+  disabled?: boolean;
+}) {
   return (
     <span className="inline-flex items-center gap-1">
       <DangerAction
@@ -1178,6 +1262,7 @@ export function ForgetCredential({ accountId }: { accountId: string }) {
         id={accountId}
         label="Forget credential"
         confirmLabel="Forget — send with the shared token?"
+        disabled={disabled}
       />
       <InfoTip label="Forget credential">
         Deletes the stored token. Sends and the template sync then use META_PAGE_ACCESS_TOKEN:

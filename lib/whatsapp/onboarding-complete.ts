@@ -35,6 +35,7 @@ import {
   subscribeAppRequest,
   subscribedAppsRequest,
 } from './onboarding-requests';
+import { NUMBER_NOT_ON_ACCOUNT } from './onboarding-view';
 
 const log = logger('complete_coexistence_onboarding');
 
@@ -71,8 +72,19 @@ const log = logger('complete_coexistence_onboarding');
  * under `worker/` may import this one.
  */
 
-/** A failure no retry can fix: the attempt is marked failed with this sentence. */
-class StepFailed extends Error {}
+/**
+ * A failure no retry can fix: the attempt is marked failed with this sentence.
+ * `outcome` is recorded on the failed step where the page needs to tell one
+ * failure from another without reading the sentence (`NUMBER_NOT_ON_ACCOUNT`).
+ */
+class StepFailed extends Error {
+  constructor(
+    message: string,
+    readonly outcome?: string,
+  ) {
+    super(message);
+  }
+}
 
 /** A failure a retry may fix, that Meta did not word as an error. */
 class StepNotYet extends Error {}
@@ -148,8 +160,13 @@ export async function completeOnboarding(
       // shows why nothing happened.
       const failedSteps =
         progress.step !== 'credential' ? [progress.step] : targeted ? options.only! : [];
+      const outcome = error instanceof StepFailed ? error.outcome : undefined;
       for (const step of failedSteps)
-        await recordStep(row.id, step, { ok: false, error: sentence });
+        await recordStep(row.id, step, {
+          ok: false,
+          error: sentence,
+          ...(outcome ? { outcome } : {}),
+        });
 
       // A connected number stays connected: the step failed, the connection did not.
       if (targeted || progress.connected) await finish(row.id, targeted);
@@ -397,6 +414,7 @@ async function numberStep(row: Onboarding, token: string): Promise<NumberFacts> 
       `Number ${row.phoneNumberId} is not on business account ${row.wabaId} — Meta lists ` +
         `${numbers.map((candidate) => candidate.id).join(', ') || 'no numbers'} there. ` +
         `Connect again and choose the number the WhatsApp Business app uses.`,
+      NUMBER_NOT_ON_ACCOUNT,
     );
   }
 

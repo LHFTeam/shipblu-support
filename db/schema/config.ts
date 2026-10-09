@@ -907,7 +907,8 @@ export type OnboardingStepRecord = {
    * channel's `created`, `connected` or `reconnected`; a copy's `sending` while
    * its request is out, which is how a retry tells an answer that was lost from
    * a refusal, and `not_applicable` or `previously_copied` for one that was
-   * deliberately not asked.
+   * deliberately not asked; the number step's `not_on_account` when Meta
+   * listed the account's numbers without this one.
    */
   outcome?: string;
   /** On a reconnect's channel step: what the previous connection copied. */

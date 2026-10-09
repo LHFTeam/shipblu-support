@@ -181,6 +181,13 @@ export function WhatsAppAccountEditor({
   now: Date;
 }) {
   const [editing, setEditing] = useState(false);
+  // While Reconnect waits on Meta's window or its answer, the three controls
+  // that would take the card away are off: Edit swaps this whole row for its
+  // form, Forget removes the credential the card is shown under, and Disconnect
+  // deletes the row. Each unmounts the card, and with it the listener Meta's
+  // answer arrives on, while the window stays open — the business would finish
+  // the steps, and Meta unlink the phone's devices, for an answer nobody hears.
+  const [reconnecting, setReconnecting] = useState(false);
 
   if (editing) {
     return (
@@ -261,16 +268,30 @@ export function WhatsAppAccountEditor({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="secondary" size="sm" onClick={() => setEditing(true)}>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => setEditing(true)}
+          disabled={reconnecting}
+        >
           Edit
         </Button>
         {account.credential && canConnect ? (
           <>
-            <ConnectBusinessAppNumber {...connect} mode="reconnect" />
-            <ForgetCredential accountId={account.id} />
+            <ConnectBusinessAppNumber
+              {...connect}
+              mode="reconnect"
+              onBusyChange={setReconnecting}
+            />
+            <ForgetCredential accountId={account.id} disabled={reconnecting} />
           </>
         ) : null}
-        <DangerAction action={deleteWhatsAppAccount} id={account.id} label="Disconnect" />
+        <DangerAction
+          action={deleteWhatsAppAccount}
+          id={account.id}
+          label="Disconnect"
+          disabled={reconnecting}
+        />
       </div>
     </div>
   );

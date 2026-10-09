@@ -46,8 +46,14 @@ export type OnboardingStepView = {
   at: string | null;
   /** What the step says about itself: its detail, or why it failed. */
   sentence: string | null;
-  /** Something the step did, that still needs a person — the app-level webhook fields. */
+  /**
+   * Something the step noticed beside its result: the app-level webhook fields
+   * a person still has to add, or what Meta says about the number.
+   * `connectedFollowUps` says which of the two a warning is.
+   */
   warning: string | null;
+  /** The step's result in a word, where it recorded one (`OnboardingStepRecord.outcome`). */
+  outcome: string | null;
 };
 
 export type OnboardingView = {
@@ -126,6 +132,7 @@ export function toOnboardingView(
         at: record?.at ?? null,
         sentence: record?.error ?? record?.detail ?? null,
         warning: record?.warning ?? null,
+        outcome: record?.outcome ?? null,
       };
     }),
     attempts: row.attempts,
@@ -159,6 +166,15 @@ export const LIVE_ATTEMPT_MS = 15 * 60 * 1000;
 /** How often the card asks while something is moving, and while it is only waiting. */
 const FAST_POLL_MS = 3_000;
 const SLOW_POLL_MS = 15_000;
+
+/**
+ * How long after its start an attempt Retry applies to is still asked about.
+ * Past it the card stops: it already shows Retry, which moves `startedAt` and
+ * so starts the asking again, and a reload reads whatever a late worker did.
+ * Without the bound, an attempt whose job is gone was asked about every fifteen
+ * seconds for as long as the tab stayed open.
+ */
+const STOP_ASKING_AFTER_MS = 60 * 60 * 1000;
 
 /** Whether a step of *this* run has been recorded since it started. */
 function movedSinceStart(view: OnboardingView): boolean {
@@ -332,15 +348,19 @@ function backoffInterval(view: OnboardingView, now: Date): number {
  * backoff whose retry is more than fifteen seconds off, on a stall the card has
  * already told the admin about, and past `LIVE_ATTEMPT_MS` — still asking,
  * because a late worker can pick the job up, but not as if something were
- * about to land.
+ * about to land — until the attempt is `STOP_ASKING_AFTER_MS` past its start,
+ * when Retry has been on the card for three quarters of an hour.
  *
  * Once connected: three seconds while a "Copy again" request is out, at the
  * backoff's pace while its retry is scheduled, fifteen while the phone sends the
  * history (which takes hours, in chunks) or a contacts copy is arriving, and
  * nothing once the attempt failed or every copy has gone quiet — a reconnect, a
- * declined history or a number not on the app has nothing to wait for. Every
- * one of these is bounded by a time measured against `now`, so none of them
- * polls for ever.
+ * declined history or a number not on the app has nothing to wait for.
+ *
+ * Every one of these is bounded by a time measured against `now`, so none of
+ * them polls for ever: a running attempt is retryable once it is past
+ * `LIVE_ATTEMPT_MS` with no retry scheduled, and a retryable one stops at
+ * `STOP_ASKING_AFTER_MS`.
  */
 export function pollIntervalMs(
   view: OnboardingView,
@@ -348,7 +368,11 @@ export function pollIntervalMs(
   now: Date,
 ): number | null {
   if (view.status === 'exchanged') {
-    if (retryable(view, now)) return SLOW_POLL_MS;
+    if (retryable(view, now)) {
+      return now.getTime() - Date.parse(view.startedAt) > STOP_ASKING_AFTER_MS
+        ? null
+        : SLOW_POLL_MS;
+    }
     if (view.lastTransientError) return backoffInterval(view, now);
     return stalled(view, now) ? SLOW_POLL_MS : FAST_POLL_MS;
   }
@@ -372,19 +396,50 @@ export type ConnectedFollowUp = {
 };
 
 /**
- * What a connected attempt still needs from a person: every step that
- * warned, and every step that failed — the subscribe step's missing webhook
- * fields, a copy Meta refused, a number Meta says is not on the app. Empty is
- * the only case in which the summary may say there is nothing else to do.
+ * The steps whose warning reports a fact rather than asking for something.
+ *
+ * The number step's warnings are what Meta says about the number — not on the
+ * WhatsApp Business app, a platform other than CLOUD_API — or that it could not
+ * be asked, and the job connects the number regardless
+ * (`./onboarding-complete`'s `numberStep`). Nothing on this page or in Meta's
+ * window changes any of them, so listing one under "Still to do" sent the admin
+ * looking for a task that does not exist. The subscribe step's warning is the
+ * opposite case: the app-level webhook fields are the one thing the job cannot
+ * subscribe for itself, and `subscribe_meta_webhooks` is the fix. Every other
+ * step warns about nothing today, so a warning added to one is a task until it
+ * is argued into this set.
  */
-export function connectedFollowUps(view: OnboardingView): ConnectedFollowUp[] {
-  const items: ConnectedFollowUp[] = [];
+const NOTE_ONLY_WARNINGS: ReadonlySet<OnboardingStep> = new Set(['number']);
+
+/**
+ * What a connected attempt says beyond "connected", split by whether a person
+ * has to act on it.
+ *
+ * `todo` is every warning that asks for something — the subscribe step's
+ * missing or unreadable webhook fields — and every step that failed, a copy
+ * Meta refused among them. `notes` is every warning that only reports, which
+ * the summary prints as it stands. Judged by the step that wrote the warning,
+ * never by its wording. An empty `todo` is the only case in which the summary
+ * may say there is nothing else to do; `notes` does not change that.
+ */
+export function connectedFollowUps(view: OnboardingView): {
+  todo: ConnectedFollowUp[];
+  notes: ConnectedFollowUp[];
+} {
+  const todo: ConnectedFollowUp[] = [];
+  const notes: ConnectedFollowUp[] = [];
   for (const step of view.steps) {
     if (step.warning) {
-      items.push({ step: step.step, label: step.label, kind: 'warning', text: step.warning });
+      const item: ConnectedFollowUp = {
+        step: step.step,
+        label: step.label,
+        kind: 'warning',
+        text: step.warning,
+      };
+      (NOTE_ONLY_WARNINGS.has(step.step) ? notes : todo).push(item);
     }
     if (step.state === 'failed') {
-      items.push({
+      todo.push({
         step: step.step,
         label: step.label,
         kind: 'failed',
@@ -392,7 +447,7 @@ export function connectedFollowUps(view: OnboardingView): ConnectedFollowUp[] {
       });
     }
   }
-  return items;
+  return { todo, notes };
 }
 
 /**
@@ -440,20 +495,46 @@ export function isOnboardingShown(view: OnboardingView, now: Date): boolean {
 }
 
 /**
+ * The number step's `outcome` when Meta listed the business account's numbers
+ * and the attempt's was not among them — the wrong number picked in Meta's
+ * window. Written by the job (`./onboarding-complete`'s `numberStep`), read by
+ * `shownOnboardings`, so the page never has to judge the failure by its
+ * sentence.
+ */
+export const NUMBER_NOT_ON_ACCOUNT = 'not_on_account';
+
+/** Meta listed the account's numbers and this attempt's was not one of them. */
+function numberNotOnAccount(view: OnboardingView): boolean {
+  return view.steps.some(
+    (step) =>
+      step.step === 'number' && step.state === 'failed' && step.outcome === NUMBER_NOT_ON_ACCOUNT,
+  );
+}
+
+/**
  * The attempts the page shows, out of every number's latest one.
  *
- * Beyond `isOnboardingShown`, a failure is hidden once a later attempt on the
- * same business account connected. That is the wrong number picked in Meta's
- * window and then the right one: the page reads one attempt per phone number
- * id, so nothing ever replaced the wrong number's failure, and its Retry —
- * which cannot succeed — sat above the working connection. The connected
- * sibling is in the list however old it is, because the reader keeps every
- * number's latest attempt whatever its age.
+ * Beyond `isOnboardingShown`, one kind of failure is hidden once a later
+ * attempt on the same business account connected: the number step's
+ * `NUMBER_NOT_ON_ACCOUNT`, which is the wrong number picked in Meta's window
+ * and then the right one. The page reads one attempt per phone number id, so
+ * nothing ever replaced the wrong number's failure, and its Retry — which asks
+ * Meta for the same list of numbers and gets the same answer — sat above the
+ * working connection.
+ *
+ * Only that kind. A business account can hold two Business-app numbers, and
+ * the credential is stored per account, so the second number connecting says
+ * nothing about why the first failed: a job that gave up on a 5xx, a token
+ * Meta refused, a bot channel on the number — each is one Retry may now fix
+ * with the credential the second sign-in stored, and hiding it would leave a
+ * fresh sign-in, which unlinks the phone's devices again, as the only way back.
+ * The connected sibling is in the list however old it is, because the reader
+ * keeps every number's latest attempt whatever its age.
  */
 export function shownOnboardings(views: OnboardingView[], now: Date): OnboardingView[] {
   return views.filter((view) => {
     if (!isOnboardingShown(view, now)) return false;
-    if (view.status !== 'failed') return true;
+    if (view.status !== 'failed' || !numberNotOnAccount(view)) return true;
     const started = Date.parse(view.startedAt);
     return !views.some(
       (other) =>

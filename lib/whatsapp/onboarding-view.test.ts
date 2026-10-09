@@ -6,6 +6,7 @@ import {
   describeOnboarding,
   isOnboardingShown,
   LIVE_ATTEMPT_MS,
+  NUMBER_NOT_ON_ACCOUNT,
   type OnboardingRow,
   type OnboardingView,
   phoneRepliesUnconfirmed,
@@ -335,6 +336,22 @@ describe('pollIntervalMs', () => {
     ).toBe(15_000);
   });
 
+  /** An attempt whose job is gone was asked about every fifteen seconds for as long as the tab stayed open. */
+  it('stops asking about an attempt Retry applies to an hour after it started', () => {
+    const HOUR = 60 * 60 * 1000;
+    expect(pollIntervalMs(view(), null, at(HOUR))).toBe(15_000);
+    expect(pollIntervalMs(view(), null, at(HOUR + 1))).toBeNull();
+    // A retry the queue has scheduled is still waited for, however old the attempt.
+    const scheduled = view({
+      lastTransientError: 'Meta answered 503',
+      nextAttemptAt: at(HOUR + 120_000),
+    });
+    expect(pollIntervalMs(scheduled, null, at(HOUR + 1))).toBe(15_000);
+    expect(pollIntervalMs(scheduled, null, at(HOUR + 120_000 + STALL_AFTER_MS + 1))).toBeNull();
+    // Retry moves the start, which is what starts the asking again.
+    expect(pollIntervalMs(view({ startedAt: at(HOUR) }), null, at(HOUR + 1))).toBe(3_000);
+  });
+
   /**
    * "Copy again" answers before the worker claims the job, so the request id
    * is not there yet; the job's own `sending` mark is what the card polls on —
@@ -393,7 +410,7 @@ describe('connectedFollowUps and phoneRepliesUnconfirmed', () => {
     view({ status: 'connected', steps: { ...clean, ...steps } });
 
   it('has nothing to add to a connection where every step went through', () => {
-    expect(connectedFollowUps(connected({}))).toEqual([]);
+    expect(connectedFollowUps(connected({}))).toEqual({ todo: [], notes: [] });
     expect(phoneRepliesUnconfirmed(connected({}))).toBe(false);
   });
 
@@ -406,19 +423,22 @@ describe('connectedFollowUps and phoneRepliesUnconfirmed', () => {
         warning: 'This app is not subscribed to smb_message_echoes for WhatsApp',
       },
     });
-    expect(connectedFollowUps(warned)).toEqual([
-      {
-        step: 'subscribe',
-        label: STEP_LABELS.subscribe,
-        kind: 'warning',
-        text: 'This app is not subscribed to smb_message_echoes for WhatsApp',
-      },
-    ]);
+    expect(connectedFollowUps(warned)).toEqual({
+      todo: [
+        {
+          step: 'subscribe',
+          label: STEP_LABELS.subscribe,
+          kind: 'warning',
+          text: 'This app is not subscribed to smb_message_echoes for WhatsApp',
+        },
+      ],
+      notes: [],
+    });
     expect(phoneRepliesUnconfirmed(warned)).toBe(true);
   });
 
   /** Judged by the step, never by the warning's wording. */
-  it('treats an unreadable subscription and a number warning the same way', () => {
+  it('asks for an unreadable subscription as for a missing one', () => {
     const unread = connected({
       subscribe: {
         at: iso(2_000),
@@ -427,29 +447,50 @@ describe('connectedFollowUps and phoneRepliesUnconfirmed', () => {
       },
     });
     expect(phoneRepliesUnconfirmed(unread)).toBe(true);
-    expect(connectedFollowUps(unread)).toHaveLength(1);
+    expect(connectedFollowUps(unread).todo).toHaveLength(1);
+  });
 
-    const notOnApp = connected({
-      number: {
-        at: iso(1_000),
-        ok: true,
-        warning: 'Meta says this number is not on the WhatsApp Business app',
-      },
+  /**
+   * What Meta says about the number is a note: nothing on the page changes it,
+   * and listing it under "Still to do" sent the admin looking for a task.
+   */
+  it('keeps every number-step warning out of the to-do list, whatever it says', () => {
+    for (const warning of [
+      'Meta says this number is not on the WhatsApp Business app, so it is connected as a Cloud API number with no phone to copy history from.',
+      "Meta reports the number's platform as ON_PREMISE, not CLOUD_API, so sending from it may not work yet.",
+      'Could not confirm the number is on the WhatsApp Business app: timeout.',
+    ]) {
+      const noted = connected({ number: { at: iso(1_000), ok: true, warning } });
+      expect(connectedFollowUps(noted)).toEqual({
+        todo: [],
+        notes: [{ step: 'number', label: STEP_LABELS.number, kind: 'warning', text: warning }],
+      });
+      // Still not vouched for: a number not on the app has no phone to type on.
+      expect(phoneRepliesUnconfirmed(noted)).toBe(true);
+    }
+
+    // A note beside a task leaves the task where it was.
+    const both = connected({
+      number: { at: iso(1_000), ok: true, warning: 'Meta says this number is not on the app' },
+      subscribe: { at: iso(2_000), ok: true, warning: 'Not subscribed to history' },
     });
-    expect(phoneRepliesUnconfirmed(notOnApp)).toBe(true);
-    expect(connectedFollowUps(notOnApp)[0]).toMatchObject({ step: 'number', kind: 'warning' });
+    expect(connectedFollowUps(both).todo.map((item) => item.step)).toEqual(['subscribe']);
+    expect(connectedFollowUps(both).notes.map((item) => item.step)).toEqual(['number']);
   });
 
   it('names a copy Meta refused, which does not touch phone replies', () => {
     const refused = connected({ contacts: failed(4_000, 'Meta refused: asked too late') });
-    expect(connectedFollowUps(refused)).toEqual([
-      {
-        step: 'contacts',
-        label: STEP_LABELS.contacts,
-        kind: 'failed',
-        text: 'Meta refused: asked too late',
-      },
-    ]);
+    expect(connectedFollowUps(refused)).toEqual({
+      todo: [
+        {
+          step: 'contacts',
+          label: STEP_LABELS.contacts,
+          kind: 'failed',
+          text: 'Meta refused: asked too late',
+        },
+      ],
+      notes: [],
+    });
     expect(phoneRepliesUnconfirmed(refused)).toBe(false);
   });
 });
@@ -473,11 +514,15 @@ describe('isOnboardingShown and shownOnboardings', () => {
   });
 
   /** The wrong number picked in Meta's window, then the right one: one id each. */
-  it('hides a failure once a later attempt on the same business account connected', () => {
+  it('hides a wrong-number failure once a later attempt on the same business account connected', () => {
+    const notOnAccount = 'Number 1098 is not on business account 102030405060';
     const wrongNumber: OnboardingView = view({
       id: 'o-wrong',
       status: 'failed',
-      error: 'Number 1098 is not on business account 102030405060',
+      error: notOnAccount,
+      steps: {
+        number: { ...failed(5_000, notOnAccount), outcome: NUMBER_NOT_ON_ACCOUNT },
+      },
       phoneNumberId: '1098',
       finishedAt: at(10_000),
     });
@@ -514,5 +559,56 @@ describe('isOnboardingShown and shownOnboardings', () => {
     expect(
       shownOnboardings([rightNumber({}), wrongNumber], at(660_000 + SHOW_CONNECTED_FOR_MS + 1)),
     ).toEqual([]);
+  });
+
+  /**
+   * One business account, two Business-app numbers, one credential between
+   * them: the second connecting is no answer to why the first failed, and the
+   * first's Retry — which uses the credential the second sign-in stored — may
+   * now go through. Hiding it left a fresh sign-in as the only way back.
+   */
+  it('keeps every other failure beside a connection on the same business account', () => {
+    const second = view({
+      id: 'o-second',
+      status: 'connected',
+      phoneNumberId: '2099',
+      startedAt: at(600_000),
+      finishedAt: at(660_000),
+    });
+    const failures: Partial<OnboardingRow>[] = [
+      // The queue gave up on a 5xx: no step records a failure at all.
+      {
+        steps: { number: ok(1_000) },
+        error:
+          'Meta answered 503: Service temporarily unavailable on subscribe — gave up after 5 attempts',
+      },
+      // Meta refused the stored token on the first call, which is the number step.
+      {
+        steps: { number: failed(1_000, 'The stored credential was refused') },
+        error: 'The stored credential was refused',
+      },
+      // The number is the bot's channel, which is changed on this page.
+      {
+        steps: {
+          number: ok(1_000),
+          subscribe: ok(2_000),
+          channel: failed(3_000, "Number 1098 is the customer bot's channel"),
+        },
+        error: "Number 1098 is the customer bot's channel",
+      },
+    ];
+    for (const overrides of failures) {
+      const first = view({
+        id: 'o-first',
+        status: 'failed',
+        phoneNumberId: '1098',
+        finishedAt: at(10_000),
+        ...overrides,
+      });
+      expect(shownOnboardings([second, first], at(700_000)).map((v) => v.id)).toEqual([
+        'o-second',
+        'o-first',
+      ]);
+    }
   });
 });

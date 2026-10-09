@@ -378,7 +378,9 @@ lifted out of the job so that it and the WhatsApp onboarding — which stores wh
 function, the `profile-refresh.ts` lesson. The job also prints a section per
 stored WhatsApp credential: it resolves each through `credentialsForAccount`,
 as only a worker may, and prints the key id, Meta's `type`, validity, expiry and
-whether the two required scopes reach the WABA — never the token.
+whether the two required scopes reach the WABA — never the token. It prints and
+writes nothing back, so it is not what fills in a credential whose expiry was
+unknown when it was stored; only storing one records an inspection (§5.1).
 
 The Instagram half can say much less, and says so. `debug_token` is a
 `graph.facebook.com` endpoint and an Instagram Login token is issued by the
@@ -465,9 +467,11 @@ Three things about the table are decided rather than copied:
 - **The WABA read is the proof, not `debug_token`.** `granular_scopes` may list
   no targets for a business token, so the inspection refuses only what Meta
   actually said — the wrong app, a missing scope, a target list that excludes
-  the WABA — and an inspection that did not answer is a warning on the notice
-  with the metadata stored null for `check_meta_permissions` to fill later. The
-  read asks for `id,name` and no more: neither reference lists
+  the WABA — and an inspection that did not answer is a warning on the notice.
+  The metadata then stays null, and the account's badge reads `expiry unknown`,
+  until a Reconnect stores a token Meta's inspection answered for:
+  `check_meta_permissions` prints the expiry without storing it, and nothing
+  else asks. The read asks for `id,name` and no more: neither reference lists
   `owner_business_info`, which an earlier draft wanted.
 - **The copy is once per onboarding, inside 24 hours, with the app open on the
   phone.** Meta's 2593107 (already asked) and 2593108 (window passed) both mean

@@ -11,6 +11,7 @@ import { credentialStatuses, forgetStoredCredential } from './credentials';
 import { beginCoexistenceOnboarding, retryOnboarding } from './onboarding';
 import { completeOnboarding } from './onboarding-complete';
 import { copyRequestRefusal } from './onboarding-reads';
+import { NUMBER_NOT_ON_ACCOUNT } from './onboarding-view';
 
 /**
  * Connecting a WhatsApp Business-app number, both phases, against Postgres
@@ -421,6 +422,38 @@ describe('one live attempt per number', () => {
     ]);
   });
 
+  /**
+   * The cheap check is the only one asked when the window names the number;
+   * without one, the index refused and the answer was always "again in fifteen
+   * minutes" — false for as long as the worker stays down, and every press
+   * spends a code and unlinks the phone's devices again.
+   */
+  it('names the waiting job at the insert too, when only the queue keeps the first attempt live', async () => {
+    graph(exchangeRoutes());
+    const first = await beginCoexistenceOnboarding(claim(), await admin());
+    if (!first.ok) throw new Error(first.error);
+    await db
+      .update(whatsappOnboardings)
+      .set({ startedAt: new Date(Date.now() - 20 * 60 * 1000) })
+      .where(eq(whatsappOnboardings.id, first.onboardingId));
+    expect(await queued('complete_coexistence_onboarding')).toHaveLength(1);
+
+    const fetch = graph(exchangeRoutes());
+    expect(
+      await beginCoexistenceOnboarding(claim({ phoneNumberId: null }), await admin2()),
+    ).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/still waiting in the queue.*worker service/),
+      wait: true,
+    });
+    // Refused at the insert, not before the code was spent.
+    expect(fetch).toHaveBeenCalled();
+    expect(await onboardingRow(first.onboardingId)).toMatchObject({ status: 'exchanged' });
+    expect(await db.select({ id: whatsappOnboardings.id }).from(whatsappOnboardings)).toEqual([
+      { id: first.onboardingId },
+    ]);
+  });
+
   it('supersedes an attempt older than fifteen minutes whose job is gone', async () => {
     graph(exchangeRoutes());
     const first = await beginCoexistenceOnboarding(claim(), await admin());
@@ -430,9 +463,12 @@ describe('one live attempt per number', () => {
       .set({ startedAt: new Date(Date.now() - 20 * 60 * 1000) })
       .where(eq(whatsappOnboardings.id, first.onboardingId));
 
-    // Still live while its job is queued, however old.
+    // Still live while its job is queued, however old — and said so as a job
+    // no worker has run, not as "again in fifteen minutes", which is false for
+    // as long as the worker stays down.
     expect(await beginCoexistenceOnboarding(claim(), await admin2())).toMatchObject({
       ok: false,
+      error: expect.stringMatching(/still waiting in the queue.*worker service/),
       wait: true,
     });
 
@@ -573,6 +609,9 @@ describe('the second phase: connecting the number', () => {
     expect(await onboardingRow(id)).toMatchObject({
       status: 'failed',
       error: expect.stringMatching(/is not on business account/),
+      // In a word, so the page can tell the wrong number from a failure a
+      // Retry may fix without reading the sentence (`shownOnboardings`).
+      steps: { number: { ok: false, outcome: NUMBER_NOT_ON_ACCOUNT } },
     });
     expect(await channelFor()).toBeNull();
   });
@@ -1054,6 +1093,52 @@ describe('retrying an attempt something has replaced, or that stalled', () => {
       ok: false,
       error: expect.stringMatching(/already being connected/),
     });
+    expect(await queued('complete_coexistence_onboarding')).toHaveLength(1);
+  });
+
+  /**
+   * Past fifteen minutes only a queued job keeps an attempt live, and the card
+   * offers Retry by then. "It can be started again in fifteen minutes" answered
+   * every press of it, for as long as no worker ran.
+   */
+  it('refuses one whose job is still queued with the worker named, not "fifteen minutes"', async () => {
+    const waiting = await attempt({
+      status: 'exchanged',
+      startedAt: new Date(Date.now() - 20 * 60 * 1000),
+    });
+    await db.insert(jobs).values({
+      type: 'complete_coexistence_onboarding',
+      payload: { onboardingId: waiting },
+      status: 'pending',
+    });
+
+    expect(await retryOnboarding(waiting)).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/no worker has finished it.*worker service.*Nothing is lost/),
+    });
+    expect(await onboardingRow(waiting)).toMatchObject({ status: 'exchanged' });
+    expect(await queued('complete_coexistence_onboarding')).toHaveLength(1);
+  });
+
+  /** The partial unique index's refusal picks between the same two sentences. */
+  it('names the waiting job when another attempt on the number is live only through it', async () => {
+    const waiting = await attempt({
+      status: 'exchanged',
+      startedAt: new Date(Date.now() - 20 * 60 * 1000),
+      createdAt: new Date(Date.now() - 20 * 60 * 1000),
+    });
+    await db.insert(jobs).values({
+      type: 'complete_coexistence_onboarding',
+      payload: { onboardingId: waiting },
+      status: 'pending',
+    });
+    const failed = await attempt();
+
+    expect(await retryOnboarding(failed)).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/still waiting in the queue.*worker service/),
+    });
+    expect(await onboardingRow(failed)).toMatchObject({ status: 'failed' });
     expect(await queued('complete_coexistence_onboarding')).toHaveLength(1);
   });
 

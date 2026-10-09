@@ -266,8 +266,11 @@ async function checkInstagramLogin(): Promise<void> {
  * would otherwise say nothing about the numbers that use one.
  *
  * Printed and never written back: this job's promise is that it changes
- * nothing, and what it reads here the hourly template sync records anyway.
- * Never the token — the kid, the verdict and what Meta says the token is.
+ * nothing. So it is not how a credential whose expiry was unknown when it was
+ * stored gets one — only storing a credential records an inspection, and a
+ * Reconnect is the way to store one; the hourly template sync records only
+ * whether Meta accepted the token. Never the token — the kid, the verdict and
+ * what Meta says the token is.
  */
 async function checkStoredWhatsAppCredentials(): Promise<void> {
   let accounts;
