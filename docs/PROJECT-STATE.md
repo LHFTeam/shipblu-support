@@ -5084,6 +5084,24 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     heartbeat keeps the sweep off it: per-request deadlines are what end a hung
     job.
 
+86. **A pause was credited in wall-clock minutes, and a reopen never ended
+    one.** _2026-10-09, two pre-existing faults found in the review of #344._
+    The resume measured a pause by the clock and added it to the due dates as
+    working minutes, so a ticket parked from Thursday 16:00 to Sunday 10:00 on
+    the Cairo calendar — 3,960 minutes, two working hours — had its deadline
+    moved about ten days. And resolving pauses the clock while `reopenResolved`,
+    which the five inbound paths reopen through, never resumed it: the reopened
+    ticket's resolution clock was owed nothing for the time it sat resolved,
+    and its next trip to Pending found the clock "already paused", so the
+    resume after it credited everything since the resolve. A pause is now
+    credited in the hours its clock counts (`excusedSince` over
+    `businessMinutesBetween`), and `sla_resumed` records where the pause began
+    so a re-time rebuilds the same interval. `onCustomerReply` closes a pause
+    left on a ticket whose status no longer stops the clock, at the `reopened`
+    event's instant. Production had one such ticket on 2026-10-09, Open with a
+    pause from a reopen on 21 August; its next customer message closes it with
+    the credit it was owed.
+
 ## 7. Verification already done
 
 - **The knowledge-base role floor, against a real Postgres.** _2026-09-04._ The

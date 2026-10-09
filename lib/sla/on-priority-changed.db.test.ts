@@ -67,6 +67,14 @@ async function ticketUnderPolicy(): Promise<string> {
   return row!.id;
 }
 
+async function pendingStatus(): Promise<string> {
+  const [row] = await db
+    .select({ id: ticketStatuses.id })
+    .from(ticketStatuses)
+    .where(eq(ticketStatuses.name, 'Pending'));
+  return row!.id;
+}
+
 async function clocks(id: string) {
   const [row] = await db
     .select({
@@ -366,6 +374,12 @@ describe('onPriorityChanged around pauses', () => {
     // Parked, the customer writes while it is parked, then it is reopened now.
     const parkedAt = new Date(Date.now() - 4 * 60 * MINUTE);
     const wroteAt = new Date(Date.now() - 2 * 60 * MINUTE);
+    // Parked on Pending, which stops the clock: a pause on an Open ticket is
+    // one `onCustomerReply` closes as stray.
+    await db
+      .update(conversations)
+      .set({ statusId: await pendingStatus() })
+      .where(eq(conversations.id, id));
     await db
       .insert(conversationEvents)
       .values({ conversationId: id, type: 'sla_paused', actorLabel: 'sla', createdAt: parkedAt });
@@ -416,6 +430,12 @@ describe('onPriorityChanged around pauses', () => {
     const parkedAt = new Date(Date.now() - 4 * 60 * MINUTE);
     const wroteAt = new Date(Date.now() - 2 * 60 * MINUTE);
     const resumedAt = new Date(Date.now() - 10 * MINUTE);
+    // Parked on Pending, which stops the clock: a pause on an Open ticket is
+    // one `onCustomerReply` closes as stray.
+    await db
+      .update(conversations)
+      .set({ statusId: await pendingStatus() })
+      .where(eq(conversations.id, id));
     await db
       .insert(conversationEvents)
       .values({ conversationId: id, type: 'sla_paused', actorLabel: 'sla', createdAt: parkedAt });
