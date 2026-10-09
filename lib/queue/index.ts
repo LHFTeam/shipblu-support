@@ -1,4 +1,4 @@
-import { and, eq, inArray, lte, or, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, notInArray, or, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { jobs } from '@/db/schema';
 import type { JobPayload } from './payloads';
@@ -162,11 +162,15 @@ export async function hasActiveJob(type: JobType): Promise<boolean> {
 }
 
 /**
- * Claim up to `limit` due jobs.
+ * Claim up to `limit` due jobs, most urgent first.
  *
  * FOR UPDATE SKIP LOCKED is what makes this safe to run from several worker
  * processes at once: each transaction takes rows nobody else holds, so workers
  * never collide and a slow job never blocks the queue behind it.
+ *
+ * Returned in priority order, which `RETURNING` alone does not promise: the
+ * worker starts a claim's jobs in the order it gets them, and when the
+ * connection pool is the bottleneck the first started is the first served.
  */
 export async function claimJobs(limit: number, workerId: string): Promise<ClaimedJob[]> {
   const rows = await db.execute<ClaimedJob>(sql`
@@ -176,15 +180,18 @@ export async function claimJobs(limit: number, workerId: string): Promise<Claime
       ORDER BY priority ASC, run_at ASC
       LIMIT ${limit}
       FOR UPDATE SKIP LOCKED
+    ),
+    updated AS (
+      UPDATE ${jobs} j
+      SET status = 'processing',
+          locked_at = now(),
+          locked_by = ${workerId},
+          attempts = j.attempts + 1
+      FROM claimed
+      WHERE j.id = claimed.id
+      RETURNING j.*
     )
-    UPDATE ${jobs} j
-    SET status = 'processing',
-        locked_at = now(),
-        locked_by = ${workerId},
-        attempts = j.attempts + 1
-    FROM claimed
-    WHERE j.id = claimed.id
-    RETURNING j.*;
+    SELECT * FROM updated ORDER BY priority ASC, run_at ASC;
   `);
 
   return (rows as unknown as JobRow[]).map(toClaimedJob);
@@ -261,11 +268,55 @@ class InvalidJobTimestampError extends Error {
   }
 }
 
-export async function completeJob(id: string): Promise<void> {
-  await db
+/**
+ * Which attempt at a job a worker holds: the claim stamps `locked_by` and bumps
+ * `attempts`, and nothing else moves either while the job runs.
+ */
+type Attempt = Pick<ClaimedJob, 'id' | 'lockedBy' | 'attempts'>;
+
+/**
+ * The row still belongs to this attempt. `locked_by` alone is not enough: a job
+ * reclaimed and then claimed again by the same process carries the same worker
+ * id, and only `attempts` tells the two runs apart.
+ */
+function heldBy(attempt: Attempt) {
+  return and(
+    eq(jobs.id, attempt.id),
+    eq(jobs.status, 'processing'),
+    attempt.lockedBy === null ? isNull(jobs.lockedBy) : eq(jobs.lockedBy, attempt.lockedBy),
+    eq(jobs.attempts, attempt.attempts),
+  );
+}
+
+/**
+ * Record a success, and say whether it was recorded.
+ *
+ * Only over this attempt's own claim — a late finisher must not mark a re-run
+ * done while that run is still going — or over the same attempt reclaimed and
+ * not yet claimed again. The second is a slow job the sweep gave up on: it has
+ * succeeded, so completing the row is what stops it running twice, and for a
+ * send that is a customer getting one message rather than two.
+ *
+ * `false` means the job is somebody else's now, and the caller says so.
+ */
+export async function completeJob(attempt: Attempt): Promise<boolean> {
+  const updated = await db
     .update(jobs)
     .set({ status: 'completed', completedAt: new Date(), lockedAt: null, lockedBy: null })
-    .where(eq(jobs.id, id));
+    .where(
+      or(
+        heldBy(attempt),
+        and(
+          eq(jobs.id, attempt.id),
+          eq(jobs.status, 'pending'),
+          isNull(jobs.lockedBy),
+          eq(jobs.attempts, attempt.attempts),
+        ),
+      ),
+    )
+    .returning({ id: jobs.id });
+
+  return updated.length > 0;
 }
 
 /**
@@ -290,21 +341,24 @@ export class PermanentJobError extends Error {
  * stay visible and can be inspected and replayed. A `PermanentJobError` goes
  * there on its first attempt.
  */
-export async function failJob(job: ClaimedJob, error: unknown): Promise<void> {
+export async function failJob(job: ClaimedJob, error: unknown): Promise<boolean> {
   const message = error instanceof Error ? `${error.message}\n${error.stack ?? ''}` : String(error);
   const exhausted = error instanceof PermanentJobError || job.attempts >= job.maxAttempts;
 
+  // Only over this attempt's own claim: a failure reported after the job was
+  // reclaimed and run again would otherwise overwrite that run's row.
   if (exhausted) {
-    await db
+    const updated = await db
       .update(jobs)
       .set({ status: 'dead', lastError: message, lockedAt: null, lockedBy: null })
-      .where(eq(jobs.id, job.id));
-    return;
+      .where(heldBy(job))
+      .returning({ id: jobs.id });
+    return updated.length > 0;
   }
 
   const backoffSeconds = Math.min(10 * job.attempts ** 2, 3600);
 
-  await db
+  const updated = await db
     .update(jobs)
     .set({
       status: 'pending',
@@ -313,33 +367,74 @@ export async function failJob(job: ClaimedJob, error: unknown): Promise<void> {
       lockedAt: null,
       lockedBy: null,
     })
-    .where(eq(jobs.id, job.id));
+    .where(heldBy(job))
+    .returning({ id: jobs.id });
+  return updated.length > 0;
 }
 
 /**
- * How long a job may hold its lock before the queue assumes its worker died and
- * runs it again.
+ * How long a job's lock may go unrefreshed before the queue assumes its worker
+ * died and runs it again.
  *
- * Nothing refreshes the lock while a job runs, so past this a slow job cannot be
- * told from an orphaned one — and a deploy can start the new worker, which
- * sweeps on start, before the old one has finished its batch. Anything a job
- * waits on, an outbound request above all, has to give up well inside this, or a
- * job that is merely slow is run twice.
+ * The worker refreshes the lock of every job it is running each
+ * `HEARTBEAT_EVERY_MS` (`touchJobs`), so a lock this old belongs to a process
+ * that is gone — killed by a deploy, or wedged — and not to a job that is merely
+ * slow. Before the heartbeat nothing refreshed it, and a job that outlived this
+ * was run twice; outbound requests are still held well inside it, because a
+ * request with no deadline is what holds a worker slot for good.
  */
 export const STALLED_AFTER_MS = 5 * 60 * 1000;
+
+/** Four beats can be missed before a running job is taken for an orphan. */
+export const HEARTBEAT_EVERY_MS = STALLED_AFTER_MS / 5;
+
+/**
+ * Refresh the locks a worker still holds, and return the ids it refreshed.
+ *
+ * Only `processing` rows locked by this worker: a job that finished, failed or
+ * was reclaimed between the worker reading its list and this landing is left
+ * alone, which is also how the caller learns it lost one. `now()` is the
+ * database's clock, the one `claimJobs` stamped the lock with and the sweep
+ * measures against.
+ */
+export async function touchJobs(ids: string[], workerId: string): Promise<string[]> {
+  if (ids.length === 0) return [];
+
+  const touched = await db
+    .update(jobs)
+    .set({ lockedAt: sql`now()` })
+    .where(and(inArray(jobs.id, ids), eq(jobs.status, 'processing'), eq(jobs.lockedBy, workerId)))
+    .returning({ id: jobs.id });
+
+  return touched.map((row) => row.id);
+}
 
 /**
  * Return jobs whose worker died mid-run to the queue. A process killed by a
  * deploy leaves rows stuck in 'processing' with no one holding the lock; without
  * this they would never run again.
+ *
+ * The cutoff is taken on the database's clock, which stamped the lock, rather
+ * than the worker's, so a skew between the two does not eat into the margin.
+ *
+ * `stillRunning` is the sweeping worker's own jobs: whatever their locks say —
+ * a heartbeat that failed for the whole window, say — the worker knows they are
+ * not orphans, and returning one would start a second run beside it.
  */
-export async function reclaimStalledJobs(olderThanMs = STALLED_AFTER_MS): Promise<number> {
-  const cutoff = new Date(Date.now() - olderThanMs);
-
+export async function reclaimStalledJobs(
+  olderThanMs = STALLED_AFTER_MS,
+  stillRunning: string[] = [],
+): Promise<number> {
   const reclaimed = await db
     .update(jobs)
     .set({ status: 'pending', lockedAt: null, lockedBy: null })
-    .where(and(eq(jobs.status, 'processing'), lte(jobs.lockedAt, cutoff)))
+    .where(
+      and(
+        eq(jobs.status, 'processing'),
+        sql`${jobs.lockedAt} <= now() - make_interval(secs => ${olderThanMs / 1000})`,
+        stillRunning.length > 0 ? notInArray(jobs.id, stillRunning) : undefined,
+      ),
+    )
     .returning({ id: jobs.id });
 
   return reclaimed.length;

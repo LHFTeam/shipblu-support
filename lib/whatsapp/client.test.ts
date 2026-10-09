@@ -323,8 +323,8 @@ describe('WhatsApp deadlines', () => {
    * The whole media job, computed from the deadlines its calls actually get:
    * the lookup, the largest download, and `uploadObject`'s upload of the same
    * bytes. Raising the largest size or the per-MB allowance, or lowering the
-   * reclaim window, fails here rather than in a job reclaimed mid-upload that
-   * writes a second attachment row.
+   * reclaim window, fails here rather than in a job reclaimed mid-upload — its
+   * heartbeat failing throughout — that writes a second attachment row.
    */
   it('fits the lookup, the largest download and its upload inside the reclaim window', () => {
     const largest = 100 * 1024 * 1024;

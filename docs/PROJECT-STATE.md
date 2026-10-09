@@ -4318,10 +4318,10 @@ null`, and argued it from write cost and 13 MB of disk. The read side turned
     as well as the status.** _2026-09-26._ Node 22's `fetch` gives up on its own
     only after five minutes without response headers, and never on a body that
     keeps trickling in (undici's `headersTimeout` and `bodyTimeout`, both
-    300 000 ms, read from Node's own source). The worker awaits a whole batch
-    before it claims the next, so one unresponsive provider held every queued
-    job — sends included — for at least that long, which is also exactly the
-    stalled-job reclaim window. And an `AbortSignal.timeout` passed to `fetch`
+    300 000 ms, read from Node's own source). The worker awaited a whole batch
+    before it claimed the next (until entry 85), so one unresponsive provider
+    held every queued job — sends included — for at least that long, which is
+    also exactly the stalled-job reclaim window. And an `AbortSignal.timeout` passed to `fetch`
     keeps running while the body is read: a deadline passing after the status
     rejects `text()`, `json()` or a stream reader with the signal's own
     `DOMException`, which names no call and is not the client's error type. A
@@ -5047,6 +5047,42 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     the fragment. The unit test had checked the fragment's shape against a
     mocked client, which is how a statement Postgres never saw passed for a
     tested one.
+
+85. **The worker ran in batches, and its stalled-job sweep could not tell a
+    slow job from a dead worker's.** _2026-10-08._ `runOnce` claimed up to
+    `WORKER_CONCURRENCY` jobs and awaited the whole batch before claiming
+    again, so one slow job — a provider at its deadline, a large download, the
+    priority classifier's 15-second TypeSafe call — held back every job queued
+    behind it, sends included (entry 73 met the same barrier from the request
+    side). `worker/pool.ts` now refills a slot as each job finishes. Taking the
+    barrier away exposed two older faults, fixed with it:
+    - **Nothing refreshed a running job's lock.** The sweep returns any lock
+      older than `STALLED_AFTER_MS`, whoever holds it. It used to run only
+      between batches, when the worker held nothing, so only a deploy's new
+      worker re-ran a long job; in a pool it would run beside the worker's own.
+      The pool now refreshes every running job's lock each
+      `HEARTBEAT_EVERY_MS` (`touchJobs`), on its own timer, because the loop's
+      error backoff can outlast the window.
+    - **A late finisher overwrote whoever held the job by then, and a success
+      that could not be recorded was retried in ten seconds.** `completeJob`
+      and `failJob` now match only the attempt that holds the row (`locked_by`
+      _and_ `attempts`, since the same process can claim a reclaimed job
+      again), and `completeJob` also takes the same attempt reclaimed but not
+      yet claimed again. `worker/execute.ts` no longer sends a job whose
+      `completeJob` threw to `failJob`; it retries the write for about half a
+      minute while the job still holds its slot and its lock. That narrows the
+      duplicate rather than ending it: if the database cannot take the write
+      for that long, the row comes back from the sweep five to ten minutes
+      later and runs again.
+    - **A pool's own sweep could hand back a job the pool was still running**,
+      if its heartbeat failed for the whole window. The sweep now skips the
+      sweeping worker's running jobs, and the pool tracks each run rather than
+      each job id, so a job claimed again beside its first run is counted,
+      refreshed and drained as the separate run it is.
+
+    A request with no deadline now holds its own slot for good, since the
+    heartbeat keeps the sweep off it: per-request deadlines are what end a hung
+    job.
 
 ## 7. Verification already done
 

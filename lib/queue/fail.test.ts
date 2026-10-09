@@ -7,7 +7,7 @@ vi.mock('@/db/client', () => ({
     update: () => ({
       set: (values: Record<string, unknown>) => {
         updates.push(values);
-        return { where: async () => {} };
+        return { where: () => ({ returning: async () => [{ id: 'job-1' }] }) };
       },
     }),
   },

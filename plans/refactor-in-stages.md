@@ -667,7 +667,9 @@ and "no timeout" is not a safe choice for a send.
 The structural fix is for `runOnce` to refill a slot as each job finishes
 rather than awaiting the batch. That is worker work for Stage 4.4, not this
 row: per-request deadlines are needed either way, because a hung request still
-holds its own slot and its own lock.
+holds its own slot and its own lock. _Done 2026-10-08 (`worker/pool.ts`,
+`docs/PROJECT-STATE.md` §6.85), with a lock heartbeat so the sweep no longer
+re-runs a job that is merely slow._
 
 ### 2.9 Replies never get paragraphs
 
