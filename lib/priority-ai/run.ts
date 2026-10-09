@@ -286,11 +286,14 @@ export async function classifyMessagePriority(
     // easy to misread. On a new ticket this is the ticket's *first* `on_update`
     // pass — ingest ran only `on_create` — so every `on_update` rule whose
     // conditions hold fires at creation, not only the ones about priority. And
-    // it is ordered after `on_create` only where ingest runs in the worker
-    // (email, WhatsApp, Meta), whose batch finishes before this job is
-    // claimed; web chat, the portal and forms enqueue this job from the request
-    // before running `on_create`, so a provider answering faster than that pass
-    // can run this one first. A `send_reply` rule that already answered since
+    // nothing orders it after `on_create`: every ingest path enqueues this job
+    // (`afterMessageStored`) before it runs that pass (`afterInboundMessage`),
+    // and the worker's pool hands the job a free slot as soon as it is queued —
+    // inside the `process_webhook` job that is still ingesting, on email,
+    // WhatsApp and Meta, and beside the request on web chat, the portal and
+    // forms. Only the provider's latency, seconds against a few writes, keeps
+    // this pass second; when it is not, an `on_create` rule writing the same
+    // field has the last word. A `send_reply` rule that already answered since
     // the customer last wrote is held off by `alreadyReplied` either way.
     await afterTicketUpdate(row.conversationId);
   }
