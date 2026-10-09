@@ -4783,7 +4783,7 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
       That one replayed submission takes React's own path, reset included.
     - Only a success moves its `key`. A success is what `ok()` answers; one
       without a nonce is given a fresh one, so the key still moves, and so
-      does the hook's `onSuccess`, keyed on it since §6.86. Any other answer
+      does the hook's `onSuccess`, keyed on it since §6.87. Any other answer
       keeps the nonce the state already had.
     - An action that throws becomes a refusal saying no answer came back, with
       the draft kept and the page re-read in case it landed. The forms whose

@@ -23,7 +23,7 @@ import { INITIAL } from './form-state';
  * it. The action writes the event that reopens the composer and revalidates the
  * ticket, the re-read page comes back with the action's answer, and the
  * composer puts the reply box where this was. Measured, the answer was never
- * painted (§6.86). The reply box is the answer, and the ticket's activity
+ * painted (§6.87). The reply box is the answer, and the ticket's activity
  * records who took control.
  */
 export function ThreadControl({ conversationId }: { conversationId: string }) {

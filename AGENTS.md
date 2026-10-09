@@ -291,7 +291,7 @@ renders the current page into a server action's response whenever the action
 revalidated anything — whatever path it named — and the client applies it with
 the answer. So nothing re-reads the page after a success: a `router.refresh()`
 there is a second full render, and on a ticket page it ran beside
-`LiveUpdates`' own (§6.86). What a form does next — close an editor, put a
+`LiveUpdates`' own (§6.87). What a form does next — close an editor, put a
 composer away — goes in `useActionForm`'s `onSuccess`. The other side of it is
 that an action answering success without revalidating leaves the screen as it
 was, and the `action-revalidates` repo rule refuses that: every success an
