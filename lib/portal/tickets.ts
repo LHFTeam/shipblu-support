@@ -182,13 +182,16 @@ export type NewTicket = {
    */
   openedBy?: { agentId: string; form: string };
   /**
-   * Who chose `priority`, as a timeline actor (`form:<slug>`), recorded as its
-   * `priority_changed` in the same transaction. The priority classifier leaves
-   * alone a priority somebody chose, and a form default that wrote no event was
-   * one it could recognise only by reading the form as it is *now* — so a
-   * default an admin added later claimed every ticket the form had ever filed.
+   * Who chose `priority`, recorded as its `priority_changed` in the same
+   * transaction: the agent who picked it, or the form (`form:<slug>`) for its
+   * default or a customer's answer. The priority classifier leaves alone a
+   * priority somebody chose, and a form default that wrote no event was one it
+   * could recognise only by reading the form as it is *now* — so a default an
+   * admin added later claimed every ticket the form had ever filed. An agent is
+   * named as an agent rather than as the form they used, so the timeline credits
+   * the person and a query for agent-set priorities finds the ticket.
    */
-  priorityChosenBy?: string;
+  priorityChosenBy?: { agentId: string } | { label: string };
 };
 
 /**
@@ -261,7 +264,9 @@ export async function createTicket(contactId: string, input: NewTicket): Promise
       await tx.insert(conversationEvents).values({
         conversationId: row.id,
         type: 'priority_changed',
-        actorLabel: input.priorityChosenBy,
+        ...('agentId' in input.priorityChosenBy
+          ? { actorAgentId: input.priorityChosenBy.agentId }
+          : { actorLabel: input.priorityChosenBy.label }),
         data: { to: input.priority },
       });
     }

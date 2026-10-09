@@ -117,10 +117,14 @@ The job is queued in `afterMessageStored`, which every ingest path runs
 _before_ `afterInboundMessage` applies the SLA — so on a new ticket the
 classifier can answer before, during or after `applySlaOnCreate`. Before: that
 function reads the raised priority. After: `onPriorityChanged` re-times. During
-is the case that needed code: `applySlaOnCreate` and `onCustomerReply` now write
-only if the priority still holds the value they computed from, and recompute
-when it does not, where an unconditional write stored the old targets under the
-new badge for good.
+is the case that needed code. Every clock writer in `lib/sla/index.ts` —
+`applySlaOnCreate`, `onCustomerReply`, the resume in `onStatusChanged` and the
+re-time — reads the ticket under its row lock and writes inside the same
+transaction (`withTicketLocked`), where an unconditional write stored the old
+targets under the new badge for good. A first version made the writes
+conditional on the priority they read and retried on a miss; that closed the
+race for three writers and not at all for a resume racing a re-time, which
+reads the timeline rather than the priority.
 
 Review also found two faults in the shared recompute that predate this change
 and that every priority change would now have reached. It added the ticket's

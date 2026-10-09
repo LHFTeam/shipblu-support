@@ -264,7 +264,8 @@ export async function submitForm(input: {
   const description = (resolved.system.description ?? '').trim();
   const body = [description, answers].filter(Boolean).join('\n\n');
 
-  const priority = priorityFrom(resolved.system) ?? form.defaultPriority;
+  const answered = priorityFrom(resolved.system);
+  const priority = answered ?? form.defaultPriority;
   const created = await createTicket(requester.contactId, {
     subject,
     body,
@@ -272,9 +273,15 @@ export async function submitForm(input: {
     formId: form.id,
     groupId: form.defaultGroupId,
     priority,
-    // The customer's answer or the form's default: either way chosen, and the
-    // priority classifier leaves a chosen priority alone (`NewTicket`).
-    priorityChosenBy: priority ? `form:${form.slug}` : undefined,
+    // An answer or the form's default: either way chosen, and the priority
+    // classifier leaves a chosen priority alone (`NewTicket`). An agent who
+    // answered the question chose it themselves; a default is the form's
+    // choice whoever submitted it.
+    priorityChosenBy: !priority
+      ? undefined
+      : answered && input.requester.kind === 'agent'
+        ? { agentId: input.requester.agentId }
+        : { label: `form:${form.slug}` },
     type: form.defaultType,
     tags: form.defaultTags,
     // Recorded because `ticket.create` is justified as a reporting-integrity

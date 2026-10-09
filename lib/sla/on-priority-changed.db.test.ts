@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import {
@@ -11,6 +11,7 @@ import {
 } from '@/db/schema';
 import { runAutomations } from '@/lib/automations';
 import { withCleanDatabase } from '@/lib/testing/db';
+import { holdNextTransaction, untilWaitingOnALock } from '@/lib/testing/hold-transaction';
 import {
   applySlaOnCreate,
   onAgentReply,
@@ -189,15 +190,8 @@ describe('onPriorityChanged against another priority change', () => {
     await lockTaken;
 
     const stale = onPriorityChanged(id);
-    // Until its write is queued behind the lock.
-    for (let i = 0; i < 100; i++) {
-      const [{ waiting }] = (await db.execute(
-        sql`select count(*)::int as waiting from pg_stat_activity
-            where datname = current_database() and wait_event_type = 'Lock'`,
-      )) as unknown as [{ waiting: number }];
-      if (waiting > 0) break;
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
+    // Until it is queued behind the lock.
+    await untilWaitingOnALock(db);
     release();
     await other;
     await stale;
@@ -205,6 +199,100 @@ describe('onPriorityChanged against another priority change', () => {
     const after = await clocks(id);
     expect(after.firstResponseDueAt!.getTime()).toBe(createdAt.getTime() + 120 * MINUTE);
     expect(after.resolutionDueAt!.getTime()).toBe(createdAt.getTime() + 480 * MINUTE);
+  });
+});
+
+describe('onPriorityChanged against a resume', () => {
+  it('credits a pause whose resume it waited on', async () => {
+    // The resume has shifted the clocks for half an hour on Pending and not yet
+    // committed. A re-time that read the timeline before the resume's event
+    // existed would rebuild the clocks with no pause in them and write over the
+    // shift — the half hour handed back to nobody.
+    const id = await ticketUnderPolicy();
+    // Opened an hour ago, so the whole pause falls inside the ticket's life.
+    const createdAt = new Date(Date.now() - 60 * MINUTE);
+    await db
+      .update(conversations)
+      .set({ createdAt, priority: 'urgent' })
+      .where(eq(conversations.id, id));
+    await db.insert(conversationEvents).values({
+      conversationId: id,
+      type: 'sla_paused',
+      actorLabel: 'sla',
+      createdAt: new Date(Date.now() - 30 * MINUTE),
+    });
+
+    const hold = holdNextTransaction('after');
+    const resume = onStatusChanged(id, false);
+    await hold.atHold;
+    const retime = onPriorityChanged(id);
+    await untilWaitingOnALock(db);
+    hold.release();
+    await Promise.all([resume, retime]);
+
+    const after = await clocks(id);
+    const urgentPlusPause = createdAt.getTime() + (60 + 30) * MINUTE;
+    expect(Math.abs(after.firstResponseDueAt!.getTime() - urgentPlusPause)).toBeLessThan(MINUTE);
+  });
+});
+
+describe('onPriorityChanged and a missed target', () => {
+  /** A ticket opened 90 minutes ago at `priority`, its clocks as the policy set them. */
+  async function ninetyMinutesOld(priority: 'medium' | 'urgent', breached: boolean) {
+    const id = await ticketUnderPolicy();
+    const createdAt = new Date(Date.now() - 90 * MINUTE);
+    const target = TARGETS[priority];
+    await db
+      .update(conversations)
+      .set({
+        priority,
+        createdAt,
+        firstResponseDueAt: new Date(createdAt.getTime() + target.firstResponseMins * MINUTE),
+        resolutionDueAt: new Date(createdAt.getTime() + target.resolutionMins * MINUTE),
+        firstResponseBreached: breached,
+      })
+      .where(eq(conversations.id, id));
+    return id;
+  }
+
+  async function breachedFlags(id: string) {
+    const [row] = await db
+      .select({
+        firstResponse: conversations.firstResponseBreached,
+        resolution: conversations.resolutionBreached,
+      })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+    return row!;
+  }
+
+  it('clears the breach of a target the ticket is no longer held to', async () => {
+    // Urgent's hour passed and the sweep flagged it; lowered to medium, the
+    // ticket is owed its first response in half an hour, not an hour ago.
+    const id = await ninetyMinutesOld('urgent', true);
+    await db.update(conversations).set({ priority: 'medium' }).where(eq(conversations.id, id));
+    await onPriorityChanged(id);
+
+    expect(await breachedFlags(id)).toEqual({ firstResponse: false, resolution: false });
+    const [event] = await db
+      .select({ data: conversationEvents.data })
+      .from(conversationEvents)
+      .where(
+        and(
+          eq(conversationEvents.conversationId, id),
+          eq(conversationEvents.type, 'sla_recalculated'),
+        ),
+      );
+    expect(event!.data).toMatchObject({ clearedBreaches: ['first_response'] });
+  });
+
+  it('leaves a raise into the past for the sweep to flag, with its event', async () => {
+    const id = await ninetyMinutesOld('medium', false);
+    await db.update(conversations).set({ priority: 'urgent' }).where(eq(conversations.id, id));
+    await onPriorityChanged(id);
+
+    expect(await breachedFlags(id)).toEqual({ firstResponse: false, resolution: false });
+    expect((await clocks(id)).firstResponseDueAt!.getTime()).toBeLessThan(Date.now());
   });
 });
 

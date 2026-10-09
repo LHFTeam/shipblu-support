@@ -1,10 +1,10 @@
-import { and, asc, eq, sql } from 'drizzle-orm';
-import { PgDatabase } from 'drizzle-orm/pg-core';
+import { and, asc, eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
 import {
   agents,
   aiPriorityRuns,
+  automationRules,
   contacts,
   conversationEvents,
   conversations,
@@ -15,10 +15,12 @@ import {
   ticketStatuses,
 } from '@/db/schema';
 import { resetEnvCache } from '@/lib/env';
+import { runAutomations } from '@/lib/automations';
 import { createTicket } from '@/lib/portal/tickets';
 import { applySlaOnCreate } from '@/lib/sla';
 import { stubFetch } from '@/lib/testing/fetch';
 import { withCleanDatabase } from '@/lib/testing/db';
+import { holdNextTransaction } from '@/lib/testing/hold-transaction';
 import type { Priority } from '@/lib/tickets/vocabulary';
 import { enqueuePriorityClassification } from './enqueue';
 import { PRIORITY_AI_ACTOR, classifyMessagePriority } from './run';
@@ -346,37 +348,16 @@ describe('classifyMessagePriority: apply', () => {
     // lock; the faster one takes the lock, raises to high and commits. Both
     // transactions' `now()` is when they began, so the slower one's later write
     // would carry the earlier stamp.
-    let release!: () => void;
-    const held = new Promise<void>((resolve) => (release = resolve));
-    let reached!: () => void;
-    const atLock = new Promise<void>((resolve) => (reached = resolve));
-    const real = PgDatabase.prototype.transaction;
-    const spy = vi.spyOn(PgDatabase.prototype, 'transaction').mockImplementationOnce(function (
-      this: PgDatabase<never>,
-      run,
-      config,
-    ) {
-      return real.call(
-        this,
-        async (tx) => {
-          await tx.execute(sql`select 1`);
-          reached();
-          await held;
-          return run(tx);
-        },
-        config,
-      ) as never;
-    });
+    const hold = holdNextTransaction('before');
 
     answers('urgent');
     const slow = classifyMessagePriority(slower, { baseUrl: BASE });
-    await atLock;
-    spy.mockRestore();
+    await hold.atHold;
     answers('high');
     expect(await classifyMessagePriority(faster, { baseUrl: BASE })).toMatchObject({
       outcome: 'applied',
     });
-    release();
+    hold.release();
     expect(await slow).toMatchObject({ outcome: 'applied', predicted: 'urgent' });
     expect(await priorityOf(id)).toBe('urgent');
 
@@ -478,7 +459,7 @@ describe('classifyMessagePriority: somebody else owns the priority', () => {
       body: 'هرفع قضية',
       formId: form!.id,
       priority: 'medium',
-      priorityChosenBy: 'form:cod',
+      priorityChosenBy: { label: 'form:cod' },
     });
     answers('urgent');
 
@@ -486,6 +467,42 @@ describe('classifyMessagePriority: somebody else owns the priority', () => {
       outcome: 'set_by_person',
     });
     expect(await priorityOf(created.conversationId)).toBe('medium');
+  });
+
+  it('names the agent, not the form, for a priority an agent chose on it', async () => {
+    const [agent] = await db
+      .insert(agents)
+      .values({ name: 'Mona', email: 'mona@shipblu.test', role: 'agent' })
+      .returning({ id: agents.id });
+    const [contact] = await db
+      .insert(contacts)
+      .values({ name: 'Amira' })
+      .returning({ id: contacts.id });
+    const created = await createTicket(contact!.id, {
+      subject: 'COD',
+      body: 'هرفع قضية',
+      priority: 'high',
+      priorityChosenBy: { agentId: agent!.id },
+    });
+
+    const [event] = await db
+      .select({
+        actorAgentId: conversationEvents.actorAgentId,
+        actorLabel: conversationEvents.actorLabel,
+      })
+      .from(conversationEvents)
+      .where(
+        and(
+          eq(conversationEvents.conversationId, created.conversationId),
+          eq(conversationEvents.type, 'priority_changed'),
+        ),
+      );
+    expect(event).toEqual({ actorAgentId: agent!.id, actorLabel: null });
+
+    answers('urgent');
+    expect(await classifyMessagePriority(created.messageId, { baseUrl: BASE })).toMatchObject({
+      outcome: 'set_by_person',
+    });
   });
 
   it('still raises a ticket whose form was given a default after it was filed', async () => {
@@ -523,6 +540,63 @@ describe('classifyMessagePriority: somebody else owns the priority', () => {
       outcome: 'set_by_person',
     });
     expect(await priorityOf(id)).toBe('high');
+  });
+});
+
+describe('classifyMessagePriority: a rule setting priority at the same moment', () => {
+  async function ruleSetting(priority: Priority) {
+    await db.insert(automationRules).values({
+      name: 'Back to normal',
+      trigger: 'on_update',
+      conditions: {},
+      actions: [{ type: 'set_priority', value: priority }],
+    });
+  }
+
+  it('waits for the rule’s column and event together, and leaves the rule’s choice', async () => {
+    // The rule has written the column and its event and not yet committed. Two
+    // autocommits instead, the classifier could land between them, read the
+    // rule's `medium` with no event owning it, and write over it.
+    const id = await ticket();
+    const messageId = await inbound(id, 'هرفع قضية');
+    await ruleSetting('medium');
+    const hold = holdNextTransaction('after');
+    const rule = runAutomations('on_update', id);
+    await hold.atHold;
+
+    answers('urgent');
+    const classified = classifyMessagePriority(messageId, { baseUrl: BASE });
+    hold.release();
+    await rule;
+
+    expect(await classified).toMatchObject({ outcome: 'set_by_person' });
+    expect(await priorityOf(id)).toBe('medium');
+  });
+
+  it('orders a rule that began before the classifier and wrote after it as the later write', async () => {
+    // The rule's transaction is open before the classifier runs and writes once
+    // the classifier has committed: its value is the one the column keeps, so
+    // the timeline has to say it came last.
+    const id = await ticket();
+    const messageId = await inbound(id, 'هرفع قضية');
+    await ruleSetting('low');
+    const hold = holdNextTransaction('before');
+    const rule = runAutomations('on_update', id);
+    await hold.atHold;
+
+    answers('urgent');
+    expect(await classifyMessagePriority(messageId, { baseUrl: BASE })).toMatchObject({
+      outcome: 'applied',
+    });
+    hold.release();
+    await rule;
+
+    expect(await priorityOf(id)).toBe('low');
+    const changes = await eventsOf(id, 'priority_changed');
+    expect(changes.map((event) => event.actorLabel)).toEqual([
+      PRIORITY_AI_ACTOR,
+      'automation:Back to normal',
+    ]);
   });
 });
 
