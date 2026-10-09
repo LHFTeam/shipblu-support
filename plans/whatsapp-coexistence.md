@@ -714,3 +714,138 @@ dryRun=true` once on production to prove the rotation path plans.
 - **Service-level override** of `WHATSAPP_CREDENTIAL_KEY` anywhere would
   silently shadow the group (the `render.yaml` header forbids the shape; the
   `keyState` badge would read `unknown` on the next page load).
+
+## As built — the names the code uses
+
+The sections above are the plan as it was written; steps 1–4 shipped under
+names that differ in places, and **the code wins**. Where a name above is not in
+the tree, this is where it went:
+
+- **The first phase** is `beginCoexistenceOnboarding(claim, actor)` in
+  `lib/whatsapp/onboarding.ts` (not `exchangeSignupCode`), behind the
+  `connectBusinessAppNumber` action in `app/(console)/admin/channels/actions.ts`.
+  It answers `BeginOutcome` — `{ok: true, onboardingId, accountId, notice}` or
+  `{ok: false, error}` — and never throws for anything a person could cause. The
+  claim's `phoneNumberId` may be null: the coexistence guide's own finish sample
+  carries only `waba_id`, so the server reads the number off the WABA when it is
+  the account's only one (`onlyNumberOn`). `coexistenceReadiness()` returns
+  `{ready: true, appId, configId} | {ready: false, missing: {variable, why}[]}`,
+  and `LIVE_ATTEMPT_MS` (fifteen minutes) is what decides whether an `exchanged`
+  attempt still blocks another. Retry is `retryOnboarding(onboardingId)`, which
+  refuses a superseded or live attempt.
+- **The exchange is `GET /oauth/access_token`** with `client_id`,
+  `client_secret` and `code` as query parameters — the shape Meta documents for
+  a Tech Provider and the only one it documents — not the POST form body §
+  Phase 1 proposed. `tokenExchangeUrl` builds it; `exchangeCode` sends it with
+  its own `fetch` and scrubs both secrets out of anything it repeats. The WABA
+  read asks for `id,name` only (neither reference lists `owner_business_info`),
+  and the business id comes from `GET /me?fields=client_business_id`
+  (`clientBusinessRequest`) as metadata. All eight request shapes are in
+  `lib/whatsapp/onboarding-requests.ts`, with `numberPlatformRequest`
+  (`is_on_biz_app,platform_type`, on the number — not on `phone_numbers`,
+  whose reference does not list `platform_type`) added.
+- **The second phase** is `completeOnboarding(onboardingId, {only, job})` in
+  `lib/whatsapp/onboarding-complete.ts`, a module of its own because it
+  resolves the stored credential and so may be imported only from `worker/`
+  (`RESOLVER_IMPORTERS` in `credential-confinement`); the handler is
+  `worker/handlers/complete-coexistence-onboarding.ts`. The payload is
+  `{onboardingId, steps?: RERUNNABLE_STEPS[]}` (`steps`, not `only`), with
+  `RERUNNABLE_STEPS = contacts | history | templates` declared in
+  `db/schema/config.ts` beside `ONBOARDING_STEPS` and `OnboardingStepRecord`
+  (`{at, ok, outcome?, previouslyCopied?, detail?, warning?, error?}`). A
+  connected number stays connected whatever a later step does; a sync refusal
+  is explained by code (2593107 already asked, 2593108 window passed); a
+  reconnect carries `previouslyCopied` on the channel step so it does not ask
+  again for what the earlier connection copied.
+- **`lib/whatsapp/coexistence.ts`** holds `Coexistence` (with `onboardingId`),
+  `parseCoexistence`, `canRequestSync(coexistence, type, now)` (not
+  `canRequestSyncAgain`), `SYNC_TYPES`, `META_SYNC_TYPE`, `SYNC_WINDOW_MS`,
+  `historyProgress`, `historyDone`, `isSyncing` and `coexistenceBadges` — all
+  pure, so the page draws the badges the job decides from.
+  `lib/whatsapp/onboarding-view.ts` is the view model of an attempt
+  (`toOnboardingView`, `STEP_LABELS`, `describeOnboarding`, `pollIntervalMs`,
+  `STALL_AFTER_MS`, `isOnboardingShown`), and `lib/whatsapp/onboarding-reads.ts`
+  (`listLatestOnboardings()`) the read the page makes, in `lib/` so the database
+  tier reaches it.
+- **The credential layer**: `lib/whatsapp/credentials.ts` exports
+  `storeBusinessToken(tx, {accountId, wabaId, token, inspection, businessId,
+actor})`, `storedTokenFor`, `storedCredentialExists()` (the `exists()`
+  fragment behind `WhatsAppAccount.hasStoredToken`),
+  `storedCredentialEditRefusal(tx, id, {wabaId, tokenEnvVar})`,
+  `credentialStatuses()`, `recordCredentialRefusal`, `recordCredentialVerified`,
+  `removeStoredCredential(tx, id, actor)` (used inside `deleteWhatsAppAccount`'s
+  transaction, so the `removed` event is cut before the cascade),
+  `forgetStoredCredential(id, actor)`, `resealStoredCredentials({dryRun})`,
+  `credentialKeyProblem()` and `REQUIRED_BUSINESS_TOKEN_SCOPES`.
+  `lib/whatsapp/credential-status.ts` carries `CredentialStatus` (`keyState`,
+  `keyProblem`, `inspectedAt`, `storedAt`, …), `credentialBadges` and
+  `EXPIRY_WARNING_MS`. `explainAuthError(code, message, {source,
+tokenEnvVar})` takes a `TokenOrigin`; `CredentialSource` lives in
+  `lib/whatsapp/errors.ts`. `inspectToken` and `readGraph` are
+  `lib/meta/debug-token.ts`.
+- **Ingest**: `lib/tickets/ingest-whatsapp-history.ts` exports
+  `ingestWhatsAppHistoryChunk`, `attachHistoryMedia` (the file behind a
+  placeholder, which arrives later as a top-level `messages` array under
+  `history`) and `applyWhatsAppContactSync`; `lib/whatsapp/coexistence-state.ts`
+  adds `recordHistoryDeclined` and `writeOnboardedCoexistence(tx, …)` to the
+  list above. `requireResolvedStatusId` is in `lib/tickets/statuses.ts`.
+- **The UI**: `app/(console)/admin/channels/coexistence-forms.tsx` exports
+  `ConnectBusinessAppNumber`, `OnboardingProgress`, `RetryOnboarding`,
+  `CoexistenceBadges`, `RequestSyncAgain`, `CredentialCard` and
+  `ForgetCredential`. The actions are `connectBusinessAppNumber`,
+  `retryCoexistenceOnboarding`, `requestCoexistenceSync` (not
+  `requestCoexistenceSyncAgain`) and `forgetStoredCredential`, all behind
+  `admin.channels.connect`, the first also behind `allow('signup:' + agent.id,
+5, 10 min)`. `AdminState` gained `notice` and `onboardingId`
+  (`admin/settings-shared.ts`); `GRAPH_VERSION` is exported from
+  `lib/meta/graph.ts`; `saveChannel` carries `coexistence` and the stored
+  `phoneNumberId` over. `lib/whatsapp/embedded-signup.ts` holds the SDK URL,
+  `EMBEDDED_SIGNUP_EXTRAS` (the v3 shape, one constant — adopt what the
+  Embedded Signup Builder generates), `embeddedSignupLoginOptions`,
+  `isFacebookOrigin`, `parseSignupMessage` and the three timings.
+- **Not built, on purpose**: `SIGNUP_EVENTS.finished` reads both
+  `FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING` and the standard `FINISH` as
+  "finished", because which flow ran is the login configuration's decision;
+  phone registration is skipped, as Meta's guide says to for this flow; and
+  `check_meta_permissions` prints a section per stored credential rather than
+  the onboarding re-checking scopes on a schedule.
+
+## Verified
+
+Locally, on 2026-10-08, before any live round trip:
+
+- **Unit tier.** `npx vitest run lib/whatsapp lib/meta lib/tickets lib/queue
+worker/handlers`: 68 files, 1,590 tests. The onboarding request shapes against
+  the references they name; the envelope's round trip, tampering, AAD binding,
+  key rotation and IV uniqueness; `resolveCredentialSource`'s order; the
+  Embedded Signup extras, the three window events and the origin check
+  (`evilfacebook.com` refused); `parseWebhook` on the four coexistence fields;
+  the delivery ids; `canRequestSync` and the badges; the view model; the
+  subscription field lists; no secret-shaped key in `JOB_PAYLOADS`.
+- **Database tier.** Migrations and `db/sql/` applied to an empty Postgres 16,
+  then nine `*.db.test.ts` files — `lib/whatsapp/credentials`, `onboarding`,
+  `onboarding-reads`, `coexistence-state`, `lib/tickets/ingest-whatsapp`,
+  `ingest-whatsapp-history`, `worker/handlers/process-whatsapp-webhook`,
+  `sync-whatsapp-templates`, `lib/admin/settings` — 106 tests. What they
+  establish is listed in `docs/PROJECT-STATE.md` §7.
+- **Build and the repo rules.** `npm run build` and
+  `node scripts/ci/repo-rules.mjs` (`credential-confinement` among them) pass
+  on the branch; the full `verify` set runs on the pull request.
+
+Waiting on the live round trip, and on nothing in the repo:
+
+- Tech Provider status of both Meta apps; the login configuration and
+  `META_EMBEDDED_SIGNUP_CONFIG_ID`; the console host in Allowed Domains for the
+  JavaScript SDK; `WHATSAPP_CREDENTIAL_KEY` in both groups.
+- The app-level fields through `npm run job -- subscribe_meta_webhooks`,
+  staging first — three of the four names are from the webhooks overview, not
+  from a subscription this app already holds.
+- Everything Meta answers: whether the Builder's extras match
+  `EMBEDDED_SIGNUP_EXTRAS`; the token's lifetime (`debug_token.expires_at` on
+  the first onboarding decides whether a Reconnect every sixty days is part of
+  operating the number); whether `granular_scopes` names WABA targets for a
+  business token; the real payload shapes of `history`, `smb_app_state_sync`,
+  `smb_message_echoes` and `account_update` against the parser's samples;
+  whether Reconnect completes for an already-onboarded number and returns a
+  fresh token; `rotate_whatsapp_credentials dryRun=true` once on production.
+  `docs/PROJECT-STATE.md` §5.2 has the order to read them back in.

@@ -333,18 +333,28 @@ returns a full instant whose **time component is an artifact of when you asked**
 `YYYY-MM-DD` and never convert through a `Date` — the value carries `+03:00`, so
 a call answered after 21:00 UTC reads as the previous day in UTC.
 
-**Background work.** Anything slow, external or retryable is a job — with one
-narrow exception, written down because it looks like a violation: a control an
-agent presses and _waits on_, whose entire output is the provider's answer, calls
-the provider in the action instead. `refreshRequesterProfile` is the only one
-today. The rule exists so a customer's ticket never depends on Graph being up and
-so unattended work gets retried; a person clicking a button is neither, and
+**Background work.** Anything slow, external or retryable is a job — with two
+narrow exceptions, written down because they look like violations. The first: a
+control an agent presses and _waits on_, whose entire output is the provider's
+answer, calls the provider in the action instead. `refreshRequesterProfile` is
+that one. The rule exists so a customer's ticket never depends on Graph being up
+and so unattended work gets retried; a person clicking a button is neither, and
 queueing it would put the one sentence they are waiting for into a worker log
 they cannot read — which is exactly how a missing Meta approval hid for a month
 (`docs/PROJECT-STATE.md` §6.27). Where this applies, the provider call itself
 stays in one shared function the job and the action both use
 (`lib/meta/profile-refresh.ts`), so the two paths cannot answer differently for
-the same subject. Everything else is a job: add the type
+the same subject. The second is the Embedded Signup exchange —
+`beginCoexistenceOnboarding` in `lib/whatsapp/onboarding.ts`, behind the
+`connectBusinessAppNumber` action — forced by the code Meta's window hands the
+browser: it lives thirty seconds and is spent once, so a queued job could not be
+sure of running before it died, and a dead code is a business sent through
+Meta's window again. Only what the code forces happens in the action — exchange
+it, prove the token reads the WABA the browser named, seal it, record the
+attempt — and everything after the exchange is the
+`complete_coexistence_onboarding` job, run with the stored credential, so a
+closed tab abandons nothing and the first run, a retry and a later "copy the
+history again" cannot differ. Everything else is a job: add the type
 to `JobType` in `lib/queue/index.ts`, a handler under `worker/handlers/`, and
 register it in `worker/handlers/index.ts`. CI checks that the three agree, and
 that every cron in `render.yaml` names a type that exists. Use `dedupeKey` for anything a webhook retry could
@@ -513,7 +523,95 @@ A WhatsApp business account's access token is read
 directly from `process.env`, for a different reason: its variable's _name_ is a
 database value, so it cannot be in the schema — and must therefore start `WHATSAPP_TOKEN_`, or
 an admin typing a variable name would be choosing which secret gets sent to Meta
-as a bearer token (`lib/whatsapp/accounts.ts`).
+as a bearer token (`lib/whatsapp/accounts.ts`). That variable is the middle of
+three sources. `tokenForAccount` resolves **stored → `WHATSAPP_TOKEN_*` →
+`META_PAGE_ACCESS_TOKEN`** (`resolveCredentialSource`, pure and tested beside
+`resolveAccount`): a credential Meta minted for the account through Embedded
+Signup wins over a variable an admin named, which wins over the shared token.
+Storing one clears the variable, so a row written through the console never
+has two sources and the order only matters for a row edited straight in the
+database. **A stored credential that cannot be opened throws and never falls
+through** to the next source. Falling through is the obvious implementation,
+and it is the "went out from the wrong WABA" failure the module already
+describes: a send authenticated as a different credential either fails with a
+sentence about the wrong thing or, worse, succeeds from a business the customer
+never messaged.
+
+**The stored WhatsApp credential.** `whatsapp_account_credentials` is the one
+credential the database holds, and it exists on an instruction: if coexistence
+needs the backend to store a token, store it securely and properly. A business
+token minted by Meta's Embedded Signup is one no person ever holds and no
+variable can name — Meta hands it to the server for a WABA the popup may have
+just created — so the alternative to storing it is a step on Render or in
+Business Manager per number, during which the number answers nobody and the
+24-hour window for copying the phone's chats runs out. Four properties make
+holding it acceptable, and each is enforced rather than asked for:
+
+- **The row is ciphertext under a key the database never sees.** AES-256-GCM
+  under `WHATSAPP_CREDENTIAL_KEY` (`lib/whatsapp/credential-envelope.ts`), with
+  the key's id in the envelope, in the `key_id` column and in the authenticated
+  data beside the account and WABA ids — so an envelope copied onto another
+  row, or left on a row whose WABA id was edited, fails to open rather than
+  sending one business's credential on another's behalf. Losing the key loses
+  every stored credential, by design: the recovery is reconnecting each number
+  through Meta's window, one popup each.
+- **No code path on the web service decrypts a stored token.** That is a
+  property of the code paths, not of what the service could do — it holds the
+  symmetric key, because it seals the token on the way in. `storedTokenFor` is
+  the one export that hands a decrypted token out (the reseal opens envelopes
+  and returns none), `lib/whatsapp/accounts.ts` the only module that may call
+  it, and the resolvers built on it (`tokenForAccount`,
+  `credentialsForAccount`, `credentialsForPhoneNumberId`) may be imported only
+  from `worker/` — or from `lib/whatsapp/onboarding-complete.ts`, which only the
+  worker may import. CI holds all of that (`credential-confinement`), and with
+  it that only `lib/whatsapp/credentials.ts` names the table, that it never
+  selects a whole row, and that `CredentialStatus` — the shape the admin page
+  renders into an RSC payload — has no field that could carry the secret. An
+  action that needs the token enqueues a job.
+- **One source per account.** Storing a credential clears `token_env_var`, and
+  an account holding one refuses a variable and a change of WABA id
+  (`storedCredentialEditRefusal`) — "forget the stored credential first" —
+  because two sources make "which token sent this?" a question with two
+  answers.
+- **Everything that happens to one is a row** in `whatsapp_credential_events`:
+  `stored`, `resealed`, `refused`, `removed`, naming the agent and surviving the
+  account, so "who removed the credential for WABA X, and when?" still has an
+  answer once both rows are gone.
+
+Two things about the key's variables are deliberate. Their names do not start
+`WHATSAPP_TOKEN_`, and must not: `parseTokenEnvVar` lets an admin name any such
+variable as a bearer token, so a key so named could be typed into the "token
+variable" box and sent to Meta. And both stay plain `z.string().optional()` in
+`lib/env.ts` — never a `min()` or a `regex()` — because `env()` parses the whole
+schema on every page, action and connection, so a format rule there turns one
+mistyped key into a console that does not load rather than a WhatsApp
+connection that says what is wrong with it (the `LOG_ALL_INCOMING_WEBHOOKS`
+lesson, `docs/PROJECT-STATE.md` §2). `parseKeyring` validates at first use and
+`coexistenceReadiness()` reports it on the page before any button. Rotation is
+`WHATSAPP_CREDENTIAL_KEY_PREVIOUS` = old, `WHATSAPP_CREDENTIAL_KEY` = new,
+`npm run job -- rotate_whatsapp_credentials dryRun=true` and then without, then
+unset `_PREVIOUS`; the dry run opens every envelope it would move, which is what
+proves the previous key is the one the rows were sealed under before anything
+depends on it.
+
+**A coexistence number is live on the phone and on Cloud API at once**, and
+four rules keep the two sides from being read as each other. The copied
+history is a record, not traffic (`lib/tickets/ingest-whatsapp-history.ts`):
+each thread is one resolved `import` conversation, and nothing a live message
+sets off runs for it — no SLA clock, no automation, no out-of-hours reply, no
+categorisation, no shipment linking, no media download and no 24-hour window,
+because `last_customer_message_at` stays null and a live message never
+continues an imported conversation. A reply the business typed on the phone
+arrives as an `smb_message_echoes` delivery and is the team's reply: outbound,
+no author, labelled "WhatsApp Business app", moving `last_agent_message_at`
+forward and never `last_customer_message_at` — on a plain support number the
+same echo is our own send coming back and stays ignored. The copy of contacts
+and history is once per onboarding, inside 24 hours of the exchange, with the
+Business app open on the phone (`canRequestSync`; Meta's 2593107 and 2593108
+both mean "reconnect"). And `saveChannel` carries `coexistence` and the stored
+`phoneNumberId` over rather than rebuilding `config` as `{phoneNumberId}`,
+which is how a rename used to wipe the connection while the number kept
+routing.
 
 **Explaining a control.** A label short enough to fit a dense table is rarely
 long enough to explain itself. `InfoTip` from `components/tooltip.tsx` is the
@@ -1064,6 +1162,13 @@ deleting it, and drop the sections that genuinely do not apply.
   group, always without values. Never echo a credential in any direction. CI
   rejects a committed `.env` and a `sync: false` inside an env group, but it
   cannot unsay a credential you pasted into a comment or a log.
+- **A dump contains no usable credential without a key the dump does not
+  contain, and `whatsapp_account_credentials` is the one place to look.** Every
+  other credential lives in the environment and is named from a row. A
+  WhatsApp business account's token is named, or stored sealed — never
+  plaintext — and nothing but the worker opens one (`credential-confinement`).
+  A second table holding a secret is a second place to look and a second
+  argument to make; make it in its own change.
 - Email bodies and imported KB HTML are attacker-controlled. **Sanitise on
   write, never on read**, through `lib/html/sanitize.ts`.
 - Attachment paths derive from ids we generate, never from a supplied filename.

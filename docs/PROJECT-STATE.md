@@ -535,6 +535,16 @@ removed; unrelated jobs and work already held by a worker remain. The database
 CI job exercises that distinction against Postgres with transaction-rolled-back
 fixtures.
 
+And now **WhatsApp coexistence**: a number that lives on the WhatsApp Business
+_app_ on a phone can be connected from Admin → Channels in one button, through
+Meta's Embedded Signup — the business token Meta mints is stored sealed, the
+number subscribes itself, six months of the phone's chats and its address book
+are copied in as resolved tickets and contacts, and a reply typed on the phone
+lands on the ticket as the team's. It is the first credential the database has
+ever held — one, sealed, opened only by the worker (§2, §8) — and **none of it
+has run live**: the whole flow is proven by the unit and database tiers (§7) and
+waits on Meta-side preconditions nobody has checked yet (§5.2).
+
 So: **the system still cannot take a real human support ticket**, and the
 remaining work is mostly not code — it is configuration, live-provider
 verification, and cutover. But the team has started arriving: **11 agents** as of
@@ -696,6 +706,34 @@ and a free-text variable name would be a way to exfiltrate any secret in the
 process. The value goes in the environment's group; the key is listed in
 `render.yaml` without it, in the same commit that names it on the account.
 Staging's `WHATSAPP_ACCESS_TOKEN` is not such a name and nothing reads it.
+
+Three keys arrived with WhatsApp coexistence on 2026-10-08, each in the
+environment group and never the shared one. `WHATSAPP_CREDENTIAL_KEY` seals the
+business tokens Embedded Signup stores in `whatsapp_account_credentials`:
+`openssl rand -base64 32`, its own value per environment — an envelope sealed on
+staging must not open on production — never derived from `APP_SECRET`, and
+never named `WHATSAPP_TOKEN_*`, because that prefix is what an admin may name
+as a bearer token. `WHATSAPP_CREDENTIAL_KEY_PREVIOUS` is set only during a
+rotation: previous = the old key, current = the new, `npm run job --
+rotate_whatsapp_credentials dryRun=true`, then without, then unset.
+`META_EMBEDDED_SIGNUP_CONFIG_ID` is the Facebook Login for Business
+configuration on that environment's own Meta app — an id the browser hands to
+Meta's SDK, not a secret, but a configuration belongs to one app. Whether any of
+the three is set is a dashboard question the repo cannot answer: `render.yaml`
+lists them as dashboard-owned, nothing could have needed them before
+2026-10-08, and the first live onboarding needs the first and third (§5.2) —
+the page names what is missing before the button opens anything.
+
+**Losing the key loses every stored credential, by design.** There is no
+recovery but reconnecting each number through Meta's window, one popup each;
+the console says so per account (the credential's `keyState` reads `unknown`,
+naming the key id and the variable) rather than failing the page. The key
+variables are plain `z.string().optional()` in `lib/env.ts` for the reason
+`LOG_ALL_INCOMING_WEBHOOKS` is (below): a format rule there would take the
+console down on a mistyped key instead of failing one WhatsApp connection with
+a sentence. And a service-level copy of the key would silently shadow the
+group's — the same precedence trap as `DATABASE_URL` above — which is what a
+`keyState` of `unknown` on the next page load would be saying.
 
 When you add a variable, add it to `render.yaml` in the same commit. The
 blueprint is meant to describe the running system; it is not documentation that
@@ -989,7 +1027,10 @@ is code:
   this app the whole time**, across all 395,391 deliveries, without ever firing
   once. That is the evidence that this number is not operated that way: it is
   sent on through the Cloud API, where the sender already knows what it sent and
-  Meta offers no echo to a third-party app.
+  Meta offers no echo to a third-party app. _Partly superseded 2026-10-08:_ the
+  silence proved that about this number and nothing about the field, and a
+  number connected through coexistence is operated from the phone — the field
+  is required and ingested now; §6.85.
 
   So the bot's half is **not reachable by webhook at all**, and the remaining
   routes are outside this system: the service that operates the number hands the
@@ -1325,6 +1366,54 @@ shipblu.com` still serves Freshdesk, so each one took a reader out of this
   depends on them any more.
 - **A WhatsApp template send outside the 24-hour window** — the one path the
   end-to-end test in §7 could not cover.
+- **Connecting a number on the WhatsApp Business app (coexistence). Built,
+  proven against a local Postgres, and not yet run live.** Everything from
+  Meta's popup to a phone-typed reply on a ticket — the code exchange, the
+  sealed credential, `complete_coexistence_onboarding`, the copied history and
+  contacts, `smb_message_echoes`, `account_update` — has been exercised only by
+  the unit and database tiers (§7). What gates the live run is outside the
+  repo, and each item is a trap of its own:
+  - **The Meta app must be a Tech Provider** (or Solution Partner), or Embedded
+    Signup refuses to open; business verification is its prerequisite. Not
+    checked for either app.
+  - **A Facebook Login for Business configuration** for the Business-app
+    onboarding → `META_EMBEDDED_SIGNUP_CONFIG_ID` (§2), with Client/Web OAuth
+    login, Enforce HTTPS and Login with the JavaScript SDK switched on, and
+    **the console host in Allowed Domains for the JavaScript SDK** and in Valid
+    OAuth redirect URIs — staging's host too. Missing, the popup fails inside
+    Meta's window with a sentence about the domain, and nothing here can say
+    more than that.
+  - `WHATSAPP_CREDENTIAL_KEY` in both groups (§2). `coexistenceReadiness()`
+    lists every missing variable on the page before the button does anything,
+    so a code is never spent on a store that was always going to fail.
+  - **The app-level webhook fields** `history`, `smb_app_state_sync`,
+    `smb_message_echoes` and `account_update` on `whatsapp_business_account`:
+    `npm run job -- subscribe_meta_webhooks` once per environment, **staging
+    first**, because three of the four names come from the webhooks overview
+    rather than from a subscription this app already holds, and one bad name
+    fails the whole write (§6.85). The onboarding job reads the list back and
+    records a warning per missing field; it cannot write the list itself.
+  - The phone runs WhatsApp Business 2.24.17 or later and stays open until the
+    history reaches 100%; onboarding unlinks companion devices; throughput on
+    such a number is fixed at 20 messages a second; marketing templates are
+    refused on it.
+
+  What to read back from the first run, in order: `whatsapp_onboardings.steps`
+  as the card polls it; the credential row by `select key_id, token_type,
+expires_at` — never `envelope`; the `request_id`s in
+  `channels.config -> coexistence`; `history` deliveries in `webhook_events`
+  with the app open on the phone (`LOG_ALL_INCOMING_WEBHOOKS` for the session,
+  Meta's Webhook Debugger for field names); imported resolved tickets carrying
+  both directions; a phone-typed reply on a live ticket labelled "WhatsApp
+  Business app" with the SLA clock stopped; a console reply landing in the
+  phone's chat; and the hourly template sync reading with the stored
+  credential (`last_synced_at` moves, `last_sync_error` null). The
+  `debug_token.expires_at` that run stores is what says whether the credential
+  never expires or a Reconnect every sixty days is part of operating the
+  number, which is what the seven-day badge exists for. Reconnect — the 190
+  recovery — assumes Embedded Signup completes for an already-onboarded number
+  and returns a fresh token; confirm it on staging before relying on it.
+
 - **A side conversation to a genuine forwarding list.** Everything below is
   verified against a local Postgres — the plus-address route, the References
   fallback, the signed-subject fallback, idempotent redelivery, and that a hub
@@ -4948,6 +5037,39 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     mocked client, which is how a statement Postgres never saw passed for a
     tested one.
 
+85. **`smb_message_echoes`'s silence proved only that no number was operated
+    from the phone — and coexistence is exactly what changes that.**
+    _2026-10-08; a reading corrected before it cost anything._ §5.1's
+    bot-transcript entry argued that the field had been subscribed on this app
+    across all 395,391 deliveries without firing once, and that the silence
+    was the proof the support number is not operated from the WhatsApp
+    Business app. Right about the number, wrong as a rule — and
+    `docs/meta-endpoints.md` §7 had turned it into one, listing
+    `smb_message_echoes` beside the discontinued `message_echoes` as
+    "deliberately not used", one tidy-up away from being dropped from
+    `REQUIRED_WHATSAPP_FIELDS` as dead. A number connected through coexistence
+    _is_ operated from the phone, and its replies arrive on that field and on
+    nothing else; dropping it would have silently lost every one of them while
+    the console reported the number connected. So the field is required now,
+    with `history`, `smb_app_state_sync` and `account_update`
+    (`COEXISTENCE_WHATSAPP_FIELDS` in `lib/meta/subscriptions.ts`), and each
+    is ingested — the echo by `ingestWhatsAppEcho`, which on a coexistence
+    channel files it as the team's reply (outbound, no author, moving
+    `last_agent_message_at` and never `last_customer_message_at`) and on a
+    plain support number still ignores it as our own send coming back; the
+    history and contacts by `lib/tickets/ingest-whatsapp-history.ts`, as a
+    record rather than traffic (no window, no clocks, no automations, no media
+    download, each thread one resolved `import` ticket); `account_update` by
+    `applyWhatsAppAccountUpdate`, idempotent because it is deliberately not
+    deduplicated at the door — the key is spent for good and a second
+    disconnect of the same number must not be swallowed. The bot number's half
+    is still unreachable: it is sent through Cloud API by another service,
+    where Meta offers no echo. The general lesson is one step out from §6.43's:
+    **a count of zero is evidence about the configuration that produced it,
+    not about the field** — change what a number is, and the figure stops
+    meaning anything. None of this has run live (§5.2), which is also why the
+    field list grows on staging first.
+
 ## 7. Verification already done
 
 - **The knowledge-base role floor, against a real Postgres.** _2026-09-04._ The
@@ -5046,6 +5168,31 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
   which is a real undelivered customer reply and not a transient failure.
   Everything else in the job history is completed work: 43,396 rows, almost all
   `process_webhook`, which is what 1,500 bot conversations a day looks like.
+- **WhatsApp coexistence, against a local Postgres 16.** _2026-10-08._ The
+  migrations and the `db/sql/` replay applied clean onto an empty database, and
+  nine database-tier files — `lib/whatsapp/credentials`, `onboarding`,
+  `onboarding-reads` and `coexistence-state`, `lib/tickets/ingest-whatsapp` and
+  `ingest-whatsapp-history`, `worker/handlers/process-whatsapp-webhook` and
+  `sync-whatsapp-templates`, and `lib/admin/settings` — passed (106 tests), with
+  the coexistence unit tier beside them (68 files under `lib/whatsapp`,
+  `lib/meta`, `lib/tickets`, `lib/queue` and `worker/handlers`, 1,590 tests).
+  What that proves: a stored credential round-trips through `storeBusinessToken`
+  and `tokenForAccount` and resolves ahead of a variable and the shared token;
+  `credentialStatuses()` and the admin's account rows carry no `envelope`;
+  storing clears `token_env_var` and the two refused edits are refused; a
+  cascade on account delete leaves the `removed` event; a wrong key throws
+  `CredentialKeyError` and leaves the row; the reseal moves rows and writes
+  events while `dryRun` writes nothing; the partial unique index refuses a
+  second live attempt and a stale one is superseded; the job's final attempt
+  marks the row failed and a transient error lands in `last_transient_error`
+  and `next_attempt_at`; a coexistence echo moves `last_agent_message_at` and
+  the response clocks and leaves `last_customer_message_at`, while a plain
+  support echo stays ignored; two history threads become two resolved `import`
+  conversations with both directions, no `jobs` rows and placeholder media,
+  replay writes nothing, and a later live inbound opens a new ticket rather
+  than the import; progress, a decline and a contact's name land where the
+  console reads them. What it cannot prove is anything Meta answers — §5.2
+  lists the round trip, and nothing in it has run.
 - **Multiple WABA connections, against a local Postgres 16.** Migration 0011 and
   the `db/sql/` replay both applied clean, and RLS came out enabled and not
   forced on `whatsapp_accounts`. A legacy null-account template upserted onto
@@ -5157,6 +5304,13 @@ configured?" questions in one call. Outbound HTTPS goes through an agent proxy;
   compromised.** It was rotated. Never echo credentials, in any direction.
 - Secrets never enter the repo. `render.yaml` uses `sync: false` or the env
   group, always without values.
+- **The database holds exactly one credential, and a dump contains no usable
+  one without a key the dump does not contain.** `whatsapp_account_credentials`
+  is the one place to look: a WhatsApp business token Embedded Signup minted,
+  AES-256-GCM under `WHATSAPP_CREDENTIAL_KEY` from the environment group, opened
+  by the worker and by nothing on the web service (`credential-confinement`).
+  Every other credential is in the environment and named from a row — a
+  WhatsApp account's token is named, or stored sealed, never plaintext.
 - RLS: enabled, zero policies, **never FORCE** (§2).
 - Email bodies and imported KB HTML are attacker-controlled. **Sanitise on
   write, never on read** — the stored row is then safe for every consumer, and
