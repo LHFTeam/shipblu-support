@@ -40,7 +40,7 @@ import { checkAutomatedRepliesDoNotCountAsAgentReplies } from './rules/automated
 import { checkClientBundleStaysOutOfTheDatabase } from './rules/client-bundle.mjs';
 import { checkNoDeadExports } from './rules/dead-exports.mjs';
 import { checkPagesDoNotImportTheDatabase } from './rules/page-db.mjs';
-import { checkConsoleFormsDoNotReset } from './rules/form-reset.mjs';
+import { checkFormsDoNotReset } from './rules/form-reset.mjs';
 
 export const RULES = [
   ['env-parity', checkEnvParity],
@@ -71,7 +71,7 @@ export const RULES = [
   ['dom-title', checkNoDomTitleAttribute],
   ['like-patterns', checkLikePatternsUseTheBuilder],
   ['console-scroll', checkConsolePagesScroll],
-  ['form-reset', checkConsoleFormsDoNotReset],
+  ['form-reset', checkFormsDoNotReset],
   ['page-db', checkPagesDoNotImportTheDatabase],
   ['light-only', checkLightOnly],
   ['framing', checkFramingHeaders],

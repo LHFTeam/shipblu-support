@@ -2,17 +2,18 @@ import ts from 'typescript';
 import { fail, read, requireAtLeast, scannable } from '../lib.mjs';
 
 /**
- * A console form with a field a reset would move submits through
- * `useActionForm` (§6.80).
+ * A form with a field a reset would move submits through `useActionForm`
+ * (§6.80) — in the console, the help centre and the sign-in pages alike.
  *
  * `<form action={fn}>` makes React 19 reset the form after every action, a
  * refusal included. On a refusal that wiped the reply an agent was about to
  * correct, and put a controlled `<select>` back on an option its state no
- * longer held — so the next send went where the screen did not say. The hook
- * submits from `onSubmit` instead, and its `form` is spread onto the element:
- * `<form {...form}>`. So a console `<form>` whose `action` is an expression,
- * with neither a spread nor an `onSubmit`, is React's own path, and this
- * refuses it when anything inside it is a field the reset moves.
+ * longer held — so the next send went where the screen did not say. In the help
+ * centre it emptied a customer's reply when the ticket closed while they typed.
+ * The hook submits from `onSubmit` instead, and its `form` is spread onto the
+ * element: `<form {...form}>`. So a `<form>` whose `action` is a function, with
+ * neither a spread nor an `onSubmit`, is React's own path, and this refuses it
+ * when anything inside it is a field the reset moves.
  *
  * What a reset moves, and so what counts: an uncontrolled `input` or
  * `textarea`, which goes back to its default; and any `select`, checkbox,
@@ -29,13 +30,11 @@ import { fail, read, requireAtLeast, scannable } from '../lib.mjs';
  * fields components/ui.tsx wraps one to one — `Input`, `Textarea`, `Select` —
  * are read as the elements they render.
  */
-export function checkConsoleFormsDoNotReset() {
+export function checkFormsDoNotReset() {
   const rule = 'form-reset';
 
   let forms = 0;
-  for (const file of scannable.filter(
-    (f) => f.startsWith('app/(console)/') && f.endsWith('.tsx'),
-  )) {
+  for (const file of scannable.filter((f) => f.startsWith('app/') && f.endsWith('.tsx'))) {
     const source = ts.createSourceFile(
       file,
       read(file),
@@ -63,8 +62,8 @@ export function checkConsoleFormsDoNotReset() {
   }
 
   // A rule that passes by finding nothing needs to know it looked. Today's
-  // console has about forty forms.
-  requireAtLeast(rule, 'app/(console)/', forms, 15, '<form> elements');
+  // app has about fifty forms, nearly forty of them in the console.
+  requireAtLeast(rule, 'app/', forms, 15, '<form> elements');
 }
 
 /** The element's name as written: `form`, `Input`, `motion.div`. */
@@ -79,16 +78,18 @@ function attribute(opening, name) {
 }
 
 /**
- * React runs the action itself, reset and all: `action` is an expression, and
+ * React runs the action itself, reset and all: `action` is a function, and
  * nothing took the submission over. A spread is the hook's props object, and an
- * `onSubmit` is a form handling its own submission; a string `action` is a
- * plain HTML form React does not touch.
+ * `onSubmit` is a form handling its own submission. A string `action` is a
+ * plain HTML form React does not touch, written either way — the help centre's
+ * search and tracking boxes build theirs as a template, `{`/${locale}/search`}`.
  */
 function submitsThroughReact(opening) {
   if (opening.attributes.properties.some((a) => ts.isJsxSpreadAttribute(a))) return false;
   if (attribute(opening, 'onSubmit')) return false;
-  const action = attribute(opening, 'action');
-  return Boolean(action?.initializer && ts.isJsxExpression(action.initializer));
+  const value = attribute(opening, 'action')?.initializer;
+  if (!value || !ts.isJsxExpression(value) || !value.expression) return false;
+  return !ts.isStringLiteralLike(value.expression) && !ts.isTemplateExpression(value.expression);
 }
 
 /** A string an attribute is set to, written either way, or null. */

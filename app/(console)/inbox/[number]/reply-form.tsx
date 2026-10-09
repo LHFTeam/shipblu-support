@@ -13,9 +13,10 @@ import {
 import { sendReply } from '../../reply-actions';
 import { KnowledgePanel } from './knowledge';
 import type { KnowledgeContext } from './types';
-import { INITIAL, LOST_SEND, useRefreshOnSuccess } from './form-state';
+import { INITIAL, LOST_SEND } from './form-state';
 import { SubmitButton } from '@/components/submit-button';
 import { useActionForm } from '@/components/use-action-form';
+import { useRefreshOnSuccess } from '@/components/use-refresh-on-success';
 
 /**
  * The language toggle's two buttons, each written in its own script.

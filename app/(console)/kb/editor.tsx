@@ -1,13 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useFormStatus } from 'react-dom';
-import { useRouter } from 'next/navigation';
 import { Button, ErrorText, Input, Label, Select, Textarea } from '@/components/ui';
 import type { AgentRole } from '@/lib/auth/permissions';
 import type { FolderOption } from '@/lib/kb/admin';
 import { FLOOR_LABELS, SELECTABLE_FLOORS } from '@/lib/kb/floors';
 import { useActionForm } from '@/components/use-action-form';
+import { useRefreshOnSuccess } from '@/components/use-refresh-on-success';
 import { saveArticle, type KbState } from './actions';
 
 const INITIAL: KbState = { error: null };
@@ -44,13 +44,10 @@ export function ArticleEditor({
   folders: FolderOption[];
 }) {
   const { state, key, form } = useActionForm(saveArticle, INITIAL);
-  const router = useRouter();
 
   // Re-reads the server components after a save, so the version list and the
   // status badge match what was just written.
-  useEffect(() => {
-    if (state.ok) router.refresh();
-  }, [state, router]);
+  useRefreshOnSuccess(state);
 
   const [locale, setLocale] = useState(article?.locale ?? 'en');
   const [body, setBody] = useState(article?.bodyHtml ?? '');

@@ -2,9 +2,10 @@
 
 import { ErrorText, Textarea } from '@/components/ui';
 import { addNote } from '../../reply-actions';
-import { INITIAL, useRefreshOnSuccess } from './form-state';
+import { INITIAL } from './form-state';
 import { SubmitButton } from '@/components/submit-button';
 import { useActionForm } from '@/components/use-action-form';
+import { useRefreshOnSuccess } from '@/components/use-refresh-on-success';
 
 export function NoteForm({
   conversationId,

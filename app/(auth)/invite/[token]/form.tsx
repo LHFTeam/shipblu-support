@@ -1,9 +1,9 @@
 'use client';
 
-import { useActionState } from 'react';
 import { acceptInvite, type AuthFormState } from '../../actions';
 import { ErrorText, Input, Label } from '@/components/ui';
 import { SubmitButton } from '@/components/submit-button';
+import { useActionForm } from '@/components/use-action-form';
 
 const INITIAL: AuthFormState = { error: null };
 
@@ -21,13 +21,10 @@ const INITIAL: AuthFormState = { error: null };
  * otherwise have had to ask.
  */
 export function InviteForm({ token, email, name }: { token: string; email: string; name: string }) {
-  const [state, action] = useActionState(acceptInvite, INITIAL);
+  const { state, form } = useActionForm(acceptInvite, INITIAL);
 
   return (
-    <form
-      action={action}
-      className="flex flex-col gap-4 rounded-lg border border-[var(--border)] p-6"
-    >
+    <form {...form} className="flex flex-col gap-4 rounded-lg border border-[var(--border)] p-6">
       <input type="hidden" name="token" value={token} />
 
       <p className="text-sm opacity-70">Set a password to activate your account.</p>

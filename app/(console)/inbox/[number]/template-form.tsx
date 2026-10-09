@@ -5,9 +5,10 @@ import { ErrorText, Input, Label, Select } from '@/components/ui';
 import { renderTemplatePreview, templateShape } from '@/lib/whatsapp/templates';
 import { sendTemplateReply } from '../../reply-actions';
 import type { TemplateOption } from './types';
-import { INITIAL, LOST_SEND, useRefreshOnSuccess } from './form-state';
+import { INITIAL, LOST_SEND } from './form-state';
 import { SubmitButton } from '@/components/submit-button';
 import { useActionForm, type FormHandlers } from '@/components/use-action-form';
+import { useRefreshOnSuccess } from '@/components/use-refresh-on-success';
 
 /**
  * Template send.
