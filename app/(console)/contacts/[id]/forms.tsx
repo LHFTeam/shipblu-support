@@ -31,7 +31,6 @@ export function RoleToggles({
   isShipper: boolean;
   isRecipient: boolean;
 }) {
-  const router = useRouter();
   const [shipper, setShipper] = useState(isShipper);
   const [recipient, setRecipient] = useState(isRecipient);
   const [error, setError] = useState<string | null>(null);
@@ -44,7 +43,6 @@ export function RoleToggles({
 
     const result = await setContactRoles(INITIAL, formData);
     setError(result.error);
-    if (!result.error) router.refresh();
   }
 
   return (
@@ -98,9 +96,13 @@ export function AccountLinks({
     const formData = new FormData();
     formData.set('contactId', contactId);
     formData.set('shippingAccountId', shippingAccountId);
-    await unlinkContactFromAccount(INITIAL, formData);
+    const result = await unlinkContactFromAccount(INITIAL, formData);
     setRemoving(null);
-    router.refresh();
+    // A success brings the re-read page with it. A refusal is not shown and
+    // revalidates nothing; the one an agent can meet is a permission lost since
+    // the page was drawn, and re-reading takes the × buttons away rather than
+    // leaving them doing nothing.
+    if (result.error) router.refresh();
   }
 
   return (

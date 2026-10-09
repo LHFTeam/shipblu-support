@@ -3,7 +3,6 @@
 import { ErrorText, Input } from '@/components/ui';
 import { SubmitButton } from '@/components/submit-button';
 import { useActionForm } from '@/components/use-action-form';
-import { useRefreshOnSuccess } from '@/components/use-refresh-on-success';
 import { INITIAL } from '../forms-shared';
 import { saveTrackingPhrase } from './actions';
 
@@ -34,7 +33,6 @@ export function PhraseEditor({
   saved: string;
 }) {
   const { state, form } = useActionForm(saveTrackingPhrase, INITIAL);
-  useRefreshOnSuccess(state);
 
   return (
     <form {...form} className="flex flex-col gap-1">

@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Badge, Button, ErrorText } from '@/components/ui';
 import { SearchIcon } from '@/components/icons';
-import { useRefreshOnSuccess } from '@/components/use-refresh-on-success';
 import type { MergeCandidate } from '@/lib/contacts/merge';
 import { mergeContactInto, type ContactActionState } from '../actions';
 
@@ -84,7 +83,6 @@ export function MergeCandidateRow({
 }) {
   const [state, action] = useActionState(mergeContactInto, INITIAL);
   const [armed, setArmed] = useState(false);
-  useRefreshOnSuccess(state);
 
   const label = candidate.name ?? candidate.email ?? candidate.phone ?? 'Unnamed contact';
   const handle = [candidate.email, candidate.phone].filter(Boolean).join(' · ');

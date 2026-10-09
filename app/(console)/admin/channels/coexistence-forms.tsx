@@ -12,7 +12,7 @@ import {
 } from 'react';
 import { unstable_rethrow, useRouter } from 'next/navigation';
 import { SubmitButton } from '@/components/submit-button';
-import { useRefreshOnSuccess } from '@/components/use-refresh-on-success';
+import { useActionForm } from '@/components/use-action-form';
 import { InfoTip } from '@/components/tooltip';
 import { Badge, Button, Card, ErrorText, Field, Select, SuccessText } from '@/components/ui';
 import { formatDateTime } from '@/lib/format';
@@ -539,8 +539,9 @@ function ConnectCard({
       try {
         const result = await connectBusinessAppNumber(INITIAL, formData);
         if (result.ok) {
+          // No re-read: the action revalidates, so the page came back with
+          // this answer (§6.89).
           dispatch({ type: 'done', notice: result.notice ?? 'Connecting the number now.' });
-          router.refresh();
         } else {
           // `wait` marks a refusal that running Meta's window again cannot fix
           // — the rate limit, or an attempt on this number still live — read
@@ -1079,7 +1080,6 @@ export function RetryOnboarding({
   disabled?: boolean;
 }) {
   const [state, formAction] = useActionState(retryCoexistenceOnboarding, INITIAL);
-  useRefreshOnSuccess(state);
 
   return (
     <form action={formAction} className="flex flex-col items-start gap-1">
@@ -1127,13 +1127,13 @@ const SYNC_REQUEST_FOLLOW_MS = 60_000;
 
 /**
  * "Copy the contacts / history (again)" on a connected row. Hidden fields and
- * a button only, so React's reset after a refusal has nothing to move and the
- * plain form action is the right shape.
+ * a button only, so React's reset after a refusal has nothing to move; it goes
+ * through `useActionForm` for the `onSuccess` that starts the burst below.
  *
- * After a success it keeps refreshing for a while, because the one refresh on
- * success lands before the worker has claimed the job: that page shows no
- * request yet, so nothing on it polls, and "this page updates as it arrives"
- * was true only after a manual reload. Once the job records the request the
+ * After a success it keeps refreshing for a while, because the page that comes
+ * back with the action's answer is read before the worker has claimed the job:
+ * it shows no request yet, so nothing on it polls, and "this page updates as it
+ * arrives" was true only after a manual reload. Once the job records the request the
  * row stops offering this button, which unmounts it and ends the burst — the
  * progress card's own polling takes over from there.
  */
@@ -1147,10 +1147,10 @@ export function RequestSyncAgain({
   /** A request Meta refused is being tried again; a copy never asked for is not "again". */
   again: boolean;
 }) {
-  const [state, formAction] = useActionState(requestCoexistenceSync, INITIAL);
   const [following, setFollowing] = useState(false);
-  const follow = useCallback(() => setFollowing(true), []);
-  useRefreshOnSuccess(state, follow);
+  const { state, form } = useActionForm(requestCoexistenceSync, INITIAL, {
+    onSuccess: () => setFollowing(true),
+  });
   // Restarted by each success (its nonce), so a second press gets its own minute.
   useEffect(() => {
     if (!following) return;
@@ -1161,7 +1161,7 @@ export function RequestSyncAgain({
   const what = type === 'contacts' ? 'contacts' : 'history';
 
   return (
-    <form action={formAction} className="inline-flex flex-col items-start gap-1">
+    <form {...form} className="inline-flex flex-col items-start gap-1">
       <input type="hidden" name="channelId" value={channelId} />
       <input type="hidden" name="syncType" value={type} />
       <SubmitButton

@@ -5,7 +5,6 @@ import { Button, Card, ErrorText } from '@/components/ui';
 import type { ActionState } from '@/lib/http/action-state';
 import { SubmitButton } from '@/components/submit-button';
 import { useActionForm } from '@/components/use-action-form';
-import { useRefreshOnSuccess } from '@/components/use-refresh-on-success';
 
 /**
  * The shape every admin editor shares: a disclosure that opens a form, submits
@@ -29,8 +28,7 @@ export function EditorForm({
   submitLabel: string;
   onSaved?: () => void;
 }) {
-  const { state, form } = useActionForm(action, INITIAL);
-  useRefreshOnSuccess(state, onSaved);
+  const { state, form } = useActionForm(action, INITIAL, { onSuccess: onSaved });
 
   return (
     <form {...form} className="flex flex-col gap-3">
@@ -149,7 +147,6 @@ export function DangerAction({
 }) {
   const [state, formAction] = useActionState(action, INITIAL);
   const [armed, setArmed] = useState(false);
-  useRefreshOnSuccess(state);
 
   return (
     <form action={formAction} className="inline-flex flex-col items-end gap-1">

@@ -4782,8 +4782,9 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
       `action` would send its fields to the page's own URL as a query string.
       That one replayed submission takes React's own path, reset included.
     - Only a success moves its `key`. A success is what `ok()` answers; one
-      without a nonce is given a fresh one, so the key and everything keyed on
-      it still move. Any other answer keeps the nonce the state already had.
+      without a nonce is given a fresh one, so the key still moves, and so
+      does the hook's `onSuccess`, keyed on it since §6.89. Any other answer
+      keeps the nonce the state already had.
     - An action that throws becomes a refusal saying no answer came back, with
       the draft kept and the page re-read in case it landed. The forms whose
       retry reaches a customer or a hub (reply, template, both side
@@ -5267,6 +5268,93 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     its own under `scripts/ci/rules/`, refusing an instrumentation file that
     does not keep both hosts out, rather than in `credential-confinement`,
     which is about the stored credential.
+
+89. **A console save's success refresh rendered its page a second time, and
+    that render went round the ticket page's backpressure.** _2026-10-09._ Forms
+    ran `router.refresh()` after a successful action, through
+    `useRefreshOnSuccess` and by hand at eleven direct-call sites. But Next 16
+    renders the current page into a server action's own response whenever the
+    action revalidated anything (`pathWasRevalidated`, `action-handler.js`),
+    and the client applies it with the answer, so by the time the refresh ran
+    the page was already fresh. Measured on a minimal app built against this
+    repo's Next 16.3.1, `next build` + `next start`, driven by Chromium:
+    - an action that revalidates its page: two full renders per submit with the
+      refresh (one inside the POST, then a `?_rsc=` GET), one without, and the
+      screen updated either way — a form's success effect already saw the new
+      value;
+    - the same counts when the action revalidates a _different_ path
+      (`revalidate.js`: "TODO: only revalidate if the path matches"), and when
+      it is awaited directly in a click handler rather than submitted by a form
+      (`callServer` dispatches in a transition either way) — though there the
+      await resolves before the new page commits, so code after it still sees
+      the old page;
+    - for a direct call, the refresh after the await also held the screen
+      back: with page renders slowed to a second, the new value appeared at
+      about 1,050–1,120 ms with it and 45–120 ms without, because the refresh's
+      update renders together with the action's;
+    - an action that revalidates nothing: no render, and the screen stays stale
+      without a refresh. That is the only case a refresh did any work;
+    - with verbatim copies of `LiveUpdates` and its scheduler, a ticket-page send
+      cost three renders with the refresh and two without, and at 800 ms per
+      render the refresh and the scheduler's were in flight together — the
+      overlap entry 23's single-flight scheduler exists to prevent.
+
+    Production is consistent with it without pinning it to one call site:
+    action POSTs on `/inbox/<n>` come back at 17–26.5 KB, a page's worth (the
+    minimal app's bare answer was about 120 B), and on 2026-09-26 one POST on
+    `/inbox/13859` was followed by two RSC GETs within a second — the action, an
+    immediate refresh, then the scheduler's. `use-field-action` refreshed the
+    same way, so either could have been the second.
+
+    So the success refresh is gone: `useRefreshOnSuccess` was deleted, what a
+    form does next is `useActionForm`'s `onSuccess`, and the direct-call sites
+    re-read nothing on a success. A refusal that returns before anything is
+    written revalidates nothing, so a control that shows no error, and whose
+    refusal means the screen is out of date — the ticket no longer the agent's
+    to see, the category gone, the permission revoked — still re-reads it then
+    (`rereadOnRefusal`). Where a refusal means the action itself found the page
+    stale, the action revalidates instead: `refreshShipment` does for a
+    shipment unlinked or gone, as it already did for `not_found`. And
+    `useActionForm` still re-reads when no answer comes back at all, since a
+    dropped connection brings no page. Forms that never refreshed — the agents
+    and channels admin, availability, the KB sidebar — were always one render.
+    Four things turned up on the way:
+    - **One success revalidated nothing.** `deleteField` answered `ok()` early
+      when the row was already gone, so the client refresh was the only thing
+      that cleared a field another admin had deleted. It revalidates now, and the
+      `action-revalidates` repo rule refuses any success an action answers —
+      `ok()`, or `{ error: null }` outside the help centre — without a
+      `revalidatePath`, a `redirect` or the shared `refresh()` before it on
+      every branch that reaches it. A helper counts only if it revalidates
+      before it can return, so `requireAgent()`, whose `redirect` is on the
+      branch that never returns, does not. The rule cannot check _which_ path:
+      everything here relies on Next re-rendering the current page whatever
+      path was named, and if that TODO is ever done, an action revalidating a
+      path other than its page's will leave that page stale.
+    - **Four of the hook's thirteen callers never ran it.** A form whose row
+      leaves the page on success — `DangerAction` on a real delete, a merge
+      row, comment moderation, thread control — unmounts in the commit that
+      delivers the answer, so its success effect never fired. The page
+      refreshed through the action all along. `DangerAction` did stay mounted,
+      and refresh, on `deleteSlaPolicy`'s deactivate branch and on
+      `deleteField`'s already-gone one.
+    - **Thread control's success message was never on screen.** The control is
+      replaced by the reply box when the re-read page arrives, and in every
+      timing the harness tried the sentence it returned was painted in zero
+      frames. The action now answers `ok()`; refusals, the case the control's
+      docblock is about, are unchanged.
+    - **The sidebar's refresh-shipment button rendered `not_found` twice.** The
+      action revalidated and the button refreshed as well. The button now
+      leaves its refusals to the action.
+
+    The real console was not exercised end to end — there is no database in the
+    session that measured this — so every call site was checked by reading which
+    path its action revalidates, against the behaviour measured above. The
+    hook's side is tested: `components/use-action-form.test.ts`, the repo's
+    first DOM test (happy-dom, for that file only), fails on each way the
+    contract has gone or could go wrong — the callback as an effect dependency,
+    keying on `ok` alone, a refresh after a success, a bare `action=`, and a
+    refusal that moves the key.
 
 ## 7. Verification already done
 

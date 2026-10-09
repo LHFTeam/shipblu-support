@@ -5,7 +5,6 @@ import { addNote } from '../../reply-actions';
 import { INITIAL } from './form-state';
 import { SubmitButton } from '@/components/submit-button';
 import { useActionForm } from '@/components/use-action-form';
-import { useRefreshOnSuccess } from '@/components/use-refresh-on-success';
 
 export function NoteForm({
   conversationId,
@@ -14,8 +13,7 @@ export function NoteForm({
   conversationId: string;
   onSent?: () => void;
 }) {
-  const { state, key, form } = useActionForm(addNote, INITIAL);
-  useRefreshOnSuccess(state, onSent);
+  const { state, key, form } = useActionForm(addNote, INITIAL, { onSuccess: onSent });
 
   return (
     <form key={key} {...form} className="flex flex-col gap-2">

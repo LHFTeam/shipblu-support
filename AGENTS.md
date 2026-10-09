@@ -286,6 +286,21 @@ passes `{ lost: 'errorNoAnswer' }`. The type insists on that last: the hook's
 own sentence is not a key, `t()` finds nothing for it, and the customer would be
 told nothing at all.
 
+**An action's revalidation is what refreshes the page; the form does not.** Next
+renders the current page into a server action's response whenever the action
+revalidated anything — whatever path it named — and the client applies it with
+the answer. So nothing re-reads the page after a success: a `router.refresh()`
+there is a second full render, and on a ticket page it ran beside
+`LiveUpdates`' own (§6.89). What a form does next — close an editor, put a
+composer away — goes in `useActionForm`'s `onSuccess`. The other side of it is
+that an action answering success without revalidating leaves the screen as it
+was, and the `action-revalidates` repo rule refuses that: every success an
+action answers (`ok()`, or `{ error: null }` outside the help centre) comes after
+a `revalidatePath`, a `redirect` or the shared `refresh()` on every branch that
+reaches it. A refusal that returns before anything is written revalidates
+nothing, so a control that shows no error, and whose refusal means the screen is
+out of date, re-reads it then (`rereadOnRefusal` in `useFieldAction`).
+
 **Authorisation lives in code.** `proxy.ts` only checks that a session cookie
 exists; it cannot tell a revoked session from a live one. It runs on Node.js in
 Next 16, not the Edge, so that is a choice rather than a limit — its header says
@@ -1077,6 +1092,17 @@ that needs Postgres is a `*.db.test.ts`, below. Put tests where bugs actually
 hide — email threading order, quote stripping, the WhatsApp 24-hour boundary,
 business hours across DST, Arabic slugs, the condition language — not on glue
 code. Add one when you fix a bug of that kind.
+
+**A test that needs a DOM opts in, one file at a time.** `// @vitest-environment
+happy-dom` on its first line gives that file happy-dom and leaves every other
+test in node. It is still a `*.test.ts`, because that is all vitest collects, so
+it builds elements with `createElement` rather than JSX, and it drives React with
+React's own `act` and `createRoot` — no testing library. Mock `next/navigation`
+through `vi.hoisted`, since `vi.mock` runs before the module's own lines.
+`components/use-action-form.test.ts` is the first, and holds the hook to what
+§6.80 and §6.89 cost to learn. happy-dom is not a browser: the form-reset bug
+was found in Chromium and only reproduced here afterwards, so behaviour that
+depends on a real engine is still measured in one before it is relied on.
 
 **`npm run test` runs without a database, so no SQL is executed there.** A query
 Postgres will reject still passes every static check: `tsc` type-checks the

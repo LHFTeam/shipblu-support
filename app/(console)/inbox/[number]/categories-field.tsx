@@ -189,7 +189,7 @@ function ReviewButton({
   label: string;
   glyph: string;
 }) {
-  const { pending: busy, run: submit } = useFieldAction(action, { refresh: 'always' });
+  const { pending: busy, run: submit } = useFieldAction(action, { rereadOnRefusal: true });
 
   async function run() {
     await submit({ conversationId, categoryId });
@@ -323,7 +323,8 @@ function RootCausePicker({
   /*
    * Held locally as well as in the prop, because a `<select>` whose value comes
    * only from the server snaps back to the old option the instant it is
-   * changed and stays there until the action and the refresh both land. On a
+   * changed and stays there until the action's answer, and the page it brings
+   * back, land. On a
    * `force-dynamic` page that is long enough to read as "it did not take", and
    * an agent's second attempt writes the same value twice.
    *

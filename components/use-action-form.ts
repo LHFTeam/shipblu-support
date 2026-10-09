@@ -1,6 +1,6 @@
 'use client';
 
-import { startTransition, useActionState, type FormEvent } from 'react';
+import { startTransition, useActionState, useEffect, useEffectEvent, type FormEvent } from 'react';
 import { unstable_rethrow, useRouter } from 'next/navigation';
 import type { ActionState } from '@/lib/http/action-state';
 
@@ -46,8 +46,8 @@ const LOST =
  *   back, it turned the key from the last success's back to 0 and the remount
  *   wiped the form just as the reset did, on the second send rather than the
  *   first. A success is what `ok()` answers, `ok: true`; one that arrives
- *   without a nonce is given a fresh one, so the key still moves. Anything
- *   else keeps the nonce it found.
+ *   without a nonce is given a fresh one, so the key still moves and
+ *   `onSuccess` still runs. Anything else keeps the nonce it found.
  * - **An action that throws becomes a refusal.** Without this, `useActionState`
  *   rethrows it while rendering, the console falls through to `global-error`,
  *   and the draft goes with it. Next's own redirect and not-found go through
@@ -59,6 +59,17 @@ const LOST =
  * through React's own path, reset and all, which is the bug this exists to
  * close. The `form-reset` repo rule refuses a form anywhere under `app/` that
  * does that.
+ *
+ * `onSuccess` is what a form does next: an admin editor closes, a composer on a
+ * phone puts itself away. It runs once per success, after the commit that
+ * delivers the answer, and not at all if that commit unmounts the form — a row
+ * the success removed takes its form with it. Nothing here re-reads the page:
+ * an action that revalidates has the re-rendered page sent back with its
+ * answer, and a `router.refresh()` after it was a second full render (§6.89).
+ * It is read as an effect event, so an inline function is fine, and keyed on
+ * the nonce, which only a success moves. A form whose `error` is a key takes
+ * no `onSuccess`: no help-centre action answers `ok: true`, so it would never
+ * run.
  */
 export function useActionForm<State extends ActionState>(
   action: (state: Awaited<State>, formData: FormData) => Promise<State>,
@@ -67,6 +78,7 @@ export function useActionForm<State extends ActionState>(
 ): { state: Awaited<State>; key: number; form: FormHandlers; pending: boolean } {
   const router = useRouter();
   const lost: string = options?.lost ?? LOST;
+  const succeeded = useEffectEvent(() => options?.onSuccess?.());
 
   async function answer(previous: Awaited<State>, formData: FormData) {
     try {
@@ -78,13 +90,18 @@ export function useActionForm<State extends ActionState>(
       ) as Awaited<State>;
     } catch (error) {
       unstable_rethrow(error);
-      // If it did land, this is what puts it on the page the error points at.
+      // If it did land, this is what puts it on the page the error points at:
+      // an action that never answered sent no page back.
       router.refresh();
       return { error: lost, nonce: previous.nonce } as Awaited<State>;
     }
   }
 
   const [state, dispatch, pending] = useActionState(answer, initial);
+
+  useEffect(() => {
+    if (state.ok) succeeded();
+  }, [state.ok, state.nonce]);
 
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -111,8 +128,8 @@ export function useActionForm<State extends ActionState>(
  */
 type Options<State extends ActionState> =
   string extends NonNullable<State['error']>
-    ? [options?: { lost?: string }]
-    : [options: { lost: NonNullable<State['error']> }];
+    ? [options?: { lost?: string; onSuccess?: () => void }]
+    : [options: { lost: NonNullable<State['error']>; onSuccess?: never }];
 
 /** Spread onto the `<form>`; a component rendering it for a parent takes this. */
 export type FormHandlers = {

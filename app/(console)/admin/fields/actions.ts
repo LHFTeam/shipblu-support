@@ -154,8 +154,14 @@ export async function deleteField(
     .where(eq(ticketFields.id, id))
     .limit(1);
 
+  // Already gone — another admin deleted it. Still revalidated, because the
+  // page this was pressed on lists it, and only a revalidated page comes back
+  // with the answer.
   const key = rows[0]?.key;
-  if (!key) return ok();
+  if (!key) {
+    refresh('/admin/fields');
+    return ok();
+  }
 
   // A form naming a field that is gone renders one question fewer, silently.
   // That is the right runtime behaviour — see `parseFormElements` — and the

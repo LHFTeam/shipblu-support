@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { Badge, Cell, Row } from '@/components/ui';
 import { saveCategory, saveRootCause, setCategoryActive, setRootCauseActive } from './actions';
 
@@ -25,7 +24,6 @@ function useLabelEditor(
   save: (state: { error: string | null }, formData: FormData) => Promise<{ error: string | null }>,
   id: string,
 ) {
-  const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(initial);
   const [busy, setBusy] = useState(false);
@@ -45,7 +43,6 @@ function useLabelEditor(
       return;
     }
     setEditing(false);
-    router.refresh();
   }
 
   function cancel() {
@@ -54,7 +51,7 @@ function useLabelEditor(
     setEditing(false);
   }
 
-  return { editing, setEditing, draft, setDraft, busy, error, commit, cancel, router };
+  return { editing, setEditing, draft, setDraft, busy, error, commit, cancel };
 }
 
 export function CategoryRow({
@@ -91,11 +88,7 @@ export function CategoryRow({
       formData.set('id', category.id);
       formData.set('active', category.isActive ? 'false' : 'true');
       const result = await setCategoryActive({ error: null }, formData);
-      if (result.error) {
-        setToggleError(result.error);
-        return;
-      }
-      editor.router.refresh();
+      if (result.error) setToggleError(result.error);
     } catch {
       setToggleError('That did not save — reload the page and try again');
     } finally {
@@ -236,11 +229,7 @@ export function RootCauseRow({
       formData.set('id', cause.id);
       formData.set('active', cause.isActive ? 'false' : 'true');
       const result = await setRootCauseActive({ error: null }, formData);
-      if (result.error) {
-        setToggleError(result.error);
-        return;
-      }
-      editor.router.refresh();
+      if (result.error) setToggleError(result.error);
     } catch {
       setToggleError('That did not save — reload the page and try again');
     } finally {
