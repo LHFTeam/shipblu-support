@@ -12,8 +12,8 @@ import { boolean, index, pgTable, text, timestamp, uniqueIndex, uuid } from 'dri
  * one in conversation, one in a mail client.
  *
  * One thing points at it: `side_conversations.location_id`, the hub a thread
- * was sent to — which is why deleting a row goes through
- * `lib/locations/remove.ts`. Otherwise nothing in this system routes on a
+ * was sent to — which is why deleting a row goes through `removeEntry` in
+ * `lib/side-conversations/directory.ts`. Otherwise nothing in this system routes on a
  * location, no agent carries one, and no ticket is attributed to one: this is
  * the register of what exists, entered once, so that whichever of those lands
  * next has a real row to point at instead of a free-text hub name typed a

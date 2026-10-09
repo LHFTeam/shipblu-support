@@ -1064,10 +1064,16 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   is `on delete set null` and would quietly strip the hub from a real thread,
   leaving only the address in `to_addresses`. That check is the SQL's to make by
   hand; the Delete button on `/admin/locations` makes it itself. `deleteLocation`
-  goes through `removeLocation` (`lib/locations/remove.ts`), which locks the row,
-  counts the threads, and marks a hub any thread has used not operating instead
-  of deleting it — the rule `deleteInternalRecipient` already applied to the
-  picker's other register.
+  goes through `removeEntry` (`lib/side-conversations/directory.ts`), which
+  locks the row, counts the threads, and marks a hub any thread has used not
+  operating instead of deleting it — the same function, and so the same rule,
+  `deleteInternalRecipient` applies to the picker's other register. Starting a
+  thread reads its hub or recipient when Send is pressed, which already refused
+  one removed while the agent wrote, and now reads it again under a share lock
+  (`holdEntry`) inside the insert's transaction. That second read covers the
+  moment between the first and the insert: before it, a hub deleted there died
+  on the foreign key and the composer said the send "may or may not have been
+  sent" when nothing was written, and one retired there was sent to anyway.
 
 - ~~**SLA policies and automation rules are both empty.**~~ `sla_policies` holds
   **4** rows and `automation_rules` **1** as of 2026-09-20, so neither cron runs
@@ -4675,10 +4681,11 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     Its `form` is spread onto the element, `<form {...form}>`, rather than
     wired as `action` and `onSubmit`: a form given only `action` still submits,
     through React's own path, reset and all. The `form-reset` repo rule refuses
-    a console form with a function `action`, no spread and no `onSubmit`, that
-    holds a field a reset moves. Run against `main` before this change it named
-    15 of the converted forms; it cannot see a field another component renders
-    (`EditorForm`'s children, `Toggle`).
+    a form with a function `action`, no spread and no `onSubmit`, that holds a
+    field a reset moves. Run against `main` before this change it named 15 of
+    the converted forms; it cannot see a field another component renders
+    (`EditorForm`'s children, `Toggle`). It read only the console until the
+    help centre and the sign-in pages followed, below.
 
     Converted: the composer's reply, note, template and both side-conversation
     forms; the new-ticket form; `EditorForm`, and with it every admin editor
@@ -4729,8 +4736,9 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     nothing for a reset to move (`DangerAction`, thread control, profile
     refresh, comment moderation, the article status, restore and delete
     buttons, merge rows, the availability switches, the import and backfill
-    buttons, agent activate). The purge panel stays too, because its one typed
-    field is controlled and a reset leaves it alone. Those forms still get
+    buttons, agent activate, and the help centre's sign-out). The purge panel
+    stays too, because its one typed field is controlled and a reset leaves it
+    alone. Those forms still get
     React's reset, and it changes nothing in them. Nothing else in the console
     resets a form: there is no reset button and no `requestFormReset` call. So
     a converted form's controlled select cannot drift from what it submits.
@@ -4743,19 +4751,85 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     stays in the box rather than being put back, and resending it on every
     focus change repeated the refusal.
 
-    **Not changed: the help centre and the sign-in pages**, which this fix's
-    scope, the agent console, left out. Measured the same way on the same day,
-    every one of them reproduces. The ones that matter: the portal's reply box
-    empties a customer's whole reply when the ticket was closed while they
-    typed; the portal's new-ticket form wipes everything and puts an edited
-    subject back to the one it was opened with; registration empties the name,
-    email and password for an address the browser accepts and the server
-    refuses (`mona@shipblu`); both sign-in forms empty the email after a wrong
-    password; and the agent invite puts a corrected name back to the admin's
-    spelling, which a resend then writes onto the agent row. The help centre's
-    ticket form keeps its typed text, which is controlled, and loses its
-    dropdowns and ticks. The hook fits all of them: their `error` is a
-    `StringKey`, which is a string.
+    **The help centre and the sign-in pages followed on 2026-10-07.** The
+    console fix had left them out, and every one of them reproduced. The
+    portal's reply box emptied a customer's whole reply when the ticket was
+    closed while they typed. The portal's new-ticket form wiped everything and
+    put an edited subject back to the one it was opened with, so a ticket sent
+    again was stored without whichever answers the customer did not retype.
+    Registration emptied the name, email and password for an address the
+    browser accepts and the server refuses (`mona@shipblu`). Both sign-in forms
+    emptied the email after a wrong password. The agent invite put a corrected
+    name back to the admin's spelling, and the resend wrote that spelling onto
+    the agent row. Setup and the password reset emptied their fields; setup's
+    are `required`, so a refused first admin could not be resubmitted without
+    retyping them. The help centre's ticket form kept its typed text, which is
+    controlled, and lost its dropdowns, ticks and files under the state still
+    describing them. And an action that never answered took the form to the
+    error page, the draft with it, as it had the console's.
+
+    All ten now submit through `useActionForm`, spread as `<form {...form}>`,
+    the forgot-password form included: it has no realistic refusal, but
+    converting it cost nothing. None takes the key, because every success
+    leaves the form behind: a redirect, or the check-your-email panel in its
+    place.
+    - The portal reply is the one success that comes back to its own route
+      and renders the same form again (`?replied=1`); the anonymous ticket form
+      comes back to its own too (`?submitted=N`), but its page renders the
+      confirmation in place of the form. The router keeps a page mounted across
+      a change of search params, and the reply box empties anyway, and always
+      did: a server action's redirect rejects the action with a redirect error
+      marked handled, and `RedirectErrorBoundary` catches it in order to
+      remount the subtree. React's reset was never what cleared it.
+    - The two sign-in forms keep the address and still empty the password on a
+      refusal, which is what the reset did to it. A wrong password is usually
+      a near miss of the right one, and left in the box it can be revealed by
+      whoever sits down next. An effect clears it on the node rather than a key
+      remounting it, so focus stays in the box an Enter was pressed in, and
+      only on a refusal, so the initial state cannot wipe a password already
+      in the box when the form hydrates, which is where an autofill lands.
+    - A thrown action's refusal carries a `StringKey` in the help centre. The
+      hook's own sentence is English and not a key: `t()` looked it up, got
+      `undefined`, and `ErrorText` rendered nothing, so with the request
+      aborted the Arabic reply box and sign-in kept the draft and said nothing
+      at all. A form whose `error` is narrower than `string` must now pass
+      `{ lost }`, typed as that narrower key, and the help centre passes
+      `errorNoAnswer`.
+
+    `form-reset` now reads everything under `app/`, not only the console. Run
+    against the forms before this change it named nine of the ten; the tenth,
+    the help centre's ticket form, renders its fields through
+    `TicketFieldInput`, which it cannot see into. A `{`/${locale}/search`}`
+    action is a URL like a string one, so the search and tracking boxes pass.
+
+    One thing the hook costs every form it serves, and these more than the
+    console's, which needs JavaScript anyway: posting without it. To catch a
+    thrown action the hook hands React a client function rather than the server
+    action, so the server renders the form with a `javascript:` action where it
+    used to render a `POST` to the action. A submission made while the page is
+    still loading is captured and replayed once React arrives; one made with
+    JavaScript off does nothing. Keeping both would change the hook every
+    console form uses: a second `useActionState` over the server action
+    itself, handed to the form as `action` and seeding the wrapped one, would
+    let the server render the post again and still show its answer.
+
+    Measured twice. First on #338, where the conversion was written against the
+    hook as it stood before #337 (a positional third argument, not `{ lost }`):
+    a scratch harness of the ten real components on React's development and
+    production builds, 244 checks per build, the forms before failing the same
+    86 on each and the conversion none; and the real app against a local
+    Postgres under `next dev` and `next start`, with real refusals and a
+    database read after each success, 145 checks per build, the forms before
+    failing the same 54. Then again after the port onto `main`'s hook, under
+    `next start` in Chromium: setup refused and corrected, the console sign-in
+    refused and with its request aborted, the portal sign-in the same in
+    Arabic, and registration refusing `mona@shipblu` — 16 of 16. The same
+    script against `main` passed 6: setup emptied the name and email, so the
+    corrected submission could not be sent, and every console sign-in check
+    after it ran against `/setup` instead; the portal sign-in emptied the
+    email, and with the request aborted showed no message and lost the email;
+    registration emptied all three fields. The only page errors in the
+    converted run were the two aborted requests themselves.
 
     Generally: assume a native reset is a desync, not a clear. The default a
     controlled `<select>` or checkbox carries is the one it was rendered with,
