@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import {
   boolean,
   date,
@@ -689,6 +690,11 @@ export const cannedResponses = pgTable(
  * ordinary case: a Business Manager with several WABAs installs one app on all
  * of them and one system-user token serves the lot.
  *
+ * The one exception is a token Meta minted through Embedded Signup, which no
+ * person holds and no variable can name. That is stored — sealed, and in
+ * `whatsapp_account_credentials` below rather than on this row, because this
+ * row is read with a star select and spread into a page's props.
+ *
  * What is deliberately *not* per-account is the app secret and the verify
  * token. Those belong to the Meta app, not to the business account, and
  * `X-Hub-Signature-256` is verified with a single secret in
@@ -707,7 +713,9 @@ export const whatsappAccounts = pgTable(
 
     /**
      * Name of the environment variable holding this account's access token.
-     * Null uses `META_PAGE_ACCESS_TOKEN`. Constrained to a prefix in
+     * Null uses `META_PAGE_ACCESS_TOKEN`, unless a sealed credential is stored
+     * for the account, which wins over both — and storing one clears this, so a
+     * row never names two sources. Constrained to a prefix in
      * `lib/whatsapp/accounts.ts` — an admin naming an arbitrary variable would
      * otherwise be choosing which of the process's secrets gets sent to Meta as
      * a bearer token.
@@ -744,11 +752,253 @@ export const whatsappAccounts = pgTable(
 );
 
 /**
+ * The one Meta credential this database holds: a WhatsApp business token,
+ * sealed — as `invites.token_ciphertext` seals an invite link, but under a key
+ * of its own.
+ *
+ * Everything else here names its credential (`tokenEnvVar` above). A token
+ * minted by Meta's Embedded Signup cannot be named — Meta hands it to the server
+ * for a business account the signup may have just created, and no person ever
+ * holds it — so the alternative to storing it was a step on Render per number,
+ * during which a newly connected number answers nobody. `plans/
+ * whatsapp-coexistence.md` has that decision and the alternatives it rejected.
+ *
+ * What keeps "a dump contains no usable credential" true is that `envelope` is
+ * AES-256-GCM under `WHATSAPP_CREDENTIAL_KEY`, which lives in the environment
+ * group and never here, with the account and WABA id in its authenticated data
+ * (`lib/whatsapp/credential-envelope.ts`). Its own table rather than a column
+ * on `whatsapp_accounts`, because that row is read with a star select and its
+ * fields spread into the admin page's props: a column there would be one
+ * refactor away from an RSC payload.
+ *
+ * `lib/whatsapp/credentials.ts` is the only module that names this table, and
+ * CI holds it to that (`credential-confinement`): no other module may select
+ * from it, and that one never selects a whole row; that it names `envelope`
+ * only where it opens it is review's.
+ *
+ * One row per account, keyed on the account and cascading with it: a credential
+ * has no meaning once the account it reaches is gone, and keeping one would be
+ * keeping a live token for nothing. The audit of what happened to it survives
+ * in `whatsapp_credential_events`.
+ */
+export const whatsappAccountCredentials = pgTable('whatsapp_account_credentials', {
+  whatsappAccountId: uuid('whatsapp_account_id')
+    .primaryKey()
+    .references(() => whatsappAccounts.id, { onDelete: 'cascade' }),
+
+  /** `v1.<keyId>.<iv>.<ciphertext>.<tag>`, base64url. Read only to be opened. */
+  envelope: text('envelope').notNull(),
+  /**
+   * The key id inside the envelope, kept beside it so a page can say whether
+   * this deployment holds that key — and the reseal job can find the rows a
+   * rotation has to move — without decrypting anything.
+   */
+  keyId: text('key_id').notNull(),
+  /** How it was obtained. `embedded_signup` is the only writer today. */
+  source: text('source').notNull(),
+
+  /**
+   * What Meta's `debug_token` said about it. Null throughout when the
+   * inspection call itself failed; `inspectedAt` says which, because a null
+   * `expiresAt` otherwise means both "never expires" and "nobody asked".
+   */
+  tokenType: text('token_type'),
+  appId: text('app_id'),
+  scopes: jsonb('scopes').$type<string[]>(),
+  businessId: text('business_id'),
+  issuedAt: timestamp('issued_at', { withTimezone: true }),
+  /** Null with `inspectedAt` set is Meta's `expires_at: 0` — never. */
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+  dataAccessExpiresAt: timestamp('data_access_expires_at', { withTimezone: true }),
+  inspectedAt: timestamp('inspected_at', { withTimezone: true }),
+
+  obtainedByAgentId: uuid('obtained_by_agent_id').references(() => agents.id, {
+    onDelete: 'set null',
+  }),
+  /**
+   * When this token was stored. A reconnect replaces the token on the same row,
+   * so this moves with it where `created_at` would keep the first connection's
+   * date — and "stored on" is the date an admin is asking about.
+   */
+  storedAt: timestamp('stored_at', { withTimezone: true }).notNull().defaultNow(),
+
+  /**
+   * The last time Meta accepted it, and the last time it refused (190), as the
+   * hourly template sync observed them. A refusal after the last success is
+   * what the console badges; a success clears the refusal.
+   */
+  lastVerifiedAt: timestamp('last_verified_at', { withTimezone: true }),
+  lastRefusedAt: timestamp('last_refused_at', { withTimezone: true }),
+  lastRefusal: text('last_refusal'),
+
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type CredentialEventKind = 'stored' | 'resealed' | 'refused' | 'removed';
+
+/**
+ * Everything that happened to a stored credential, and who did it.
+ *
+ * Append-only, and **deliberately not a foreign key to the account or the
+ * credential** — the shape `admin_deletions` takes for the same reason. The
+ * question this answers is asked after the fact: "who removed the credential
+ * for WABA X, and when?" must still have an answer once both the credential row
+ * and the account are gone, so `whatsapp_account_id` is a bare uuid and
+ * `waba_id` carries the identity it can no longer be resolved to.
+ *
+ * `detail` holds what Meta said — type, scopes, expiry, a refusal's sentence —
+ * and never a secret: the module that writes it never puts the token or the
+ * envelope in it, and a refusal is written once per transition rather than
+ * hourly, so the table reads as a history rather than a log.
+ */
+export const whatsappCredentialEvents = pgTable(
+  'whatsapp_credential_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    whatsappAccountId: uuid('whatsapp_account_id').notNull(),
+    wabaId: text('waba_id').notNull(),
+    /** Plain text, typed in code — the convention `admin_deletions.subject` follows. */
+    event: text('event').$type<CredentialEventKind>().notNull(),
+    keyId: text('key_id'),
+
+    /** Null when a job did it rather than a person. */
+    agentId: uuid('agent_id').references(() => agents.id, { onDelete: 'set null' }),
+    /** Kept beside the id so a departed agent is still named. */
+    agentLabel: text('agent_label'),
+
+    detail: jsonb('detail').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('whatsapp_credential_events_account_idx').on(t.whatsappAccountId, t.createdAt)],
+);
+
+export type OnboardingStatus = 'exchanged' | 'connected' | 'failed';
+
+/** The steps the onboarding job takes, in the order it takes them. */
+export const ONBOARDING_STEPS = [
+  'number',
+  'subscribe',
+  'channel',
+  'contacts',
+  'history',
+  'templates',
+] as const;
+export type OnboardingStep = (typeof ONBOARDING_STEPS)[number];
+
+/**
+ * The steps that may be run again on their own, on a number already connected:
+ * the copy, which an admin may ask for again inside its window, and the
+ * template sync. The others change what the connection *is* — run alone, the
+ * channel step would rewrite a live connection's state from nothing — so a
+ * failed one is retried by running the attempt again (`retryOnboarding`).
+ */
+export const RERUNNABLE_STEPS = ['contacts', 'history', 'templates'] as const;
+
+/**
+ * One step's outcome. `ok` with a `warning` is a step that did its job but
+ * found something a person has to do — the app-level webhook fields, today.
+ */
+export type OnboardingStepRecord = {
+  at: string;
+  ok: boolean;
+  /**
+   * A step's result in a word, where a re-run or the page needs it: the
+   * channel's `created`, `connected` or `reconnected`; a copy's `sending` while
+   * its request is out, which is how a retry tells an answer that was lost from
+   * a refusal, and `not_applicable` or `previously_copied` for one that was
+   * deliberately not asked; the number step's `not_on_account` when Meta
+   * listed the account's numbers without this one.
+   */
+  outcome?: string;
+  /** On a reconnect's channel step: what the previous connection copied. */
+  previouslyCopied?: ('contacts' | 'history')[];
+  detail?: string;
+  warning?: string;
+  error?: string;
+};
+
+/**
+ * One attempt to connect a WhatsApp number through Meta's Embedded Signup, and
+ * the progress the admin screen polls while it runs.
+ *
+ * Two phases share the row. The server action that receives Meta's sign-in code
+ * exchanges it, stores the credential and inserts this row as `exchanged` — all
+ * inside the thirty seconds the code lives. Everything after that is the
+ * `complete_coexistence_onboarding` job, which records each step in `steps` as
+ * it lands, so the page can show "subscribed ✓, copying history…" rather than a
+ * spinner, and so a retry skips what already succeeded.
+ *
+ * Also the audit of who connected what, so modelled on `admin_deletions`: the
+ * account and the channel are bare ids beside the WABA and phone number they
+ * were, because the question "who connected this number, and when?" outlives
+ * both rows. The agent and the default group are the exceptions and are
+ * `set null`, with the agent's name kept beside the id.
+ *
+ * **One live attempt per number, enforced by the database.** The partial unique
+ * index makes "already connecting" atomic: two admins pressing the button at
+ * once cannot both insert an `exchanged` row, where a read-then-insert would
+ * let both through. A stale one — its job dead, or never picked up — is marked
+ * `failed` by the next attempt rather than locking the number out.
+ */
+export const whatsappOnboardings = pgTable(
+  'whatsapp_onboardings',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    whatsappAccountId: uuid('whatsapp_account_id').notNull(),
+    wabaId: text('waba_id').notNull(),
+    phoneNumberId: text('phone_number_id').notNull(),
+    /** Null until the job's `channel` step creates or finds the channel. */
+    channelId: uuid('channel_id'),
+    /** What the admin chose for a new channel; a reconnect keeps the channel's own. */
+    defaultGroupId: uuid('default_group_id').references(() => groups.id, {
+      onDelete: 'set null',
+    }),
+
+    status: text('status').$type<OnboardingStatus>().notNull(),
+    steps: jsonb('steps')
+      .$type<Partial<Record<OnboardingStep, OnboardingStepRecord>>>()
+      .notNull()
+      .default({}),
+
+    /**
+     * The job's attempts and when the queue will try again, recorded by the
+     * job before it rethrows a transient failure — so the page can say "Meta
+     * answered 503 on subscribe, retrying in 2 min" instead of spinning.
+     */
+    attempts: integer('attempts').notNull().default(0),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }),
+    lastTransientError: text('last_transient_error'),
+    /** Why it failed, when it did — or `superseded` by a later attempt. */
+    error: text('error'),
+
+    startedByAgentId: uuid('started_by_agent_id').references(() => agents.id, {
+      onDelete: 'set null',
+    }),
+    startedByLabel: text('started_by_label'),
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // The page asks for each number's latest attempt.
+    index('whatsapp_onboardings_phone_idx').on(t.phoneNumberId, t.startedAt.desc()),
+    uniqueIndex('whatsapp_onboardings_live_idx')
+      .on(t.phoneNumberId)
+      .where(sql`${t.status} = 'exchanged'`),
+  ],
+);
+
+/**
  * A configured inbox: one support mailbox, or one WhatsApp number.
  *
  * `config` holds non-secret settings only (addresses, display names, defaults).
- * Credentials stay in environment variables and are referenced by name, so a
- * database dump never contains a usable access token.
+ * Credentials stay out of it: they live in environment variables referenced by
+ * name, or — for a WhatsApp token minted by Embedded Signup — sealed in
+ * `whatsapp_account_credentials` under a key the database never sees. Either
+ * way a database dump contains no usable access token.
  */
 export const channels = pgTable(
   'channels',

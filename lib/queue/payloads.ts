@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { LOCALES } from '@/lib/kb/locale';
+import { RERUNNABLE_STEPS } from '@/db/schema';
 import { PermanentJobError, type ClaimedJob, type JobType } from '@/lib/queue';
 
 /**
@@ -215,6 +216,29 @@ const JOB_PAYLOADS = {
      * reverting every other response the team has edited.
      */
     keys: z.string().optional(),
+  }),
+  rotate_whatsapp_credentials: z.strictObject({
+    /** Open every envelope it would move, and write nothing. */
+    dryRun: z.boolean().optional(),
+  }),
+  // Strict, though code writes it: `npm run job` reaches it too, and a mistyped
+  // `step=history` dropped by a lax schema would run every step instead of one.
+  complete_coexistence_onboarding: z.strictObject({
+    onboardingId: z.uuid(),
+    /**
+     * Run only these steps on a connected number — "copy the history" after
+     * the connection, or the template sync. Only the steps that may be run
+     * alone (`RERUNNABLE_STEPS` says why the others may not). Comma-separated
+     * when typed (`steps=contacts,history`), since `npm run job` hands every
+     * value over as a string.
+     */
+    steps: z
+      .preprocess(
+        (value) =>
+          typeof value === 'string' ? value.split(',').map((step) => step.trim()) : value,
+        z.array(z.enum(RERUNNABLE_STEPS)).nonempty(),
+      )
+      .optional(),
   }),
 } satisfies Partial<Record<JobType, z.ZodType>>;
 

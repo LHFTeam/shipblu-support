@@ -138,11 +138,14 @@ export function DangerAction({
   id,
   label = 'Delete',
   confirmLabel = 'Really delete?',
+  disabled = false,
 }: {
   action: (state: ActionState, formData: FormData) => Promise<ActionState>;
   id: string;
   label?: string;
   confirmLabel?: string;
+  /** Off while something beside it must not be undone underneath — armed or not. */
+  disabled?: boolean;
 }) {
   const [state, formAction] = useActionState(action, INITIAL);
   const [armed, setArmed] = useState(false);
@@ -152,9 +155,15 @@ export function DangerAction({
     <form action={formAction} className="inline-flex flex-col items-end gap-1">
       <input type="hidden" name="id" value={id} />
       {armed ? (
-        <SubmitButton idle={confirmLabel} variant="danger" />
+        <SubmitButton idle={confirmLabel} variant="danger" disabled={disabled} />
       ) : (
-        <Button type="button" variant="ghost" size="sm" onClick={() => setArmed(true)}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => setArmed(true)}
+          disabled={disabled}
+        >
           {label}
         </Button>
       )}

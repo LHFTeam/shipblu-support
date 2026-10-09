@@ -22,6 +22,7 @@ import { checkDbJobs } from './rules/db-jobs.mjs';
 import { checkPostMigrationSql } from './rules/db-sql.mjs';
 import { checkNoForceRls } from './rules/force-rls.mjs';
 import { checkShipmentPayloadConfinement } from './rules/shipment-payload.mjs';
+import { checkCredentialConfinement } from './rules/credential-confinement.mjs';
 import { checkServerActions } from './rules/server-actions.mjs';
 import { checkSanitiserConfinement } from './rules/sanitiser.mjs';
 import { checkArticleNormalisation } from './rules/article-normalisation.mjs';
@@ -61,6 +62,7 @@ export const RULES = [
   ['db-sql', checkPostMigrationSql],
   ['force-rls', checkNoForceRls],
   ['shipment-payload', checkShipmentPayloadConfinement],
+  ['credential-confinement', checkCredentialConfinement],
   // ---------------------------------------------------------------------------
   // Source conventions that are one grep away from being enforced
   // ---------------------------------------------------------------------------

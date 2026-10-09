@@ -36,6 +36,8 @@ export type JobType =
   | 'normalise_kb_formatting'
   | 'seed_console_handbook'
   | 'seed_canned_responses'
+  | 'rotate_whatsapp_credentials'
+  | 'complete_coexistence_onboarding'
   | 'cleanup';
 
 export type EnqueueOptions = {
@@ -336,14 +338,35 @@ export class PermanentJobError extends Error {
 }
 
 /**
- * Exponential backoff with a 1-hour ceiling: 10s, 40s, 90s, ... A job that has
- * used all its attempts becomes 'dead' rather than being deleted, so failures
- * stay visible and can be inspected and replayed. A `PermanentJobError` goes
- * there on its first attempt.
+ * How long the queue waits before the next attempt, after `attempts` have run:
+ * exponential, with a 1-hour ceiling — 10s, 40s, 90s, …
+ *
+ * Exported for a handler that records on its own row when it will be retried,
+ * so what it tells a person and what the queue does cannot drift apart.
+ */
+export function retryDelaySeconds(attempts: number): number {
+  return Math.min(10 * attempts ** 2, 3600);
+}
+
+/**
+ * Whether this attempt is the job's last: if it fails, the job goes `dead`.
+ *
+ * For a handler that must leave its own row in a final state rather than
+ * mid-way — `failJob` decides the same thing the same way.
+ */
+export function isFinalAttempt(job: Pick<ClaimedJob, 'attempts' | 'maxAttempts'>): boolean {
+  return job.attempts >= job.maxAttempts;
+}
+
+/**
+ * Exponential backoff with a 1-hour ceiling (`retryDelaySeconds`). A job that
+ * has used all its attempts becomes 'dead' rather than being deleted, so
+ * failures stay visible and can be inspected and replayed. A
+ * `PermanentJobError` goes there on its first attempt.
  */
 export async function failJob(job: ClaimedJob, error: unknown): Promise<boolean> {
   const message = error instanceof Error ? `${error.message}\n${error.stack ?? ''}` : String(error);
-  const exhausted = error instanceof PermanentJobError || job.attempts >= job.maxAttempts;
+  const exhausted = error instanceof PermanentJobError || isFinalAttempt(job);
 
   // Only over this attempt's own claim: a failure reported after the job was
   // reclaimed and run again would otherwise overwrite that run's row.
@@ -356,7 +379,7 @@ export async function failJob(job: ClaimedJob, error: unknown): Promise<boolean>
     return updated.length > 0;
   }
 
-  const backoffSeconds = Math.min(10 * job.attempts ** 2, 3600);
+  const backoffSeconds = retryDelaySeconds(job.attempts);
 
   const updated = await db
     .update(jobs)

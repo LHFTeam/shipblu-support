@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversations } from '@/db/schema';
 import { withTestEnv } from '@/lib/testing/env';
-import { firstAt, latest } from './latest';
+import { earliest, firstAt, latest } from './latest';
 
 /**
  * The fast half of the check AGENTS.md asks of any `sql` fragment holding an
@@ -49,6 +49,21 @@ describe('firstAt', () => {
     expect(text).toContain(
       '"first_auto_replied_at" = coalesce("conversations"."first_auto_replied_at", $',
     );
+    expect(text).toContain('::timestamptz');
+  });
+});
+
+describe('earliest', () => {
+  it('moves the column back to the instant and never forward, binding it the same way', () => {
+    const { sql: text, params } = db
+      .update(conversations)
+      .set({ firstRespondedAt: earliest(conversations.firstRespondedAt, AT) })
+      .where(eq(conversations.id, '00000000-0000-0000-0000-000000000000'))
+      .toSQL();
+
+    expect(params.some((param) => param instanceof Date)).toBe(false);
+    expect(params).toContain(AT.toISOString());
+    expect(text).toContain('"first_responded_at" = least("conversations"."first_responded_at", $');
     expect(text).toContain('::timestamptz');
   });
 });

@@ -73,13 +73,22 @@ const INSTRUCTIONS = [
  * the damaged parcel. The model cannot see the photo, so it is not asked about
  * one. The message still counts as the ticket's opening, so the words that
  * follow it may raise and never lower.
+ *
+ * A WhatsApp edit is refused too, whatever it says. Its label wraps the
+ * customer's new words in ours — `[edited a message: …]`, from the same
+ * `displayText` — which `PLACEHOLDER` recognised only when the words fitted on
+ * one line and held no bracket: a two-line edit went to the model with our
+ * wrapper around it, and a one-line one did not go at all. The message it
+ * edits was asked about when it arrived, so skipping every edit is the
+ * consistent half of that, and keeps our label out of what the model reads.
  */
 export function hasCustomerText(bodyText: string): boolean {
   const text = bodyText.trim();
-  return text !== '' && !PLACEHOLDER.test(text);
+  return text !== '' && !PLACEHOLDER.test(text) && !EDIT_LABEL.test(text);
 }
 
 const PLACEHOLDER = /^\[[^\]\n]*\]$/;
+const EDIT_LABEL = /^\[edited a message(?:: [\s\S]*)?\]$/;
 
 export function priorityQuestion(): ChoiceQuestion {
   const criteria: Record<string, string> = {};

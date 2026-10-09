@@ -12,10 +12,13 @@ import { errorMessage } from '@/lib/errors';
  * rather than a page or phone number, and it takes an *app* access token, which
  * the page token cannot stand in for.
  *
- * This is configuration, not traffic. It runs from `npm run job --
+ * This is configuration, not traffic. Its writes run from `npm run job --
  * subscribe_meta_webhooks` and nowhere else, which is why nothing here retries:
  * a person is watching the output, and a failure they can read beats a retry
- * that hides which half of a two-step change actually landed.
+ * that hides which half of a two-step change actually landed. The one other
+ * caller only reads: `complete_coexistence_onboarding` calls
+ * `readSubscription` to name the WhatsApp fields a Business-app number needs
+ * and the app is not subscribed to, which it cannot fix for itself.
  *
  * **A webhook has two subscriptions, not one, and this module writes both.**
  * Meta's own sentence is that "only fields with subscriptions at both the page
@@ -44,40 +47,54 @@ export const INSTAGRAM_OBJECT = 'instagram';
 export const PAGE_OBJECT = 'page';
 
 /**
+ * The `whatsapp_business_account` fields a number on the WhatsApp Business app
+ * needs beyond `messages`: its chat history and contacts as they are copied,
+ * the replies typed on the phone, and the number being disconnected from the
+ * phone and reconnected. The first three are the coexistence guide's step 1;
+ * `account_update` is the reconnect guide's, which needs it to see a number
+ * offboarded and re-onboarded. All four are spelled as the webhooks overview's
+ * field table spells them.
+ *
+ * Their own list as well as part of the required one, because the onboarding
+ * job reads the app's subscription and names which of these are missing — the
+ * one thing it cannot fix for itself, since this job is hand-run.
+ */
+export const COEXISTENCE_WHATSAPP_FIELDS = [
+  'history',
+  'smb_app_state_sync',
+  'smb_message_echoes',
+  'account_update',
+] as const;
+
+/**
  * What the WhatsApp pipeline needs delivered.
  *
  * `messages` carries inbound customer messages *and* delivery statuses, so it is
- * the field the whole channel rests on — it is listed here because this job
- * rewrites the field list wholesale and the merge must be able to prove it is
- * still present, not because anything expects it to be missing. It is the only
- * entry, and the reason there is only one is worth keeping.
+ * the field the whole channel rests on — it is listed because this job rewrites
+ * the field list wholesale and the merge must be able to prove it is still
+ * present, not because anything expects it to be missing.
  *
- * **`message_echoes` was here and has been removed: Meta discontinued it.** It
- * was the bot's half of the transcript — `whatsapp_bot` is a number another
- * service sends on, so without echoes we archive what customers said and
- * nothing said back to them — and that is still a real gap. It is simply not a
- * gap a subscription can close. Attested by the team that owns this
- * integration, and corroborated three ways on 2026-09-21: the field is absent
- * from the `whatsapp_business_account` webhook reference for v23.0, which is
- * the version `GRAPH_VERSION` names (`lib/meta/graph.ts`); Graph refuses a
- * write naming it with `"An unknown error occurred"`, which is what it answers
- * for a field it does not know; and a run of this job against production read
- * back twelve subscribed fields with no trace of it.
+ * The coexistence fields are here because a number can now be operated from
+ * the WhatsApp Business app and Cloud API at once, and each carries something
+ * nothing else does: `smb_message_echoes` the business's replies typed on the
+ * phone, `history` and `smb_app_state_sync` the copy of the phone's chats and
+ * contacts, `account_update` the phone disconnecting. This list used to argue
+ * the opposite — `smb_message_echoes` had been subscribed throughout and
+ * produced 0 of 395,391 stored deliveries, which was the evidence that no
+ * number was operated from the phone. That was true until coexistence, and is
+ * exactly what connecting one changes.
  *
- * Leaving it in cost more than a stale comment. The job is the only way this
- * repo writes a subscription, so a required field Graph rejects makes *every*
- * run fail at the write — including a run somebody starts to add `comments` or
- * `feed` for a different channel. A field list is not a wish list: it is the
- * list this code will refuse to proceed without.
- *
- * `smb_message_echoes` is still deliberately absent, but not for the reason
- * given here before. It covers a business replying from the WhatsApp Business
- * app or a linked companion device — and it is **already subscribed on this
- * app**, where it has produced 0 of 395,391 stored deliveries. So it is not an
- * untried alternative to reach for; it has been on the whole time, and its
- * silence is the evidence that this number is not operated that way.
+ * **A field list is not a wish list.** The job is the only way this repo writes
+ * a subscription, so a name Graph rejects makes *every* run fail at the write —
+ * including one somebody starts for a different channel. `message_echoes` is the
+ * precedent: Meta discontinued it, Graph refused a write naming it with "An
+ * unknown error occurred", and it was removed (2026-09-21; absent from the v23.0
+ * reference, the version `GRAPH_VERSION` names). `smb_message_echoes` is proven
+ * on this app by already being subscribed; the other three are in the webhooks
+ * overview's field table, and the first run after this list grew is on staging
+ * for that reason.
  */
-export const REQUIRED_WHATSAPP_FIELDS = ['messages'] as const;
+export const REQUIRED_WHATSAPP_FIELDS = ['messages', ...COEXISTENCE_WHATSAPP_FIELDS] as const;
 
 /**
  * What the Instagram pipeline needs delivered.

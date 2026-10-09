@@ -15,8 +15,13 @@ import { READ_TIMEOUT_MS, WRITE_TIMEOUT_MS } from '@/lib/http/deadline';
  *
  * Before changing it, read the node reference for the version named here for
  * every edge in `docs/meta-endpoints.md`, as AGENTS.md asks.
+ *
+ * Exported for the one caller that is not a server-side client: the browser's
+ * `FB.init` takes the version too, and Embedded Signup's window is opened on
+ * it. A popup on one version and an exchange on another is the same partial
+ * bump as before, one hop further away. Pure, so the admin page may bundle it.
  */
-const GRAPH_VERSION = 'v23.0';
+export const GRAPH_VERSION = 'v23.0';
 
 export const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
 

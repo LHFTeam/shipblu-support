@@ -286,6 +286,46 @@ const schema = z.object({
   WHATSAPP_WABA_ID: z.string().optional(),
 
   /**
+   * The key that seals the one WhatsApp credential the database stores — a
+   * business token minted by Embedded Signup, which no variable can name — and
+   * the key a rotation is moving away from.
+   *
+   * Its own key rather than one derived from `APP_SECRET`, which signs reply
+   * tokens sitting in customers' mailboxes and so is effectively never rotated;
+   * this one must be rotatable without breaking a single email thread. In the
+   * environment group, never in the database, which is what keeps a dump free of
+   * a usable credential. `lib/whatsapp/credential-envelope.ts` has the format.
+   *
+   * **Plain `z.string().optional()`, and no `min()` here**, for the reason
+   * `LOG_ALL_INCOMING_WEBHOOKS` below gives: `env()` parses this whole schema on
+   * every page and action, so a format rule here would turn one mistyped key
+   * into a console that does not load at all. The format is checked by
+   * `parseKeyring` at first use, where the failure is a sentence about
+   * WhatsApp.
+   *
+   * Neither name starts `WHATSAPP_TOKEN_`, and must not: an admin may type any
+   * such name into an account's token box, and it is then sent to Meta as a
+   * bearer token. A key named that way could be posted to graph.facebook.com.
+   *
+   * `_PREVIOUS` is set only during a rotation (current = new, previous = old,
+   * run `rotate_whatsapp_credentials`, then unset previous).
+   */
+  WHATSAPP_CREDENTIAL_KEY: z.string().optional(),
+  WHATSAPP_CREDENTIAL_KEY_PREVIOUS: z.string().optional(),
+
+  /**
+   * The Facebook Login for Business configuration that opens Meta's Embedded
+   * Signup for a number already on the WhatsApp Business app (coexistence).
+   *
+   * An id, not a secret — the browser hands it to Meta's SDK — but per
+   * environment, because each environment has its own Meta app and a
+   * configuration belongs to one app. Unset means the "Connect a WhatsApp
+   * number" button says what is missing instead of opening a window Meta will
+   * refuse (`coexistenceReadiness` in `lib/whatsapp/onboarding.ts`).
+   */
+  META_EMBEDDED_SIGNUP_CONFIG_ID: z.string().optional(),
+
+  /**
    * Freshdesk, for the knowledge base importer only. Unset means the import
    * job skips rather than fails, so the cron that runs it is green before the
    * migration is scheduled.

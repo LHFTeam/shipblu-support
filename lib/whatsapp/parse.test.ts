@@ -598,3 +598,378 @@ describe('parseWebhook: echoes', () => {
     expect(parsed.echoes.map((e) => e.wamid)).toEqual(['wamid.echo5']);
   });
 });
+
+/**
+ * The four fields a number connected through coexistence adds, each parsed from
+ * Meta's own example payload, copied verbatim from the webhook references
+ * (history, smb_app_state_sync, account_update) and the Business-app
+ * onboarding guide — because the field decides what `messages` means, and a
+ * shape guessed from the syntax block is how a parser comes to read six-month-old
+ * media as live messages.
+ */
+describe('parseWebhook: a number on the WhatsApp Business app', () => {
+  const HISTORY_SAMPLE = {
+    object: 'whatsapp_business_account',
+    entry: [
+      {
+        id: '102290129340398',
+        changes: [
+          {
+            value: {
+              messaging_product: 'whatsapp',
+              metadata: { display_phone_number: '15550783881', phone_number_id: '106540352242922' },
+              history: [
+                {
+                  metadata: { phase: 0, chunk_order: 1, progress: 55 },
+                  threads: [
+                    {
+                      id: '16505551234',
+                      messages: [
+                        {
+                          from: '15550783881',
+                          id: 'wamid.HBgLMTY0NjcwNDM1OTUVAgARGBIyNDlBOEI5QUQ4NDc0N0FCNjMA',
+                          timestamp: '1739230955',
+                          type: 'text',
+                          text: {
+                            body: "Here's the info you requested! https://www.meta.com/quest/quest-3/",
+                          },
+                          history_context: { status: 'READ' },
+                        },
+                        {
+                          from: '15550783881',
+                          id: 'wamid.QyNUEHBgLMTY0NjcwNDM1OTUVAgARGBI1Rj3NEYxMzAzMzQ5MkEA',
+                          timestamp: '1739230970',
+                          type: 'media_placeholder',
+                          history_context: { status: 'PLAYED' },
+                        },
+                        {
+                          from: '16505551234',
+                          id: 'wamid.N0FCNjMAHBgLMTY0NjcwNDM1OTUVAgARGBIyNDlBOEI5QUQ4NDc0',
+                          timestamp: '1739230970',
+                          type: 'text',
+                          text: { body: 'Thanks!' },
+                          history_context: { status: 'READ' },
+                        },
+                      ],
+                    },
+                    {
+                      id: '12125557890',
+                      messages: [
+                        {
+                          from: '15550783881',
+                          id: 'wamid.BIyNDlBOEI5N0FCNjMAHBgLMTY0NjcwNDM1OTUVAgARGQUQ4NDc0',
+                          timestamp: '1739230970',
+                          type: 'text',
+                          text: {
+                            body: 'Thanks for your order! As a thank you, use code THANKS30 to get 30% of your next order.',
+                          },
+                          history_context: { status: 'DELIVERED' },
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+            field: 'history',
+          },
+        ],
+      },
+    ],
+  };
+
+  it('reads a history chunk: both sides of each thread, the customer as the thread', () => {
+    const parsed = parseWebhook(HISTORY_SAMPLE);
+
+    expect(parsed.messages).toEqual([]);
+    expect(parsed.echoes).toEqual([]);
+    expect(parsed.history).toHaveLength(1);
+
+    const [chunk] = parsed.history;
+    expect(chunk).toMatchObject({
+      phoneNumberId: '106540352242922',
+      phase: 0,
+      chunkOrder: 1,
+      progress: 55,
+      declined: null,
+    });
+    expect(
+      chunk!.messages.map(({ customer, direction, type, text, mediaPlaceholder, phoneStatus }) => ({
+        customer,
+        direction,
+        type,
+        text,
+        mediaPlaceholder,
+        phoneStatus,
+      })),
+    ).toEqual([
+      {
+        customer: '16505551234',
+        direction: 'outbound',
+        type: 'text',
+        text: "Here's the info you requested! https://www.meta.com/quest/quest-3/",
+        mediaPlaceholder: false,
+        phoneStatus: 'READ',
+      },
+      {
+        customer: '16505551234',
+        direction: 'outbound',
+        type: 'media_placeholder',
+        text: '[media]',
+        mediaPlaceholder: true,
+        phoneStatus: 'PLAYED',
+      },
+      {
+        customer: '16505551234',
+        direction: 'inbound',
+        type: 'text',
+        text: 'Thanks!',
+        mediaPlaceholder: false,
+        phoneStatus: 'READ',
+      },
+      {
+        customer: '12125557890',
+        direction: 'outbound',
+        type: 'text',
+        text: 'Thanks for your order! As a thank you, use code THANKS30 to get 30% of your next order.',
+        mediaPlaceholder: false,
+        phoneStatus: 'DELIVERED',
+      },
+    ]);
+    expect(chunk!.messages[0]!.sentAt.toISOString()).toBe('2025-02-10T23:42:35.000Z');
+  });
+
+  it('reads the file behind a placeholder as history media, never as a live message', () => {
+    const parsed = parseWebhook({
+      object: 'whatsapp_business_account',
+      entry: [
+        {
+          id: '102290129340398',
+          changes: [
+            {
+              value: {
+                messaging_product: 'whatsapp',
+                metadata: {
+                  display_phone_number: '15550783881',
+                  phone_number_id: '106540352242922',
+                },
+                messages: [
+                  {
+                    from: '16505551234',
+                    id: 'wamid.QyNUEHBgLMTY0NjcwNDM1OTUVAgARGBI1Rj3NEYxMzAzMzQ5MkEA',
+                    timestamp: '1738796547',
+                    type: 'image',
+                    image: {
+                      caption: 'Black Prince echeveria',
+                      mime_type: 'image/jpeg',
+                      sha256: '3f9d94d399fa61c191bc1d4ca71375a035cd9b9f5b1128e1f0963a415c16b0cc',
+                      id: '24230790383178626',
+                    },
+                  },
+                ],
+              },
+              field: 'history',
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(parsed.messages).toEqual([]);
+    expect(parsed.historyMedia).toEqual([
+      {
+        wamid: 'wamid.QyNUEHBgLMTY0NjcwNDM1OTUVAgARGBI1Rj3NEYxMzAzMzQ5MkEA',
+        phoneNumberId: '106540352242922',
+        text: expect.stringContaining('Black Prince echeveria'),
+        media: expect.objectContaining({ mediaId: '24230790383178626', mimeType: 'image/jpeg' }),
+      },
+    ]);
+  });
+
+  it('reads a business declining to share its history', () => {
+    const parsed = parseWebhook({
+      object: 'whatsapp_business_account',
+      entry: [
+        {
+          id: '102290129340398',
+          changes: [
+            {
+              field: 'history',
+              value: {
+                messaging_product: 'whatsapp',
+                metadata: {
+                  display_phone_number: '15550783881',
+                  phone_number_id: '106540352242922',
+                },
+                history: [
+                  {
+                    errors: [
+                      {
+                        code: 2593109,
+                        title:
+                          'History sync is turned off by the business from the WhatsApp Business App',
+                        message:
+                          'History sync is turned off by the business from the WhatsApp Business App',
+                        error_data: { details: 'History sharing is turned off by the business' },
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(parsed.history).toEqual([
+      expect.objectContaining({
+        phoneNumberId: '106540352242922',
+        messages: [],
+        declined: {
+          code: 2593109,
+          message: 'History sync is turned off by the business from the WhatsApp Business App',
+        },
+      }),
+    ]);
+  });
+
+  it('reads an address-book entry from the phone', () => {
+    const parsed = parseWebhook({
+      object: 'whatsapp_business_account',
+      entry: [
+        {
+          id: '102290129340398',
+          changes: [
+            {
+              value: {
+                messaging_product: 'whatsapp',
+                metadata: {
+                  display_phone_number: '15550783881',
+                  phone_number_id: '106540352242922',
+                },
+                state_sync: [
+                  {
+                    type: 'contact',
+                    contact: {
+                      full_name: 'Pablo Morales',
+                      first_name: 'Pablo',
+                      phone_number: '16505551234',
+                    },
+                    action: 'add',
+                    metadata: { timestamp: '1739321024' },
+                  },
+                ],
+              },
+              field: 'smb_app_state_sync',
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(parsed.contactSyncs).toEqual([
+      {
+        phoneNumberId: '106540352242922',
+        phone: '16505551234',
+        name: 'Pablo Morales',
+        action: 'add',
+        at: new Date(1739321024 * 1000),
+      },
+    ]);
+  });
+
+  it('reads the phone disconnecting, with why — the WABA from the entry', () => {
+    const parsed = parseWebhook({
+      object: 'whatsapp_business_account',
+      entry: [
+        {
+          id: '102290129340398',
+          time: 1739212624,
+          changes: [
+            {
+              value: {
+                phone_number: '15550783881',
+                event: 'PARTNER_REMOVED',
+                disconnection_info: { reason: 'PRIMARY_INACTIVITY', initiated_by: 'SYSTEM' },
+              },
+              field: 'account_update',
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(parsed.accountUpdates).toEqual([
+      {
+        wabaId: '102290129340398',
+        phoneNumber: '15550783881',
+        event: 'PARTNER_REMOVED',
+        reason: 'PRIMARY_INACTIVITY',
+        initiatedBy: 'SYSTEM',
+        at: new Date(1739212624 * 1000),
+      },
+    ]);
+  });
+
+  it('reads an offboarding that names nothing but the event', () => {
+    const parsed = parseWebhook({
+      entry: [
+        {
+          id: '862475293675413',
+          time: 1768477204,
+          changes: [{ value: { event: 'ACCOUNT_OFFBOARDED' }, field: 'account_update' }],
+        },
+      ],
+      object: 'whatsapp_business_account',
+    });
+
+    expect(parsed.accountUpdates).toEqual([
+      expect.objectContaining({
+        wabaId: '862475293675413',
+        phoneNumber: null,
+        event: 'ACCOUNT_OFFBOARDED',
+        reason: null,
+      }),
+    ]);
+  });
+
+  it('degrades on a shape it does not know rather than throwing', () => {
+    const parsed = parseWebhook({
+      object: 'whatsapp_business_account',
+      entry: [
+        {
+          id: '1',
+          changes: [
+            { field: 'history', value: { history: [{ threads: [{ messages: [{}] }] }, {}] } },
+            { field: 'smb_app_state_sync', value: { state_sync: [{ type: 'label' }, {}] } },
+            { field: 'account_update', value: {} },
+          ],
+        },
+      ],
+    });
+
+    expect(parsed.history.flatMap((chunk) => chunk.messages)).toEqual([]);
+    expect(parsed.contactSyncs).toEqual([]);
+    expect(parsed.accountUpdates).toEqual([]);
+  });
+});
+
+describe('displayText: what a Business-app number adds', () => {
+  it('names an edit and a deletion instead of calling them unsupported', () => {
+    const base = { id: 'wamid.1', from: '1', timestamp: '1' };
+    expect(displayText({ ...base, type: 'revoke', revoke: { original_message_id: 'x' } })).toBe(
+      '[deleted a message]',
+    );
+    expect(
+      displayText({
+        ...base,
+        type: 'edit',
+        edit: {
+          original_message_id: 'x',
+          message: { ...base, type: 'text', text: { body: 'Tomorrow at 10' } },
+        },
+      }),
+    ).toBe('[edited a message: Tomorrow at 10]');
+  });
+});

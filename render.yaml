@@ -207,6 +207,20 @@ projects:
             #   KB_NOTICE_TONE           info | warning | danger
             #   TYPESAFE_MODEL           pins a shadow run to one Jev version
             #                            instead of the moving `jev-latest`
+            #   WHATSAPP_CREDENTIAL_KEY  seals the WhatsApp business tokens
+            #                            Embedded Signup stores in the database
+            #                            (`openssl rand -base64 32`). Its own
+            #                            value per environment, never derived
+            #                            from APP_SECRET, and never named
+            #                            WHATSAPP_TOKEN_* — see lib/env.ts.
+            #   WHATSAPP_CREDENTIAL_KEY_PREVIOUS
+            #                            the key being retired, set only while
+            #                            rotate_whatsapp_credentials runs
+            #   META_EMBEDDED_SIGNUP_CONFIG_ID
+            #                            the Facebook Login for Business
+            #                            configuration Embedded Signup opens
+            #                            with; an id, but this environment's
+            #                            Meta app's own
             #   PRIORITY_AI              off | shadow | apply. Here and not in
             #                            shared: it sends customer text to a
             #                            third party, and `apply` moves SLA
@@ -535,6 +549,17 @@ projects:
             #   WHATSAPP_VERIFY_TOKEN
             #   META_SYSTEM_ADMIN_TOKEN
             #   FB_PAGE_ACCESS_TOKEN_ALI
+            #
+            # Read by the code, set nowhere today, and belonging here when set:
+            #
+            #   WHATSAPP_CREDENTIAL_KEY    staging's own key, not production's —
+            #                              an envelope sealed in one environment
+            #                              must not open in the other
+            #   WHATSAPP_CREDENTIAL_KEY_PREVIOUS
+            #                              only during a rotation
+            #   META_EMBEDDED_SIGNUP_CONFIG_ID
+            #                              a configuration on staging's own
+            #                              Meta app
             envVars: []
 
         services:

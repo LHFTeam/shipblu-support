@@ -1,10 +1,10 @@
 # Meta endpoints — what this system calls, from where, and why
 
 Every HTTP request this codebase makes to Meta, and every request Meta makes to
-it. One file because the surface is spread across four clients that share a
+it. One file because the surface is spread across five clients that share a
 host and nothing else: a question like "what does the Page token actually do
-here?" otherwise takes a grep across `lib/meta/`, `lib/whatsapp/`, one worker
-handler and a server action.
+here?" otherwise takes a grep across `lib/meta/`, `lib/whatsapp/`, the worker's
+handlers and two server actions.
 
 **Scope.** This describes the _code_: the call, its route, its caller and the
 reason it exists. It deliberately says nothing about whether a given call
@@ -15,15 +15,17 @@ rather than by a bug, §8 names the gate and cites the file that holds the
 evidence.
 
 Every Graph path below addresses **v23.0**, declared once in
-`lib/meta/graph.ts` beside the two hosts it is addressed on. The four clients —
-`lib/meta/client.ts`, `lib/meta/subscriptions.ts`, `lib/whatsapp/client.ts` and
-`worker/handlers/check-meta-permissions.ts` — stay separate, each with its own
-credential and error handling, and import the address from there, so a version
-bump is one edit and cannot land on some of them only.
+`lib/meta/graph.ts` beside the two hosts it is addressed on. The five clients —
+`lib/meta/client.ts`, `lib/meta/subscriptions.ts`, `lib/whatsapp/client.ts`,
+`lib/meta/debug-token.ts` (shared by `check_meta_permissions` and the WhatsApp
+onboarding) and the one bare `fetch` in `lib/whatsapp/onboarding.ts` that
+exchanges a signup code — stay separate, each with its own credential and error
+handling, and import the address from there, so a version bump is one edit and
+cannot land on some of them only.
 
 ## Contents
 
-1. [The routes: two hosts, three credentials](#1-the-routes-two-hosts-three-credentials)
+1. [The routes: two hosts, four credentials](#1-the-routes-two-hosts-four-credentials)
 2. [Messenger and Instagram — `lib/meta/client.ts`](#2-messenger-and-instagram--libmetaclientts)
 3. [Webhook subscriptions — `lib/meta/subscriptions.ts`](#3-webhook-subscriptions--libmetasubscriptionsts)
 4. [Diagnostics — `check_meta_permissions`](#4-diagnostics--check_meta_permissions)
@@ -32,20 +34,22 @@ bump is one edit and cannot land on some of them only.
 7. [Endpoints deliberately not used](#7-endpoints-deliberately-not-used)
 8. [What each call needs, and what currently gates one](#8-what-each-call-needs-and-what-currently-gates-one)
 
-## 1. The routes: two hosts, three credentials
+## 1. The routes: two hosts, four credentials
 
-One Meta app serves four products, and the Instagram account is connected to it
-**twice**. Which host and which credential a call goes out with is a property of
-the _connection_, not of the platform — `lib/meta/connection.ts` is the only
-place that decides, and `metaConnection()` decides it from configuration alone
-so that "can this ticket be answered?" cannot depend on which webhook delivery
-reached the worker first.
+One Meta app serves four products, the Instagram account is connected to it
+**twice**, and a WhatsApp number on the WhatsApp Business app brings a
+credential of its own. Which host and which credential a call goes out with is
+a property of the _connection_, not of the platform — `lib/meta/connection.ts`
+is the only place that decides, and `metaConnection()` decides it from
+configuration alone so that "can this ticket be answered?" cannot depend on
+which webhook delivery reached the worker first.
 
-| Connection           | Host                  | Credential                         | Signs webhooks with    | Permission vocabulary                              |
-| -------------------- | --------------------- | ---------------------------------- | ---------------------- | -------------------------------------------------- |
-| Facebook Page        | `graph.facebook.com`  | `META_PAGE_ACCESS_TOKEN`           | `META_APP_SECRET`      | `pages_*`, `instagram_basic`, `instagram_manage_*` |
-| Instagram Login      | `graph.instagram.com` | `INSTAGRAM_ACCESS_TOKEN`           | `INSTAGRAM_APP_SECRET` | `instagram_business_*`                             |
-| App-level (webhooks) | `graph.facebook.com`  | `{META_APP_ID}\|{META_APP_SECRET}` | n/a                    | none — an app token carries no scopes              |
+| Connection           | Host                  | Credential                         | Signs webhooks with    | Permission vocabulary                                         |
+| -------------------- | --------------------- | ---------------------------------- | ---------------------- | ------------------------------------------------------------- |
+| Facebook Page        | `graph.facebook.com`  | `META_PAGE_ACCESS_TOKEN`           | `META_APP_SECRET`      | `pages_*`, `instagram_basic`, `instagram_manage_*`            |
+| Instagram Login      | `graph.instagram.com` | `INSTAGRAM_ACCESS_TOKEN`           | `INSTAGRAM_APP_SECRET` | `instagram_business_*`                                        |
+| App-level (webhooks) | `graph.facebook.com`  | `{META_APP_ID}\|{META_APP_SECRET}` | n/a                    | none — an app token carries no scopes                         |
+| Embedded Signup      | `graph.facebook.com`  | a business token, stored sealed    | `META_APP_SECRET`      | `whatsapp_business_management`, `whatsapp_business_messaging` |
 
 Facebook is always the Page connection; there is no second way to reach a Page.
 Instagram takes the direct connection whenever `INSTAGRAM_ACCESS_TOKEN` is set,
@@ -55,11 +59,30 @@ token. The third subscription write in §3 is the one thing that does not fall
 back: it refuses outright, because a Page token addressed to
 `graph.instagram.com` is refused with a sentence naming neither credential.
 
+**The fourth credential is the one the database holds.** A number that lives on
+the WhatsApp Business app is connected through Meta's Embedded Signup, which
+hands the browser a one-use code; `lib/whatsapp/onboarding.ts` exchanges it for
+a business token Meta mints for that WABA, proves the token reads the WABA, and
+stores it sealed in `whatsapp_account_credentials`, one row per WABA (AGENTS.md,
+"The stored WhatsApp credential"). Only the worker ever opens one:
+`tokenForAccount` in `lib/whatsapp/accounts.ts` resolves **stored →
+`WHATSAPP_TOKEN_*` → `META_PAGE_ACCESS_TOKEN`**, a stored credential that will
+not open throws rather than falling through, and CI confines the resolvers to
+`worker/` (`credential-confinement`). The WABA is under this app by
+construction — the popup is opened as it — so its deliveries verify with
+`META_APP_SECRET` like every other WhatsApp delivery.
+
 **Where the credential travels.** `lib/meta/client.ts` puts it in the query
 string (`?access_token=`); the other three clients put it in an
 `Authorization: Bearer` header. That is not an oversight in the second group: an
 app access token contains the app secret verbatim, and a URL is the part of a
-request that reaches logs and error messages.
+request that reaches logs and error messages. Two requests cannot keep a secret
+out of the URL — the signup-code exchange takes the app secret and the code as
+query parameters, and `debug_token` takes the token it inspects as
+`input_token` — so both go out with a `fetch` of their own rather than through a
+client that would put the request into its error messages, and every sentence
+they build names host and path, never the URL (`lib/whatsapp/onboarding.ts`,
+`lib/meta/debug-token.ts`).
 
 ## 2. Messenger and Instagram — `lib/meta/client.ts`
 
@@ -270,11 +293,28 @@ writes rather than two:
 | App             | `GET`/`POST graph.facebook.com/{app-id}/subscriptions`    | app token, `{app-id}\|{app-secret}` | `readSubscription` / `applyFieldSubscription`                        |
 | Facebook Page   | `GET`/`POST graph.facebook.com/{page-id}/subscribed_apps` | `META_PAGE_ACCESS_TOKEN`            | `readPageSubscription` / `applyPageSubscription`                     |
 | Instagram Login | `GET`/`POST graph.instagram.com/{ig-id}/subscribed_apps`  | `INSTAGRAM_ACCESS_TOKEN`            | `readInstagramLoginSubscription` / `applyInstagramLoginSubscription` |
+| WhatsApp WABA   | `POST`/`GET graph.facebook.com/{waba-id}/subscribed_apps` | the stored business token           | `subscribeAppRequest` / `subscribedAppsRequest`                      |
 
 The app level is shared — one app, one `instagram` object subscription serving
 both connections. Each connection then owns its account-level half, on a
 different host, with a different credential and, for the Page, a different field
 vocabulary.
+
+The fourth row is the account-level half for a WABA connected through Embedded
+Signup, and it is the one write in this table that is not hand-run: it is the
+`subscribe` step of `complete_coexistence_onboarding`
+(`lib/whatsapp/onboarding-complete.ts`, shapes in
+`lib/whatsapp/onboarding-requests.ts`), because the WABA was handed to this app
+seconds earlier and nothing else can subscribe it. It carries no field list — a
+body-less POST subscribes the app, and would clear a WABA-level callback
+override this app never sets — and the GET afterwards is the proof, since a 200
+on the POST is not: the step is retried until `META_APP_ID` is listed. The
+app-level half it cannot write for itself the job reads back instead:
+`readSubscription(WHATSAPP_OBJECT)` must list every name in
+`COEXISTENCE_WHATSAPP_FIELDS`, and a missing one is recorded as a warning on the
+step, naming `npm run job -- subscribe_meta_webhooks`, because without it the
+number connects and every phone-typed reply and every chunk of history falls on
+the floor.
 
 **Every one of these writes replaces the field list rather than adding to it.**
 A request naming only `account_alerts` silently unsubscribes `messages`, and
@@ -298,7 +338,7 @@ shell prompt against production:
 
 | Object                      | Fields                                                                                   |
 | --------------------------- | ---------------------------------------------------------------------------------------- |
-| `whatsapp_business_account` | `messages`                                                                               |
+| `whatsapp_business_account` | `messages`, `history`, `smb_app_state_sync`, `smb_message_echoes`, `account_update`      |
 | `instagram`                 | `messages`, `comments`, `messaging_postbacks`, `messaging_referral`, `message_reactions` |
 | `page`                      | `messages`, `feed`, `messaging_postbacks`, `messaging_referrals`, `message_reactions`    |
 
@@ -309,6 +349,13 @@ drops the rest. And the referral field is spelled `messaging_referral` on
 Instagram and `messaging_referrals` on the Page: one character, and Graph
 rejects the whole write rather than the one bad name, so the two lists cannot be
 folded together however similar they look.
+
+The four WhatsApp names after `messages` are `COEXISTENCE_WHATSAPP_FIELDS` —
+what a number on the WhatsApp Business app sends beyond customer messages; §6
+says where each lands. `smb_message_echoes` is proven on this app by having been
+subscribed throughout; the other three are spelled as the webhooks overview's
+field table spells them, and the first run after the list grew is on staging for
+that reason, since one bad name fails the whole write.
 
 ## 4. Diagnostics — `check_meta_permissions`
 
@@ -325,7 +372,15 @@ this deployment sends with a Page one, where `/me` is the Page and the edge does
 not exist. It takes any token, is authorised with the same app token
 §3 builds, and returns `granular_scopes`, which says per asset who a
 permission was granted for — the thing that matters when one app administers
-more than one Page.
+more than one Page. The call is `inspectToken` in `lib/meta/debug-token.ts`,
+lifted out of the job so that it and the WhatsApp onboarding — which stores what
+`debug_token` says beside the sealed token — ask Meta one question through one
+function, the `profile-refresh.ts` lesson. The job also prints a section per
+stored WhatsApp credential: it resolves each through `credentialsForAccount`,
+as only a worker may, and prints the key id, Meta's `type`, validity, expiry and
+whether the two required scopes reach the WABA — never the token. It prints and
+writes nothing back, so it is not what fills in a credential whose expiry was
+unknown when it was stored; only storing one records an inspection (§5.1).
 
 The Instagram half can say much less, and says so. `debug_token` is a
 `graph.facebook.com` endpoint and an Instagram Login token is issued by the
@@ -375,7 +430,55 @@ Details worth keeping:
   variable's _name_ is a database value, so it cannot be in the Zod schema — and
   must therefore start `WHATSAPP_TOKEN_`, or an admin typing a variable name
   would be choosing which secret gets sent to Meta as a bearer token
-  (`lib/whatsapp/accounts.ts`).
+  (`lib/whatsapp/accounts.ts`). It is the middle of three sources: a credential
+  stored by Embedded Signup wins over it, and it wins over
+  `META_PAGE_ACCESS_TOKEN`; a stored one that will not open throws rather than
+  falling through.
+
+### 5.1 Connecting a number on the WhatsApp Business app
+
+Eight calls, written down in `lib/whatsapp/onboarding-requests.ts` and asserted
+there against Meta's references, because the documentation for this flow is
+split across two generations of pages that do not agree and a wrong shape is
+invisible in the response. The first phase runs in a server action, inside the
+thirty seconds the signup code lives (`lib/whatsapp/onboarding.ts`); the rest is
+the `complete_coexistence_onboarding` job (`lib/whatsapp/onboarding-complete.ts`),
+with the stored credential.
+
+| Graph request                                                                         | Credential                        | What it does                                                   | Called from                                                |
+| ------------------------------------------------------------------------------------- | --------------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------- |
+| `GET /oauth/access_token?client_id&client_secret&code`                                | `META_APP_ID` + `META_APP_SECRET` | Exchange the signup code for a business token                  | `lib/whatsapp/onboarding.ts` (`exchangeCode`, own `fetch`) |
+| `GET /debug_token?input_token=`                                                       | app token (header)                | Type, validity, expiry, scopes of the new token                | `lib/whatsapp/onboarding.ts` via `lib/meta/debug-token.ts` |
+| `GET /{waba-id}?fields=id,name`                                                       | the new token                     | **The proof** the token reaches the WABA the browser named     | `lib/whatsapp/onboarding.ts`                               |
+| `GET /{waba-id}/phone_numbers?fields=id,display_phone_number,verified_name&limit=100` | the new token, then stored        | The number, when the finish event named none; then its details | `lib/whatsapp/onboarding.ts`, `onboarding-complete.ts`     |
+| `GET /me?fields=client_business_id`                                                   | the new token                     | The business portfolio, as metadata — never a reason to fail   | `lib/whatsapp/onboarding.ts`                               |
+| `GET /{phone-number-id}?fields=is_on_biz_app,platform_type`                           | stored                            | The coexistence guide's optional "is it on the app?" check     | `lib/whatsapp/onboarding-complete.ts` (`numberStep`)       |
+| `POST /{waba-id}/subscribed_apps` (no body), then `GET` it                            | stored                            | Subscribe this app to the WABA, and prove it (§3)              | `lib/whatsapp/onboarding-complete.ts` (`subscribeStep`)    |
+| `POST /{phone-number-id}/smb_app_data` `{messaging_product, sync_type}`               | stored                            | Ask the phone for its contacts or its chat history             | `lib/whatsapp/onboarding-complete.ts` (`syncStep`)         |
+
+Three things about the table are decided rather than copied:
+
+- **The exchange is a `GET` with query parameters**, because that is the shape
+  Meta documents for a Tech Provider and the only one it documents. It puts the
+  app secret and the code in a URL, so `tokenExchangeUrl` builds the URL and
+  nothing else, the action sends it with its own `fetch` outside every Graph
+  client, and anything Meta or the network says back has both secrets cut out
+  before it is repeated. Nothing is written before it succeeds.
+- **The WABA read is the proof, not `debug_token`.** `granular_scopes` may list
+  no targets for a business token, so the inspection refuses only what Meta
+  actually said — the wrong app, a missing scope, a target list that excludes
+  the WABA — and an inspection that did not answer is a warning on the notice.
+  The metadata then stays null, and the account's badge reads `expiry unknown`,
+  until a Reconnect stores a token Meta's inspection answered for:
+  `check_meta_permissions` prints the expiry without storing it, and nothing
+  else asks. The read asks for `id,name` and no more: neither reference lists
+  `owner_business_info`, which an earlier draft wanted.
+- **The copy is once per onboarding, inside 24 hours, with the app open on the
+  phone.** Meta's 2593107 (already asked) and 2593108 (window passed) both mean
+  "reconnect" and are worded so; a business declining on the phone does not
+  land here at all — Meta accepts the request and says so later, in a `history`
+  delivery carrying 2593109. A reconnect does not ask again for what the
+  earlier connection copied.
 
 ## 6. Inbound: the endpoints Meta calls
 
@@ -408,6 +511,30 @@ older name `META_INSTAGRAM_APP_SECRET`, and neither app secret can be removed
 while both connections are live — unsetting one resumes 403s for that half of
 the traffic (`docs/PROJECT-STATE.md` §6.26, §6.29).
 
+A number connected through coexistence adds four fields to the WhatsApp route,
+parsed by `lib/whatsapp/parse.ts` and handed out by
+`worker/handlers/process-whatsapp-webhook.ts`:
+
+| Field                | Carries                                                                                                                                       | Ingested by                                                                                         |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `history`            | Chunks of the phone's past chats, per phase, each with the whole copy's `progress` (100 is complete); a decline (2593109); media placeholders | `ingestWhatsAppHistoryChunk`, `attachHistoryMedia` (`lib/tickets/ingest-whatsapp-history.ts`)       |
+| `smb_app_state_sync` | Entries from the phone's address book, `add` or `remove`                                                                                      | `applyWhatsAppContactSync` (same module)                                                            |
+| `smb_message_echoes` | A reply the business typed on the phone                                                                                                       | `ingestWhatsAppEcho` (`lib/tickets/ingest-whatsapp.ts`) — the team's reply on a coexistence channel |
+| `account_update`     | `PARTNER_REMOVED`, `ACCOUNT_OFFBOARDED`, `ACCOUNT_RECONNECTED`                                                                                | `applyWhatsAppAccountUpdate` (`lib/whatsapp/coexistence-state.ts`)                                  |
+
+Each delivery's idempotency key comes from `lib/whatsapp/delivery-id.ts`:
+`hm:<wamid>` per history message — distinct from `m:`, because the file behind
+a placeholder arrives later under the same wamid — and
+`c:<phone>:<action>:<timestamp>` per contact. **Nothing for `account_update`**:
+the index behind the key is spent for good, and a number disconnected,
+reconnected and disconnected again sends the same body twice, so its handler is
+idempotent instead — and applies an event only when it is at least as new as
+the connection and as the last one applied (`coexistence.accountEventAt`), so
+an older event processed late changes nothing. History is a record rather than
+traffic — no window, no clocks, no automations, no media download — and the
+echo on a plain support number is still our own send coming back and still
+ignored; AGENTS.md carries the rules.
+
 ## 7. Endpoints deliberately not used
 
 Recorded so the next reader does not have to re-derive the reason, or "fix"
@@ -420,28 +547,38 @@ something by adding one back.
 | `POST /{page-id}/request_thread_control`    | The secondary receiver's call, answered by whoever runs the _other_ tool rather than by Meta                           |
 | `live_comments`, `mentions` webhook fields  | Nothing ingests them, and an unread field is a `webhook_events` row and a job per event, forever                       |
 | `message_echoes` (WhatsApp)                 | Discontinued by Meta: absent from the v23.0 reference and refused on write, so requiring it failed every subscribe run |
-| `smb_message_echoes` as a fix for that      | Already subscribed, and 0 of 395,391 deliveries carry it — this number is not operated from the WhatsApp Business app  |
 | `messaging_type` on a tagged Instagram send | Absent from both Instagram send references; see §2.1 for why only the tagged half drops it                             |
 | `pages_user_timezone` / `timezone` field    | A third permission to justify to App Review for a column no screen shows                                               |
 | The Facebook SDK                            | A handful of endpoints do not justify the SDK's surface or its transitive dependencies (`lib/whatsapp/client.ts`)      |
 | Read receipts (`status: read`)              | Never wired up; the unused `markRead` helper has since been deleted from `lib/whatsapp/client.ts`                      |
+
+One row left this table on 2026-10-08. `smb_message_echoes` was listed beside
+the discontinued `message_echoes` as not worth reaching for, because 0 of
+395,391 deliveries carried it — which proved only that no number was operated
+from the WhatsApp Business app, and a number connected through coexistence is
+exactly that. It is required and ingested now (§3, §6);
+`docs/PROJECT-STATE.md` §6.87 has the correction, so the next reader does not
+drop it from `REQUIRED_WHATSAPP_FIELDS` as dead.
 
 ## 8. What each call needs, and what currently gates one
 
 Credentials, all optional in the schema (`lib/env.ts`) and declared in
 `render.yaml` in the same commit:
 
-| Variable                                                    | Used by                                                                                                         |
-| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `META_PAGE_ACCESS_TOKEN`                                    | §2 over the Page connection, the Page subscription write, `debug_token`'s input, and the WhatsApp default token |
-| `META_APP_ID` + `META_APP_SECRET`                           | The app token for `/{app-id}/subscriptions` and `debug_token`'s authorisation                                   |
-| `META_APP_SECRET`                                           | Also verifies X-Hub-Signature-256 on `page` and WhatsApp deliveries                                             |
-| `META_VERIFY_TOKEN`                                         | Answers the subscription handshake, on both webhook routes and on every write                                   |
-| `FACEBOOK_PAGE_ID` / `INSTAGRAM_ACCOUNT_ID`                 | The node every send, private reply and subscription write is addressed to                                       |
-| `INSTAGRAM_ACCESS_TOKEN`                                    | Everything in §2 and §3 routed over the direct Instagram connection                                             |
-| `INSTAGRAM_APP_SECRET` (a.k.a. `META_INSTAGRAM_APP_SECRET`) | Verifies deliveries signed by the Instagram Login connection                                                    |
-| `WHATSAPP_PHONE_NUMBER_ID` / `WHATSAPP_WABA_ID`             | The default send number and the template listing                                                                |
-| `WHATSAPP_TOKEN_*`                                          | A second business account's own token, named by a database row                                                  |
+| Variable                                                    | Used by                                                                                                          |
+| ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `META_PAGE_ACCESS_TOKEN`                                    | §2 over the Page connection, the Page subscription write, `debug_token`'s input, and the WhatsApp default token  |
+| `META_APP_ID` + `META_APP_SECRET`                           | The app token for `/{app-id}/subscriptions` and `debug_token`'s authorisation                                    |
+| `META_APP_SECRET`                                           | Also verifies X-Hub-Signature-256 on `page` and WhatsApp deliveries                                              |
+| `META_VERIFY_TOKEN`                                         | Answers the subscription handshake, on both webhook routes and on every write                                    |
+| `FACEBOOK_PAGE_ID` / `INSTAGRAM_ACCOUNT_ID`                 | The node every send, private reply and subscription write is addressed to                                        |
+| `INSTAGRAM_ACCESS_TOKEN`                                    | Everything in §2 and §3 routed over the direct Instagram connection                                              |
+| `INSTAGRAM_APP_SECRET` (a.k.a. `META_INSTAGRAM_APP_SECRET`) | Verifies deliveries signed by the Instagram Login connection                                                     |
+| `WHATSAPP_PHONE_NUMBER_ID` / `WHATSAPP_WABA_ID`             | The default send number and the template listing                                                                 |
+| `WHATSAPP_TOKEN_*`                                          | A second business account's own token, named by a database row — after a stored credential, before the shared    |
+| `META_EMBEDDED_SIGNUP_CONFIG_ID`                            | The Facebook Login for Business configuration the browser opens Embedded Signup with; an id, but per environment |
+| `WHATSAPP_CREDENTIAL_KEY`                                   | Seals and opens the stored business tokens (§1): its own value per environment, never derived from `APP_SECRET`  |
+| `WHATSAPP_CREDENTIAL_KEY_PREVIOUS`                          | The key being retired, set only while `rotate_whatsapp_credentials` runs                                         |
 
 Three gates are known to be closed as of 2026-09-07, and each stops a call
 above for a reason no code change fixes. `FEATURES` in
@@ -461,12 +598,19 @@ the file to re-read rather than this one:
   an app admin on their own public post, which is why regenerating the token
   changes nothing.
 
+A fourth gate is unknown rather than closed. Embedded Signup is refused unless
+the app is a **Tech Provider** (or Solution Partner), which needs business
+verification first, and whether either Meta app is one has not been checked —
+nothing in §5.1 has run live. `docs/PROJECT-STATE.md` §5.2 lists that with the
+rest of what the first live onboarding waits on.
+
 ---
 
 **Keeping this current.** Add a row when you add a call, and put the reasoning
 next to the code rather than only here — `lib/meta/send.ts`,
-`lib/meta/comments.ts` and `lib/meta/handover.ts` are the request shapes, and
-their headers are the evidence. When adding or changing a Graph request, read
+`lib/meta/comments.ts`, `lib/meta/handover.ts` and
+`lib/whatsapp/onboarding-requests.ts` are the request shapes, and their headers
+are the evidence. When adding or changing a Graph request, read
 the node reference **for v23.0 specifically**: an edge missing from it is a
 finding rather than an omission by the doc, and removal notices sit on a
 separate legacy page that a search for the working endpoint will not surface

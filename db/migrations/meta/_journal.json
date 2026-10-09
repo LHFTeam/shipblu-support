@@ -232,6 +232,13 @@
       "when": 1791417541754,
       "tag": "0032_wild_hitman",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1791565293640,
+      "tag": "0033_special_king_cobra",
+      "breakpoints": true
     }
   ]
 }

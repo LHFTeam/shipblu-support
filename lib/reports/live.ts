@@ -366,6 +366,9 @@ export async function todayByHour(zone: string, now: Date = new Date()): Promise
         lt(messages.createdAt, now),
         ne(messages.kind, 'note'),
         notInArray(conversations.channel, readOnlyChannels()),
+        // A copied chat history's last day lands with today's timestamps, and
+        // is not today's traffic.
+        ne(messages.sourceSystem, 'import'),
       ),
     )
     .groupBy(sql`1`)

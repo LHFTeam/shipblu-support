@@ -76,4 +76,32 @@ describe('explainAuthError', () => {
     const explained = explainDeliveryError(ACCESS_TOKEN_CODE, META_TEXT, { windowOpen: true });
     expect(explained).toContain('META_PAGE_ACCESS_TOKEN');
   });
+
+  /**
+   * Three credentials, fixed in three places. Blaming the shared token for a
+   * stored credential's expiry sends somebody to Render to replace a token that
+   * is fine, while the one that expired can only be renewed through Meta.
+   */
+  it('sends a stored credential to a reconnect, and nowhere near Render', () => {
+    const explained = explainAuthError(ACCESS_TOKEN_CODE, META_TEXT, { source: 'stored' });
+
+    expect(explained).toContain(META_TEXT);
+    expect(explained).toContain('reconnected through Meta');
+    expect(explained).not.toContain('META_PAGE_ACCESS_TOKEN');
+    expect(explained).not.toContain('environment group');
+  });
+
+  it('names the variable an account sends with, rather than the shared one', () => {
+    const explained = explainAuthError(ACCESS_TOKEN_CODE, META_TEXT, {
+      source: 'variable',
+      tokenEnvVar: 'WHATSAPP_TOKEN_SAUDI',
+    });
+
+    expect(explained).toContain('WHATSAPP_TOKEN_SAUDI');
+    expect(explained).not.toContain('META_PAGE_ACCESS_TOKEN');
+  });
+
+  it('leaves a stored credential’s other errors alone too', () => {
+    expect(explainAuthError(RE_ENGAGEMENT_CODE, META_TEXT, { source: 'stored' })).toBe(META_TEXT);
+  });
 });

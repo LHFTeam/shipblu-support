@@ -1,8 +1,10 @@
 import { env, metaAppSecret } from '@/lib/env';
-import { isTimeout } from '@/lib/http/deadline';
 import { FEATURES, diagnoseCapabilities, requiredScopes } from '@/lib/meta/capabilities';
 import { CONNECTION_LABEL, instagramLoginConfigured } from '@/lib/meta/connection';
-import { GRAPH_BASE, graphTimeout, INSTAGRAM_GRAPH_BASE } from '@/lib/meta/graph';
+import { inspectToken, readGraph, type TokenInspection } from '@/lib/meta/debug-token';
+import { INSTAGRAM_GRAPH_BASE } from '@/lib/meta/graph';
+import { credentialsForAccount, listAccounts } from '@/lib/whatsapp/accounts';
+import { credentialStatuses, REQUIRED_BUSINESS_TOKEN_SCOPES } from '@/lib/whatsapp/credentials';
 import { errorMessage } from '@/lib/errors';
 
 /**
@@ -40,19 +42,6 @@ import { errorMessage } from '@/lib/errors';
  * and both would have been answered by it in one line.
  */
 
-type DebugToken = {
-  type?: string;
-  application?: string;
-  app_id?: string;
-  is_valid?: boolean;
-  expires_at?: number;
-  data_access_expires_at?: number;
-  scopes?: string[];
-  granular_scopes?: { scope: string; target_ids?: string[] }[];
-  profile_id?: string;
-  user_id?: string;
-};
-
 export async function checkMetaPermissions(): Promise<void> {
   const appId = env().META_APP_ID;
   const appSecret = metaAppSecret();
@@ -70,24 +59,10 @@ export async function checkMetaPermissions(): Promise<void> {
     throw new Error(`${missing.join(', ')} must be set before the token can be inspected`);
   }
 
-  const url = new URL(`${GRAPH_BASE}/debug_token`);
-  url.searchParams.set('input_token', token!);
+  const data = await inspectToken(token!);
+  const scopes = data.scopes;
 
-  // The app token goes in the header, not the query string: it contains the app
-  // secret verbatim and a URL is the part of a request that reaches logs.
-  const { ok, status, body } = await readGraph<{ data?: DebugToken; error?: unknown }>(
-    url,
-    `${appId}|${appSecret}`,
-  );
-
-  if (!ok || !body?.data) {
-    throw new Error(`debug_token failed (HTTP ${status}): ${JSON.stringify(body?.error ?? body)}`);
-  }
-
-  const data = body.data;
-  const scopes = data.scopes ?? [];
-
-  console.log(`\n[meta:permissions] token type ${data.type ?? 'unknown'}, valid=${data.is_valid}`);
+  console.log(`\n[meta:permissions] token type ${data.type ?? 'unknown'}, valid=${data.isValid}`);
 
   // §6.28 in one line: a token can carry every scope needed and still be the
   // wrong kind, and Graph's refusal for that names a capability rather than a
@@ -101,8 +76,8 @@ export async function checkMetaPermissions(): Promise<void> {
 
   console.log(`[meta:permissions] ${scopes.length} scope(s): ${scopes.join(', ') || '(none)'}`);
 
-  for (const entry of data.granular_scopes ?? []) {
-    const targets = entry.target_ids?.length ? entry.target_ids.join(', ') : 'all assets';
+  for (const entry of data.granularScopes) {
+    const targets = entry.targetIds ? entry.targetIds.join(', ') : 'all assets';
     console.log(`[meta:permissions]   ${entry.scope} → ${targets}`);
   }
 
@@ -142,6 +117,7 @@ export async function checkMetaPermissions(): Promise<void> {
     // `reportFeatures`.
     console.log('\n[meta:permissions] every Facebook Page capability is granted by this token.');
     await checkInstagramLogin();
+    await checkStoredWhatsAppCredentials();
     reportFeatures();
     return;
   }
@@ -164,6 +140,7 @@ export async function checkMetaPermissions(): Promise<void> {
   console.warn(`[meta:permissions] full scope list to request: ${requiredScopes().join(',')}`);
 
   await checkInstagramLogin();
+  await checkStoredWhatsAppCredentials();
   reportFeatures();
 }
 
@@ -194,47 +171,6 @@ function reportFeatures(): void {
     );
     if (feature.refusal) console.log(`[meta:permissions]     refused as: ${feature.refusal}`);
   }
-}
-
-/**
- * A GET to Graph with the read deadline, and the JSON it answered with.
- *
- * The body is read as text and parsed separately because the two failures mean
- * opposite things here. A body that is not JSON is an answer — Meta's edge
- * sometimes serves an HTML page — and is reported as one, with the status. A
- * body that never arrived is not, and swallowing it into the same null reported
- * a working token as refused with HTTP 200: this job's whole value is that what
- * it prints is true, and that sentence sends somebody to rotate a credential.
- */
-async function readGraph<T>(
-  url: URL,
-  token: string,
-): Promise<{ ok: boolean; status: number; body: T | null }> {
-  const timeoutMs = graphTimeout('GET');
-  let response: Response;
-  let text: string;
-  try {
-    // Header rather than query string: a URL is the part of a request that ends
-    // up in logs, and both tokens read here are live credentials.
-    response = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    text = await response.text();
-  } catch (error) {
-    if (isTimeout(error)) {
-      throw new Error(`${url.host}${url.pathname} did not answer in ${timeoutMs / 1000}s`);
-    }
-    throw error;
-  }
-
-  let body: T | null = null;
-  try {
-    body = JSON.parse(text) as T;
-  } catch {
-    // Not JSON: left null, and the caller reports the status it came with.
-  }
-  return { ok: response.ok, status: response.status, body };
 }
 
 /**
@@ -318,4 +254,78 @@ async function checkInstagramLogin(): Promise<void> {
       `from here — confirm in the App Dashboard under Instagram → API setup with Instagram ` +
       `login: ${requiredScopes('instagram_login').join(', ')}`,
   );
+}
+
+/**
+ * The WhatsApp business tokens this database stores, one section each.
+ *
+ * Everything above inspects the environment's tokens. A business account
+ * connected through Embedded Signup sends with a token of its own, sealed in
+ * `whatsapp_account_credentials`, and it can expire or be revoked by the
+ * business without the environment's tokens noticing — so a clean report above
+ * would otherwise say nothing about the numbers that use one.
+ *
+ * Printed and never written back: this job's promise is that it changes
+ * nothing. So it is not how a credential whose expiry was unknown when it was
+ * stored gets one — only storing a credential records an inspection, and a
+ * Reconnect is the way to store one; the hourly template sync records only
+ * whether Meta accepted the token. Never the token — the kid, the verdict and
+ * what Meta says the token is.
+ */
+async function checkStoredWhatsAppCredentials(): Promise<void> {
+  let accounts;
+  let statuses;
+  try {
+    [accounts, statuses] = await Promise.all([listAccounts(), credentialStatuses()]);
+  } catch (error) {
+    console.error(
+      `\n[meta:permissions] could not read the stored WhatsApp credentials: ${errorMessage(error)}`,
+    );
+    return;
+  }
+
+  const stored = accounts.filter((account) => account.hasStoredToken);
+  if (stored.length === 0) return;
+
+  console.log('');
+
+  for (const account of stored) {
+    const status = statuses.get(account.id);
+    const label = `[meta:permissions] WhatsApp ${account.name} (${account.wabaId})`;
+
+    let inspection: TokenInspection;
+    try {
+      const { token, source } = await credentialsForAccount(account);
+      if (source !== 'stored') continue;
+      inspection = await inspectToken(token);
+    } catch (error) {
+      console.error(`${label}: stored credential could not be inspected — ${errorMessage(error)}`);
+      continue;
+    }
+
+    const expiry = inspection.expiresAt ? inspection.expiresAt.toISOString() : 'never expires';
+    console.log(
+      `${label}: stored credential, key ${status?.keyId ?? 'unknown'}, ` +
+        `type ${inspection.type ?? 'unknown'}, valid=${inspection.isValid}, ${expiry}`,
+    );
+
+    if (!inspection.isValid) {
+      console.warn(
+        `${label}: Meta refuses this credential${inspection.error ? ` — ${inspection.error}` : ''}. ` +
+          `Reconnect the number through Meta under Settings → Channels.`,
+      );
+    }
+
+    for (const scope of REQUIRED_BUSINESS_TOKEN_SCOPES) {
+      const entry = inspection.granularScopes.find((granted) => granted.scope === scope);
+      if (!inspection.scopes.includes(scope)) {
+        console.warn(`${label}: missing ${scope}`);
+      } else if (entry?.targetIds && !entry.targetIds.includes(account.wabaId)) {
+        console.warn(
+          `${label}: ${scope} is granted for ${entry.targetIds.join(', ')}, not for this ` +
+            `business account`,
+        );
+      }
+    }
+  }
 }

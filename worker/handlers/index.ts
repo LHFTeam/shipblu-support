@@ -6,6 +6,7 @@ import { backfillMetaProfiles } from './backfill-meta-profiles';
 import { backfillShipmentLinks } from './backfill-shipment-links';
 import { checkMetaPermissions } from './check-meta-permissions';
 import { classifyPriority } from './classify-priority';
+import { completeCoexistenceOnboarding } from './complete-coexistence-onboarding';
 import { cleanup } from './cleanup';
 import { downloadMediaJob } from './download-media';
 import { fetchMetaProfile } from './fetch-meta-profile';
@@ -16,6 +17,7 @@ import { presenceSweep } from './presence-sweep';
 import { processWebhook } from './process-webhook';
 import { rollupMetrics } from './rollup-metrics';
 import { runTimeAutomations } from './run-time-automations';
+import { rotateWhatsAppCredentials } from './rotate-whatsapp-credentials';
 import { seedCannedResponses } from './seed-canned-responses';
 import { seedConsoleHandbook } from './seed-console-handbook';
 import { sendCsat } from './send-csat';
@@ -53,6 +55,7 @@ export const handlers: Partial<Record<JobType, JobHandler>> = {
   classify_priority: (job) => classifyPriority(job),
   test_comment_permission: (job) => testCommentPermission(job),
   cleanup,
+  complete_coexistence_onboarding: completeCoexistenceOnboarding,
   download_media: downloadMediaJob,
   fetch_meta_profile: fetchMetaProfile,
   import_freshdesk_kb: () => importFreshdeskKb(),
@@ -61,6 +64,7 @@ export const handlers: Partial<Record<JobType, JobHandler>> = {
   presence_sweep: () => presenceSweep(),
   process_webhook: processWebhook,
   rollup_metrics: (job) => rollupMetrics(job),
+  rotate_whatsapp_credentials: (job) => rotateWhatsAppCredentials(job),
   run_time_automations: () => runTimeAutomations(),
   seed_canned_responses: (job) => seedCannedResponses(job),
   seed_console_handbook: (job) => seedConsoleHandbook(job),

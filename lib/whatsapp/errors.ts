@@ -24,9 +24,56 @@ export const RE_ENGAGEMENT_CODE = 131047;
  */
 export const ACCESS_TOKEN_CODE = 190;
 
-/** How to get out of an expired-token state, appended to Meta's own wording. */
-export function explainAuthError(code: number | null, message: string): string {
+/**
+ * Which credential a WhatsApp call authenticated with — see
+ * `resolveCredentialSource` in ./accounts, which decides it.
+ *
+ *   stored    sealed in the database when the number was connected through
+ *             Meta's Embedded Signup
+ *   variable  a `WHATSAPP_TOKEN_*` variable the account names
+ *   shared    `META_PAGE_ACCESS_TOKEN`
+ */
+export type CredentialSource = 'stored' | 'variable' | 'shared';
+
+/** Enough to say which credential to fix, and nothing else of it. */
+export type TokenOrigin = { source: CredentialSource; tokenEnvVar?: string | null };
+
+/**
+ * How to get out of an expired-token state, appended to Meta's own wording.
+ *
+ * The sentence depends on which credential was refused, because the fixes are
+ * in three different places and blaming the wrong one is how an afternoon goes:
+ * a stored credential is renewed by signing in through Meta again, and nothing
+ * on Render will help it; a named variable is replaced on Render, and only for
+ * the one account; the shared token stops every Meta channel at once.
+ */
+export function explainAuthError(
+  code: number | null,
+  message: string,
+  origin: TokenOrigin = { source: 'shared' },
+): string {
   if (code !== ACCESS_TOKEN_CODE) return message;
+
+  if (origin.source === 'stored') {
+    return (
+      `${message}\n\nThe credential stored for this WhatsApp business account when it ` +
+      `was connected through Meta is expired or revoked — it reached its expiry, or ` +
+      `the business removed this app under Business Settings → Integrations → ` +
+      `Connected apps. Every call on this account fails until the number is ` +
+      `reconnected through Meta under Settings → Channels. Nothing in the ` +
+      `environment needs to change, and the other accounts are unaffected.`
+    );
+  }
+
+  if (origin.source === 'variable' && origin.tokenEnvVar) {
+    return (
+      `${message}\n\n${origin.tokenEnvVar}, the access token this WhatsApp business ` +
+      `account names, is expired or revoked, so every call on this account fails ` +
+      `until it is replaced. Short-lived user tokens last about 24 hours; issue a ` +
+      `System User token in Meta Business Manager, which does not expire, and set ` +
+      `it as ${origin.tokenEnvVar} in the shipblu-support-production environment group.`
+    );
+  }
 
   return (
     `${message}\n\nMETA_PAGE_ACCESS_TOKEN is expired or revoked, so every ` +
@@ -61,6 +108,10 @@ export function explainDeliveryError(
   // An expired token fails every send identically, so an agent looking at a
   // failed message should be told it is a credential rather than anything they
   // did or the customer did.
+  //
+  // The status webhook this is called from does not say which credential the
+  // send used, so this names the shared one — the sentence `send_whatsapp`
+  // records at send time is the one that knows.
   if (code === ACCESS_TOKEN_CODE) return explainAuthError(code, message);
 
   if (code !== RE_ENGAGEMENT_CODE) return message;
