@@ -28,6 +28,18 @@ describe('priorityAiMode', () => {
     expect(warn).toHaveBeenCalledOnce();
     warn.mockRestore();
   });
+
+  it('warns about one bad value once, not on every message read', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    setTestEnv({ PRIORITY_AI: 'yes' });
+    priorityAiMode();
+    priorityAiMode();
+    expect(warn).toHaveBeenCalledOnce();
+    setTestEnv({ PRIORITY_AI: 'on' });
+    expect(priorityAiMode()).toBe('off');
+    expect(warn).toHaveBeenCalledTimes(2);
+    warn.mockRestore();
+  });
 });
 
 describe('priorityAiMinProbability', () => {

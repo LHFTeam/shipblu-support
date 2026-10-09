@@ -7,6 +7,7 @@ import { predictionFrom, type AiPrediction } from '@/lib/categorise-ai/map';
 import { errorMessage } from '@/lib/errors';
 import { logger } from '@/lib/log';
 import { onPriorityChanged } from '@/lib/sla';
+import { PRIORITY_STAMP } from '@/lib/tickets/priority-stamp';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
 import { PRIORITIES, isPriority, type Priority } from '@/lib/tickets/vocabulary';
 import {
@@ -204,7 +205,9 @@ export async function classifyMessagePriority(
     // classifier's last write by these stamps, so a later write carrying the
     // earlier one reads as overwritten — the column then disagrees with what it
     // "last applied", and every answer after is refused as somebody else's.
-    const lockedAt = sql<Date>`clock_timestamp()`;
+    // The console and the `set_priority` rule stamp their events the same way,
+    // so an agent's change that waited on this lock sorts after it.
+    const lockedAt = PRIORITY_STAMP;
 
     // The run row first. Two deliveries of one job racing past the check above
     // are already serialised by the row lock — the second reads the first's

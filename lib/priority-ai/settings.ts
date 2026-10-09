@@ -35,12 +35,29 @@ export type PriorityAiMode = (typeof PRIORITY_AI_MODES)[number];
  */
 export const DEFAULT_MIN_PROBABILITY = 0.6;
 
+/**
+ * The bad values already warned about, once per process each.
+ *
+ * Both switches are read for every message stored, on every ingest path, so a
+ * typo warned about on each read is a line per inbound message — the noise that
+ * buries the one line saying what is wrong. Keyed on the value rather than a
+ * flag, so correcting one typo to another still says so.
+ */
+const warned = new Set<string>();
+
+function warnOnce(key: string, message: string): void {
+  if (warned.has(key)) return;
+  warned.add(key);
+  log.warn(message);
+}
+
 export function priorityAiMode(): PriorityAiMode {
   const raw = process.env.PRIORITY_AI?.trim().toLowerCase();
   if (!raw) return 'off';
   const mode = PRIORITY_AI_MODES.find((candidate) => candidate === raw);
   if (!mode) {
-    log.warn(
+    warnOnce(
+      `PRIORITY_AI=${raw}`,
       `PRIORITY_AI=${raw} is not one of ${PRIORITY_AI_MODES.join(' | ')}; reading it as off`,
     );
     return 'off';
@@ -53,7 +70,8 @@ export function priorityAiMinProbability(): number {
   if (!raw) return DEFAULT_MIN_PROBABILITY;
   const value = Number(raw);
   if (!Number.isFinite(value) || value < 0 || value > 1) {
-    log.warn(
+    warnOnce(
+      `PRIORITY_AI_MIN_PROBABILITY=${raw}`,
       `PRIORITY_AI_MIN_PROBABILITY=${raw} is not a number in 0..1; using ${DEFAULT_MIN_PROBABILITY}`,
     );
     return DEFAULT_MIN_PROBABILITY;

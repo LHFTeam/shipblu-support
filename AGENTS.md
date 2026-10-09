@@ -683,10 +683,14 @@ priority set by a person, a rule, a form default or an agent opening the ticket
 is never touched; only the answer to the customer's opening message may lower a
 ticket, and later ones only raise; and every answer, applied or not, is a row in
 `ai_priority_runs` with its full distribution, because those rows are the only
-labels priority has. A new writer of `conversations.priority` calls
-`onPriorityChanged` after its write commits, as the console, the `set_priority`
-automation and the classifier do — the policies price their targets per
-priority. See `plans/priority-through-typesafe.md`.
+labels priority has. A new writer of `conversations.priority` writes the column
+and its `priority_changed` event in one transaction, stamps the event with
+`PRIORITY_STAMP` (`lib/tickets/priority-stamp.ts`) so events sort in the order
+the column was written, and calls `onPriorityChanged` after it commits — as the
+console, the `set_priority` automation and the classifier do. The policies price
+their targets per priority, and the classifier decides whose priority a ticket
+carries from the column and those events read together. See
+`plans/priority-through-typesafe.md`.
 
 **Knowledge base article formatting.** `lib/kb/format.ts` is the standard, and
 it is code rather than prose because it is enforced: `normaliseArticleHtml`
