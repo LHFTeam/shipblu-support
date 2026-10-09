@@ -134,6 +134,40 @@ raising a ticket parked for two days last week pushed its reply deadline back tw
 days. And it credited a pause still open, which the resume credits again in
 full. Both are fixed, with tests that fail on the old code.
 
+## The rules that watch priority run after it
+
+An applied change is followed by the `on_update` rules and auto-assignment,
+exactly as a console edit is (`afterTicketUpdate`), so a rule keyed on priority
+— "urgent → the escalations group" — fires for a ticket the classifier raised,
+which is the ticket such a rule is written for. Without it, no `on_create` or
+`on_update` rule saw the classifier's value until the next message or edit: the
+pass the message's own ingest ran had already seen the priority from before the
+answer. (A `time_based` rule sees it on the sweep's next pass either way.)
+
+Only an applied change runs them: a shadow answer and a refused one moved
+nothing a rule could react to. What it costs is what an agent's edit costs, and
+two parts of that are easy to misread:
+
+- **On a new ticket it is the first `on_update` pass, not a second one.** Ingest
+  ran only `on_create`, so every `on_update` rule whose conditions hold now fires
+  at creation on a ticket the classifier changed, not only rules about priority —
+  as it would if an agent had edited the ticket a moment after it arrived. The
+  condition language has no fact telling a reply from an edit, so a rule meant
+  for follow-ups cannot exclude it.
+- **It is not always ordered after `on_create`.** Where ingest runs in the
+  worker (email, WhatsApp, Meta), the batch finishes before this job is claimed.
+  Web chat, the portal and forms enqueue the job from the request before they
+  run `on_create`, so a provider answering faster than that pass lets this one
+  run first, and an `on_create` rule writing the same field then has the last
+  word.
+
+A `send_reply` rule that already answered since the customer last wrote is held
+off by `alreadyReplied`, so the same rule does not reply twice to one message.
+Production had no `on_update` rule when this shipped (one `time_based` rule
+closes resolved tickets), so until somebody writes one the pass's only effect is
+auto-assignment, which leaves an assigned ticket alone and repeats what the
+assignment sweep would do for an unassigned one.
+
 ## Rollout
 
 `PRIORITY_AI` is `off` until set. `shadow` asks and records and changes nothing;

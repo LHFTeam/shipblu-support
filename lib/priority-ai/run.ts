@@ -7,6 +7,7 @@ import { predictionFrom, type AiPrediction } from '@/lib/categorise-ai/map';
 import { errorMessage } from '@/lib/errors';
 import { logger } from '@/lib/log';
 import { onPriorityChanged } from '@/lib/sla';
+import { afterTicketUpdate } from '@/lib/tickets/lifecycle';
 import { PRIORITY_STAMP } from '@/lib/tickets/priority-stamp';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
 import { PRIORITIES, isPriority, type Priority } from '@/lib/tickets/vocabulary';
@@ -273,6 +274,25 @@ export async function classifyMessagePriority(
     // priority change did before this, rather than failing a classification
     // already written.
     await onPriorityChanged(row.conversationId);
+
+    // Then the observer rules and auto-assignment, exactly as after a console
+    // edit, so a rule keyed on priority — "urgent → the escalations group" —
+    // fires for a ticket Jev raised, which is the ticket it was written for.
+    // The pass the message's own ingest ran saw the priority from before this
+    // answer. Only an applied change: shadow and refused answers moved nothing
+    // a rule could react to. Best-effort inside, like the SLA call above.
+    //
+    // What it costs is what an agent's edit costs, and two parts of it are
+    // easy to misread. On a new ticket this is the ticket's *first* `on_update`
+    // pass — ingest ran only `on_create` — so every `on_update` rule whose
+    // conditions hold fires at creation, not only the ones about priority. And
+    // it is ordered after `on_create` only where ingest runs in the worker
+    // (email, WhatsApp, Meta), whose batch finishes before this job is
+    // claimed; web chat, the portal and forms enqueue this job from the request
+    // before running `on_create`, so a provider answering faster than that pass
+    // can run this one first. A `send_reply` rule that already answered since
+    // the customer last wrote is held off by `alreadyReplied` either way.
+    await afterTicketUpdate(row.conversationId);
   }
 
   return { status: 'recorded', outcome, predicted };
