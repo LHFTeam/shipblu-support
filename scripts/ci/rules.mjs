@@ -43,6 +43,7 @@ import { checkNoDeadExports } from './rules/dead-exports.mjs';
 import { checkPagesDoNotImportTheDatabase } from './rules/page-db.mjs';
 import { checkFormsDoNotReset } from './rules/form-reset.mjs';
 import { checkActionsRevalidate } from './rules/action-revalidates.mjs';
+import { checkButtonTypeIsFixed } from './rules/button-type.mjs';
 
 export const RULES = [
   ['env-parity', checkEnvParity],
@@ -76,6 +77,7 @@ export const RULES = [
   ['console-scroll', checkConsolePagesScroll],
   ['form-reset', checkFormsDoNotReset],
   ['action-revalidates', checkActionsRevalidate],
+  ['button-type', checkButtonTypeIsFixed],
   ['page-db', checkPagesDoNotImportTheDatabase],
   ['light-only', checkLightOnly],
   ['framing', checkFramingHeaders],

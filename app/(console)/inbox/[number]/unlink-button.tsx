@@ -1,13 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useConfirmClick } from '@/components/confirm-submit';
 import { type LinkAction, useFieldAction } from './use-field-action';
 
 /**
- * Two-click removal, inline rather than importing `DangerAction` from the admin
- * forms. Reaching into admin internals from the inbox would couple two areas
- * that have stayed apart; promoting that component into `components/ui.tsx` is
- * the better move and a wider change than this feature should carry.
+ * Two-click removal. Not a `ConfirmSubmit`, because there is no form here — the
+ * write goes through `useFieldAction` like the sidebar's other controls — but
+ * the same click rule, so a double-click arms it and stops (§6.85).
  */
 export function UnlinkButton({
   action,
@@ -18,24 +17,20 @@ export function UnlinkButton({
   fields: Record<string, string>;
   label: string;
 }) {
-  const [armed, setArmed] = useState(false);
   const { pending: busy, run } = useFieldAction(action, { rereadOnRefusal: true });
-
-  async function remove() {
-    await run(fields);
-    setArmed(false);
-  }
+  const { armed, disarm, onClick, onKeyDown } = useConfirmClick(() => run(fields));
 
   return (
     <button
       type="button"
       disabled={busy}
       aria-label={label}
-      onClick={() => (armed ? void remove() : setArmed(true))}
-      onBlur={() => setArmed(false)}
+      onClick={onClick}
+      onKeyDown={onKeyDown}
+      onBlur={disarm}
       className="shrink-0 rounded px-1 text-xs opacity-50 hover:opacity-100"
     >
-      {armed ? 'Sure?' : '\u00d7'}
+      {armed ? 'Sure?' : '×'}
     </button>
   );
 }

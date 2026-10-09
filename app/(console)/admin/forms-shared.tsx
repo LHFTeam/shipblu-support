@@ -3,6 +3,7 @@
 import { useActionState, useState, type ReactNode } from 'react';
 import { Button, Card, ErrorText } from '@/components/ui';
 import type { ActionState } from '@/lib/http/action-state';
+import { ConfirmSubmit } from '@/components/confirm-submit';
 import { SubmitButton } from '@/components/submit-button';
 import { useActionForm } from '@/components/use-action-form';
 
@@ -126,10 +127,7 @@ export function Collapsible({
 }
 
 /**
- * A destructive action behind one confirmation.
- *
- * The confirm is a second click on the same button rather than a dialog: it is
- * enough to stop a mis-click and does not need a focus trap to be accessible.
+ * A destructive action behind one confirmation: `ConfirmSubmit`'s second click.
  */
 export function DangerAction({
   action,
@@ -146,24 +144,11 @@ export function DangerAction({
   disabled?: boolean;
 }) {
   const [state, formAction] = useActionState(action, INITIAL);
-  const [armed, setArmed] = useState(false);
 
   return (
     <form action={formAction} className="inline-flex flex-col items-end gap-1">
       <input type="hidden" name="id" value={id} />
-      {armed ? (
-        <SubmitButton idle={confirmLabel} variant="danger" disabled={disabled} />
-      ) : (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={() => setArmed(true)}
-          disabled={disabled}
-        >
-          {label}
-        </Button>
-      )}
+      <ConfirmSubmit label={label} confirmLabel={confirmLabel} disabled={disabled} />
       {state.error ? (
         <span className="max-w-xs text-end text-xs text-red-600">{state.error}</span>
       ) : null}
