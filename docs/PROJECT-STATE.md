@@ -5349,7 +5349,12 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
 
     The real console was not exercised end to end — there is no database in the
     session that measured this — so every call site was checked by reading which
-    path its action revalidates, against the behaviour measured above.
+    path its action revalidates, against the behaviour measured above. The
+    hook's side is tested: `components/use-action-form.test.ts`, the repo's
+    first DOM test (happy-dom, for that file only), fails on each way the
+    contract has gone or could go wrong — the callback as an effect dependency,
+    keying on `ok` alone, a refresh after a success, a bare `action=`, and a
+    refusal that moves the key.
 
 ## 7. Verification already done
 
