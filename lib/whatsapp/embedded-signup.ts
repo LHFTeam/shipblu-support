@@ -2,17 +2,26 @@
  * The browser half of connecting a WhatsApp Business-app number: what Meta's
  * JavaScript SDK is asked for, and what its window says back.
  *
- * Pure and client-safe, and deliberately small. Everything the popup returns
- * is a *claim* — the server proves the code by exchanging it and the ids by
- * reading them with the token (`./onboarding`) — so this module only has to
- * get three things right: open the window with the options Meta documents,
- * take a message from Meta's own origin and nobody else's, and read the three
- * events the window sends without ever throwing in a `message` listener.
+ * Pure and client-safe. Everything the popup returns is a *claim* — the server
+ * proves the code by exchanging it and the ids by reading them with the token
+ * (`./onboarding`) — so this module only has to get three things right: open
+ * the window with the options Meta documents, take a message from Meta's own
+ * origin and nobody else's, and read the three events the window sends without
+ * ever throwing in a `message` listener.
+ *
+ * It also holds the connect card's phase machine and the two pieces of SDK
+ * plumbing the card leans on — seeing whether the browser refused the window,
+ * and sharing the SDK's one `fbAsyncInit` between cards. They are here rather
+ * than in the card because each is a rule with a way to be wrong that only
+ * shows in a browser, and the card is a `'use client'` file a node test cannot
+ * import; here, the test beside this file runs them.
  *
  * Verified against Meta's Embedded Signup and coexistence pages on 2026-10-08.
  * Where the pages disagree (there are two generations of them), the constants
  * below say which one they follow, and the test beside this file pins them.
  */
+
+import { GRAPH_VERSION } from '@/lib/meta/graph';
 
 /** Loaded once per document, when the connect card opens — never on the click. */
 export const FB_SDK_URL = 'https://connect.facebook.net/en_US/sdk.js';
@@ -64,10 +73,246 @@ export const SDK_LOAD_TIMEOUT_MS = 10_000;
 
 /**
  * A login callback this soon after the click, with no code and no message, is
- * read as a popup the browser blocked. A very fast cancel reads the same way,
- * and the recovery is the same either way: press the button again.
+ * worded as a blocked window.
+ *
+ * Not how an ordinary pop-up blocker shows itself: when `window.open` answers
+ * null the SDK logs it and stops — no window is registered, no monitor runs and
+ * the callback never comes — so that case is seen during the click by
+ * `watchWindowOpen` instead. A callback with no code is always a window that
+ * opened and then shut, noticed by the SDK's 100 ms monitor. Shut within a
+ * second of opening, that is a blocker extension that lets `window.open`
+ * succeed and closes what it opened, or a very fast cancel; the recovery is the
+ * same either way — allow pop-ups and press again.
  */
 export const POPUP_BLOCKED_MS = 1_000;
+
+export type WindowOpenOutcome = 'opened' | 'blocked' | 'not_called';
+
+/**
+ * Runs `run` — the `FB.login` call — and reports what `window.open` answered
+ * while it ran.
+ *
+ * The SDK opens Meta's window synchronously inside `FB.login` (that is why the
+ * call has to be inside the click), and says nothing at all when the browser
+ * refuses it: the callback is simply never called. So the refusal can only be
+ * seen here, as `window.open` returning null during the call. `not_called`
+ * means the SDK opened nothing synchronously — a future SDK that opens later,
+ * or another sign-in path — and the card cannot tell either way.
+ *
+ * The original is called with its own `this` (`apply(target, …)`): the native
+ * `window.open` invoked on anything else throws "Illegal invocation". And it is
+ * put back in `finally`, so a throwing `run` cannot leave the page's
+ * `window.open` wrapped.
+ */
+export function watchWindowOpen(
+  target: { open: Window['open'] },
+  run: () => void,
+): WindowOpenOutcome {
+  const native = target.open;
+  let outcome: WindowOpenOutcome = 'not_called';
+  target.open = (...args) => {
+    const opened = native.apply(target, args);
+    outcome = opened ? 'opened' : 'blocked';
+    return opened;
+  };
+  try {
+    run();
+  } finally {
+    target.open = native;
+  }
+  return outcome;
+}
+
+type SdkInitOptions = {
+  appId: string;
+  autoLogAppEvents: boolean;
+  xfbml: boolean;
+  version: string;
+};
+
+/** The two globals the SDK reads and writes, as the gate needs them. */
+type SdkHost = {
+  FB?: { init(options: SdkInitOptions): void };
+  fbAsyncInit?: () => void;
+};
+
+type SdkWaiter = { ready: () => void; blocked: () => void };
+
+/**
+ * One `fbAsyncInit` for every connect card in the document.
+ *
+ * The SDK calls `window.fbAsyncInit` exactly once, when it loads, and marks it
+ * `hasRun`. The page can hold several cards — the header's, an account row's,
+ * a channel row's — and a card that assigned its own closure would lose to
+ * whichever card assigned last: its `sdk_ready` would never come, and its
+ * timeout would say the SDK was blocked while the card beside it used it. So
+ * each card waits here, and whichever closure the SDK calls initialises the SDK
+ * once and wakes every waiter. Every card hands the same app id, from the same
+ * readiness, so which closure wins does not matter.
+ *
+ * `fail` is the script's `error` event, which only the card that injected the
+ * tag hears. Waiters are told and kept: the tag comes down on an error, a card
+ * opened later injects it again, and a load that succeeds then still wakes the
+ * cards that were told it failed.
+ */
+export function createSdkGate() {
+  let initialised = false;
+  const waiting = new Set<SdkWaiter>();
+
+  return {
+    /** Whether `FB.init` has run in this document. */
+    get initialised() {
+      return initialised;
+    },
+
+    /** Wakes `waiter` once the SDK is initialised; the answer unsubscribes it. */
+    wait(host: SdkHost, appId: string, waiter: SdkWaiter): () => void {
+      if (initialised) {
+        waiter.ready();
+        return () => undefined;
+      }
+      waiting.add(waiter);
+      host.fbAsyncInit = () => {
+        const fb = host.FB;
+        if (!fb) return;
+        fb.init({ appId, autoLogAppEvents: true, xfbml: true, version: GRAPH_VERSION });
+        initialised = true;
+        const woken = [...waiting];
+        waiting.clear();
+        for (const each of woken) each.ready();
+      };
+      return () => {
+        waiting.delete(waiter);
+      };
+    },
+
+    fail() {
+      for (const each of [...waiting]) each.blocked();
+    },
+  };
+}
+
+// --- The connect card's phases ----------------------------------------------
+
+export type ConnectPhase =
+  | { name: 'loading_sdk' }
+  /** `timeout`: not arrived yet, and may still. `error`: the script failed to load. */
+  | { name: 'sdk_blocked'; cause: 'timeout' | 'error' }
+  /** `wait`: refused for something running Meta's window again cannot fix. */
+  | { name: 'idle'; error: string | null; wait: boolean }
+  /** `unseen`: the SDK opened nothing during the click, so the card cannot tell. */
+  | { name: 'popup_open'; unseen: boolean }
+  | { name: 'popup_blocked' }
+  | { name: 'cancelled'; step: string | null }
+  | { name: 'meta_error'; message: string | null; sessionId: string | null }
+  | { name: 'awaiting_number' }
+  | { name: 'no_number' }
+  | { name: 'finishing' }
+  | { name: 'unanswered' }
+  | { name: 'done'; notice: string };
+
+export type ConnectEvent =
+  | { type: 'sdk_ready' }
+  | { type: 'sdk_blocked'; cause: 'timeout' | 'error' }
+  | { type: 'opened' }
+  | { type: 'window_unseen' }
+  | { type: 'popup_blocked' }
+  | { type: 'closed' }
+  | { type: 'cancelled'; step: string | null }
+  | { type: 'meta_error'; message: string | null; sessionId: string | null }
+  | { type: 'awaiting_number' }
+  | { type: 'no_number' }
+  | { type: 'finishing' }
+  | { type: 'refused'; error: string; wait: boolean }
+  | { type: 'unanswered' }
+  | { type: 'done'; notice: string };
+
+/** The phases in which Meta's window is open and may still say something. */
+const WINDOW_OPEN = new Set<ConnectPhase['name']>(['popup_open', 'awaiting_number']);
+
+/**
+ * The phases a finished sign-in may still arrive in, beyond `WINDOW_OPEN`.
+ *
+ * An ERROR or a CANCEL does not close Meta's window, and the business can
+ * recover inside it and finish. The card resets both halves of the answer on
+ * every press, so a FINISH and a code held together both come from this
+ * press's window — newer and stronger evidence than the earlier message, and a
+ * code that lives thirty seconds. Refusing them would leave the number
+ * connected (or refused) while the card still read "Meta reported …", and its
+ * "Try again" would put the business through the window a second time. Meta's
+ * samples also show a user-reported error posted as CANCEL, which is why
+ * `cancelled` is here too; a window that was really closed brings no code, so
+ * the action is never reached from it.
+ */
+const FINISH_AFTER = new Set<ConnectPhase['name']>(['meta_error', 'cancelled']);
+
+/**
+ * Each event applies only from the phases it can follow, so a late message —
+ * a CANCEL posted after the window closed, a second `sdk_ready` — cannot move
+ * the card backwards out of `finishing` or `done`.
+ *
+ * One deliberate exception: `sdk_ready` lifts `sdk_blocked`. The ten-second
+ * timeout is a guess, not evidence — on a slow link the SDK arrives after it,
+ * and `sdk_ready` is only ever dispatched once `FB.init` has run, so a card
+ * that said "blocked" and then got a working SDK should carry on rather than
+ * send the admin to reload.
+ */
+export function reduceConnectPhase(phase: ConnectPhase, event: ConnectEvent): ConnectPhase {
+  switch (event.type) {
+    case 'sdk_ready':
+      return phase.name === 'loading_sdk' || phase.name === 'sdk_blocked'
+        ? { name: 'idle', error: null, wait: false }
+        : phase;
+    case 'sdk_blocked':
+      // The script failing outright is firmer than the timeout that came first.
+      return phase.name === 'loading_sdk' ||
+        (phase.name === 'sdk_blocked' && event.cause === 'error')
+        ? { name: 'sdk_blocked', cause: event.cause }
+        : phase;
+    case 'opened':
+      return { name: 'popup_open', unseen: false };
+    case 'window_unseen':
+      return phase.name === 'popup_open' ? { name: 'popup_open', unseen: true } : phase;
+    case 'popup_blocked':
+      return phase.name === 'popup_open' ? { name: 'popup_blocked' } : phase;
+    case 'closed':
+      return WINDOW_OPEN.has(phase.name) ? { name: 'cancelled', step: null } : phase;
+    case 'cancelled':
+      return WINDOW_OPEN.has(phase.name) ? { name: 'cancelled', step: event.step } : phase;
+    case 'meta_error':
+      return WINDOW_OPEN.has(phase.name)
+        ? { name: 'meta_error', message: event.message, sessionId: event.sessionId }
+        : phase;
+    case 'awaiting_number':
+      return phase.name === 'popup_open' ? { name: 'awaiting_number' } : phase;
+    case 'no_number':
+      return phase.name === 'awaiting_number' ? { name: 'no_number' } : phase;
+    case 'finishing':
+      return WINDOW_OPEN.has(phase.name) || FINISH_AFTER.has(phase.name)
+        ? { name: 'finishing' }
+        : phase;
+    case 'refused':
+      return phase.name === 'finishing'
+        ? { name: 'idle', error: event.error, wait: event.wait }
+        : phase;
+    case 'unanswered':
+      return phase.name === 'finishing' ? { name: 'unanswered' } : phase;
+    case 'done':
+      return phase.name === 'finishing' ? { name: 'done', notice: event.notice } : phase;
+  }
+}
+
+/**
+ * What the card is waiting on, if anything: Meta's window, or the action
+ * checking Meta's answer. While it waits, closing the card would unmount the
+ * listener and the refs the answer lands in — the window stays open, the
+ * business finishes in it, and nobody hears — so the card's Cancel asks first.
+ */
+export function connectWaitingOn(phase: ConnectPhase): 'window' | 'verifying' | null {
+  if (WINDOW_OPEN.has(phase.name)) return 'window';
+  if (phase.name === 'finishing') return 'verifying';
+  return null;
+}
 
 /**
  * `FB.login`'s second argument.

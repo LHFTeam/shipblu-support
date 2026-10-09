@@ -46,6 +46,42 @@ export async function writeOnboardedCoexistence(
     .where(eq(channels.id, channelId));
 }
 
+/**
+ * The `config` and account link an admin's save of a `whatsapp` channel writes
+ * — decided by Postgres inside the UPDATE, not from a read the action took
+ * before it.
+ *
+ * A channel carrying a `coexistence` object keeps its whole `config` and its
+ * account exactly as the row holds them; any other takes the form's phone
+ * number id and account. Both are kept rather than rebuilt because nothing in
+ * them is the form's to change: the phone number id is what Meta reported, the
+ * object is moved by concurrent webhooks and the job, and the account is the
+ * one whose credential this connection was made with — sending from another
+ * is the "went out from the wrong WABA" failure `./accounts` describes.
+ *
+ * In the statement rather than in the action because the action's read is
+ * stale by the time it writes. Copying `config` from that read wrote back a
+ * snapshot over every `jsonb_set` that landed in between — a history chunk's
+ * progress, a request id, a disconnection — which is the read-modify-write
+ * this module exists to avoid; and a channel the onboarding job adopted in
+ * between would have lost its connection and been pointed back at its old
+ * account. Under READ COMMITTED an UPDATE that waits on a concurrent writer
+ * evaluates its SET again against the row it then locks, so the CASE sees the
+ * object as it is when the write happens.
+ */
+export function whatsappEditColumns(form: {
+  phoneNumberId: string;
+  whatsappAccountId: string | null;
+}): { config: SQL; whatsappAccountId: SQL } {
+  const connected = sql`jsonb_typeof(${channels.config} -> 'coexistence') = 'object'`;
+  return {
+    config: sql`case when ${connected} then ${channels.config}
+                     else ${JSON.stringify({ phoneNumberId: form.phoneNumberId })}::jsonb end`,
+    whatsappAccountId: sql`case when ${connected} then ${channels.whatsappAccountId}
+                                else ${form.whatsappAccountId}::uuid end`,
+  };
+}
+
 export type SyncOutcome = { requestId: string } | { error: string };
 
 /**

@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import {
@@ -542,6 +542,50 @@ describe('rotating the key', () => {
       { accountId: egypt.id, reason: expect.stringMatching(/neither WHATSAPP_CREDENTIAL_KEY/) },
     ]);
     expect(await envelopeOf(egypt.id)).toEqual(stranded);
+  });
+
+  /**
+   * The reseal binds a freshly sealed envelope into its update, so an ordinary
+   * failure there — a dropped connection, a constraint a later migration adds —
+   * would carry it into the job's `last_error`, which is why it is wrapped as
+   * `storeBusinessToken`'s insert is. Forced with a trigger refusing any write
+   * to `envelope`, dropped whatever the test does, since truncating leaves a
+   * trigger in place; `or replace` so a run killed before the drop does not
+   * fail the next one.
+   */
+  it('fails with Postgres’s sentence, never the statement or the new envelope in it', async () => {
+    const egypt = await account('Egypt', '111111');
+    await store(egypt);
+    const before = await envelopeOf(egypt.id);
+    useKeys(KEY_B, KEY_A);
+
+    await db.execute(
+      sql.raw(`create or replace function test_refuse_envelope_write() returns trigger language plpgsql as $$
+        begin raise exception 'refused by the test' using errcode = 'check_violation'; end $$`),
+    );
+    await db.execute(
+      sql.raw(`create or replace trigger test_refuse_envelope_write before update of envelope
+        on whatsapp_account_credentials for each row execute function test_refuse_envelope_write()`),
+    );
+    let failure: Error | null;
+    try {
+      failure = await resealStoredCredentials({ dryRun: false }).then(
+        () => null,
+        (error: unknown) => error as Error,
+      );
+    } finally {
+      await db.execute(
+        sql.raw(
+          `drop trigger if exists test_refuse_envelope_write on whatsapp_account_credentials`,
+        ),
+      );
+      await db.execute(sql.raw(`drop function if exists test_refuse_envelope_write()`));
+    }
+
+    expect(failure?.message).toBe('storing the credential failed (23514): refused by the test');
+    expect(failure && 'cause' in failure).toBe(false);
+    expect(await envelopeOf(egypt.id)).toEqual(before);
+    expect((await eventsFor(egypt.id)).map((event) => event.event)).toEqual(['stored']);
   });
 
   it('skips with no key and nothing stored, and refuses with no key and rows to move', async () => {

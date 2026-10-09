@@ -17,10 +17,17 @@ import {
 import { type ClaimedJob, enqueue, isFinalAttempt, retryDelaySeconds } from '@/lib/queue';
 import { credentialsForAccount, listAccounts } from './accounts';
 import { callGraph, WhatsAppApiError } from './client';
-import { canRequestSync, type Coexistence, parseCoexistence, type SyncType } from './coexistence';
+import {
+  canRequestSync,
+  type Coexistence,
+  parseCoexistence,
+  SYNC_TYPES,
+  type SyncType,
+} from './coexistence';
 import { recordSyncRequest, writeOnboardedCoexistence } from './coexistence-state';
 import { CredentialKeyError } from './credential-envelope';
 import { ACCESS_TOKEN_CODE, explainAuthError } from './errors';
+import { runsNamedSteps } from './onboarding-reads';
 import {
   numberPlatformRequest,
   phoneNumbersRequest,
@@ -102,10 +109,12 @@ export async function completeOnboarding(
   const targeted = options.only !== undefined;
 
   // A full run is for an attempt still connecting; a targeted one is for a
-  // number already connected. Anything else is a job that outlived its
-  // purpose — a retry that raced a supersede, a double-click — and does
-  // nothing, rather than reopening a decision somebody else already made.
-  if ((!targeted && row.status !== 'exchanged') || (targeted && row.status !== 'connected')) {
+  // number already connected — `runsNamedSteps`, which the copy button's
+  // action asks too, so it refuses with a sentence what this would skip.
+  // Anything else is a job that outlived its purpose — a retry that raced a
+  // supersede, a double-click — and does nothing, rather than reopening a
+  // decision somebody else already made.
+  if ((!targeted && row.status !== 'exchanged') || (targeted && !runsNamedSteps(row.status))) {
     log.info(`${onboardingId} is ${row.status}; nothing to do`, {
       onboardingId,
       status: row.status,
@@ -532,6 +541,10 @@ async function channelStep(
     verifiedName: facts.verifiedName,
     subscribedAt,
     syncs: {},
+    // On the channel, not only on the step records: the row's badges and copy
+    // buttons read this object, and without it a number with no phone to copy
+    // from is offered a copy, and a day later a reconnect for one it missed.
+    ...(facts.onBusinessApp ? {} : { notOnBusinessApp: true as const }),
   };
 
   const current = existing[0];
@@ -539,6 +552,10 @@ async function channelStep(
     const previous = parseCoexistence(current.config);
 
     if (previous?.onboardingId === row.id) {
+      // What this attempt carried over when it wrote the object, so a re-run
+      // skips those copies exactly as the run that wrote it would have — and
+      // records them, so a run after this one finds them on the step too.
+      const previouslyCopied = previous.carriedOver ?? [];
       await db.transaction(async (tx) => {
         await tx
           .update(whatsappOnboardings)
@@ -547,18 +564,28 @@ async function channelStep(
         await recordStep(
           row.id,
           'channel',
-          { ok: true, outcome: 'connected', detail: `Connected channel "${current.name}".` },
+          {
+            ok: true,
+            outcome: 'connected',
+            previouslyCopied,
+            detail: `Connected channel "${current.name}".`,
+          },
           tx,
         );
       });
-      return { id: current.id, previouslyCopied: [] };
+      return { id: current.id, previouslyCopied };
     }
 
-    const previouslyCopied = (['contacts', 'history'] as const).filter((type) => {
+    // Copied means copied by any earlier connection, not only the last one: a
+    // reconnect asks for nothing it carried over, so its own slots are empty,
+    // and reading only those would have the reconnect after it ask the phone
+    // for six months of chats again.
+    const previouslyCopied = SYNC_TYPES.filter((type) => {
       const slot = previous?.syncs[type];
       const requested = Boolean(slot && 'requestId' in slot && slot.requestId);
       // Declined on the phone: the business said no then, and may say yes now.
-      return requested && !(type === 'history' && previous?.syncs.history?.declined);
+      const declined = type === 'history' && Boolean(previous?.syncs.history?.declined);
+      return (requested && !declined) || Boolean(previous?.carriedOver?.includes(type));
     });
 
     await db.transaction(async (tx) => {
@@ -569,7 +596,10 @@ async function channelStep(
         .update(channels)
         .set({ whatsappAccountId: row.whatsappAccountId, isActive: true, updatedAt: new Date() })
         .where(eq(channels.id, current.id));
-      await writeOnboardedCoexistence(tx, current.id, coexistence);
+      await writeOnboardedCoexistence(tx, current.id, {
+        ...coexistence,
+        ...(previouslyCopied.length > 0 ? { carriedOver: previouslyCopied } : {}),
+      });
       await tx
         .update(whatsappOnboardings)
         .set({ channelId: current.id, updatedAt: new Date() })

@@ -5070,6 +5070,42 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     meaning anything. None of this has run live (§5.2), which is also why the
     field list grows on staging first.
 
+86. **Every Graph credential this app sends rides in a URL, and a fetch
+    tracing span records the URL whole.** _2026-10-09, found in review of the
+    coexistence change; nothing traces yet, so nothing has left the process._
+    Next 16's patched `fetch` wraps every server-side call in a span named
+    `fetch GET <url>` with `'http.url': <url>`
+    (`next/dist/server/lib/patch-fetch.js`). No `instrumentation.ts` exists,
+    so the tracer is a no-op and no span is exported. The day one is added —
+    `@vercel/otel` or any OTLP exporter, to see why a page is slow — every
+    Graph request goes to the tracing vendor with its query string: the Page
+    token on every call through `lib/meta/client.ts` (`access_token=`, line
+    209, the console's own actions in `app/(console)/meta-actions.ts` among
+    them — the largest instance, and older than coexistence); the app secret
+    and the single-use code on the Embedded Signup exchange
+    (`tokenExchangeUrl`); and the business token in `debug_token`'s
+    `input_token`. The modules' rule — a sentence names host and path, never
+    the URL — covers logs and error messages and says nothing about spans.
+    So whoever adds instrumentation keeps the `graph.facebook.com` and
+    `graph.instagram.com` query strings out of every span. With `@vercel/otel`
+    that is
+    `instrumentationConfig: { fetch: { ignoreUrls: [/^https:\/\/graph\.(facebook|instagram)\.com\//] } }`;
+    with anything else, a `SpanProcessor` that strips the query from the span
+    name, `http.url` and `url.full`. The worker needs the same if it ever
+    gains OpenTelemetry's undici instrumentation, because it calls Graph with
+    the same tokens through plain `fetch`. Three tempting fixes do not work.
+    `NEXT_OTEL_FETCH_DISABLED=1` hides only Next's span, and `@vercel/otel`
+    sets it itself and records its own span with the full URL. Setting
+    `next.internal` on a request suppresses Next's span, but it is an
+    internal flag outside Next's public types, and `NEXT_OTEL_VERBOSE=1` brings
+    the span back. And taking the credential out of the query string is
+    impossible for `debug_token`, whose `input_token` has no other shape, and
+    unproven for the exchange: Meta documents only the GET, and a wrong guess
+    spends a code that works once. Not yet a CI check. It belongs in a rule of
+    its own under `scripts/ci/rules/`, refusing an instrumentation file that
+    does not keep both hosts out, rather than in `credential-confinement`,
+    which is about the stored credential.
+
 ## 7. Verification already done
 
 - **The knowledge-base role floor, against a real Postgres.** _2026-09-04._ The
@@ -5311,6 +5347,11 @@ configured?" questions in one call. Outbound HTTPS goes through an agent proxy;
   by the worker and by nothing on the web service (`credential-confinement`).
   Every other credential is in the environment and named from a row — a
   WhatsApp account's token is named, or stored sealed, never plaintext.
+- **Graph requests carry credentials in their URLs** — the Page token on every
+  call, the app secret and code on the Embedded Signup exchange, the business
+  token in `debug_token`. Nothing traces today; whoever adds an
+  `instrumentation.ts` keeps both Graph hosts' query strings out of every span
+  first (§6.86).
 - RLS: enabled, zero policies, **never FORCE** (§2).
 - Email bodies and imported KB HTML are attacker-controlled. **Sanitise on
   write, never on read** — the stored row is then safe for every consumer, and

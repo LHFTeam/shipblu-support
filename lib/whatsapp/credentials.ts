@@ -583,14 +583,22 @@ export async function resealStoredCredentials(options: {
         const reopened = unseal(row.envelope, ring, binding);
         if (options.dryRun) return true;
 
-        await tx
-          .update(credentials)
-          .set({
-            envelope: seal(reopened, ring, binding),
-            keyId: ring.current.id,
-            updatedAt: new Date(),
-          })
-          .where(eq(credentials.whatsappAccountId, accountId));
+        // The other writer of `envelope`, so it fails the way `storeBusinessToken`
+        // does: the statement binds the freshly sealed envelope, and anything
+        // but a `CredentialKeyError` is rethrown below into the job's
+        // `last_error` and the worker's log.
+        try {
+          await tx
+            .update(credentials)
+            .set({
+              envelope: seal(reopened, ring, binding),
+              keyId: ring.current.id,
+              updatedAt: new Date(),
+            })
+            .where(eq(credentials.whatsappAccountId, accountId));
+        } catch (error) {
+          throw withoutStatement(error);
+        }
 
         await appendEvent(tx, {
           accountId,
@@ -610,4 +618,40 @@ export async function resealStoredCredentials(options: {
   }
 
   return summary;
+}
+
+/**
+ * Why disconnecting an account would be refused to this caller, or null when
+ * it would not: the account holds a stored credential, and the caller may not
+ * remove one.
+ *
+ * Deleting the account takes the credential with it by cascade, so removing
+ * the account is removing the credential — the thing `admin.channels.connect`
+ * gates on Forget. The caller says whether it holds that key (`mayForget`);
+ * this says whether it matters.
+ *
+ * Locks the account row and only then asks, in a separate statement, whether a
+ * credential exists — `storedCredentialEditRefusal`'s order, for its reason:
+ * a credential stored by a connection finishing while this waited is seen
+ * here, rather than cascaded away by the caller's delete without anybody who
+ * held the right to remove it.
+ */
+export async function storedCredentialRemovalRefusal(
+  tx: Executor,
+  accountId: string,
+  mayForget: boolean,
+): Promise<string | null> {
+  const [row] = await tx
+    .select({ id: whatsappAccounts.id })
+    .from(whatsappAccounts)
+    .where(eq(whatsappAccounts.id, accountId))
+    .for('update');
+
+  if (!row || mayForget || !(await lockedAccountHasCredential(tx, accountId))) return null;
+
+  return (
+    'This business account holds a credential stored through Meta’s window, and disconnecting ' +
+    'it removes that credential, which needs the permission to connect numbers. Ask an admin ' +
+    'who connects numbers to disconnect it.'
+  );
 }

@@ -24,6 +24,15 @@ import { GRAPH_BASE, graphTimeout } from '@/lib/meta/graph';
  * builds names `host + pathname` and never the URL, and anything an error
  * carries back from the network layer has the token cut out of it before it is
  * repeated.
+ *
+ * A sentence is not the only place a URL goes. Every fetch tracing span
+ * records it whole, as the span's name and as `http.url` / `url.full` — Next's
+ * patched `fetch` on the web service, `@vercel/otel`'s fetch instrumentation,
+ * OpenTelemetry's undici instrumentation. Nothing registers a tracer today (no
+ * `instrumentation.ts`), so those spans go nowhere; whoever adds one keeps the
+ * Graph hosts' query strings out of them, or this token is exported on every
+ * call. `docs/PROJECT-STATE.md` §6.86 says how, and why
+ * `NEXT_OTEL_FETCH_DISABLED` is not the answer.
  */
 
 /** What `debug_token` answers, as Meta spells it. */

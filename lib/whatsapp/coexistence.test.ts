@@ -4,9 +4,11 @@ import {
   coexistenceBadges,
   historyDone,
   isSyncing,
+  needsReconnect,
   parseCoexistence,
   SYNC_STALE_MS,
   SYNC_WINDOW_MS,
+  uncopiedAfterWindow,
 } from './coexistence';
 
 /**
@@ -19,7 +21,7 @@ import {
 const ONBOARDED = '2026-10-08T10:00:00.000Z';
 const at = (ms: number) => new Date(Date.parse(ONBOARDED) + ms);
 
-const connected = (syncs = {}) =>
+const connected = (syncs = {}, extra = {}) =>
   parseCoexistence({
     phoneNumberId: '1098765432',
     coexistence: {
@@ -29,6 +31,7 @@ const connected = (syncs = {}) =>
       verifiedName: 'ShipBlu',
       subscribedAt: ONBOARDED,
       syncs,
+      ...extra,
     },
   })!;
 
@@ -53,6 +56,17 @@ describe('parseCoexistence', () => {
     expect(parsed).toMatchObject({ displayPhoneNumber: null, syncs: {} });
     expect(parsed?.disconnected).toEqual({ at: '', event: '', reason: null });
     expect(parseCoexistence({ coexistence: { wabaId: '1' } })).toBeNull();
+  });
+
+  /** The two facts the row reads to stop offering what cannot or need not happen. */
+  it('reads "not on the Business app" only as a literal true, and carried-over copies by name', () => {
+    expect(connected({}, { notOnBusinessApp: true }).notOnBusinessApp).toBe(true);
+    expect(connected({}, { notOnBusinessApp: 'false' }).notOnBusinessApp).toBeUndefined();
+    expect(connected({}, { carriedOver: ['history', 'nonsense', 7] }).carriedOver).toEqual([
+      'history',
+    ]);
+    expect(connected({}, { carriedOver: 'contacts' }).carriedOver).toBeUndefined();
+    expect(connected().carriedOver).toBeUndefined();
   });
 });
 
@@ -84,6 +98,25 @@ describe('canRequestSync', () => {
         'contacts',
         at(60_000),
       ),
+    ).toEqual({ ok: true });
+  });
+
+  /** Meta refuses it, and the refusal would land on the row as a red "failed" badge. */
+  it('never allows a copy from a number Meta says is not on the Business app', () => {
+    const notOnApp = connected({}, { notOnBusinessApp: true });
+    for (const type of ['contacts', 'history'] as const) {
+      expect(canRequestSync(notOnApp, type, at(60_000))).toMatchObject({
+        ok: false,
+        reason: 'not_on_business_app',
+        sentence: expect.stringMatching(/no phone to copy from/),
+      });
+    }
+  });
+
+  /** Copying again inside the new window is a choice the row offers on purpose. */
+  it('allows a copy an earlier connection made, inside the new window', () => {
+    expect(
+      canRequestSync(connected({}, { carriedOver: ['history'] }), 'history', at(60_000)),
     ).toEqual({ ok: true });
   });
 
@@ -164,6 +197,59 @@ describe('coexistenceBadges', () => {
     for (const badge of badges) expect(badge.explain.length).toBeGreaterThan(20);
   });
 
+  /**
+   * A number Meta says is not on the app has no phone typing replies and
+   * nothing to copy: its window closing is nothing missed, and it is not
+   * offered a reconnect for it.
+   */
+  it('says a number not on the Business app is a Cloud API number, with no copy to miss', () => {
+    const notOnApp = connected({}, { notOnBusinessApp: true });
+    const after = coexistenceBadges(notOnApp, at(SYNC_WINDOW_MS + 1));
+
+    expect(after[0]).toMatchObject({ label: 'connected through Meta', tone: 'brand' });
+    expect(after[0]!.explain).toMatch(/not on the WhatsApp Business app/);
+    expect(after[0]!.explain).not.toMatch(/typed there/);
+    expect(after.map((badge) => badge.label)).not.toContain('copy window closed');
+    expect(uncopiedAfterWindow(notOnApp, at(SYNC_WINDOW_MS + 1))).toEqual([]);
+    expect(needsReconnect(notOnApp, at(SYNC_WINDOW_MS + 1))).toBe(false);
+  });
+
+  /**
+   * A reconnect asks for nothing an earlier connection copied, so its own
+   * slots are empty. Read alone, they called six months of imported chats
+   * "never copied" and offered a reconnect to fetch them again.
+   */
+  it('counts what an earlier connection copied as copied', () => {
+    const both = connected({}, { carriedOver: ['contacts', 'history'] });
+    const afterWindow = at(SYNC_WINDOW_MS + 1);
+
+    const labelsAfter = coexistenceBadges(both, afterWindow).map((badge) => badge.label);
+    expect(labelsAfter).not.toContain('copy window closed');
+    expect(labelsAfter).toContain('contacts and history copied before');
+    expect(needsReconnect(both, afterWindow)).toBe(false);
+
+    // Only the contacts carried over: the history is what the window missed.
+    const contactsOnly = connected({}, { carriedOver: ['contacts'] });
+    expect(uncopiedAfterWindow(contactsOnly, afterWindow)).toEqual(['history']);
+    const closed = coexistenceBadges(contactsOnly, afterWindow).find(
+      (badge) => badge.label === 'copy window closed',
+    );
+    expect(closed?.explain).toMatch(/the chat history was never copied/);
+    expect(closed?.explain).not.toMatch(/contacts/);
+    expect(needsReconnect(contactsOnly, afterWindow)).toBe(true);
+
+    // Copied again in this window: that copy's own badge says so instead.
+    expect(
+      coexistenceBadges(
+        connected(
+          { contacts: { requestId: 'c', requestedAt: ONBOARDED, received: 3 } },
+          { carriedOver: ['contacts'] },
+        ),
+        at(60_000),
+      ).map((badge) => badge.label),
+    ).not.toContain('contacts copied before');
+  });
+
   it('follows the history through its states', () => {
     expect(labels({ history: { requestId: 'r', requestedAt: ONBOARDED } })).toContain(
       'copying history · waiting for the phone',
@@ -207,6 +293,75 @@ describe('coexistenceBadges', () => {
         at(SYNC_STALE_MS + 1),
       ),
     ).toContain('history stalled at 0%');
+  });
+
+  /**
+   * The declined request holds Meta's request id and Meta asks the phone once
+   * per connection, so no copy button can ask again — the badge used to send
+   * the admin to one that is never drawn.
+   */
+  it('sends a declined history to Reconnect, not to a copy button the row never shows', () => {
+    const declined = connected({
+      contacts: { requestId: 'c', requestedAt: ONBOARDED, received: 3 },
+      history: {
+        requestId: 'r',
+        requestedAt: ONBOARDED,
+        declined: { at: ONBOARDED, code: 2593109 },
+      },
+    });
+    const badge = coexistenceBadges(declined, at(60_000)).find(
+      (candidate) => candidate.label === 'history declined on the phone',
+    );
+
+    expect(badge?.explain).toMatch(/press Reconnect/);
+    expect(badge?.explain).not.toMatch(/Copy history again/);
+    expect(canRequestSync(declined, 'history', at(60_000)).ok).toBe(false);
+    // Inside the window and long after it: the decline is final for this connection.
+    expect(needsReconnect(declined, at(60 * 60 * 1000))).toBe(true);
+    expect(needsReconnect(declined, at(30 * SYNC_WINDOW_MS))).toBe(true);
+
+    const copied = connected({
+      contacts: { requestId: 'c', requestedAt: ONBOARDED, received: 3 },
+      history: { requestId: 'r', requestedAt: ONBOARDED },
+    });
+    expect(needsReconnect(copied, at(60 * 60 * 1000))).toBe(false);
+    expect(needsReconnect(copied, at(30 * SYNC_WINDOW_MS))).toBe(false);
+  });
+
+  /**
+   * `ACCOUNT_OFFBOARDED` is a phone change Meta undoes by itself; reconnecting
+   * through the window for it unlinks the phone's devices for nothing. Every
+   * other event — and one this module has not met — keeps the safe instruction.
+   */
+  it('tells an offboarded number to wait for Meta, and anything else to reconnect', () => {
+    const disconnectedBy = (event: string) =>
+      coexistenceBadges(
+        connected({}, { disconnected: { at: ONBOARDED, event, reason: null } }),
+        at(60_000),
+      ).find((badge) => badge.label === 'disconnected on the phone')!;
+
+    const offboarded = disconnectedBy('ACCOUNT_OFFBOARDED');
+    expect(offboarded.tone).toBe('warning');
+    expect(offboarded.explain).toMatch(/Meta reconnects it on its own/);
+    expect(offboarded.explain).toMatch(/Press Reconnect only if the badge is still here/);
+    expect(offboarded.explain).not.toMatch(/press Reconnect and complete/);
+
+    for (const event of ['PARTNER_REMOVED', '', 'SOMETHING_NEW']) {
+      const badge = disconnectedBy(event);
+      expect(badge.tone).toBe('danger');
+      expect(badge.explain).toMatch(/press Reconnect and complete the window again/);
+    }
+
+    // The button stays either way: if Meta's reconnection never arrives, it is the way back.
+    expect(
+      needsReconnect(
+        connected(
+          {},
+          { disconnected: { at: ONBOARDED, event: 'ACCOUNT_OFFBOARDED', reason: null } },
+        ),
+        at(60_000),
+      ),
+    ).toBe(true);
   });
 
   it('counts the contacts, and names a disconnection and a window that closed unused', () => {

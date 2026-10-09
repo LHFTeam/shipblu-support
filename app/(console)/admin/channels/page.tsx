@@ -11,7 +11,12 @@ import { requirePermission } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
 import { env } from '@/lib/env';
 import { listFolderOptions } from '@/lib/kb/admin';
-import { canRequestSync, parseCoexistence, SYNC_TYPES } from '@/lib/whatsapp/coexistence';
+import {
+  canRequestSync,
+  needsReconnect,
+  parseCoexistence,
+  SYNC_TYPES,
+} from '@/lib/whatsapp/coexistence';
 import { credentialStatuses } from '@/lib/whatsapp/credentials';
 import { coexistenceReadiness } from '@/lib/whatsapp/onboarding';
 import { listLatestOnboardings } from '@/lib/whatsapp/onboarding-reads';
@@ -186,6 +191,14 @@ export default async function ChannelsPage() {
                   accountName={account?.name ?? null}
                   credential={account ? (credentials.get(account.id) ?? null) : null}
                   canConnect={canConnect}
+                  // A failed attempt's new sign-in: an attempt that reached a
+                  // channel suggests that channel's group, as the row's own
+                  // reconnect does.
+                  connect={
+                    channel
+                      ? { ...connectProps, suggestedGroupId: channel.defaultGroupId }
+                      : connectProps
+                  }
                   now={now}
                 />
               );
@@ -205,17 +218,23 @@ export default async function ChannelsPage() {
             const coexistence =
               channel.type === 'whatsapp' ? parseCoexistence(channel.config) : null;
 
-            // A number that was disconnected on the phone, or whose copy window
-            // closed with a copy never made, is reconnected through the same
-            // window it was connected through.
-            const windowClosed =
-              coexistence !== null &&
-              SYNC_TYPES.some((type) => {
-                const permission = canRequestSync(coexistence, type, now);
-                return !permission.ok && permission.reason === 'window_closed';
-              });
-            const reconnectable =
-              coexistence !== null && (coexistence.disconnected !== undefined || windowClosed);
+            // A number that was disconnected on the phone, whose copy window
+            // closed with a copy never made, or whose history the phone
+            // declined, is reconnected through the same window it was
+            // connected through — `needsReconnect`, drawn from the same facts
+            // as the badge that says which.
+            const reconnectable = coexistence !== null && needsReconnect(coexistence, now);
+            // The copy buttons wait for the attempt that wrote this object to
+            // finish connecting: until then the copy is one of its own steps,
+            // shown on its progress card, and the job would skip a run of the
+            // copy alone. Keyed on the attempt the channel names, not on the
+            // latest per number — a newer attempt that failed early leaves
+            // this one connected and its buttons working. The action asks
+            // again, since this render can be stale.
+            const attempt = coexistence?.onboardingId
+              ? onboardings.find((onboarding) => onboarding.id === coexistence.onboardingId)
+              : undefined;
+            const stillConnecting = attempt?.status === 'exchanged';
 
             return (
               <li key={channel.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
@@ -247,7 +266,7 @@ export default async function ChannelsPage() {
                           ? 'the widget'
                           : (channel.config.address as string) || 'no address'}
                 </span>
-                {coexistence && canConnect && channel.isActive
+                {coexistence && canConnect && channel.isActive && !stillConnecting
                   ? SYNC_TYPES.map((type) => {
                       if (!canRequestSync(coexistence, type, now).ok) return null;
                       const slot = coexistence.syncs[type];

@@ -4,6 +4,7 @@ import { and, eq, ne, sql, asc } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels, whatsappAccounts, groups } from '@/db/schema';
 import { requirePermission } from '@/lib/auth/guard';
+import { can } from '@/lib/auth/permissions';
 import { ok } from '@/lib/http/action-state';
 import { text, uuidField } from '@/lib/http/form-data';
 import { allow } from '@/lib/http/rate-limit';
@@ -15,12 +16,15 @@ import {
   SYNC_TYPES,
   type SyncType,
 } from '@/lib/whatsapp/coexistence';
+import { whatsappEditColumns } from '@/lib/whatsapp/coexistence-state';
 import {
   forgetStoredCredential as forgetCredential,
   removeStoredCredential,
   storedCredentialEditRefusal,
+  storedCredentialRemovalRefusal,
 } from '@/lib/whatsapp/credentials';
 import { beginCoexistenceOnboarding, retryOnboarding } from '@/lib/whatsapp/onboarding';
+import { copyRequestRefusal } from '@/lib/whatsapp/onboarding-reads';
 import { GONE, refresh, type SettingsState, type AdminState } from '../settings-shared';
 import { revalidatePath } from 'next/cache';
 import { canonicalUuid } from '@/lib/http/uuid';
@@ -140,6 +144,12 @@ export async function saveWhatsAppAccount(
  * pointing at it are detached by the `set null` on the foreign key rather than
  * deleted: a channel row is where a ticket's history is anchored, and taking it
  * with the connection would orphan every conversation that arrived on it.
+ *
+ * A stored credential goes with it too — by cascade, whatever this does — and
+ * removing one is what `admin.channels.connect` hands out (`forgetStoredCredential`
+ * asks for it). So an account holding one is disconnected only by somebody who
+ * holds that key; anybody else would have a Forget button by another name the
+ * day the two keys are given to different roles.
  */
 export async function deleteWhatsAppAccount(
   _state: SettingsState,
@@ -149,9 +159,10 @@ export async function deleteWhatsAppAccount(
 
   const id = uuidField(formData, 'id');
   if (!id) return { error: 'Nothing to delete' };
+  const mayForget = can(agent, 'admin.channels.connect');
 
   const numbers = await db
-    .select({ name: channels.name })
+    .select({ name: channels.name, type: channels.type, config: channels.config })
     .from(channels)
     .where(and(eq(channels.whatsappAccountId, id), eq(channels.isActive, true)));
 
@@ -165,19 +176,40 @@ export async function deleteWhatsAppAccount(
       .set({ isActive: false, updatedAt: new Date() })
       .where(eq(whatsappAccounts.id, id));
 
+    // "Point them elsewhere" is not something the editor can do for a number
+    // connected through Meta (`saveChannel` keeps its account), so those are
+    // named with the way they do move.
+    const connected = numbers.filter(
+      (number) => number.type === 'whatsapp' && parseCoexistence(number.config),
+    );
+    const names = (rows: typeof numbers) => rows.map((number) => number.name).join(', ');
+    const howConnectedMove =
+      connected.length === 0
+        ? '.'
+        : ` — ${names(connected)} ${connected.length === 1 ? 'was' : 'were'} connected ` +
+          `through Meta, and ${connected.length === 1 ? 'moves' : 'move'} only by connecting ` +
+          `again through Meta with the other account.`;
     refresh('/admin/channels');
     return {
-      error: `${numbers.map((number) => number.name).join(', ')} still send on that business account, so it was switched off rather than disconnected. Point them somewhere else first.`,
+      error:
+        `${names(numbers)} still send on that business account, so it was switched off rather ` +
+        `than disconnected. Point them at another business account first${howConnectedMove}`,
     };
   }
 
   // A stored credential goes with the account by cascade; removing it first, in
   // the same transaction, is what records who disconnected it — the audit row
-  // outlives both.
-  await db.transaction(async (tx) => {
+  // outlives both. Whether this caller may is decided under the account row's
+  // lock, the one a connection storing a credential takes, so a credential
+  // stored while the page was open is counted rather than cascaded away.
+  const refusal = await db.transaction(async (tx) => {
+    const refused = await storedCredentialRemovalRefusal(tx, id, mayForget);
+    if (refused) return refused;
     await removeStoredCredential(tx, id, { id: agent.id, label: agent.name });
     await tx.delete(whatsappAccounts).where(eq(whatsappAccounts.id, id));
+    return null;
   });
+  if (refusal) return { error: refusal };
 
   refresh('/admin/channels');
   return ok();
@@ -197,19 +229,23 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
   // and the same request could rewrite a `portal` or `api` row that no form
   // edits. The form's field only says what to create.
   let type = String(formData.get('type') ?? '');
-  let existingConfig: Record<string, unknown> | null = null;
+  let existing: { config: Record<string, unknown>; whatsappAccountId: string | null } | null = null;
   if (rawId) {
     if (!id) return { error: 'That form is out of date — reload the page and try again' };
 
-    const existing = await db
-      .select({ type: channels.type, config: channels.config })
+    const [row] = await db
+      .select({
+        type: channels.type,
+        config: channels.config,
+        whatsappAccountId: channels.whatsappAccountId,
+      })
       .from(channels)
       .where(eq(channels.id, id))
       .limit(1);
 
-    if (!existing[0]) return { error: 'That channel no longer exists' };
-    type = existing[0].type;
-    existingConfig = existing[0].config;
+    if (!row) return { error: 'That channel no longer exists' };
+    type = row.type;
+    existing = row;
   }
 
   // Re-read rather than written as given: Postgres answers a malformed uuid with
@@ -245,7 +281,29 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
 
   const isWhatsApp = type === 'whatsapp' || type === 'whatsapp_bot';
 
-  if (isWhatsApp) {
+  // A number connected through Meta's Embedded Signup sends with the
+  // credential stored for the business account it was connected to, so that
+  // link is not the form's to change: pointed at another account, its replies
+  // would go out authenticated as a different WABA, and a disconnection on the
+  // phone would be recorded against the wrong credential. The editor shows the
+  // account as text and submits the stored id; anything else is refused here
+  // with the way to move it — and kept regardless by `whatsappEditColumns`
+  // below, which also covers a channel the job adopted after this read.
+  const coexistence = type === 'whatsapp' && existing ? parseCoexistence(existing.config) : null;
+
+  if (coexistence && existing) {
+    const chosen = whatsappAccountId
+      ? (canonicalUuid(whatsappAccountId) ?? whatsappAccountId)
+      : null;
+    if (chosen !== existing.whatsappAccountId) {
+      return {
+        error:
+          `This number was connected through Meta to business account ${coexistence.wabaId} ` +
+          `and sends with the credential stored for it, so it cannot be moved to another here. ` +
+          `To move it, connect it again through Meta and choose the other business account.`,
+      };
+    }
+  } else if (isWhatsApp) {
     // Re-read rather than trusted: the id arrives in a FormData field, and a
     // number pointed at a business account that does not exist would send with
     // a token that has no access to it.
@@ -286,40 +344,36 @@ export async function saveChannel(_state: AdminState, formData: FormData): Promi
   // Facebook and Instagram are addressed by ids that live in the environment
   // beside the token they are useless without, so their row carries routing
   // only.
-  //
-  // A number connected through Meta's Embedded Signup carries a `coexistence`
-  // object the onboarding job wrote and the history webhooks keep moving, and
-  // its phone number id is what Meta reported, not what a form says. Both are
-  // carried over from the stored row rather than rebuilt: the form never
-  // offers them (`AddressField` shows the id as text), and rebuilding `config`
-  // as `{phoneNumberId}` here is how a rename used to wipe the connection —
-  // the number kept routing and lost its copy window, its request ids and the
-  // badge that said it was connected at all.
-  const coexistence =
-    type === 'whatsapp' && existingConfig ? parseCoexistence(existingConfig) : null;
   const config =
-    coexistence && existingConfig
-      ? {
-          phoneNumberId: String(existingConfig.phoneNumberId ?? phoneNumberId),
-          coexistence: existingConfig.coexistence,
-        }
-      : type === 'whatsapp' || type === 'whatsapp_bot'
-        ? { phoneNumberId }
-        : type === 'facebook' || type === 'instagram'
-          ? {}
-          : type === 'webchat'
-            ? // The widget has no address. The row used to store an empty one
-              // because this branch was the catch-all; production still carries
-              // `{"address": ""}` from that, and this replaces it.
-              { faqFolders }
-            : { address };
+    type === 'whatsapp' || type === 'whatsapp_bot'
+      ? { phoneNumberId }
+      : type === 'facebook' || type === 'instagram'
+        ? {}
+        : type === 'webchat'
+          ? // The widget has no address. The row used to store an empty one
+            // because this branch was the catch-all; production still carries
+            // `{"address": ""}` from that, and this replaces it.
+            { faqFolders }
+          : { address };
 
   const account = isWhatsApp ? whatsappAccountId : null;
 
   if (id) {
+    // An edit of a `whatsapp` row leaves its config and account to the
+    // database. A number connected through Meta carries a `coexistence` object
+    // the job wrote and the history webhooks keep moving, and its phone number
+    // id is what Meta reported; rebuilding `config` as `{phoneNumberId}` is how
+    // a rename used to wipe the connection, and copying it from the read above
+    // wrote back a snapshot over every update that landed since.
+    // `whatsappEditColumns` keeps both as the row holds them when the UPDATE
+    // runs, and writes the form's for any other number.
+    const columns =
+      type === 'whatsapp'
+        ? whatsappEditColumns({ phoneNumberId, whatsappAccountId: account })
+        : { config, whatsappAccountId: account };
     await db
       .update(channels)
-      .set({ name, defaultGroupId, config, whatsappAccountId: account, updatedAt: new Date() })
+      .set({ name, defaultGroupId, ...columns, updatedAt: new Date() })
       .where(eq(channels.id, id));
   } else {
     await db.insert(channels).values({
@@ -358,7 +412,10 @@ export async function connectBusinessAppNumber(
   const agent = await requirePermission('admin.channels.connect');
 
   if (!allow(`signup:${agent.id}`, 5, 10 * 60 * 1000)) {
-    return { error: 'Too many attempts — wait ten minutes before connecting again.' };
+    return {
+      error: 'Too many attempts — wait ten minutes before connecting again.',
+      wait: true,
+    };
   }
 
   const defaultGroupId = uuidField(formData, 'defaultGroupId');
@@ -382,7 +439,7 @@ export async function connectBusinessAppNumber(
     { id: agent.id, name: agent.name },
   );
 
-  if (!outcome.ok) return { error: outcome.error };
+  if (!outcome.ok) return { error: outcome.error, wait: outcome.wait };
 
   refresh('/admin/channels');
   return { ...ok(), notice: outcome.notice, onboardingId: outcome.onboardingId };
@@ -420,9 +477,10 @@ export async function retryCoexistenceOnboarding(
  * job uses, so the button and the job cannot disagree about whether a copy
  * may be asked for — and the job judges again when it runs, because the
  * window can close between the click and the claim. What is enqueued names
- * the attempt that connected the channel (`coexistence.onboardingId`): the job
- * runs targeted steps only on a connected attempt, so a channel whose
- * connection details were written by hand has nothing to run.
+ * the attempt that connected the channel (`coexistence.onboardingId`), and the
+ * job runs named steps only on an attempt that finished connecting — so that
+ * is asked here too (`copyRequestRefusal`), or a click on a number still
+ * connecting would be told the copy was on its way while the job skipped it.
  */
 export async function requestCoexistenceSync(
   _state: AdminState,
@@ -459,6 +517,9 @@ export async function requestCoexistenceSync(
 
   const permission = canRequestSync(coexistence, type, new Date());
   if (!permission.ok) return { error: permission.sentence };
+
+  const refusal = await copyRequestRefusal(coexistence.onboardingId);
+  if (refusal) return { error: refusal };
 
   await enqueue(
     'complete_coexistence_onboarding',

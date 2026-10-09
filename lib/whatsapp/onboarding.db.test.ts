@@ -5,11 +5,12 @@ import { agents, channels, jobs, whatsappAccounts, whatsappOnboardings } from '@
 import { resetEnvCache } from '@/lib/env';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { stubFetch } from '@/lib/testing/fetch';
-import { parseCoexistence } from './coexistence';
+import { canRequestSync, parseCoexistence } from './coexistence';
 import { recordSyncRequest } from './coexistence-state';
 import { credentialStatuses, forgetStoredCredential } from './credentials';
 import { beginCoexistenceOnboarding, retryOnboarding } from './onboarding';
 import { completeOnboarding } from './onboarding-complete';
+import { copyRequestRefusal } from './onboarding-reads';
 
 /**
  * Connecting a WhatsApp Business-app number, both phases, against Postgres
@@ -389,11 +390,35 @@ describe('one live attempt per number', () => {
     expect(first.ok).toBe(true);
 
     const fetch = graph(exchangeRoutes());
+    // `wait`: the card must not offer Meta's window again, which would unlink
+    // the phone's linked devices once more and end the same way.
     expect(await beginCoexistenceOnboarding(claim(), await admin2())).toMatchObject({
       ok: false,
       error: expect.stringMatching(/already being connected/),
+      wait: true,
     });
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('refuses at the insert, with the same wait, when the window did not name the number', async () => {
+    graph(exchangeRoutes());
+    const first = await beginCoexistenceOnboarding(claim(), await admin());
+    if (!first.ok) throw new Error(first.error);
+
+    // No number in the claim, so the cheap check cannot be asked: the code is
+    // spent, the number read off the WABA, and the partial unique index
+    // refuses the row.
+    graph(exchangeRoutes());
+    expect(
+      await beginCoexistenceOnboarding(claim({ phoneNumberId: null }), await admin2()),
+    ).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/already being connected/),
+      wait: true,
+    });
+    expect(await db.select({ id: whatsappOnboardings.id }).from(whatsappOnboardings)).toEqual([
+      { id: first.onboardingId },
+    ]);
   });
 
   it('supersedes an attempt older than fifteen minutes whose job is gone', async () => {
@@ -406,7 +431,10 @@ describe('one live attempt per number', () => {
       .where(eq(whatsappOnboardings.id, first.onboardingId));
 
     // Still live while its job is queued, however old.
-    expect(await beginCoexistenceOnboarding(claim(), await admin2())).toMatchObject({ ok: false });
+    expect(await beginCoexistenceOnboarding(claim(), await admin2())).toMatchObject({
+      ok: false,
+      wait: true,
+    });
 
     await db
       .update(jobs)
@@ -602,6 +630,43 @@ describe('the second phase: connecting the number', () => {
     expect(after).toMatchObject({ id: before!.id, name: 'Support line' });
     // A fresh window, with nothing requested in it yet: the buttons' to offer.
     expect(parseCoexistence(after!.config)?.syncs).toEqual({});
+    // And what the earlier connection copied, on the channel the row reads —
+    // without it, a day later the row calls both "never copied".
+    expect(parseCoexistence(after!.config)?.carriedOver).toEqual(['contacts', 'history']);
+  });
+
+  /**
+   * A reconnect's own slots are empty — it asked for nothing — so "copied"
+   * has to carry through it, or the reconnect after it asks the phone for six
+   * months of chats the helpdesk already holds.
+   */
+  it('on a second reconnect, still does not copy what the first connection copied', async () => {
+    const first = await exchanged();
+    await completeOnboarding(first, { job: JOB });
+    await db.update(jobs).set({ status: 'completed' });
+
+    graph(completeRoutes());
+    const second = await beginCoexistenceOnboarding(claim(), await admin2());
+    if (!second.ok) throw new Error(second.error);
+    await completeOnboarding(second.onboardingId, { job: JOB });
+    await db.update(jobs).set({ status: 'completed' });
+
+    const fetch = graph(completeRoutes());
+    const third = await beginCoexistenceOnboarding(claim(), await admin2());
+    if (!third.ok) throw new Error(third.error);
+    await completeOnboarding(third.onboardingId, { job: JOB });
+
+    const { steps } = await onboardingRow(third.onboardingId);
+    expect(steps.channel).toMatchObject({
+      outcome: 'reconnected',
+      previouslyCopied: ['contacts', 'history'],
+    });
+    expect(steps.history).toMatchObject({ ok: true, outcome: 'previously_copied' });
+    expect(fetch.mock.calls.some(([url]) => String(url).includes('smb_app_data'))).toBe(false);
+    expect(parseCoexistence((await channelFor())!.config)?.carriedOver).toEqual([
+      'contacts',
+      'history',
+    ]);
   });
 
   it('on a reconnect, asks for what the earlier connection did not get — refused, or declined', async () => {
@@ -707,6 +772,15 @@ describe('the second phase: connecting the number', () => {
     expect(steps.contacts).toMatchObject({ ok: true, outcome: 'not_applicable' });
     expect(steps.history).toMatchObject({ ok: true, outcome: 'not_applicable' });
     expect(fetch.mock.calls.some(([url]) => String(url).includes('smb_app_data'))).toBe(false);
+
+    // On the channel too, where the row's buttons and badges look: no copy is
+    // offered, and the window closing is nothing missed.
+    const coexistence = parseCoexistence((await channelFor())!.config)!;
+    expect(coexistence.notOnBusinessApp).toBe(true);
+    expect(canRequestSync(coexistence, 'history', new Date())).toMatchObject({
+      ok: false,
+      reason: 'not_on_business_app',
+    });
   });
 
   it('reads Meta’s "already asked" after a lost answer as the first request having gone through', async () => {
@@ -743,6 +817,39 @@ describe('the second phase: connecting the number', () => {
     expect(parseCoexistence((await channelFor())!.config)?.syncs.contacts).toMatchObject({
       requestId: 'unconfirmed',
     });
+  });
+
+  /**
+   * After its channel step, an attempt waiting out a retry has written the
+   * object the copy buttons read, with nothing requested in it. The button's
+   * action used to enqueue a copy the job then skipped as "not connected";
+   * now both answer from one rule, and both open up once the attempt finishes.
+   */
+  it('refuses the copy buttons while the attempt is still connecting, as the job would', async () => {
+    const outage: Route = {
+      method: 'POST',
+      path: new RegExp(`/${PHONE}/smb_app_data$`),
+      status: 503,
+      answer: () => ({ error: { message: 'Service temporarily unavailable', code: 2 } }),
+    };
+    const id = await exchanged(completeRoutes({ sync: outage }));
+    await expect(
+      completeOnboarding(id, { job: { attempts: 1, maxAttempts: 5 } }),
+    ).rejects.toThrow();
+
+    expect((await onboardingRow(id)).status).toBe('exchanged');
+    const coexistence = parseCoexistence((await channelFor())!.config)!;
+    expect(coexistence.onboardingId).toBe(id);
+    expect(canRequestSync(coexistence, 'history', new Date())).toEqual({ ok: true });
+
+    expect(await copyRequestRefusal(id)).toMatch(/has not finished yet/);
+    expect(await completeOnboarding(id, { only: ['history'], job: JOB })).toBe('skipped');
+
+    graph(completeRoutes());
+    expect(await completeOnboarding(id, { job: { attempts: 2, maxAttempts: 5 } })).toBe(
+      'connected',
+    );
+    expect(await copyRequestRefusal(id)).toBeNull();
   });
 
   it('finishes connected, not failed, when the last attempt dies after the channel exists', async () => {
@@ -811,6 +918,38 @@ describe('the second phase: connecting the number', () => {
     expect(steps.channel).toMatchObject({ ok: true, outcome: 'connected' });
     expect(steps.history).toMatchObject({ ok: true, detail: expect.stringMatching(/earlier/) });
     expect((await channelFor())!.config).toEqual(before!.config);
+    expect(fetch.mock.calls.some(([url]) => String(url).includes('smb_app_data'))).toBe(false);
+  });
+
+  /** A reconnect's run that died after writing the channel still carries over what it did. */
+  it('re-running a reconnect into its own channel still skips what it carried over', async () => {
+    const first = await exchanged();
+    await completeOnboarding(first, { job: JOB });
+    await db.update(jobs).set({ status: 'completed' });
+
+    graph(completeRoutes());
+    const again = await beginCoexistenceOnboarding(claim(), await admin2());
+    if (!again.ok) throw new Error(again.error);
+    await completeOnboarding(again.onboardingId, { job: JOB });
+    await db
+      .update(whatsappOnboardings)
+      .set({
+        status: 'exchanged',
+        finishedAt: null,
+        steps: sql`${whatsappOnboardings.steps} - 'channel' - 'contacts' - 'history'`,
+      })
+      .where(eq(whatsappOnboardings.id, again.onboardingId));
+    const fetch = graph(completeRoutes());
+
+    expect(await completeOnboarding(again.onboardingId, { job: JOB })).toBe('connected');
+
+    const { steps } = await onboardingRow(again.onboardingId);
+    expect(steps.channel).toMatchObject({
+      ok: true,
+      outcome: 'connected',
+      previouslyCopied: ['contacts', 'history'],
+    });
+    expect(steps.history).toMatchObject({ ok: true, outcome: 'previously_copied' });
     expect(fetch.mock.calls.some(([url]) => String(url).includes('smb_app_data'))).toBe(false);
   });
 

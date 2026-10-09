@@ -5,7 +5,12 @@ import { channels, whatsappAccounts } from '@/db/schema';
 import { resetEnvCache } from '@/lib/env';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { parseCoexistence } from './coexistence';
-import { applyWhatsAppAccountUpdate } from './coexistence-state';
+import {
+  applyWhatsAppAccountUpdate,
+  recordHistoryProgress,
+  whatsappEditColumns,
+  writeOnboardedCoexistence,
+} from './coexistence-state';
 import { credentialStatuses, storeBusinessToken } from './credentials';
 
 /**
@@ -152,5 +157,132 @@ describe('applyWhatsAppAccountUpdate', () => {
       await applyWhatsAppAccountUpdate({ ...base, wabaId: WABA, event: 'VERIFIED_ACCOUNT' }),
     ).toBe(0);
     expect(await disconnected(id)).toBeNull();
+  });
+});
+
+/**
+ * An admin's save of a WhatsApp channel decides its `config` and account in
+ * the UPDATE. It used to copy them from a read taken before it, which wrote a
+ * snapshot back over every `jsonb_set` that landed in between — progress went
+ * backwards, a disconnection vanished — and wiped the connection of a channel
+ * the job adopted after the read.
+ */
+describe('whatsappEditColumns', () => {
+  async function save(channelId: string, form: { phoneNumberId: string; account: string | null }) {
+    await db
+      .update(channels)
+      .set({
+        name: 'Renamed',
+        ...whatsappEditColumns({
+          phoneNumberId: form.phoneNumberId,
+          whatsappAccountId: form.account,
+        }),
+        updatedAt: new Date(),
+      })
+      .where(eq(channels.id, channelId));
+    const [row] = await db
+      .select({ config: channels.config, whatsappAccountId: channels.whatsappAccountId })
+      .from(channels)
+      .where(eq(channels.id, channelId));
+    return row!;
+  }
+
+  async function otherAccount() {
+    const [row] = await db
+      .insert(whatsappAccounts)
+      .values({ name: 'Elsewhere', wabaId: '109999999999999' })
+      .returning({ id: whatsappAccounts.id });
+    return row!.id;
+  }
+
+  it('keeps everything a connected channel has gathered, whatever the form says', async () => {
+    const accountId = await connectedAccount();
+    const id = await channel(accountId, '106540352242922', '15550783881');
+    await recordHistoryProgress(id, { phase: 0, progress: 40 }, AT);
+    await recordHistoryProgress(id, { phase: 1, progress: 100 }, AT);
+    await applyWhatsAppAccountUpdate({
+      wabaId: WABA,
+      phoneNumber: null,
+      event: 'ACCOUNT_OFFBOARDED',
+      reason: null,
+      initiatedBy: null,
+      at: AT,
+    });
+
+    const row = await save(id, { phoneNumberId: '100000000000', account: await otherAccount() });
+
+    expect(row.whatsappAccountId).toBe(accountId);
+    expect(row.config.phoneNumberId).toBe('106540352242922');
+    const coexistence = parseCoexistence(row.config);
+    expect(coexistence?.syncs.history).toMatchObject({
+      chunks: 2,
+      progressByPhase: { '0': 40, '1': 100 },
+    });
+    expect(coexistence?.disconnected).toMatchObject({ event: 'ACCOUNT_OFFBOARDED' });
+  });
+
+  it('writes the form’s phone number id and account on a plain number', async () => {
+    const accountId = await connectedAccount();
+    const elsewhere = await otherAccount();
+    const [plain] = await db
+      .insert(channels)
+      .values({
+        type: 'whatsapp',
+        name: 'Plain',
+        whatsappAccountId: accountId,
+        config: { phoneNumberId: '106540352240000' },
+      })
+      .returning({ id: channels.id });
+
+    const row = await save(plain!.id, { phoneNumberId: '106540352241111', account: elsewhere });
+
+    expect(row).toEqual({
+      config: { phoneNumberId: '106540352241111' },
+      whatsappAccountId: elsewhere,
+    });
+    expect((await save(plain!.id, { phoneNumberId: '1', account: null })).whatsappAccountId).toBe(
+      null,
+    );
+  });
+
+  /** The race the read-then-write lost: the form was drawn before the job adopted the number. */
+  it('keeps the connection of a plain number the job adopted after the form was drawn', async () => {
+    const [legacy] = await db
+      .insert(whatsappAccounts)
+      .values({ name: 'Legacy', wabaId: '108888888888888' })
+      .returning({ id: whatsappAccounts.id });
+    const accountId = await connectedAccount();
+    const [plain] = await db
+      .insert(channels)
+      .values({
+        type: 'whatsapp',
+        name: 'Plain',
+        whatsappAccountId: legacy!.id,
+        config: { phoneNumberId: '106540352242922' },
+      })
+      .returning({ id: channels.id });
+
+    // What `channelStep` does when it takes a plain channel over.
+    await db.transaction(async (tx) => {
+      await tx
+        .update(channels)
+        .set({ whatsappAccountId: accountId })
+        .where(eq(channels.id, plain!.id));
+      await writeOnboardedCoexistence(tx, plain!.id, {
+        onboardingId: null,
+        onboardedAt: AT.toISOString(),
+        wabaId: WABA,
+        displayPhoneNumber: '15550783881',
+        verifiedName: null,
+        subscribedAt: null,
+        syncs: {},
+      });
+    });
+
+    // The admin's form, drawn before: the legacy account and the old id.
+    const row = await save(plain!.id, { phoneNumberId: '106540352242922', account: legacy!.id });
+
+    expect(row.whatsappAccountId).toBe(accountId);
+    expect(parseCoexistence(row.config)).toMatchObject({ wabaId: WABA, syncs: {} });
   });
 });

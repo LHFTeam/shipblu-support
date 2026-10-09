@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import { whatsappAccounts, whatsappOnboardings } from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
-import { listLatestOnboardings } from './onboarding-reads';
+import { copyRequestRefusal, listLatestOnboardings, runsNamedSteps } from './onboarding-reads';
 
 /**
  * `distinct on` is the one thing here only Postgres can judge: an `order by`
@@ -94,5 +94,49 @@ describe('listLatestOnboardings', () => {
       'pending',
     ]);
     expect(views[0]!.steps[0]).toMatchObject({ step: 'number', state: 'done' });
+  });
+});
+
+/**
+ * The copy buttons' gate is the job's: a run of the copy alone happens only on
+ * an attempt that finished connecting. The action used to enqueue it for an
+ * attempt still connecting, the job skipped it, and the page said the copy was
+ * on its way.
+ */
+describe('copyRequestRefusal', () => {
+  it('allows the copy through a connected attempt, and only through one', async () => {
+    const accountId = await account();
+    const at = new Date('2026-10-08T10:00:00Z');
+    const connected = await attempt({
+      accountId,
+      phoneNumberId: '109876543210',
+      status: 'connected',
+      startedAt: at,
+    });
+    const connecting = await attempt({
+      accountId,
+      phoneNumberId: '109876543211',
+      status: 'exchanged',
+      startedAt: at,
+    });
+    const replaced = await attempt({
+      accountId,
+      phoneNumberId: '109876543212',
+      status: 'failed',
+      startedAt: at,
+      error: 'superseded',
+    });
+
+    expect(await copyRequestRefusal(connected)).toBeNull();
+    expect(await copyRequestRefusal(connecting)).toMatch(/has not finished yet.*progress card/);
+    expect(await copyRequestRefusal(replaced)).toMatch(/replaced by a newer one/);
+    // Gone, or a hand-written id Postgres would answer with 22P02: a sentence, not a crash.
+    for (const missing of [crypto.randomUUID(), 'not-a-uuid']) {
+      expect(await copyRequestRefusal(missing)).toMatch(/no longer recorded.*Reconnect/);
+    }
+
+    expect(runsNamedSteps('connected')).toBe(true);
+    expect(runsNamedSteps('exchanged')).toBe(false);
+    expect(runsNamedSteps('failed')).toBe(false);
   });
 });

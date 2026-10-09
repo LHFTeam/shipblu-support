@@ -11,9 +11,10 @@ import { formatDateTime } from '@/lib/format';
  * contacts and up to six months of its chats (`plans/whatsapp-coexistence.md`).
  *
  * Pure and client-safe, so the admin page can draw the same badges the job
- * decides from. Written only by `lib/whatsapp/coexistence-state.ts`, one
- * `jsonb_set` at a time, because the history webhooks that update it arrive
- * concurrently.
+ * decides from. Created by the onboarding job and written after that only by
+ * `lib/whatsapp/coexistence-state.ts`, one `jsonb_set` at a time, because the
+ * history webhooks that update it arrive concurrently — an admin's save of the
+ * channel leaves it to the database too (`whatsappEditColumns`).
  */
 
 /** The two things Meta's SMB App Data API can be asked to copy. */
@@ -81,6 +82,23 @@ export type Coexistence = {
   syncs: { contacts?: ContactsSync; history?: HistorySync };
   /** Meta told us the number was disconnected from the phone (`account_update`). */
   disconnected?: { at: string; event: string; reason: string | null };
+  /**
+   * Meta said, when this connection was made, that the number is not on the
+   * WhatsApp Business app (`is_on_biz_app: false`). There is no phone to copy
+   * from, so nothing may be asked for and a closed window is nothing missed.
+   * Kept here rather than only on the attempt's step records, because the row's
+   * badges and buttons read this object and nothing else.
+   */
+  notOnBusinessApp?: true;
+  /**
+   * What an earlier connection of this number already copied, carried over on
+   * a reconnect that did not ask for it again. Without it, the fresh `syncs: {}`
+   * a reconnect writes reads as "never copied": the row would badge a closed
+   * window and offer Reconnect for ever, and the next reconnect would ask the
+   * phone for six months of chats the helpdesk already holds. History the
+   * phone declined is never in it — the business may say yes next time.
+   */
+  carriedOver?: SyncType[];
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -106,6 +124,8 @@ export function parseCoexistence(config: unknown): Coexistence | null {
   if (!onboardedAt || !wabaId) return null;
 
   const syncs = isRecord(raw.syncs) ? raw.syncs : {};
+  const carried = Array.isArray(raw.carriedOver) ? (raw.carriedOver as unknown[]) : [];
+  const carriedOver = SYNC_TYPES.filter((type) => carried.includes(type));
 
   return {
     onboardingId: text(raw.onboardingId),
@@ -127,20 +147,34 @@ export function parseCoexistence(config: unknown): Coexistence | null {
           },
         }
       : {}),
+    // Only a literal `true`: a hand-written "false" string must not stop a copy.
+    ...(raw.notOnBusinessApp === true ? { notOnBusinessApp: true as const } : {}),
+    ...(carriedOver.length > 0 ? { carriedOver } : {}),
   };
 }
 
 export type SyncPermission =
-  { ok: true } | { ok: false; reason: 'already_requested' | 'window_closed'; sentence: string };
+  | { ok: true }
+  | {
+      ok: false;
+      reason: 'not_on_business_app' | 'already_requested' | 'window_closed';
+      sentence: string;
+    };
 
 /**
  * Whether the contacts or the history may be asked for now.
  *
- * Once per onboarding — Meta: "You can only perform this step once. If you need
- * to perform it again, the customer must first offboard, then complete the
- * Embedded Signup flow again" — and only inside the window. A request Meta
- * refused left no `requestId`, so it may be tried again while the window is
- * open; that is the case the "Copy again" button exists for.
+ * Never for a number Meta said is not on the WhatsApp Business app: there is
+ * no phone to answer, and Meta refuses the request, which would land on the
+ * row as a red "failed" badge for a copy that could never have happened.
+ *
+ * Otherwise once per onboarding — Meta: "You can only perform this step once.
+ * If you need to perform it again, the customer must first offboard, then
+ * complete the Embedded Signup flow again" — and only inside the window. A
+ * request Meta refused left no `requestId`, so it may be tried again while the
+ * window is open; that is the case the "Copy again" button exists for. What an
+ * earlier connection copied (`carriedOver`) is deliberately not refused here:
+ * copying it again inside the new window is a choice the row offers.
  */
 export function canRequestSync(
   coexistence: Coexistence,
@@ -149,6 +183,17 @@ export function canRequestSync(
 ): SyncPermission {
   const slot = coexistence.syncs[type];
   const label = type === 'contacts' ? 'The contacts' : 'The chat history';
+
+  if (coexistence.notOnBusinessApp) {
+    return {
+      ok: false,
+      reason: 'not_on_business_app',
+      sentence:
+        `${label} cannot be copied: when this number was connected, Meta reported that it is ` +
+        `not on the WhatsApp Business app, so there is no phone to copy from. If the number ` +
+        `has moved onto the app since, reconnect it through Meta.`,
+    };
+  }
 
   if (slot && 'requestId' in slot && slot.requestId) {
     return {
@@ -173,6 +218,23 @@ export function canRequestSync(
   }
 
   return { ok: true };
+}
+
+/**
+ * What this connection's window closed on without anything copying it: never
+ * asked for, or asked and refused, and not carried over from an earlier
+ * connection. Empty for a number not on the Business app — nothing was ever
+ * there to copy.
+ *
+ * The one answer to "was something missed?", so the row's "copy window closed"
+ * badge and its Reconnect button cannot disagree about it.
+ */
+export function uncopiedAfterWindow(coexistence: Coexistence, now: Date): SyncType[] {
+  return SYNC_TYPES.filter((type) => {
+    if (coexistence.carriedOver?.includes(type)) return false;
+    const permission = canRequestSync(coexistence, type, now);
+    return !permission.ok && permission.reason === 'window_closed';
+  });
 }
 
 /**
@@ -231,6 +293,32 @@ export function historyDone(coexistence: Coexistence): boolean {
 }
 
 /**
+ * Whether the row offers Reconnect: going through Meta's window again is the
+ * only way back for each of these, and the badge beside it says which.
+ *
+ * - **Disconnected** on the phone (`account_update`). Kept for an
+ *   `ACCOUNT_OFFBOARDED` too, which Meta usually undoes on its own: if its
+ *   `ACCOUNT_RECONNECTED` never arrives, this button is the way back.
+ * - **A window that closed with something never copied** — `uncopiedAfterWindow`,
+ *   so a number not on the app, or one whose copies an earlier connection
+ *   made, is not offered a reconnect for a copy it does not need.
+ * - **History declined on the phone.** Meta asks the phone once per
+ *   connection, and the declined request holds a request id, so no copy button
+ *   is offered for it inside the window or after. A reconnect asks again —
+ *   `channelStep` leaves declined history out of what it carries over.
+ *
+ * Pure, so the page's condition has a test and the badges are drawn from the
+ * same facts.
+ */
+export function needsReconnect(coexistence: Coexistence, now: Date): boolean {
+  return (
+    coexistence.disconnected !== undefined ||
+    uncopiedAfterWindow(coexistence, now).length > 0 ||
+    historyProgress(coexistence).declined
+  );
+}
+
+/**
  * How long a copy in progress is waited on before the page stops asking.
  *
  * Six months of chats can take hours, but not days: a copy that has moved
@@ -279,27 +367,58 @@ export type CoexistenceBadge = {
  * row. The pure half of the admin page; `CoexistenceBadges` draws these.
  */
 export function coexistenceBadges(coexistence: Coexistence, now: Date): CoexistenceBadge[] {
+  const connectedOn = `Connected through Meta on ${formatDateTime(coexistence.onboardedAt)}.`;
   const badges: CoexistenceBadge[] = [
-    {
-      label: 'WhatsApp Business app',
-      tone: 'brand',
-      explain:
-        `Connected through Meta on ${formatDateTime(coexistence.onboardedAt)}. The number keeps ` +
-        `working on the phone: replies typed there count as the team's and appear on tickets ` +
-        `as "WhatsApp Business app"; console replies go out over Cloud API.`,
-    },
+    // A number Meta says is not on the Business app has no phone typing
+    // replies and nothing to copy, so the badge that promises both would be
+    // wrong about the one thing it is there to say.
+    coexistence.notOnBusinessApp
+      ? {
+          label: 'connected through Meta',
+          tone: 'brand',
+          explain:
+            `${connectedOn} Meta reported then that this number is not on the WhatsApp ` +
+            `Business app, so it works as a Cloud API number: there is no phone to copy ` +
+            `contacts or chats from, and console replies go out over Cloud API.`,
+        }
+      : {
+          label: 'WhatsApp Business app',
+          tone: 'brand',
+          explain:
+            `${connectedOn} The number keeps working on the phone: replies typed there count ` +
+            `as the team's and appear on tickets as "WhatsApp Business app"; console replies go ` +
+            `out over Cloud API.`,
+        },
   ];
 
   if (coexistence.disconnected) {
     const { event, reason, at } = coexistence.disconnected;
-    badges.push({
-      label: 'disconnected on the phone',
-      tone: 'danger',
-      explain:
-        `Meta reported ${event || 'a disconnection'}${reason ? ` (${reason})` : ''} on ` +
-        `${formatDateTime(at || now)}. Sends from this number fail until it is reconnected ` +
-        `through Meta — press Reconnect and complete the window again.`,
-    });
+    const reported =
+      `Meta reported ${event || 'a disconnection'}${reason ? ` (${reason})` : ''} on ` +
+      `${formatDateTime(at || now)}.`;
+    // Only the one event Meta undoes by itself is told to wait. Anything else
+    // — PARTNER_REMOVED, or an event this module has not met — gets the
+    // instruction that is safe whatever happened: reconnect.
+    badges.push(
+      event === 'ACCOUNT_OFFBOARDED'
+        ? {
+            label: 'disconnected on the phone',
+            tone: 'warning',
+            explain:
+              `${reported} That happens when the number moves to another phone or is ` +
+              `registered again, and Meta reconnects it on its own, usually within minutes; ` +
+              `sends from this number fail until it has, and this badge clears when it does. ` +
+              `Press Reconnect only if the badge is still here after a few minutes — going ` +
+              `through Meta's window again unlinks the phone's linked devices again.`,
+          }
+        : {
+            label: 'disconnected on the phone',
+            tone: 'danger',
+            explain:
+              `${reported} Sends from this number fail until it is reconnected through Meta — ` +
+              `press Reconnect and complete the window again.`,
+          },
+    );
   }
 
   const history = historyProgress(coexistence);
@@ -314,10 +433,15 @@ export function coexistenceBadges(coexistence: Coexistence, now: Date): Coexiste
     badges.push({
       label: 'history declined on the phone',
       tone: 'warning',
+      // Not "copy again": the declined request holds Meta's request id, and
+      // Meta asks the phone once per connection, so no button here could ask
+      // again — inside the 24 hours or after. Reconnecting does.
       explain:
         'The business chose not to share its chat history when the number was connected: ' +
-        'the WhatsApp Business app asked on the phone and the answer was no. Turn sharing ' +
-        'on there and press "Copy history again" while the 24-hour window is open.',
+        'the WhatsApp Business app asked on the phone and the answer was no. Meta asks the ' +
+        'phone once per connection, so press Reconnect and choose to share the history when ' +
+        'the WhatsApp Business app asks — the new connection asks for it again, and contacts ' +
+        'already copied are not copied twice.',
     });
   } else if (history.requested && history.done) {
     badges.push({
@@ -383,10 +507,31 @@ export function coexistenceBadges(coexistence: Coexistence, now: Date): Coexiste
     });
   }
 
-  const neverCopied = SYNC_TYPES.filter((type) => {
-    const permission = canRequestSync(coexistence, type, now);
-    return !permission.ok && permission.reason === 'window_closed';
+  // What an earlier connection copied and this one has not asked for again: a
+  // fresh reconnect's `syncs` are empty, and without this the row would say
+  // nothing at all about chats the helpdesk already holds.
+  const carried = (coexistence.carriedOver ?? []).filter((type) => {
+    const slot = coexistence.syncs[type];
+    return !(slot && 'requestId' in slot && slot.requestId);
   });
+  if (carried.length > 0) {
+    const both = carried.length === SYNC_TYPES.length;
+    const subject = both
+      ? 'contacts and chat history were'
+      : carried[0] === 'contacts'
+        ? 'contacts were'
+        : 'chat history was';
+    badges.push({
+      label: `${both ? 'contacts and history' : carried[0]} copied before`,
+      tone: 'neutral',
+      explain:
+        `The ${subject} copied when this number was connected before, so this connection did ` +
+        `not ask the phone again — asking re-sends all of it. Copying again is offered on this ` +
+        `row in the 24 hours after connecting.`,
+    });
+  }
+
+  const neverCopied = uncopiedAfterWindow(coexistence, now);
   if (neverCopied.length > 0) {
     badges.push({
       label: 'copy window closed',

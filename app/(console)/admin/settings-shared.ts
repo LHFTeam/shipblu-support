@@ -51,6 +51,14 @@ export type AdminState = ActionState & {
    * can tell its own progress card from another number's on the same page.
    */
   onboardingId?: string;
+  /**
+   * On a refusal from connecting a number: running Meta's window again would
+   * end the same way — the rate limit, or an attempt on this number still
+   * live — so the card stops offering it. Read off the answer rather than out
+   * of its wording, because each run of the window unlinks the phone's linked
+   * devices again.
+   */
+  wait?: true;
 };
 
 export function refresh(path: string) {

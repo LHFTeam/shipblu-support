@@ -49,6 +49,17 @@ const log = logger('coexistence');
  * It is never logged, never returned, never put in a job payload, and every
  * sentence this module builds about a request names its host and path, never
  * its URL — the exchange's URL carries the app secret and the code.
+ *
+ * A fetch tracing span is the place a sentence rule cannot reach: Next's
+ * patched `fetch` (and `@vercel/otel`'s, and OpenTelemetry's undici
+ * instrumentation) names the span after the whole URL and records it as
+ * `http.url` / `url.full`. Nothing registers a tracer today, so nothing leaves
+ * the process; the day an `instrumentation.ts` does, the exchange's URL and
+ * `debug_token`'s `input_token` go to the tracing vendor with every Connect
+ * unless the Graph hosts' query strings are kept out of spans
+ * (`docs/PROJECT-STATE.md` §6.86). The exchange stays a GET regardless:
+ * it is the only shape Meta documents (`./onboarding-requests`), and trying
+ * another spends a code that works once.
  */
 
 /** A variable the button cannot work without, and what it is for. */
@@ -121,9 +132,14 @@ export type SignupClaim = {
   defaultGroupId: string | null;
 };
 
+/**
+ * `wait` marks a refusal that running Meta's window again cannot fix — an
+ * attempt on this number is still live — so the card stops offering one: each
+ * run of the window unlinks the phone's linked devices again.
+ */
 export type BeginOutcome =
   | { ok: true; onboardingId: string; accountId: string; notice: string }
-  | { ok: false; error: string };
+  | { ok: false; error: string; wait?: true };
 
 /** How long an `exchanged` attempt counts as live before another may replace it. */
 export const LIVE_ATTEMPT_MS = 15 * 60 * 1000;
@@ -179,7 +195,7 @@ export async function beginCoexistenceOnboarding(
   // is what makes it atomic; this only makes it cheap — and can only be asked
   // when the window named the number.
   if (claim.phoneNumberId && (await hasLiveAttempt(claim.phoneNumberId))) {
-    return { ok: false, error: ALREADY_CONNECTING };
+    return { ok: false, error: ALREADY_CONNECTING, wait: true };
   }
 
   const appSecret = metaAppSecret()!;
@@ -297,7 +313,7 @@ export async function beginCoexistenceOnboarding(
       throw error;
     });
 
-  if (!committed) return { ok: false, error: ALREADY_CONNECTING };
+  if (!committed) return { ok: false, error: ALREADY_CONNECTING, wait: true };
 
   // After the commit: a job is enqueued only once the row it names exists.
   await enqueue(

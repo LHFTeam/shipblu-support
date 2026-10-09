@@ -15,7 +15,6 @@ import { SubmitButton } from '@/components/submit-button';
 import { InfoTip } from '@/components/tooltip';
 import { Badge, Button, Card, ErrorText, Field, Select, SuccessText } from '@/components/ui';
 import { formatDateTime } from '@/lib/format';
-import { GRAPH_VERSION } from '@/lib/meta/graph';
 import { RefreshScheduler } from '@/lib/realtime/refresh-scheduler';
 import {
   type Coexistence,
@@ -31,20 +30,28 @@ import {
   type CredentialStatus,
 } from '@/lib/whatsapp/credential-status';
 import {
+  type ConnectPhase,
+  connectWaitingOn,
+  createSdkGate,
   embeddedSignupLoginOptions,
   FB_SDK_URL,
   FINISH_WAIT_MS,
   isFacebookOrigin,
   parseSignupMessage,
   POPUP_BLOCKED_MS,
+  reduceConnectPhase,
   SDK_LOAD_TIMEOUT_MS,
   type SignupMessage,
   signupStepLabel,
+  watchWindowOpen,
 } from '@/lib/whatsapp/embedded-signup';
 import {
+  connectedFollowUps,
   describeOnboarding,
   type OnboardingView,
+  phoneRepliesUnconfirmed,
   pollIntervalMs,
+  recoveryFor,
 } from '@/lib/whatsapp/onboarding-view';
 import { DangerAction, useRefreshOnSuccess } from '../forms-shared';
 import type { AdminState } from '../settings-shared';
@@ -108,106 +115,60 @@ declare global {
 const SDK_SCRIPT_ID = 'facebook-jssdk';
 
 /**
- * Whether `FB.init` has run in this document. The SDK calls `fbAsyncInit`
- * once, when it loads; a card closed and reopened finds the SDK already there
- * and must not wait for a call that will not come.
+ * The document's one `fbAsyncInit`, shared by every connect card on the page
+ * (`createSdkGate` says why one per card loses). Module scope, like the script
+ * tag it stands for: a card closed and reopened finds the SDK initialised and
+ * does not wait for a call that will not come. Touches no browser global until
+ * a card mounts, so the server render can import it.
  */
-let sdkInitialised = false;
+const sdk = createSdkGate();
 
 // --- The connect card's phases ----------------------------------------------
-
-type Phase =
-  | { name: 'loading_sdk' }
-  | { name: 'sdk_blocked' }
-  | { name: 'idle'; error: string | null }
-  | { name: 'popup_open' }
-  | { name: 'popup_blocked' }
-  | { name: 'cancelled'; step: string | null }
-  | { name: 'meta_error'; message: string | null; sessionId: string | null }
-  | { name: 'awaiting_number' }
-  | { name: 'no_number' }
-  | { name: 'finishing' }
-  | { name: 'unanswered' }
-  | { name: 'done'; notice: string };
-
-type CardEvent =
-  | { type: 'sdk_ready' }
-  | { type: 'sdk_blocked' }
-  | { type: 'opened' }
-  | { type: 'popup_blocked' }
-  | { type: 'closed' }
-  | { type: 'cancelled'; step: string | null }
-  | { type: 'meta_error'; message: string | null; sessionId: string | null }
-  | { type: 'awaiting_number' }
-  | { type: 'no_number' }
-  | { type: 'finishing' }
-  | { type: 'refused'; error: string }
-  | { type: 'unanswered' }
-  | { type: 'done'; notice: string };
-
-/** The phases in which Meta's window is open and may still say something. */
-const WINDOW_OPEN = new Set<Phase['name']>(['popup_open', 'awaiting_number']);
-
-/**
- * Each event applies only from the phases it can follow, so a late message —
- * a CANCEL posted after the window closed, a second `sdk_ready` — cannot move
- * the card backwards out of `finishing` or `done`.
- */
-function reduce(phase: Phase, event: CardEvent): Phase {
-  switch (event.type) {
-    case 'sdk_ready':
-      return phase.name === 'loading_sdk' ? { name: 'idle', error: null } : phase;
-    case 'sdk_blocked':
-      return phase.name === 'loading_sdk' ? { name: 'sdk_blocked' } : phase;
-    case 'opened':
-      return { name: 'popup_open' };
-    case 'popup_blocked':
-      return phase.name === 'popup_open' ? { name: 'popup_blocked' } : phase;
-    case 'closed':
-      return WINDOW_OPEN.has(phase.name) ? { name: 'cancelled', step: null } : phase;
-    case 'cancelled':
-      return WINDOW_OPEN.has(phase.name) ? { name: 'cancelled', step: event.step } : phase;
-    case 'meta_error':
-      return WINDOW_OPEN.has(phase.name)
-        ? { name: 'meta_error', message: event.message, sessionId: event.sessionId }
-        : phase;
-    case 'awaiting_number':
-      return phase.name === 'popup_open' ? { name: 'awaiting_number' } : phase;
-    case 'no_number':
-      return phase.name === 'awaiting_number' ? { name: 'no_number' } : phase;
-    case 'finishing':
-      return WINDOW_OPEN.has(phase.name) ? { name: 'finishing' } : phase;
-    case 'refused':
-      return phase.name === 'finishing' ? { name: 'idle', error: event.error } : phase;
-    case 'unanswered':
-      return phase.name === 'finishing' ? { name: 'unanswered' } : phase;
-    case 'done':
-      return phase.name === 'finishing' ? { name: 'done', notice: event.notice } : phase;
-  }
-}
+// The machine itself is `reduceConnectPhase` in `lib/whatsapp/embedded-signup`,
+// where the test beside it runs; what is here is what the admin reads.
 
 /** The plan's copy for each phase. `idle` with no error says nothing. */
-function phaseCopy(phase: Phase): { text: string; tone: 'muted' | 'error' | 'success' } | null {
+function phaseCopy(
+  phase: ConnectPhase,
+): { text: string; tone: 'muted' | 'error' | 'success' } | null {
   switch (phase.name) {
     case 'loading_sdk':
       return { text: "Loading Meta's sign-in…", tone: 'muted' };
     case 'sdk_blocked':
-      return {
-        text:
-          "Meta's sign-in script could not be loaded — usually a content blocker. Allow " +
-          'connect.facebook.net for this page and reload.',
-        tone: 'error',
-      };
+      // Split by cause, because only one of them is a diagnosis: the script's
+      // `error` event means it will not arrive, while the timeout only means it
+      // has not yet — and the card carries on by itself if it does.
+      return phase.cause === 'error'
+        ? {
+            text:
+              "Meta's sign-in script could not be loaded — usually a content blocker. Allow " +
+              'connect.facebook.net for this page and reload.',
+            tone: 'error',
+          }
+        : {
+            text:
+              "Meta's sign-in has not loaded after ten seconds. A content blocker on " +
+              'connect.facebook.net is the usual cause — allow it for this page and reload. On a ' +
+              'slow connection, wait instead: this card carries on by itself when it arrives.',
+            tone: 'error',
+          };
     case 'idle':
       return phase.error ? { text: phase.error, tone: 'error' } : null;
     case 'popup_open':
       return {
-        text: "Meta's window is open. Finish the steps there — this page updates when you do.",
+        text:
+          "Meta's window is open. Finish the steps there — this page updates when you do." +
+          // The SDK opened nothing during the click, so the card cannot tell a
+          // window opened some other way from one the browser stopped.
+          (phase.unseen
+            ? ' No window? Your browser may have blocked it: allow pop-ups for this site, then ' +
+              'close this card (Cancel, then Close anyway) and open it again.'
+            : ''),
         tone: 'muted',
       };
     case 'popup_blocked':
       return {
-        text: 'Your browser blocked the window. Allow pop-ups for this site and press Continue again.',
+        text: 'Your browser blocked the window. Allow pop-ups for this site and press Try again.',
         tone: 'error',
       };
     case 'cancelled':
@@ -248,7 +209,7 @@ function phaseCopy(phase: Phase): { text: string; tone: 'muted' | 'error' | 'suc
 }
 
 /** The phases from which pressing the button again is the recovery. */
-const RETRYABLE = new Set<Phase['name']>([
+const RETRYABLE = new Set<ConnectPhase['name']>([
   'popup_blocked',
   'cancelled',
   'meta_error',
@@ -265,21 +226,53 @@ const RETRYABLE = new Set<Phase['name']>([
  * is the page's primary action in one mode and a row's quiet one in the other;
  * the card itself takes `Disclosure`'s `data-expanded` shape so the page header
  * gives it the whole row.
+ *
+ * Cancel asks first while the card is waiting on Meta. Closing the card
+ * unmounts the `message` listener and the refs the answer lands in, but not
+ * Meta's window: the business would finish the steps there — and Meta would
+ * unlink the phone's linked devices — for an answer nobody hears. Asked rather
+ * than refused, so a login callback that never came cannot pin the card open
+ * until a reload. `onBusyChange` tells a row the same thing, so it can keep its
+ * own controls from replacing the card mid-flow.
  */
 export function ConnectBusinessAppNumber({
   readiness,
   groups,
   suggestedGroupId,
   mode,
+  onBusyChange,
 }: {
   readiness: ConnectReadiness;
   groups: Choice[];
   /** The one existing WhatsApp channel's group, when there is exactly one. */
   suggestedGroupId: string | null;
   mode: 'connect' | 'reconnect';
+  /** Told whenever the card starts or stops waiting on Meta's window or its answer. */
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [waitingOn, setWaitingOn] = useState<'window' | 'verifying' | null>(null);
+  const [armed, setArmed] = useState(false);
   const label = mode === 'reconnect' ? 'Reconnect' : 'Connect a WhatsApp number';
+  const busy = waitingOn !== null;
+
+  // Stable, so the card's effect reporting through it runs only when the
+  // answer changes. A wait that ends disarms the Cancel: the next one asks
+  // again rather than closing on a click made about the last.
+  const reportWaiting = useCallback((next: 'window' | 'verifying' | null) => {
+    setWaitingOn(next);
+    if (next === null) setArmed(false);
+  }, []);
+
+  useEffect(() => {
+    onBusyChange?.(busy);
+  }, [busy, onBusyChange]);
+
+  function close() {
+    setOpen(false);
+    setWaitingOn(null);
+    setArmed(false);
+  }
 
   if (!open) {
     return mode === 'reconnect' ? (
@@ -293,22 +286,40 @@ export function ConnectBusinessAppNumber({
 
   return (
     <Card data-expanded className="w-full border-brand-500/30">
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-3 flex items-center justify-between gap-3">
         <h2 className="text-sm font-semibold">{label}</h2>
         <button
           type="button"
-          onClick={() => setOpen(false)}
+          onClick={() => (busy && !armed ? setArmed(true) : close())}
           className="text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
         >
-          Cancel
+          {busy && armed ? 'Close anyway' : 'Cancel'}
         </button>
       </div>
+      {busy && armed ? (
+        <p className="mb-3 rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-800">
+          {waitingOn === 'window' ? (
+            <>
+              Meta&rsquo;s window is still open, and this card is what hears its answer. Close the
+              window first and this card says what happened. Closing the card now loses the answer,
+              so steps finished in the window would have to be done again.
+            </>
+          ) : (
+            <>
+              This card is checking Meta&rsquo;s answer, which takes a few seconds. Closing it now
+              hides the reason if the number is refused; a connection that goes through still
+              appears on this page.
+            </>
+          )}
+        </p>
+      ) : null}
       {readiness.ready ? (
         <ConnectCard
           readiness={readiness}
           groups={groups}
           suggestedGroupId={suggestedGroupId}
           mode={mode}
+          onWaitingChange={reportWaiting}
         />
       ) : (
         <NotReady missing={readiness.missing} />
@@ -317,14 +328,26 @@ export function ConnectBusinessAppNumber({
   );
 }
 
-/** The checklist, naming each variable and its group, with the button disabled. */
+/**
+ * The checklist of missing variables, with the button disabled. Every one of
+ * them belongs in this environment's own group, so the paragraph names the
+ * group once rather than per variable.
+ */
 function NotReady({ missing }: { missing: { variable: string; why: string }[] }) {
   return (
     <div className="flex flex-col gap-3 text-sm">
+      {/* Both groups, each with its own value — and a redeploy, not a reload:
+          `env()` reads the environment once per process, and production does
+          not redeploy itself when a group changes. The worker is named because
+          it opens the sealed credential with the same key; a web service
+          redeployed alone turns this card ready while the job that follows
+          fails. */}
       <p className="text-[var(--muted-foreground)]">
-        This environment cannot open Meta&rsquo;s sign-in yet. Set these on Render — in the
-        <code> shipblu-support-production</code> or <code>shipblu-support-staging</code> group,
-        never both — and this page re-reads them on its next load:
+        This environment cannot open Meta&rsquo;s sign-in yet. Set these on Render in this
+        environment&rsquo;s own group — <code>shipblu-support-production</code> on production,
+        <code> shipblu-support-staging</code> on staging, each with its own value — not in{' '}
+        <code>shipblu-support-shared</code> and not on a service. Then deploy the web service and
+        the worker; this list updates once the new deploy is live.
       </p>
       <ul className="flex flex-col gap-1.5">
         {missing.map((setting) => (
@@ -346,15 +369,24 @@ function ConnectCard({
   groups,
   suggestedGroupId,
   mode,
+  onWaitingChange,
 }: {
   readiness: { ready: true; appId: string; configId: string };
   groups: Choice[];
   suggestedGroupId: string | null;
   mode: 'connect' | 'reconnect';
+  onWaitingChange: (waitingOn: 'window' | 'verifying' | null) => void;
 }) {
   const router = useRouter();
   const [, startTransition] = useTransition();
-  const [phase, dispatch] = useReducer(reduce, { name: 'loading_sdk' } as Phase);
+  const [phase, dispatch] = useReducer(reduceConnectPhase, {
+    name: 'loading_sdk',
+  } as ConnectPhase);
+
+  const waitingOn = connectWaitingOn(phase);
+  useEffect(() => {
+    onWaitingChange(waitingOn);
+  }, [waitingOn, onWaitingChange]);
 
   // Outside any <form>, so there is nothing a reset could move and nothing
   // for Enter to submit; the action is called with a FormData built by hand.
@@ -374,25 +406,30 @@ function ConnectCard({
   // window as a pop-up and blocks it, so the script has to be there already.
   // The `app/help/chat.tsx` shape: one tag per document, a 'load' that may
   // land after the reader has left, an 'error' that takes the tag down so a
-  // reload can try again.
+  // reload can try again. The wait goes through the shared gate, so a second
+  // card open while the script downloads is woken by the same load.
+  //
+  // The timeout says "blocked" but does not unsubscribe: it is a guess, and a
+  // script that arrives after it still wakes this card (`reduceConnectPhase`
+  // lets `sdk_ready` lift it).
   useEffect(() => {
-    let left = false;
-    const ready = () => {
-      if (!left) dispatch({ type: 'sdk_ready' });
-    };
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const stopWaiting = sdk.wait(window, appId, {
+      ready: () => {
+        if (timer) clearTimeout(timer);
+        dispatch({ type: 'sdk_ready' });
+      },
+      blocked: () => {
+        if (timer) clearTimeout(timer);
+        dispatch({ type: 'sdk_blocked', cause: 'error' });
+      },
+    });
+    if (sdk.initialised) return stopWaiting;
 
-    if (window.FB && sdkInitialised) {
-      ready();
-      return;
-    }
-
-    const timer = setTimeout(() => dispatch({ type: 'sdk_blocked' }), SDK_LOAD_TIMEOUT_MS);
-    window.fbAsyncInit = () => {
-      window.FB?.init({ appId, autoLogAppEvents: true, xfbml: true, version: GRAPH_VERSION });
-      sdkInitialised = true;
-      clearTimeout(timer);
-      ready();
-    };
+    timer = setTimeout(
+      () => dispatch({ type: 'sdk_blocked', cause: 'timeout' }),
+      SDK_LOAD_TIMEOUT_MS,
+    );
 
     if (!document.getElementById(SDK_SCRIPT_ID)) {
       const script = document.createElement('script');
@@ -402,15 +439,14 @@ function ConnectCard({
       script.crossOrigin = 'anonymous';
       script.addEventListener('error', () => {
         script.remove();
-        clearTimeout(timer);
-        dispatch({ type: 'sdk_blocked' });
+        sdk.fail();
       });
       document.body.appendChild(script);
     }
 
     return () => {
-      left = true;
-      clearTimeout(timer);
+      stopWaiting();
+      if (timer) clearTimeout(timer);
     };
   }, [appId]);
 
@@ -468,10 +504,19 @@ function ConnectCard({
           dispatch({ type: 'done', notice: result.notice ?? 'Connecting the number now.' });
           router.refresh();
         } else {
+          // `wait` marks a refusal that running Meta's window again cannot fix
+          // — the rate limit, or an attempt on this number still live — read
+          // off the answer rather than out of its wording. Each run of the
+          // window unlinks the phone's linked devices again, so the card stops
+          // offering one; a live attempt is the progress card the sentence
+          // points at, so the page is re-read to put it there.
+          const wait = result.wait === true;
           dispatch({
             type: 'refused',
             error: result.error ?? "Meta's window did not connect the number.",
+            wait,
           });
+          if (wait) router.refresh();
         }
       } catch (error) {
         unstable_rethrow(error);
@@ -525,49 +570,68 @@ function ConnectCard({
     const clickedAt = Date.now();
     dispatch({ type: 'opened' });
 
-    fb.login((response) => {
-      const code = response?.authResponse?.code;
-      if (code) {
-        codeRef.current = code;
-        tryFinish();
-        return;
-      }
-      // No code: the window was blocked, closed, or failed. Blocked is the
-      // callback firing almost at once with nothing said; otherwise Meta's
-      // CANCEL or ERROR usually lands around now, so it is given a moment to
-      // name the step before the card calls it a plain close.
-      if (finishRef.current) {
-        // Finished, and no code to exchange: the login configuration is not
-        // returning one — a misconfiguration, not something to retry blindly.
-        dispatch({
-          type: 'meta_error',
-          message:
-            "the window finished without a sign-in code — check the login configuration's response type",
-          sessionId: null,
-        });
-        return;
-      }
-      if (Date.now() - clickedAt < POPUP_BLOCKED_MS) {
-        dispatch({ type: 'popup_blocked' });
-        return;
-      }
-      setTimeout(() => dispatch({ type: 'closed' }), 300);
-    }, embeddedSignupLoginOptions(configId));
+    // The SDK never calls back for a window the browser refused, so the
+    // refusal is read off `window.open` while `FB.login` runs — the only place
+    // it shows (`watchWindowOpen`). Without this the card sat on "Meta's
+    // window is open" for good, with no window and nothing to press.
+    const opened = watchWindowOpen(window, () => {
+      fb.login((response) => {
+        const code = response?.authResponse?.code;
+        if (code) {
+          codeRef.current = code;
+          tryFinish();
+          return;
+        }
+        // No code: a window that opened has shut — the SDK's monitor saw it
+        // close, or the flow ended without a code. Meta's CANCEL or ERROR
+        // usually lands around now, so it is given a moment to name the step
+        // before the card calls it a plain close.
+        if (finishRef.current) {
+          // Finished, and no code to exchange: the login configuration is not
+          // returning one — a misconfiguration, not something to retry blindly.
+          dispatch({
+            type: 'meta_error',
+            message:
+              "the window finished without a sign-in code — check the login configuration's response type",
+            sessionId: null,
+          });
+          return;
+        }
+        // Shut within a second of opening: a blocker extension closing what
+        // `window.open` gave it, or a very fast cancel (`POPUP_BLOCKED_MS`).
+        if (Date.now() - clickedAt < POPUP_BLOCKED_MS) {
+          dispatch({ type: 'popup_blocked' });
+          return;
+        }
+        setTimeout(() => dispatch({ type: 'closed' }), 300);
+      }, embeddedSignupLoginOptions(configId));
+    });
+    if (opened === 'blocked') dispatch({ type: 'popup_blocked' });
+    else if (opened === 'not_called') dispatch({ type: 'window_unseen' });
   }
 
   const copy = phaseCopy(phase);
-  const busy =
-    phase.name === 'popup_open' || phase.name === 'awaiting_number' || phase.name === 'finishing';
+  const busy = waitingOn !== null;
+  // A refusal marked `wait` keeps the button off: the next run of Meta's
+  // window would end the same way. Closing and reopening the card is the way
+  // back once the sentence's wait is over, which the line under it says.
+  const mustWait = phase.name === 'idle' && phase.wait;
   const buttonLabel =
     phase.name === 'loading_sdk'
       ? "Loading Meta's sign-in…"
-      : RETRYABLE.has(phase.name) || (phase.name === 'idle' && phase.error)
+      : RETRYABLE.has(phase.name) || (phase.name === 'idle' && phase.error && !mustWait)
         ? 'Try again'
         : 'Continue with Meta';
-  const canPress = phase.name === 'idle' || RETRYABLE.has(phase.name);
+  const canPress = (phase.name === 'idle' && !mustWait) || RETRYABLE.has(phase.name);
+  // What is announced: the muted and success lines, which `ErrorText`'s
+  // `role="alert"` does not cover.
+  const status = copy && copy.tone !== 'error' ? copy.text : '';
 
   return (
-    <div className="flex flex-col gap-3 text-sm">
+    // Positioned for the `sr-only` live region below, which is
+    // `position: absolute` and would otherwise be placed against the document
+    // (PROJECT-STATE §6.81).
+    <div className="relative flex flex-col gap-3 text-sm">
       <ul className="flex flex-col gap-1 text-xs text-[var(--muted-foreground)]">
         <li>Sign in as an admin of the Business portfolio that owns the number.</li>
         <li>
@@ -604,9 +668,30 @@ function ConnectCard({
       </Field>
 
       {copy?.tone === 'error' ? <ErrorText>{copy.text}</ErrorText> : null}
-      {copy?.tone === 'success' ? <SuccessText>{copy.text}</SuccessText> : null}
+      {mustWait ? (
+        <p className="text-xs text-[var(--muted-foreground)]">
+          The button stays off until this card is closed and opened again: running Meta&rsquo;s
+          window now would end the same way, and it unlinks the phone&rsquo;s linked devices each
+          time.
+        </p>
+      ) : null}
+      {/* Announced through one region mounted for the card's whole life: a
+          `role="status"` inserted together with its text is not reliably read
+          out, and these are the lines that say whether anything happened.
+          The visible copy is hidden from assistive technology so it is not
+          read twice. Errors stay outside, in `ErrorText`'s alert. */}
+      <p role="status" className="sr-only">
+        {status}
+      </p>
+      {copy?.tone === 'success' ? (
+        <div aria-hidden>
+          <SuccessText>{copy.text}</SuccessText>
+        </div>
+      ) : null}
       {copy?.tone === 'muted' ? (
-        <p className="text-xs text-[var(--muted-foreground)]">{copy.text}</p>
+        <p aria-hidden className="text-xs text-[var(--muted-foreground)]">
+          {copy.text}
+        </p>
       ) : null}
 
       {phase.name === 'done' ? null : (
@@ -675,7 +760,15 @@ const STEP_GLYPH = { pending: '◌', running: '…', done: '✓', failed: '✗' 
 
 /**
  * One attempt, as the page polls it: each step as it lands, the queue's
- * backoff, the stall sentence, the retry, and the summary once it connected.
+ * backoff, the stall sentence, the recovery, and the summary once it connected.
+ *
+ * The recovery is two controls, because a failure is one of two kinds and the
+ * card cannot tell which from the sentence. Retry runs the job again with the
+ * stored credential and no popup — right for anything fixed outside the job (a
+ * permission granted, `META_APP_ID` set, a worker that gave up). A new sign-in
+ * is right for what the job cannot fix — the wrong number chosen in Meta's
+ * window, a credential since forgotten — and is offered beside it, from the
+ * `connect` the page hands over. `recoveryFor` decides which apply.
  */
 export function OnboardingProgress({
   onboarding,
@@ -684,6 +777,7 @@ export function OnboardingProgress({
   accountName,
   credential,
   canConnect,
+  connect,
   now,
 }: {
   onboarding: OnboardingView;
@@ -692,14 +786,23 @@ export function OnboardingProgress({
   accountName: string | null;
   credential: CredentialStatus | null;
   canConnect: boolean;
+  /**
+   * What the connect card needs, so a failed attempt can offer a new sign-in in
+   * place. Required, so the one recovery the job cannot provide is not lost to
+   * a call site that leaves it out.
+   */
+  connect: { readiness: ConnectReadiness; groups: Choice[]; suggestedGroupId: string | null };
   /** The server's clock at render, so the page and this card agree on the sentences. */
   now: Date;
 }) {
-  // On the server's clock: every refresh renders a fresh `now`, so a copy
-  // that stalls stops the polling on the next read without a clock of its own.
+  // On the server's clock: every refresh renders a fresh `now`, and every
+  // bound `pollIntervalMs` applies is measured against it, so a backoff, a
+  // stall or a copy that has gone quiet changes the interval on the next read
+  // without a clock of its own.
   useRefreshEvery(pollIntervalMs(onboarding, coexistence, now));
 
   const lines = describeOnboarding(onboarding, now);
+  const recovery = recoveryFor(onboarding, now, credential !== null);
   const number = coexistence?.displayPhoneNumber ?? onboarding.phoneNumberId;
   const title =
     onboarding.status === 'exchanged'
@@ -762,10 +865,22 @@ export function OnboardingProgress({
       ))}
 
       {onboarding.status === 'failed' ? (
-        <>
-          <ErrorText>{onboarding.error ?? 'The connection failed.'}</ErrorText>
-          {canConnect ? <RetryOnboarding onboardingId={onboarding.id} /> : null}
-        </>
+        <ErrorText>{onboarding.error ?? 'The connection failed.'}</ErrorText>
+      ) : null}
+
+      {canConnect && (recovery.retry || recovery.connect) ? (
+        <div className="flex flex-wrap items-start gap-2">
+          {recovery.retry ? <RetryOnboarding onboardingId={onboarding.id} /> : null}
+          {recovery.connect ? (
+            // `reconnect` only where the attempt reached a channel: its hint
+            // about the group being used "only if the window connects a
+            // different number" is wrong for a number never connected.
+            <ConnectBusinessAppNumber
+              {...connect}
+              mode={onboarding.channelId ? 'reconnect' : 'connect'}
+            />
+          ) : null}
+        </div>
       ) : null}
 
       {onboarding.status === 'connected' ? (
@@ -781,7 +896,16 @@ export function OnboardingProgress({
   );
 }
 
-/** The plan's "Done" block, from what the connection knows about itself. */
+/**
+ * The plan's "Done" block, from what the connection knows about itself.
+ *
+ * Its closing line is built from the steps rather than fixed. "Nothing else to
+ * do" under a subscribe warning saying phone replies will not arrive sent the
+ * admin away from the one thing still to do — and the card, with the warning on
+ * it, leaves the page after a day. So the phone-replies sentence is printed
+ * only when the number and subscribe steps say nothing against it, and "Nothing
+ * else to do" only when no step warned or failed and the credential is stored.
+ */
 function ConnectedSummary({
   onboarding,
   coexistence,
@@ -821,6 +945,9 @@ function ConnectedSummary({
           (_, phase) => `phase ${phase} ${phases[String(phase)] ?? 0}%`,
         ).join(' · ')} (${history.chunks} chunk${history.chunks === 1 ? '' : 's'}).`;
 
+  const followUps = connectedFollowUps(onboarding);
+  const allClear = followUps.length === 0 && credential !== null;
+
   return (
     <div className="flex flex-col gap-1 rounded-md bg-emerald-500/10 px-3 py-2 text-sm text-emerald-800">
       <p>
@@ -834,10 +961,42 @@ function ConnectedSummary({
           ? ' Keep the WhatsApp Business app open on the phone until this reaches 100% — six months of chats can take hours.'
           : ''}
       </p>
-      <p>
-        Replies typed on the phone appear on tickets as &ldquo;WhatsApp Business app&rdquo;. Console
-        replies go out over Cloud API. Nothing else to do.
-      </p>
+      {phoneRepliesUnconfirmed(onboarding) ? null : (
+        <p>
+          Replies typed on the phone appear on tickets as &ldquo;WhatsApp Business app&rdquo;.
+          Console replies go out over Cloud API.
+        </p>
+      )}
+      {allClear ? (
+        <p>Nothing else to do.</p>
+      ) : (
+        <div className="text-amber-800">
+          {followUps.length > 0 ? (
+            <>
+              <p>
+                <strong>Still to do:</strong>
+              </p>
+              <ul className="list-disc ps-5">
+                {followUps.map((item) => (
+                  <li key={`${item.step}-${item.kind}`}>
+                    &ldquo;{item.label}&rdquo; — the {item.kind === 'warning' ? 'note' : 'reason'}{' '}
+                    under it above says what is needed.
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+          {/* Not "press Reconnect": an account with no stored credential may
+              still send with a token the environment names, which the account
+              row shows. */}
+          {credential === null ? (
+            <p>
+              No credential is stored for this business account now, so it sends with a token from
+              the environment, if one is set — the account&rsquo;s row above names which.
+            </p>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 }
@@ -879,9 +1038,24 @@ export function CoexistenceBadges({ config, now }: { config: Record<string, unkn
 }
 
 /**
+ * How long a "Copy again" keeps re-reading the page after the action answers.
+ * The action only enqueues; the request id the progress card polls on is
+ * written by the job, a claim and a Graph call later — seconds, at priority 10.
+ * A minute covers that with room, and ends on its own if Meta refuses again.
+ */
+const SYNC_REQUEST_FOLLOW_MS = 60_000;
+
+/**
  * "Copy the contacts / history (again)" on a connected row. Hidden fields and
  * a button only, so React's reset after a refusal has nothing to move and the
  * plain form action is the right shape.
+ *
+ * After a success it keeps refreshing for a while, because the one refresh on
+ * success lands before the worker has claimed the job: that page shows no
+ * request yet, so nothing on it polls, and "this page updates as it arrives"
+ * was true only after a manual reload. Once the job records the request the
+ * row stops offering this button, which unmounts it and ends the burst — the
+ * progress card's own polling takes over from there.
  */
 export function RequestSyncAgain({
   channelId,
@@ -894,7 +1068,16 @@ export function RequestSyncAgain({
   again: boolean;
 }) {
   const [state, formAction] = useActionState(requestCoexistenceSync, INITIAL);
-  useRefreshOnSuccess(state);
+  const [following, setFollowing] = useState(false);
+  const follow = useCallback(() => setFollowing(true), []);
+  useRefreshOnSuccess(state, follow);
+  // Restarted by each success (its nonce), so a second press gets its own minute.
+  useEffect(() => {
+    if (!following) return;
+    const stop = setTimeout(() => setFollowing(false), SYNC_REQUEST_FOLLOW_MS);
+    return () => clearTimeout(stop);
+  }, [following, state.nonce]);
+  useRefreshEvery(following ? 3_000 : null);
   const what = type === 'contacts' ? 'contacts' : 'history';
 
   return (
@@ -938,8 +1121,10 @@ function explainCredentialBadge(badge: CredentialBadge, status: CredentialStatus
   if (label === 'credential refused by Meta') {
     return `${status.lastRefusal ?? 'Meta refused the stored credential.'} Press Reconnect to store a fresh one.`;
   }
+  // Nothing fills the expiry in later: `check_meta_permissions` prints it and
+  // writes nothing back, and only storing a credential records an inspection.
   if (label === 'expiry unknown') {
-    return "Meta's token inspection did not answer when the credential was stored; the next check_meta_permissions run fills it in.";
+    return "Meta's token inspection did not answer when this credential was stored, so its expiry is unknown and no warning will appear before it lapses. `npm run job -- check_meta_permissions` prints the expiry without saving it. Reconnect stores a fresh token and records its expiry when Meta's inspection answers.";
   }
   if (label === 'never expires') return 'Meta said so when the token was inspected.';
   if (label === 'credential expired') {
@@ -977,6 +1162,13 @@ export function CredentialCard({ status, now }: { status: CredentialStatus; now:
  * "Forget credential": deletes the sealed token and records who did; the
  * account and its numbers stay. Nothing changes at Meta — the hint says where
  * that is done, because this button cannot and should not look as if it had.
+ *
+ * The hint and the confirmation carry the consequence, because nothing else
+ * can: on success the row re-renders without a credential and this control
+ * unmounts with any notice it held. And the consequence is the shared token,
+ * not "the account's variable" — storing the credential cleared the variable
+ * and the edit form refuses one while a credential is stored, so a row written
+ * through the console has none to fall back to.
  */
 export function ForgetCredential({ accountId }: { accountId: string }) {
   return (
@@ -985,12 +1177,15 @@ export function ForgetCredential({ accountId }: { accountId: string }) {
         action={forgetStoredCredential}
         id={accountId}
         label="Forget credential"
-        confirmLabel="Really forget it?"
+        confirmLabel="Forget — send with the shared token?"
       />
       <InfoTip label="Forget credential">
-        Deletes the stored token; sends and the template sync then use the account&rsquo;s token
-        variable, or META_PAGE_ACCESS_TOKEN. Revoking it on Meta&rsquo;s side is done in Business
-        Settings → Integrations → Connected apps, or by offboarding the number on the phone.
+        Deletes the stored token. Sends and the template sync then use META_PAGE_ACCESS_TOKEN:
+        connecting through Meta cleared any token variable this account named, so there is none to
+        fall back to. If the shared token cannot reach this business, press Reconnect, or name a
+        WHATSAPP_TOKEN_ variable with Edit afterwards. Revoking the token on Meta&rsquo;s side is
+        done in Business Settings → Integrations → Connected apps, or by offboarding the number on
+        the phone.
       </InfoTip>
     </span>
   );

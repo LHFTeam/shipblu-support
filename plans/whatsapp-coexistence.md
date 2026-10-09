@@ -180,7 +180,10 @@ says "press Reconnect" for a stored credential instead of blaming
 `credentialBadges` renders `credential expires in N days` within 7 days.
 `check_meta_permissions` gains a section per stored credential (kid, valid,
 type, scopes, expiry — never the token). `applyWhatsAppAccountUpdate`
-(`PARTNER_REMOVED` / `ACCOUNT_OFFBOARDED`) also writes a `refused` event.
+records a refusal — and so a `refused` event — for `PARTNER_REMOVED` only.
+`ACCOUNT_OFFBOARDED` is Meta re-onboarding the number after it moved phone or
+was registered again; the partner keeps its access, so the credential is left
+alone and the badge clears on `ACCOUNT_RECONNECTED`.
 
 **Disconnect** — _Forget credential_ (new `DangerAction` on the WABA row):
 deletes the row, appends `removed`, leaves the account and numbers; the
@@ -188,9 +191,13 @@ notice says sends and the sync fail until Reconnect or a `WHATSAPP_TOKEN_*`
 variable. Deliberately no `DELETE /{waba}/subscribed_apps` (it would silence
 inbound tickets as a side effect of a credential decision). _Disconnect_
 (`deleteWhatsAppAccount`) cascades; the `removed` event is appended inside the
-same transaction. Meta-side revocation is done by the business (Business
-Settings → Integrations → Connected apps) or by offboarding on the phone; the
-console says so beside the button.
+same transaction. Because the cascade removes the credential, an account
+holding one is disconnected only by an `admin.channels.connect` holder — the
+key Forget asks for — decided under the account row's lock
+(`storedCredentialRemovalRefusal`); anybody else is told who can. Meta-side
+revocation is done by the business (Business Settings → Integrations →
+Connected apps) or by offboarding on the phone; the console says so beside the
+button.
 
 **Rotation** — set `_PREVIOUS` = old, current = new (both services and the
 crons read the group), `npm run job -- rotate_whatsapp_credentials
@@ -405,18 +412,19 @@ an audience of one admin watching six states. Invalidation, not data, as
 
 ### Failure states and recovery
 
-| state                                                                   | shown                                                                                                          | recovery                                                                                                                                               |
-| ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| code expired / exchange refused                                         | the sentence above; nothing written                                                                            | Connect again                                                                                                                                          |
-| readiness missing                                                       | checklist naming variable + group                                                                              | set it on Render; page re-reads                                                                                                                        |
-| token refused at exchange (scopes, wrong app, not granted on this WABA) | the specific sentence                                                                                          | re-run signed in as the right Business admin / fix the login configuration                                                                             |
-| number already connected                                                | **Reconnected**; `coexistence` rewritten                                                                       | nothing; contacts/history offered as buttons                                                                                                           |
-| job failed on number/subscribe/channel                                  | `failed` with the step and Meta's sentence; _Retry connection_                                                 | `retryCoexistenceOnboarding` enqueues again — no popup                                                                                                 |
-| history declined on the phone (2593109)                                 | badge `history declined on the phone` + InfoTip with the phone-side path (wording confirmed on the test phone) | _Copy history again_ → job `steps: ['history']`, within 24 h                                                                                           |
-| disconnected from the phone (`account_update`)                          | badge on channel and account                                                                                   | _Reconnect_ = the same popup (its copy warns that Meta unlinks companion devices again); the exchange overwrites the credential, the job re-subscribes |
-| credential expiring / refused (190)                                     | account badge + `last_sync_error` sentence                                                                     | _Reconnect_                                                                                                                                            |
-| credential unreadable (`keyState` unknown / no key)                     | badge naming the key id and `WHATSAPP_CREDENTIAL_KEY`                                                          | set the key or rotate; _Reconnect_ re-stores under the current key                                                                                     |
-| copy window passed, sync never requested                                | badge `copy window closed` + InfoTip                                                                           | _Reconnect_ opens a new window                                                                                                                         |
+| state                                                                          | shown                                                                                                                                                   | recovery                                                                                                                                                                                                                                    |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| code expired / exchange refused                                                | the sentence above; nothing written                                                                                                                     | Connect again                                                                                                                                                                                                                               |
+| readiness missing                                                              | checklist naming variable + group                                                                                                                       | set it on Render; page re-reads                                                                                                                                                                                                             |
+| token refused at exchange (scopes, wrong app, not granted on this WABA)        | the specific sentence                                                                                                                                   | re-run signed in as the right Business admin / fix the login configuration                                                                                                                                                                  |
+| number already connected                                                       | **Reconnected**; `coexistence` rewritten                                                                                                                | nothing; contacts/history offered as buttons                                                                                                                                                                                                |
+| job failed on number/subscribe/channel                                         | `failed` with the step and Meta's sentence; _Retry connection_                                                                                          | `retryCoexistenceOnboarding` enqueues again — no popup                                                                                                                                                                                      |
+| history declined on the phone (2593109)                                        | badge `history declined on the phone` + InfoTip with the phone-side path (wording confirmed on the test phone)                                          | _Reconnect_, and share the history when the phone asks: Meta asks once per connection and the declined request holds a request id, so no copy button can ask again; the reconnect asks for the history and carries the copied contacts over |
+| disconnected from the phone (`account_update` `PARTNER_REMOVED`)               | badge on channel (danger) and a refusal on the account's credential                                                                                     | _Reconnect_ = the same popup (its copy warns that Meta unlinks companion devices again); the exchange overwrites the credential, the job re-subscribes                                                                                      |
+| number moved phone or registered again (`account_update` `ACCOUNT_OFFBOARDED`) | badge on channel (warning) saying Meta reconnects it on its own                                                                                         | wait: Meta re-onboards it, usually within minutes, and `ACCOUNT_RECONNECTED` clears the badge; _Reconnect_ only if it stays                                                                                                                 |
+| credential expiring / refused (190)                                            | account badge + `last_sync_error` sentence                                                                                                              | _Reconnect_                                                                                                                                                                                                                                 |
+| credential unreadable (`keyState` unknown / no key)                            | badge naming the key id and `WHATSAPP_CREDENTIAL_KEY`                                                                                                   | set the key or rotate; _Reconnect_ re-stores under the current key                                                                                                                                                                          |
+| copy window passed, sync never requested                                       | badge `copy window closed` + InfoTip — not for a number Meta says is not on the Business app, nor for a copy an earlier connection made (`carriedOver`) | _Reconnect_ opens a new window                                                                                                                                                                                                              |
 
 ### The rows afterwards
 
@@ -425,11 +433,15 @@ an audience of one admin watching six states. Invalidation, not data, as
   on <date>; phone-typed replies count as the team's) · `copying history 2/3 ·
 40%` / `history copied` / `history declined` / `history failed` · `412
 contacts` · `disconnected on the phone` · `copy window closed`; then
-  `RequestSyncAgain` buttons where `canRequestSyncAgain` allows and
-  _Reconnect_ when disconnected. `ChannelEditor`'s Edit still works;
-  `AddressField` shows the phone number id as text; `saveChannel` carries
-  `coexistence` over (it rebuilds `config` as `{phoneNumberId}` today —
-  renaming would wipe it).
+  `RequestSyncAgain` buttons where `canRequestSyncAgain` allows and the
+  attempt the channel names has finished connecting, and _Reconnect_ where
+  `needsReconnect` says (disconnected, a window that closed on something never
+  copied, or history declined on the phone). `ChannelEditor`'s Edit still
+  works; it shows the phone number id and the business account as text, and
+  `saveChannel` leaves a connected number's `config` and account to the
+  UPDATE (`whatsappEditColumns`) — a rename once wiped the connection, and a
+  copy taken from a read wrote back over concurrent progress — and refuses a
+  change of account.
 - **WABA row** (`WhatsAppAccountEditor`): the variable line becomes
   `CredentialCard` — `Stored from Embedded Signup on <date> by <agent> ·
 <type> · never expires | expires <date> · key <id>` — plus
@@ -450,7 +462,9 @@ rule walks it): `ConnectBusinessAppNumber({readiness, groups, mode:
 `CredentialCard({status})`, `ForgetCredential({accountId})` (`DangerAction`).
 Actions in `actions.ts`: `exchangeSignupCode`, `retryCoexistenceOnboarding`
 (`onboardingId` via `uuidField`), `requestCoexistenceSyncAgain` (re-reads the
-row, `canRequestSyncAgain`, **enqueues** `{onboardingId, steps: [type]}`),
+row, `canRequestSyncAgain`, refuses unless the attempt the channel names is
+`connected` — the job's own gate — then **enqueues** `{onboardingId, steps:
+[type]}`),
 `forgetStoredCredential` (`accountId` via `uuidField`). `page.tsx` also loads
 `credentialStatuses()` and `listLatestOnboardings()`
 (`lib/whatsapp/onboarding-reads.ts`, in `lib/` so the DB tier reaches it) and
@@ -756,17 +770,22 @@ the tree, this is where it went:
   connected number stays connected whatever a later step does; a sync refusal
   is explained by code (2593107 already asked, 2593108 window passed); a
   reconnect carries `previouslyCopied` on the channel step so it does not ask
-  again for what the earlier connection copied.
+  again for what an earlier connection copied — any earlier one, since the
+  list is also written onto the channel as `coexistence.carriedOver` and read
+  back by the next reconnect. A number Meta says is not on the Business app is
+  written `notOnBusinessApp: true`, so the row offers it no copy.
 - **`lib/whatsapp/coexistence.ts`** holds `Coexistence` (with `onboardingId`),
   `parseCoexistence`, `canRequestSync(coexistence, type, now)` (not
-  `canRequestSyncAgain`), `SYNC_TYPES`, `META_SYNC_TYPE`, `SYNC_WINDOW_MS`,
-  `historyProgress`, `historyDone`, `isSyncing` and `coexistenceBadges` — all
-  pure, so the page draws the badges the job decides from.
+  `canRequestSyncAgain`; it also refuses `not_on_business_app`), `SYNC_TYPES`,
+  `META_SYNC_TYPE`, `SYNC_WINDOW_MS`, `historyProgress`, `historyDone`,
+  `isSyncing`, `uncopiedAfterWindow`, `needsReconnect` and `coexistenceBadges`
+  — all pure, so the page draws the badges the job decides from.
   `lib/whatsapp/onboarding-view.ts` is the view model of an attempt
   (`toOnboardingView`, `STEP_LABELS`, `describeOnboarding`, `pollIntervalMs`,
   `STALL_AFTER_MS`, `isOnboardingShown`), and `lib/whatsapp/onboarding-reads.ts`
-  (`listLatestOnboardings()`) the read the page makes, in `lib/` so the database
-  tier reaches it.
+  (`listLatestOnboardings()`, and `copyRequestRefusal()` with the
+  `runsNamedSteps` predicate the job's gate shares) the reads the page and its
+  actions make, in `lib/` so the database tier reaches them.
 - **The credential layer**: `lib/whatsapp/credentials.ts` exports
   `storeBusinessToken(tx, {accountId, wabaId, token, inspection, businessId,
 actor})`, `storedTokenFor`, `storedCredentialExists()` (the `exists()`
@@ -775,6 +794,8 @@ actor})`, `storedTokenFor`, `storedCredentialExists()` (the `exists()`
   `credentialStatuses()`, `recordCredentialRefusal`, `recordCredentialVerified`,
   `removeStoredCredential(tx, id, actor)` (used inside `deleteWhatsAppAccount`'s
   transaction, so the `removed` event is cut before the cascade),
+  `storedCredentialRemovalRefusal(tx, id, mayForget)` (the same transaction,
+  first: no cascade for a caller without `admin.channels.connect`),
   `forgetStoredCredential(id, actor)`, `resealStoredCredentials({dryRun})`,
   `credentialKeyProblem()` and `REQUIRED_BUSINESS_TOKEN_SCOPES`.
   `lib/whatsapp/credential-status.ts` carries `CredentialStatus` (`keyState`,
@@ -798,8 +819,10 @@ tokenEnvVar})` takes a `TokenOrigin`; `CredentialSource` lives in
   `admin.channels.connect`, the first also behind `allow('signup:' + agent.id,
 5, 10 min)`. `AdminState` gained `notice` and `onboardingId`
   (`admin/settings-shared.ts`); `GRAPH_VERSION` is exported from
-  `lib/meta/graph.ts`; `saveChannel` carries `coexistence` and the stored
-  `phoneNumberId` over. `lib/whatsapp/embedded-signup.ts` holds the SDK URL,
+  `lib/meta/graph.ts`; `saveChannel` keeps a connected number's `config` and
+  account through `whatsappEditColumns` in `coexistence-state.ts`, decided in
+  the UPDATE, and refuses moving it to another account.
+  `lib/whatsapp/embedded-signup.ts` holds the SDK URL,
   `EMBEDDED_SIGNUP_EXTRAS` (the v3 shape, one constant — adopt what the
   Embedded Signup Builder generates), `embeddedSignupLoginOptions`,
   `isFacebookOrigin`, `parseSignupMessage` and the three timings.
