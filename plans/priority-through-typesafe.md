@@ -154,12 +154,14 @@ two parts of that are easy to misread:
   as it would if an agent had edited the ticket a moment after it arrived. The
   condition language has no fact telling a reply from an edit, so a rule meant
   for follow-ups cannot exclude it.
-- **It is not always ordered after `on_create`.** Where ingest runs in the
-  worker (email, WhatsApp, Meta), the batch finishes before this job is claimed.
-  Web chat, the portal and forms enqueue the job from the request before they
-  run `on_create`, so a provider answering faster than that pass lets this one
-  run first, and an `on_create` rule writing the same field then has the last
-  word.
+- **Nothing orders it after `on_create`.** Every ingest path enqueues the job
+  before it runs that pass, and the worker's continuous pool gives the job a free
+  slot as soon as it is queued — beside the `process_webhook` job still ingesting
+  on email, WhatsApp and Meta, and beside the request on web chat, the portal
+  and forms. (Under the old batch loop the worker-ingested channels were ordered
+  by the batch; the pool in #347 removed that.) Only the provider's latency keeps
+  this pass second, and when it does not, an `on_create` rule writing the same
+  field has the last word.
 
 A `send_reply` rule that already answered since the customer last wrote is held
 off by `alreadyReplied`, so the same rule does not reply twice to one message.
