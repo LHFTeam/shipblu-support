@@ -282,7 +282,8 @@ export async function claimThreadControl(
 
   refresh(row.conversation.number);
 
-  // No message: `ThreadControl` is gone by the time this answer renders, replaced
-  // by the reply box in the commit that brings the re-read page (its docblock).
+  // No message: `ThreadControl` is replaced by the reply box when the re-read
+  // page arrives with this answer, so a sentence here was never painted (its
+  // docblock).
   return ok();
 }

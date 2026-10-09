@@ -21,10 +21,13 @@ export type LinkAction = (
  * Nine controls on the ticket page spelled this out by hand, and they did not
  * all do it the same way, so the differences are options rather than lost:
  *
- * - `rereadOnRefusal` re-reads the page after a refusal, for a control whose
- *   refusal mostly means the page was stale — another agent unlinked it or
- *   decided it first — and which shows no error, or not the one that matters.
- *   A refusal revalidates nothing, so nothing else would correct the screen.
+ * - `rereadOnRefusal` re-reads the page after a refusal, for a control that
+ *   shows no error and whose refusal means the screen is out of date: the
+ *   ticket is no longer this agent's to see, the category is gone, the
+ *   permission was revoked. Those refusals return before anything is written,
+ *   so they revalidate nothing, and without the re-read the control would just
+ *   do nothing. Acting on what another agent already removed or decided is not
+ *   a refusal: those actions succeed, and revalidate.
  * - `clearError: false` keeps the last refusal on screen while a retry is
  *   pending, which is what the link inputs have always done.
  *

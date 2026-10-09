@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Badge, ErrorText } from '@/components/ui';
 import { useActionForm } from '@/components/use-action-form';
 import type { LinkedShippingAccount } from '@/lib/shipments/queries';
@@ -86,6 +87,7 @@ export function AccountLinks({
   accounts: LinkedShippingAccount[];
   editable: boolean;
 }) {
+  const router = useRouter();
   const { state, key, form, pending } = useActionForm(linkContactToAccount, INITIAL);
   const [removing, setRemoving] = useState<string | null>(null);
 
@@ -94,8 +96,13 @@ export function AccountLinks({
     const formData = new FormData();
     formData.set('contactId', contactId);
     formData.set('shippingAccountId', shippingAccountId);
-    await unlinkContactFromAccount(INITIAL, formData);
+    const result = await unlinkContactFromAccount(INITIAL, formData);
     setRemoving(null);
+    // A success brings the re-read page with it. A refusal is not shown and
+    // revalidates nothing; the one an agent can meet is a permission lost since
+    // the page was drawn, and re-reading takes the × buttons away rather than
+    // leaving them doing nothing.
+    if (result.error) router.refresh();
   }
 
   return (

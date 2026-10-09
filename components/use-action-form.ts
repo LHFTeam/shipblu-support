@@ -62,12 +62,14 @@ const LOST =
  *
  * `onSuccess` is what a form does next: an admin editor closes, a composer on a
  * phone puts itself away. It runs once per success, after the commit that
- * delivers it — and by then the page is already fresh, because an action that
- * calls `revalidatePath` has the re-rendered page sent back with its answer.
- * Nothing here re-reads the page after a success for that reason: a
- * `router.refresh()` was a second full render of it (§6.86). It is read as an
- * effect event, so an inline function is fine, and keyed on the nonce, which
- * only a success moves.
+ * delivers the answer, and not at all if that commit unmounts the form — a row
+ * the success removed takes its form with it. Nothing here re-reads the page:
+ * an action that revalidates has the re-rendered page sent back with its
+ * answer, and a `router.refresh()` after it was a second full render (§6.86).
+ * It is read as an effect event, so an inline function is fine, and keyed on
+ * the nonce, which only a success moves. A form whose `error` is a key takes
+ * no `onSuccess`: no help-centre action answers `ok: true`, so it would never
+ * run.
  */
 export function useActionForm<State extends ActionState>(
   action: (state: Awaited<State>, formData: FormData) => Promise<State>,
@@ -127,7 +129,7 @@ export function useActionForm<State extends ActionState>(
 type Options<State extends ActionState> =
   string extends NonNullable<State['error']>
     ? [options?: { lost?: string; onSuccess?: () => void }]
-    : [options: { lost: NonNullable<State['error']>; onSuccess?: () => void }];
+    : [options: { lost: NonNullable<State['error']>; onSuccess?: never }];
 
 /** Spread onto the `<form>`; a component rendering it for a parent takes this. */
 export type FormHandlers = {

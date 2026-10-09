@@ -2,34 +2,43 @@ import ts from 'typescript';
 import { directiveOf, fail, read, requireAtLeast, resolveModule, scannable } from '../lib.mjs';
 
 /**
- * A server action that answers success has revalidated first, on that path.
+ * A server action that answers success has revalidated first, on every branch
+ * that reaches the answer.
  *
  * Next renders the current page into an action's own response whenever the
  * action marked something revalidated (`pathWasRevalidated` in
  * next/dist/server/app-render/action-handler.js), and the client applies that
  * tree. So the console's forms no longer re-read the page after a success —
- * that was a second full server render, alongside LiveUpdates' own. The cost is
- * that a success which skipped `revalidatePath` now leaves the screen showing
- * what was there before it: the row the agent deleted is still in the list.
+ * that was a second full server render, alongside LiveUpdates' own (§6.86). The
+ * cost is that a success which skipped `revalidatePath` now leaves the screen
+ * showing what was there before it: the row the agent deleted is still in the
+ * list.
  *
- * What counts as success is what the form reads as one: `ok()`, an object
- * spreading it, or `ok: true`. A `{ error: null }` answer is left alone — the
- * help centre's registration answers it whether or not anything happened, on
- * purpose, and has nothing on the page to re-read.
+ * What counts as success is what a caller reads as one: `ok()`, an object
+ * spreading it, `ok: true`, and — because the console's direct-call controls
+ * test `!result.error` — an object with `error: null`. Type-only wrappers
+ * (`as`, `satisfies`, `!`) are seen through. The help centre is left out of the
+ * last shape: its errors are keys the page translates, and registration and
+ * forgot-password answer `{ error: null }` whether or not anything happened, on
+ * purpose, with nothing on the page to re-read.
  *
- * What counts as revalidating is what sets the flag: `revalidatePath`,
- * `updateTag` and `refresh` from next/cache, a `redirect`, or a function that
- * calls one of those as a statement of its own body — `refresh(number)` in
- * lib/tickets/console-guards.ts, `refresh(path)` in admin/settings-shared.ts.
- * `revalidateTag` is not on the list: with the profile it now requires it does
- * not mark the page (revalidate.js), so it would satisfy this check and still
- * leave the screen stale.
+ * What counts as revalidating, called in the action: `revalidatePath`,
+ * `updateTag` and `refresh` from next/cache, which mark the page; and
+ * `redirect`, which renders its target instead, and after which nothing runs.
+ * Or a function that calls one of the first three as a statement before any
+ * return of its own — `refresh(number)` in lib/tickets/console-guards.ts,
+ * `refresh(path)` in admin/settings-shared.ts. A helper's `redirect` does not
+ * count: a guard like `requireAgent()` redirects only on the branch where the
+ * caller never gets control back, and returns before it on every other.
+ * `revalidateTag` is not on the list: whether it marks the page depends on the
+ * profile it is given (revalidate.js), so it cannot stand in for the rest.
  *
- * "On that path" means a statement that runs before the return whatever
- * happened: an earlier statement in the block holding the return, or in any
- * block around it. A revalidation inside an `if` the return is not in does not
- * count, and neither does one after an early `return ok()` — which is the shape
- * this was written against.
+ * "Before" means a statement that runs ahead of the return whatever happened:
+ * an earlier statement in the block holding the return, or in any block around
+ * it. A revalidation inside an `if` the return is not in does not count, and
+ * neither does one after an early `return ok()` — which is the shape this was
+ * written against. A revalidation in a `finally` is refused too, although it
+ * would run in time; write it before the return.
  */
 export function checkActionsRevalidate() {
   const rule = 'action-revalidates';
@@ -42,25 +51,35 @@ export function checkActionsRevalidate() {
   for (const file of files) {
     const source = parse(file);
     const revalidates = revalidatingNames(file, source);
+    const errorNullIsSuccess = !file.startsWith('app/help/');
 
-    for (const statement of source.statements) {
-      if (!ts.isFunctionDeclaration(statement) || !statement.body || !isExported(statement))
+    const report = (node, name) => {
+      const { line } = source.getLineAndCharacterOfPosition(node.getStart(source));
+      fail(
+        rule,
+        `${file}:${line + 1}`,
+        `${name} answers success here without revalidating first — the form does not re-read the page, so call revalidatePath (or the shared refresh()) before this return`,
+      );
+    };
+
+    for (const { name, fn } of exportedActions(source)) {
+      // An arrow answering with an expression has no statement before it.
+      if (!ts.isBlock(fn.body)) {
+        if (isSuccess(fn.body, errorNullIsSuccess)) {
+          successes++;
+          report(fn.body, name);
+        }
         continue;
-      for (const ret of ownReturns(statement)) {
-        if (!isSuccess(ret.expression)) continue;
+      }
+      for (const ret of ownReturns(fn)) {
+        if (!isSuccess(ret.expression, errorNullIsSuccess)) continue;
         successes++;
-        if (dominated(ret, statement.body, revalidates)) continue;
-        const { line } = source.getLineAndCharacterOfPosition(ret.getStart(source));
-        fail(
-          rule,
-          `${file}:${line + 1}`,
-          `${statement.name?.text ?? 'this action'} answers success here without revalidating first on this path — the form no longer re-reads the page, so call revalidatePath (or the shared refresh()) before this return`,
-        );
+        if (!dominated(ret, fn.body, revalidates)) report(ret, name);
       }
     }
   }
 
-  // Today's actions answer success from about sixty-five places.
+  // Today's actions answer success from about eighty places.
   requireAtLeast(rule, 'app/', successes, 30, "successful returns from 'use server' modules");
 }
 
@@ -72,40 +91,111 @@ function isExported(node) {
   return node.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword) ?? false;
 }
 
+/** Strips what changes a value's type and leaves the value alone. */
+function unwrap(expression) {
+  while (
+    ts.isParenthesizedExpression(expression) ||
+    ts.isAwaitExpression(expression) ||
+    ts.isAsExpression(expression) ||
+    ts.isSatisfiesExpression(expression) ||
+    ts.isNonNullExpression(expression) ||
+    ts.isTypeAssertionExpression(expression)
+  ) {
+    expression = expression.expression;
+  }
+  return expression;
+}
+
+/**
+ * Every export of the module that is a function, as Next publishes it: a
+ * declaration, a `const` holding an arrow or a function expression, a local
+ * name listed in `export { … }`, and the default.
+ */
+function exportedActions(source) {
+  const locals = new Map();
+  const isFn = (node) => node && (ts.isArrowFunction(node) || ts.isFunctionExpression(node));
+  for (const statement of source.statements) {
+    if (ts.isFunctionDeclaration(statement) && statement.name && statement.body) {
+      locals.set(statement.name.text, statement);
+    }
+    if (ts.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        const init = declaration.initializer && unwrap(declaration.initializer);
+        if (ts.isIdentifier(declaration.name) && isFn(init)) {
+          locals.set(declaration.name.text, init);
+        }
+      }
+    }
+  }
+
+  const out = [];
+  for (const statement of source.statements) {
+    if (ts.isFunctionDeclaration(statement) && statement.body && isExported(statement)) {
+      out.push({ name: statement.name?.text ?? 'the default action', fn: statement });
+    } else if (ts.isVariableStatement(statement) && isExported(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        const fn = ts.isIdentifier(declaration.name) && locals.get(declaration.name.text);
+        if (fn) out.push({ name: declaration.name.text, fn });
+      }
+    } else if (
+      ts.isExportDeclaration(statement) &&
+      !statement.moduleSpecifier &&
+      statement.exportClause &&
+      ts.isNamedExports(statement.exportClause)
+    ) {
+      for (const element of statement.exportClause.elements) {
+        const fn = locals.get((element.propertyName ?? element.name).text);
+        if (fn) out.push({ name: element.name.text, fn });
+      }
+    } else if (ts.isExportAssignment(statement)) {
+      const value = unwrap(statement.expression);
+      const fn = isFn(value) ? value : ts.isIdentifier(value) && locals.get(value.text);
+      if (fn) out.push({ name: 'the default action', fn });
+    }
+  }
+  return out;
+}
+
 const NEXT = {
   'next/cache': ['revalidatePath', 'updateTag', 'refresh'],
   'next/navigation': ['redirect', 'permanentRedirect'],
 };
 
+/** The Next calls after which control comes back to the caller. */
+const RETURNING = new Set(['revalidatePath', 'updateTag', 'refresh']);
+
 /**
  * The names that revalidate when called in `file`: Next's own, under whatever
  * local name they were imported as; then a function of this module or one it
- * imports whose body calls one of Next's as a statement. One level, read from
- * the module the import resolves to.
+ * imports that calls one of the returning ones before it can return. One level,
+ * read from the module the import resolves to.
  */
 function revalidatingNames(file, source) {
   const names = new Set(nextNames(source));
-  const imports = namedImports(source);
-  for (const [local, { spec, name }] of imports) {
+  const seeds = new Set(nextNames(source, RETURNING));
+  for (const [local, { spec, name }] of namedImports(source)) {
     if (NEXT[spec]) continue;
     const target = resolveModule(spec, file);
     if (!target || !/\.tsx?$/.test(target)) continue;
     const helpers = parse(target);
     const fn = topFunction(helpers, name);
-    if (fn && callsAsStatement(fn.body, new Set(nextNames(helpers)))) names.add(local);
+    if (fn && revalidatesBeforeReturning(fn.body, new Set(nextNames(helpers, RETURNING)))) {
+      names.add(local);
+      seeds.add(local);
+    }
   }
   for (const statement of source.statements) {
     if (ts.isFunctionDeclaration(statement) && statement.name && statement.body) {
-      if (callsAsStatement(statement.body, names)) names.add(statement.name.text);
+      if (revalidatesBeforeReturning(statement.body, seeds)) names.add(statement.name.text);
     }
   }
   return names;
 }
 
-function nextNames(source) {
+function nextNames(source, only) {
   const out = [];
   for (const [local, { spec, name }] of namedImports(source)) {
-    if (NEXT[spec]?.includes(name)) out.push(local);
+    if (NEXT[spec]?.includes(name) && (!only || only.has(name))) out.push(local);
   }
   return out;
 }
@@ -133,17 +223,38 @@ function topFunction(source, name) {
   return null;
 }
 
-/** A top-level statement of `body` is a call to one of `names`. */
-function callsAsStatement(body, names) {
-  return Boolean(body && ts.isBlock(body) && body.statements.some((s) => isCallTo(s, names)));
+/**
+ * A top-level statement of `body` calls one of `names` before any statement
+ * that can return. `if (agent) return agent; redirect('/login')` does not
+ * qualify, whatever the redirect is: the caller gets control back only through
+ * the return.
+ */
+function revalidatesBeforeReturning(body, names) {
+  if (!body || !ts.isBlock(body)) return false;
+  for (const statement of body.statements) {
+    if (isCallTo(statement, names)) return true;
+    if (containsOwnReturn(statement)) return false;
+  }
+  return false;
+}
+
+function containsOwnReturn(node) {
+  let found = false;
+  const visit = (child) => {
+    if (found || ts.isFunctionLike(child)) return;
+    if (ts.isReturnStatement(child)) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(child, visit);
+  };
+  visit(node);
+  return found;
 }
 
 function isCallTo(statement, names) {
   if (!ts.isExpressionStatement(statement)) return false;
-  let expression = statement.expression;
-  while (ts.isAwaitExpression(expression) || ts.isParenthesizedExpression(expression)) {
-    expression = expression.expression;
-  }
+  const expression = unwrap(statement.expression);
   return (
     ts.isCallExpression(expression) &&
     ts.isIdentifier(expression.expression) &&
@@ -163,13 +274,14 @@ function ownReturns(fn) {
   return out;
 }
 
-function isSuccess(expression) {
+function isSuccess(expression, errorNullIsSuccess) {
   if (!expression) return false;
-  while (ts.isParenthesizedExpression(expression) || ts.isAwaitExpression(expression)) {
-    expression = expression.expression;
-  }
+  expression = unwrap(expression);
   if (ts.isConditionalExpression(expression)) {
-    return isSuccess(expression.whenTrue) || isSuccess(expression.whenFalse);
+    return (
+      isSuccess(expression.whenTrue, errorNullIsSuccess) ||
+      isSuccess(expression.whenFalse, errorNullIsSuccess)
+    );
   }
   if (isOkCall(expression)) return true;
   if (!ts.isObjectLiteralExpression(expression)) return false;
@@ -178,11 +290,16 @@ function isSuccess(expression) {
       (ts.isSpreadAssignment(p) && isOkCall(p.expression)) ||
       (ts.isPropertyAssignment(p) &&
         p.name.getText() === 'ok' &&
-        p.initializer.kind === ts.SyntaxKind.TrueKeyword),
+        unwrap(p.initializer).kind === ts.SyntaxKind.TrueKeyword) ||
+      (errorNullIsSuccess &&
+        ts.isPropertyAssignment(p) &&
+        p.name.getText() === 'error' &&
+        unwrap(p.initializer).kind === ts.SyntaxKind.NullKeyword),
   );
 }
 
 function isOkCall(expression) {
+  expression = unwrap(expression);
   return (
     ts.isCallExpression(expression) &&
     ts.isIdentifier(expression.expression) &&

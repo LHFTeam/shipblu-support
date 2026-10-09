@@ -132,9 +132,10 @@ export function RefreshShipmentButton({
     const formData = new FormData();
     formData.set('trackingNumber', trackingNumber);
 
-    // A refusal re-reads the page too: the action revalidates as soon as the
-    // sync has run, because `not_found` is written to the row and the badge
-    // beside this button has changed.
+    // A refusal after the sync brings the page back too: the action revalidates
+    // as soon as the sync has run, because `not_found` is written to the row and
+    // the badge beside this button has changed. The two before it — no
+    // permission, no tracking number — change nothing.
     const result = await refreshShipmentDetail(INITIAL, formData);
     setBusy(false);
     setError(result.error);

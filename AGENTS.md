@@ -288,17 +288,18 @@ told nothing at all.
 
 **An action's revalidation is what refreshes the page; the form does not.** Next
 renders the current page into a server action's response whenever the action
-revalidated anything — the path is not compared with the page — and the client
-applies it with the answer. So nothing re-reads the page after a success: a
-`router.refresh()` there is a second full render, and on a ticket page it ran
-beside `LiveUpdates`' own (§6.86). What a form does next — close an editor, put
-a composer away — goes in `useActionForm`'s `onSuccess`. The other side of it is
+revalidated anything — whatever path it named — and the client applies it with
+the answer. So nothing re-reads the page after a success: a `router.refresh()`
+there is a second full render, and on a ticket page it ran beside
+`LiveUpdates`' own (§6.86). What a form does next — close an editor, put a
+composer away — goes in `useActionForm`'s `onSuccess`. The other side of it is
 that an action answering success without revalidating leaves the screen as it
-was, and the `action-revalidates` repo rule refuses that: every `ok()` an action
-returns comes after a `revalidatePath`, a `redirect` or the shared `refresh()`
-on the same path. A refusal revalidates nothing, so a control whose refusal
-mostly means the page was stale re-reads it then (`rereadOnRefusal` in
-`useFieldAction`).
+was, and the `action-revalidates` repo rule refuses that: every success an
+action answers (`ok()`, or `{ error: null }` outside the help centre) comes after
+a `revalidatePath`, a `redirect` or the shared `refresh()` on every branch that
+reaches it. A refusal that returns before anything is written revalidates
+nothing, so a control that shows no error, and whose refusal means the screen is
+out of date, re-reads it then (`rereadOnRefusal` in `useFieldAction`).
 
 **Authorisation lives in code.** `proxy.ts` only checks that a session cookie
 exists; it cannot tell a revoked session from a live one. It runs on Node.js in

@@ -21,9 +21,10 @@ import { INITIAL } from './form-state';
  *
  * A success has nothing to say here, because this component does not survive
  * it. The action writes the event that reopens the composer and revalidates the
- * ticket, the re-read page arrives with the action's answer, and the composer
- * puts the reply box where this was in that same commit. The reply box is the
- * answer, and the ticket's activity records who took control.
+ * ticket, the re-read page comes back with the action's answer, and the
+ * composer puts the reply box where this was. Measured, the answer was never
+ * painted (§6.86). The reply box is the answer, and the ticket's activity
+ * records who took control.
  */
 export function ThreadControl({ conversationId }: { conversationId: string }) {
   const [state, formAction] = useActionState(claimThreadControl, INITIAL);
