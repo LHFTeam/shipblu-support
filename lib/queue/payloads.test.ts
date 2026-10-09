@@ -187,6 +187,15 @@ describe('the backfills and the knowledge-base passes', () => {
     );
   });
 
+  // Review on #344: re-run by hand after a failure, and a dropped dryRun wrote.
+  it('refuses a classify_priority option it does not have, since there is no dry run', () => {
+    const messageId = '00000000-0000-4000-8000-000000000001';
+    expect(parse('classify_priority', { messageId })).toEqual({ messageId });
+    expect(() => parse('classify_priority', { messageId, dryRun: true })).toThrow(
+      PermanentJobError,
+    );
+  });
+
   it('keeps a run label of digits as the text it was typed as', () => {
     expect(parse('backfill_categorise_ai', { runLabel: 2026 })).toEqual({ runLabel: '2026' });
   });

@@ -264,29 +264,36 @@ export async function submitForm(input: {
   const description = (resolved.system.description ?? '').trim();
   const body = [description, answers].filter(Boolean).join('\n\n');
 
+  const answered = priorityFrom(resolved.system);
+  const priority = answered ?? form.defaultPriority;
   const created = await createTicket(requester.contactId, {
     subject,
     body,
     customFields: resolved.custom,
     formId: form.id,
     groupId: form.defaultGroupId,
-    priority: priorityFrom(resolved.system) ?? form.defaultPriority,
+    priority,
+    // An answer or the form's default: either way chosen, and the priority
+    // classifier leaves a chosen priority alone (`NewTicket`). An agent who
+    // answered the question chose it themselves; a default is the form's
+    // choice whoever submitted it.
+    priorityChosenBy: !priority
+      ? undefined
+      : answered && input.requester.kind === 'agent'
+        ? { agentId: input.requester.agentId }
+        : { label: `form:${form.slug}` },
     type: form.defaultType,
     tags: form.defaultTags,
-  });
-
-  if (input.requester.kind === 'agent') {
     // Recorded because `ticket.create` is justified as a reporting-integrity
     // permission — "every ticket an agent opens counts in first-response time,
     // in volume per channel". Nothing distinguished those tickets, so the
-    // integrity the permission protects was unmeasurable.
-    await db.insert(conversationEvents).values({
-      conversationId: created.conversationId,
-      type: 'opened_by_agent',
-      actorAgentId: input.requester.agentId,
-      data: { form: form.slug },
-    });
-  }
+    // integrity the permission protects was unmeasurable. Written by
+    // `createTicket`, in its transaction, for the reason `NewTicket` gives.
+    openedBy:
+      input.requester.kind === 'agent'
+        ? { agentId: input.requester.agentId, form: form.slug }
+        : undefined,
+  });
 
   if (requester.unverifiedEmail) {
     await db.insert(conversationEvents).values({

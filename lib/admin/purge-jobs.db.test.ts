@@ -45,6 +45,7 @@ const messageJobs = [
   'send_meta',
   'moderate_meta_comment',
   'download_media',
+  'classify_priority',
 ] as const;
 
 function subjects(scope: Scope) {

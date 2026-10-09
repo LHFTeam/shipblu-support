@@ -43,6 +43,12 @@ const JOB_PAYLOADS = {
   }),
 
   process_webhook: z.object({ webhookEventId: z.string() }),
+  // Enqueued by `enqueuePriorityClassification`, and re-run by hand with
+  // `npm run job -- classify_priority messageId=…` after a `failed` run, whose
+  // dedupe key is spent — so strict: `dryRun=true` is refused rather than
+  // dropped into a run that writes. A uuid because the id goes straight into a
+  // query, where a malformed one is 22P02.
+  classify_priority: z.strictObject({ messageId: z.uuid() }),
   send_csat: z.object({ conversationId: z.string().min(1) }),
   // Facebook and Instagram hand over a URL, WhatsApp an id to exchange for one.
   // The WhatsApp half names no source, so a Meta payload that lost its URL

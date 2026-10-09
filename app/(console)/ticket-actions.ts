@@ -13,8 +13,9 @@ import { ok } from '@/lib/http/action-state';
 import { isUuid } from '@/lib/http/uuid';
 import { can } from '@/lib/auth/permissions';
 import { isPriority } from '@/lib/tickets/vocabulary';
-import { onGroupChanged } from '@/lib/sla';
+import { onGroupChanged, onPriorityChanged } from '@/lib/sla';
 import { afterTicketUpdate } from '@/lib/tickets/lifecycle';
+import { PRIORITY_STAMP } from '@/lib/tickets/priority-stamp';
 import { isBlank } from '@/lib/tickets/custom-fields';
 import { parseFieldValue } from '@/lib/tickets/custom-fields-parse';
 import { getTicketField } from '@/lib/tickets/lookups';
@@ -169,9 +170,15 @@ export async function updateTicket(_state: ActionState, formData: FormData): Pro
           conversationId,
           type: 'priority_changed',
           actorAgentId: agent.id,
+          // After the update above has the row lock (`PRIORITY_STAMP`).
+          createdAt: PRIORITY_STAMP,
           data: { to: value },
         });
       });
+
+      // The policy prices its targets per priority, so the deadline follows the
+      // badge rather than staying at whatever the ticket arrived as.
+      await onPriorityChanged(conversationId);
       break;
     }
 

@@ -29,7 +29,12 @@ export function describeEvent(type: string, data: Record<string, unknown>): stri
     case 'status_changed':
       return `set status to ${String(data.to ?? '')}`;
     case 'priority_changed':
-      return `set priority to ${String(data.to ?? '')}`;
+      // The classifier records how sure it was, because "Jev set this to urgent"
+      // reads very differently at 95% than at 61%, and the agent deciding whether
+      // to overrule it should not have to open a table to find out which.
+      return typeof data.probability === 'number'
+        ? `set priority to ${String(data.to ?? '')} (${Math.round(data.probability * 100)}% likely)`
+        : `set priority to ${String(data.to ?? '')}`;
     case 'assigned':
       return 'reassigned the ticket';
     case 'unassigned':
@@ -151,9 +156,13 @@ export function describeEvent(type: string, data: Record<string, unknown>): stri
     case 'comment_deleted':
       return 'deleted the comment from the post';
     case 'sla_recalculated':
-      return data.reason === 'group_hours'
-        ? "re-counted the due dates on the new group's business hours"
-        : 're-counted the due dates';
+      if (data.reason === 'group_hours') {
+        return "re-counted the due dates on the new group's business hours";
+      }
+      if (data.reason === 'priority') {
+        return `re-counted the due dates for ${String(data.priority ?? 'the new')} priority`;
+      }
+      return 're-counted the due dates';
 
     // The six categorisation events, and they need cases here for exactly the
     // reason `unverified_submitter` above does: the default prints the type

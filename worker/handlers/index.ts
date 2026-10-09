@@ -5,6 +5,7 @@ import { backfillMessageLocations } from './backfill-message-locations';
 import { backfillMetaProfiles } from './backfill-meta-profiles';
 import { backfillShipmentLinks } from './backfill-shipment-links';
 import { checkMetaPermissions } from './check-meta-permissions';
+import { classifyPriority } from './classify-priority';
 import { cleanup } from './cleanup';
 import { downloadMediaJob } from './download-media';
 import { fetchMetaProfile } from './fetch-meta-profile';
@@ -49,6 +50,7 @@ export const handlers: Partial<Record<JobType, JobHandler>> = {
   backfill_meta_profiles: (job) => backfillMetaProfiles(job),
   backfill_shipment_links: (job) => backfillShipmentLinks(job),
   check_meta_permissions: () => checkMetaPermissions(),
+  classify_priority: (job) => classifyPriority(job),
   test_comment_permission: (job) => testCommentPermission(job),
   cleanup,
   download_media: downloadMediaJob,

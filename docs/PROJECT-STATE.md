@@ -1304,6 +1304,32 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
 Everything below passes unit tests. Each is a round trip, or the half of one
 nobody has run, that somebody has to actually watch against the real provider:
 
+- **The priority classifier, in shadow first** (`plans/priority-through-typesafe.md`).
+  It ships off. Set `PRIORITY_AI=shadow` in the `shipblu-support-production`
+  env group, beside `TYPESAFE_API_KEY` — never on a service, which would
+  silently win over the group — let a day of inbound traffic through, and read
+  the rows back by hand before `apply` — no real Jev response has been parsed
+  by this code. Per channel, since one channel is most of the volume:
+
+  ```sql
+  select c.channel, r.outcome, r.predicted, count(*),
+         round(avg(r.probability)::numeric, 2) as avg_p
+  from ai_priority_runs r join conversations c on c.id = r.conversation_id
+  group by 1, 2, 3 order by 1, 2, 3;
+  ```
+
+  Once it is on `apply`, the disagreements the threshold is tuned from are an
+  agent's `priority_changed` after the classifier's on the same ticket:
+
+  ```sql
+  select r.conversation_id, r.predicted, r.probability, e.data->>'to' as agent_set
+  from ai_priority_runs r
+  join conversation_events e on e.conversation_id = r.conversation_id
+   and e.type = 'priority_changed' and e.actor_agent_id is not null
+   and e.created_at > r.created_at
+  where r.outcome = 'applied';
+  ```
+
 - **Postmark, from Outlook.** The credentials are set (§5.1), and the Gmail half
   has been watched: on ticket #13777 on 2026-09-03 a Gmail message arrived, an
   agent replied through Postmark, and the Gmail answer threaded onto the same

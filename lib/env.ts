@@ -295,13 +295,13 @@ const schema = z.object({
 
   /**
    * TypeSafe's System One API, read by the shadow categorisation run in
-   * `lib/categorise-ai/` and by nothing else.
+   * `lib/categorise-ai/` and by the priority classifier below.
    *
    * Unset is the resting state rather than a misconfiguration. Presence of the
    * key is what enables the job — the device `instagramLoginConfigured()` uses —
    * so this ships inert and stays inert until somebody deliberately starts a
-   * measurement. No page and no action reads either value; the only reader is a
-   * hand-run job, which is why a missing key here can never fail a request.
+   * measurement. No page and no action reads either value; the readers are
+   * jobs, which is why a missing key here can never fail a request.
    *
    * `TYPESAFE_MODEL` pins a run to one Jev version. Left unset the request asks
    * for the `jev-latest` alias, and every row records the version the *response*
@@ -309,6 +309,27 @@ const schema = z.object({
    */
   TYPESAFE_API_KEY: z.string().optional(),
   TYPESAFE_MODEL: z.string().optional(),
+
+  /**
+   * The priority classifier (`lib/priority-ai/`), which asks the same TypeSafe
+   * endpoint how urgent each inbound customer message is.
+   *
+   * `PRIORITY_AI` is `off` (unset), `shadow` — ask and record in
+   * `ai_priority_runs`, change nothing — or `apply`, which also writes
+   * `conversations.priority` and so moves SLA deadlines. It needs
+   * `TYPESAFE_API_KEY` as well; the switch alone sends nothing.
+   *
+   * `PRIORITY_AI_MIN_PROBABILITY` is a number in 0..1, the winner's share below
+   * which nothing is applied (default 0.6, a guess until measured).
+   *
+   * Both read straight from `process.env` by `lib/priority-ai/settings.ts`, and
+   * both strings rather than an enum and a number, for the reason the
+   * categoriser's thresholds above give: the switch is read inside
+   * `afterMessageStored`, on every ingest path, and a typo in it must turn the
+   * feature off rather than throw for the whole application from `env()`.
+   */
+  PRIORITY_AI: z.string().optional(),
+  PRIORITY_AI_MIN_PROBABILITY: z.string().optional(),
 
   /** Worker tuning. */
   /**
