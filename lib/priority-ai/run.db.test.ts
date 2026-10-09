@@ -545,10 +545,13 @@ describe('classifyMessagePriority: somebody else owns the priority', () => {
 
 describe('classifyMessagePriority: a rule setting priority at the same moment', () => {
   async function ruleSetting(priority: Priority) {
+    // Only on a ticket still at the default: the classifier's own `on_update`
+    // pass after it raises one would otherwise run this rule a second time, and
+    // the test is about the one run it holds.
     await db.insert(automationRules).values({
       name: 'Back to normal',
       trigger: 'on_update',
-      conditions: {},
+      conditions: { all: [{ field: 'priority', op: 'eq', value: 'medium' }] },
       actions: [{ type: 'set_priority', value: priority }],
     });
   }
@@ -597,6 +600,63 @@ describe('classifyMessagePriority: a rule setting priority at the same moment', 
       PRIORITY_AI_ACTOR,
       'automation:Back to normal',
     ]);
+  });
+});
+
+describe('classifyMessagePriority: the rules that watch priority', () => {
+  async function escalateUrgent() {
+    await db.insert(automationRules).values({
+      name: 'Escalate urgent',
+      trigger: 'on_update',
+      conditions: { all: [{ field: 'priority', op: 'eq', value: 'urgent' }] },
+      actions: [{ type: 'add_tags', tags: ['escalated'] }],
+    });
+  }
+
+  async function tagsOf(conversationId: string): Promise<string[]> {
+    const [row] = await db
+      .select({ tags: conversations.tags })
+      .from(conversations)
+      .where(eq(conversations.id, conversationId));
+    return row!.tags;
+  }
+
+  it('runs the on_update rules after it applies a change, as a console edit does', async () => {
+    await escalateUrgent();
+    const id = await ticket();
+    const messageId = await inbound(id, 'هرفع قضية');
+    answers('urgent');
+
+    expect(await classifyMessagePriority(messageId, { baseUrl: BASE })).toMatchObject({
+      outcome: 'applied',
+    });
+    expect(await tagsOf(id)).toEqual(['escalated']);
+  });
+
+  it('runs no rule for an answer it did not apply', async () => {
+    // A rule that matches the ticket as it stands, so the only thing keeping it
+    // from running is that nothing was applied.
+    await db.insert(automationRules).values({
+      name: 'Watch everything',
+      trigger: 'on_update',
+      conditions: { all: [{ field: 'priority', op: 'eq', value: 'medium' }] },
+      actions: [{ type: 'add_tags', tags: ['ran'] }],
+    });
+    const id = await ticket();
+    const below = await inbound(id, 'هرفع قضية', { createdAt: new Date(Date.now() - MINUTE) });
+    answers('urgent', 0.4);
+    expect(await classifyMessagePriority(below, { baseUrl: BASE })).toMatchObject({
+      outcome: 'below_threshold',
+    });
+
+    vi.stubEnv('PRIORITY_AI', 'shadow');
+    const shadow = await inbound(id, 'هرفع قضية تاني');
+    answers('urgent');
+    expect(await classifyMessagePriority(shadow, { baseUrl: BASE })).toMatchObject({
+      outcome: 'would_apply',
+    });
+
+    expect(await tagsOf(id)).toEqual([]);
   });
 });
 

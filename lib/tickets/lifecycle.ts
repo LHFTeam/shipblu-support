@@ -79,7 +79,12 @@ export async function afterInboundMessage(
   await maybeSendAutoResponse(conversationId);
 }
 
-/** An agent changed something in the console. */
+/**
+ * Something about the ticket changed that observer rules should see: an agent's
+ * edit in the console, or a priority the classifier applied
+ * (`lib/priority-ai/run.ts`), which calls this from a worker job with no agent
+ * session. So nothing here may assume a person or a request.
+ */
 export async function afterTicketUpdate(conversationId: string): Promise<void> {
   await runAutomations('on_update', conversationId);
   await autoAssign(conversationId);
