@@ -251,8 +251,67 @@ describe('a reopened ticket’s pause', () => {
       await appendReply(created.contactId, created.number, 'it came back broken'),
     ).not.toBeNull();
 
-    const [reopened] = await events(created.id, 'reopened');
+    // The reopen is stamped when its transaction commits, a moment after the
+    // reply it reopened for; the pause ends at the reply.
+    const [ticketRow] = await db
+      .select({ wrote: conversations.lastCustomerMessageAt })
+      .from(conversations)
+      .where(eq(conversations.id, created.id));
     const resumed = await events(created.id, 'sla_resumed');
-    expect(resumed.map((event) => event.createdAt)).toEqual([reopened!.createdAt]);
+    expect(resumed.map((event) => event.createdAt)).toEqual([ticketRow!.wrote]);
+  });
+
+  it('ends at the customer’s message when the reopen was written after it', async () => {
+    const { id } = await resolvedTicket();
+    // A delayed delivery: the mail reached us at 10:00, the reopen committed at 10:40.
+    await reopen(id, cairo('2026-10-11T10:40'));
+    const wrote = cairo('2026-10-11T10:00');
+    await db
+      .update(conversations)
+      .set({ lastCustomerMessageAt: wrote })
+      .where(eq(conversations.id, id));
+    await onCustomerReply(id, wrote);
+    const live = await clocks(id);
+
+    expect((await events(id, 'sla_resumed')).map((event) => event.createdAt)).toEqual([wrote]);
+
+    await db.update(conversations).set({ priority: 'low' }).where(eq(conversations.id, id));
+    await onPriorityChanged(id);
+    expect(await clocks(id)).toEqual(live);
+  });
+
+  // A burst of messages to a resolved ticket: each delivery is its own job.
+  it('is closed once when several messages arrive together', async () => {
+    const { id } = await resolvedTicket();
+    await reopen(id, cairo('2026-10-11T10:00'));
+
+    await Promise.all([
+      onCustomerReply(id, cairo('2026-10-11T10:05')),
+      onCustomerReply(id, cairo('2026-10-11T10:06')),
+      onCustomerReply(id, cairo('2026-10-11T10:07')),
+    ]);
+
+    expect(await events(id, 'sla_resumed')).toHaveLength(1);
+    expect((await clocks(id)).resolutionDueAt).toEqual(cairo('2026-10-11T12:00'));
+
+    await db.update(conversations).set({ priority: 'low' }).where(eq(conversations.id, id));
+    await onPriorityChanged(id);
+    expect((await clocks(id)).resolutionDueAt).toEqual(cairo('2026-10-11T12:00'));
+  });
+});
+
+describe('a pause with no working time in it', () => {
+  it('moves no deadline, even one sitting at closing time', async () => {
+    // Due at 17:00 Thursday, the close; parked from 17:30 to 18:00, all after hours.
+    const { id } = await ticket(cairo('2026-10-08T13:00'));
+    expect((await clocks(id)).resolutionDueAt).toEqual(cairo('2026-10-08T17:00'));
+
+    await onStatusChanged(id, true, cairo('2026-10-08T17:30'));
+    await onStatusChanged(id, false, cairo('2026-10-08T18:00'));
+    expect((await clocks(id)).resolutionDueAt).toEqual(cairo('2026-10-08T17:00'));
+
+    await db.update(conversations).set({ priority: 'low' }).where(eq(conversations.id, id));
+    await onPriorityChanged(id);
+    expect(await events(id, 'sla_recalculated')).toEqual([]);
   });
 });
