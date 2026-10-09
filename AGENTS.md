@@ -364,6 +364,19 @@ per-row backfill — must make its handler idempotent and enqueue without a key,
 or the retry silently does nothing. Webhooks persist to `webhook_events` and
 return 200 immediately; they never do the work inline.
 
+**The worker is a pool, and a running job's lock is kept fresh.**
+`worker/pool.ts` refills a slot as each job finishes, so a slow job holds only
+its own slot, and refreshes the lock of every job it is running each
+`HEARTBEAT_EVERY_MS` so the stalled sweep returns only a dead worker's jobs.
+Two consequences for handlers. Nothing but the job itself ends a hung job, so
+every outbound call in a job path carries a deadline (`lib/http/deadline.ts`).
+And a job still runs at least once, not exactly once: a worker stopped
+mid-job — a deploy's shutdown window is short — leaves its job to be run again,
+so a handler must tolerate a second run. `completeJob` and `failJob` write only
+over the attempt that holds the row — `completeJob` also over that attempt
+reclaimed and not yet claimed again, since a run that finished needs no second
+one (§6.85).
+
 `npm run job -- <type>` takes trailing `key=value` pairs as the payload
 (`npm run job -- backfill_meta_profiles force=true limit=50`), so a handler's
 options are reachable without hand-inserting a `jobs` row.
