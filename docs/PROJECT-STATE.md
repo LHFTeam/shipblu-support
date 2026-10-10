@@ -573,15 +573,15 @@ That split has been real on Render since the services were created; `render.yaml
 only started describing it in the env-group change below, and before that
 declared all seven services as one flat list.
 
-| Service                          | Type                          | Id                         | Branch                       |
-| -------------------------------- | ----------------------------- | -------------------------- | ---------------------------- |
-| `shipblu-support`                | web (standard, autoscale 1→3) | `srv-da1jgtg1ne8s73ciqulg` | `main`                       |
-| `shipblu-support-worker`         | worker (starter)              | `srv-da1jgtg1ne8s73ciqujg` | `main`                       |
-| `shipblu-support-staging`        | web (starter)                 | `srv-da1jgtg1ne8s73ciqul0` | a feature branch — see below |
-| `shipblu-sla-sweep`¹             | cron `*/5 * * * *`            | `crn-da1jgtg1ne8s73ciqup0` | `main`                       |
-| `shipblu-time-automations`       | cron `*/15 * * * *`           | `crn-da1jgtg1ne8s73ciquog` | `main`                       |
-| `shipblu-whatsapp-template-sync` | cron `0 * * * *`              | `crn-da1jgtg1ne8s73ciquk0` | `main`                       |
-| `shipblu-nightly`                | cron `0 0 * * *`              | `crn-da1jgtg1ne8s73ciqumg` | `main`                       |
+| Service                          | Type                          | Id                         | Branch                             |
+| -------------------------------- | ----------------------------- | -------------------------- | ---------------------------------- |
+| `shipblu-support`                | web (standard, autoscale 1→3) | `srv-da1jgtg1ne8s73ciqulg` | `main`                             |
+| `shipblu-support-worker`         | worker (starter)              | `srv-da1jgtg1ne8s73ciqujg` | `main`                             |
+| `shipblu-support-staging`        | web (starter)                 | `srv-da1jgtg1ne8s73ciqul0` | `main`, deploys itself — see below |
+| `shipblu-sla-sweep`¹             | cron `*/5 * * * *`            | `crn-da1jgtg1ne8s73ciqup0` | `main`                             |
+| `shipblu-time-automations`       | cron `*/15 * * * *`           | `crn-da1jgtg1ne8s73ciquog` | `main`                             |
+| `shipblu-whatsapp-template-sync` | cron `0 * * * *`              | `crn-da1jgtg1ne8s73ciquk0` | `main`                             |
+| `shipblu-nightly`                | cron `0 0 * * *`              | `crn-da1jgtg1ne8s73ciqumg` | `main`                             |
 
 ¹ `shipblu-sla-sweep` runs **three** jobs,
 `sla_sweep && presence_sweep && assign_sweep`. For an unknown period up to
@@ -617,6 +617,15 @@ used to pin a deleted feature branch, which failed every Blueprint sync:
 the next commit, against staging's own database. Before resuming it, read
 staging's `EMAIL_PROVIDER` in the dashboard: it should be `local`, the blueprint
 no longer sets it, and staging holds a Postmark `EMAIL_API_KEY` of its own.
+
+**Staging is a web service and nothing else** — no worker and no crons. Its
+web service enqueues jobs that nothing takes: every inbound delivery it
+receives is stored in `webhook_events` and never processed, and a job an action
+queues waits for good. For WhatsApp coexistence that means `complete_coexistence_onboarding`
+never runs there and the `history`, `smb_message_echoes` and `account_update`
+deliveries a connected number sends are stored and never ingested, so "staging
+first" needs `npm run worker` run by hand against staging's environment, or the
+first live test is on production with a test number (§5.2).
 
 ### Supabase — org `ihngokrzwjmgpogkecug`
 
@@ -718,7 +727,11 @@ rotation: previous = the old key, current = the new, `npm run job --
 rotate_whatsapp_credentials dryRun=true`, then without, then unset.
 `META_EMBEDDED_SIGNUP_CONFIG_ID` is the Facebook Login for Business
 configuration on that environment's own Meta app — an id the browser hands to
-Meta's SDK, not a secret, but a configuration belongs to one app. Whether any of
+Meta's SDK, not a secret, but a configuration belongs to one app — and it must
+be a v4 one, created new with the WhatsApp Embedded Signup login variation and
+products selected (Cloud API at least). A configuration with no products is not
+v4, v2 and v3 end on 2026-10-15, and nothing in the repo can check which
+version the id names. Whether any of
 the three is set is a dashboard question the repo cannot answer: `render.yaml`
 lists them as dashboard-owned, nothing could have needed them before
 2026-10-08, and the first live onboarding needs the first and third (§5.2) —
@@ -732,8 +745,11 @@ variables are plain `z.string().optional()` in `lib/env.ts` for the reason
 `LOG_ALL_INCOMING_WEBHOOKS` is (below): a format rule there would take the
 console down on a mistyped key instead of failing one WhatsApp connection with
 a sentence. And a service-level copy of the key would silently shadow the
-group's — the same precedence trap as `DATABASE_URL` above — which is what a
-`keyState` of `unknown` on the next page load would be saying.
+group's — the same precedence trap as `DATABASE_URL` above. The `keyState`
+badge is drawn by the web service from the key it holds, so it sees only a copy
+there, as `unknown` on a credential sealed under the group's key; a copy on the
+worker alone leaves the badge reading `current` and shows instead as a
+`CredentialKeyError` on the onboarding row or on a send.
 
 When you add a variable, add it to `render.yaml` in the same commit. The
 blueprint is meant to describe the running system; it is not documentation that
@@ -1408,9 +1424,23 @@ shipblu.com` still serves Freshdesk, so each one took a reader out of this
   - **The Meta app must be a Tech Provider** (or Solution Partner), or Embedded
     Signup refuses to open; business verification is its prerequisite. Not
     checked for either app.
-  - **A Facebook Login for Business configuration** for the Business-app
-    onboarding → `META_EMBEDDED_SIGNUP_CONFIG_ID` (§2), with Client/Web OAuth
-    login, Enforce HTTPS and Login with the JavaScript SDK switched on, and
+  - **A new v4 Facebook Login for Business configuration, before
+    2026-10-15**, when Embedded Signup v2 and v3 end with their public
+    previews; Meta does not say whether a launch on one after that is refused,
+    upgraded or broken. v4 belongs to the configuration, not to the launch: one
+    created new with the WhatsApp Embedded Signup login variation and products
+    selected — Cloud API at least, whose permissions the flow then selects by
+    itself and which Meta's v4 page says need Advanced Access. The
+    Business-app onboarding is not a product; it is the launch's `featureType`
+    (`EMBEDDED_SIGNUP_EXTRAS` in `lib/whatsapp/embedded-signup.ts`). Its id
+    goes in `META_EMBEDDED_SIGNUP_CONFIG_ID` (§2) in each environment's group,
+    then a deploy of web and worker. Nothing in the repo can read which
+    version an id names — the page checks only that it is set — and Meta's own
+    v4 pages disagree about the extras (`{}` against `{ setup: {} }`), so once
+    the configuration exists, compare the Embedded Signup Builder's snippet
+    (App Dashboard → WhatsApp → Embedded Signup Builder) with the constant.
+    The configuration also needs Client/Web OAuth login, Enforce HTTPS and
+    Login with the JavaScript SDK switched on, and
     **the console host in Allowed Domains for the JavaScript SDK** and in Valid
     OAuth redirect URIs — staging's host too. Missing, the popup fails inside
     Meta's window with a sentence about the domain, and nothing here can say
@@ -1432,19 +1462,45 @@ shipblu.com` still serves Freshdesk, so each one took a reader out of this
 
   What to read back from the first run, in order: `whatsapp_onboardings.steps`
   as the card polls it; the credential row by `select key_id, token_type,
-expires_at` — never `envelope`; the `request_id`s in
+expires_at, inspected_at` — never `envelope`, and a null `expires_at` means
+  "never" only when `inspected_at` is set (`db/schema/config.ts`); the
+  `request_id`s in
   `channels.config -> coexistence`; `history` deliveries in `webhook_events`
   with the app open on the phone (`LOG_ALL_INCOMING_WEBHOOKS` for the session,
   Meta's Webhook Debugger for field names); imported resolved tickets carrying
   both directions; a phone-typed reply on a live ticket labelled "WhatsApp
   Business app" with the SLA clock stopped; a console reply landing in the
-  phone's chat; and the hourly template sync reading with the stored
-  credential (`last_synced_at` moves, `last_sync_error` null). The
+  phone's chat, and whether Meta echoes that reply back on
+  `smb_message_echoes` at all — unconfirmed, and the one case where an echo
+  can race its own send (below); and the hourly template sync reading with
+  the stored credential (`last_synced_at` moves, `last_sync_error` null). The
   `debug_token.expires_at` that run stores is what says whether the credential
   never expires or a Reconnect every sixty days is part of operating the
   number, which is what the seven-day badge exists for. Reconnect — the 190
   recovery — assumes Embedded Signup completes for an already-onboarded number
-  and returns a fresh token; confirm it on staging before relying on it.
+  and returns a fresh token; confirm it before relying on it. Any of this on
+  staging needs a worker run by hand against staging's environment, because
+  staging has none (§2); without one the first live test is on production,
+  with a test number.
+
+  Known, and not built — none of it reachable until a number is live:
+  - **A conversation the business starts from the phone never gets an SLA
+    policy** — LHFTeam/shipblu-support#352.
+  - **Nothing stops an agent choosing a `MARKETING` template** on a
+    coexistence number, which Meta refuses.
+  - **An agent's hand work on an imported ticket counts in the agent metrics
+    and not in the team metrics**: the team rollups leave `import`
+    conversations out (`lib/reports/rollup.ts`), the agent rollups do not.
+  - **A history delivery can be replayed for 30 days at most**: `cleanup`
+    deletes `webhook_events` after that, so a history chunk, or the file a
+    placeholder is waiting for, can be replayed from its stored row for no
+    longer.
+  - **An echo can race the console's own send.** An `smb_message_echoes`
+    delivery processed between Graph's answer and `send_whatsapp` writing the
+    wamid inserts its own row, and the send's UPDATE then hits
+    `messages_channel_message_idx`. The window is milliseconds wide, and
+    whether Meta echoes a Cloud-API send on that field at all is unconfirmed —
+    read it on the first live run.
 
 - **A side conversation to a genuine forwarding list.** Everything below is
   verified against a local Postgres — the plus-address route, the References
@@ -5478,7 +5534,12 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
   replay writes nothing, and a later live inbound opens a new ticket rather
   than the import; progress, a decline and a contact's name land where the
   console reads them. What it cannot prove is anything Meta answers — §5.2
-  lists the round trip, and nothing in it has run.
+  lists the round trip, and nothing in it has run. _Corrected 2026-10-10:_ the
+  admin's account rows had no test behind them that day — the page still read
+  them with a star select, and `lib/admin/settings.db.test.ts` did not look at
+  them. Since the follow-up to #348 they are `listAccountsForAdmin()`, a named
+  column list, and that file asserts they carry exactly the eight columns the
+  page reads and nothing of a stored credential.
 - **Multiple WABA connections, against a local Postgres 16.** Migration 0011 and
   the `db/sql/` replay both applied clean, and RLS came out enabled and not
   forced on `whatsapp_accounts`. A legacy null-account template upserted onto
