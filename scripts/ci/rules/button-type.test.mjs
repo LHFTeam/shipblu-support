@@ -3,9 +3,10 @@ import { runRule } from '../fixture.mjs';
 
 /**
  * A button whose `type` changes between renders is submitted by the click that
- * changed it (§6.90). Refused as an expression, and as the merge row's shape —
- * one button element in each branch of a conditional, with different types.
- * Everything else about a button passes.
+ * changed it (§6.90). Refused as an expression; as the merge row's shape, one
+ * button element in each branch of a conditional with different types; and as
+ * the same choice made by two `return`s of one function. Everything else about
+ * a button passes.
  */
 
 /** Sixty buttons: the rule's floor, so a case is only its own change. */
@@ -68,6 +69,69 @@ describe('button-type', () => {
     });
 
     expect(found).toEqual([at('app/(console)/contacts/[id]/merge.tsx', 4)]);
+  });
+
+  // Review on #351: the same node, spelled three other ways, passed the rule.
+  it('reads branches through nested conditionals and a fragment around one element', async () => {
+    const found = await run({
+      'components/nested.tsx': component(
+        '<form>',
+        '  {armed ? <button type="submit">Sure?</button> : busy ? <span>…</span> : <button type="button">x</button>}',
+        '  {armed ? (',
+        '    <>',
+        '      <Button type="submit">Sure?</Button>',
+        '    </>',
+        '  ) : (',
+        '    <><Button type="button">Delete</Button></>',
+        '  )}',
+        '</form>',
+      ),
+    });
+
+    expect(found).toEqual([at('components/nested.tsx', 4), at('components/nested.tsx', 5)]);
+  });
+
+  it('refuses one function returning the button with two types, as an early return or a switch', async () => {
+    const found = await run({
+      'components/early.tsx': [
+        'export function Arm({ armed }) {',
+        '  if (armed) return <button type="submit">Sure?</button>;',
+        '  return <button type="button">x</button>;',
+        '}',
+        'export function Step({ step }) {',
+        '  switch (step) {',
+        "    case 'confirm':",
+        '      return <Button type="submit">Sure?</Button>;',
+        '    default:',
+        '      return <Button>Delete</Button>;',
+        '  }',
+        '}',
+        '',
+      ].join('\n'),
+    });
+
+    expect(found).toEqual([at('components/early.tsx', 3), at('components/early.tsx', 10)]);
+  });
+
+  it("does not compare one function's returns with another's, even nested inside it", async () => {
+    const found = await run({
+      'components/two.tsx': [
+        'export function Save() {',
+        '  const Inner = () => {',
+        '    return <button type="button">x</button>;',
+        '  };',
+        '  return <button type="submit">Save</button>;',
+        '}',
+        'export const Open = () => <Button type="button">Open</Button>;',
+        'export function Send() {',
+        '  if (busy) return <span>…</span>;',
+        '  return <Button type="submit">Send</Button>;',
+        '}',
+        '',
+      ].join('\n'),
+    });
+
+    expect(found).toEqual([]);
   });
 
   it("reads a missing type as each element's own default", async () => {

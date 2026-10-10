@@ -64,8 +64,8 @@ export function CommentModeration({
             label="Delete"
             // Irreversible, and it removes somebody's words from a public
             // thread. One extra click is the whole guard — this codebase has no
-            // modals, and a second click on the same button is what every other
-            // destructive action in the console asks for.
+            // modals, and a second click on the same button is what every
+            // admin delete asks for too (ConfirmSubmit).
             confirmLabel="Really delete?"
           />
         </>

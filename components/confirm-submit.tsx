@@ -1,14 +1,23 @@
 'use client';
 
-import { useState, type KeyboardEvent, type MouseEvent } from 'react';
+import { useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Button } from '@/components/ui';
+
+/**
+ * How long after one pointer click the next is still part of the same gesture:
+ * Chromium 141's own double-click window as measured on Linux, about 500ms
+ * from press to press, and longer than a tap's, 400ms from lift to landing
+ * (§6.90). So a click the platform would have counted as a double-click is
+ * caught even when it reported a single one.
+ */
+const BURST_MS = 500;
 
 /**
  * The click half of a two-click control: the first click arms it, and only a
  * second, separate click confirms.
  *
- * Three things a plain `armed ? confirm : arm` gets wrong, each measured in
+ * Four things a plain `armed ? confirm : arm` gets wrong, each measured in
  * Chromium (§6.90):
  *
  * - **The arming click must not be the confirming one.** React commits a
@@ -19,16 +28,22 @@ import { Button } from '@/components/ui';
  *   the activation; on a `type="button"` it costs nothing.
  * - **A double-click is one gesture, not two decisions.** Its second click
  *   lands on whatever the first one put there, so swapping in a separate
- *   confirm button does not help: the swap is what the second click hits. That
- *   click carries `detail` 2 — the platform's own count of clicks inside its
- *   double-click window — so anything above 1 is refused. A deliberate confirm
- *   inside that window (about half a second for a mouse) is swallowed and the
- *   next click confirms; a time-based guard was measured and was worse, because
- *   it also swallowed a quick keyboard confirm. Keyboard activation reports
- *   `detail` 0, so `=== 1` would lock the keyboard out entirely.
- * - **A held key repeats.** Enter activates a button on every keydown, repeats
- *   included, so holding it would arm and then confirm. A repeated keydown is
- *   cancelled, which cancels the click it would have produced.
+ *   confirm button does not help: the swap is what the second click hits.
+ * - **The platform's click count does not see every double-click.** `detail`
+ *   counts clicks inside the double-click window, but Chromium starts again at
+ *   1 when the second press lands a few pixels from the first, and after
+ *   every third click. So a pointer click within `BURST_MS` of the last one
+ *   on this button is refused whatever its count, and so is any click the
+ *   platform counts as a second or later, which covers a double-click window
+ *   set longer than ours. The cost: a deliberate confirm inside half a second
+ *   is swallowed, and the next click confirms. The keyboard is exempt — its
+ *   activation reports `detail` 0 — because a guard on time alone swallowed a
+ *   quick Enter, Enter.
+ * - **A held Enter repeats.** Each Enter keydown, repeats included, produces
+ *   the keypress that activates a focused button, so holding it would arm and
+ *   then confirm. A repeated Enter is cancelled, which cancels that click. Only
+ *   Enter: Space activates on release, and cancelling every repeat stopped a
+ *   held arrow key or Tab at the button.
  *
  * `onConfirm` is for a control that is not a submit button: the confirming
  * click calls it, and the control disarms once it settles. A submit button
@@ -37,23 +52,31 @@ import { Button } from '@/components/ui';
  */
 export function useConfirmClick(onConfirm?: () => Promise<unknown>) {
   const [armed, setArmed] = useState(false);
+  const lastPointerClick = useRef(-Infinity);
   const disarm = () => setArmed(false);
 
   return {
     armed,
     disarm,
     onClick(event: MouseEvent<HTMLButtonElement>) {
-      if (!armed) {
+      const pointer = event.detail > 0;
+      const burst = pointer && event.timeStamp - lastPointerClick.current < BURST_MS;
+      if (pointer) lastPointerClick.current = event.timeStamp;
+
+      // Refused before the arming check, armed or not: an action that answers
+      // inside a double-click has disarmed the button by its second click, and
+      // that click arming it again left the next single click a second send.
+      if (burst || event.detail > 1) {
+        event.preventDefault();
+      } else if (!armed) {
         event.preventDefault();
         setArmed(true);
-      } else if (event.detail > 1) {
-        event.preventDefault();
       } else if (onConfirm) {
         void onConfirm().finally(disarm);
       }
     },
     onKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
-      if (event.repeat) event.preventDefault();
+      if (event.repeat && event.key === 'Enter') event.preventDefault();
     },
   };
 }
@@ -64,12 +87,24 @@ export function useConfirmClick(onConfirm?: () => Promise<unknown>) {
  * needs no focus trap to be accessible.
  *
  * One `<button>` from first render to last, whose `type` and label change, so
- * focus stays where the agent left it — the confirm used to be a different
- * component, and arming one dropped focus to the page. Rendered inside the
- * `<form>`, because `useFormStatus` reports only a form above it, and disabled
- * while that form's action runs, so a click that lands mid-flight sends nothing.
- * The server still decides: a merge refuses a duplicate already folded in, and
- * a delete refuses a row that has gone.
+ * arming leaves focus where the agent put it — the confirm used to be a
+ * different component, and arming one dropped focus to the page. Rendered
+ * inside the `<form>`, because `useFormStatus` reports only a form above it.
+ *
+ * Disabled while the form's action runs, so a click that lands mid-flight sends
+ * nothing; as with every `SubmitButton`, Chromium then moves focus to the page.
+ * And disarmed when the action settles, either way: a retry after a refusal is
+ * two clicks again, and so is a second delete of a row a success left on
+ * screen. Without that, a press made mid-flight and released after the answer
+ * sent the action a second time.
+ *
+ * It guards clicks and keys on itself and nothing else. In a form with a single
+ * text field, Enter in that field submits without it, and once it is armed,
+ * Enter in any of its form's text fields confirms it, because implicit
+ * submission clicks the form's default button. So it must not share a form
+ * with a text field. The server still decides what a submission means: a merge
+ * refuses a duplicate already folded in, the Meta delete refuses a comment
+ * already deleted, and an admin delete of a row that has gone deletes nothing.
  */
 export function ConfirmSubmit({
   label,
@@ -83,8 +118,16 @@ export function ConfirmSubmit({
   /** Off for a reason outside the form, as `SubmitButton`'s is; off while the form submits regardless. */
   disabled?: boolean;
 }) {
-  const { armed, onClick, onKeyDown } = useConfirmClick();
+  const { armed, disarm, onClick, onKeyDown } = useConfirmClick();
   const { pending } = useFormStatus();
+
+  // Disarm on the render that sees the action end, before that render commits,
+  // so the button is never on screen enabled and still armed.
+  const [running, setRunning] = useState(pending);
+  if (pending !== running) {
+    setRunning(pending);
+    if (!pending) disarm();
+  }
 
   return (
     <Button

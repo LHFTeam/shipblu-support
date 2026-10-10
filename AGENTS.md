@@ -672,16 +672,22 @@ and the form are usually in different files.
 
 **A two-click confirm is `ConfirmSubmit`** (`components/confirm-submit.tsx`), or
 `useConfirmClick` from the same module for a control that is not a submit
-button. Arm-then-confirm looks like two lines of state and was wrong in all four
-places it was written by hand (§6.90). A button that becomes a submit inside its
-own click handler is submitted by that same click, because React commits the
-change before the browser acts on the click: the merge row merged a contact on
-one click. A confirm swapped in as a different button is where the second click
+button. Arm-then-confirm looks like two lines of state and was wrong in the
+four places it was first written by hand (§6.90). A button that becomes a
+submit inside its own click handler is submitted by that same click, because
+React commits the change before the browser acts on the click: the merge row
+merged a contact on one click. A confirm swapped in as a different button is where the second click
 of a double-click lands, so a double-click deleted. The component keeps one
-button, so focus stays on it; it refuses the second click of a double-click and a
-held key, and is disabled while the action runs. The `button-type` repo rule
-refuses a button whose `type` changes between renders anywhere else. It cannot
-see the swapped-component shape.
+button, so arming leaves focus on it. It refuses a pointer click within half a
+second of the last as well as the platform's own double-clicks, because the
+platform's count starts again after a small drift and after every third click;
+it refuses a held Enter; it is disabled while the action runs and disarms when
+the action settles. It guards only itself, so it must not share a form with a
+text field: Enter there submits without it, or confirms it once armed. The
+`button-type` repo rule refuses a button whose `type` changes between renders
+anywhere else, in the spellings its header lists. It cannot see a confirm
+swapped in as a different component, nor a button inside a wrapper that two
+`return`s both render.
 
 **One palette, light.** The console, the help centre and the widget render the
 same colours whatever the reader's operating system asks for. So: no
