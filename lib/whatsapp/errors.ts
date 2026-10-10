@@ -46,13 +46,33 @@ export type TokenOrigin = { source: CredentialSource; tokenEnvVar?: string | nul
  * a stored credential is renewed by signing in through Meta again, and nothing
  * on Render will help it; a named variable is replaced on Render, and only for
  * the one account; the shared token stops every Meta channel at once.
+ *
+ * A `null` origin is a caller that cannot tell which credential it was. The
+ * sentence then says so and names all three remedies, rather than the shared
+ * token's: "META_PAGE_ACCESS_TOKEN is expired" about a stored credential sends
+ * somebody to replace a token that works, while the one that expired goes
+ * unrenewed.
+ * The default stays the shared token, which is what the callers in
+ * `lib/meta/errors.ts` rely on.
  */
 export function explainAuthError(
   code: number | null,
   message: string,
-  origin: TokenOrigin = { source: 'shared' },
+  origin: TokenOrigin | null = { source: 'shared' },
 ): string {
   if (code !== ACCESS_TOKEN_CODE) return message;
+
+  if (origin === null) {
+    return (
+      `${message}\n\nThe access token this was sent with is expired or revoked, and ` +
+      `which credential it was can no longer be told from this message. Settings → ` +
+      `Channels lists the one each WhatsApp business account sends with: a ` +
+      `credential stored when the number was connected through Meta is renewed by ` +
+      `reconnecting the number there; a WHATSAPP_TOKEN_* variable, or the shared ` +
+      `META_PAGE_ACCESS_TOKEN, is replaced in the shipblu-support-production ` +
+      `environment group.`
+    );
+  }
 
   if (origin.source === 'stored') {
     return (
@@ -92,6 +112,15 @@ export type ErrorContext = {
   inboundPhoneNumberId?: string | null;
   /** The number the message actually went out from. */
   sentFromPhoneNumberId?: string | null;
+  /**
+   * The credential the send authenticated with, as far as it can still be
+   * told — null when it cannot. Read only for an expired token (190).
+   *
+   * Required, so every caller says which: the status webhook carries no word
+   * of the credential, and when this was left out the sentence named the
+   * shared token for every 190, whichever credential had sent.
+   */
+  credential: TokenOrigin | null;
 };
 
 /**
@@ -107,12 +136,8 @@ export function explainDeliveryError(
 ): string {
   // An expired token fails every send identically, so an agent looking at a
   // failed message should be told it is a credential rather than anything they
-  // did or the customer did.
-  //
-  // The status webhook this is called from does not say which credential the
-  // send used, so this names the shared one — the sentence `send_whatsapp`
-  // records at send time is the one that knows.
-  if (code === ACCESS_TOKEN_CODE) return explainAuthError(code, message);
+  // did or the customer did — and which one, as far as the caller could tell.
+  if (code === ACCESS_TOKEN_CODE) return explainAuthError(code, message, context.credential);
 
   if (code !== RE_ENGAGEMENT_CODE) return message;
 

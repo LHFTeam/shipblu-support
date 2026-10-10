@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type CredentialStatus, credentialBadges } from './credential-status';
+import { type CredentialStatus, credentialBadges, credentialOrigin } from './credential-status';
 
 /**
  * The badges are the console's whole account of a credential nobody can see,
@@ -24,6 +24,7 @@ const healthy: CredentialStatus = {
   dataAccessExpiresAt: null,
   inspectedAt: new Date('2026-10-01T00:00:00Z'),
   obtainedByAgentId: null,
+  obtainedByName: null,
   lastVerifiedAt: new Date('2026-10-08T09:00:00Z'),
   lastRefusedAt: null,
   lastRefusal: null,
@@ -95,5 +96,27 @@ describe('credentialBadges', () => {
       expect(badge.label.length).toBeLessThanOrEqual(20);
       expect(badge.label).not.toMatch(/abcdef01|WHATSAPP_/);
     }
+  });
+});
+
+describe('credentialOrigin', () => {
+  // `storedAt` is 00:00 UTC, which is 03:00 in Cairo under its summer time:
+  // the card is read in the team's zone, as every other date in the console.
+  it('names the agent who connected it', () => {
+    expect(credentialOrigin({ ...healthy, obtainedByName: 'Mona Admin' })).toBe(
+      'Stored from Embedded Signup on 1 Oct 2026, 03:00 by Mona Admin',
+    );
+  });
+
+  /**
+   * Deleting the agent sets the id, and so the name, null. "by null" is a bug
+   * on the page and "by unknown" accuses a credential the audit row still
+   * accounts for, so the clause goes rather than being filled in.
+   */
+  it('leaves the "by" clause out when no agent row answers', () => {
+    expect(credentialOrigin(healthy)).toBe('Stored from Embedded Signup on 1 Oct 2026, 03:00');
+    expect(credentialOrigin({ ...healthy, obtainedByName: '' })).toBe(
+      'Stored from Embedded Signup on 1 Oct 2026, 03:00',
+    );
   });
 });

@@ -7,6 +7,7 @@ import {
   EMBEDDED_SIGNUP_EXTRAS,
   embeddedSignupLoginOptions,
   isFacebookOrigin,
+  metaErrorSentence,
   parseSignupMessage,
   reduceConnectPhase,
   signupStepLabel,
@@ -20,7 +21,13 @@ import {
  */
 
 describe('embeddedSignupLoginOptions', () => {
-  it('asks for a code, for the Business-app onboarding, in the documented shape', () => {
+  /**
+   * v4 is chosen by the login configuration, not here. `sessionInfoVersion`
+   * with `featureType` and no `version` is v2's own launch, which ends on
+   * 2026-10-15 — and no page says whether a v4 configuration ignores it or
+   * falls back on it — so `toEqual` holds the extras to exactly these keys.
+   */
+  it('asks for a code, for the Business-app onboarding, in the v4 shape', () => {
     expect(embeddedSignupLoginOptions('cfg-123')).toEqual({
       config_id: 'cfg-123',
       response_type: 'code',
@@ -28,10 +35,11 @@ describe('embeddedSignupLoginOptions', () => {
       extras: {
         setup: {},
         featureType: 'whatsapp_business_app_onboarding',
-        sessionInfoVersion: '3',
       },
     });
     expect(embeddedSignupLoginOptions('cfg-123').extras).toBe(EMBEDDED_SIGNUP_EXTRAS);
+    expect(EMBEDDED_SIGNUP_EXTRAS).not.toHaveProperty('sessionInfoVersion');
+    expect(EMBEDDED_SIGNUP_EXTRAS).not.toHaveProperty('version');
   });
 });
 
@@ -83,6 +91,48 @@ describe('parseSignupMessage', () => {
     });
   });
 
+  /** v4's samples carry no `version`, and may list the assets the customer also shared. */
+  it("reads v4's finish, with no version and its optional asset lists", () => {
+    expect(
+      parseSignupMessage(
+        JSON.stringify({
+          data: {
+            phone_number_id: '109876543210',
+            waba_id: '102030405060',
+            business_id: '555666777',
+            ad_account_ids: ['act_1'],
+            page_ids: ['p_1'],
+            waba_ids: ['102030405060', '102030405061'],
+          },
+          type: 'WA_EMBEDDED_SIGNUP',
+          event: 'FINISH',
+        }),
+      ),
+    ).toEqual({
+      kind: 'finished',
+      wabaId: '102030405060',
+      phoneNumberId: '109876543210',
+      businessId: '555666777',
+    });
+  });
+
+  /**
+   * The server reads the number off the WABA when the window names none, so a
+   * finish with no number read as "finished" would spend the code on a WABA
+   * nobody added a number to — and connect the one it already holds.
+   */
+  it('reads FINISH_ONLY_WABA as finished without a number, never as finished', () => {
+    expect(
+      parseSignupMessage(
+        JSON.stringify({
+          data: { waba_id: '102030405060', business_id: '555666777' },
+          type: 'WA_EMBEDDED_SIGNUP',
+          event: 'FINISH_ONLY_WABA',
+        }),
+      ),
+    ).toEqual({ kind: 'finished_without_number' });
+  });
+
   it('reads a cancel with its step, and an error with its reference', () => {
     expect(
       parseSignupMessage(
@@ -100,12 +150,11 @@ describe('parseSignupMessage', () => {
         JSON.stringify({
           data: {
             error_message: 'Something went wrong',
-            error_id: 'E123',
+            error_code: 'E123',
             session_id: 'sess-9',
           },
           type: 'WA_EMBEDDED_SIGNUP',
           event: 'ERROR',
-          version: '3',
         }),
       ),
     ).toEqual({
@@ -114,6 +163,58 @@ describe('parseSignupMessage', () => {
       code: 'E123',
       sessionId: 'sess-9',
     });
+  });
+
+  /**
+   * Meta's errors page posts a user-reported error as CANCEL. Read as a
+   * cancel, the card said "You closed Meta's window" and lost both the message
+   * and the session id Meta's support asks for. This is Meta's own sample.
+   */
+  it('reads a CANCEL carrying an error as the error it reports', () => {
+    expect(
+      parseSignupMessage(
+        JSON.stringify({
+          data: {
+            error_message:
+              'Your verified name violates WhatsApp guidelines. Please edit your verified name and try again.',
+            error_code: '524126',
+            session_id: 'f34b51dab5e0498',
+            timestamp: '1746041036',
+          },
+          type: 'WA_EMBEDDED_SIGNUP',
+          event: 'CANCEL',
+        }),
+      ),
+    ).toEqual({
+      kind: 'error',
+      message:
+        'Your verified name violates WhatsApp guidelines. Please edit your verified name and try again.',
+      code: '524126',
+      sessionId: 'f34b51dab5e0498',
+    });
+
+    // Meta's example code is printed bare; a number is the same reference.
+    expect(
+      parseSignupMessage({
+        data: { error_code: 524126 },
+        type: 'WA_EMBEDDED_SIGNUP',
+        event: 'CANCEL',
+      }),
+    ).toEqual({ kind: 'error', message: null, code: '524126', sessionId: null });
+  });
+
+  it('takes the older error_id spelling only when error_code is absent', () => {
+    const error = (data: Record<string, unknown>) =>
+      parseSignupMessage({ data, type: 'WA_EMBEDDED_SIGNUP', event: 'ERROR' });
+    expect(error({ error_id: 'E1' })).toEqual({
+      kind: 'error',
+      message: null,
+      code: 'E1',
+      sessionId: null,
+    });
+    expect(error({ error_code: 'C1', error_id: 'E1' })).toMatchObject({ code: 'C1' });
+    // v4 lists ERROR with no sample of its fields: still an error, with nothing to quote.
+    expect(error({})).toEqual({ kind: 'error', message: null, code: null, sessionId: null });
   });
 
   it('answers null for everything else, and never throws', () => {
@@ -139,9 +240,47 @@ describe('parseSignupMessage', () => {
 });
 
 describe('signupStepLabel', () => {
-  it('words the documented step and prints an unknown one as Meta spelled it', () => {
+  /** The six `current_step` values Meta's errors page lists, and nothing it does not. */
+  it('words each documented step and prints any other as Meta spelled it', () => {
+    expect(signupStepLabel('BUSINESS_ACCOUNT_SELECTION')).toBe('choosing the business portfolio');
+    expect(signupStepLabel('WABA_PHONE_PROFILE_PICKER')).toBe('choosing the WhatsApp account');
+    expect(signupStepLabel('WHATSAPP_BUSINESS_PROFILE_SETUP')).toBe(
+      'creating the WhatsApp account',
+    );
     expect(signupStepLabel('PHONE_NUMBER_SETUP')).toBe('choosing the number');
+    expect(signupStepLabel('PHONE_NUMBER_VERIFICATION')).toBe('verifying the number');
+    expect(signupStepLabel('PERMISSIONS')).toBe('reviewing the permissions');
     expect(signupStepLabel('SOMETHING_NEW')).toBe('SOMETHING_NEW');
+    // A guess no page names: printed as spelled rather than worded as if it were known.
+    expect(signupStepLabel('WABA_SELECTION')).toBe('WABA_SELECTION');
+  });
+
+  it('prints a step named like an inherited property as spelled, not as a function', () => {
+    for (const step of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+      expect(signupStepLabel(step)).toBe(step);
+    }
+  });
+});
+
+describe('metaErrorSentence', () => {
+  /** Meta's sample message ends in a full stop; the card printed "try again..". */
+  it('ends the sentence once, and names the session id as the reference to quote', () => {
+    expect(
+      metaErrorSentence(
+        'Your verified name violates WhatsApp guidelines. Please edit your verified name and try again.',
+        'f34b51dab5e0498',
+      ),
+    ).toBe(
+      'Meta reported: Your verified name violates WhatsApp guidelines. Please edit your verified ' +
+        'name and try again. Reference f34b51dab5e0498 — quote it to Meta support.',
+    );
+    expect(metaErrorSentence('the window finished without a sign-in code', null)).toBe(
+      'Meta reported: the window finished without a sign-in code.',
+    );
+    expect(metaErrorSentence(null, null)).toBe('Meta reported: an error with no message.');
+    expect(metaErrorSentence('  ', 'sess-9')).toBe(
+      'Meta reported: an error with no message. Reference sess-9 — quote it to Meta support.',
+    );
   });
 });
 

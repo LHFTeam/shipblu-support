@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { enqueue, PermanentJobError, type ClaimedJob } from '@/lib/queue';
-import { parseJobPayload } from './payloads';
+import { JOB_PAYLOADS, parseJobPayload } from './payloads';
 
 function job(payload: Record<string, unknown>): ClaimedJob {
   return { id: 'job-1', type: 'send_email', payload } as unknown as ClaimedJob;
@@ -248,5 +249,110 @@ describe('complete_coexistence_onboarding', () => {
     expect(() => parse({ onboardingId: id, steps: 'histroy' })).toThrow(PermanentJobError);
     expect(() => parse({ onboardingId: id, step: 'history' })).toThrow(PermanentJobError);
     expect(() => parse({ onboardingId: 'not-a-uuid' })).toThrow(PermanentJobError);
+  });
+});
+
+/**
+ * No job payload may carry a credential under a name that says it is one.
+ *
+ * `jobs.payload` is jsonb in a table anyone with the database can read — a
+ * dump, a backup, `execute_sql` from a tool — and a row outlives its job: one
+ * that reached `dead` is never cleaned up. The stored WhatsApp credential is
+ * sealed so that nobody reading the database holds anything usable, and a
+ * payload that carried the token across the queue "so the worker need not
+ * look it up" would undo that in a column nobody thinks of as storage. An
+ * action that needs the token enqueues an id, and the worker resolves it.
+ *
+ * A check of names, not values: a secret under an innocent name passes. What
+ * it stops is the honest version of the mistake, in the commit that writes
+ * the schema, before any row exists to clean up.
+ */
+describe('no job payload carries a credential', () => {
+  const SECRET_SHAPED = /token|secret|envelope|ciphertext|password|api[_-]?key/i;
+  const isSecretShaped = (path: string) => SECRET_SHAPED.test(path.split('.').at(-1)!);
+
+  type Schema = z.core.$ZodType;
+
+  function isSchema(value: unknown): value is Schema {
+    return (
+      typeof value === 'object' &&
+      value !== null &&
+      typeof (value as { _zod?: { def?: { type?: unknown } } })._zod?.def?.type === 'string'
+    );
+  }
+
+  /**
+   * Every object key reachable in `schema`, as a dotted path.
+   *
+   * Generic over zod's definitions rather than a switch over the kinds the
+   * payloads use today. Every child a definition holds — a union's options, an
+   * optional's inner type, both ends of a pipe (what `preprocess` and
+   * `transform` build), an array's element, an object's catchall — is a
+   * property of `_zod.def` that is itself a schema or an array of them, so a
+   * kind used for the first time later is walked without anybody adding it
+   * here. Only an object's `shape` names keys. A check — `min`, `.refine` —
+   * is not a schema (its definition has no `type`) and is passed over: a
+   * refined object is still an object, with its shape where it was.
+   */
+  function keysIn(schema: Schema, at = '', walking = new Set<Schema>()): string[] {
+    // A lazy schema can name itself; one already on this path is a cycle.
+    if (walking.has(schema)) return [];
+    walking.add(schema);
+    const def = schema._zod.def as unknown as Record<string, unknown>;
+    const found: string[] = [];
+    for (const [name, value] of Object.entries(def)) {
+      if (def.type === 'object' && name === 'shape') {
+        for (const [key, child] of Object.entries(value as Record<string, Schema>)) {
+          found.push(`${at}${key}`, ...keysIn(child, `${at}${key}.`, walking));
+        }
+        continue;
+      }
+      for (const child of Array.isArray(value) ? value : [value]) {
+        if (isSchema(child)) found.push(...keysIn(child, at, walking));
+      }
+    }
+    // The one child held behind a function rather than as a value.
+    if (def.type === 'lazy') found.push(...keysIn((def.getter as () => Schema)(), at, walking));
+    walking.delete(schema);
+    return found;
+  }
+
+  it('walks a schema all the way down, so the check below cannot pass by seeing nothing', () => {
+    const synthetic = z
+      .strictObject({
+        messageId: z.string(),
+        source: z.union([
+          z.object({ url: z.string() }),
+          z.object({ media: z.array(z.object({ accessToken: z.string() })).optional() }),
+        ]),
+        options: z.preprocess((value) => value, z.object({ api_key: z.string() })).optional(),
+        later: z.lazy(() => z.object({ envelope: z.string() })),
+      })
+      .refine(() => true);
+
+    expect(keysIn(synthetic).filter(isSecretShaped)).toEqual([
+      'source.media.accessToken',
+      'options.api_key',
+      'later.envelope',
+    ]);
+  });
+
+  it('finds no secret-shaped key in any job payload', () => {
+    const keys = new Map<string, string[]>(
+      Object.entries(JOB_PAYLOADS).map(([type, schema]) => [type, [...new Set(keysIn(schema))]]),
+    );
+
+    // The reach is real, through every shape `JOB_PAYLOADS` holds: a plain
+    // object, both branches of a union, an object behind `.refine`, a field
+    // behind a `preprocess`.
+    expect(keys.get('send_email')).toEqual(['messageId']);
+    expect(keys.get('download_media')).toEqual(expect.arrayContaining(['url', 'mediaId']));
+    expect(keys.get('sync_shipment')).toEqual(['shipmentId', 'trackingNumber', 'force']);
+    expect(keys.get('complete_coexistence_onboarding')).toEqual(['onboardingId', 'steps']);
+
+    const secretShaped = [...keys].flatMap(([type, paths]) =>
+      paths.filter(isSecretShaped).map((path) => `${type}: ${path}`),
+    );
+    expect(secretShaped).toEqual([]);
   });
 });

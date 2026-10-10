@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import {
   agentSkills,
@@ -21,9 +21,12 @@ import {
   whatsappAccounts,
   whatsappTemplates,
 } from '@/db/schema';
+import { resetEnvCache } from '@/lib/env';
 import { withCleanDatabase } from '@/lib/testing/db';
+import { storeBusinessToken } from '@/lib/whatsapp/credentials';
 import {
   countTemplatesByAccount,
+  listAccountsForAdmin,
   listActiveAgents,
   listActiveTicketFields,
   listAnyHoliday,
@@ -291,5 +294,78 @@ describe('the channel and condition-builder lists', () => {
     ]);
 
     expect((await listActiveTicketFields()).map((row) => row.key)).toEqual(['area', 'warehouse']);
+  });
+});
+
+/**
+ * The channels page spreads each account row into a client component's props,
+ * so every key on it is published in the RSC payload to whoever can open the
+ * admin screen. The stored credential is a table of its own for that reason,
+ * and this is the tripwire for the day somebody joins it in "to show a badge".
+ */
+describe('the business accounts the channels page publishes', () => {
+  const saved = { ...process.env };
+  const TOKEN = 'EAAGm0PX4ZCpsBAsettingsListTestToken0123456';
+
+  beforeEach(() => {
+    process.env.WHATSAPP_CREDENTIAL_KEY = 's'.repeat(20) + 'settings-test-credential-key';
+    resetEnvCache();
+  });
+
+  afterEach(() => {
+    process.env = { ...saved };
+    resetEnvCache();
+  });
+
+  it('carries the columns the page reads and nothing of a stored credential', async () => {
+    const [connected, named] = await db
+      .insert(whatsappAccounts)
+      .values([
+        { name: 'Egypt', wabaId: '111111' },
+        { name: 'Saudi', wabaId: '222222', tokenEnvVar: 'WHATSAPP_TOKEN_SAUDI' },
+      ])
+      .returning({ id: whatsappAccounts.id, wabaId: whatsappAccounts.wabaId });
+    const { keyId } = await db.transaction((tx) =>
+      storeBusinessToken(tx, {
+        accountId: connected!.id,
+        wabaId: connected!.wabaId,
+        token: TOKEN,
+        inspection: null,
+        businessId: null,
+        actor: null,
+      }),
+    );
+
+    const rows = await listAccountsForAdmin();
+
+    expect(rows.map((row) => row.id)).toEqual([connected!.id, named!.id]);
+    // Exactly the fields `WhatsAppAccountRow` takes from the row; a star
+    // select would add `createdAt` and `updatedAt` here, and whatever came next.
+    for (const row of rows) {
+      expect(Object.keys(row).sort()).toEqual([
+        'id',
+        'isActive',
+        'isDefault',
+        'lastSyncError',
+        'lastSyncedAt',
+        'name',
+        'tokenEnvVar',
+        'wabaId',
+      ]);
+      // `tokenEnvVar` is the one exception, and it is not a secret: it is the
+      // *name* of an environment variable (WHATSAPP_TOKEN_SAUDI), never its
+      // value, which lives on Render and is read by nothing on this page.
+      expect(
+        Object.keys(row).filter(
+          (key) => key !== 'tokenEnvVar' && /envelope|cipher|plaintext|secret|token/i.test(key),
+        ),
+      ).toEqual([]);
+    }
+    expect(rows[1]!.tokenEnvVar).toBe('WHATSAPP_TOKEN_SAUDI');
+
+    // Neither the token nor its sealed envelope (`v1.<key id>.…`) in any value.
+    const published = JSON.stringify(rows);
+    expect(published).not.toContain(TOKEN);
+    expect(published).not.toContain(`v1.${keyId}.`);
   });
 });

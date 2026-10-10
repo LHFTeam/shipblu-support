@@ -217,6 +217,132 @@ describe('a signed delivery', () => {
   });
 });
 
+/**
+ * The three fields a number on the WhatsApp Business app adds, through the
+ * route rather than `deliveryId` alone: what matters is the key the row is
+ * stored under, because that is what the unique index answers "duplicate" on.
+ * The shapes are Meta's own samples from the field references.
+ */
+describe('a signed delivery for a number on the WhatsApp Business app', () => {
+  const coexistence = (field: string, value: Record<string, unknown>) => ({
+    object: 'whatsapp_business_account',
+    entry: [{ id: '102290129340398', time: 1739212624, changes: [{ field, value }] }],
+  });
+  const METADATA = { display_phone_number: '15550783881', phone_number_id: '106540352242922' };
+
+  const HISTORY = coexistence('history', {
+    messaging_product: 'whatsapp',
+    metadata: METADATA,
+    history: [
+      {
+        metadata: { phase: 0, chunk_order: 1, progress: 55 },
+        threads: [
+          {
+            id: '16505551234',
+            messages: [
+              { from: '15550783881', id: 'wamid.OUT', timestamp: '1739230955', type: 'text' },
+              { from: '16505551234', id: 'wamid.IN', timestamp: '1739230970', type: 'text' },
+            ],
+          },
+          {
+            id: '12125557890',
+            messages: [
+              { from: '15550783881', id: 'wamid.OTHER', timestamp: '1739230970', type: 'text' },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+
+  it('stores a history chunk under every message of every thread, and a redelivery as a duplicate', async () => {
+    const response = await deliver(HISTORY);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: 'queued' });
+    expect(writes).toEqual([
+      expect.objectContaining({
+        providerEventId: 'hm:wamid.IN|hm:wamid.OTHER|hm:wamid.OUT',
+        payload: HISTORY,
+        signatureVerified: true,
+      }),
+    ]);
+    expect(enqueue).toHaveBeenCalledTimes(1);
+
+    // Meta's redelivery: the same bytes, so the same key — which the index has.
+    conflict = true;
+    const again = await deliver(HISTORY);
+
+    expect(again.status).toBe(200);
+    expect(await again.json()).toEqual({ status: 'duplicate' });
+    expect(writes[1]).toMatchObject({ providerEventId: writes[0]!.providerEventId });
+    expect(enqueue).toHaveBeenCalledTimes(1);
+  });
+
+  it('stores an address-book delivery under each contact, its action and its instant', async () => {
+    const contact = (phone: string, action: string, timestamp: string) => ({
+      type: 'contact',
+      contact: { full_name: 'Pablo Morales', first_name: 'Pablo', phone_number: phone },
+      action,
+      metadata: { timestamp },
+    });
+    const sync = coexistence('smb_app_state_sync', {
+      messaging_product: 'whatsapp',
+      metadata: METADATA,
+      state_sync: [
+        contact('16505551234', 'add', '1739321024'),
+        contact('12125557890', 'remove', '1739321100'),
+      ],
+    });
+
+    const response = await deliver(sync);
+
+    expect(await response.json()).toEqual({ status: 'queued' });
+    expect(writes).toEqual([
+      expect.objectContaining({
+        providerEventId: 'c:12125557890:remove:1739321100|c:16505551234:add:1739321024',
+        signatureVerified: true,
+      }),
+    ]);
+  });
+
+  /**
+   * No key, so nothing collides: the same disconnect body can arrive again
+   * after a reconnect, and the second must be processed. The handler is the
+   * idempotent part (`applyWhatsAppAccountUpdate`).
+   */
+  it('stores an account update under no id, and queues the same body twice', async () => {
+    const update = coexistence('account_update', {
+      phone_number: '15550783881',
+      event: 'PARTNER_REMOVED',
+      disconnection_info: { reason: 'PRIMARY_INACTIVITY', initiated_by: 'SYSTEM' },
+    });
+
+    await deliver(update);
+    await deliver(update);
+
+    expect(writes).toEqual([
+      expect.objectContaining({ providerEventId: null, signatureVerified: true }),
+      expect.objectContaining({ providerEventId: null, signatureVerified: true }),
+    ]);
+    expect(enqueue).toHaveBeenCalledTimes(2);
+  });
+
+  // A null where a chunk belongs used to throw in the key, before the insert:
+  // a 500 with nothing stored, and every redelivery the same.
+  it('stores a history holding a null chunk under the chunk beside it', async () => {
+    const junk = coexistence('history', {
+      metadata: METADATA,
+      history: [null, { threads: [{ id: '16505551234', messages: [{ id: 'wamid.KEPT' }] }] }],
+    });
+
+    const response = await deliver(junk);
+
+    expect(response.status).toBe(200);
+    expect(writes).toEqual([expect.objectContaining({ providerEventId: 'hm:wamid.KEPT' })]);
+  });
+});
+
 describe('an unsigned delivery', () => {
   it.each([
     ['a signature from another secret', () => deliver(BATCH, sign(JSON.stringify(BATCH), 'other'))],

@@ -30,6 +30,10 @@ import type {
  * lists, not a single message. Nothing here throws: a payload we cannot read is
  * an empty result, because a throw in the webhook path makes Meta redeliver the
  * whole batch, including the parts we did understand.
+ *
+ * That covers the containers too, not only the leaves: every list is walked
+ * through `recordsIn`, so a list that is not one, or an element of it that is
+ * `null` or a bare value, is skipped rather than read.
  */
 
 const MEDIA_TYPES = ['image', 'video', 'audio', 'document', 'sticker'] as const;
@@ -49,13 +53,13 @@ export function parseWebhook(payload: unknown): NormalisedWebhook {
     accountUpdates: [],
   };
 
-  if (!isObject(payload)) return result;
+  if (!isRecord(payload)) return result;
   const body = payload as WhatsAppWebhookPayload;
 
-  for (const entry of body.entry ?? []) {
-    for (const change of entry.changes ?? []) {
+  for (const entry of recordsIn(body.entry)) {
+    for (const change of recordsIn(entry.changes)) {
       const value = change.value;
-      if (!value) continue;
+      if (!isRecord(value)) continue;
 
       // The field decides what the arrays mean, so it is read first. Under
       // `history`, a top-level `messages` array is the file behind a copied
@@ -76,11 +80,12 @@ export function parseWebhook(payload: unknown): NormalisedWebhook {
       }
 
       const phoneNumberId = value.metadata?.phone_number_id ?? null;
+      const contacts = recordsIn(value.contacts);
 
       // Meta sends the profile name once per batch in `contacts`, keyed by the
       // customer's number, not on the message itself.
       const profileNames = new Map<string, string>();
-      for (const contact of value.contacts ?? []) {
+      for (const contact of contacts) {
         if (contact.wa_id && contact.profile?.name) {
           profileNames.set(contact.wa_id, contact.profile.name);
         }
@@ -94,18 +99,18 @@ export function parseWebhook(payload: unknown): NormalisedWebhook {
       // The only customer in the batch, when there is exactly one. An echo that
       // arrives without a `to` has no other way to name who it went to, and
       // guessing between several would attach it to the wrong conversation.
-      const soleContact = value.contacts?.length === 1 ? value.contacts[0]!.wa_id : null;
+      const soleContact = contacts.length === 1 ? contacts[0]!.wa_id : null;
 
       // `message_echoes` is the array `smb_message_echoes` carries: a reply
       // the business typed on the WhatsApp Business app, on a number connected
       // through coexistence. The older `message_echoes` field Meta discontinued
       // used the same array, so stored deliveries of either replay the same way.
-      for (const echo of value.message_echoes ?? []) {
+      for (const echo of recordsIn(value.message_echoes)) {
         const normalised = normaliseEcho(echo, phoneNumberId, soleContact);
         if (normalised) result.echoes.push(normalised);
       }
 
-      for (const message of value.messages ?? []) {
+      for (const message of recordsIn(value.messages)) {
         // A message from our own number is an echo wherever it arrives, and
         // this branch is load-bearing on its own terms rather than as a
         // fallback for the array above. Treating `messages` as unconditionally
@@ -124,12 +129,12 @@ export function parseWebhook(payload: unknown): NormalisedWebhook {
         if (normalised) result.messages.push(normalised);
       }
 
-      for (const status of value.statuses ?? []) {
+      for (const status of recordsIn(value.statuses)) {
         const normalised = normaliseStatus(status);
         if (normalised) result.statuses.push(normalised);
       }
 
-      for (const error of value.errors ?? []) {
+      for (const error of recordsIn(value.errors)) {
         result.errors.push(
           `${error.code}: ${error.title}${error.message ? ` — ${error.message}` : ''}`,
         );
@@ -147,18 +152,24 @@ export function parseWebhook(payload: unknown): NormalisedWebhook {
  * Direction comes from comparing `from` with the business's own number, digits
  * only, the way the echo branch below tells our own messages from a
  * customer's. The thread's id is the customer either way.
+ *
+ * A decline is read from inside a chunk (`history[].errors`), and only there:
+ * that is where Meta's history webhook reference and its Business-app
+ * onboarding guide both put 2593109, and neither shows a top-level `errors`
+ * under this field — so there is no sample to test reading one against, and
+ * this branch returns before `parseWebhook`'s `value.errors` loop would see it.
  */
 function parseHistory(value: WhatsAppValue, result: NormalisedWebhook): void {
   const phoneNumberId = value.metadata?.phone_number_id ?? null;
   const businessNumber = digits(value.metadata?.display_phone_number);
 
-  for (const chunk of value.history ?? []) {
+  for (const chunk of recordsIn(value.history)) {
     result.history.push(normaliseHistoryChunk(chunk, phoneNumberId, businessNumber));
   }
 
-  for (const message of value.messages ?? []) {
+  for (const message of recordsIn(value.messages)) {
     const media = extractMedia(message);
-    if (!message?.id || !media) continue;
+    if (!message.id || !media) continue;
     result.historyMedia.push({
       wamid: message.id,
       phoneNumberId,
@@ -173,12 +184,12 @@ function normaliseHistoryChunk(
   phoneNumberId: string | null,
   businessNumber: string | null,
 ): NormalisedHistoryChunk {
-  const declined = (chunk.errors ?? []).find((error) => error?.code === DECLINED_HISTORY);
+  const declined = recordsIn(chunk.errors).find((error) => error.code === DECLINED_HISTORY);
   const messages: NormalisedHistoryMessage[] = [];
 
-  for (const thread of chunk.threads ?? []) {
-    for (const message of thread.messages ?? []) {
-      if (!message?.id) continue;
+  for (const thread of recordsIn(chunk.threads)) {
+    for (const message of recordsIn(thread.messages)) {
+      if (!message.id) continue;
       const outbound = businessNumber !== null && digits(message.from) === businessNumber;
       // The thread is the customer; a message without one names them itself.
       const customer = thread.id ?? (outbound ? message.to : message.from);
@@ -217,7 +228,7 @@ function normaliseHistoryChunk(
 
 function parseStateSync(value: WhatsAppValue, result: NormalisedWebhook): void {
   const phoneNumberId = value.metadata?.phone_number_id ?? null;
-  for (const item of value.state_sync ?? []) {
+  for (const item of recordsIn(value.state_sync)) {
     const sync = normaliseContactSync(item, phoneNumberId);
     if (sync) result.contactSyncs.push(sync);
   }
@@ -227,7 +238,7 @@ function normaliseContactSync(
   item: WhatsAppStateSyncItem,
   phoneNumberId: string | null,
 ): NormalisedContactSync | null {
-  if (item?.type !== 'contact') return null;
+  if (item.type !== 'contact') return null;
   const phone = item.contact?.phone_number;
   if (!phone || (item.action !== 'add' && item.action !== 'remove')) return null;
 
@@ -322,8 +333,10 @@ function normaliseEcho(
 }
 
 /** Phone numbers for comparison only — Meta formats them for display. */
-function digits(value: string | undefined | null): string | null {
-  if (!value) return null;
+function digits(value: unknown): string | null {
+  // `typeof`, not truthiness: a number here has no `replace`, and the throw
+  // would be the whole delivery's.
+  if (typeof value !== 'string' || !value) return null;
   const stripped = value.replace(/\D/g, '');
   return stripped || null;
 }
@@ -346,7 +359,7 @@ export function displayText(message: WhatsAppInboundMessage): string {
     case 'document':
     case 'sticker': {
       const media = message[message.type as (typeof MEDIA_TYPES)[number]];
-      const caption = media?.caption?.trim();
+      const caption = trimmedOrNull(media?.caption);
       if (caption) return caption;
       if (message.type === 'document' && media?.filename) return `[document: ${media.filename}]`;
       if (message.type === 'audio' && media?.voice) return '[voice note]';
@@ -455,8 +468,9 @@ function extractLocation(message: WhatsAppInboundMessage): NormalisedLocation | 
   };
 }
 
-function trimmedOrNull(value: string | undefined): string | null {
-  const trimmed = value?.trim();
+/** Anything but a string is absent: `?.trim()` guards only null and undefined. */
+function trimmedOrNull(value: unknown): string | null {
+  const trimmed = typeof value === 'string' ? value.trim() : '';
   return trimmed ? trimmed : null;
 }
 
@@ -464,8 +478,8 @@ function trimmedOrNull(value: string | undefined): string | null {
  * Meta appends codec parameters, e.g. `audio/ogg; codecs=opus`. Storage and the
  * Content-Type header want the bare type.
  */
-function normaliseMime(mime: string | undefined): string | null {
-  return mimeEssence(mime) || null;
+function normaliseMime(mime: unknown): string | null {
+  return typeof mime === 'string' ? mimeEssence(mime) || null : null;
 }
 
 function normaliseStatus(status: WhatsAppStatus): NormalisedStatus | null {
@@ -492,13 +506,38 @@ function normaliseStatus(status: WhatsAppStatus): NormalisedStatus | null {
  * Meta sends Unix *seconds* as a string. Treating it as milliseconds — the easy
  * mistake — dates every message to 1970 and silently breaks the 24-hour window,
  * so an unparseable value falls back to now rather than to the epoch.
+ *
+ * So does a finite number past the last instant a `Date` can hold (year
+ * 275760). `new Date` answers that with an Invalid Date rather than a throw, so
+ * nothing here would notice — but the first `toISOString()` downstream throws
+ * `RangeError`, in the worker, and the whole delivery retries until it is
+ * `dead` over one field of one message.
  */
 export function parseTimestamp(timestamp: string | undefined): Date {
   const seconds = Number(timestamp);
   if (!Number.isFinite(seconds) || seconds <= 0) return new Date();
-  return new Date(seconds * 1000);
+  const date = new Date(seconds * 1000);
+  return Number.isNaN(date.getTime()) ? new Date() : date;
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+/** A JSON object — not `null`, which `typeof` also calls an object, and not a list. */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * The objects in a list the payload says holds objects: none when it is not a
+ * list, and none of its elements that is not an object.
+ *
+ * The types in `./types` describe what Meta documents, and `?? []` and `?.`
+ * answer only for a field that is missing. A `history: [null]`, or an object
+ * where a list was meant, passed both and threw on the first property read —
+ * in the worker a retry of the whole delivery until it went `dead`, and in the
+ * route, through `./delivery-id`, a 500 before the row was even stored. So
+ * every walk in both goes through this rather than trusting the type. Skipping
+ * the element rather than refusing the delivery is the module's rule: the rest
+ * of the batch is still somebody's message.
+ */
+export function recordsIn<T extends object>(list: T[] | undefined): T[] {
+  return Array.isArray(list) ? list.filter((item: unknown) => isRecord(item)) : [];
 }

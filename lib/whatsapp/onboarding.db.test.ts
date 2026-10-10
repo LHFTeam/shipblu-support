@@ -1,7 +1,14 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
-import { agents, channels, jobs, whatsappAccounts, whatsappOnboardings } from '@/db/schema';
+import {
+  agents,
+  channels,
+  jobs,
+  whatsappAccounts,
+  whatsappCredentialEvents,
+  whatsappOnboardings,
+} from '@/db/schema';
 import { resetEnvCache } from '@/lib/env';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { stubFetch } from '@/lib/testing/fetch';
@@ -105,7 +112,7 @@ const exchangeRoutes = (overrides: Partial<Record<string, Route>> = {}): Route[]
       data: [{ id: PHONE, display_phone_number: '+20 10 1234 5678', verified_name: 'ShipBlu' }],
     }),
   },
-  {
+  overrides.me ?? {
     method: 'GET' as const,
     path: /\/me\?fields=client_business_id$/,
     answer: () => ({ client_business_id: '555666777', id: '1' }),
@@ -395,6 +402,86 @@ describe('the first phase: exchanging the code', () => {
     expect(
       await beginCoexistenceOnboarding(claim({ phoneNumberId: null }), await admin2()),
     ).toMatchObject({ ok: false, error: expect.stringMatching(/has 2/) });
+  });
+
+  /**
+   * Graph is not known to echo a bearer token or the request it was sent, but
+   * nothing promises it never will. So every read made with the new token
+   * answers here with a sentence carrying all three secrets, and the sentence
+   * must still reach the admin — it is the only reason they are given — with
+   * none of them in it, nor in a log line, a row or a job.
+   */
+  describe('when Graph echoes what it was sent', () => {
+    const ECHO = `Invalid OAuth access token - Cannot parse access token ${TOKEN} (code ${CODE}, client_secret ${APP_SECRET})`;
+    const refusing = (path: RegExp, status = 400): Route => ({
+      method: 'GET',
+      path,
+      status,
+      answer: () => ({ error: { message: ECHO, type: 'OAuthException', code: 190 } }),
+    });
+
+    async function everythingWritten(): Promise<string> {
+      return JSON.stringify([
+        await db.select().from(whatsappOnboardings),
+        await db.select().from(whatsappAccounts),
+        await db.select().from(whatsappCredentialEvents),
+        await db.select().from(channels),
+        await db.select().from(jobs),
+      ]);
+    }
+
+    it.each([
+      {
+        read: 'the WABA read',
+        routes: { waba: refusing(new RegExp(`/${WABA}\\?`)) },
+        phoneNumberId: PHONE,
+        outcome: { ok: false, error: expect.stringMatching(/cannot read business account/) },
+      },
+      {
+        read: 'the phone_numbers read',
+        routes: { numbers: refusing(new RegExp(`/${WABA}/phone_numbers\\?`)) },
+        phoneNumberId: null,
+        outcome: { ok: false, error: expect.stringMatching(/would not list the numbers/) },
+      },
+      {
+        read: 'the /me read',
+        routes: { me: refusing(/\/me\?/) },
+        phoneNumberId: PHONE,
+        outcome: { ok: true, notice: expect.stringMatching(/which business portfolio/) },
+      },
+      {
+        read: 'debug_token, failing',
+        routes: { debug: refusing(/\/debug_token\?/, 500) },
+        phoneNumberId: PHONE,
+        outcome: { ok: true, notice: expect.stringMatching(/inspection did not answer/) },
+      },
+      {
+        read: 'debug_token, calling the token invalid',
+        routes: {
+          debug: {
+            method: 'GET',
+            path: /\/debug_token\?/,
+            answer: () => ({ data: { app_id: APP_ID, is_valid: false, error: { message: ECHO } } }),
+          } satisfies Route,
+        },
+        phoneNumberId: PHONE,
+        outcome: { ok: false, error: expect.stringMatching(/is not valid/) },
+      },
+    ])('repeats $read with all three cut out', async ({ routes, phoneNumberId, outcome }) => {
+      const logs = captureLogs();
+      graph(exchangeRoutes(routes));
+
+      const answered = await beginCoexistenceOnboarding(claim({ phoneNumberId }), await admin());
+
+      expect(answered).toMatchObject(outcome);
+      // Meta's sentence did arrive, so the absences below are a scrub, not silence.
+      expect(JSON.stringify(answered)).toContain('Cannot parse access token [redacted]');
+      for (const secret of [TOKEN, CODE, APP_SECRET]) {
+        expect(JSON.stringify(answered)).not.toContain(secret);
+        expect(logs()).not.toContain(secret);
+        expect(await everythingWritten()).not.toContain(secret);
+      }
+    });
   });
 });
 
@@ -1316,5 +1403,87 @@ describe('recordSyncRequest', () => {
       .from(channels)
       .where(and(eq(channels.id, row!.id)));
     expect(after!.config).toEqual({ phoneNumberId: '109999999999' });
+  });
+});
+
+/**
+ * The second phase runs with the decrypted stored token, and every sentence it
+ * records — a step's error or warning, `last_transient_error`, the attempt's
+ * `error`, a credential's refusal, the worker log — is read by somebody. So
+ * when Meta's answer repeats the token, or the app secret the subscription
+ * read goes out with, neither may survive into any of them (`askGraph`).
+ */
+describe('the second phase, when Graph echoes what it was sent', () => {
+  const ECHO = `Invalid OAuth access token - Cannot parse access token ${TOKEN} (client_secret ${APP_SECRET})`;
+  const refusing = (method: 'GET' | 'POST', path: RegExp, status = 400, code = 100): Route => ({
+    method,
+    path,
+    status,
+    answer: () => ({ error: { message: ECHO, type: 'OAuthException', code } }),
+  });
+
+  async function everythingWritten(): Promise<string> {
+    return JSON.stringify([
+      await db.select().from(whatsappOnboardings),
+      await db.select().from(whatsappCredentialEvents),
+      await db.select().from(channels),
+      await db.select().from(jobs),
+    ]);
+  }
+
+  it.each([
+    {
+      read: 'the phone_numbers read',
+      overrides: { numbers: refusing('GET', new RegExp(`/${WABA}/phone_numbers\\?`)) },
+    },
+    {
+      read: 'the platform read',
+      overrides: {
+        platform: refusing('GET', new RegExp(`/${PHONE}\\?fields=is_on_biz_app,platform_type$`)),
+      },
+    },
+    {
+      read: 'the subscription',
+      overrides: { subscribe: refusing('POST', new RegExp(`/${WABA}/subscribed_apps$`)) },
+    },
+    {
+      read: 'a transient subscription failure',
+      overrides: {
+        subscribe: refusing('POST', new RegExp(`/${WABA}/subscribed_apps$`), 503, 2),
+      },
+    },
+    {
+      read: "the app's webhook fields",
+      overrides: { appFields: refusing('GET', new RegExp(`/${APP_ID}/subscriptions$`)) },
+    },
+    {
+      read: 'the copy request',
+      overrides: { sync: refusing('POST', new RegExp(`/${PHONE}/smb_app_data$`)) },
+    },
+    {
+      read: 'the copy request, refused as a bad token',
+      overrides: { sync: refusing('POST', new RegExp(`/${PHONE}/smb_app_data$`), 400, 190) },
+    },
+  ])('records $read with both cut out', async ({ overrides }) => {
+    const id = await exchanged();
+    graph(completeRoutes(overrides));
+    const logs = captureLogs();
+
+    let thrown = '';
+    try {
+      await completeOnboarding(id, { job: { attempts: 2, maxAttempts: 5 } });
+    } catch (error) {
+      thrown = error instanceof Error ? `${error.message}\n${error.stack}` : String(error);
+    }
+
+    const written = await everythingWritten();
+    // Meta's sentence did arrive somewhere a person reads, so the absences
+    // below are a scrub, not silence.
+    expect(`${written}\n${logs()}\n${thrown}`).toContain('Cannot parse access token [redacted]');
+    for (const secret of [TOKEN, APP_SECRET]) {
+      expect(written).not.toContain(secret);
+      expect(logs()).not.toContain(secret);
+      expect(thrown).not.toContain(secret);
+    }
   });
 });

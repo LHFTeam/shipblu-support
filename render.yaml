@@ -220,7 +220,11 @@ projects:
             #                            the Facebook Login for Business
             #                            configuration Embedded Signup opens
             #                            with; an id, but this environment's
-            #                            Meta app's own
+            #                            Meta app's own. A v4 one: created new
+            #                            with the WhatsApp Embedded Signup login
+            #                            variation and products selected (Cloud
+            #                            API at least) — v2 and v3 end
+            #                            2026-10-15 — see lib/env.ts.
             #   PRIORITY_AI              off | shadow | apply. Here and not in
             #                            shared: it sends customer text to a
             #                            third party, and `apply` moves SLA
@@ -559,7 +563,8 @@ projects:
             #                              only during a rotation
             #   META_EMBEDDED_SIGNUP_CONFIG_ID
             #                              a configuration on staging's own
-            #                              Meta app
+            #                              Meta app, and a v4 one, as in
+            #                              production's group
             envVars: []
 
         services:

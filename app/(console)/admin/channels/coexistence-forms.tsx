@@ -27,6 +27,7 @@ import {
 import {
   type CredentialBadge,
   credentialBadges,
+  credentialOrigin,
   type CredentialStatus,
 } from '@/lib/whatsapp/credential-status';
 import {
@@ -37,6 +38,7 @@ import {
   FB_SDK_URL,
   FINISH_WAIT_MS,
   isFacebookOrigin,
+  metaErrorSentence,
   parseSignupMessage,
   POPUP_BLOCKED_MS,
   reduceConnectPhase,
@@ -179,12 +181,7 @@ function phaseCopy(
         tone: 'muted',
       };
     case 'meta_error':
-      return {
-        text:
-          `Meta reported: ${phase.message ?? 'an error with no message'}.` +
-          (phase.sessionId ? ` Reference ${phase.sessionId} — quote it to Meta support.` : ''),
-        tone: 'error',
-      };
+      return { text: metaErrorSentence(phase.message, phase.sessionId), tone: 'error' };
     case 'awaiting_number':
       return { text: 'Reading which number you chose…', tone: 'muted' };
     case 'no_number':
@@ -434,6 +431,11 @@ function ConnectCard({
   const codeRef = useRef<string | null>(null);
   const finishRef = useRef<Extract<SignupMessage, { kind: 'finished' }> | null>(null);
   const finishTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Set when the window says it finished with no number (`FINISH_ONLY_WABA`),
+  // so the code it hands over ends the attempt at once: no finish naming a
+  // number is coming, and waiting `FINISH_WAIT_MS` for one would only delay
+  // the same sentence.
+  const numberlessRef = useRef(false);
 
   const { appId, configId } = readiness;
 
@@ -509,14 +511,17 @@ function ConnectCard({
       if (code && !finish) {
         dispatch({ type: 'awaiting_number' });
         if (finishTimer.current) clearTimeout(finishTimer.current);
-        finishTimer.current = setTimeout(() => {
+        const endWithoutNumber = () => {
           // The code is dropped with the wait: a finish message landing
           // after this would otherwise call the action from a card that
           // has already said the flow ended without a number.
+          finishTimer.current = null;
           codeRef.current = null;
           setAnswerDue(false);
           dispatch({ type: 'no_number' });
-        }, FINISH_WAIT_MS);
+        };
+        if (numberlessRef.current) endWithoutNumber();
+        else finishTimer.current = setTimeout(endWithoutNumber, FINISH_WAIT_MS);
       }
       return;
     }
@@ -578,6 +583,10 @@ function ConnectCard({
           finishRef.current = message;
           tryFinish();
           break;
+        case 'finished_without_number':
+          numberlessRef.current = true;
+          tryFinish();
+          break;
         case 'cancelled':
           dispatch({ type: 'cancelled', step: message.step });
           break;
@@ -604,6 +613,7 @@ function ConnectCard({
 
     codeRef.current = null;
     finishRef.current = null;
+    numberlessRef.current = false;
     if (finishTimer.current) clearTimeout(finishTimer.current);
     finishTimer.current = null;
     const clickedAt = Date.now();
@@ -628,9 +638,11 @@ function ConnectCard({
         // close, or the flow ended without a code. Meta's CANCEL or ERROR
         // usually lands around now, so it is given a moment to name the step
         // before the card calls it a plain close.
-        if (finishRef.current) {
-          // Finished, and no code to exchange: the login configuration is not
-          // returning one — a misconfiguration, not something to retry blindly.
+        if (finishRef.current || numberlessRef.current) {
+          // Finished, with or without a number, and no code to exchange: Meta
+          // documents the code coming back whenever its flow finishes, so the
+          // login configuration is not returning one — a misconfiguration,
+          // not something to retry blindly.
           dispatch({
             type: 'meta_error',
             message:
@@ -1217,13 +1229,11 @@ function explainCredentialBadge(badge: CredentialBadge, status: CredentialStatus
 
 /** The business account row's account of its stored credential — everything but the credential. */
 export function CredentialCard({ status, now }: { status: CredentialStatus; now: Date }) {
-  const source = status.source === 'embedded_signup' ? 'Embedded Signup' : status.source;
-
   return (
     <div className="flex flex-col gap-1">
       <p className="text-xs text-[var(--muted-foreground)]">
-        Stored from {source} on {formatDateTime(status.storedAt)} ·{' '}
-        {status.tokenType ?? 'token type unknown'} · {expiryLabel(status)} · key {status.keyId}
+        {credentialOrigin(status)} · {status.tokenType ?? 'token type unknown'} ·{' '}
+        {expiryLabel(status)} · key {status.keyId}
       </p>
       <div className="flex flex-wrap gap-1">
         {credentialBadges(status, now).map((badge) => (

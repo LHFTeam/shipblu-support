@@ -49,7 +49,10 @@ const log = logger('coexistence');
  * The plaintext token exists here as one local, from the exchange to the seal.
  * It is never logged, never returned, never put in a job payload, and every
  * sentence this module builds about a request names its host and path, never
- * its URL — the exchange's URL carries the app secret and the code.
+ * its URL — the exchange's URL carries the app secret and the code. What Meta
+ * or the network says back is repeated only with the token, the code and the
+ * app secret cut out of it (`redact`), since nothing promises Graph never
+ * echoes what it was sent.
  *
  * A fetch tracing span is the place a sentence rule cannot reach: Next's
  * patched `fetch` (and `@vercel/otel`'s, and OpenTelemetry's undici
@@ -97,9 +100,14 @@ export function coexistenceReadiness(): Readiness {
   if (!e.META_EMBEDDED_SIGNUP_CONFIG_ID) {
     missing.push({
       variable: 'META_EMBEDDED_SIGNUP_CONFIG_ID',
+      // What the id must name, not only that it is missing: an admin creating
+      // it now creates it once, and a configuration with no products is not
+      // v4 — which nothing on this page can check afterwards.
       why:
         'The Facebook Login for Business configuration that opens Embedded Signup for a ' +
-        'number on the WhatsApp Business app.',
+        'number on the WhatsApp Business app — a new one, with the WhatsApp Embedded Signup ' +
+        'login variation and the Cloud API product selected, which is what makes it Embedded ' +
+        'Signup v4.',
     });
   }
   const keyProblem = credentialKeyProblem();
@@ -218,18 +226,28 @@ export async function beginCoexistenceOnboarding(
   const token = exchanged.token;
   const warnings: string[] = [];
 
+  // Every sentence below that repeats what Graph or the network layer said —
+  // a refusal, a warning in the notice — passes through this on its way out,
+  // with all three secrets this attempt holds. Graph is not known to echo a
+  // bearer token or the request it was sent, but nothing in its contract
+  // promises it never will, and these sentences go to the browser and to
+  // anything that logs the action's answer. Cutting all three everywhere is
+  // cheaper than reasoning, per call, about which of them that call was sent.
+  const scrub = (text: string) => redact(text, [token, code, appSecret]);
+
   let inspection: TokenInspection | null = null;
   try {
     inspection = await inspectToken(token);
   } catch (error) {
     // Not the proof — reading the WABA below is — so a debug_token that did
     // not answer costs the metadata, not the connection.
-    warnings.push(`Meta's token inspection did not answer (${errorMessage(error)}).`);
+    warnings.push(`Meta's token inspection did not answer (${scrub(errorMessage(error))}).`);
   }
 
   if (inspection) {
+    // Scrubbed too: an invalid token's refusal repeats Meta's own sentence.
     const refusal = refuseInspection(inspection, readiness.appId, claim.wabaId);
-    if (refusal) return { ok: false, error: refusal };
+    if (refusal) return { ok: false, error: scrub(refusal) };
   }
 
   let wabaName: string | null;
@@ -250,12 +268,12 @@ export async function beginCoexistenceOnboarding(
       ok: false,
       error:
         `The token Meta issued cannot read business account ${claim.wabaId}, so nothing was ` +
-        `stored: ${error instanceof WhatsAppApiError ? error.message : errorMessage(error)}. ` +
+        `stored: ${scrub(error instanceof WhatsAppApiError ? error.message : errorMessage(error))}. ` +
         `Sign in to Meta's window as an admin of the business portfolio that owns the number.`,
     };
   }
 
-  const phoneNumberId = claim.phoneNumberId ?? (await onlyNumberOn(claim.wabaId, token));
+  const phoneNumberId = claim.phoneNumberId ?? (await onlyNumberOn(claim.wabaId, token, scrub));
   if (typeof phoneNumberId !== 'string') return { ok: false, error: phoneNumberId.error };
 
   // Metadata, so never the reason a connection fails.
@@ -265,7 +283,7 @@ export async function beginCoexistenceOnboarding(
     businessId = typeof me?.client_business_id === 'string' ? me.client_business_id : null;
   } catch (error) {
     warnings.push(
-      `Meta did not say which business portfolio the token is for (${errorMessage(error)}).`,
+      `Meta did not say which business portfolio the token is for (${scrub(errorMessage(error))}).`,
     );
   }
 
@@ -384,8 +402,16 @@ class AlreadyConnecting extends Error {}
  * For a finish event that did not name the number. A Business-app number
  * converted into a messaging account is that account's only number; a WABA
  * with several is one where guessing would connect the wrong phone.
+ *
+ * Takes the caller's `scrub` rather than redacting the token alone: Meta's
+ * sentence leaves through the caller's refusal, and the caller holds the code
+ * and the app secret as well.
  */
-async function onlyNumberOn(wabaId: string, token: string): Promise<string | { error: string }> {
+async function onlyNumberOn(
+  wabaId: string,
+  token: string,
+  scrub: (text: string) => string,
+): Promise<string | { error: string }> {
   try {
     const listed = await callGraph<{ data?: { id?: string }[] }>(
       phoneNumbersRequest(wabaId),
@@ -401,9 +427,9 @@ async function onlyNumberOn(wabaId: string, token: string): Promise<string | { e
     };
   } catch (error) {
     return {
-      error: `Meta would not list the numbers on business account ${wabaId}: ${
-        error instanceof WhatsAppApiError ? error.message : errorMessage(error)
-      }. Connect again.`,
+      error: `Meta would not list the numbers on business account ${wabaId}: ${scrub(
+        error instanceof WhatsAppApiError ? error.message : errorMessage(error),
+      )}. Connect again.`,
     };
   }
 }
@@ -520,11 +546,7 @@ async function exchangeCode(
 ): Promise<{ ok: true; token: string } | { ok: false; error: string }> {
   const url = tokenExchangeUrl(GRAPH_BASE, { appId, appSecret, code });
   const where = `${url.host}${url.pathname}`;
-  const scrub = (text: string) =>
-    [appSecret, code].reduce(
-      (out, secret) => (secret ? out.split(secret).join('[redacted]') : out),
-      text,
-    );
+  const scrub = (text: string) => redact(text, [appSecret, code]);
   const timeoutMs = graphTimeout('GET');
 
   let response: Response;
@@ -563,6 +585,23 @@ async function exchangeCode(
       `Meta refused the sign-in code (${meta}), so nothing was stored. The code lives thirty ` +
       `seconds and can be used once — press Connect and finish Meta's window a little faster.`,
   };
+}
+
+/**
+ * `text` with every occurrence of each secret cut out.
+ *
+ * No minimum length, unlike `redact` in `lib/meta/debug-token.ts`, which keeps
+ * a short test value from mangling its one fixed sentence: every secret this is
+ * handed is one the onboarding sent somewhere — here, or in the second phase
+ * (`./onboarding-complete`) — and must never repeat, however short a
+ * misconfigured one is. An empty one is skipped, since splitting on it would
+ * put a marker between every character.
+ */
+export function redact(text: string, secrets: readonly string[]): string {
+  return secrets.reduce(
+    (out, secret) => (secret ? out.split(secret).join('[redacted]') : out),
+    text,
+  );
 }
 
 /**

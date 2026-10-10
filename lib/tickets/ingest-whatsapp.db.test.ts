@@ -12,10 +12,12 @@ import {
   messages,
   slaPolicies,
   ticketStatuses,
+  whatsappAccounts,
 } from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
+import { storeBusinessToken } from '@/lib/whatsapp/credentials';
 import type { NormalisedEcho, NormalisedInboundMessage } from '@/lib/whatsapp/types';
-import { ingestWhatsAppEcho, ingestWhatsAppMessage } from './ingest-whatsapp';
+import { applyWhatsAppStatus, ingestWhatsAppEcho, ingestWhatsAppMessage } from './ingest-whatsapp';
 import { ingestWhatsAppHistoryChunk } from './ingest-whatsapp-history';
 
 /**
@@ -779,5 +781,139 @@ describe('ingestWhatsAppEcho on a number connected through coexistence', () => {
 
     expect(await ingestWhatsAppEcho(phoneEcho())).toMatchObject({ duplicate: true });
     expect((await clocks(asked.conversationId)).firstRespondedAt).toBeNull();
+  });
+});
+
+/**
+ * A 190 on a status webhook, explained on the reply it refused.
+ *
+ * The webhook names no credential, and every one used to be explained as
+ * META_PAGE_ACCESS_TOKEN's — so a stored credential's expiry sent somebody to
+ * Render to replace a token that was fine, while the number stayed dead until
+ * a reconnect nobody was told to make.
+ */
+describe('applyWhatsAppStatus, for an expired token', () => {
+  const EXPIRED =
+    '190: Error validating access token: Session has expired on Tuesday, 18-Aug-26 04:00:00 PDT.';
+
+  async function account(wabaId: string, tokenEnvVar: string | null = null) {
+    const [row] = await db
+      .insert(whatsappAccounts)
+      .values({ name: `ShipBlu ${wabaId}`, wabaId, tokenEnvVar, isDefault: true })
+      .returning({ id: whatsappAccounts.id, wabaId: whatsappAccounts.wabaId });
+    return row!;
+  }
+
+  async function storeCredential(target: { id: string; wabaId: string }) {
+    await db.transaction((tx) =>
+      storeBusinessToken(tx, {
+        accountId: target.id,
+        wabaId: target.wabaId,
+        token: 'EAAGm0PX4ZCpsBAstatusTestToken0123456789',
+        inspection: null,
+        businessId: null,
+        actor: null,
+      }),
+    );
+  }
+
+  /** A reply `send_whatsapp` sent, recording `meta` as it does, then refused with a 190. */
+  async function refusedReply(meta: Record<string, unknown>): Promise<string | null> {
+    const { conversationId } = await ingestWhatsAppMessage(inbound());
+    await db.insert(messages).values({
+      conversationId,
+      direction: 'outbound',
+      kind: 'reply',
+      bodyText: 'It leaves the hub this afternoon.',
+      channelMessageId: 'wamid.reply-1',
+      deliveryStatus: 'sent',
+      meta,
+    });
+
+    const applied = await applyWhatsAppStatus({
+      wamid: 'wamid.reply-1',
+      status: 'failed',
+      at: LATER,
+      recipientId: CUSTOMER,
+      error: EXPIRED,
+      conversationExpiresAt: null,
+    });
+    expect(applied).toBe(true);
+
+    const [row] = await db
+      .select({ deliveryStatus: messages.deliveryStatus, deliveryError: messages.deliveryError })
+      .from(messages)
+      .where(eq(messages.channelMessageId, 'wamid.reply-1'));
+    expect(row!.deliveryStatus).toBe('failed');
+    expect(row!.deliveryError).toContain('Session has expired');
+    return row!.deliveryError;
+  }
+
+  it('sends a stored credential to a reconnect, and nowhere near the shared token', async () => {
+    const egypt = await account('102290129340398');
+    await storeCredential(egypt);
+
+    const explained = await refusedReply({
+      phoneNumberId: SUPPORT_NUMBER,
+      whatsappAccountId: egypt.id,
+    });
+
+    expect(explained).toContain('reconnected through Meta');
+    expect(explained).not.toContain('META_PAGE_ACCESS_TOKEN');
+  });
+
+  it('names the variable the account sends with', async () => {
+    const saudi = await account('102290129340399', 'WHATSAPP_TOKEN_SAUDI');
+
+    const explained = await refusedReply({
+      phoneNumberId: SUPPORT_NUMBER,
+      whatsappAccountId: saudi.id,
+    });
+
+    expect(explained).toContain('WHATSAPP_TOKEN_SAUDI');
+    expect(explained).not.toContain('META_PAGE_ACCESS_TOKEN');
+  });
+
+  it('finds the account through the number on a reply recorded before the account was', async () => {
+    await storeCredential(await account('102290129340398'));
+
+    expect(await refusedReply({ phoneNumberId: SUPPORT_NUMBER })).toContain(
+      'reconnected through Meta',
+    );
+  });
+
+  it('names the shared token when it is the one the send used', async () => {
+    // No business account at all: the send resolved none, and authenticated
+    // with META_PAGE_ACCESS_TOKEN.
+    expect(await refusedReply({ phoneNumberId: SUPPORT_NUMBER })).toContain(
+      'META_PAGE_ACCESS_TOKEN is expired',
+    );
+  });
+
+  /**
+   * The account the send recorded is gone. The number now resolves to another
+   * one, with a stored credential — which is not what sent this reply, so
+   * naming it would send somebody to reconnect a number that works.
+   */
+  it('says it cannot tell when the account the send recorded is gone', async () => {
+    const gone = await account('102290129340397', 'WHATSAPP_TOKEN_OLD');
+    await db.delete(whatsappAccounts).where(eq(whatsappAccounts.id, gone.id));
+    await storeCredential(await account('102290129340398'));
+
+    const explained = await refusedReply({
+      phoneNumberId: SUPPORT_NUMBER,
+      whatsappAccountId: gone.id,
+    });
+
+    expect(explained).toContain('can no longer be told');
+    expect(explained).not.toContain('reconnected through Meta');
+    expect(explained).not.toContain('META_PAGE_ACCESS_TOKEN is expired');
+  });
+
+  it('says it cannot tell for a reply that recorded neither account nor number', async () => {
+    const explained = await refusedReply({});
+
+    expect(explained).toContain('can no longer be told');
+    expect(explained).not.toContain('META_PAGE_ACCESS_TOKEN is expired');
   });
 });

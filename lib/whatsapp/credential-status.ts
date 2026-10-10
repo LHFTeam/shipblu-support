@@ -13,6 +13,8 @@
  * published to whoever can open the admin screen.
  */
 
+import { formatDateTime } from '@/lib/format';
+
 /**
  * Whether the key a credential was sealed under is one this process holds.
  *
@@ -48,6 +50,15 @@ export type CredentialStatus = {
   dataAccessExpiresAt: Date | null;
   inspectedAt: Date | null;
   obtainedByAgentId: string | null;
+  /**
+   * The name of the agent who connected it, as their row reads today. Null
+   * when no agent row answers: the foreign key sets the id null when the agent
+   * is deleted, and a store made by a job would carry no agent at all. The
+   * name a departed agent had is kept on the `stored` audit row
+   * (`whatsapp_credential_events.agent_label`), where "who connected this?" is
+   * still answered after the fact.
+   */
+  obtainedByName: string | null;
   lastVerifiedAt: Date | null;
   lastRefusedAt: Date | null;
   /** Meta's sentence for the refusal, as the template sync recorded it. */
@@ -93,6 +104,25 @@ export type CredentialBadge = {
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Where the credential came from, when, and who connected it — the opening
+ * clause of the account card: "Stored from Embedded Signup on 1 Oct 2026,
+ * 03:00 by Mona".
+ *
+ * With no agent to name, the "by" clause is left out rather than filled in.
+ * A null name means either a deleted agent or a store no person made, and the
+ * card cannot tell which — "by an agent since removed" would be false for the
+ * second, and "by unknown" reads as a credential nobody can account for, when
+ * the audit row still names whoever it was.
+ */
+export function credentialOrigin(
+  status: Pick<CredentialStatus, 'source' | 'storedAt' | 'obtainedByName'>,
+): string {
+  const source = status.source === 'embedded_signup' ? 'Embedded Signup' : status.source;
+  const by = status.obtainedByName ? ` by ${status.obtainedByName}` : '';
+  return `Stored from ${source} on ${formatDateTime(status.storedAt)}${by}`;
+}
 
 /**
  * The badges a credential earns, most urgent first.

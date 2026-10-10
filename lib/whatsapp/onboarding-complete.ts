@@ -6,7 +6,7 @@ import {
   type OnboardingStepRecord,
   whatsappOnboardings,
 } from '@/db/schema';
-import { env } from '@/lib/env';
+import { env, metaAppSecret } from '@/lib/env';
 import { errorMessage } from '@/lib/errors';
 import { logger } from '@/lib/log';
 import {
@@ -16,7 +16,7 @@ import {
 } from '@/lib/meta/subscriptions';
 import { type ClaimedJob, enqueue, isFinalAttempt, retryDelaySeconds } from '@/lib/queue';
 import { credentialsForAccount, listAccounts } from './accounts';
-import { callGraph, WhatsAppApiError } from './client';
+import { callGraph, type GraphRequest, WhatsAppApiError } from './client';
 import {
   canRequestSync,
   type Coexistence,
@@ -27,6 +27,7 @@ import {
 import { recordSyncRequest, writeOnboardedCoexistence } from './coexistence-state';
 import { CredentialKeyError } from './credential-envelope';
 import { ACCESS_TOKEN_CODE, explainAuthError } from './errors';
+import { redact } from './onboarding';
 import { runsNamedSteps } from './onboarding-reads';
 import {
   numberPlatformRequest,
@@ -220,6 +221,56 @@ async function finish(onboardingId: string, targeted: boolean): Promise<void> {
     .where(eq(whatsappOnboardings.id, onboardingId));
 }
 
+/**
+ * `callGraph`, with the stored token and the app secret cut out of anything
+ * Meta says back.
+ *
+ * Every sentence this job records starts here — a step's error or warning,
+ * `last_transient_error`, the attempt's `error`, the worker log — and each is
+ * read by somebody: the first three on the channels page, the last wherever
+ * Render's logs go. Graph is not known to echo a bearer token, but nothing in
+ * its contract promises it never will, and the first phase already cuts the
+ * same secrets out of the same kind of sentence (`./onboarding`). Done once,
+ * to the error as it leaves Graph, rather than at each of the dozen places
+ * that repeat it, so the next sentence somebody adds cannot be the one that
+ * forgot.
+ */
+async function askGraph<T>(request: GraphRequest, token: string): Promise<T | null> {
+  try {
+    return await callGraph<T>(request, token);
+  } catch (error) {
+    throw scrubbed(error, secretsOf(token));
+  }
+}
+
+/**
+ * What this job holds that no sentence may repeat: the business token, and the
+ * app secret inside the app token the subscription read goes out with.
+ */
+function secretsOf(token: string): string[] {
+  return [token, metaAppSecret() ?? ''];
+}
+
+/**
+ * `error` with `secrets` cut out of what it says, and still the same kind of
+ * error: the steps read a `WhatsAppApiError`'s code and `isTransient` to choose
+ * between a retry, a recorded refusal and a failed attempt, so the scrubbed one
+ * has to answer those exactly as Meta's did.
+ */
+function scrubbed(error: unknown, secrets: readonly string[]): unknown {
+  if (error instanceof WhatsAppApiError) {
+    const message = redact(error.message, secrets);
+    const details = error.details === null ? null : redact(error.details, secrets);
+    if (message === error.message && details === error.details) return error;
+    return new WhatsAppApiError(message, error.status, error.code, details, error.isTransient);
+  }
+  // A network failure names a host and a path, never the header the token
+  // rides in; this is for the failure that is not so polite.
+  const message = errorMessage(error);
+  const clean = redact(message, secrets);
+  return clean === message ? error : new Error(clean);
+}
+
 function describe(error: unknown): string {
   if (error instanceof WhatsAppApiError) {
     return `Meta answered ${error.status || 'nothing'}${error.code ? ` (${error.code})` : ''}: ${error.message}`;
@@ -402,7 +453,7 @@ async function numberStep(row: Onboarding, token: string): Promise<NumberFacts> 
     data?: { id?: string; display_phone_number?: string; verified_name?: string }[];
   } | null;
   try {
-    listed = await callGraph(phoneNumbersRequest(row.wabaId), token);
+    listed = await askGraph(phoneNumbersRequest(row.wabaId), token);
   } catch (error) {
     permanently(error, `Meta would not list the numbers on business account ${row.wabaId}`);
   }
@@ -428,7 +479,7 @@ async function numberStep(row: Onboarding, token: string): Promise<NumberFacts> 
   // guide's own check, `is_on_biz_app` true and `platform_type` CLOUD_API.
   const warnings: string[] = [];
   try {
-    const platform = await callGraph<{ is_on_biz_app?: boolean; platform_type?: string }>(
+    const platform = await askGraph<{ is_on_biz_app?: boolean; platform_type?: string }>(
       numberPlatformRequest(row.phoneNumberId),
       token,
     );
@@ -469,8 +520,8 @@ async function subscribeStep(row: Onboarding, token: string): Promise<string> {
   let apps: { data?: { whatsapp_business_api_data?: { id?: string } }[] } | null;
   try {
     // A lost answer (null) is fine here: the read-back below is the proof.
-    await callGraph(subscribeAppRequest(row.wabaId), token);
-    apps = await callGraph(subscribedAppsRequest(row.wabaId), token);
+    await askGraph(subscribeAppRequest(row.wabaId), token);
+    apps = await askGraph(subscribedAppsRequest(row.wabaId), token);
   } catch (error) {
     permanently(error, `Meta refused to subscribe this app to business account ${row.wabaId}`);
   }
@@ -500,7 +551,12 @@ async function subscribeStep(row: Onboarding, token: string): Promise<string> {
         `\`npm run job -- subscribe_meta_webhooks\` adds them.`;
     }
   } catch (error) {
-    warning = `Could not read this app's webhook fields to check them: ${errorMessage(error)}.`;
+    // Read with the app token, `{app id}|{app secret}`, which `askGraph` does
+    // not see — so cut here, by hand, for the same reason it cuts.
+    warning = `Could not read this app's webhook fields to check them: ${redact(
+      errorMessage(error),
+      secretsOf(token),
+    )}.`;
   }
 
   const at = new Date().toISOString();
@@ -765,7 +821,7 @@ async function syncStep(
   const at = new Date();
   let answer: { request_id?: string } | null;
   try {
-    answer = await callGraph(smbAppDataRequest(row.phoneNumberId, type), token);
+    answer = await askGraph(smbAppDataRequest(row.phoneNumberId, type), token);
   } catch (error) {
     refusedToken(error);
     if (error instanceof WhatsAppApiError && askedBefore && error.code === ALREADY_REQUESTED) {

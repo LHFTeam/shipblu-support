@@ -86,8 +86,12 @@ export type Coexistence = {
   verifiedName: string | null;
   subscribedAt: string | null;
   syncs: { contacts?: ContactsSync; history?: HistorySync };
-  /** Meta told us the number was disconnected from the phone (`account_update`). */
-  disconnected?: { at: string; event: string; reason: string | null };
+  /**
+   * Meta told us the number was disconnected from the phone (`account_update`).
+   * `initiatedBy` is Meta's `initiated_by` verbatim — `USER` or `SYSTEM` where
+   * it says, null where it does not (only a `PARTNER_REMOVED` carries one).
+   */
+  disconnected?: { at: string; event: string; reason: string | null; initiatedBy: string | null };
   /**
    * When the newest `account_update` applied to this connection happened —
    * the high-water mark that keeps an older event processed late from undoing
@@ -161,6 +165,7 @@ export function parseCoexistence(config: unknown): Coexistence | null {
             at: text(raw.disconnected.at) ?? '',
             event: text(raw.disconnected.event) ?? '',
             reason: text(raw.disconnected.reason),
+            initiatedBy: text(raw.disconnected.initiatedBy),
           },
         }
       : {}),
@@ -424,6 +429,41 @@ function historyStalled(coexistence: Coexistence, now: Date): boolean {
   return now.getTime() - lastMovedAt(slot) > SYNC_STALE_MS;
 }
 
+/**
+ * Who Meta says disconnected the number, as a sentence for the badge — or
+ * nothing where it does not say.
+ *
+ * Worth a sentence because the two answers send an admin to different people.
+ * `USER` is something done with the phone: Disconnect under Settings → Account
+ * → Business Platform in the app, a change of number, or the app registered
+ * again on another phone — so whoever holds it knows which, and whether it was
+ * meant. `SYSTEM` is Meta acting on its own, for a phone left unused for about
+ * two weeks or for enforcement, which nobody at the business chose. The reason
+ * code beside it in the badge (`PRIMARY_INACTIVITY`, …) is Meta's word for
+ * which; this is the part an admin can act on without looking it up.
+ *
+ * A value Meta has not documented is quoted rather than guessed at, the way
+ * the event and the reason are.
+ */
+function disconnectedBy(initiatedBy: string | null): string {
+  if (!initiatedBy) return '';
+  switch (initiatedBy.toUpperCase()) {
+    case 'USER':
+      return (
+        ` Meta says this was done on the business's side: the number was disconnected in ` +
+        `the WhatsApp Business app (Settings → Account → Business Platform), changed, or ` +
+        `registered again on another phone — whoever holds the phone will know which.`
+      );
+    case 'SYSTEM':
+      return (
+        ` Meta says it disconnected the number itself, not anyone at the business — after ` +
+        `the phone went unused for about two weeks, for example, or for enforcement.`
+      );
+    default:
+      return ` Meta says it was started by ${initiatedBy}.`;
+  }
+}
+
 export type CoexistenceBadge = {
   label: string;
   tone: 'brand' | 'neutral' | 'pending' | 'success' | 'warning' | 'danger';
@@ -467,10 +507,10 @@ export function coexistenceBadges(coexistence: Coexistence, now: Date): Coexiste
   ];
 
   if (coexistence.disconnected) {
-    const { event, reason, at } = coexistence.disconnected;
+    const { event, reason, initiatedBy, at } = coexistence.disconnected;
     const reported =
       `Meta reported ${event || 'a disconnection'}${reason ? ` (${reason})` : ''} on ` +
-      `${formatDateTime(at || now)}.`;
+      `${formatDateTime(at || now)}.${disconnectedBy(initiatedBy)}`;
     // Only the one event Meta undoes by itself is told to wait. Anything else
     // — PARTNER_REMOVED, or an event this module has not met — gets the
     // instruction that is safe whatever happened: reconnect.

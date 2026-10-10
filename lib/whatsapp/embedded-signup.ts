@@ -6,8 +6,8 @@
  * proves the code by exchanging it and the ids by reading them with the token
  * (`./onboarding`) — so this module only has to get three things right: open
  * the window with the options Meta documents, take a message from Meta's own
- * origin and nobody else's, and read the three events the window sends without
- * ever throwing in a `message` listener.
+ * origin and nobody else's, and read the events the window sends without ever
+ * throwing in a `message` listener.
  *
  * It also holds the connect card's phase machine and the two pieces of SDK
  * plumbing the card leans on — seeing whether the browser refused the window,
@@ -16,9 +16,11 @@
  * shows in a browser, and the card is a `'use client'` file a node test cannot
  * import; here, the test beside this file runs them.
  *
- * Verified against Meta's Embedded Signup and coexistence pages on 2026-10-08.
- * Where the pages disagree (there are two generations of them), the constants
- * below say which one they follow, and the test beside this file pins them.
+ * Verified for Embedded Signup v4 against Meta's versions, v4, implementation,
+ * coexistence and errors pages on 2026-10-09. Where the pages disagree — and
+ * the v4 pages disagree with each other about the launch — the constants below
+ * say which one they follow and what is still open, and the test beside this
+ * file pins them.
  */
 
 import { GRAPH_VERSION } from '@/lib/meta/graph';
@@ -30,39 +32,88 @@ export const FB_SDK_URL = 'https://connect.facebook.net/en_US/sdk.js';
 export const SIGNUP_MESSAGE_TYPE = 'WA_EMBEDDED_SIGNUP';
 
 /**
- * The three events the window posts, by what they mean here.
+ * The events the window posts, by what they mean here: v4's finish types as
+ * the implementation page lists them, less the two flows nothing here starts.
  *
- * The coexistence guide names the finish event for the Business-app flow
- * `FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING`; the plain `FINISH` is the standard
- * flow's. Both are read as "finished": which flow ran is the login
- * configuration's decision, not the browser's, and the server treats the ids
- * either way as claims it proves — a number that turns out not to be on the
- * Business app is recorded as such by the job's `number` step.
+ * `FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING` is the Business-app flow's finish
+ * and `FINISH` the Cloud API flow's. Both are read as "finished": v4 asks for
+ * the number first (Meta is still rolling that order out) and enters the
+ * coexistence flow by itself when the number is already on the Business app,
+ * so which flow ran is decided by the number the business typed, not by the
+ * browser — and the server treats the ids either way as claims it proves; a
+ * number that turns out not to be on the Business app is recorded as such by
+ * the job's `number` step.
+ *
+ * `FINISH_ONLY_WABA` — "completed flow without a phone number" — is its own
+ * kind and never "finished". The server reads the number off the WABA when the
+ * window names none, which is right for a converted Business-app account,
+ * whose only number is the one converted, and wrong here: an existing WABA the
+ * business picked without adding a number would have the code spent on it and,
+ * if it already holds exactly one number, that number connected — one nobody
+ * chose in the window.
+ *
+ * `CANCEL` is a closed window or a user-reported error — Meta posts the second
+ * as CANCEL too (`parseSignupMessage` tells them apart). `ERROR` is still in
+ * v4's list, with no sample of what it carries, so it is read with the fields
+ * of the reported error and nothing assumed beyond them.
+ *
+ * Not read: `FINISH_OBO_MIGRATION` and `FINISH_GRANT_ONLY_API_ACCESS`, the
+ * on-behalf-of migration and grant-only flows, which this launch does not ask
+ * for. One arriving anyway reaches the card as a code with no finish, and the
+ * card's wait ends that as "no number" (`FINISH_WAIT_MS`) — it connects nothing.
  */
 export const SIGNUP_EVENTS = {
   finished: 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING',
   finishedStandard: 'FINISH',
+  finishedWithoutNumber: 'FINISH_ONLY_WABA',
   cancelled: 'CANCEL',
   error: 'ERROR',
 } as const;
 
 /**
- * The `extras` handed to `FB.login`, which is what turns a Facebook login into
- * Embedded Signup for a number on the WhatsApp Business app.
+ * The `extras` handed to `FB.login` for Embedded Signup v4, with the
+ * WhatsApp Business app onboarding switched on.
  *
- * **Re-check these against the App Dashboard's Embedded Signup Builder before
- * relying on them.** The custom-flow page for the Business-app onboarding
- * shows v3 extras — `featureType` and `sessionInfoVersion: '3'` — while the
- * versions page says v4 selects the product in the login configuration and
- * takes `extras: {}`, listing `whatsapp_business_app_onboarding` for v4 as
- * well. The Builder generates the snippet for whichever version the app is on,
- * and that snippet is the authority; this is the v3 shape, in one constant so
- * adopting the Builder's is one edit. v2 retires on 2026-10-15.
+ * **The version is not chosen here.** v4 is a property of the Facebook Login
+ * for Business configuration `META_EMBEDDED_SIGNUP_CONFIG_ID` names: one created
+ * with the "WhatsApp Embedded Signup" login variation and products selected —
+ * Cloud API at least — and "selecting the products will automatically set you
+ * to v4". Meta's pages say to create a new configuration for it, and none says
+ * whether adding products to an old one does the same. The Business-app
+ * onboarding is not among those products: v4 "continues to support" it
+ * through `featureType`, below. A configuration with no products is not v4
+ * whatever these extras say, and v2 and v3, with their public previews, end on
+ * 2026-10-15; Meta does not say whether a launch on one after that is refused,
+ * upgraded or broken. Nothing in the repo can read which version a
+ * configuration is — `coexistenceReadiness` checks that the variable is set,
+ * no more — so the id is the App Dashboard's to get right.
+ *
+ * Two keys are gone from the shape before this one, and must not come back:
+ * - `sessionInfoVersion: '3'`. A v2 setting: v3 and v4 send the session info
+ *   for every flow. `featureType` plus `sessionInfoVersion` with no `version`
+ *   is v2's own signature, and no page says whether a v4 configuration ignores
+ *   that or falls back on it. The coexistence guide's Step 2 still shows it
+ *   beside `featureType` because that sample is the v2 shape — which this
+ *   comment used to call v3; v3 needed `version: 'v3'`.
+ * - `version`. Its documented values are the public previews, `v3` and `v2`;
+ *   there is no `v4`, which comes from the configuration.
+ *
+ * Still open, because Meta's v4 pages disagree with each other: the versions
+ * page gives v4 `extras: {}` ("purposely empty"), the implementation page
+ * `{ setup: {} }`, and the v4 page sends Business-app onboarding to the
+ * coexistence guide's `featureType` step. No page shows the three together;
+ * this is their union, and `setup` is empty, so it pre-fills nothing.
+ * `featureType` stays because the v4 public preview's page says a number
+ * already on the Business app enters the coexistence flow by itself, while v4's
+ * own flow page says so only "if you have enabled Coexistence" — linking to
+ * this switch. **Re-check against the Embedded Signup Builder** (App
+ * Dashboard → WhatsApp → Embedded Signup Builder), which writes the snippet for
+ * the app's own configuration; this is one constant so adopting its shape is
+ * one edit.
  */
 export const EMBEDDED_SIGNUP_EXTRAS = {
   setup: {},
   featureType: 'whatsapp_business_app_onboarding',
-  sessionInfoVersion: '3',
 } as const;
 
 /** How long the browser waits for the finish event once the code is in hand. */
@@ -334,7 +385,9 @@ export function connectWaitingOn(
  * `response_type: 'code'` with `override_default_response_type` is what makes
  * the SDK hand back a code the server exchanges for a *business* token, rather
  * than a user token the browser would hold; the server's exchange is the only
- * thing the thirty-second code is for.
+ * thing the thirty-second code is for. v4 leaves these three as they were, and
+ * the exchange too; no option here picks the version (`EMBEDDED_SIGNUP_EXTRAS`
+ * says what does).
  */
 export function embeddedSignupLoginOptions(configId: string) {
   return {
@@ -373,8 +426,12 @@ export type SignupMessage =
       phoneNumberId: string | null;
       businessId: string | null;
     }
+  /** `FINISH_ONLY_WABA`: finished with no number — `SIGNUP_EVENTS` says why it is kept apart. */
+  | { kind: 'finished_without_number' }
   | { kind: 'cancelled'; step: string | null }
   | { kind: 'error'; message: string | null; code: string | null; sessionId: string | null };
+
+type ReportedError = Extract<SignupMessage, { kind: 'error' }>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -382,6 +439,29 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 const text = (value: unknown): string | null =>
   typeof value === 'string' && value !== '' ? value : null;
+
+/**
+ * An error reference, as a string. Meta's sample quotes the `error_code`
+ * placeholder but gives the example value, 524126, as bare digits, so a number
+ * is taken too: dropping it would lose the detail a support case is looked up
+ * by.
+ */
+const reference = (value: unknown): string | null =>
+  typeof value === 'number' && Number.isFinite(value) ? String(value) : text(value);
+
+/**
+ * The error a window message reports, or null when it reports none.
+ *
+ * `error_code` is the spelling every current page uses; `error_id` is what an
+ * earlier copy of Meta's page had, and is read only when `error_code` is
+ * absent, which costs nothing.
+ */
+function reportedError(payload: Record<string, unknown>): ReportedError | null {
+  const message = text(payload.error_message);
+  const code = reference(payload.error_code) ?? reference(payload.error_id);
+  const sessionId = text(payload.session_id);
+  return message || code || sessionId ? { kind: 'error', message, code, sessionId } : null;
+}
 
 /**
  * Reads one `message` event's data as an Embedded Signup event, or null for
@@ -392,6 +472,9 @@ const text = (value: unknown): string | null =>
  * an object as well. Never throws: this runs inside a window listener that
  * receives every message any script on the page posts, and a listener that
  * throws on one of them stops hearing the one it was waiting for.
+ *
+ * `version` is not read. v4's own samples carry none, while the coexistence
+ * and errors pages' samples still say `version: 3`, so nothing can depend on it.
  */
 export function parseSignupMessage(data: unknown): SignupMessage | null {
   let message: unknown = data;
@@ -418,35 +501,63 @@ export function parseSignupMessage(data: unknown): SignupMessage | null {
         businessId: text(payload.business_id),
       };
     }
+    case SIGNUP_EVENTS.finishedWithoutNumber:
+      return { kind: 'finished_without_number' };
     case SIGNUP_EVENTS.cancelled:
-      return { kind: 'cancelled', step: text(payload.current_step) };
+      // Meta posts a user-reported error as CANCEL, with the message and the
+      // session id its support asks for. Read as a cancel, the card told the
+      // admin they had closed the window and threw both away.
+      return reportedError(payload) ?? { kind: 'cancelled', step: text(payload.current_step) };
     case SIGNUP_EVENTS.error:
-      return {
-        kind: 'error',
-        message: text(payload.error_message),
-        // Spelled `error_id` on one page and `error_code` on the other.
-        code: text(payload.error_code) ?? text(payload.error_id),
-        sessionId: text(payload.session_id),
-      };
+      return (
+        reportedError(payload) ?? { kind: 'error', message: null, code: null, sessionId: null }
+      );
     default:
       return null;
   }
 }
 
 /**
- * The step a cancelled window was on, in words.
+ * The step a cancelled window was on, in words: the six `current_step` values
+ * Meta's errors page lists, each worded from the screen it names for it.
  *
- * `PHONE_NUMBER_SETUP` is the one Meta's sample shows; the others are steps
- * whose names describe themselves, so a label cannot say something the name
- * does not. Anything else is printed as Meta spelled it rather than guessed at.
+ * Anything else is printed as Meta spelled it rather than guessed at. That
+ * covers the coexistence flow's own screens — the business profile, the QR
+ * code, the terms — for which no value is documented, and the order a business
+ * meets the rest in varies while v4's number-first screens are still rolling
+ * out. `WABA_SELECTION`, guessed here before, is on no page; the WhatsApp
+ * account picker is `WABA_PHONE_PROFILE_PICKER`.
  */
 const STEP_LABELS: Record<string, string> = {
+  BUSINESS_ACCOUNT_SELECTION: 'choosing the business portfolio',
+  WABA_PHONE_PROFILE_PICKER: 'choosing the WhatsApp account',
+  WHATSAPP_BUSINESS_PROFILE_SETUP: 'creating the WhatsApp account',
   PHONE_NUMBER_SETUP: 'choosing the number',
   PHONE_NUMBER_VERIFICATION: 'verifying the number',
-  BUSINESS_ACCOUNT_SELECTION: 'choosing the business portfolio',
-  WABA_SELECTION: 'choosing the WhatsApp business account',
+  PERMISSIONS: 'reviewing the permissions',
 };
 
 export function signupStepLabel(step: string): string {
-  return STEP_LABELS[step] ?? step;
+  // Own keys only: an index into an object literal also reaches what every
+  // object inherits, so a step spelled `constructor` or `toString` would print
+  // a function's source where the step belongs.
+  return Object.hasOwn(STEP_LABELS, step) ? STEP_LABELS[step]! : step;
+}
+
+/**
+ * What the card says when Meta's window reported an error.
+ *
+ * Meta's sample message is sentences of its own — "Your verified name
+ * violates WhatsApp guidelines. Please edit your verified name and try
+ * again." — so a full stop is added only where the message does not end one
+ * already; appending it blindly printed "try again..". The session id is named
+ * as what to quote, because it is the reference Meta's support asks for.
+ */
+export function metaErrorSentence(message: string | null, sessionId: string | null): string {
+  const reported = message?.trim() || 'an error with no message';
+  const ended = /[.!?؟…]$/u.test(reported) ? reported : `${reported}.`;
+  return (
+    `Meta reported: ${ended}` +
+    (sessionId ? ` Reference ${sessionId} — quote it to Meta support.` : '')
+  );
 }

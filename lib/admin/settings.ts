@@ -323,8 +323,31 @@ export function listChannelsForAdmin() {
     .orderBy(asc(channels.name));
 }
 
-export function listWhatsAppAccounts() {
-  return db.select().from(whatsappAccounts).orderBy(asc(whatsappAccounts.name));
+/**
+ * Every WhatsApp business account, by name, with the columns the channels page
+ * reads — and no others.
+ *
+ * Named rather than `select()`, because the page spreads each row into a client
+ * component's props, and a client prop is serialised into the RSC payload whole:
+ * a star select there publishes whatever column is added to the table next, to
+ * anybody who can open the admin screen. That is why the stored credential is a
+ * table of its own rather than a column here, and this list is what keeps the
+ * reason true. `tokenEnvVar` is the *name* of a variable, never its value.
+ */
+export function listAccountsForAdmin() {
+  return db
+    .select({
+      id: whatsappAccounts.id,
+      name: whatsappAccounts.name,
+      wabaId: whatsappAccounts.wabaId,
+      tokenEnvVar: whatsappAccounts.tokenEnvVar,
+      isDefault: whatsappAccounts.isDefault,
+      isActive: whatsappAccounts.isActive,
+      lastSyncedAt: whatsappAccounts.lastSyncedAt,
+      lastSyncError: whatsappAccounts.lastSyncError,
+    })
+    .from(whatsappAccounts)
+    .orderBy(asc(whatsappAccounts.name));
 }
 
 /**
