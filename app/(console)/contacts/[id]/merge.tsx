@@ -3,7 +3,8 @@
 import { useActionState, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { Badge, Button, ErrorText } from '@/components/ui';
+import { Badge, ErrorText } from '@/components/ui';
+import { ConfirmSubmit } from '@/components/confirm-submit';
 import { SearchIcon } from '@/components/icons';
 import type { MergeCandidate } from '@/lib/contacts/merge';
 import { mergeContactInto, type ContactActionState } from '../actions';
@@ -71,8 +72,9 @@ const REASONS: Record<NonNullable<MergeCandidate['reason']>, string> = {
  *
  * The row says what would move before it is moved, because "3 tickets" is the
  * whole difference between merging a stray duplicate and merging away somebody's
- * history. The confirm is a second click on the same button — enough to stop a
- * mis-click, and it needs no focus trap to be accessible.
+ * history. The confirm is a second, separate click on the same button. It was
+ * the first click until §6.90: the button turned into a submit inside its own
+ * click handler, and that click then submitted it.
  */
 export function MergeCandidateRow({
   survivorId,
@@ -82,7 +84,6 @@ export function MergeCandidateRow({
   candidate: MergeCandidate;
 }) {
   const [state, action] = useActionState(mergeContactInto, INITIAL);
-  const [armed, setArmed] = useState(false);
 
   const label = candidate.name ?? candidate.email ?? candidate.phone ?? 'Unnamed contact';
   const handle = [candidate.email, candidate.phone].filter(Boolean).join(' · ');
@@ -105,15 +106,7 @@ export function MergeCandidateRow({
       <form action={action} className="flex flex-col items-end gap-1">
         <input type="hidden" name="survivorId" value={survivorId} />
         <input type="hidden" name="loserId" value={candidate.id} />
-        {armed ? (
-          <Button type="submit" variant="danger" size="sm">
-            Merge into this contact
-          </Button>
-        ) : (
-          <Button type="button" variant="ghost" size="sm" onClick={() => setArmed(true)}>
-            Merge
-          </Button>
-        )}
+        <ConfirmSubmit label="Merge" confirmLabel="Merge into this contact" />
         {state.error ? <ErrorText>{state.error}</ErrorText> : null}
       </form>
     </li>

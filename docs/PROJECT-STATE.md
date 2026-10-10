@@ -5356,6 +5356,126 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     keying on `ok` alone, a refresh after a success, a bare `action=`, and a
     refusal that moves the key.
 
+90. **A button that turns into a submit inside its own click handler is
+    submitted by that click, and the platform's click count does not see every
+    double-click.** _2026-10-09 and 10, measured in Chromium 141 against `main`
+    at 4f47b15._ The contact page's merge row drew "Merge" as
+    `<Button type="button" onClick={() => setArmed(true)}>` and the armed
+    "Merge into this contact" as `<Button type="submit">`, in the two branches
+    of one ternary. Same element, same position, so React kept the DOM node and
+    changed its `type`. React commits a click's state update in the microtask
+    after the click's listeners return, which is before the browser runs the
+    click's default action, and that action reads the button's type as it is
+    by then. One click, logged:
+    `mousedown[d=1] on "Merge" → click[d=1] on "Merge" → submit(by "Merge into this contact")`.
+    So one click, one Enter, one Space or one tap merged a contact with the
+    confirm step on screen; a double-click, or holding Enter, merged twice. The
+    confirm was never disabled while the action ran, so `already_merged` in
+    `lib/contacts/merge.ts` was the only thing between a triple-click and three
+    calls.
+
+    The other three hand-written two-click controls had the other half.
+    `DangerAction` (every admin delete) and the comment strip's delete, which
+    removes a customer's public comment at Meta, rendered a different
+    component once armed. The arming click's node left the document, so it
+    submitted nothing. But the second click of a double-click, or of a
+    double-tap, landed on the confirm that had taken its place, and confirmed.
+    Arming also dropped focus to `<body>`, so a keyboard could arm either one
+    and never confirm it. The sidebar's unlink "×" (`UnlinkButton`) confirmed
+    on a double-click and on a held Enter, because each Enter keydown, repeats
+    included, produces the keypress that activates a focused button.
+
+    **The fix is `ConfirmSubmit`** (`components/confirm-submit.tsx`), with
+    `useConfirmClick` for the unlink button, which has no form. One `<button>`
+    for both steps:
+    - The arming click calls `preventDefault`, which cancels its default action,
+      so the type it flips cannot act on it.
+    - A pointer click within 500ms of the last pointer click on the button is
+      refused whatever its count, and so is any click the platform counts as a
+      second or later, armed or not. Refusing on `detail > 1` alone was the
+      first version, and real input showed what it misses (below).
+    - Keyboard activation is exempt: Enter, NumpadEnter and Space, and
+      `element.click()`, all report `detail` 0. A guard on time alone was
+      measured in the prototype and swallowed a quick Enter, Enter.
+    - A repeated Enter keydown is cancelled, which cancels its click. Only
+      Enter: the first version cancelled every repeated key, and a held arrow,
+      PageDown or Tab then stopped at the button (40px of scroll where `main`
+      gives 640).
+    - It is disabled while the form's action runs (`useFormStatus`), and
+      disarmed on the render that sees the action end, either way. A retry
+      after a refusal is two clicks again, and a press made mid-flight and
+      released after the answer only arms; while it stayed armed, that release
+      sent the action a second time.
+
+    **What the platform counts, measured with real input.** Playwright tells
+    Chromium a mouse click's count rather than letting it time the click, so
+    the mouse figures come from a headed Chromium on a private Xvfb driven
+    through XTest, where Chromium counts for itself; taps go through CDP touch
+    events, which Chromium's gesture detector times.
+    - Mouse: the second click is `detail` 2 up to about 495ms press to press
+      and 1 from about 503ms, whatever the hold. Only within 2px on each axis:
+      a second press 3px off starts again at 1. And the count wraps after
+      three: 1, 2, 3, 1, 2, 3.
+    - Touch: 2 when the second tap lands up to 400ms after the first lifts, 1
+      after; within 20px; the same 1, 2, 3, 1 wrap.
+    - So on `detail > 1` alone, a double-click whose second press drifted 3px
+      confirmed, and so did the fourth click of a fast burst, or the fourth
+      tap. The time guard closes both.
+
+    **The cost**: a deliberate pointer confirm within half a second of the
+    previous click is swallowed, and the next click confirms. For a tap, a
+    confirm counts from about 500ms lift to lift.
+
+    **How it was measured.** The method §6.80 describes: the four real
+    components bundled with esbuild against the React Next vendors, in its
+    development and production builds, `next/navigation` stubbed, and each
+    `'use server'` module replaced by a stub that counts its calls and answers
+    after a delay. Five adversarial passes, each re-run on `main`, on the first
+    version and on the fix:
+    - the original 13 gestures, 80 checks per build: `main` 43, first version
+      80, fix 80;
+    - real mouse input, 48 checks: `main` 12, first version 24, fix 44;
+    - keyboard and focus, 160 checks: `main` 127, first version 143, fix 151;
+    - touch, 144 checks: `main` 58, first version 116, fix 144;
+    - form lifecycle, 109 checks: `main` 58 of 108, first version 86, fix 92.
+
+    Development and production agreed throughout. What the fix still fails is
+    what was chosen or left alone. The four real-input misses are the
+    deliberate confirm inside half a second. The keyboard misses are focus
+    dropping to the page while the button is disabled, as it does for every
+    `SubmitButton`, and the unlink button's accessible name, which says
+    "Unlink …" in both states, as on `main`. The lifecycle misses are those
+    and checks of things this change does not touch: the comment strip's Hide
+    sending twice on a double-click when Meta answers fast, an action that
+    throws, two scripted `click()` calls in one task, and implicit
+    submission. A refusal answered inside a
+    double-click's two clicks re-armed the button by the second click until
+    the burst check moved ahead of the arming one: 24 of 40 probe rows, then 0.
+
+    Known limits, left on purpose:
+    - It guards only itself. In a form with a text field, Enter submits without
+      it, or confirms it once armed. No caller has one.
+    - On a phone-width screen, a long contact name makes the armed merge
+      button wrap 20 to 48px lower, so a second tap at the same spot misses.
+      Nothing is sent.
+    - Not measured: Firefox, Safari on any platform, and the double-click
+      settings of Windows, macOS or a desktop environment. Android Chrome's
+      long-press and tap settings come from the platform.
+
+    Two other controls have the double-click half and are not converted. The
+    WhatsApp connect card's Cancel becomes "Close anyway" while it waits on
+    Meta (`admin/channels/coexistence-forms.tsx`); read, not measured. The
+    category and root-cause rows put Retire where Cancel was, so a double-click
+    on Cancel retires the row; measured.
+
+    The `button-type` repo rule refuses the merge row's shape anywhere else: a
+    button whose `type` is an expression, one button element with two types in
+    the branches of a conditional (through nested conditionals and one-element
+    fragments), or in two `return`s of one function. Run against `main`, it
+    names the merge row and nothing else. It cannot see a confirm swapped in
+    as a different component, since a wrapper's name does not say whether it
+    submits.
+
 ## 7. Verification already done
 
 - **The knowledge-base role floor, against a real Postgres.** _2026-09-04._ The
