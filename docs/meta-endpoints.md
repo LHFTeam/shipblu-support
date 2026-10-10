@@ -463,7 +463,15 @@ Three things about the table are decided rather than copied:
   app secret and the code in a URL, so `tokenExchangeUrl` builds the URL and
   nothing else, the action sends it with its own `fetch` outside every Graph
   client, and anything Meta or the network says back has both secrets cut out
-  before it is repeated. Nothing is written before it succeeds.
+  before it is repeated. Nothing is written before it succeeds. The calls after
+  it are held to the same rule, since nothing in Graph's contract promises it
+  never echoes what it was sent: the action repeats what the `debug_token`,
+  WABA, `phone_numbers` and `/me` reads say with the token, the code and the
+  app secret cut out (`redact`), and the job sends every call through
+  `askGraph`, which cuts the stored token and the app secret out of the error
+  before a step, the attempt's `error`, `last_transient_error` or the worker
+  log repeats it — and the app-token subscription read, which `askGraph` does
+  not see, by hand.
 - **The WABA read is the proof, not `debug_token`.** `granular_scopes` may list
   no targets for a business token, so the inspection refuses only what Meta
   actually said — the wrong app, a missing scope, a target list that excludes
@@ -477,8 +485,10 @@ Three things about the table are decided rather than copied:
   phone.** Meta's 2593107 (already asked) and 2593108 (window passed) both mean
   "reconnect" and are worded so; a business declining on the phone does not
   land here at all — Meta accepts the request and says so later, in a `history`
-  delivery carrying 2593109. A reconnect does not ask again for what the
-  earlier connection copied.
+  delivery carrying 2593109. A reconnect does not ask again for what an
+  earlier connection finished copying (`copiedSoFar`); a copy that was only
+  requested — refused, stalled, never delivered, declined on the phone — is
+  asked for again.
 
 ## 6. Inbound: the endpoints Meta calls
 
@@ -515,17 +525,21 @@ A number connected through coexistence adds four fields to the WhatsApp route,
 parsed by `lib/whatsapp/parse.ts` and handed out by
 `worker/handlers/process-whatsapp-webhook.ts`:
 
-| Field                | Carries                                                                                                                                       | Ingested by                                                                                         |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `history`            | Chunks of the phone's past chats, per phase, each with the whole copy's `progress` (100 is complete); a decline (2593109); media placeholders | `ingestWhatsAppHistoryChunk`, `attachHistoryMedia` (`lib/tickets/ingest-whatsapp-history.ts`)       |
-| `smb_app_state_sync` | Entries from the phone's address book, `add` or `remove`                                                                                      | `applyWhatsAppContactSync` (same module)                                                            |
-| `smb_message_echoes` | A reply the business typed on the phone                                                                                                       | `ingestWhatsAppEcho` (`lib/tickets/ingest-whatsapp.ts`) — the team's reply on a coexistence channel |
-| `account_update`     | `PARTNER_REMOVED`, `ACCOUNT_OFFBOARDED`, `ACCOUNT_RECONNECTED`                                                                                | `applyWhatsAppAccountUpdate` (`lib/whatsapp/coexistence-state.ts`)                                  |
+| Field                | Carries                                                                                                                                                                  | Ingested by                                                                                         |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| `history`            | Chunks of the phone's past chats, per phase, each with the whole copy's `progress` (100 is complete); a decline (2593109, inside a chunk's `errors`); media placeholders | `ingestWhatsAppHistoryChunk`, `attachHistoryMedia` (`lib/tickets/ingest-whatsapp-history.ts`)       |
+| `smb_app_state_sync` | Entries from the phone's address book, `add` or `remove`                                                                                                                 | `applyWhatsAppContactSync` (same module)                                                            |
+| `smb_message_echoes` | A reply the business typed on the phone                                                                                                                                  | `ingestWhatsAppEcho` (`lib/tickets/ingest-whatsapp.ts`) — the team's reply on a coexistence channel |
+| `account_update`     | `PARTNER_REMOVED` (with who started it, `initiated_by`, which the channel's badge turns into a sentence), `ACCOUNT_OFFBOARDED`, `ACCOUNT_RECONNECTED`                    | `applyWhatsAppAccountUpdate` (`lib/whatsapp/coexistence-state.ts`)                                  |
 
 Each delivery's idempotency key comes from `lib/whatsapp/delivery-id.ts`:
 `hm:<wamid>` per history message — distinct from `m:`, because the file behind
 a placeholder arrives later under the same wamid — and
-`c:<phone>:<action>:<timestamp>` per contact. **Nothing for `account_update`**:
+`c:<phone>:<action>:<timestamp>` per contact. A list that is not one, or an
+element that is not an object, adds nothing to the key rather than throwing: the
+key is read in the route before the row is written, so a throw there was a 500
+with nothing stored, and Meta redelivering the same bytes met the same throw.
+**Nothing for `account_update`**:
 the index behind the key is spent for good, and a number disconnected,
 reconnected and disconnected again sends the same body twice, so its handler is
 idempotent instead — and applies an event only when it is at least as new as
@@ -565,20 +579,20 @@ drop it from `REQUIRED_WHATSAPP_FIELDS` as dead.
 Credentials, all optional in the schema (`lib/env.ts`) and declared in
 `render.yaml` in the same commit:
 
-| Variable                                                    | Used by                                                                                                          |
-| ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `META_PAGE_ACCESS_TOKEN`                                    | §2 over the Page connection, the Page subscription write, `debug_token`'s input, and the WhatsApp default token  |
-| `META_APP_ID` + `META_APP_SECRET`                           | The app token for `/{app-id}/subscriptions` and `debug_token`'s authorisation                                    |
-| `META_APP_SECRET`                                           | Also verifies X-Hub-Signature-256 on `page` and WhatsApp deliveries                                              |
-| `META_VERIFY_TOKEN`                                         | Answers the subscription handshake, on both webhook routes and on every write                                    |
-| `FACEBOOK_PAGE_ID` / `INSTAGRAM_ACCOUNT_ID`                 | The node every send, private reply and subscription write is addressed to                                        |
-| `INSTAGRAM_ACCESS_TOKEN`                                    | Everything in §2 and §3 routed over the direct Instagram connection                                              |
-| `INSTAGRAM_APP_SECRET` (a.k.a. `META_INSTAGRAM_APP_SECRET`) | Verifies deliveries signed by the Instagram Login connection                                                     |
-| `WHATSAPP_PHONE_NUMBER_ID` / `WHATSAPP_WABA_ID`             | The default send number and the template listing                                                                 |
-| `WHATSAPP_TOKEN_*`                                          | A second business account's own token, named by a database row — after a stored credential, before the shared    |
-| `META_EMBEDDED_SIGNUP_CONFIG_ID`                            | The Facebook Login for Business configuration the browser opens Embedded Signup with; an id, but per environment |
-| `WHATSAPP_CREDENTIAL_KEY`                                   | Seals and opens the stored business tokens (§1): its own value per environment, never derived from `APP_SECRET`  |
-| `WHATSAPP_CREDENTIAL_KEY_PREVIOUS`                          | The key being retired, set only while `rotate_whatsapp_credentials` runs                                         |
+| Variable                                                    | Used by                                                                                                                                                                      |
+| ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `META_PAGE_ACCESS_TOKEN`                                    | §2 over the Page connection, the Page subscription write, `debug_token`'s input, and the WhatsApp default token                                                              |
+| `META_APP_ID` + `META_APP_SECRET`                           | The app token for `/{app-id}/subscriptions` and `debug_token`'s authorisation                                                                                                |
+| `META_APP_SECRET`                                           | Also verifies X-Hub-Signature-256 on `page` and WhatsApp deliveries                                                                                                          |
+| `META_VERIFY_TOKEN`                                         | Answers the subscription handshake, on both webhook routes and on every write                                                                                                |
+| `FACEBOOK_PAGE_ID` / `INSTAGRAM_ACCOUNT_ID`                 | The node every send, private reply and subscription write is addressed to                                                                                                    |
+| `INSTAGRAM_ACCESS_TOKEN`                                    | Everything in §2 and §3 routed over the direct Instagram connection                                                                                                          |
+| `INSTAGRAM_APP_SECRET` (a.k.a. `META_INSTAGRAM_APP_SECRET`) | Verifies deliveries signed by the Instagram Login connection                                                                                                                 |
+| `WHATSAPP_PHONE_NUMBER_ID` / `WHATSAPP_WABA_ID`             | The default send number and the template listing                                                                                                                             |
+| `WHATSAPP_TOKEN_*`                                          | A second business account's own token, named by a database row — after a stored credential, before the shared                                                                |
+| `META_EMBEDDED_SIGNUP_CONFIG_ID`                            | The Facebook Login for Business configuration the browser opens Embedded Signup with; an id, but per environment, and a v4 one (products selected): v2 and v3 end 2026-10-15 |
+| `WHATSAPP_CREDENTIAL_KEY`                                   | Seals and opens the stored business tokens (§1): its own value per environment, never derived from `APP_SECRET`                                                              |
+| `WHATSAPP_CREDENTIAL_KEY_PREVIOUS`                          | The key being retired, set only while `rotate_whatsapp_credentials` runs                                                                                                     |
 
 Three gates are known to be closed as of 2026-09-07, and each stops a call
 above for a reason no code change fixes. `FEATURES` in
@@ -601,7 +615,9 @@ the file to re-read rather than this one:
 A fourth gate is unknown rather than closed. Embedded Signup is refused unless
 the app is a **Tech Provider** (or Solution Partner), which needs business
 verification first, and whether either Meta app is one has not been checked —
-nothing in §5.1 has run live. `docs/PROJECT-STATE.md` §5.2 lists that with the
+nothing in §5.1 has run live. And from 2026-10-15 the configuration
+`META_EMBEDDED_SIGNUP_CONFIG_ID` names must be a v4 one, which nothing here can
+read back. `docs/PROJECT-STATE.md` §5.2 lists that with the
 rest of what the first live onboarding waits on.
 
 ---

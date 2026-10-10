@@ -52,11 +52,11 @@ describe('parseCoexistence', () => {
         wabaId: '102030405',
         displayPhoneNumber: 42,
         syncs: 'nonsense',
-        disconnected: { at: 7 },
+        disconnected: { at: 7, initiatedBy: 7 },
       },
     });
     expect(parsed).toMatchObject({ displayPhoneNumber: null, syncs: {} });
-    expect(parsed?.disconnected).toEqual({ at: '', event: '', reason: null });
+    expect(parsed?.disconnected).toEqual({ at: '', event: '', reason: null, initiatedBy: null });
     expect(parseCoexistence({ coexistence: { wabaId: '1' } })).toBeNull();
     expect(connected({}, { accountEventAt: 7 }).accountEventAt).toBeUndefined();
     expect(connected({}, { accountEventAt: ONBOARDED }).accountEventAt).toBe(ONBOARDED);
@@ -514,6 +514,55 @@ describe('coexistenceBadges', () => {
         at(60_000),
       ),
     ).toBe(true);
+  });
+
+  /**
+   * `applyWhatsAppAccountUpdate` stores who Meta says started a disconnect, and
+   * the two answers send the admin to different people: whoever holds the phone,
+   * or nobody, because Meta did it. Dropped on read, the badge said neither.
+   */
+  it('says who Meta reports started a disconnection, and nothing when it does not say', () => {
+    const removedBy = (initiatedBy: unknown) => {
+      const coexistence = connected(
+        {},
+        {
+          disconnected: {
+            at: ONBOARDED,
+            event: 'PARTNER_REMOVED',
+            reason: 'PRIMARY_INACTIVITY',
+            initiatedBy,
+          },
+        },
+      );
+      return {
+        stored: coexistence.disconnected?.initiatedBy,
+        explain: coexistenceBadges(coexistence, at(60_000)).find(
+          (badge) => badge.label === 'disconnected on the phone',
+        )!.explain,
+      };
+    };
+
+    const byMeta = removedBy('SYSTEM');
+    expect(byMeta.stored).toBe('SYSTEM');
+    expect(byMeta.explain).toMatch(/Meta says it disconnected the number itself/);
+    expect(byMeta.explain).not.toMatch(/business's side/);
+
+    const byBusiness = removedBy('USER');
+    expect(byBusiness.stored).toBe('USER');
+    expect(byBusiness.explain).toMatch(/done on the business's side/);
+    expect(byBusiness.explain).toMatch(/Settings → Account → Business Platform/);
+    expect(byBusiness.explain).not.toMatch(/disconnected the number itself/);
+
+    // A value Meta has not documented is quoted, not mapped onto one of the two.
+    expect(removedBy('PARTNER').explain).toMatch(/Meta says it was started by PARTNER\./);
+
+    // Not said, or not a string: the badge claims nothing about who.
+    for (const unsaid of [null, undefined, 7]) {
+      const { stored, explain } = removedBy(unsaid);
+      expect(stored).toBeNull();
+      expect(explain).not.toMatch(/Meta says/);
+      expect(explain).toMatch(/press Reconnect and complete the window again/);
+    }
   });
 
   it('counts the address book, and names a disconnection and a window that closed unused', () => {

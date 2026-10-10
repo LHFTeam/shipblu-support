@@ -83,3 +83,73 @@ describe('deliveryId', () => {
     ).toBeNull();
   });
 });
+
+/**
+ * This runs in the route before the row is written, so a throw is a 500 with
+ * nothing stored, and Meta redelivers the same bytes into the same throw. Each
+ * shape keeps a well-formed part beside the junk and must key on exactly that
+ * part: the key a redelivery collides on is the one the worker's skip agrees
+ * with.
+ */
+describe('deliveryId: a container that is not what Meta documents', () => {
+  const batch = (...changes: unknown[]) => ({
+    object: 'whatsapp_business_account',
+    entry: [{ id: '102290129340398', changes }],
+  });
+  const value = (fields: Record<string, unknown>) => ({ field: 'history', value: fields });
+  const thread = (messages: unknown) => ({ id: '16505551234', messages });
+  const KEPT = thread([{ id: 'wamid.KEPT' }]);
+  const wellFormed = value({ history: [{ threads: [KEPT] }] });
+  const contact = {
+    type: 'contact',
+    contact: { phone_number: '16505551234' },
+    action: 'add',
+    metadata: { timestamp: '1739321024' },
+  };
+
+  it.each([
+    ['a null chunk', batch(value({ history: [null, { threads: [KEPT] }] })), 'hm:wamid.KEPT'],
+    ['a history that is not a list', batch(value({ history: {} }), wellFormed), 'hm:wamid.KEPT'],
+    ['a null thread', batch(value({ history: [{ threads: [null, KEPT] }] })), 'hm:wamid.KEPT'],
+    [
+      'a thread whose messages are not a list',
+      batch(value({ history: [{ threads: [thread({}), KEPT] }] })),
+      'hm:wamid.KEPT',
+    ],
+    [
+      'a null where the file behind a placeholder belongs',
+      batch(value({ messages: [null, { id: 'wamid.FILE' }] })),
+      'm:wamid.FILE',
+    ],
+    [
+      'a null address-book entry',
+      batch({ field: 'smb_app_state_sync', value: { state_sync: [null, contact] } }),
+      'c:16505551234:add:1739321024',
+    ],
+    [
+      'an address book that is not a list',
+      batch({ field: 'smb_app_state_sync', value: { state_sync: {} } }, wellFormed),
+      'hm:wamid.KEPT',
+    ],
+    [
+      'a null message, echo and status',
+      batch({
+        field: 'messages',
+        value: {
+          messages: [null, { id: 'wamid.LIVE' }],
+          message_echoes: [null],
+          statuses: [null],
+        },
+      }),
+      'm:wamid.LIVE',
+    ],
+    ['a null entry', { entry: [null, batch(wellFormed).entry[0]] }, 'hm:wamid.KEPT'],
+    ['a null change', batch(null, wellFormed), 'hm:wamid.KEPT'],
+  ])('skips %s and keys on the rest', (_what, payload, key) => {
+    expect(deliveryId(payload)).toBe(key);
+  });
+
+  it('keys a body that is not a batch at all on nothing', () => {
+    expect(deliveryId(null)).toBeNull();
+  });
+});

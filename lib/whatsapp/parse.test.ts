@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { displayText, parseTimestamp, parseWebhook } from './parse';
-import type { WhatsAppWebhookPayload } from './types';
+import type { NormalisedWebhook, WhatsAppWebhookPayload } from './types';
 
 function envelope(value: Record<string, unknown>): WhatsAppWebhookPayload {
   return {
@@ -420,6 +420,15 @@ describe('parseTimestamp', () => {
   it('falls back to now rather than 1970 when unparseable', () => {
     const before = Date.now();
     const parsed = parseTimestamp('not a number');
+    expect(parsed.getTime()).toBeGreaterThanOrEqual(before);
+  });
+
+  it('falls back to now for a finite value no Date can hold, rather than an Invalid Date', () => {
+    const before = Date.now();
+    const parsed = parseTimestamp('99999999999999');
+    // The throw this guards against is downstream: an Invalid Date passes
+    // through here quietly and fails the first `toISOString()` in the worker.
+    expect(() => parsed.toISOString()).not.toThrow();
     expect(parsed.getTime()).toBeGreaterThanOrEqual(before);
   });
 });
@@ -952,6 +961,162 @@ describe('parseWebhook: a number on the WhatsApp Business app', () => {
     expect(parsed.history.flatMap((chunk) => chunk.messages)).toEqual([]);
     expect(parsed.contactSyncs).toEqual([]);
     expect(parsed.accountUpdates).toEqual([]);
+  });
+});
+
+/**
+ * A list the payload says holds objects, holding something else — or not a list
+ * at all. `?? []` and `?.` answer only for a field that is missing, so every one
+ * of these threw: in the worker a retry of the whole delivery until it went
+ * `dead`, and through `deliveryId` a 500 in the route before the row was stored.
+ *
+ * Each case keeps a well-formed sibling beside the junk, because "skipped" has
+ * to be told apart from "the whole delivery read as nothing" — the second would
+ * pass a bare no-throw assertion and lose the customer's message.
+ */
+describe('parseWebhook: a container that is not what Meta documents', () => {
+  const METADATA = { display_phone_number: '15550783881', phone_number_id: '106540352242922' };
+  const batch = (...changes: unknown[]) => ({
+    object: 'whatsapp_business_account',
+    entry: [{ id: '102290129340398', changes }],
+  });
+
+  const KEPT = {
+    from: '16505551234',
+    id: 'wamid.KEPT',
+    timestamp: '1739230970',
+    type: 'text',
+    text: { body: 'Thanks!' },
+  };
+  const thread = (messages: unknown) => ({ id: '16505551234', messages });
+  const history = (chunks: unknown) => ({
+    field: 'history',
+    value: { metadata: METADATA, history: chunks },
+  });
+  const wellFormed = history([{ threads: [thread([KEPT])] }]);
+
+  it.each([
+    ['a null chunk', [history([null, { threads: [thread([KEPT])] }])]],
+    ['a history that is not a list', [history({}), wellFormed]],
+    ['a null thread', [history([{ threads: [null, thread([KEPT])] }])]],
+    ['threads that are not a list', [history([{ threads: {} }]), wellFormed]],
+    [
+      'a thread whose messages are not a list',
+      [history([{ threads: [thread({}), thread([KEPT])] }])],
+    ],
+    ['chunk errors that are not a list', [history([{ errors: {}, threads: [thread([KEPT])] }])]],
+  ])('skips %s and reads the rest of the history', (_what, changes) => {
+    const parsed = parseWebhook(batch(...changes));
+
+    expect(parsed.history.flatMap((chunk) => chunk.messages.map((m) => m.wamid))).toEqual([
+      'wamid.KEPT',
+    ]);
+  });
+
+  it('skips a null where the file behind a placeholder belongs, and reads the file beside it', () => {
+    const parsed = parseWebhook(
+      batch({
+        field: 'history',
+        value: {
+          metadata: METADATA,
+          messages: [
+            null,
+            {
+              from: '16505551234',
+              id: 'wamid.FILE',
+              timestamp: '1',
+              type: 'image',
+              image: { id: '9' },
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(parsed.historyMedia.map((media) => media.wamid)).toEqual(['wamid.FILE']);
+    expect(parsed.messages).toEqual([]);
+  });
+
+  it('skips an address book that is not a list, and a null entry in one that is', () => {
+    const contact = {
+      type: 'contact',
+      contact: { phone_number: '16505551234' },
+      action: 'add',
+      metadata: { timestamp: '1739321024' },
+    };
+    const parsed = parseWebhook(
+      batch(
+        { field: 'smb_app_state_sync', value: { metadata: METADATA, state_sync: {} } },
+        { field: 'smb_app_state_sync', value: { metadata: METADATA, state_sync: [null, contact] } },
+      ),
+    );
+
+    expect(parsed.contactSyncs.map((sync) => sync.phone)).toEqual(['16505551234']);
+  });
+
+  /** The live fields share the walk, and a coexistence number's traffic is mostly these. */
+  const LIVE = {
+    from: '16505551234',
+    id: 'wamid.LIVE',
+    timestamp: '1739230970',
+    type: 'text',
+    text: { body: 'Where is my order?' },
+  };
+  const live = (value: Record<string, unknown>) =>
+    batch({ field: 'messages', value: { metadata: METADATA, messages: [LIVE], ...value } });
+
+  it.each([
+    ['a null message', live({ messages: [null, LIVE] })],
+    ['a null contact profile', live({ contacts: [null] })],
+    ['echoes that are not a list', live({ message_echoes: {} })],
+    ['statuses that are not a list', live({ statuses: {} })],
+    ['a null account error', live({ errors: [null] })],
+    ['a null entry', { entry: [null, live({}).entry[0]] }],
+    ['a null change', { entry: [{ changes: [null, live({}).entry[0]!.changes[0]] }] }],
+  ])('skips %s and still reads the message the customer sent', (_what, payload) => {
+    expect(parseWebhook(payload).messages.map((m) => m.wamid)).toEqual(['wamid.LIVE']);
+  });
+
+  /**
+   * The leaves the parser calls a string method on. `?.trim()` guards null and
+   * undefined, not a number, so the same delivery-wide throw was one level down.
+   */
+  it.each([
+    [
+      'our own number',
+      live({ metadata: { ...METADATA, display_phone_number: 15550783881 } }),
+      (parsed: NormalisedWebhook) => expect(parsed.messages).toHaveLength(1),
+    ],
+    [
+      'a caption',
+      live({ messages: [{ ...LIVE, type: 'image', image: { id: '9', caption: 5 } }] }),
+      (parsed: NormalisedWebhook) => expect(parsed.messages[0]!.text).toBe('[image]'),
+    ],
+    [
+      'a mime type',
+      live({ messages: [{ ...LIVE, type: 'image', image: { id: '9', mime_type: 5 } }] }),
+      (parsed: NormalisedWebhook) =>
+        expect(parsed.messages[0]!.media).toMatchObject({ mediaId: '9', mimeType: null }),
+    ],
+    [
+      'an address-book name',
+      batch({
+        field: 'smb_app_state_sync',
+        value: {
+          state_sync: [
+            {
+              type: 'contact',
+              contact: { phone_number: '16505551234', full_name: 5, first_name: 'Pablo' },
+              action: 'add',
+            },
+          ],
+        },
+      }),
+      (parsed: NormalisedWebhook) =>
+        expect(parsed.contactSyncs).toEqual([expect.objectContaining({ name: 'Pablo' })]),
+    ],
+  ])('reads %s that is not a string as absent', (_what, payload, check) => {
+    check(parseWebhook(payload));
   });
 });
 

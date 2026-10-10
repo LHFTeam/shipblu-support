@@ -166,6 +166,44 @@ describe('storing a business token', () => {
     expect(status.inspectedAt).toBeInstanceOf(Date);
   });
 
+  it('names the agent who connected it, as their row reads now', async () => {
+    const egypt = await account('Egypt', '111111');
+    const mona = await admin();
+    await store(egypt, mona);
+
+    expect((await credentialStatuses()).get(egypt.id)).toMatchObject({
+      obtainedByAgentId: mona.id,
+      obtainedByName: 'Mona Admin',
+    });
+
+    // The join reads the agent's row, not a copy taken when it was stored.
+    await db.update(agents).set({ name: 'Mona Saleh' }).where(eq(agents.id, mona.id));
+    expect((await credentialStatuses()).get(egypt.id)?.obtainedByName).toBe('Mona Saleh');
+  });
+
+  /**
+   * Deleting the agent sets `obtained_by_agent_id` null. The credential still
+   * sends, so it must still be listed — an inner join would drop the account's
+   * card, its badges and its Forget button with the agent — and the name is
+   * null rather than anything invented. The audit row keeps the label.
+   */
+  it('still lists a credential whose agent was deleted, naming nobody', async () => {
+    const egypt = await account('Egypt', '111111');
+    const mona = await admin();
+    await store(egypt, mona);
+
+    await db.delete(agents).where(eq(agents.id, mona.id));
+
+    expect((await credentialStatuses()).get(egypt.id)).toMatchObject({
+      accountId: egypt.id,
+      obtainedByAgentId: null,
+      obtainedByName: null,
+    });
+    expect(await eventsFor(egypt.id)).toEqual([
+      expect.objectContaining({ event: 'stored', agentLabel: 'Mona Admin' }),
+    ]);
+  });
+
   /** One source per account. The variable it replaced is kept on the audit row. */
   it('clears the token variable it replaces, and remembers which one it was', async () => {
     const egypt = await account('Egypt', '111111', 'WHATSAPP_TOKEN_DBTEST');

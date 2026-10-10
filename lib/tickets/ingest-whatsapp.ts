@@ -4,8 +4,14 @@ import { channels, conversations, messages } from '@/db/schema';
 import { enqueue } from '@/lib/queue';
 import { onAgentReply } from '@/lib/sla';
 import { afterInboundMessage, afterMessageStored } from '@/lib/tickets/lifecycle';
+import {
+  accountForPhoneNumberId,
+  listAccounts,
+  resolveCredentialSource,
+  type WhatsAppAccount,
+} from '@/lib/whatsapp/accounts';
 import { parseCoexistence } from '@/lib/whatsapp/coexistence';
-import { explainDeliveryError } from '@/lib/whatsapp/errors';
+import { ACCESS_TOKEN_CODE, explainDeliveryError, type TokenOrigin } from '@/lib/whatsapp/errors';
 import type {
   NormalisedEcho,
   NormalisedInboundMessage,
@@ -517,7 +523,8 @@ export async function applyWhatsAppStatus(status: NormalisedStatus): Promise<boo
 
 /**
  * Builds the stored failure text, comparing the number the reply went out from
- * against the number the conversation arrived on.
+ * against the number the conversation arrived on — and, for an expired token,
+ * naming the credential it went out on.
  */
 async function explainFailure(
   message: {
@@ -547,7 +554,47 @@ async function explainFailure(
     windowOpen: windowState(message.lastCustomerMessageAt, status.at).isOpen,
     inboundPhoneNumberId: typeof arrivedOn === 'string' ? arrivedOn : null,
     sentFromPhoneNumberId: typeof sentFrom === 'string' ? sentFrom : null,
+    // Only a 190 names a credential, so only a 190 pays to find out which.
+    credential: code === ACCESS_TOKEN_CODE ? await sendingCredential(message.meta) : null,
   });
+}
+
+/**
+ * Which credential a failed send authenticated with — or null when that can no
+ * longer be told, which the sentence then says instead of blaming the shared
+ * token.
+ *
+ * Answered from what `send_whatsapp` recorded and the configuration as it
+ * stands, never by opening anything: `resolveCredentialSource` needs only
+ * whether a credential is stored, which `hasStoredToken` reads off the account
+ * row, and only the worker's resolvers may decrypt (`credential-confinement`).
+ * The account the send recorded is asked first, because a channel can be moved
+ * to another account after a send; the number is for a row recorded before the
+ * account was. "As it stands" is the one approximation: a status follows its
+ * send within seconds, and a credential changed in between is a reconnect
+ * somebody has only just made.
+ */
+async function sendingCredential(meta: unknown): Promise<TokenOrigin | null> {
+  const sent = meta as { phoneNumberId?: unknown; whatsappAccountId?: unknown; echo?: unknown };
+  // Another service's message — the bot's, or a reply typed on the phone —
+  // went out on a credential that is not ours to name.
+  if (sent.echo === true) return null;
+
+  let account: WhatsAppAccount | null;
+  if (typeof sent.whatsappAccountId === 'string') {
+    account = (await listAccounts()).find((row) => row.id === sent.whatsappAccountId) ?? null;
+    // Deleted since, and what it sent with is gone with it.
+    if (!account) return null;
+  } else if (typeof sent.phoneNumberId === 'string') {
+    // Null is no account at all, which is what the send resolved too: it went
+    // out on the shared token.
+    account = await accountForPhoneNumberId(sent.phoneNumberId);
+  } else {
+    return null;
+  }
+
+  const source = resolveCredentialSource(account, account?.hasStoredToken ?? false);
+  return { source, tokenEnvVar: source === 'variable' ? (account?.tokenEnvVar ?? null) : null };
 }
 
 export type ResolvedChannel = {

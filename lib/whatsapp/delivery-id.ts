@@ -1,4 +1,5 @@
 import { boundedDeliveryKey } from '@/lib/webhooks/delivery-key';
+import { isRecord, recordsIn } from './parse';
 import type { WhatsAppWebhookPayload } from './types';
 
 /**
@@ -28,30 +29,39 @@ import type { WhatsAppWebhookPayload } from './types';
  * distinct, so contentless deliveries are stored rather than colliding. A batch
  * too long for the column is hashed whole rather than truncated
  * (`boundedDeliveryKey`).
+ *
+ * Walked as `parseWebhook` walks it (`recordsIn`), and for a sharper reason:
+ * this runs in the route, before the row is written, so a throw here is a 500
+ * with nothing stored — Meta redelivers the same bytes and meets the same
+ * throw. A list that is not one, or an element that is not an object, adds no
+ * part; the delivery is stored under what the rest of it names, and the worker
+ * skips the same elements.
  */
-export function deliveryId(payload: WhatsAppWebhookPayload): string | null {
+export function deliveryId(payload: unknown): string | null {
+  if (!isRecord(payload)) return null;
   const parts: string[] = [];
 
-  for (const entry of payload.entry ?? []) {
-    for (const change of entry.changes ?? []) {
+  for (const entry of recordsIn((payload as WhatsAppWebhookPayload).entry)) {
+    for (const change of recordsIn(entry.changes)) {
       const value = change.value;
-      for (const message of value?.messages ?? []) {
+      if (!isRecord(value)) continue;
+      for (const message of recordsIn(value.messages)) {
         if (message.id) parts.push(`m:${message.id}`);
       }
-      for (const echo of value?.message_echoes ?? []) {
+      for (const echo of recordsIn(value.message_echoes)) {
         if (echo.id) parts.push(`e:${echo.id}`);
       }
-      for (const status of value?.statuses ?? []) {
+      for (const status of recordsIn(value.statuses)) {
         if (status.id) parts.push(`s:${status.id}:${status.status}`);
       }
-      for (const chunk of value?.history ?? []) {
-        for (const thread of chunk.threads ?? []) {
-          for (const message of thread.messages ?? []) {
+      for (const chunk of recordsIn(value.history)) {
+        for (const thread of recordsIn(chunk.threads)) {
+          for (const message of recordsIn(thread.messages)) {
             if (message.id) parts.push(`hm:${message.id}`);
           }
         }
       }
-      for (const item of value?.state_sync ?? []) {
+      for (const item of recordsIn(value.state_sync)) {
         const phone = item.contact?.phone_number;
         if (phone) {
           parts.push(`c:${phone}:${item.action ?? ''}:${String(item.metadata?.timestamp ?? '')}`);

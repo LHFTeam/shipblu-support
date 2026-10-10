@@ -238,8 +238,9 @@ export function WhatsAppAccountEditor({
         </p>
 
         {/* The credential's own line, in place of the variable's name: what it
-            is, when it was stored, when it expires and which key sealed it —
-            and never the credential, which `CredentialStatus` cannot carry. */}
+            is, when it was stored and by whom, when it expires and which key
+            sealed it — and never the credential, which `CredentialStatus`
+            cannot carry. */}
         {account.credential ? (
           <div className="mt-1">
             <CredentialCard status={account.credential} now={now} />

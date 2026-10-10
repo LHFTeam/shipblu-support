@@ -49,8 +49,15 @@ Decisions taken with the user:
 1. The production Meta app must be a **Tech Provider** (or Solution Partner);
    Embedded Signup is refused otherwise (App Dashboard → WhatsApp →
    Quickstart). Business verification is a prerequisite.
-2. **Facebook Login for Business** product with a configuration for the
-   Business-app onboarding product → `META_EMBEDDED_SIGNUP_CONFIG_ID`. Client
+2. **Facebook Login for Business** product with a **new v4 configuration**:
+   login variation WhatsApp Embedded Signup, with products selected (Cloud API
+   at least; the flow then selects the permissions they need, each needing
+   Advanced Access per Meta's v4 page) → `META_EMBEDDED_SIGNUP_CONFIG_ID`. The
+   Business-app onboarding is not one of the products: it is
+   `featureType: 'whatsapp_business_app_onboarding'` in the launch's extras. A
+   configuration with no products is not v4, v2 and v3 (with their public
+   previews) end on 2026-10-15, and nothing in the repo can read which version
+   an id names. Client
    OAuth settings: Client/Web OAuth login, Enforce HTTPS, Login with the
    JavaScript SDK = Yes; the console host (and staging's) in **Allowed Domains
    for the JavaScript SDK** and **Valid OAuth redirect URIs**.
@@ -61,23 +68,25 @@ Decisions taken with the user:
    staging first.
 5. The phone runs WhatsApp Business app ≥ 2.24.17 and stays open during the
    sync; onboarding unlinks companion devices; throughput is fixed at 20 mps;
-   marketing templates are refused on a coexistence number.
+   marketing templates are refused on a coexistence number — and nothing in
+   the console stops an agent choosing a `MARKETING` template on one. Known,
+   not built.
 
 ## The credential — stored sealed, used by the worker only
 
 Threat → control, so each design choice has its reason:
 
-| Threat                                           | Control                                                                                                                                                                                                                                                              |
-| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Database dump, backup, `execute_sql` from a tool | ciphertext only, in its own table; key in Render's env group, never in the DB; AAD binds a ciphertext to its row and WABA                                                                                                                                            |
-| Web-service compromise (internet-facing)         | the web service never decrypts a stored token: only worker handlers resolve one, CI-checked; the plaintext from the exchange lives for one request                                                                                                                   |
-| Log scraping                                     | token is a local in two functions; `logger` fields are primitives; a test spies on every log call and thrown message                                                                                                                                                 |
-| Browser (RSC payload)                            | the ciphertext table is reached by no page query; `CredentialStatus` has no secret field; the star-select `listWhatsAppAccounts()` + `{...account}` spread in `page.tsx:51` is why the column is **not** on `whatsapp_accounts`                                      |
-| Forged `postMessage` / forged ids                | hostname origin check; the server treats `waba_id`/`phone_number_id` as claims and proves them with the token (`debug_token`, `GET /{waba}`, `GET /{waba}/phone_numbers`)                                                                                            |
-| CSRF / replay                                    | Next's same-origin check on actions + `SameSite=Lax` cookie (the console host is the only `APP_URL` origin — say so in `proxy.ts`'s header so a later help-centre rewrite does not weaken it); the code is single-use and lives 30 s; `allow()` rate limit per agent |
-| Insider                                          | new permission `admin.channels.connect`; every store / reseal / remove / refusal is an append-only audit row naming the agent                                                                                                                                        |
-| Key loss / wrong key                             | named `CredentialKeyError`; nothing sent to Meta with garbage; recovery is one popup per number                                                                                                                                                                      |
-| Key rotation                                     | key id in envelope, column and AAD; a `_PREVIOUS` slot; `rotate_whatsapp_credentials` job                                                                                                                                                                            |
+| Threat                                           | Control                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Database dump, backup, `execute_sql` from a tool | ciphertext only, in its own table; key in Render's env group, never in the DB; AAD binds a ciphertext to its row and WABA                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Web-service compromise (internet-facing)         | the web service never decrypts a stored token: only worker handlers resolve one, CI-checked; the plaintext from the exchange lives for one request                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Log scraping                                     | token is a local in two functions; `logger` fields are primitives; a test spies on every log call and thrown message; every sentence either phase repeats from Graph has the secrets it holds cut out — the token, the code and the app secret in the action (`redact`), the stored token and the app secret in the job (`askGraph`, and by hand for the app-token subscription read) — tested by Graph answers that echo them                                                                                                                                                                 |
+| Browser (RSC payload)                            | the ciphertext table is reached by no page query; `CredentialStatus` has no secret field; `page.tsx` spreads each account row into client props (`{...account}`), which is why the column is **not** on `whatsapp_accounts` — and `listAccountsForAdmin()` names its columns, so a column added to that table later is not published either                                                                                                                                                                                                                                                    |
+| Forged `postMessage` / forged ids                | hostname origin check; the server treats `waba_id`/`phone_number_id` as claims and proves them with the token (`debug_token`, `GET /{waba}`, `GET /{waba}/phone_numbers`)                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| CSRF / replay                                    | Next's same-origin check on actions (`Origin` host against `X-Forwarded-Host`, else `Host`; no `serverActions.allowedOrigins`) + host-only `SameSite=Lax` session cookie. `proxy.ts`'s header says both hold only while nothing on the console's origin runs script we do not write: the help centre is served there already (`/help` and the locale paths, on every host) and is safe as this app's own rendering; a rewrite proxying a third-party page, or an attachment served inline, would need a host of its own. The code is single-use and lives 30 s; `allow()` rate limit per agent |
+| Insider                                          | new permission `admin.channels.connect`; every store / reseal / remove / refusal is an append-only audit row naming the agent                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Key loss / wrong key                             | named `CredentialKeyError`; nothing sent to Meta with garbage; recovery is one popup per number                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Key rotation                                     | key id in envelope, column and AAD; a `_PREVIOUS` slot; `rotate_whatsapp_credentials` job                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 **Schema** (`db/schema/config.ts`, then `npm run db:generate` → one
 migration; RLS from the `db/sql/001` loop; `touch_updated_at` picks up
@@ -144,12 +153,15 @@ rotate on its own). The names deliberately do not start `WHATSAPP_TOKEN_`:
 agent})` (upsert on the PK; writes a `stored` event with the previous
 `key_id`), `storedTokenFor(account)` (**the only decrypting export**; null
 when no row; throws `CredentialKeyError`), `hasStoredCredential`,
-`credentialStatuses()` (named columns **excluding `envelope`** →
-`Map<accountId, CredentialStatus>` with `keyState`), `recordCredentialRefusal`,
+`credentialStatuses()` (named columns **excluding `envelope`**, plus
+`obtainedByName` from a left join to `agents` — null once the agent is deleted,
+and the credential still listed → `Map<accountId, CredentialStatus>` with
+`keyState`), `recordCredentialRefusal`,
 `recordCredentialVerified`, `forgetStoredCredential(accountId, agent)`,
 `resealStoredCredentials({dryRun})`. `lib/whatsapp/credential-status.ts`
 (pure, client-safe): `CredentialStatus`, `credentialBadges(status, now)`,
-`EXPIRY_WARNING_MS = 7 days`.
+`credentialOrigin(status)` (the card's "Stored from … on … by …" clause, which
+leaves out "by" when no agent row answers), `EXPIRY_WARNING_MS = 7 days`.
 
 **Resolution** — `lib/whatsapp/accounts.ts`: `resolveCredentialSource(account,
 hasStored)` (pure, tested beside `resolveAccount`): **stored →
@@ -189,11 +201,19 @@ stored token is still current, so a Reconnect mid-call does not badge the fresh
 credential, and the recording never stops the job from rethrowing — a 190 is
 retryable, so the reply or the file still goes through after the reconnect.
 `download_media` explains nothing on the message; Meta's sentence is the job's
-`last_error`. Before it fails:
+`last_error`. A 190 that arrives later, on a status webhook, is explained on the
+message by `explainFailure` (`lib/tickets/ingest-whatsapp.ts`), which names the
+credential through `resolveCredentialSource` from the account the send recorded
+— or the number's account, for a row recorded before the account was —
+decrypting nothing, and says it cannot tell, rather than blaming
+`META_PAGE_ACCESS_TOKEN`, when the recorded account is gone, nothing was
+recorded, or the message is an echo — the bot's, or a reply typed on the phone,
+which went out on a credential that is not ours to name. Before it fails:
 `credentialBadges` renders `expires in N days` within 7 days (each badge has a
 stable `kind` and a label of a few words; the key id, the variable and the date
 are in its explanation, one tap away). `check_meta_permissions` gains a section
-per stored credential (kid, valid, type, scopes, expiry — never the token); it
+per stored credential (key id, type, valid, expiry, and a warning only for a
+required scope that is missing or granted for another WABA — never the token); it
 prints and writes nothing back, so a credential whose expiry was unknown at
 storing stays `expiry unknown` until a Reconnect stores a token Meta's
 inspection answered for. `applyWhatsAppAccountUpdate` records a refusal — and so
@@ -241,7 +261,10 @@ places: a `const` in `exchangeSignupCode` (bearer to `debug_token` and
 `tokenForAccount`. Nothing under `app/` imports `storedTokenFor`,
 `tokenForAccount`, `credentialsForAccount` or `credentialsForPhoneNumberId`
 (today `channels/actions.ts:9` imports only `parseTokenEnvVar`). No
-`JOB_PAYLOADS` key matches `/token|secret|envelope/i` (`payloads.test.ts`).
+`JOB_PAYLOADS` key, at any depth, matches
+`/token|secret|envelope|ciphertext|password|api[_-]?key/i` (`payloads.test.ts`,
+which walks every schema in the exported `JOB_PAYLOADS` through `_zod.def`, and
+proves the walk on a synthetic schema so it cannot pass by seeing nothing).
 Meta never sends a token in a webhook; `storedHeaders` already drops
 `authorization`. New rule `scripts/ci/rules/credential-confinement.mjs` +
 `.test.mjs`, registered in `RULES` (the `shipment-payload` device): the
@@ -255,7 +278,10 @@ Rejected: Supabase Vault / pgsodium (decrypts in SQL for every holder of the
 `vault.decrypted_secrets`; CI's `database` job runs plain Postgres 17; the
 plaintext would transit the pooler and `pg_stat_statements`); env-var-only
 (the manual step per number, during which the 24-hour window lapses);
-plaintext column; ciphertext on `whatsapp_accounts` (the star select);
+plaintext column; ciphertext on `whatsapp_accounts` (the channels page
+spreads each account row into client props; `listAccountsForAdmin()` names its
+columns, but a secret on that table would be one added name away from the RSC
+payload);
 `APP_SECRET`-derived key; hybrid asymmetric envelope (a private key on five
 services — kept as a future `v2` of the format); an external KMS.
 
@@ -307,10 +333,10 @@ WhatsApp number` beside the existing by-ids form (the flow creates or reuses
 | `sdk_blocked`     | by cause. `error`: "Meta's sign-in script could not be loaded — usually a content blocker. Allow `connect.facebook.net` for this page and reload." `timeout`: "Meta's sign-in has not loaded after ten seconds. A content blocker on connect.facebook.net is the usual cause — allow it for this page and reload. On a slow connection, wait instead: this card carries on by itself when it arrives." | `error`: the script's `error` event. `timeout`: no `fbAsyncInit` in 10 s — a guess, so a late `fbAsyncInit` (`sdk_ready`) returns the card to `idle`                                                                           |
 | `popup_open`      | "Meta's window is open. Finish the steps there — this page updates when you do." — plus, when the SDK opened nothing during the click: "No window? Your browser may have blocked it: allow pop-ups for this site, then close this card (Cancel, then Close anyway) and open it again."                                                                                                                 | after `FB.login`                                                                                                                                                                                                               |
 | `popup_blocked`   | "Your browser blocked the window. Allow pop-ups for this site and press Try again." + Try again (the 1 s heuristic can read a very fast cancel as blocked; the recovery is the same either way)                                                                                                                                                                                                        | `window.open` returned null while `FB.login` ran (`watchWindowOpen` — the SDK never calls back for a refused window), or a callback with no code within 1 s (`POPUP_BLOCKED_MS`: a blocker extension closing what it let open) |
-| `cancelled`       | "You closed Meta's window at the _<step>_ step. Nothing was changed." + Try again — `<step>` via `signupStepLabel(current_step)` (`PHONE_NUMBER_SETUP` → "choosing the number"; unknown printed as-is)                                                                                                                                                                                                 | `CANCEL {current_step}`                                                                                                                                                                                                        |
-| `meta_error`      | "Meta reported: _<message>_. Reference `<session_id>` — quote it to Meta support." + Try again                                                                                                                                                                                                                                                                                                         | `ERROR`                                                                                                                                                                                                                        |
+| `cancelled`       | "You closed Meta's window at the _<step>_ step. Nothing was changed." + Try again — `<step>` via `signupStepLabel(current_step)`, which words the six steps Meta's errors page lists (`PHONE_NUMBER_SETUP` → "choosing the number") and prints anything else as Meta spelled it — the coexistence screens have no documented value                                                                     | `CANCEL {current_step}` carrying no error fields                                                                                                                                                                               |
+| `meta_error`      | "Meta reported: _<message>_. Reference `<session_id>` — quote it to Meta support." + Try again — the full stop after _<message>_ only when Meta's message does not already end a sentence (`metaErrorSentence`)                                                                                                                                                                                        | `ERROR`, or a `CANCEL` carrying `error_message` / `error_code` / `session_id` (Meta posts a user-reported error as CANCEL)                                                                                                     |
 | `awaiting_number` | "Reading which number you chose…"                                                                                                                                                                                                                                                                                                                                                                      | the `code` arrived, `FINISH` not yet (≤ 2 s)                                                                                                                                                                                   |
-| `no_number`       | "Meta signed you in but did not say which number was chosen — the flow ended without a number set up. Try again and complete the number step."                                                                                                                                                                                                                                                         | the 2 s passed                                                                                                                                                                                                                 |
+| `no_number`       | "Meta signed you in but did not say which number was chosen — the flow ended without a number set up. Try again and complete the number step."                                                                                                                                                                                                                                                         | the 2 s passed, or `FINISH_ONLY_WABA` arrived with the code in hand (at once — never read as finished)                                                                                                                         |
 | `finishing`       | "Verifying with Meta…"                                                                                                                                                                                                                                                                                                                                                                                 | `FINISH` ids (in a ref, reset per click) + the `code`; `startTransition(() => dispatch(formData))`                                                                                                                             |
 | `unanswered`      | "No answer came back. The progress below shows whether the number was connected; if it was, nothing is lost." + `router.refresh()`                                                                                                                                                                                                                                                                     | the action threw or the connection dropped                                                                                                                                                                                     |
 
@@ -411,13 +437,18 @@ skipped on a re-run when already `ok`:
   `defaultGroupId`); `channel_id` written on the onboarding row.
 - **contacts**, **history** — `canRequestSyncAgain` → `smbAppDataRequest`;
   outcome via `recordSyncRequest`; a refusal (declined, "already requested")
-  is recorded on the step and the run continues. On a reconnect these two are
-  **not** auto-run (history was copied once; re-requesting re-sends every
-  chunk for nothing) — the row offers them as buttons.
-- **templates** — `enqueue('sync_whatsapp_templates', {})` unless one is
-  already queued, so the agent's template picker fills within a minute rather
-  than at the top of the hour; the sync is also the first exercise of the
-  stored credential (`last_synced_at` moves).
+  is recorded on the step and the run continues. On a reconnect each is
+  skipped only when an earlier connection **finished** copying it (history at
+  100% and not declined, contacts with at least one received — `copiedSoFar`,
+  carried forward as `carriedOver`): re-requesting would re-send every chunk
+  for nothing, and the row offers it as a button for the window instead. A copy
+  that was only requested — refused, stalled, never delivered, declined on the
+  phone — is asked for again.
+- **templates** — `enqueue('sync_whatsapp_templates', {})`, always: the sync is
+  idempotent, and the hourly one is a cron run outside the queue that no check
+  could see. The agent's template picker fills within a minute rather than at
+  the top of the hour; the sync is also the first exercise of the stored
+  credential (`last_synced_at` moves).
 - Finish: `status: 'connected'`, `finished_at`. A transient `WhatsAppApiError`
   is **recorded before it is rethrown** — `attempts`, `next_attempt_at` (the
   queue's backoff) and `last_transient_error` on the row — so the card reads
@@ -425,7 +456,9 @@ skipped on a re-run when already `ok`:
   spinner; on the job's **final attempt** the handler marks the row `failed`
   with that error so it never sits `exchanged` for ever. A permanent error on
   `number`/`subscribe`/`channel` → `status: 'failed'` with `error`. Per-step
-  retry from the UI is the same job with `steps: [name]`.
+  retry from the UI is the same job with `steps: [name]`, for `contacts` and
+  `history`; `templates` is rerunnable by the job but has no button, and needs
+  none — the hourly sync runs it again whatever the step recorded.
   `scripts/ci/db-jobs.txt`: `skip: complete_coexistence_onboarding — needs a
 stored credential and calls Graph`.
 
@@ -482,20 +515,20 @@ finish (`phoneRepliesUnconfirmed`).
 
 ### Failure states and recovery
 
-| state                                                                          | shown                                                                                                                                                   | recovery                                                                                                                                                                                                                                    |
-| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| code expired / exchange refused                                                | the sentence above; nothing written                                                                                                                     | Connect again                                                                                                                                                                                                                               |
-| readiness missing                                                              | checklist naming variable + group                                                                                                                       | set it on Render; page re-reads                                                                                                                                                                                                             |
-| token refused at exchange (scopes, wrong app, not granted on this WABA)        | the specific sentence                                                                                                                                   | re-run signed in as the right Business admin / fix the login configuration                                                                                                                                                                  |
-| number already connected                                                       | **Reconnected**; `coexistence` rewritten                                                                                                                | nothing; contacts/history offered as buttons                                                                                                                                                                                                |
-| job failed on number/subscribe/channel                                         | `failed` with the step and Meta's sentence; _Retry connection_                                                                                          | `retryCoexistenceOnboarding` enqueues again — no popup                                                                                                                                                                                      |
-| connection overdue (`exchanged` past fifteen minutes, no retry scheduled)      | "This connection has not finished in fifteen minutes and nothing is scheduled to carry it on. Press Retry connection…"; _Retry connection_              | `retryOnboarding` reopens it when its job is gone; while a job for it is still queued it refuses, naming the worker service as the thing to check                                                                                           |
-| history declined on the phone (2593109)                                        | badge `history declined on the phone` + InfoTip with the phone-side path (wording confirmed on the test phone)                                          | _Reconnect_, and share the history when the phone asks: Meta asks once per connection and the declined request holds a request id, so no copy button can ask again; the reconnect asks for the history and carries the copied contacts over |
-| disconnected from the phone (`account_update` `PARTNER_REMOVED`)               | badge on channel (danger) and a refusal on the account's credential                                                                                     | _Reconnect_ = the same popup (its copy warns that Meta unlinks companion devices again); the exchange overwrites the credential, the job re-subscribes                                                                                      |
-| number moved phone or registered again (`account_update` `ACCOUNT_OFFBOARDED`) | badge on channel (warning) saying Meta reconnects it on its own                                                                                         | wait: Meta re-onboards it, usually within minutes, and `ACCOUNT_RECONNECTED` clears the badge; _Reconnect_ only if it stays                                                                                                                 |
-| credential expiring / refused (190)                                            | account badge + `last_sync_error` sentence                                                                                                              | _Reconnect_                                                                                                                                                                                                                                 |
-| credential unreadable (`keyState` unknown / no key)                            | badge `key unknown` / `key not set`, its explanation naming the key id and `WHATSAPP_CREDENTIAL_KEY`                                                    | set the key or rotate; _Reconnect_ re-stores under the current key                                                                                                                                                                          |
-| copy window passed, sync never requested                                       | badge `copy window closed` + InfoTip — not for a number Meta says is not on the Business app, nor for a copy an earlier connection made (`carriedOver`) | _Reconnect_ opens a new window                                                                                                                                                                                                              |
+| state                                                                          | shown                                                                                                                                                                                                                | recovery                                                                                                                                                                                                                                    |
+| ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| code expired / exchange refused                                                | the sentence above; nothing written                                                                                                                                                                                  | Connect again                                                                                                                                                                                                                               |
+| readiness missing                                                              | checklist naming variable + group                                                                                                                                                                                    | set it on Render; page re-reads                                                                                                                                                                                                             |
+| token refused at exchange (scopes, wrong app, not granted on this WABA)        | the specific sentence                                                                                                                                                                                                | re-run signed in as the right Business admin / fix the login configuration                                                                                                                                                                  |
+| number already connected                                                       | **Reconnected**; `coexistence` rewritten                                                                                                                                                                             | nothing; what an earlier connection finished copying is carried over and offered as a button, anything it did not finish is asked for again                                                                                                 |
+| job failed on number/subscribe/channel                                         | `failed` with the step and Meta's sentence; _Retry connection_                                                                                                                                                       | `retryCoexistenceOnboarding` enqueues again — no popup                                                                                                                                                                                      |
+| connection overdue (`exchanged` past fifteen minutes, no retry scheduled)      | "This connection has not finished in fifteen minutes and nothing is scheduled to carry it on. Press Retry connection…"; _Retry connection_                                                                           | `retryOnboarding` reopens it when its job is gone; while a job for it is still queued it refuses, naming the worker service as the thing to check                                                                                           |
+| history declined on the phone (2593109)                                        | badge `history declined on the phone` + InfoTip with the phone-side path (wording confirmed on the test phone)                                                                                                       | _Reconnect_, and share the history when the phone asks: Meta asks once per connection and the declined request holds a request id, so no copy button can ask again; the reconnect asks for the history and carries the copied contacts over |
+| disconnected from the phone (`account_update` `PARTNER_REMOVED`)               | badge on channel (danger), its InfoTip saying who Meta reports started it (`initiatedBy`: `USER`, done with the phone; `SYSTEM`, Meta itself — inactivity or enforcement), and a refusal on the account's credential | _Reconnect_ = the same popup (its copy warns that Meta unlinks companion devices again); the exchange overwrites the credential, the job re-subscribes                                                                                      |
+| number moved phone or registered again (`account_update` `ACCOUNT_OFFBOARDED`) | badge on channel (warning) saying Meta reconnects it on its own                                                                                                                                                      | wait: Meta re-onboards it, usually within minutes, and `ACCOUNT_RECONNECTED` clears the badge; _Reconnect_ only if it stays                                                                                                                 |
+| credential expiring / refused (190)                                            | account badge + `last_sync_error` sentence                                                                                                                                                                           | _Reconnect_                                                                                                                                                                                                                                 |
+| credential unreadable (`keyState` unknown / no key)                            | badge `key unknown` / `key not set`, its explanation naming the key id and `WHATSAPP_CREDENTIAL_KEY`                                                                                                                 | set the key or rotate; _Reconnect_ re-stores under the current key                                                                                                                                                                          |
+| copy window passed, sync never requested                                       | badge `copy window closed` + InfoTip — not for a number Meta says is not on the Business app, nor for a copy an earlier connection made (`carriedOver`)                                                              | _Reconnect_ opens a new window                                                                                                                                                                                                              |
 
 ### The rows afterwards
 
@@ -510,7 +543,8 @@ finish (`phoneRepliesUnconfirmed`).
   opened; no Reconnect) / `history copied` / `history declined on the phone` /
   `history failed` · `412 address-book entries` ·
   `disconnected on the phone` (warning and "Meta reconnects it on its own" for
-  `ACCOUNT_OFFBOARDED`, danger for anything else) ·
+  `ACCOUNT_OFFBOARDED`, danger for anything else; its InfoTip names who Meta
+  says started it when `disconnection_info.initiated_by` was sent) ·
   `contacts and history copied before` (`carriedOver`, what an earlier
   connection copied and this one did not ask for again) · `copy window closed`;
   then `RequestSyncAgain` buttons where `canRequestSyncAgain` allows and the
@@ -526,7 +560,8 @@ finish (`phoneRepliesUnconfirmed`).
 - **WABA row** (`WhatsAppAccountEditor`): the variable line becomes
   `CredentialCard` —
   `Stored from Embedded Signup on <date> by <agent> · <type> · never expires | expires <date> · key <id>`
-  — plus `credentialBadges`, _Reconnect_ and _Forget credential_; the edit form
+  — `by <agent>` left out when the agent who connected it has been deleted
+  (`credentialOrigin`) — plus `credentialBadges`, _Reconnect_ and _Forget credential_; the edit form
   hides the token-variable field and says why; `saveWhatsAppAccount` never
   writes the credential. While _Reconnect_ waits on Meta's window or its answer,
   Edit, Forget and Disconnect are off — each would unmount the card, and with it
@@ -618,7 +653,9 @@ onboarding only by `lib/whatsapp/coexistence-state.ts` with atomic `jsonb_set`
 (chunks are processed concurrently). History conversations: `source_system='import'`,
 `external_id='whatsapp:history:<phoneNumberId>:<customer>'`, status resolved,
 `resolved_at` **null** (no rollup counts an import as a resolution),
-`last_*_message_at` null, `created_at` = earliest message. History messages:
+`last_message_at` = the thread's newest message (the column is `NOT NULL`, and
+it is what sorts the import), `last_customer_message_at` and
+`last_agent_message_at` null, `created_at` = earliest message. History messages:
 `source_system='import'`, `external_id = channel_message_id = wamid`,
 `meta.history = true`.
 
@@ -629,7 +666,14 @@ onboarding only by `lib/whatsapp/coexistence-state.ts` with atomic `jsonb_set`
   `NormalisedContactSync`, `NormalisedAccountUpdate`; direction by comparing
   digits with `metadata.display_phone_number` (the echo branch's device at
   `parse.ts:82`); `media_placeholder` → `mediaPlaceholder: true`; declined
-  when an `errors` entry carries 2593109. Unknown shapes degrade, never throw.
+  when an `errors` entry inside a `history[]` chunk carries 2593109 (where
+  Meta's history reference and its Business-app onboarding guide both put it;
+  a top-level `value.errors` under `history` is not read, nor logged). Unknown
+  shapes degrade, never throw: every list is walked through `recordsIn`, so a
+  list that is not one, or an element that is `null` or a bare value, is
+  skipped — in the parser and in `deliveryId` alike, where a throw was a 500
+  before the row was stored — and a timestamp past what a `Date` can hold
+  falls back to now.
 - NEW `lib/whatsapp/delivery-id.ts`: `deliveryId()` moved out of the route;
   `hm:<wamid>` per history message, `c:<phone>:<action>:<timestamp>` per
   state-sync item; **nothing for `account_update`** (the index is spent for
@@ -737,16 +781,16 @@ be separated without a migration of meaning later.
 
 ## Idempotency
 
-| case                                        | absorbed by                                                                                                                                                                                                                                                                            |
-| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| exchange action re-posted                   | the partial unique index refuses a second `exchanged` row while the first's job is live; a stale one is superseded (`failed: 'superseded'`); a used code is refused by Meta and nothing was written                                                                                    |
-| job dies / worker never runs                | final attempt marks `failed`; a 15-minute-old `exchanged` row no longer blocks a new attempt                                                                                                                                                                                           |
-| job re-run / retry                          | steps already `ok` skipped; channel upsert keyed on `phoneNumberId`; syncs refused by `canRequestSyncAgain` once a `requestId` exists                                                                                                                                                  |
-| history chunk redelivered                   | `hm:<wamid>` → 200 at the door; `(import, wamid)` and `channel_message_id` on replay; progress via `greatest()`                                                                                                                                                                        |
-| echo redelivered / echo of a Cloud-API send | `messages_channel_message_idx`; `duplicate` before any clock moves                                                                                                                                                                                                                     |
-| contact sync redelivered                    | `c:<phone>:<action>:<ts>`; `resolveContact`/`applyChannelProfile` idempotent                                                                                                                                                                                                           |
-| re-onboarding (same number)                 | credential upsert on the PK (`stored` event names the previous key id); channel rewritten in place; no second ticket                                                                                                                                                                   |
-| `ACCOUNT_RECONNECTED`                       | clears `disconnected`, nothing else — and, like every `account_update`, only when the event is at least as new as the connection (`onboardedAt`, to the second) and as the last `account_update` applied (`coexistence.accountEventAt`); an older event processed late changes nothing |
+| case                                        | absorbed by                                                                                                                                                                                                                                                                                                                                                   |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| exchange action re-posted                   | the partial unique index refuses a second `exchanged` row while the first's job is live; a stale one is superseded (`failed: 'superseded'`); a used code is refused by Meta and nothing was written                                                                                                                                                           |
+| job dies / worker never runs                | final attempt marks `failed`; an `exchanged` row older than fifteen minutes whose job is gone is superseded by the next attempt — while its job is still `pending` or `processing` it still blocks, refused with the worker service named (`JOB_WAITING`)                                                                                                     |
+| job re-run / retry                          | steps already `ok` skipped; channel upsert keyed on `phoneNumberId`; syncs refused by `canRequestSyncAgain` once a `requestId` exists                                                                                                                                                                                                                         |
+| history chunk redelivered                   | `hm:<wamid>` → 200 at the door; `(import, wamid)` and `channel_message_id` on replay; progress via `greatest()`                                                                                                                                                                                                                                               |
+| echo redelivered / echo of a Cloud-API send | `messages_channel_message_idx`; `duplicate` before any clock moves — except an echo of a console send processed between Graph's answer and `send_whatsapp` writing the wamid, which inserts its own row, and the send's UPDATE then hits the index; milliseconds wide, and whether Meta echoes a Cloud-API send on `smb_message_echoes` at all is unconfirmed |
+| contact sync redelivered                    | `c:<phone>:<action>:<ts>`; `resolveContact`/`applyChannelProfile` idempotent                                                                                                                                                                                                                                                                                  |
+| re-onboarding (same number)                 | credential upsert on the PK (`stored` event names the previous key id); channel rewritten in place; no second ticket                                                                                                                                                                                                                                          |
+| `ACCOUNT_RECONNECTED`                       | clears `disconnected`, nothing else — and, like every `account_update`, only when the event is at least as new as the connection (`onboardedAt`, to the second) and as the last `account_update` applied (`coexistence.accountEventAt`); an older event processed late changes nothing                                                                        |
 
 ## Tests
 
@@ -755,35 +799,51 @@ be separated without a migration of meaning later.
   `current` seals; unknown key id; the envelope never contains the plaintext,
   decoded bytes included; 1,000 seals → 1,000 IVs; `parseKeyring` names the
   variable, not the value); `credential-status.test.ts`;
-  `embedded-signup.test.ts` (extras equal the documented object; the three
-  event samples; `evilfacebook.com` refused); `coexistence.test.ts`;
+  `embedded-signup.test.ts` (extras pinned to the v4 shape, with no
+  `sessionInfoVersion` and no `version`; v4's finish sample, `FINISH_ONLY_WABA`
+  never read as finished, a CANCEL carrying an error read as the error; the six
+  documented step labels; `evilfacebook.com` refused); `coexistence.test.ts`;
   `debug-token.test.ts`; `onboarding.test.ts` (request shapes vs the v23.0
   references; mocked `fetch` order exchange → debug_token → WABA → store →
   enqueue; the token appears in no `logger` call, no thrown message, no
   returned state — spy on `lib/log`; app-id and scope refusals; a refused
   history step still leaves `connected`); `parse.test.ts` (verbatim Meta
-  samples); `delivery-id.test.ts`; `subscriptions.test.ts`; `payloads.test.ts`
-  (no secret-shaped key); `route.test.ts` beside "a signed delivery";
-  `accounts.test.ts` (`resolveCredentialSource` order).
+  samples, and containers that are not what Meta documents); `delivery-id.test.ts`;
+  `subscriptions.test.ts`; `payloads.test.ts` (no secret-shaped key);
+  `route.test.ts` beside "a signed delivery" (a history chunk stored as `hm:`
+  per message and its redelivery answered duplicate; an address-book delivery
+  as `c:` per contact; an account update under no id, queued twice; a history
+  holding a null chunk stored, not a 500); `accounts.test.ts`
+  (`resolveCredentialSource` order).
 - DB: `credentials.db.test.ts` (store → `credentialStatuses` has no `envelope`
-  key; stored / variable / shared order end-to-end through `tokenForAccount`;
+  key; names the connecting agent from their current row, and still lists a
+  credential whose agent was deleted, with no name;
+  stored / variable / shared order end-to-end through `tokenForAccount`;
   storing clears `tokenEnvVar`; the variable refusal predicate; cascade on
   account delete with the `removed` event surviving; `resealStoredCredentials`
   moves rows and writes events, `dryRun` writes nothing; wrong key →
   `CredentialKeyError`, row untouched; `parseKeyring` refuses identical
   current/previous bytes); `onboarding.db.test.ts` (the partial unique index
-  refuses a second live `exchanged` row; a 15-minute-old one is superseded;
-  the handler's final attempt marks `failed`; a transient error lands in
-  `last_transient_error`/`next_attempt_at`); `lib/admin/settings.db.test.ts`
-  (`listAccountsForAdmin()` rows carry no `envelope`/`ciphertext` key — a
+  refuses a second live `exchanged` row; one older than fifteen minutes whose
+  job is gone is superseded, one whose job is still queued is refused with the
+  worker named; the handler's final attempt marks `failed`; a transient error
+  lands in `last_transient_error`/`next_attempt_at`; when Graph's answer echoes
+  what it was sent, neither phase lets the token, the code or the app secret
+  into anything it returns, writes or logs); `lib/admin/settings.db.test.ts`
+  (with a stored credential present, `listAccountsForAdmin()` rows carry
+  exactly the eight columns the page reads, no key matching
+  `envelope|cipher|plaintext|secret|token` but `tokenEnvVar` — the variable's
+  name, not a secret — and neither the token nor its envelope in any value: a
   tripwire for a future join); `onboarding-reads.db.test.ts`;
   `ingest-whatsapp.db.test.ts` (coexistence echo sets `lastAgentMessageAt`,
   `firstRespondedAt`, clears `nextResponseDueAt`, leaves
-  `lastCustomerMessageAt`; plain support echo still `ignored` at L347);
+  `lastCustomerMessageAt`; plain support echo still `ignored` at L347; a 190
+  on a status webhook names the credential the send recorded, or says it
+  cannot tell);
   `ingest-whatsapp-history.db.test.ts` (two threads → two resolved `import`
   conversations, both directions, no `jobs` rows, placeholder meta, replay
-  writes nothing, a later live inbound reopens and only then sets
-  `lastCustomerMessageAt`, un-onboarded number skipped, progress/declined
+  writes nothing, a later live inbound opens a live ticket of its own and never
+  continues the import, un-onboarded number skipped, progress/declined
   recorded; contact naming rules); `coexistence-state.db.test.ts`.
 - `node scripts/ci/repo-rules.mjs` clean: `credential-confinement`,
   env-parity, render-groups, dead-exports, client-bundle, server-actions,
@@ -795,11 +855,18 @@ be separated without a migration of meaning later.
 npm run test && npm run knip && npm run build && node scripts/ci/repo-rules.mjs`;
    `npm run test:db` against a local `TEST_DATABASE_URL` (placeholder key in
    `vitest.db.config.mts`).
-2. Staging first if its Meta app can run Embedded Signup; otherwise the live
-   round trip is on production after deploy (user's call): set the three
+2. Staging first if its Meta app can run Embedded Signup — but staging is a web
+   service and nothing else, with no worker and no crons, so
+   `complete_coexistence_onboarding` never runs there and its inbound
+   `history`, `smb_message_echoes` and `account_update` deliveries are stored
+   and never processed: "staging first" needs `npm run worker` run by hand
+   against staging's environment. Otherwise the live round trip is on
+   production after deploy, with a test number (user's call): set the three
    variables; Admin → Channels → Connect a WhatsApp number → complete the
    popup; watch the progress card reach **Connected**; confirm the credential
-   row (`select key_id, token_type, expires_at` — never `envelope`), the
+   row (`select key_id, token_type, expires_at, inspected_at` — never
+   `envelope`; a null `expires_at` means "never" only when `inspected_at` is
+   set), the
    onboarding row's steps, the channel + WABA rows, the two `request_id`s;
    with the app open on the phone, `history` deliveries in `webhook_events`
    (`LOG_ALL_INCOMING_WEBHOOKS=true` for the session, Meta's Webhook Debugger
@@ -821,11 +888,20 @@ dryRun=true` once on production to prove the rotation path plans.
 ## Risks to settle at implementation time
 
 - **Tech Provider status** of both Meta apps; without it the popup refuses.
-- **Embedded Signup version**: v2 retires 2026-10-15; the custom-flow doc shows
-  v3 extras (`featureType`, `sessionInfoVersion: '3'`) while the versions page
-  says v4 selects the product in the login configuration with `extras: {}`
-  and lists `whatsapp_business_app_onboarding` for v4. One constant; adopt
-  what the Embedded Signup Builder generates.
+- **Embedded Signup version**: v2 and v3 (and their public previews) end
+  2026-10-15, and Meta does not say whether a launch on one after that is
+  refused, upgraded or broken. v4 is chosen by the configuration, not the
+  launch: a new one with products selected (§ Preconditions 2). The coexistence
+  guide's Step 2 shows the v2 extras shape (`featureType` plus
+  `sessionInfoVersion: '3'`, no `version`); v4 takes no `version` — its
+  documented values are the previews, `v3` and `v2` — and no
+  `sessionInfoVersion`, so `EMBEDDED_SIGNUP_EXTRAS` is now
+  `{ setup: {}, featureType: 'whatsapp_business_app_onboarding' }`. Still
+  open, because Meta's v4 pages disagree with each other: the versions page
+  gives v4 `extras: {}`, the implementation page `{ setup: {} }`, and the v4
+  page sends Business-app onboarding to the `featureType` step; the constant is
+  their union. One constant; check it against the Embedded Signup Builder's
+  snippet once the v4 configuration exists.
 - **Token lifetime** is an assumption until the first live `debug_token`;
   `granular_scopes` for a business token may not list WABA targets (the
   `GET /{waba}` read is the fallback proof and is always performed).
@@ -833,9 +909,15 @@ dryRun=true` once on production to prove the rotation path plans.
   (webhooks — one bad name fails the whole write); `owner_business_info` on
   the WABA node; `platform_type` on `phone_numbers`; whether
   `oauth/access_token` accepts a POST form (fallback: GET kept outside
-  `graph()`). Scopes the login configuration requests (`business_management`?).
+  `graph()`). Scopes: a v4 configuration selects the permissions its products
+  need by itself (Cloud API: `whatsapp_business_management`,
+  `whatsapp_business_messaging`), and Meta's v4 page says each needs Advanced
+  Access.
 - **Payload shapes** from the dashboard's test payloads: `threads[].id`
-  meaning, `media_placeholder` form, where 2593109 arrives, `account_update`
+  meaning, `media_placeholder` form, where 2593109 arrives (settled from the
+  docs: inside a `history[]` chunk's `errors`, per the history webhook
+  reference and the Business-app onboarding guide; confirm against the
+  dashboard sample), `account_update`
   keys, `smb_message_echoes` carrying `to`;
   `normaliseIdentifier('whatsapp', '+20…')` with the leading `+`. Per-phase
   `progress` is settled: per Meta it is the copy's overall percentage, 100
@@ -849,16 +931,24 @@ dryRun=true` once on production to prove the rotation path plans.
 - **Content blockers** on `connect.facebook.net`: the `sdk_blocked` state
   names the fix; there is no server-side fallback for the JS-SDK code flow.
 - **Reconnect assumes** Embedded Signup completes for an already-onboarded
-  number and returns a fresh token — confirm on staging before relying on it
-  as the 190 recovery.
+  number and returns a fresh token — confirm it before relying on it as the
+  190 recovery, on staging only with a worker run against staging's
+  environment (Verification 2).
 - **Hourly refusal detection** is only as frequent as the sync; a failed send
   or media download is the earlier signal, and records the refusal on the
   stored credential when it happens (`recordRefusalIfStored`).
-- **Reports/retention**: check `lib/reports/rollup.ts` and
-  `worker/handlers/cleanup.ts` predicates against imported rows.
+- **Reports/retention**: the team rollups in `lib/reports/rollup.ts` leave
+  imports out; the agent rollups do not, so an agent's hand work on an
+  imported ticket counts in agent metrics and not in team metrics — known, not
+  built. `worker/handlers/cleanup.ts` deletes `webhook_events` after 30 days,
+  so a history chunk or a late placeholder file can be replayed for at most
+  that long.
 - **Service-level override** of `WHATSAPP_CREDENTIAL_KEY` anywhere would
-  silently shadow the group (the `render.yaml` header forbids the shape; the
-  `keyState` badge would read `unknown` on the next page load).
+  silently shadow the group (the `render.yaml` header forbids the shape). The
+  `keyState` badge is drawn by the web service from the key it holds, so it
+  sees only an override there — as `unknown` on a credential sealed under the
+  group's key. One on the worker alone leaves the badge reading `current`, and
+  shows instead as a `CredentialKeyError` on the onboarding row or on a send.
 
 ## As built — the names the code uses
 
@@ -886,7 +976,13 @@ the tree, this is where it went:
   `client_secret` and `code` as query parameters — the shape Meta documents for
   a Tech Provider and the only one it documents — not the POST form body §
   Phase 1 proposed. `tokenExchangeUrl` builds it; `exchangeCode` sends it with
-  its own `fetch` and scrubs both secrets out of anything it repeats. The WABA
+  its own `fetch` and scrubs both secrets out of anything it repeats; and
+  `beginCoexistenceOnboarding` repeats every Graph or network sentence from
+  the debug_token, WABA, phone_numbers and /me reads with the token, the code
+  and the app secret cut out (`redact`). The job does the same with the stored
+  token and the app secret: every Graph call goes through `askGraph`, which
+  scrubs the error it throws, and the app-token subscription read is scrubbed
+  by hand. The WABA
   read asks for `id,name` only (neither reference lists `owner_business_info`),
   and the business id comes from `GET /me?fields=client_business_id`
   (`clientBusinessRequest`) as metadata. All eight request shapes are in
@@ -945,8 +1041,13 @@ actor})`, `storedTokenFor`, `storedCredentialExists()` (the `exists()`
   `lib/whatsapp/credential-status.ts` carries `CredentialStatus` (`keyState`,
   `keyProblem`, `inspectedAt`, `storedAt`, …), `credentialBadges` (each
   `CredentialBadge` a `kind` the explanation matches on, and a short label)
-  and `EXPIRY_WARNING_MS`. `explainAuthError(code, message, {source,
-tokenEnvVar})` takes a `TokenOrigin`; `CredentialSource` lives in
+  and `EXPIRY_WARNING_MS`; `CredentialStatus` also carries `obtainedByName`
+  (a left join to `agents`), which `credentialOrigin` words for the card.
+  `explainAuthError(code, message, {source,
+tokenEnvVar})` takes a `TokenOrigin`, or `null` for a caller that cannot tell
+  which credential sent — a sentence naming all three remedies rather than
+  the shared token — and `explainDeliveryError`'s `ErrorContext.credential` is
+  required, so the status webhook's caller has to say; `CredentialSource` lives in
   `lib/whatsapp/errors.ts`. `inspectToken` and `readGraph` are
   `lib/meta/debug-token.ts`.
 - **Ingest**: `lib/tickets/ingest-whatsapp-history.ts` exports
@@ -968,43 +1069,75 @@ tokenEnvVar})` takes a `TokenOrigin`; `CredentialSource` lives in
   account through `whatsappEditColumns` in `coexistence-state.ts`, decided in
   the UPDATE, and refuses moving it to another account.
   `lib/whatsapp/embedded-signup.ts` holds the SDK URL,
-  `EMBEDDED_SIGNUP_EXTRAS` (the v3 shape, one constant — adopt what the
-  Embedded Signup Builder generates), `embeddedSignupLoginOptions`,
-  `isFacebookOrigin`, `parseSignupMessage` and the three timings.
+  `EMBEDDED_SIGNUP_EXTRAS` (since the v4 follow-up, `setup: {}` and
+  `featureType: 'whatsapp_business_app_onboarding'` and nothing else — the
+  `sessionInfoVersion: '3'` it carried before was v2's, though this plan and
+  the module called the shape v3; one constant, to check against what the
+  Embedded Signup Builder generates), `embeddedSignupLoginOptions`, `isFacebookOrigin`,
+  `parseSignupMessage`, `signupStepLabel`, `metaErrorSentence` and the three
+  timings.
 - **Not built, on purpose**: `SIGNUP_EVENTS.finished` reads both
   `FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING` and the standard `FINISH` as
-  "finished", because which flow ran is the login configuration's decision;
-  phone registration is skipped, as Meta's guide says to for this flow; and
-  `check_meta_permissions` prints a section per stored credential rather than
-  the onboarding re-checking scopes on a schedule.
+  "finished", because under v4 the number the business enters picks the flow
+  — a number already on the Business app enters coexistence by itself — and
+  the server proves the ids either way. `FINISH_ONLY_WABA` is read apart and
+  never as finished, because the server's read of the WABA's only number would
+  connect a number nobody chose; `FINISH_OBO_MIGRATION` and
+  `FINISH_GRANT_ONLY_API_ACCESS` are not read, since this launch starts
+  neither flow. Phone registration is skipped, as Meta's guide says to for
+  this flow; and `check_meta_permissions` prints a section per stored
+  credential rather than the onboarding re-checking scopes on a schedule.
+- **Known, and not built**: nothing stops an agent choosing a `MARKETING`
+  template on a coexistence number, which Meta refuses (Preconditions 5); a
+  conversation the business starts from the phone never gets an SLA policy
+  (LHFTeam/shipblu-support#352); an agent's hand work on an imported ticket
+  counts in agent metrics and not in team metrics, and a history delivery can
+  be replayed only while `webhook_events` keeps it, 30 days (Risks,
+  Reports/retention).
 
 ## Verified
 
 Locally, on 2026-10-08, before any live round trip:
 
 - **Unit tier.** `npx vitest run lib/whatsapp lib/meta lib/tickets lib/queue
-worker/handlers`: 68 files, 1,590 tests. The onboarding request shapes against
+worker/handlers`: 68 files, 1,590 tests that day. The onboarding request shapes against
   the references they name; the envelope's round trip, tampering, AAD binding,
   key rotation and IV uniqueness; `resolveCredentialSource`'s order; the
   Embedded Signup extras, the three window events and the origin check
   (`evilfacebook.com` refused); `parseWebhook` on the four coexistence fields;
   the delivery ids; `canRequestSync` and the badges; the view model; the
-  subscription field lists; no secret-shaped key in `JOB_PAYLOADS`.
+  subscription field lists. This list also claimed "no secret-shaped key in
+  `JOB_PAYLOADS`", which no test checked that day; `payloads.test.ts` has
+  checked it since the follow-up below.
 - **Database tier.** Migrations and `db/sql/` applied to an empty Postgres 16,
   then nine `*.db.test.ts` files — `lib/whatsapp/credentials`, `onboarding`,
   `onboarding-reads`, `coexistence-state`, `lib/tickets/ingest-whatsapp`,
   `ingest-whatsapp-history`, `worker/handlers/process-whatsapp-webhook`,
-  `sync-whatsapp-templates`, `lib/admin/settings` — 106 tests. What they
-  establish is listed in `docs/PROJECT-STATE.md` §7.
+  `sync-whatsapp-templates`, `lib/admin/settings` — 106 tests that day. What
+  they establish is listed in `docs/PROJECT-STATE.md` §7.
 - **Build and the repo rules.** `npm run build` and
   `node scripts/ci/repo-rules.mjs` (`credential-confinement` among them) pass
   on the branch; the full `verify` set runs on the pull request.
 
+The follow-up to #348, on 2026-10-10, added tests rather than restating the
+counts above: the job-payload credential tripwire; the admin's account rows
+(`listAccountsForAdmin()`) as a named list; who connected a credential; the
+parser and the delivery ids on containers that are not what Meta documents,
+and the route storing each coexistence field; the v4 launch shape, the
+window's finish-without-number and reported-error events; Graph's echoed
+secrets cut out of both phases; and a 190 on a status webhook naming the
+credential that sent, or saying it cannot tell (§ Tests).
+
 Waiting on the live round trip, and on nothing in the repo:
 
-- Tech Provider status of both Meta apps; the login configuration and
-  `META_EMBEDDED_SIGNUP_CONFIG_ID`; the console host in Allowed Domains for the
-  JavaScript SDK; `WHATSAPP_CREDENTIAL_KEY` in both groups.
+- Tech Provider status of both Meta apps; a new v4 login configuration
+  (WhatsApp Embedded Signup variation, Cloud API product) and
+  `META_EMBEDDED_SIGNUP_CONFIG_ID` naming it, set before 2026-10-15; the
+  console host in Allowed Domains for the JavaScript SDK;
+  `WHATSAPP_CREDENTIAL_KEY` in both groups.
+- A worker for staging, if the first run is to be there: staging has none, so
+  the job and the inbound coexistence deliveries would wait in the queue
+  (Verification 2).
 - The app-level fields through `npm run job -- subscribe_meta_webhooks`,
   staging first — three of the four names are from the webhooks overview, not
   from a subscription this app already holds.
@@ -1015,5 +1148,7 @@ Waiting on the live round trip, and on nothing in the repo:
   business token; the real payload shapes of `history`, `smb_app_state_sync`,
   `smb_message_echoes` and `account_update` against the parser's samples;
   whether Reconnect completes for an already-onboarded number and returns a
-  fresh token; `rotate_whatsapp_credentials dryRun=true` once on production.
+  fresh token; whether Meta echoes a console reply sent through Cloud API on
+  `smb_message_echoes` at all (§ Idempotency, the echo row);
+  `rotate_whatsapp_credentials dryRun=true` once on production.
   `docs/PROJECT-STATE.md` §5.2 has the order to read them back in.

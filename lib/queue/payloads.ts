@@ -29,8 +29,12 @@ const instant = z.string().refine((value) => !Number.isNaN(Date.parse(value)), {
  * A job with no entry takes any object, as every job did before. Entries are
  * added a family at a time, each with its handlers switched over in the same
  * change.
+ *
+ * Exported for `payloads.test.ts`, which walks every schema for a key named
+ * like a credential; nothing else reads it but `parseJobPayload` and the types
+ * below.
  */
-const JOB_PAYLOADS = {
+export const JOB_PAYLOADS = {
   send_email: z.object({ messageId: z.string() }),
   send_side_email: z.object({ messageId: z.string() }),
   send_whatsapp: z.object({ messageId: z.string() }),

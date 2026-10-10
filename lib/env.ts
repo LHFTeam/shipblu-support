@@ -322,6 +322,15 @@ const schema = z.object({
    * configuration belongs to one app. Unset means the "Connect a WhatsApp
    * number" button says what is missing instead of opening a window Meta will
    * refuse (`coexistenceReadiness` in `lib/whatsapp/onboarding.ts`).
+   *
+   * The configuration is also what picks the Embedded Signup version, so it
+   * must be a v4 one: created new with the "WhatsApp Embedded Signup" login
+   * variation and products selected, Cloud API at least. One with no products
+   * is not v4, and v2 and v3 end on 2026-10-15. Nothing here can read which
+   * version an id names — a format rule would not know, and would only turn a
+   * typo into a console that does not load — so it stays a plain string and
+   * the App Dashboard is where it is got right (`EMBEDDED_SIGNUP_EXTRAS` in
+   * `lib/whatsapp/embedded-signup.ts` has the detail).
    */
   META_EMBEDDED_SIGNUP_CONFIG_ID: z.string().optional(),
 

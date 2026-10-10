@@ -1,6 +1,7 @@
 import { count, eq, ne, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import {
+  agents,
   type CredentialEventKind,
   whatsappAccountCredentials as credentials,
   whatsappAccounts,
@@ -373,6 +374,12 @@ export async function storedCredentialEditRefusal(
  *
  * A named column list with `envelope` left out, which is the whole point of
  * this function: the admin page renders what it is handed.
+ *
+ * The agent who connected it is a left join, and must stay one. An inner join
+ * would drop the credential of a deleted agent — or one stored with no actor —
+ * from the map entirely, and with it the account's card, its badges and its
+ * Forget button — while the token went on sending, with nothing left on the
+ * page to say it was about to expire or that Meta had refused it.
  */
 export async function credentialStatuses(
   executor: Executor = db,
@@ -390,12 +397,14 @@ export async function credentialStatuses(
       dataAccessExpiresAt: credentials.dataAccessExpiresAt,
       inspectedAt: credentials.inspectedAt,
       obtainedByAgentId: credentials.obtainedByAgentId,
+      obtainedByName: agents.name,
       storedAt: credentials.storedAt,
       lastVerifiedAt: credentials.lastVerifiedAt,
       lastRefusedAt: credentials.lastRefusedAt,
       lastRefusal: credentials.lastRefusal,
     })
-    .from(credentials);
+    .from(credentials)
+    .leftJoin(agents, eq(agents.id, credentials.obtainedByAgentId));
 
   const { keyring: ring, problem } = keyringForStatus();
 

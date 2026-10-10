@@ -3,9 +3,9 @@ import { ChannelBadge } from '@/components/channel';
 import { Badge, Card, PageHeader } from '@/components/ui';
 import {
   countTemplatesByAccount,
+  listAccountsForAdmin,
   listChannelsForAdmin,
   listGroupNames,
-  listWhatsAppAccounts,
 } from '@/lib/admin/settings';
 import { requirePermission } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
@@ -51,7 +51,7 @@ export default async function ChannelsPage() {
   ] = await Promise.all([
     listChannelsForAdmin(),
     listGroupNames(),
-    listWhatsAppAccounts(),
+    listAccountsForAdmin(),
     countTemplatesByAccount(),
     listFolderOptions(),
     credentialStatuses(),
@@ -86,6 +86,9 @@ export default async function ChannelsPage() {
   const accountChoices = accountList.map((account) => ({ id: account.id, name: account.name }));
   const templatesByAccount = new Map(templateCounts.map((row) => [row.accountId, row]));
 
+  // Spread whole into a client component's props, and so into the RSC payload:
+  // safe only because `listAccountsForAdmin` names its columns. A column it
+  // does not name never reaches the browser, whatever the table grows next.
   const accounts: WhatsAppAccountRow[] = accountList.map((account) => ({
     ...account,
     numbers: channelList
