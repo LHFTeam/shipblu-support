@@ -1,8 +1,16 @@
+import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
-import { whatsappAccounts, whatsappOnboardings } from '@/db/schema';
+import { channels, whatsappAccounts, whatsappOnboardings } from '@/db/schema';
+import { listChannelsForAdmin } from '@/lib/admin/settings';
 import { withCleanDatabase } from '@/lib/testing/db';
-import { copyRequestRefusal, listLatestOnboardings, runsNamedSteps } from './onboarding-reads';
+import { progressVersion } from './onboarding-view';
+import {
+  copyRequestRefusal,
+  listLatestOnboardings,
+  readProgressVersion,
+  runsNamedSteps,
+} from './onboarding-reads';
 
 /**
  * `distinct on` is the one thing here only Postgres can judge: an `order by`
@@ -138,5 +146,80 @@ describe('copyRequestRefusal', () => {
     expect(runsNamedSteps('connected')).toBe(true);
     expect(runsNamedSteps('exchanged')).toBe(false);
     expect(runsNamedSteps('failed')).toBe(false);
+  });
+});
+
+describe('readProgressVersion', () => {
+  /** What the Channels page computes from its own reads, through the same function. */
+  async function versionAsThePageSeesIt(now: Date): Promise<string> {
+    const [onboardings, channelList] = await Promise.all([
+      listLatestOnboardings(),
+      listChannelsForAdmin(),
+    ]);
+    return progressVersion(
+      onboardings,
+      channelList
+        .filter((channel) => channel.type === 'whatsapp')
+        .map(({ id, config }) => ({ id, config })),
+      now,
+    );
+  }
+
+  it('agrees with the page when nothing has moved, and differs once something has', async () => {
+    const accountId = await account();
+    const [channel] = await db
+      .insert(channels)
+      .values([
+        {
+          type: 'whatsapp',
+          name: 'ShipBlu',
+          whatsappAccountId: accountId,
+          config: {
+            phoneNumberId: '109876543210',
+            coexistence: {
+              onboardedAt: '2026-10-08T10:00:00Z',
+              wabaId: WABA,
+              syncs: { history: { requestId: 'r', requestedAt: '2026-10-08T10:00:05Z' } },
+            },
+          },
+        },
+        // Not a WhatsApp number: the page leaves it out, and so must the read.
+        { type: 'email', name: 'Support inbox', config: { address: 'help@example.com' } },
+      ])
+      .returning({ id: channels.id });
+    await attempt({
+      accountId,
+      phoneNumberId: '109876543210',
+      status: 'connected',
+      startedAt: new Date('2026-10-08T10:00:00Z'),
+    });
+    const now = new Date('2026-10-08T10:05:00Z');
+
+    // If these ever differ with nothing moved, the page re-renders on every
+    // poll — the cost this exists to remove.
+    const polled = await readProgressVersion(now);
+    expect(polled).toBe(await versionAsThePageSeesIt(now));
+
+    await db
+      .update(channels)
+      .set({
+        config: {
+          phoneNumberId: '109876543210',
+          coexistence: {
+            onboardedAt: '2026-10-08T10:00:00Z',
+            wabaId: WABA,
+            syncs: {
+              history: {
+                requestId: 'r',
+                requestedAt: '2026-10-08T10:00:05Z',
+                progressByPhase: { 0: 50 },
+              },
+            },
+          },
+        },
+      })
+      .where(eq(channels.id, channel!.id));
+
+    expect(await readProgressVersion(now)).not.toBe(polled);
   });
 });

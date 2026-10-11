@@ -464,10 +464,17 @@ stored credential and calls Graph`.
 
 ### Live progress — polling, not SSE
 
-`OnboardingProgress` runs `RefreshScheduler`
-(`lib/realtime/refresh-scheduler.ts`, single-flight, visibility-aware) →
-`router.refresh()` at the interval `pollIntervalMs` picks — two fixed values, so
-the effect is not rebuilt on every refresh: every 3 s while the job is stepping;
+The page runs one poller, `OnboardingPolling`, for every progress card on it. It
+asks `/api/admin/onboarding-progress` for `progressVersion` (two queries) and
+calls `router.refresh()` only when the answer differs from the version the page
+was rendered with, one question at a time and only while the tab is visible.
+Until 2026-10-11 each card re-rendered the whole page on its own timer: about a
+dozen queries every three seconds per card, for as long as a history copy took.
+The page's share of that freeze is in `docs/PROJECT-STATE.md` §6.91. The version
+takes in the rows and every sentence the clock changes, so a stall sentence or a
+backoff countdown still appears without a row moving. It asks at the shortest
+interval any card wants (`pagePollIntervalMs` over `pollIntervalMs`), two fixed
+values, so the effect is not rebuilt on every refresh: every 3 s while the job is stepping;
 every 15 s while it is only waiting — a backoff whose retry is more than 15 s
 off, a stall the card has already reported, an attempt past fifteen minutes that
 offers Retry — and not at all once that overdue attempt is an hour past its
@@ -475,7 +482,7 @@ start (Retry restarts the asking; a reload reads what a late worker did). Once
 connected: 3 s for a minute while a "Copy again" request is out, at the
 backoff's pace while a retry of it is scheduled, 15 s while the history or a
 contacts copy is arriving, nothing once the attempt failed or every copy went
-quiet. A "Copy again" button also re-reads every 3 s for the 60 s after it
+quiet. A "Copy again" button also asks every 3 s for the 60 s after it
 answers, because the job records the request a claim and a Graph call later.
 Every band ends at a time measured against the server's `now`, so nothing polls
 for ever. Props flow into the mounted client component without resetting its

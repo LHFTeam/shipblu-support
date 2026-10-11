@@ -16,7 +16,6 @@ import { useActionForm } from '@/components/use-action-form';
 import { InfoTip } from '@/components/tooltip';
 import { Badge, Button, Card, ErrorText, Field, Select, SuccessText } from '@/components/ui';
 import { formatDateTime } from '@/lib/format';
-import { RefreshScheduler } from '@/lib/realtime/refresh-scheduler';
 import {
   type Coexistence,
   coexistenceBadges,
@@ -52,7 +51,6 @@ import {
   describeOnboarding,
   type OnboardingView,
   phoneRepliesUnconfirmed,
-  pollIntervalMs,
   recoveryFor,
 } from '@/lib/whatsapp/onboarding-view';
 import { DangerAction } from '../forms-shared';
@@ -759,55 +757,92 @@ function ConnectCard({
 
 // --- Progress ---------------------------------------------------------------
 
+/** Where the page asks whether anything it shows of an onboarding has moved. */
+const PROGRESS_URL = '/api/admin/onboarding-progress';
+
 /**
- * Re-reads the page every `intervalMs`, single-flight and only while the tab
- * is visible — `LiveUpdates`' scheduler on a timer instead of a stream, for
- * the reason the plan gives: an admin topic on `/api/events` would hold one
- * more backend connection per admin tab for an audience of one person
- * watching six states. Null stops it.
+ * Asks every `intervalMs`, while the tab is visible, whether anything the page
+ * shows of an onboarding has moved, and re-renders the page only when it has.
+ * Null stops it.
+ *
+ * The question is `progressVersion` — two queries — compared with the version
+ * the page was rendered with. This used to be the render itself, every three
+ * seconds per progress card for as long as a copy took: about a dozen queries
+ * each time, on a pool of eight places, for hours of history (§6.91). One
+ * question in flight at a time, none while the render it set off is still
+ * running, and one at once when the tab comes back into view.
+ *
+ * Still a timer rather than a stream, for the reason the plan gives: an admin
+ * topic on `/api/events` would hold one more backend connection per admin tab
+ * for an audience of one person watching six states.
  */
-function useRefreshEvery(intervalMs: number | null) {
+function useProgressPolling(intervalMs: number | null, version: string) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const schedulerRef = useRef<RefreshScheduler | null>(null);
-  const observedPendingRef = useRef(false);
+  const versionRef = useRef(version);
+  const pendingRef = useRef(isPending);
 
   useEffect(() => {
-    const scheduler = schedulerRef.current;
-    if (!scheduler) return;
-    if (isPending) {
-      observedPendingRef.current = true;
-    } else if (observedPendingRef.current) {
-      observedPendingRef.current = false;
-      scheduler.complete();
-    }
+    versionRef.current = version;
+  }, [version]);
+  useEffect(() => {
+    pendingRef.current = isPending;
   }, [isPending]);
 
   useEffect(() => {
     if (intervalMs === null) return;
 
-    const scheduler = new RefreshScheduler({
-      visible: document.visibilityState === 'visible',
-      start: () => {
-        startTransition(() => router.refresh());
-      },
-    });
-    schedulerRef.current = scheduler;
+    let stopped = false;
+    let asking = false;
+    const rerender = () => {
+      if (!stopped) startTransition(() => router.refresh());
+    };
 
+    const ask = async () => {
+      if (asking || pendingRef.current || document.visibilityState !== 'visible') return;
+      asking = true;
+      try {
+        const response = await fetch(PROGRESS_URL, { cache: 'no-store' });
+        // A session that ended or a permission withdrawn: the page itself is
+        // what says which, and sends the admin where they belong.
+        if (response.status === 401 || response.status === 403) return rerender();
+        if (!response.ok) return;
+        const { version: latest } = (await response.json()) as { version?: unknown };
+        if (typeof latest === 'string' && latest !== versionRef.current) rerender();
+      } catch {
+        // A dropped connection: the next tick asks again.
+      } finally {
+        asking = false;
+      }
+    };
+
+    const poll = setInterval(() => void ask(), intervalMs);
     const onVisibilityChange = () => {
-      scheduler.setVisible(document.visibilityState === 'visible');
+      if (document.visibilityState === 'visible') void ask();
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
-    const poll = setInterval(() => scheduler.request(), intervalMs);
 
     return () => {
+      stopped = true;
       clearInterval(poll);
       document.removeEventListener('visibilitychange', onVisibilityChange);
-      scheduler.dispose();
-      schedulerRef.current = null;
-      observedPendingRef.current = false;
     };
   }, [intervalMs, router, startTransition]);
+}
+
+/**
+ * The page's one poller for every progress card on it, at the shortest interval
+ * any of them asks for (`pagePollIntervalMs`). Renders nothing.
+ */
+export function OnboardingPolling({
+  intervalMs,
+  version,
+}: {
+  intervalMs: number | null;
+  version: string;
+}) {
+  useProgressPolling(intervalMs, version);
+  return null;
 }
 
 const STEP_GLYPH = { pending: '◌', running: '…', done: '✓', failed: '✗' } as const;
@@ -849,12 +884,6 @@ export function OnboardingProgress({
   /** The server's clock at render, so the page and this card agree on the sentences. */
   now: Date;
 }) {
-  // On the server's clock: every refresh renders a fresh `now`, and every
-  // bound `pollIntervalMs` applies is measured against it, so a backoff, a
-  // stall or a copy that has gone quiet changes the interval on the next read
-  // without a clock of its own.
-  useRefreshEvery(pollIntervalMs(onboarding, coexistence, now));
-
   // Retry is off while the sign-in beside it waits on Meta: a retry that starts
   // turns this attempt back to `exchanged`, which takes both recoveries off the
   // card — and unmounting the sign-in card unmounts the listener Meta's answer
@@ -1142,20 +1171,24 @@ const SYNC_REQUEST_FOLLOW_MS = 60_000;
  * a button only, so React's reset after a refusal has nothing to move; it goes
  * through `useActionForm` for the `onSuccess` that starts the burst below.
  *
- * After a success it keeps refreshing for a while, because the page that comes
+ * After a success it keeps asking for a while, because the page that comes
  * back with the action's answer is read before the worker has claimed the job:
  * it shows no request yet, so nothing on it polls, and "this page updates as it
  * arrives" was true only after a manual reload. Once the job records the request the
  * row stops offering this button, which unmounts it and ends the burst — the
- * progress card's own polling takes over from there.
+ * page's own polling takes over from there. It asks the way that polling does,
+ * and re-renders only when the answer moves (`useProgressPolling`).
  */
 export function RequestSyncAgain({
   channelId,
   type,
   again,
+  version,
 }: {
   channelId: string;
   type: SyncType;
+  /** The `progressVersion` the page was rendered with. */
+  version: string;
   /** A request Meta refused is being tried again; a copy never asked for is not "again". */
   again: boolean;
 }) {
@@ -1169,7 +1202,7 @@ export function RequestSyncAgain({
     const stop = setTimeout(() => setFollowing(false), SYNC_REQUEST_FOLLOW_MS);
     return () => clearTimeout(stop);
   }, [following, state.nonce]);
-  useRefreshEvery(following ? 3_000 : null);
+  useProgressPolling(following ? 3_000 : null, version);
   const what = type === 'contacts' ? 'contacts' : 'history';
 
   return (

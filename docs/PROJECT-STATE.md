@@ -938,15 +938,16 @@ page shares the second pool; nothing made a third. Three consequences:
 
 - An instance can hold `2 × POOL_MAX` = 20 connections to Supavisor, not 10.
   Anything that sizes the pooler per instance should count both.
-- `poolPressure()` in `/api/health` describes the **route-handler** pool only.
-  The pool that saturated on 09-08 was the one pages use, and it is not in that
-  block. The render probe is what now covers it, by failing rather than by
-  reporting a number.
-- Sharing one pool through `globalThis` in production, as #79 did, is not the
-  one-line fix it looks like. `instrumented` in `db/client.ts` is a module-local
-  `WeakSet`, so each copy would wrap the shared pool again: two deadline timers
-  per query, and pressure counters split across the copies. Fix the wrapping
-  first, or share the instrumented client rather than the raw pool.
+- `/api/health` reported the **route-handler** pool only, and the pool that
+  saturated on 09-08 was the one pages use. Since §6.91 it reports `pools`:
+  each copy registers its pool on `globalThis` under a name (`pool 1`,
+  `pool 2`), and the `[db]` lines carry the name.
+- Sharing one pool through `globalThis` in production, as #79 did, is still a
+  decision rather than a one-liner. The wrapping no longer stands in its way:
+  the deadline and the gate mark the pool handle itself (`Symbol.for`) rather
+  than a module-local `WeakSet`, so a second copy finds them installed. What
+  is left is whether webhooks should queue behind page renders. In the
+  2026-10-11 freeze the separate route pool is what kept them flowing.
 
 One figure makes #155 more urgent than its own description says: `webhook_events`
 is **402,172 rows and 1006 MB** as of 2026-09-20, against the 206,053 that PR
@@ -5566,6 +5567,157 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     names the merge row and nothing else. It cannot see a confirm swapped in
     as a different component, since a wrapper's name does not say whether it
     submits.
+
+91. **postgres.js pipelines through Supavisor's transaction pooler whenever its
+    pool is full. The pooler loses the replies, and each loss takes a
+    connection for the life of the process.** _2026-10-11, the five-minute
+    freeze after the first coexistence onboarding; production at 04df2a5. Read
+    from the Render and Supabase logs, Supavisor's source, and a local
+    reproduction against Postgres 16._
+
+    **What it looked like.** The pages froze. Webhooks and `/api/inbox` kept
+    answering in about 30 ms.
+    - 08:45:21.127: `[db] 10 queries in flight against max 10`, and the line
+      that reports recovery never came.
+    - 84 ms later: the Channels render threw `Cannot read properties of
+undefined (reading 'number')`. `listLatestOnboardings` had been handed
+      another query's rows.
+    - Page requests ran 106 s, 85 s and 144 s past a 30 s query deadline, and
+      ended only when the browser went away. One, started at 08:32:50, ran
+      944 s.
+    - 08:47:38: a reload's `groups` query was rejected by postgres.js's own
+      queue (`Error: 57014: …`, not a `PostgresError`). So for thirty seconds
+      none of the page pool's ten connections could take a query.
+    - 08:47:14: the render probe stopped answering.
+    - About 08:47:32: Render cut routing.
+    - 08:48:52: Render restarted the process.
+
+    The database was idle the whole time: no lock waits, nothing over 10 s in
+    `auto_explain`, no checkout timeouts at the pooler. And no deadline cancel
+    ever reached a running statement: there is no "canceling statement due to
+    user request" anywhere on the day.
+
+    **The mechanism.**
+    - **postgres.js pipelines once every connection is busy.** It writes the
+      next query onto a connection still waiting for its answer
+      (`busy.shift()` in its `handler()`). Or it drains its queue into one
+      write on the next connection to free up (`onopen()`). With
+      `prepare: false`, a query with no parameters goes out as a simple query
+      and leaves its connection open to more. A query with parameters goes
+      out as Parse/Describe/Flush, and only after the describe answers does
+      it send Bind/Execute/Sync.
+    - **Supavisor v2.9 hands the backend back too early.** In transaction
+      mode it returns the backend to its pool as soon as one read from
+      Postgres ends in ReadyForQuery `I` (`db_handler.ex:411-423` on the v2.9
+      line). It does not count how many replies the client is still owed.
+      Bytes Postgres sends after that are dropped at debug level, or reach
+      whichever client checks that backend out next. That client is likely
+      the next one, because the pool is LIFO.
+    - **The fixes are not deployed.** They are #1079 ("wait for all DB
+      replies") and #1205 ("hold backend until Sync"), both on Supavisor's
+      `main` in milestone v2.10.0. Neither is in any v2.9 tag up to v2.9.13.
+      The production pooler's log lines carry source line numbers matching
+      v2.9.6 to v2.9.10. Supabase's own documentation now says postgres.js
+      pipelining through the transaction pooler "can hang queries or return
+      mismatched rows". supabase/supabase#50358 reports the same failure with
+      the same stack.
+    - **The deadline (§62) cannot free a query whose reply is lost.** For a
+      query pipelined behind another, postgres.js's cancel only sets a flag.
+      For the one at the head, it sends a CancelRequest. Supavisor drops that
+      when it thinks the client is idle (`cancel.ex`). Postgres ignores it
+      when the backend is waiting for the client's next message, which is
+      where a Parse with no Sync leaves it. Nothing else in postgres.js gives
+      up on a sent query: `idle_timeout` applies only to idle connections,
+      and `max_lifetime` waits for the outstanding reply. So the query never
+      settles, and the connection is gone until the process restarts.
+    - **One loss can strand a second backend.** A wedged connection that is
+      handed a parameterised query consumes that query's ParameterDescription
+      under its stale head query. postgres.js writes Bind only for the
+      current describe-first query, so it never sends one. The backend sits
+      in PARSE until `statement_timeout`, and that timeout surfaces only when
+      the socket closes. Three of them did at 08:48:48.696-.698: two session
+      lookups and one `presence_policy` read.
+
+    **It built up over 36 hours in one process.**
+    - 2026-10-10 20:48:56: three web sockets opened in a pool-ceiling burst,
+      and every one of them was still open at the 08:48:48 kill. postgres.js
+      retires a connection after 30 to 60 minutes unless a query on it is
+      still outstanding, so each of those was holding a query that never
+      settled.
+    - 08:32:50 on the day: a Parse-stranded backend was killed exactly five
+      minutes later by `transaction_timeout`, beside the 944 s render.
+    - 08:45:21: the onboarding's click took the rest. At 04df2a5 that one
+      click produced two full Channels renders at once: the action's own
+      revalidation, plus a `router.refresh()` that 15a30dc has since removed.
+      Each render was about eleven queries, seven of them parameterless, on
+      top of the layouts' reads.
+    - Webhooks kept flowing because route handlers have a pool of their own
+      (§5.0). 13 web sockets closed at the kill, against `POOL_MAX` 10.
+
+    **The fix is an admission gate in `db/client.ts`.**
+    - Every query and transaction on the pool waits for one of `ADMIT_MAX`
+      places before postgres.js sees it. That is `POOL_MAX - 2`, eight.
+    - With no more queries inside it than it has idle or unopened
+      connections, postgres.js never reaches a busy one, so it never
+      pipelines.
+    - The two spare connections cover the moments a connection is neither
+      idle nor unopened: closing at `max_lifetime`, or still connecting after
+      the query it opened for was cancelled.
+    - A transaction holds one place from before its `BEGIN` until it settles.
+      Its statements run on its own connection, where pipelining is safe:
+      every ReadyForQuery until the `COMMIT` reports the transaction open, so
+      the pooler keeps the backend.
+    - `max_pipeline: 0` is what Supabase suggests, and what #50358 used. It
+      does stop the pipelining, but postgres.js then never calls the hook
+      `begin()` uses to find its connection, so every transaction fails with
+      `UNSAFE_TRANSACTION`. Measured locally. `max_pipeline: 1` still wedges.
+    - A place is handed on a microtask after the query settles, because
+      postgres.js settles a query before it moves the connection back to
+      `open`.
+    - The health probe's `select 1` is a tagged template, which bypasses
+      `unsafe()`, so it is gated explicitly.
+
+    **Given up on, not left hanging.** The gate keeps the pooler from losing
+    replies, but a reply can still go missing some other way. So a query still
+    unanswered 10 s after its deadline's cancel is rejected with `57014`
+    (`query had no answer …ms after its cancel`), and its place is kept and
+    counted as `lost`. Admitting another query in its place would leave
+    postgres.js one connection short and pipelining again. If the reply comes
+    after all, the place is freed. A transaction whose statement is given up
+    on is rejected at the same moment, because its `ROLLBACK` sits behind that
+    statement. Its place stays held until both the transaction and every lost
+    statement have answered.
+
+    **The Channels page.**
+    - The page's seven reads run three at a time (`allLimited` in
+      `lib/concurrency.ts`).
+    - While an onboarding moves, the page asks `/api/admin/onboarding-progress`
+      for `progressVersion`, two queries, and re-renders only when the answer
+      differs. It used to run a full render every three seconds per progress
+      card, for as long as a history copy took. The version takes in the rows
+      and every sentence the clock changes, so the stall sentence, the
+      backoff countdown and Retry still appear on time.
+    - One poller for the page, at the shortest interval any card asks for.
+    - `getSessionAgent()` is still called once per layout and once per page.
+      `lib/auth/customer-session.ts` says why it must keep re-reading.
+
+    **How to recognise it now.**
+    - `[db] a query had no answer after its cancel (pool N: …)` is a
+      connection given up on.
+    - `lost` in `/api/health`, which now reports `pools`, every pool in the
+      process rather than only the route handlers'.
+    - Postgres logging a 57014 or a `25P04` FATAL whose `command_tag` is
+      `PARSE` is a backend that received a Parse and never its Sync. That is
+      this shape at the database. It also appeared on 10-05 between 11:17 and
+      12:35, seven times, and nobody noticed.
+
+    **When Supavisor v2.10 is deployed, keep the gate.** It costs a queue
+    that was already there, and postgres.js's own skip of a cancelled
+    pipelined query (`connection.js:573-574`) hands the next query the
+    skipped one's rows whatever the pooler does.
+    `db/client.db.test.ts` runs the real postgres.js through a proxy that
+    counts a ReadyForQuery `I` arriving after the client has written more. The
+    same burst without the gate produces that shape; with it, never.
 
 ## 7. Verification already done
 

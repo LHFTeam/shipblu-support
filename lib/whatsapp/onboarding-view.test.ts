@@ -7,6 +7,8 @@ import {
   isOnboardingShown,
   LIVE_ATTEMPT_MS,
   NUMBER_NOT_ON_ACCOUNT,
+  pagePollIntervalMs,
+  progressVersion,
   type OnboardingRow,
   type OnboardingView,
   phoneRepliesUnconfirmed,
@@ -610,5 +612,89 @@ describe('isOnboardingShown and shownOnboardings', () => {
         'o-first',
       ]);
     }
+  });
+});
+
+describe('progressVersion', () => {
+  const channelConfig = (syncs: Record<string, unknown> = {}) => ({
+    phoneNumberId: '109876543210',
+    coexistence: {
+      onboardedAt: STARTED.toISOString(),
+      wabaId: '102030405060',
+      displayPhoneNumber: '+20 10 1234 5678',
+      verifiedName: 'ShipBlu',
+      subscribedAt: null,
+      syncs,
+    },
+  });
+  const channel = (id: string, syncs: Record<string, unknown> = {}) => ({
+    id,
+    config: channelConfig(syncs),
+  });
+
+  it('is the same for the same rows at the same moment, read in any order', () => {
+    const attempts = [view({ id: 'o-1' }), view({ id: 'o-2', phoneNumberId: '1098' })];
+    const channels = [channel('c-1'), channel('c-2')];
+
+    expect(progressVersion(attempts, channels, at(5_000))).toBe(
+      progressVersion([...attempts].reverse(), [...channels].reverse(), at(5_000)),
+    );
+  });
+
+  it('moves when a step lands', () => {
+    const before = progressVersion([view()], [], at(5_000));
+    const after = progressVersion([view({ steps: { number: ok(4_000) } })], [], at(5_000));
+
+    expect(after).not.toBe(before);
+  });
+
+  it('moves when the phone sends more of the history', () => {
+    const attempt = view({ status: 'connected', channelId: 'c-1', finishedAt: at(10_000) });
+    const requested = { requestId: 'r', requestedAt: iso(10_000) };
+
+    expect(
+      progressVersion(
+        [attempt],
+        [channel('c-1', { history: { ...requested, progressByPhase: { 0: 40 } } })],
+        at(60_000),
+      ),
+    ).not.toBe(
+      progressVersion(
+        [attempt],
+        [channel('c-1', { history: { ...requested, progressByPhase: { 0: 60 } } })],
+        at(60_000),
+      ),
+    );
+  });
+
+  it('moves when the clock alone changes what the card says, and not otherwise', () => {
+    const attempt = view();
+
+    // A few seconds in, nothing on the card depends on how many.
+    expect(progressVersion([attempt], [], at(5_000))).toBe(
+      progressVersion([attempt], [], at(9_000)),
+    );
+    // Past the stall, the card says no worker has picked it up, and asks less
+    // often: the page has to render for that, with nothing in the rows moved.
+    expect(progressVersion([attempt], [], at(STALL_AFTER_MS + 1_000))).not.toBe(
+      progressVersion([attempt], [], at(5_000)),
+    );
+  });
+});
+
+describe('pagePollIntervalMs', () => {
+  it('asks as often as the most eager card, once for the whole page', () => {
+    const running = view({ id: 'o-1' });
+    const stalled = view({ id: 'o-2', phoneNumberId: '1098', startedAt: at(-STALL_AFTER_MS * 2) });
+
+    expect(pagePollIntervalMs([stalled], () => null, at(0))).toBe(15_000);
+    expect(pagePollIntervalMs([stalled, running], () => null, at(0))).toBe(3_000);
+  });
+
+  it('stops when no card is waiting for anything', () => {
+    const failedAttempt = view({ status: 'failed', finishedAt: at(1_000), error: 'refused' });
+
+    expect(pagePollIntervalMs([failedAttempt], () => null, at(2_000))).toBeNull();
+    expect(pagePollIntervalMs([], () => null, at(2_000))).toBeNull();
   });
 });

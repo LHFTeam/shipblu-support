@@ -1,8 +1,13 @@
 import { desc, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
-import { ONBOARDING_STEPS, type OnboardingStatus, whatsappOnboardings } from '@/db/schema';
+import {
+  channels,
+  ONBOARDING_STEPS,
+  type OnboardingStatus,
+  whatsappOnboardings,
+} from '@/db/schema';
 import { canonicalUuid } from '@/lib/http/uuid';
-import { type OnboardingView, toOnboardingView } from './onboarding-view';
+import { type OnboardingView, progressVersion, toOnboardingView } from './onboarding-view';
 
 /**
  * What the admin page and its actions read of the attempts to connect WhatsApp
@@ -47,6 +52,28 @@ export async function listLatestOnboardings(): Promise<OnboardingView[]> {
   return rows
     .map((row) => toOnboardingView(row, ONBOARDING_STEPS))
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+}
+
+/**
+ * What the Channels page's onboarding parts are drawn from, as one short
+ * string (`progressVersion`): two reads, where a render of the page is about a
+ * dozen. The page polls this while an attempt is moving and renders only when
+ * it changes.
+ *
+ * The same two inputs the page hands `progressVersion` — every number's latest
+ * attempt, and the `whatsapp` channels' configuration, which is where their
+ * coexistence state lives — so a version the page computed and one read here
+ * differ only when something did.
+ */
+export async function readProgressVersion(now: Date): Promise<string> {
+  const [onboardings, whatsappChannels] = await Promise.all([
+    listLatestOnboardings(),
+    db
+      .select({ id: channels.id, config: channels.config })
+      .from(channels)
+      .where(eq(channels.type, 'whatsapp')),
+  ]);
+  return progressVersion(onboardings, whatsappChannels, now);
 }
 
 /**

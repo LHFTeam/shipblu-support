@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { databaseProbe, poolPressure } from '@/db/client';
+import { allPoolPressures, databaseProbe } from '@/db/client';
 import { renderProbe, within } from '@/lib/health/probe';
 import { queueDepth } from '@/lib/queue';
 
@@ -51,7 +51,10 @@ export async function GET() {
       dbLatencyMs,
       renderMs,
       queue,
-      pool: poolPressure(),
+      // Every pool in the process, not only the one this route handler uses:
+      // pages run on a second pool (`db/client.ts`), and that is the one that
+      // froze on 2026-09-08 and on 2026-10-11.
+      pools: allPoolPressures(),
       commit: process.env.RENDER_GIT_COMMIT?.slice(0, 7) ?? null,
       timestamp: new Date().toISOString(),
     });
@@ -60,9 +63,10 @@ export async function GET() {
       {
         status: 'error',
         error: error instanceof Error ? error.message : 'unknown',
-        // The number that says whether this is the database or ourselves. A
-        // saturated pool with a healthy database is the shape of §62.
-        pool: poolPressure(),
+        // The numbers that say whether this is the database or ourselves. A
+        // saturated pool with a healthy database is the shape of §62, and a
+        // pool with `lost` places is the shape of §6.91.
+        pools: allPoolPressures(),
         timestamp: new Date().toISOString(),
       },
       { status: 503 },

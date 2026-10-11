@@ -1,5 +1,13 @@
 import type { OnboardingStatus, OnboardingStep, OnboardingStepRecord } from '@/db/schema';
-import { type Coexistence, isSyncing } from './coexistence';
+import {
+  canRequestSync,
+  type Coexistence,
+  coexistenceBadges,
+  isSyncing,
+  needsReconnect,
+  parseCoexistence,
+  SYNC_TYPES,
+} from './coexistence';
 
 /**
  * What the admin page shows of an attempt to connect a WhatsApp Business-app
@@ -544,4 +552,92 @@ export function shownOnboardings(views: OnboardingView[], now: Date): Onboarding
         Date.parse(other.startedAt) > started,
     );
   });
+}
+
+/**
+ * How often the page asks whether anything on it moved, or null when nothing
+ * shown is waiting for anything: the shortest of the shown cards' intervals.
+ *
+ * One answer for the page rather than one per card. Each card used to re-render
+ * the whole page on its own timer, so two cards running were two full renders
+ * every three seconds, each about a dozen queries on a pool of eight places.
+ */
+export function pagePollIntervalMs(
+  cards: OnboardingView[],
+  coexistenceFor: (view: OnboardingView) => Coexistence | null,
+  now: Date,
+): number | null {
+  const intervals = cards
+    .map((view) => pollIntervalMs(view, coexistenceFor(view), now))
+    .filter((interval): interval is number => interval !== null);
+  return intervals.length > 0 ? Math.min(...intervals) : null;
+}
+
+/**
+ * A short string that changes whenever anything the onboarding parts of the
+ * Channels page would draw differently — so the page polls this and renders
+ * only when it moves, instead of re-rendering itself on a timer.
+ *
+ * Computed by the page from what it already read, and by
+ * `/api/admin/onboarding-progress` from the same two reads, through this one
+ * function, so the two cannot disagree about what counts as a change. It takes
+ * in the rows the cards and the coexistence parts of the channel rows are drawn
+ * from, and every sentence and switch those draw from the clock — the stall
+ * sentence, the backoff's countdown, when Retry appears, the poll interval, the
+ * badges and copy buttons — so time passing moves it when it would move the
+ * page, and only then.
+ *
+ * Pure and synchronous on both sides of the wire: a 32-bit FNV-1a over the
+ * JSON, which is plenty for telling "changed" from "did not" and needs no
+ * `node:crypto` in a module the browser also loads.
+ */
+export function progressVersion(
+  onboardings: OnboardingView[],
+  channels: { id: string; config: Record<string, unknown> }[],
+  now: Date,
+): string {
+  // By id, so the page and the endpoint may read the rows in any order. The
+  // order the cards are drawn in moves only with `startedAt`, which is in the
+  // rows already.
+  const byId = <T extends { id: string }>(rows: T[]) =>
+    [...rows].sort((a, b) => a.id.localeCompare(b.id));
+  const coexistenceById = new Map(
+    byId(channels).map((channel) => [channel.id, parseCoexistence(channel.config)] as const),
+  );
+  const coexistenceFor = (view: OnboardingView) =>
+    view.channelId ? (coexistenceById.get(view.channelId) ?? null) : null;
+
+  const drawn = {
+    cards: shownOnboardings(byId(onboardings), now).map((view) => ({
+      view,
+      lines: describeOnboarding(view, now),
+      retry: retryable(view, now),
+      poll: pollIntervalMs(view, coexistenceFor(view), now),
+    })),
+    // The channel rows read every number's latest attempt, shown or not, to
+    // decide whether its copy buttons wait for it.
+    attempts: byId(onboardings).map((view) => [view.id, view.status]),
+    channels: [...coexistenceById].map(([id, coexistence]) =>
+      coexistence
+        ? {
+            id,
+            coexistence,
+            badges: coexistenceBadges(coexistence, now).map((badge) => badge.label),
+            reconnect: needsReconnect(coexistence, now),
+            copy: SYNC_TYPES.map((type) => canRequestSync(coexistence, type, now).ok),
+          }
+        : { id },
+    ),
+  };
+
+  return fnv1a(JSON.stringify(drawn));
+}
+
+function fnv1a(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
 }
