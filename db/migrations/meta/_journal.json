@@ -239,6 +239,13 @@
       "when": 1791565293640,
       "tag": "0033_special_king_cobra",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1791763165595,
+      "tag": "0034_high_leech",
+      "breakpoints": true
     }
   ]
 }
