@@ -6,12 +6,17 @@ _Diagnosis only. No application code was changed. Written 2026-09-09 against
 streams on `nqbcfnvqqyqawmffgiql`, and `EXPLAIN ANALYZE` run against
 production._
 
-_Sequel, 2026-10-11._ The same pool froze again, the same way to look at, for a
-reason this diagnosis does not cover. At a full pool postgres.js pipelines onto
-busy connections, and Supavisor's transaction pooler loses the replies, so the
-connections themselves were lost rather than merely queued behind
-(`docs/PROJECT-STATE.md` §6.91). Nobody has checked whether that also played a
-part here. The admission gate in `db/client.ts` is the answer to that one.
+_Sequel, 2026-10-11._ The same pool froze again, looking the same from
+outside, for a reason this diagnosis does not cover. At a full pool postgres.js
+pipelines onto busy connections, and Supavisor's transaction pooler loses the
+replies, so the connections themselves were lost rather than merely queued
+behind (`docs/PROJECT-STATE.md` §6.91). Nobody has checked whether that also
+played a part here. The lines to check are in the timeline below: the
+statement timeout on a parameterised query, and the five
+`transaction_timeout` terminations this diagnosis reads as stranded SSE
+connections. A `command_tag` of `PARSE` on any of them is a backend handed a
+Parse that never got its Sync, which is the 10-11 shape and not a queue. The
+admission gate in `db/client.ts` is the answer to that one.
 
 ## What happened
 

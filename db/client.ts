@@ -685,12 +685,12 @@ function instrumentWith<T>(client: T, limits: Limits, state: PoolState, txn?: Tr
 }
 
 /** A clock that gives the transaction up on firing, and reports back if cleared after. */
-function clock(txn: TransactionWatch, label: string, afterMs: number): Clock {
+function clock(state: PoolState, txn: TransactionWatch, label: string, afterMs: number): Clock {
   let fired = false;
   let cleared = false;
   const timer = setTimeout(() => {
     fired = true;
-    log.warn(`a transaction's ${label} had no answer in ${afterMs}ms`);
+    log.warn(`a transaction's ${label} had no answer in ${afterMs}ms${describe(state)}`);
     txn.lost(canceled(`${label} had no answer in ${afterMs}ms; its connection is treated as lost`));
   }, afterMs);
   return {
@@ -792,7 +792,7 @@ function beginBehind(
           unanswered -= 1;
           releaseWhenFree();
         },
-        stall: (label) => clock(txn, label, limits.timeoutMs + limits.lostAfterMs),
+        stall: (label) => clock(state, txn, label, limits.timeoutMs + limits.lostAfterMs),
       };
 
       // The BEGIN reports here: given up on, it is never counted answered.

@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import { channels, whatsappAccounts, whatsappOnboardings } from '@/db/schema';
-import { listChannelsForAdmin } from '@/lib/admin/settings';
+import { listAccountsForAdmin, listChannelsForAdmin } from '@/lib/admin/settings';
 import { withCleanDatabase } from '@/lib/testing/db';
 import { progressVersion } from './onboarding-view';
 import {
@@ -152,15 +152,23 @@ describe('copyRequestRefusal', () => {
 describe('readProgressVersion', () => {
   /** What the Channels page computes from its own reads, through the same function. */
   async function versionAsThePageSeesIt(now: Date): Promise<string> {
-    const [onboardings, channelList] = await Promise.all([
+    const [onboardings, channelList, accountList] = await Promise.all([
       listLatestOnboardings(),
       listChannelsForAdmin(),
+      listAccountsForAdmin(),
     ]);
     return progressVersion(
-      onboardings,
-      channelList
-        .filter((channel) => channel.type === 'whatsapp')
-        .map(({ id, config }) => ({ id, config })),
+      {
+        onboardings,
+        channels: channelList
+          .filter((channel) => channel.type === 'whatsapp')
+          .map(({ id, config }) => ({ id, config })),
+        accounts: accountList.map(({ id, lastSyncedAt, lastSyncError }) => ({
+          id,
+          lastSyncedAt,
+          lastSyncError,
+        })),
+      },
       now,
     );
   }
@@ -221,5 +229,42 @@ describe('readProgressVersion', () => {
       .where(eq(channels.id, channel!.id));
 
     expect(await readProgressVersion(now)).not.toBe(polled);
+  });
+
+  // The onboarding only queues the template sync, so its answer lands on the
+  // account row once the attempt has stopped moving. Read here as a Date from
+  // a timestamptz, on the page through `listAccountsForAdmin`: the two have to
+  // agree on the instant, and on a second account in another name order.
+  it("agrees with the page on the accounts' sync, and moves when the sync answers", async () => {
+    const accountId = await account();
+    await db
+      .insert(whatsappAccounts)
+      .values({ name: 'Another', wabaId: '908070605040', tokenEnvVar: null, isDefault: false });
+    await attempt({
+      accountId,
+      phoneNumberId: '109876543210',
+      status: 'connected',
+      startedAt: new Date('2026-10-08T10:00:00Z'),
+    });
+    const now = new Date('2026-10-08T10:05:00Z');
+
+    const neverSynced = await readProgressVersion(now);
+    expect(neverSynced).toBe(await versionAsThePageSeesIt(now));
+
+    await db
+      .update(whatsappAccounts)
+      .set({ lastSyncedAt: new Date('2026-10-08T10:04:30.123Z') })
+      .where(eq(whatsappAccounts.id, accountId));
+    const synced = await readProgressVersion(now);
+    expect(synced).not.toBe(neverSynced);
+    expect(synced).toBe(await versionAsThePageSeesIt(now));
+
+    await db
+      .update(whatsappAccounts)
+      .set({ lastSyncError: '(#190) The access token has expired.' })
+      .where(eq(whatsappAccounts.id, accountId));
+    const failing = await readProgressVersion(now);
+    expect(failing).not.toBe(synced);
+    expect(failing).toBe(await versionAsThePageSeesIt(now));
   });
 });

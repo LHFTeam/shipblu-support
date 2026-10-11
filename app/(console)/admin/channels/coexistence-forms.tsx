@@ -761,16 +761,61 @@ function ConnectCard({
 const PROGRESS_URL = '/api/admin/onboarding-progress';
 
 /**
+ * How long a refresh one poller asked for stops another on the page from
+ * asking for the same one. Longer than a render of the page normally takes, so
+ * the second poller does not ask while the first one's render is still on its
+ * way; short enough that a refresh which never landed — a connection that
+ * dropped mid-render — is asked for again a few ticks later rather than never.
+ */
+const REFRESH_CLAIM_MS = 10_000;
+
+/** What a refresh for a poll the server would not answer is filed under. */
+const NOT_ANSWERED = 'not answered';
+
+/**
+ * The refreshes asked for in the last `REFRESH_CLAIM_MS`, by what they were
+ * for, shared by every poller on the page. Each poller tracks only its own
+ * transition, so the page's poller and a "Copy again" burst that saw the same
+ * change both refreshed for it — two full renders for one change, which Next
+ * queues one behind the other rather than merging.
+ */
+const refreshesAsked = new Map<string, number>();
+
+/**
+ * Whether this poller is the first to ask for a refresh for `reason` lately.
+ * `at` is `performance.now()`, not `Date.now()`: a wall clock set back an hour
+ * would leave every claim an hour in the future, and the page refusing itself
+ * every refresh until it caught up.
+ */
+function firstToAsk(reason: string, at: number): boolean {
+  for (const [asked, askedAt] of refreshesAsked) {
+    if (at - askedAt >= REFRESH_CLAIM_MS) refreshesAsked.delete(asked);
+  }
+  if (refreshesAsked.has(reason)) return false;
+  refreshesAsked.set(reason, at);
+  return true;
+}
+
+/**
  * Asks every `intervalMs`, while the tab is visible, whether anything the page
  * shows of an onboarding has moved, and re-renders the page only when it has.
  * Null stops it.
  *
- * The question is `progressVersion` — two queries — compared with the version
- * the page was rendered with. This used to be the render itself, every three
- * seconds per progress card for as long as a copy took: about a dozen queries
- * each time, on a pool of eight places, for hours of history (§6.91). One
- * question in flight at a time, none while the render it set off is still
- * running, and one at once when the tab comes back into view.
+ * The question is `progressVersion` — the session lookup and three narrow
+ * reads, on the route handlers' pool — compared with the version the page was
+ * rendered with. This used to be the render itself, about a dozen queries,
+ * once per progress card: every three seconds while the job was stepping,
+ * which takes minutes, and every fifteen while a history or contacts copy
+ * arrived, which takes hours (§6.91). One question in flight at a time, none
+ * while the render it set off is still running, and one at once when the tab
+ * comes back into view.
+ *
+ * A refresh is asked for once per change across every poller on the page
+ * (`firstToAsk`). A poll the server would not answer — redirected to /login,
+ * 401, 403 — asks for one too, because the page itself is what says which and
+ * sends the admin where they belong. So nothing here refreshes more often than
+ * it asks, and a refusal that persists refreshes at most once per
+ * `REFRESH_CLAIM_MS`, rather than becoming the render on a timer this replaced.
  *
  * Still a timer rather than a stream, for the reason the plan gives: an admin
  * topic on `/api/events` would hold one more backend connection per admin tab
@@ -794,21 +839,36 @@ function useProgressPolling(intervalMs: number | null, version: string) {
 
     let stopped = false;
     let asking = false;
-    const rerender = () => {
-      if (!stopped) startTransition(() => router.refresh());
+    const rerender = (reason: string) => {
+      if (!stopped && firstToAsk(reason, performance.now())) {
+        startTransition(() => router.refresh());
+      }
     };
 
     const ask = async () => {
       if (asking || pendingRef.current || document.visibilityState !== 'visible') return;
       asking = true;
       try {
-        const response = await fetch(PROGRESS_URL, { cache: 'no-store' });
-        // A session that ended or a permission withdrawn: the page itself is
-        // what says which, and sends the admin where they belong.
-        if (response.status === 401 || response.status === 403) return rerender();
+        // Not followed: `proxy.ts` answers a request with no session cookie —
+        // signed out in another tab, or the cookie's age run out — with a
+        // redirect to /login before the route can say 401. Followed, that was
+        // the login page's 200, whose HTML `json()` threw on, so the tab sat
+        // on a stale page polling /login for as long as it stayed open.
+        const response = await fetch(PROGRESS_URL, { cache: 'no-store', redirect: 'manual' });
+        if (
+          response.type === 'opaqueredirect' ||
+          response.status === 401 ||
+          response.status === 403
+        ) {
+          return rerender(NOT_ANSWERED);
+        }
         if (!response.ok) return;
         const { version: latest } = (await response.json()) as { version?: unknown };
-        if (typeof latest === 'string' && latest !== versionRef.current) rerender();
+        // Filed under the change rather than the new version alone, so a page
+        // that moved away and back is not refused the second refresh.
+        if (typeof latest === 'string' && latest !== versionRef.current) {
+          rerender(`${versionRef.current} -> ${latest}`);
+        }
       } catch {
         // A dropped connection: the next tick asks again.
       } finally {
@@ -832,7 +892,9 @@ function useProgressPolling(intervalMs: number | null, version: string) {
 
 /**
  * The page's one poller for every progress card on it, at the shortest interval
- * any of them asks for (`pagePollIntervalMs`). Renders nothing.
+ * any of them asks for (`pagePollIntervalMs`). Renders nothing. A "Copy again"
+ * button runs a minute's burst of its own beside it (`RequestSyncAgain`), and
+ * the two refresh once between them for a change both see (`firstToAsk`).
  */
 export function OnboardingPolling({
   intervalMs,
@@ -1159,10 +1221,10 @@ export function CoexistenceBadges({ config, now }: { config: Record<string, unkn
 }
 
 /**
- * How long a "Copy again" keeps re-reading the page after the action answers.
- * The action only enqueues; the request id the progress card polls on is
- * written by the job, a claim and a Graph call later — seconds, at priority 10.
- * A minute covers that with room, and ends on its own if Meta refuses again.
+ * How long a "Copy again" keeps asking whether the page moved after the action
+ * answers. The action only enqueues; the request id the progress card polls on
+ * is written by the job, a claim and a Graph call later — seconds, at priority
+ * 10. A minute covers that with room, and ends on its own if Meta refuses again.
  */
 const SYNC_REQUEST_FOLLOW_MS = 60_000;
 

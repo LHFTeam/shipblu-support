@@ -4,6 +4,7 @@ import {
   channels,
   ONBOARDING_STEPS,
   type OnboardingStatus,
+  whatsappAccounts,
   whatsappOnboardings,
 } from '@/db/schema';
 import { canonicalUuid } from '@/lib/http/uuid';
@@ -55,25 +56,34 @@ export async function listLatestOnboardings(): Promise<OnboardingView[]> {
 }
 
 /**
- * What the Channels page's onboarding parts are drawn from, as one short
- * string (`progressVersion`): two reads, where a render of the page is about a
- * dozen. The page polls this while an attempt is moving and renders only when
- * it changes.
+ * What the Channels page's onboarding parts and its accounts' template sync
+ * are drawn from, as one short string (`progressVersion`): three narrow reads,
+ * where a render of the page is about a dozen. The page polls this while an
+ * attempt is moving and renders only when it changes.
  *
- * The same two inputs the page hands `progressVersion` — every number's latest
- * attempt, and the `whatsapp` channels' configuration, which is where their
- * coexistence state lives — so a version the page computed and one read here
- * differ only when something did.
+ * The same three inputs the page hands `progressVersion` — every number's
+ * latest attempt, the `whatsapp` channels' configuration, which is where their
+ * coexistence state lives, and each account's last sync — so a version the
+ * page computed and one read here differ only when something did. The account
+ * read names its three columns rather than reusing `listAccountsForAdmin`: the
+ * poll needs the sync's outcome, not the row the editor draws.
  */
 export async function readProgressVersion(now: Date): Promise<string> {
-  const [onboardings, whatsappChannels] = await Promise.all([
+  const [onboardings, whatsappChannels, accounts] = await Promise.all([
     listLatestOnboardings(),
     db
       .select({ id: channels.id, config: channels.config })
       .from(channels)
       .where(eq(channels.type, 'whatsapp')),
+    db
+      .select({
+        id: whatsappAccounts.id,
+        lastSyncedAt: whatsappAccounts.lastSyncedAt,
+        lastSyncError: whatsappAccounts.lastSyncError,
+      })
+      .from(whatsappAccounts),
   ]);
-  return progressVersion(onboardings, whatsappChannels, now);
+  return progressVersion({ onboardings, channels: whatsappChannels, accounts }, now);
 }
 
 /**

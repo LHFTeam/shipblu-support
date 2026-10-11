@@ -558,9 +558,13 @@ export function shownOnboardings(views: OnboardingView[], now: Date): Onboarding
  * How often the page asks whether anything on it moved, or null when nothing
  * shown is waiting for anything: the shortest of the shown cards' intervals.
  *
- * One answer for the page rather than one per card. Each card used to re-render
- * the whole page on its own timer, so two cards running were two full renders
- * every three seconds, each about a dozen queries on a pool of eight places.
+ * One answer for the page rather than one per card. Each card used to
+ * re-render the whole page on its own timer — every three seconds while its job
+ * was stepping, which takes minutes, and every fifteen while a history or
+ * contacts copy arrived, which takes hours — so two cards were two full renders
+ * per tick, each about a dozen queries. On 2026-10-11 those landed on a pool of
+ * ten connections with nothing in front of it; today a render's dozen queue for
+ * the gate's eight places (§6.91).
  */
 export function pagePollIntervalMs(
   cards: OnboardingView[],
@@ -575,11 +579,12 @@ export function pagePollIntervalMs(
 
 /**
  * A short string that changes whenever anything the onboarding parts of the
- * Channels page would draw differently — so the page polls this and renders
- * only when it moves, instead of re-rendering itself on a timer.
+ * Channels page, or its accounts' template sync, would draw differently — so
+ * the page polls this and renders only when it moves, instead of re-rendering
+ * itself on a timer.
  *
  * Computed by the page from what it already read, and by
- * `/api/admin/onboarding-progress` from the same two reads, through this one
+ * `/api/admin/onboarding-progress` from the same three reads, through this one
  * function, so the two cannot disagree about what counts as a change. It takes
  * in the rows the cards and the coexistence parts of the channel rows are drawn
  * from, and every sentence and switch those draw from the clock — the stall
@@ -587,28 +592,49 @@ export function pagePollIntervalMs(
  * badges and copy buttons — so time passing moves it when it would move the
  * page, and only then.
  *
+ * The accounts are in it because the onboarding's last step only queues the
+ * template sync, and `finish` connects the attempt a moment later: the sync's
+ * outcome lands on the account row after the last write the onboarding parts
+ * see. Without it an account row said "never synced" for as long as the page
+ * polled, and never said "sync failing" — the failure of the first sync on a
+ * newly stored credential being what that row is there to show. The sync
+ * writes the templates before it stamps `last_synced_at`, so the stamp moving
+ * brings the template count along.
+ *
+ * The backoff's countdown moves it on purpose. Under ninety seconds the card
+ * counts in whole seconds, so every poll in the last ninety seconds of a
+ * backoff re-renders the page — most of a real one, since the queue waits 10,
+ * 40, 90 and then 160 s (`retryDelaySeconds`). The countdown is what the card
+ * shows, drawn from the server's `now`: left out of the version, it would stand
+ * still at whatever the last render said. Drawing it on the client from
+ * `nextAttemptAt` is what would take those renders away.
+ *
  * Pure and synchronous on both sides of the wire: a 32-bit FNV-1a over the
  * JSON, which is plenty for telling "changed" from "did not" and needs no
  * `node:crypto` in a module the browser also loads.
  */
 export function progressVersion(
-  onboardings: OnboardingView[],
-  channels: { id: string; config: Record<string, unknown> }[],
+  rows: {
+    onboardings: OnboardingView[];
+    channels: { id: string; config: Record<string, unknown> }[];
+    accounts: { id: string; lastSyncedAt: Date | string | null; lastSyncError: string | null }[];
+  },
   now: Date,
 ): string {
   // By id, so the page and the endpoint may read the rows in any order. The
   // order the cards are drawn in moves only with `startedAt`, which is in the
-  // rows already.
-  const byId = <T extends { id: string }>(rows: T[]) =>
-    [...rows].sort((a, b) => a.id.localeCompare(b.id));
+  // rows already; the account rows are drawn by name, which only an action
+  // changes, and an action re-renders the page by itself.
+  const byId = <T extends { id: string }>(list: T[]) =>
+    [...list].sort((a, b) => a.id.localeCompare(b.id));
   const coexistenceById = new Map(
-    byId(channels).map((channel) => [channel.id, parseCoexistence(channel.config)] as const),
+    byId(rows.channels).map((channel) => [channel.id, parseCoexistence(channel.config)] as const),
   );
   const coexistenceFor = (view: OnboardingView) =>
     view.channelId ? (coexistenceById.get(view.channelId) ?? null) : null;
 
   const drawn = {
-    cards: shownOnboardings(byId(onboardings), now).map((view) => ({
+    cards: shownOnboardings(byId(rows.onboardings), now).map((view) => ({
       view,
       lines: describeOnboarding(view, now),
       retry: retryable(view, now),
@@ -616,7 +642,7 @@ export function progressVersion(
     })),
     // The channel rows read every number's latest attempt, shown or not, to
     // decide whether its copy buttons wait for it.
-    attempts: byId(onboardings).map((view) => [view.id, view.status]),
+    attempts: byId(rows.onboardings).map((view) => [view.id, view.status]),
     channels: [...coexistenceById].map(([id, coexistence]) =>
       coexistence
         ? {
@@ -628,9 +654,29 @@ export function progressVersion(
           }
         : { id },
     ),
+    // Named fields rather than the row, so a caller handing over its whole
+    // account row cannot put a column into the page's version that the
+    // endpoint's narrow read does not have.
+    accounts: byId(rows.accounts).map((account) => ({
+      id: account.id,
+      lastSyncedAt: isoInstant(account.lastSyncedAt),
+      lastSyncError: account.lastSyncError,
+    })),
   };
 
   return fnv1a(JSON.stringify(drawn));
+}
+
+/**
+ * One spelling for an instant, whichever way it was read: a `Date` serialises
+ * through `toISOString`, but a string from a raw read keeps Postgres's
+ * `2026-10-08 10:00:00+00`, and the same moment hashing two ways is a page that
+ * re-renders on every poll.
+ */
+function isoInstant(value: Date | string | null): string | null {
+  if (value === null) return null;
+  const at = new Date(value);
+  return Number.isNaN(at.getTime()) ? String(value) : at.toISOString();
 }
 
 function fnv1a(text: string): string {

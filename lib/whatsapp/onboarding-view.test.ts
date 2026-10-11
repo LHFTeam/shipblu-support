@@ -631,19 +631,43 @@ describe('progressVersion', () => {
     id,
     config: channelConfig(syncs),
   });
+  type Account = { id: string; lastSyncedAt: Date | string | null; lastSyncError: string | null };
+  const account = (id: string, overrides: Partial<Account> = {}): Account => ({
+    id,
+    lastSyncedAt: null,
+    lastSyncError: null,
+    ...overrides,
+  });
+  /** The version of these rows, with whatever the case does not name left empty. */
+  const version = (
+    rows: {
+      onboardings?: OnboardingView[];
+      channels?: ReturnType<typeof channel>[];
+      accounts?: Account[];
+    },
+    now: Date,
+  ) => progressVersion({ onboardings: [], channels: [], accounts: [], ...rows }, now);
 
   it('is the same for the same rows at the same moment, read in any order', () => {
-    const attempts = [view({ id: 'o-1' }), view({ id: 'o-2', phoneNumberId: '1098' })];
+    const onboardings = [view({ id: 'o-1' }), view({ id: 'o-2', phoneNumberId: '1098' })];
     const channels = [channel('c-1'), channel('c-2')];
+    const accounts = [account('a-1'), account('a-2', { lastSyncError: 'expired' })];
 
-    expect(progressVersion(attempts, channels, at(5_000))).toBe(
-      progressVersion([...attempts].reverse(), [...channels].reverse(), at(5_000)),
+    expect(version({ onboardings, channels, accounts }, at(5_000))).toBe(
+      version(
+        {
+          onboardings: [...onboardings].reverse(),
+          channels: [...channels].reverse(),
+          accounts: [...accounts].reverse(),
+        },
+        at(5_000),
+      ),
     );
   });
 
   it('moves when a step lands', () => {
-    const before = progressVersion([view()], [], at(5_000));
-    const after = progressVersion([view({ steps: { number: ok(4_000) } })], [], at(5_000));
+    const before = version({ onboardings: [view()] }, at(5_000));
+    const after = version({ onboardings: [view({ steps: { number: ok(4_000) } })] }, at(5_000));
 
     expect(after).not.toBe(before);
   });
@@ -653,31 +677,86 @@ describe('progressVersion', () => {
     const requested = { requestId: 'r', requestedAt: iso(10_000) };
 
     expect(
-      progressVersion(
-        [attempt],
-        [channel('c-1', { history: { ...requested, progressByPhase: { 0: 40 } } })],
+      version(
+        {
+          onboardings: [attempt],
+          channels: [channel('c-1', { history: { ...requested, progressByPhase: { 0: 40 } } })],
+        },
         at(60_000),
       ),
     ).not.toBe(
-      progressVersion(
-        [attempt],
-        [channel('c-1', { history: { ...requested, progressByPhase: { 0: 60 } } })],
+      version(
+        {
+          onboardings: [attempt],
+          channels: [channel('c-1', { history: { ...requested, progressByPhase: { 0: 60 } } })],
+        },
         at(60_000),
       ),
     );
   });
 
   it('moves when the clock alone changes what the card says, and not otherwise', () => {
-    const attempt = view();
+    const onboardings = [view()];
 
     // A few seconds in, nothing on the card depends on how many.
-    expect(progressVersion([attempt], [], at(5_000))).toBe(
-      progressVersion([attempt], [], at(9_000)),
-    );
+    expect(version({ onboardings }, at(5_000))).toBe(version({ onboardings }, at(9_000)));
     // Past the stall, the card says no worker has picked it up, and asks less
     // often: the page has to render for that, with nothing in the rows moved.
-    expect(progressVersion([attempt], [], at(STALL_AFTER_MS + 1_000))).not.toBe(
-      progressVersion([attempt], [], at(5_000)),
+    expect(version({ onboardings }, at(STALL_AFTER_MS + 1_000))).not.toBe(
+      version({ onboardings }, at(5_000)),
+    );
+  });
+
+  // Deliberate, and the one place a poll re-renders the page with nothing in
+  // the rows moved: the countdown is what the card shows, from the server's clock.
+  it('moves with every second of the last ninety of a backoff, and by the minute before', () => {
+    const onboardings = [
+      view({
+        attempts: 2,
+        lastTransientError: 'Graph timed out',
+        nextAttemptAt: at(300_000),
+        steps: { number: ok(1_000) },
+      }),
+    ];
+
+    expect(version({ onboardings }, at(300_000 - 60_000))).not.toBe(
+      version({ onboardings }, at(300_000 - 45_000)),
+    );
+    expect(version({ onboardings }, at(300_000 - 200_000))).toBe(
+      version({ onboardings }, at(300_000 - 195_000)),
+    );
+  });
+
+  // The onboarding only queues the template sync; its answer lands on the
+  // account row after the attempt stopped moving, and a page that did not see
+  // it said "never synced" for as long as it polled.
+  it("moves when an account's template sync answers, and when it starts failing", () => {
+    const never = version({ accounts: [account('a-1')] }, at(5_000));
+    const synced = version({ accounts: [account('a-1', { lastSyncedAt: at(4_000) })] }, at(5_000));
+    const failing = version(
+      { accounts: [account('a-1', { lastSyncedAt: at(4_000), lastSyncError: '(#190) expired' })] },
+      at(5_000),
+    );
+
+    expect(new Set([never, synced, failing]).size).toBe(3);
+  });
+
+  it('hashes an instant the same whether it was read as a Date or as a string', () => {
+    const asDate = version({ accounts: [account('a-1', { lastSyncedAt: at(4_000) })] }, at(5_000));
+
+    for (const spelling of [iso(4_000), '2026-10-08 10:00:04+00']) {
+      expect(version({ accounts: [account('a-1', { lastSyncedAt: spelling })] }, at(5_000))).toBe(
+        asDate,
+      );
+    }
+  });
+
+  it('takes only the sync fields of an account, whatever else the caller hands over', () => {
+    const narrow = account('a-1', { lastSyncedAt: at(4_000) });
+    const whole = { ...narrow, name: 'ShipBlu', wabaId: '102030405060', isActive: true };
+
+    expect(version({ accounts: [whole] }, at(5_000))).toBe(
+      version({ accounts: [narrow] }, at(5_000)),
     );
   });
 });

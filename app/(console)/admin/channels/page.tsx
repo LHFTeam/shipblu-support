@@ -47,9 +47,11 @@ export default async function ChannelsPage() {
   const canConnect = can(agent, 'admin.channels.connect');
 
   // Three at a time rather than all seven at once. The layouts' own reads run
-  // beside these, and seven together took most of the pool's eight places from
-  // every other request for the length of a render — the onboarding's own
-  // render and refresh did, at the moment the 2026-10-11 freeze began (§6.91).
+  // beside these, and seven together would take most of the gate's eight
+  // places from every other request for the length of a render. On 2026-10-11,
+  // before the gate, the onboarding's click set off two of these renders at
+  // once on a pool of ten that had already lost connections, and that is where
+  // the freeze's last stretch began (§6.91).
   const [
     channelList,
     groupList,
@@ -138,13 +140,22 @@ export default async function ChannelsPage() {
 
   // What the page asks `/api/admin/onboarding-progress` about while anything
   // shown is moving, and how often. It renders again only when the answer
-  // differs from this one: the same function over the same two reads, so the
-  // two agree on what counts as a change.
+  // differs from this one: the same function over the same three reads, so the
+  // two agree on what counts as a change. The accounts' sync outcome is in it
+  // because the onboarding only queues the template sync, whose answer lands
+  // on the account row after the attempt has stopped moving.
   const progressVersionNow = progressVersion(
-    onboardings,
-    channelList
-      .filter((channel) => channel.type === 'whatsapp')
-      .map(({ id, config }) => ({ id, config })),
+    {
+      onboardings,
+      channels: channelList
+        .filter((channel) => channel.type === 'whatsapp')
+        .map(({ id, config }) => ({ id, config })),
+      accounts: accountList.map(({ id, lastSyncedAt, lastSyncError }) => ({
+        id,
+        lastSyncedAt,
+        lastSyncError,
+      })),
+    },
     now,
   );
   const pollMs = pagePollIntervalMs(
