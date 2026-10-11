@@ -286,20 +286,24 @@ export function startPool(deps: PoolDeps): Pool {
 }
 
 /**
- * How many jobs to run at once, given what was asked for and the database pool.
+ * How many jobs to run at once, given what was asked for and the places the
+ * database gate admits (`ADMIT_MAX` in `db/client.ts`).
  *
- * Every running job can hold a connection, and the loop needs one of its own to
- * claim or sweep and the heartbeat another; past the pool's size the extra
- * queries queue, and a query queued past `DB_QUERY_TIMEOUT_MS` is cancelled — a
- * `completeJob` among them. Warned rather than refused: a worker that will not
- * start over a setting crash-loops on Render, which is worse than one running
- * fewer jobs than it was told to.
+ * Every running job can hold a place — a transaction holds one for its whole
+ * life — and the loop needs one of its own to claim or sweep and the heartbeat
+ * another. Counted against the gate rather than the pool's connections: every
+ * query the worker sends waits at the gate (§6.91), which admits two fewer than
+ * the pool holds, so a ceiling taken from the pool let eight jobs in
+ * transactions fill every place and left the heartbeat and the sweep queued
+ * behind them until `DB_QUERY_TIMEOUT_MS` refused them. Warned rather than
+ * refused: a worker that will not start over a setting crash-loops on Render,
+ * which is worse than one running fewer jobs than it was told to.
  */
-export function effectiveConcurrency(requested: number, poolMax: number): number {
-  const ceiling = Math.max(1, poolMax - 2);
+export function effectiveConcurrency(requested: number, admitMax: number): number {
+  const ceiling = Math.max(1, admitMax - 2);
   if (requested <= ceiling) return requested;
   log.warn(
-    `WORKER_CONCURRENCY=${requested} needs more than the ${poolMax} database connections allow; running ${ceiling}`,
+    `WORKER_CONCURRENCY=${requested} leaves no room in the database gate's ${admitMax} places for the claim loop and the heartbeat; running ${ceiling}`,
   );
   return ceiling;
 }

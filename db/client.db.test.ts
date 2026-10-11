@@ -1,7 +1,7 @@
 import net from 'node:net';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { gateState, instrumentClient } from '@/db/client';
+import { pressureOf, instrumentClient } from '@/db/client';
 import { refuseUnlessDisposable } from '@/lib/testing/db';
 
 /**
@@ -49,6 +49,8 @@ async function startWireProxy(upstreamUrl: string) {
   let nextId = 1;
   let crossings = 0;
   let holdMarker: string | null = null;
+  /** New connections' replies are held this long: a pooler slow to let a client in. */
+  let startupDelayMs = 0;
   const sent: string[] = [];
 
   const server = net.createServer((client) => {
@@ -61,6 +63,15 @@ async function startWireProxy(upstreamUrl: string) {
       upstream: backend,
     };
     connections.set(connection.id, connection);
+
+    if (startupDelayMs > 0) {
+      connection.held = [];
+      setTimeout(() => {
+        const held = connection.held ?? [];
+        connection.held = null;
+        for (const chunk of held) client.write(chunk);
+      }, startupDelayMs);
+    }
 
     let startup = true;
     let fromClient = Buffer.alloc(0);
@@ -139,6 +150,9 @@ async function startWireProxy(upstreamUrl: string) {
     sentContaining: (text: string) => sent.filter((body) => body.includes(text)).length,
     hold: (marker: string) => {
       holdMarker = marker;
+    },
+    delayStartups: (ms: number) => {
+      startupDelayMs = ms;
     },
     release: () => {
       for (const connection of connections.values()) {
@@ -232,7 +246,7 @@ describe('the admission gate', () => {
       expect(await Promise.all(transactions)).toEqual(
         Array.from({ length: 12 }, (_, index) => [index, index]),
       );
-      expect(gateState(sql)).toMatchObject({ waiting: 0, lost: 0 });
+      expect(pressureOf(sql)).toMatchObject({ waiting: 0, lost: 0 });
     } finally {
       await sql.end({ timeout: 1 });
     }
@@ -248,7 +262,7 @@ describe('the admission gate', () => {
       // A transaction holds its place for its whole life, statement or not, so
       // two open ones fill a gate of two for as long as the test says.
       const holders = [sql.begin(() => done), sql.begin(() => done)];
-      await expect.poll(() => gateState(sql)?.admitted).toBe(2);
+      await expect.poll(() => pressureOf(sql)?.admitted).toBe(2);
 
       const waiting = sql.unsafe(`select 'never-sent' as n`);
       await expect(waiting).rejects.toMatchObject({ code: '57014' });
@@ -256,7 +270,7 @@ describe('the admission gate', () => {
 
       finish();
       await Promise.all(holders);
-      await expect.poll(() => gateState(sql)).toMatchObject({ admitted: 0, waiting: 0 });
+      await expect.poll(() => pressureOf(sql)).toMatchObject({ admitted: 0, waiting: 0 });
     } finally {
       finish();
       await sql.end({ timeout: 1 });
@@ -273,7 +287,7 @@ describe('the admission gate', () => {
         code: '57014',
         message: expect.stringContaining('no answer') as unknown,
       });
-      expect(gateState(sql)).toMatchObject({ admitted: 1, lost: 1 });
+      expect(pressureOf(sql)).toMatchObject({ admitted: 1, lost: 1 });
 
       // The pool goes on answering on the connections it has left, and never
       // pipelines onto the one still waiting.
@@ -284,7 +298,7 @@ describe('the admission gate', () => {
       // The reply comes after all: the connection is free again, and so is
       // its place.
       proxy.release();
-      await expect.poll(() => gateState(sql)).toMatchObject({ admitted: 0, lost: 0 });
+      await expect.poll(() => pressureOf(sql)).toMatchObject({ admitted: 0, lost: 0 });
       await burst(sql, 6);
     } finally {
       proxy.release();
@@ -302,10 +316,80 @@ describe('the admission gate', () => {
       });
 
       await expect(transaction).rejects.toMatchObject({ code: '57014' });
-      expect(gateState(sql)).toMatchObject({ admitted: 1, lost: 1 });
+      expect(pressureOf(sql)).toMatchObject({ admitted: 1, lost: 1 });
 
       proxy.release();
-      await expect.poll(() => gateState(sql)).toMatchObject({ admitted: 0, lost: 0 });
+      await expect.poll(() => pressureOf(sql)).toMatchObject({ admitted: 0, lost: 0 });
+      await burst(sql, 6);
+    } finally {
+      proxy.release();
+      await sql.end({ timeout: 1 });
+    }
+  });
+  it('waits for a connection still connecting rather than cancelling its first query', async () => {
+    // A pooler slow to let a client in, slower than the deadline: postgres.js's
+    // cancel on such a query would leave its connection in `connecting` for
+    // its whole max_lifetime, and three of those took the gate's spares.
+    proxy.delayStartups(600);
+    const sql = instrumentClient(openPool(proxy.url), 200, { admit: 3, lostAfterMs: 5_000 });
+    try {
+      const first = await Promise.allSettled([
+        sql.unsafe('select 1 as n'),
+        sql.unsafe('select $1::int as n', [2]),
+        sql.unsafe('select 3 as n'),
+      ]);
+      // Answered once connected, past their deadlines: waited for, not cancelled.
+      expect(first.map((outcome) => outcome.status)).toEqual([
+        'fulfilled',
+        'fulfilled',
+        'fulfilled',
+      ]);
+      proxy.delayStartups(0);
+
+      // Every connection came out of `connecting`: a burst runs on them
+      // without ever pipelining, and every place comes back.
+      const before = proxy.crossings();
+      for (let round = 0; round < 3; round += 1) await burst(sql, 30);
+      expect(proxy.crossings() - before).toBe(0);
+      await expect.poll(() => pressureOf(sql)).toMatchObject({ admitted: 0, lost: 0, waiting: 0 });
+    } finally {
+      proxy.delayStartups(0);
+      await sql.end({ timeout: 1 });
+    }
+  });
+
+  it('ends a transaction whose statements outlive their deadline, queued one included', async () => {
+    const sql = instrumentClient(openPool(proxy.url), 300, { admit: 3, lostAfterMs: 2_000 });
+    try {
+      // Both parameterised, so the second waits in the transaction's own queue
+      // behind the first. Its cancel used to mark it there and stop the queue,
+      // ROLLBACK included, for good.
+      const transaction = sql.begin((tx) =>
+        Promise.all([tx.unsafe('select pg_sleep($1)', [2]), tx.unsafe('select $1::int as n', [1])]),
+      );
+
+      await expect(transaction).rejects.toMatchObject({ code: expect.any(String) as unknown });
+      await expect.poll(() => pressureOf(sql)).toMatchObject({ admitted: 0, lost: 0 });
+      await burst(sql, 6);
+    } finally {
+      await sql.end({ timeout: 1 });
+    }
+  });
+
+  it('gives up on a transaction whose COMMIT does not answer, and takes the place back late', async () => {
+    const sql = instrumentClient(openPool(proxy.url), 200, { admit: 3, lostAfterMs: 300 });
+    try {
+      const transaction = sql.begin(async (tx) => {
+        await tx.unsafe('select $1::int as n', [1]);
+        // The COMMIT postgres.js writes next, on its own, past `unsafe()`.
+        proxy.hold('commit');
+      });
+
+      await expect(transaction).rejects.toMatchObject({ code: '57014' });
+      expect(pressureOf(sql)).toMatchObject({ admitted: 1, lost: 1 });
+
+      proxy.release();
+      await expect.poll(() => pressureOf(sql)).toMatchObject({ admitted: 0, lost: 0 });
       await burst(sql, 6);
     } finally {
       proxy.release();
