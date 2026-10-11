@@ -675,12 +675,12 @@ on the web and worker services as well as in the production group — were
 deleted from the dashboard on 2026-09-26.
 
 Service-level entries exist only as deliberate exceptions, each commented in
-`render.yaml`: the two `FRESHDESK_*` keys on the worker (the importer is a
-queued job), and `DB_QUERY_TIMEOUT_MS` on `shipblu-nightly`, plus `NODE_ENV` on
-the web and worker services. Confirmed against the dashboard on 2026-09-26.
-`LOG_ALL_INCOMING_WEBHOOKS` belongs on the web service only for a debugging
-session, and the blueprint lists it as normally absent rather than declaring it
-(below).
+`render.yaml`: `LOG_ALL_INCOMING_WEBHOOKS` on the web service, the two
+`FRESHDESK_*` keys on the worker (the importer is a queued job),
+and `DB_QUERY_TIMEOUT_MS` on `shipblu-nightly`, plus `NODE_ENV` on the web and
+worker services. Confirmed against the dashboard on 2026-09-26.
+`LOG_ALL_INCOMING_WEBHOOKS` is declared with the literal `false` since
+2026-10-11, the value the dashboard holds (below).
 
 **`shipblu-support-shared` is workspace-scoped and cannot be moved into the
 project.** A group scoped to a project environment cannot be linked to any
@@ -761,16 +761,18 @@ drifts.
 
 Set it to `true` on the **`shipblu-support` web service** and every inbound
 delivery — Meta, WhatsApp and email — is printed with its headers and raw body.
-Grep the logs for `[webhook:all]`. Unset it again afterwards.
+Grep the logs for `[webhook:all]`. Set it back to `false` afterwards.
 
 **It was found left on in production on 2026-10-11**, printing the first
 coexistence history copy into the Render log. Those deliveries are customers'
-past chats, up to 72 kB each. It was turned off in the dashboard (the env-update
-deploy went live at 09:03 UTC, and the last `[webhook:all]` line is at 09:03:04,
-from the instance it replaced). `render.yaml` used to declare it with
-`sync: false`, which read as a key the service is meant to carry. It now lists it
-in a comment as normally absent, the way the worker lists `WORKER_CONCURRENCY`.
-After a session, check the dashboard as well as the code.
+past chats, up to 72 kB each. It was set to `false` in the dashboard (the
+env-update deploy went live at 09:03 UTC, and the last `[webhook:all]` line is at
+09:03:04, from the instance it replaced). `render.yaml` used to declare it with
+`sync: false`, which left the blueprint with no opinion on whether a debug switch
+was on. It now declares `value: 'false'`, the dashboard's value, so a sync
+changes nothing live, and a session that forgets to switch it off is ended by
+the next blueprint sync rather than by somebody noticing. After a session,
+check the dashboard as well as the code.
 
 It exists because the most expensive question about this system is also the one
 the database cannot answer: **did the delivery arrive at all?** `webhook_events`
