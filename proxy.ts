@@ -7,8 +7,8 @@ import { LOCALES } from '@/lib/kb/locale';
  *
  * 1. Host routing. One Next app serves two surfaces: the agent console and the
  *    public help centre. Requests arriving on the help-centre hostname are
- *    rewritten under `/kb`, so support.shipblu.com/en/a/foo renders
- *    /kb/en/a/foo while the URL the customer sees stays clean.
+ *    rewritten under `/help`, so support.shipblu.com/en/a/foo renders
+ *    /help/en/a/foo while the URL the customer sees stays clean.
  *
  * 2. The signed-out redirect for the console. This only checks that a session
  *    cookie exists — it cannot tell a revoked session from a live one.
@@ -21,6 +21,34 @@ import { LOCALES } from '@/lib/kb/locale';
  * a query here would work. It would also sit in front of every request the app
  * serves but static assets — each prefetch, poll and widget call — to repeat a
  * check the page makes anyway.
+ *
+ * Nothing here protects a server action from a forged cross-site request
+ * either — no line looks at a POST's origin. Two things outside this file do:
+ *
+ *  - Next refuses an action whose `Origin` host differs from the host the
+ *    request arrived on (`X-Forwarded-Host` when a proxy sets it, else
+ *    `Host`). `next.config.ts` sets no `serverActions.allowedOrigins`, so no
+ *    other origin is admitted. A request with no `Origin` is let through with
+ *    a warning: every current browser sends one with a POST, and a client that
+ *    leaves it off is not carrying an agent's cookie.
+ *  - The session cookie is host-only and `SameSite=Lax` (`lib/auth/session.ts`),
+ *    so a browser leaves it off a POST from another site. Site, not origin: a
+ *    page on another subdomain of the same registrable domain is the same site,
+ *    its POSTs carry the cookie, and only Next's check is left to refuse them —
+ *    the console and support.shipblu.com become one site the day both are under
+ *    shipblu.com.
+ *
+ * Both ask where a request came from, never what made it, so neither can tell
+ * the console from anything else answered on the console's origin: script
+ * running there is same-origin to the one and same-site to the other, and can
+ * call every action with the agent's cookie. The help centre is served here
+ * already — `/help`, and the locale paths rewritten to it below, on every
+ * host — and that is safe because it is this app's own rendering, with every
+ * body an attacker can supply sanitised on write. A rewrite that puts a page whose script we do not
+ * write on this origin — Freshdesk's pages proxied through, an attachment
+ * served inline instead of redirected to its signed URL, a third-party status
+ * page — gives that page every action the console has. It needs a host of its
+ * own.
  */
 
 /** Paths that are public on every hostname. */

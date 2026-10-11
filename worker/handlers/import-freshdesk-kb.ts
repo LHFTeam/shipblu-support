@@ -90,11 +90,11 @@ export async function importFreshdeskKb(): Promise<void> {
     One item's failure is recorded and the run carries on — except when
     Freshdesk did not answer at all. Every request left would then wait out its
     own fifteen-second deadline, over an hour for a few hundred articles,
-    holding the worker's whole batch and outliving the reclaim window, so a
-    deploy could start a second import beside it. Thrown instead, the job fails
-    now and the queue retries the run later: the import is idempotent on
-    `(source_system, external_id)`, so running it again repairs rather than
-    duplicates.
+    holding a worker slot all that time, and a deploy's worker would stop
+    mid-run and leave the rest to a reclaimed second run. Thrown instead, the
+    job fails now and the queue retries the run later: the import is
+    idempotent on `(source_system, external_id)`, so running it again repairs
+    rather than duplicates.
   */
   const record = (what: string, error: unknown) => {
     if (error instanceof FreshdeskError && error.status === 0) throw error;

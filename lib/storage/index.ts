@@ -10,9 +10,9 @@ import { mimeEssence } from '@/lib/http/mime';
  * HTTP calls. Attachments are written mostly by the worker and read through
  * signed URLs — but a customer's form upload writes from inside their request,
  * and every signed URL is minted inside an agent's, so both calls carry a
- * deadline. In a job the deadline matters more: the worker awaits a whole batch
- * before it claims another, and `fetch` with no signal waits five minutes for a
- * response that is not coming, so one slow request held every queued job.
+ * deadline. In a job the deadline matters more: `fetch` with no signal waits
+ * five minutes for a response that is not coming, and nothing but the request's
+ * own deadline frees the worker slot it holds (`WRITE_TIMEOUT_MS` says why).
  */
 
 /** Signing is one small round trip, and somebody is waiting on the page. */

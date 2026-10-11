@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { LOCALES } from '@/lib/kb/locale';
+import { RERUNNABLE_STEPS } from '@/db/schema';
 import { PermanentJobError, type ClaimedJob, type JobType } from '@/lib/queue';
 
 /**
@@ -28,8 +29,12 @@ const instant = z.string().refine((value) => !Number.isNaN(Date.parse(value)), {
  * A job with no entry takes any object, as every job did before. Entries are
  * added a family at a time, each with its handlers switched over in the same
  * change.
+ *
+ * Exported for `payloads.test.ts`, which walks every schema for a key named
+ * like a credential; nothing else reads it but `parseJobPayload` and the types
+ * below.
  */
-const JOB_PAYLOADS = {
+export const JOB_PAYLOADS = {
   send_email: z.object({ messageId: z.string() }),
   send_side_email: z.object({ messageId: z.string() }),
   send_whatsapp: z.object({ messageId: z.string() }),
@@ -43,6 +48,12 @@ const JOB_PAYLOADS = {
   }),
 
   process_webhook: z.object({ webhookEventId: z.string() }),
+  // Enqueued by `enqueuePriorityClassification`, and re-run by hand with
+  // `npm run job -- classify_priority messageId=…` after a `failed` run, whose
+  // dedupe key is spent — so strict: `dryRun=true` is refused rather than
+  // dropped into a run that writes. A uuid because the id goes straight into a
+  // query, where a malformed one is 22P02.
+  classify_priority: z.strictObject({ messageId: z.uuid() }),
   send_csat: z.object({ conversationId: z.string().min(1) }),
   // Facebook and Instagram hand over a URL, WhatsApp an id to exchange for one.
   // The WhatsApp half names no source, so a Meta payload that lost its URL
@@ -209,6 +220,29 @@ const JOB_PAYLOADS = {
      * reverting every other response the team has edited.
      */
     keys: z.string().optional(),
+  }),
+  rotate_whatsapp_credentials: z.strictObject({
+    /** Open every envelope it would move, and write nothing. */
+    dryRun: z.boolean().optional(),
+  }),
+  // Strict, though code writes it: `npm run job` reaches it too, and a mistyped
+  // `step=history` dropped by a lax schema would run every step instead of one.
+  complete_coexistence_onboarding: z.strictObject({
+    onboardingId: z.uuid(),
+    /**
+     * Run only these steps on a connected number — "copy the history" after
+     * the connection, or the template sync. Only the steps that may be run
+     * alone (`RERUNNABLE_STEPS` says why the others may not). Comma-separated
+     * when typed (`steps=contacts,history`), since `npm run job` hands every
+     * value over as a string.
+     */
+    steps: z
+      .preprocess(
+        (value) =>
+          typeof value === 'string' ? value.split(',').map((step) => step.trim()) : value,
+        z.array(z.enum(RERUNNABLE_STEPS)).nonempty(),
+      )
+      .optional(),
   }),
 } satisfies Partial<Record<JobType, z.ZodType>>;
 

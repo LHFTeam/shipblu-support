@@ -112,10 +112,10 @@ describe('discoverLanguageCode', () => {
 });
 
 /**
- * The importer runs as a job, and the worker awaits a whole batch before it
- * claims the next one. A request with no deadline of its own therefore held
- * every queued job — every send, every sync — for the five minutes `fetch`
- * waits before it gives up.
+ * The importer runs as a job, and a request with no deadline of its own holds
+ * its worker slot for the five minutes `fetch` waits before it gives up — when
+ * the worker still ran in batches, every queued job behind it, every send and
+ * every sync, waited as long.
  */
 describe('a Freshdesk request', () => {
   withTestEnv({ FRESHDESK_DOMAIN: 'shipblu.freshdesk.com', FRESHDESK_API_KEY: 'key' });

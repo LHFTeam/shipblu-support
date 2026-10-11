@@ -45,11 +45,9 @@ const subscription = (fields: string[], overrides: Partial<GraphSubscription> = 
 
 describe('planFieldSubscription', () => {
   it('adds the missing field and keeps the one already there', () => {
-    // An explicit want-list rather than REQUIRED_WHATSAPP_FIELDS, because that
-    // constant no longer adds anything to a healthy subscription — see the test
-    // below. What is covered here is the merge itself, which every object's
-    // write goes through, so it has to keep working whether or not WhatsApp
-    // currently wants a second field. `account_alerts` is a real field on this
+    // An explicit want-list rather than REQUIRED_WHATSAPP_FIELDS, because what
+    // is covered here is the merge itself, which every object's write goes
+    // through, so it has to keep working whatever WhatsApp currently wants. `account_alerts` is a real field on this
     // object; the case is not worth writing against an invented name, which is
     // how a subscription list came to carry a field Graph rejects.
     const plan = planFieldSubscription(subscription(['messages']), ['messages', 'account_alerts']);
@@ -58,16 +56,26 @@ describe('planFieldSubscription', () => {
     expect(plan.merged).toEqual(['messages', 'account_alerts']);
   });
 
-  it('asks WhatsApp for nothing it is not already subscribed to', () => {
-    // The state since Meta discontinued `message_echoes`: the required list is
-    // `messages` alone, so a healthy subscription needs no write at all. This
-    // asserts the constant rather than the merge, and it is here so that adding
-    // a field back to it is a decision somebody makes against a failing test
-    // rather than one that rides along in a diff.
-    const plan = planFieldSubscription(subscription(['messages']), REQUIRED_WHATSAPP_FIELDS);
+  it('asks WhatsApp for exactly the coexistence fields, beside messages', () => {
+    // The constant, asserted rather than the merge, so that a field joining it
+    // is a decision somebody makes against a failing test rather than one that
+    // rides along in a diff — a name Graph rejects fails every run of the job.
+    // `smb_message_echoes` is already subscribed on the app; the merge leaves it.
+    const plan = planFieldSubscription(
+      subscription(['messages', 'smb_message_echoes']),
+      REQUIRED_WHATSAPP_FIELDS,
+    );
 
-    expect(plan.adding).toEqual([]);
-    expect(plan.merged).toEqual(['messages']);
+    expect(plan.adding).toEqual(['history', 'smb_app_state_sync', 'account_update']);
+    expect(plan.merged).toEqual([
+      'messages',
+      'smb_message_echoes',
+      'history',
+      'smb_app_state_sync',
+      'account_update',
+    ]);
+    // Never the discontinued name, which Graph refuses with a whole-call error.
+    expect(REQUIRED_WHATSAPP_FIELDS).not.toContain('message_echoes');
   });
 
   it('keeps fields nothing in this repo asks for', () => {
@@ -89,21 +97,21 @@ describe('planFieldSubscription', () => {
 
   it('is a no-op once everything is subscribed', () => {
     const plan = planFieldSubscription(
-      subscription(['messages', 'message_echoes']),
+      subscription([...REQUIRED_WHATSAPP_FIELDS]),
       REQUIRED_WHATSAPP_FIELDS,
     );
 
     expect(plan.adding).toEqual([]);
-    expect(plan.merged).toEqual(['messages', 'message_echoes']);
+    expect(plan.merged).toEqual([...REQUIRED_WHATSAPP_FIELDS]);
   });
 
   it('does not list a field twice', () => {
     const plan = planFieldSubscription(
-      subscription(['message_echoes', 'messages']),
+      subscription(['history', 'messages']),
       REQUIRED_WHATSAPP_FIELDS,
     );
 
-    expect(plan.merged).toHaveLength(2);
+    expect(plan.merged).toHaveLength(REQUIRED_WHATSAPP_FIELDS.length);
   });
 
   it('never drops a subscribed field, whatever it is asked for', () => {
@@ -133,12 +141,12 @@ describe('planFieldSubscription', () => {
   it('restores messages to a subscription that has somehow lost it', () => {
     // Not a case to "fix" by dropping the write: the merge restores `messages`
     // because it is in REQUIRED_WHATSAPP_FIELDS, which is why that constant
-    // lists a field nothing was expected to be missing. That is now the
-    // constant's whole job, and this is the test that says so.
+    // lists a field nothing was expected to be missing, and this is the test
+    // that says so.
     const plan = planFieldSubscription(subscription([]), REQUIRED_WHATSAPP_FIELDS);
 
-    expect(plan.adding).toEqual(['messages']);
-    expect(plan.merged).toEqual(['messages']);
+    expect(plan.adding[0]).toBe('messages');
+    expect(plan.merged).toContain('messages');
   });
 });
 

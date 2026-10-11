@@ -218,6 +218,8 @@ const STRINGS = {
     errorSubjectRequired: 'Give your request a subject',
     errorMessageRequired: 'Write your message',
     errorGeneric: 'Something went wrong. Try again.',
+    errorNoAnswer:
+      'No answer came back, so this may or may not have gone through. Check before trying again.',
   },
   ar: {
     title: 'مركز مساعدة شيب بلو',
@@ -401,6 +403,7 @@ const STRINGS = {
     errorSubjectRequired: 'اكتب موضوعًا لطلبك',
     errorMessageRequired: 'اكتب رسالتك',
     errorGeneric: 'حدث خطأ ما. حاول مرة أخرى.',
+    errorNoAnswer: 'لم يصلنا رد، فقد يكون طلبك قد وصل وقد لا يكون. تحقّق قبل المحاولة مرة أخرى.',
   },
 } as const;
 

@@ -12,6 +12,7 @@ import {
   PermanentJobError,
   reclaimStalledJobs,
   STALLED_AFTER_MS,
+  touchJobs,
 } from './index';
 
 /**
@@ -38,10 +39,11 @@ async function row(id: string) {
 describe('enqueue', () => {
   // The note on `dedupeKey` says this in prose; this is the index saying it.
   it('spends a dedupe key for good, not only until its job finishes', async () => {
-    const first = await enqueued('cleanup', {}, { dedupeKey: 'once' });
+    await enqueued('cleanup', {}, { dedupeKey: 'once' });
     expect(await enqueue('cleanup', {}, { dedupeKey: 'once' })).toBeNull();
 
-    await completeJob(first);
+    const [first] = await claimJobs(1, 'worker-a');
+    expect(await completeJob(first!)).toBe(true);
     expect(await enqueue('cleanup', {}, { dedupeKey: 'once' })).toBeNull();
   });
 });
@@ -58,7 +60,8 @@ describe('hasActiveJob', () => {
     await db.update(jobs).set({ status: 'processing' }).where(eq(jobs.id, id));
     expect(await hasActiveJob('import_freshdesk_kb')).toBe(true);
 
-    await completeJob(id);
+    // Marked processing by hand above, so this attempt holds no worker id.
+    expect(await completeJob({ id, lockedBy: null, attempts: 0 })).toBe(true);
     expect(await hasActiveJob('import_freshdesk_kb')).toBe(false);
 
     await db.update(jobs).set({ status: 'dead' }).where(eq(jobs.id, id));
@@ -79,6 +82,16 @@ describe('claimJobs', () => {
     const rest = await claimJobs(10, 'worker-b');
     expect(rest.map((job) => job.type)).toEqual(['cleanup']);
     expect(await claimJobs(10, 'worker-c')).toEqual([]);
+  });
+
+  // `RETURNING` promises no order; the worker starts a claim's jobs as listed.
+  it('lists a claim most urgent first', async () => {
+    for (const priority of [300, 10, 200, 20, 100, 30]) {
+      await enqueued('cleanup', {}, { priority });
+    }
+
+    const claimed = await claimJobs(6, 'worker-a');
+    expect(claimed.map((job) => job.priority)).toEqual([10, 20, 30, 100, 200, 300]);
   });
 
   it('hands the row back under the schema’s names, not the database’s', async () => {
@@ -165,5 +178,108 @@ describe('reclaimStalledJobs', () => {
     expect(await reclaimStalledJobs()).toBe(1);
     expect(await row(stalled)).toMatchObject({ status: 'pending', lockedAt: null, lockedBy: null });
     expect(await row(live)).toMatchObject({ status: 'processing', lockedBy: 'worker-a' });
+  });
+});
+
+describe('reclaimStalledJobs, from a worker still running some of them', () => {
+  it('leaves the jobs it says it is running, whatever their locks say', async () => {
+    const mine = await enqueued('import_freshdesk_kb', {}, { priority: 1 });
+    const orphan = await enqueued('cleanup', {}, { priority: 2 });
+    await claimJobs(2, 'worker-a');
+    await db.update(jobs).set({ lockedAt: new Date(Date.now() - STALLED_AFTER_MS - 1_000) });
+
+    expect(await reclaimStalledJobs(STALLED_AFTER_MS, [mine])).toBe(1);
+    expect((await row(mine)).status).toBe('processing');
+    expect((await row(orphan)).status).toBe('pending');
+  });
+});
+
+describe('touchJobs', () => {
+  it('refreshes only the running jobs this worker holds, and says which', async () => {
+    const mine = await enqueued('cleanup', {}, { priority: 1 });
+    const theirs = await enqueued('cleanup', {}, { priority: 2 });
+    const waiting = await enqueued('cleanup', {}, { runAt: new Date(Date.now() + 60_000) });
+    await claimJobs(1, 'worker-a');
+    await claimJobs(1, 'worker-b');
+    const old = new Date(Date.now() - 60_000);
+    await db.update(jobs).set({ lockedAt: old });
+
+    expect(await touchJobs([mine, theirs, waiting], 'worker-a')).toEqual([mine]);
+    expect((await row(mine)).lockedAt!.getTime()).toBeGreaterThan(old.getTime());
+    expect((await row(theirs)).lockedAt!.getTime()).toBe(old.getTime());
+    expect(await touchJobs([], 'worker-a')).toEqual([]);
+  });
+
+  // The point of the heartbeat: a job slower than the window is not a dead worker's.
+  it('keeps a slow job it refreshed out of the stalled sweep', async () => {
+    const slow = await enqueued('import_freshdesk_kb', {});
+    await claimJobs(1, 'worker-a');
+    await db
+      .update(jobs)
+      .set({ lockedAt: new Date(Date.now() - STALLED_AFTER_MS - 1_000) })
+      .where(eq(jobs.id, slow));
+
+    await touchJobs([slow], 'worker-a');
+
+    expect(await reclaimStalledJobs()).toBe(0);
+    expect(await row(slow)).toMatchObject({ status: 'processing', lockedBy: 'worker-a' });
+  });
+});
+
+describe('a finished job reported by an attempt that no longer holds it', () => {
+  async function reclaimedAndClaimedAgain() {
+    const id = await enqueued('cleanup', {}, { maxAttempts: 5 });
+    const [stale] = await claimJobs(1, 'worker-a');
+    await db
+      .update(jobs)
+      .set({ lockedAt: new Date(Date.now() - STALLED_AFTER_MS - 1_000) })
+      .where(eq(jobs.id, id));
+    await reclaimStalledJobs();
+    // The same process takes it again, so only `attempts` tells the runs apart.
+    const [current] = await claimJobs(1, 'worker-a');
+    return { id, stale: stale!, current: current! };
+  }
+
+  it('is not recorded over the run that holds it now', async () => {
+    const { id, stale, current } = await reclaimedAndClaimedAgain();
+
+    expect(await completeJob(stale)).toBe(false);
+    expect(await failJob(stale, new Error('late failure'))).toBe(false);
+    expect(await row(id)).toMatchObject({
+      status: 'processing',
+      attempts: 2,
+      lastError: null,
+      lockedBy: 'worker-a',
+    });
+
+    expect(await completeJob(current)).toBe(true);
+    expect((await row(id)).status).toBe('completed');
+  });
+
+  it('completes a reclaimed job nobody has taken again, so it does not run twice', async () => {
+    const id = await enqueued('send_email', { messageId: 'm1' });
+    const [job] = await claimJobs(1, 'worker-a');
+    await db
+      .update(jobs)
+      .set({ lockedAt: new Date(Date.now() - STALLED_AFTER_MS - 1_000) })
+      .where(eq(jobs.id, id));
+    await reclaimStalledJobs();
+
+    expect(await completeJob(job!)).toBe(true);
+    expect(await row(id)).toMatchObject({ status: 'completed', lockedBy: null });
+    expect(await claimJobs(1, 'worker-b')).toEqual([]);
+  });
+
+  it('does not fail a reclaimed job: the next run is its retry', async () => {
+    const id = await enqueued('cleanup', {});
+    const [job] = await claimJobs(1, 'worker-a');
+    await db
+      .update(jobs)
+      .set({ lockedAt: new Date(Date.now() - STALLED_AFTER_MS - 1_000) })
+      .where(eq(jobs.id, id));
+    await reclaimStalledJobs();
+
+    expect(await failJob(job!, new Error('late'))).toBe(false);
+    expect(await row(id)).toMatchObject({ status: 'pending', lastError: null });
   });
 });

@@ -153,7 +153,12 @@ export async function refreshShipment(
     )
     .limit(1);
 
-  if (!linked[0]) return { error: 'That shipment is not linked to this ticket' };
+  // Unlinked since the page was drawn: revalidated so the sidebar the agent is
+  // looking at stops offering it, which the button cannot do on its own.
+  if (!linked[0]) {
+    refresh(row.conversation.number);
+    return { error: 'That shipment is not linked to this ticket' };
+  }
 
   const result = await syncShipment({ shipmentId, force: true });
 
@@ -166,6 +171,7 @@ export async function refreshShipment(
       refresh(row.conversation.number);
       return { error: 'The shipping platform does not recognise this number' };
     case 'gone':
+      refresh(row.conversation.number);
       return { error: 'That shipment no longer exists' };
     case 'transient':
       return { error: 'The shipping platform could not be reached. Try again in a moment.' };
@@ -173,7 +179,9 @@ export async function refreshShipment(
       return { error: `The shipping platform refused the lookup: ${result.error.message}` };
     case 'skipped':
       // Unreachable with `force`, and enumerated so a new result kind is a type
-      // error here rather than a silent success in front of an agent.
+      // error here rather than a silent success in front of an agent. Revalidated
+      // all the same, as every success is (`action-revalidates`).
+      refresh(row.conversation.number);
       return ok();
   }
 }

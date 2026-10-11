@@ -20,6 +20,25 @@ describe('describeEvent', () => {
     );
   });
 
+  it('says how sure the classifier was, and nothing extra for a person', () => {
+    expect(describeEvent('priority_changed', { to: 'urgent', probability: 0.824 })).toBe(
+      'set priority to urgent (82% likely)',
+    );
+    expect(describeEvent('priority_changed', { to: 'high' })).toBe('set priority to high');
+    expect(describeEvent('priority_changed', { to: 'high', probability: null })).toBe(
+      'set priority to high',
+    );
+  });
+
+  it('names why the due dates moved', () => {
+    expect(describeEvent('sla_recalculated', { reason: 'priority', priority: 'urgent' })).toBe(
+      're-counted the due dates for urgent priority',
+    );
+    expect(describeEvent('sla_recalculated', { reason: 'group_hours' })).toBe(
+      "re-counted the due dates on the new group's business hours",
+    );
+  });
+
   it('explains a skipped assignment, and falls back to the raw reason it does not know', () => {
     expect(describeEvent('assignment_skipped', { reason: 'all_at_capacity' })).toBe(
       'could not assign it: everybody available was at their ticket limit',

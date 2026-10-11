@@ -263,22 +263,43 @@ and the help centre's are not a mistake to tidy: its `error` is a `StringKey`
 the page translates, not a sentence. A new action file anywhere else answers
 with `lib/http/action-state.ts`.
 
-A console form submits through `useActionForm`
-(`components/use-action-form.ts`), not a bare `<form action={…}>`, whenever a
-native reset could move one of its fields: anything uncontrolled, and any
-controlled select or checkbox. React 19 resets a form after every function
-action, a refusal included, so the bare shape wipes the reply an agent is
-about to correct and leaves a controlled `<select>` disagreeing with the state
-everything around it is drawn from (§6.80). The hook's `key` is also the one to
-clear a form on after a success: it holds the last success's nonce, where
-`state.nonce ?? 0` fell back to 0 on a refusal and remounted the form. A form
-of hidden fields, buttons and controlled text boxes has nothing a reset moves
-and may keep `action=`; the purge panel is one. Spread the hook's `form` onto
-the element, `<form {...form}>`: a form given only its `action` still submits,
-through React's reset. The `form-reset` repo rule refuses that shape where it
-can see a field the reset moves. The hook also turns an action that throws into
-a refusal, so a dropped connection keeps the draft rather than falling through
-to `global-error`; a form whose retry reaches a customer passes `LOST_SEND`.
+A form — in the console, the help centre or the sign-in pages — submits through
+`useActionForm` (`components/use-action-form.ts`), not a bare
+`<form action={…}>`, whenever a native reset could move one of its fields:
+anything uncontrolled, and any controlled select or checkbox. React 19 resets a
+form after every function action, a refusal included, so the bare shape wipes
+the reply an agent or a customer is about to correct and leaves a controlled
+`<select>` disagreeing with the state everything around it is drawn from
+(§6.80). The hook's `key` is also the one to clear a form on after a success: it
+holds the last success's nonce, where `state.nonce ?? 0` fell back to 0 on a
+refusal and remounted the form. A form whose success redirects needs no key,
+even back to its own route: Next remounts the page for a server action's
+redirect. A form of hidden fields, buttons and controlled text boxes has nothing
+a reset moves and may keep `action=`; the purge panel is one. Spread the hook's
+`form` onto the element, `<form {...form}>`: a form given only its `action`
+still submits, through React's reset. The `form-reset` repo rule refuses that
+shape anywhere under `app/` where it can see a field the reset moves. The hook
+also turns an action that throws into a refusal, so a dropped connection keeps
+the draft rather than falling through to `global-error`; a form whose retry
+reaches a customer passes `LOST_SEND`, and one whose `error` is a `StringKey`
+passes `{ lost: 'errorNoAnswer' }`. The type insists on that last: the hook's
+own sentence is not a key, `t()` finds nothing for it, and the customer would be
+told nothing at all.
+
+**An action's revalidation is what refreshes the page; the form does not.** Next
+renders the current page into a server action's response whenever the action
+revalidated anything — whatever path it named — and the client applies it with
+the answer. So nothing re-reads the page after a success: a `router.refresh()`
+there is a second full render, and on a ticket page it ran beside
+`LiveUpdates`' own (§6.89). What a form does next — close an editor, put a
+composer away — goes in `useActionForm`'s `onSuccess`. The other side of it is
+that an action answering success without revalidating leaves the screen as it
+was, and the `action-revalidates` repo rule refuses that: every success an
+action answers (`ok()`, or `{ error: null }` outside the help centre) comes after
+a `revalidatePath`, a `redirect` or the shared `refresh()` on every branch that
+reaches it. A refusal that returns before anything is written revalidates
+nothing, so a control that shows no error, and whose refusal means the screen is
+out of date, re-reads it then (`rereadOnRefusal` in `useFieldAction`).
 
 **Authorisation lives in code.** `proxy.ts` only checks that a session cookie
 exists; it cannot tell a revoked session from a live one. It runs on Node.js in
@@ -333,26 +354,37 @@ returns a full instant whose **time component is an artifact of when you asked**
 `YYYY-MM-DD` and never convert through a `Date` — the value carries `+03:00`, so
 a call answered after 21:00 UTC reads as the previous day in UTC.
 
-**Background work.** Anything slow, external or retryable is a job — with one
-narrow exception, written down because it looks like a violation: a control an
-agent presses and _waits on_, whose entire output is the provider's answer, calls
-the provider in the action instead. `refreshRequesterProfile`, `claimThreadControl`
-and `refreshShipment` are the three today. The rule exists so a customer's ticket never depends on Graph being up and
-so unattended work gets retried; a person clicking a button is neither, and
+**Background work.** Anything slow, external or retryable is a job — with two
+narrow exceptions, written down because they look like violations. The first: a
+control an agent presses and _waits on_, whose entire output is the provider's
+answer, calls the provider in the action instead. `refreshRequesterProfile`,
+`claimThreadControl`, `refreshShipment` and `refreshShipmentDetail` are the four
+today. The rule exists so a customer's ticket never depends on Graph being up
+and so unattended work gets retried; a person clicking a button is neither, and
 queueing it would put the one sentence they are waiting for into a worker log
 they cannot read — which is exactly how a missing Meta approval hid for a month
-(`docs/PROJECT-STATE.md` §6.27). Where this applies, the provider call itself
-stays in one shared function the job and the action both use
-(`lib/meta/profile-refresh.ts`), so the two paths cannot answer differently for
-the same subject. The reply box's canned-response suggestion
-(`/api/canned-suggestions`) is the same exception in a different shape: started
-by focus rather than a press, and a route rather than an action, because Next
-sends a client's actions one at a time and a provider call made as one would
-queue the agent's Send behind it. It is also worth little late — an answer that
-lands after the agent has started typing is held, not drawn, and appears only if
-the box is emptied again or on a later focus — so a queued retry, landing later
-still, buys almost nothing. Nothing retries: a failure is recorded on its row,
-and that message gets no suggestion. Everything else is a job: add the type
+(`docs/PROJECT-STATE.md` §6.27). Where a job does the same work, the provider
+call itself stays in one shared function the job and the action both use
+(`lib/meta/profile-refresh.ts`, `syncShipment`), so the two paths cannot answer
+differently for the same subject; `claimThreadControl` has no job twin. The
+reply box's canned-response suggestion (`/api/canned-suggestions`) is the first
+exception in a different shape: started by focus rather than a press, and a
+route rather than an action, because Next sends a client's actions one at a time
+and a provider call made as one would queue the agent's Send behind it. It is
+also worth little late — an answer that lands after the agent has started typing
+is held, not drawn, and appears only if the box is emptied again or on a later
+focus — so a queued retry, landing later still, buys almost nothing. Nothing
+retries: a failure is recorded on its row, and that message gets no suggestion.
+The second is the Embedded Signup exchange — `beginCoexistenceOnboarding` in
+`lib/whatsapp/onboarding.ts`, behind the `connectBusinessAppNumber` action —
+forced by the code Meta's window hands the browser: it lives thirty seconds and
+is spent once, so a queued job could not be sure of running before it died, and
+a dead code is a business sent through Meta's window again. Only what the code
+forces happens in the action — exchange it, prove the token reads the WABA the
+browser named, seal it, record the attempt — and everything after the exchange
+is the `complete_coexistence_onboarding` job, run with the stored credential, so
+a closed tab abandons nothing and the first run, a retry and a later "copy the
+history again" cannot differ. Everything else is a job: add the type
 to `JobType` in `lib/queue/index.ts`, a handler under `worker/handlers/`, and
 register it in `worker/handlers/index.ts`. CI checks that the three agree, and
 that every cron in `render.yaml` names a type that exists. Use `dedupeKey` for anything a webhook retry could
@@ -365,6 +397,19 @@ legitimately need to run again for the same subject — a profile refresh, a
 per-row backfill — must make its handler idempotent and enqueue without a key,
 or the retry silently does nothing. Webhooks persist to `webhook_events` and
 return 200 immediately; they never do the work inline.
+
+**The worker is a pool, and a running job's lock is kept fresh.**
+`worker/pool.ts` refills a slot as each job finishes, so a slow job holds only
+its own slot, and refreshes the lock of every job it is running each
+`HEARTBEAT_EVERY_MS` so the stalled sweep returns only a dead worker's jobs.
+Two consequences for handlers. Nothing but the job itself ends a hung job, so
+every outbound call in a job path carries a deadline (`lib/http/deadline.ts`).
+And a job still runs at least once, not exactly once: a worker stopped
+mid-job — a deploy's shutdown window is short — leaves its job to be run again,
+so a handler must tolerate a second run. `completeJob` and `failJob` write only
+over the attempt that holds the row — `completeJob` also over that attempt
+reclaimed and not yet claimed again, since a run that finished needs no second
+one (§6.85).
 
 `npm run job -- <type>` takes trailing `key=value` pairs as the payload
 (`npm run job -- backfill_meta_profiles force=true limit=50`), so a handler's
@@ -521,7 +566,101 @@ A WhatsApp business account's access token is read
 directly from `process.env`, for a different reason: its variable's _name_ is a
 database value, so it cannot be in the schema — and must therefore start `WHATSAPP_TOKEN_`, or
 an admin typing a variable name would be choosing which secret gets sent to Meta
-as a bearer token (`lib/whatsapp/accounts.ts`).
+as a bearer token (`lib/whatsapp/accounts.ts`). That variable is the middle of
+three sources. `tokenForAccount` resolves **stored → `WHATSAPP_TOKEN_*` →
+`META_PAGE_ACCESS_TOKEN`** (`resolveCredentialSource`, pure and tested beside
+`resolveAccount`): a credential Meta minted for the account through Embedded
+Signup wins over a variable an admin named, which wins over the shared token.
+Storing one clears the variable, so a row written through the console never
+has two sources and the order only matters for a row edited straight in the
+database. **A stored credential that cannot be opened throws and never falls
+through** to the next source. Falling through is the obvious implementation,
+and it is the "went out from the wrong WABA" failure the module already
+describes: a send authenticated as a different credential either fails with a
+sentence about the wrong thing or, worse, succeeds from a business the customer
+never messaged.
+
+**The stored WhatsApp credential.** `whatsapp_account_credentials` is the one
+credential the database holds, and it exists on an instruction: if coexistence
+needs the backend to store a token, store it securely and properly. A business
+token minted by Meta's Embedded Signup is one no person ever holds and no
+variable can name — Meta hands it to the server for a WABA the popup may have
+just created — so the alternative to storing it is a step on Render or in
+Business Manager per number, during which the number answers nobody and the
+24-hour window for copying the phone's chats runs out. Four properties make
+holding it acceptable, and each is enforced rather than asked for:
+
+- **The row is ciphertext under a key the database never sees.** AES-256-GCM
+  under `WHATSAPP_CREDENTIAL_KEY` (`lib/whatsapp/credential-envelope.ts`), with
+  the key's id in the envelope, in the `key_id` column and in the authenticated
+  data beside the account and WABA ids — so an envelope copied onto another
+  row, or left on a row whose WABA id was edited, fails to open rather than
+  sending one business's credential on another's behalf. Losing the key loses
+  every stored credential, by design: the recovery is reconnecting each number
+  through Meta's window, one popup each.
+- **No code path on the web service decrypts a stored token.** That is a
+  property of the code paths, not of what the service could do — it holds the
+  symmetric key, because it seals the token on the way in. `storedTokenFor` is
+  the one export that hands a decrypted token out (the reseal opens envelopes
+  and returns none), `lib/whatsapp/accounts.ts` the only module that may call
+  it, and the resolvers built on it (`tokenForAccount`,
+  `credentialsForAccount`, `credentialsForPhoneNumberId`) may be imported only
+  from `worker/` — or from `lib/whatsapp/onboarding-complete.ts`, which only the
+  worker may import. CI holds all of that (`credential-confinement`), and with
+  it that only `lib/whatsapp/credentials.ts` names the table, that it never
+  selects a whole row, and that `CredentialStatus` — the shape the admin page
+  renders into an RSC payload — has no field that could carry the secret. An
+  action that needs the token enqueues a job.
+- **One source per account.** Storing a credential clears `token_env_var`, and
+  an account holding one refuses a variable and a change of WABA id
+  (`storedCredentialEditRefusal`) — "forget the stored credential first" —
+  because two sources make "which token sent this?" a question with two
+  answers.
+- **Everything that happens to one is a row** in `whatsapp_credential_events`:
+  `stored`, `resealed`, `refused`, `removed`, naming the agent and surviving the
+  account, so "who removed the credential for WABA X, and when?" still has an
+  answer once both rows are gone.
+
+Two things about the key's variables are deliberate. Their names do not start
+`WHATSAPP_TOKEN_`, and must not: `parseTokenEnvVar` lets an admin name any such
+variable as a bearer token, so a key so named could be typed into the "token
+variable" box and sent to Meta. And both stay plain `z.string().optional()` in
+`lib/env.ts` — never a `min()` or a `regex()` — because `env()` parses the whole
+schema on every page, action and connection, so a format rule there turns one
+mistyped key into a console that does not load rather than a WhatsApp
+connection that says what is wrong with it (the `LOG_ALL_INCOMING_WEBHOOKS`
+lesson, `docs/PROJECT-STATE.md` §2). `parseKeyring` validates at first use and
+`coexistenceReadiness()` reports it on the page before any button. Rotation is
+`WHATSAPP_CREDENTIAL_KEY_PREVIOUS` = old, `WHATSAPP_CREDENTIAL_KEY` = new,
+`npm run job -- rotate_whatsapp_credentials dryRun=true` and then without, then
+unset `_PREVIOUS`; the dry run opens every envelope it would move, which is what
+proves the previous key is the one the rows were sealed under before anything
+depends on it.
+
+**A coexistence number is live on the phone and on Cloud API at once**, and
+four rules keep the two sides from being read as each other. The copied
+history is a record, not traffic (`lib/tickets/ingest-whatsapp-history.ts`):
+each thread is one resolved `import` conversation, and nothing a live message
+sets off runs for it — no SLA clock, no automation, no out-of-hours reply, no
+categorisation, no shipment linking, no media download and no 24-hour window,
+because `last_customer_message_at` stays null and a live message never
+continues an imported conversation. A reply the business typed on the phone
+arrives as an `smb_message_echoes` delivery and is the team's reply: outbound,
+no author, labelled "WhatsApp Business app", moving `last_agent_message_at`
+forward and never `last_customer_message_at` — on a plain support number the
+same echo is our own send coming back and stays ignored. It answers only what
+came before it: `onAgentReply` stops the next-response clock only when the
+reply is at least as new as `last_customer_message_at`, and
+`first_responded_at` takes the earliest reply, so the SLA does not depend on
+the order deliveries are processed in. With no live conversation, the business
+writing first files a _resolved_ conversation (`resolved_at` null, no survey)
+that the customer's reply reopens. The copy of contacts
+and history is once per onboarding, inside 24 hours of the exchange, with the
+Business app open on the phone (`canRequestSync`; Meta's 2593107 and 2593108
+both mean "reconnect"). And `saveChannel` carries `coexistence` and the stored
+`phoneNumberId` over rather than rebuilding `config` as `{phoneNumberId}`,
+which is how a rename used to wipe the connection while the number kept
+routing.
 
 **Explaining a control.** A label short enough to fit a dense table is rarely
 long enough to explain itself. `InfoTip` from `components/tooltip.tsx` is the
@@ -539,6 +678,25 @@ search, inside the reply form, sent half-written replies (§6.83).
 `components/search-input.tsx` owns no form, so no key path reaches one, and Enter
 puts a phone's keyboard away instead. No repo rule checks this, because the box
 and the form are usually in different files.
+
+**A two-click confirm is `ConfirmSubmit`** (`components/confirm-submit.tsx`), or
+`useConfirmClick` from the same module for a control that is not a submit
+button. Arm-then-confirm looks like two lines of state and was wrong in the
+four places it was first written by hand (§6.90). A button that becomes a
+submit inside its own click handler is submitted by that same click, because
+React commits the change before the browser acts on the click: the merge row
+merged a contact on one click. A confirm swapped in as a different button is where the second click
+of a double-click lands, so a double-click deleted. The component keeps one
+button, so arming leaves focus on it. It refuses a pointer click within half a
+second of the last as well as the platform's own double-clicks, because the
+platform's count starts again after a small drift and after every third click;
+it refuses a held Enter; it is disabled while the action runs and disarms when
+the action settles. It guards only itself, so it must not share a form with a
+text field: Enter there submits without it, or confirms it once armed. The
+`button-type` repo rule refuses a button whose `type` changes between renders
+anywhere else, in the spellings its header lists. It cannot see a confirm
+swapped in as a different component, nor a button inside a wrapper that two
+`return`s both render.
 
 **One palette, light.** The console, the help centre and the widget render the
 same colours whatever the reader's operating system asks for. So: no
@@ -643,12 +801,13 @@ rule that contributed rather than from how many did, so a pile of single
 keywords is held below the auto band however many of them agree.
 See `plans/ticket-categorisation.md`.
 
-**The one AI provider, and the two things it is allowed to touch.**
-`lib/typesafe/` calls TypeSafe's System One endpoint, and two modules ask it a
-question: `lib/categorise-ai/` asks which category a message belongs to, and
-`lib/canned-suggest/` asks which canned response an agent would send next. Jev
-answers a `choice` over options the request offered, so neither can be handed a
-word of free text — the categoriser gets a key, the composer gets an id.
+**The one AI provider, and the three things it is allowed to touch.**
+`lib/typesafe/` calls TypeSafe's System One endpoint, and three modules ask it a
+question: `lib/categorise-ai/` asks which category a message belongs to,
+`lib/priority-ai/` how urgent it is, and `lib/canned-suggest/` which canned
+response an agent would send next. Jev answers a `choice` over options the
+request offered, so none of them can be handed a word of free text — the
+categoriser gets a key, the classifier a level, the composer an id.
 
 The categoriser is a **shadow**: every answer lands in `ai_category_runs` and
 nothing else, so no rollup, no review queue and no primary ladder can see it.
@@ -660,8 +819,8 @@ Anything wanting to promote a result argues for it in its own change.
 
 Four rules hold there, and the job is inert until somebody starts it — presence of
 `TYPESAFE_API_KEY` is its flag, the `instagramLoginConfigured()` device, and the
-key lives in the environment groups rather than the shared one because both uses
-send real customer text to a third party:
+key lives in the environment groups rather than the shared one because all three
+uses send real customer text to a third party:
 
 - **The option list comes from `ticket_categories`, never from `TAXONOMY`.** A
   retired category leaves the rules path at once; if it did not leave the model's
@@ -683,6 +842,26 @@ The job is hand-run and on no cron — a shadow run is an experiment with a labe
 on it. `dryRun=true` builds every request, calls nothing and writes nothing, which
 is why it can sit in CI's `database` job loop and put the selection and report
 queries in front of real Postgres. See `plans/categorisation-through-typesafe.md`.
+
+`lib/priority-ai/` asks how urgent each inbound customer message is, and it is
+**not** a shadow: under `PRIORITY_AI=apply` it writes `conversations.priority`,
+which moves SLA deadlines. It earns that where the categoriser could not because
+priority has no second quantity to be confused with — the column is a level, not
+an evidence grade, and one ticket in the archive had a priority set by hand.
+What it may not do is overrule anybody: `lib/priority-ai/decide.ts` is the only
+place that decides whether an answer may be written, and its rules are tests. A
+priority set by a person, a rule, a form default or an agent opening the ticket
+is never touched; only the answer to the customer's opening message may lower a
+ticket, and later ones only raise; and every answer, applied or not, is a row in
+`ai_priority_runs` with its full distribution, because those rows are the only
+labels priority has. A new writer of `conversations.priority` writes the column
+and its `priority_changed` event in one transaction, stamps the event with
+`PRIORITY_STAMP` (`lib/tickets/priority-stamp.ts`) so events sort in the order
+the column was written, and calls `onPriorityChanged` after it commits — as the
+console, the `set_priority` automation and the classifier do. The policies price
+their targets per priority, and the classifier decides whose priority a ticket
+carries from the column and those events read together. See
+`plans/priority-through-typesafe.md`.
 
 The suggestion is **live**: its answer is shown to an agent, as grey text in an
 empty reply box that Tab (or Use, on a phone) puts in. It is still never
@@ -985,6 +1164,17 @@ hide — email threading order, quote stripping, the WhatsApp 24-hour boundary,
 business hours across DST, Arabic slugs, the condition language — not on glue
 code. Add one when you fix a bug of that kind.
 
+**A test that needs a DOM opts in, one file at a time.** `// @vitest-environment
+happy-dom` on its first line gives that file happy-dom and leaves every other
+test in node. It is still a `*.test.ts`, because that is all vitest collects, so
+it builds elements with `createElement` rather than JSX, and it drives React with
+React's own `act` and `createRoot` — no testing library. Mock `next/navigation`
+through `vi.hoisted`, since `vi.mock` runs before the module's own lines.
+`components/use-action-form.test.ts` is the first, and holds the hook to what
+§6.80 and §6.89 cost to learn. happy-dom is not a browser: the form-reset bug
+was found in Chromium and only reproduced here afterwards, so behaviour that
+depends on a real engine is still measured in one before it is relied on.
+
 **`npm run test` runs without a database, so no SQL is executed there.** A query
 Postgres will reject still passes every static check: `tsc` type-checks the
 Drizzle builder, not the statement it emits, and a raw `sql` fragment is a
@@ -1114,6 +1304,23 @@ deleting it, and drop the sections that genuinely do not apply.
   group, always without values. Never echo a credential in any direction. CI
   rejects a committed `.env` and a `sync: false` inside an env group, but it
   cannot unsay a credential you pasted into a comment or a log.
+- **A dump contains no usable credential without a key the dump does not
+  contain, and `whatsapp_account_credentials` is the one place to look.** Every
+  other credential lives in the environment and is named from a row. A
+  WhatsApp business account's token is named, or stored sealed — never
+  plaintext — and nothing but the worker opens one (`credential-confinement`).
+  A second table holding a secret is a second place to look and a second
+  argument to make; make it in its own change.
+- **Some Graph credentials ride in a URL, and a fetch tracing span records the
+  URL whole.** `lib/meta/client.ts` sends the Page token as `access_token`, the
+  Embedded Signup exchange sends the app secret and the code as query
+  parameters, and `debug_token` takes the inspected token as `input_token` —
+  the endpoint's only shape. WhatsApp's sends and media downloads, and the
+  app token on `debug_token`, go in an `Authorization` header and are not
+  exposed this way. Nothing traces today; whoever adds an
+  `instrumentation.ts` keeps the `graph.facebook.com` and `graph.instagram.com`
+  query strings out of every span in the same change, and
+  `NEXT_OTEL_FETCH_DISABLED=1` alone does not (`docs/PROJECT-STATE.md` §6.88).
 - Email bodies and imported KB HTML are attacker-controlled. **Sanitise on
   write, never on read**, through `lib/html/sanitize.ts`.
 - Attachment paths derive from ids we generate, never from a supplied filename.

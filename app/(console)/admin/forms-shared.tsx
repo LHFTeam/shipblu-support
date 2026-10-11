@@ -1,9 +1,9 @@
 'use client';
 
-import { useActionState, useEffect, useState, type ReactNode } from 'react';
-import { useRouter } from 'next/navigation';
+import { useActionState, useState, type ReactNode } from 'react';
 import { Button, Card, ErrorText } from '@/components/ui';
 import type { ActionState } from '@/lib/http/action-state';
+import { ConfirmSubmit } from '@/components/confirm-submit';
 import { SubmitButton } from '@/components/submit-button';
 import { useActionForm } from '@/components/use-action-form';
 
@@ -17,16 +17,6 @@ import { useActionForm } from '@/components/use-action-form';
  */
 
 export const INITIAL: ActionState = { error: null };
-/** Refreshes the server components after a successful write. */
-export function useRefreshOnSuccess(state: ActionState, onSuccess?: () => void) {
-  const router = useRouter();
-  useEffect(() => {
-    if (!state.ok) return;
-    router.refresh();
-    onSuccess?.();
-    // `nonce` changes on every success, so two consecutive saves both fire.
-  }, [state.ok, state.nonce, router, onSuccess]);
-}
 
 export function EditorForm({
   action,
@@ -39,8 +29,7 @@ export function EditorForm({
   submitLabel: string;
   onSaved?: () => void;
 }) {
-  const { state, form } = useActionForm(action, INITIAL);
-  useRefreshOnSuccess(state, onSaved);
+  const { state, form } = useActionForm(action, INITIAL, { onSuccess: onSaved });
 
   return (
     <form {...form} className="flex flex-col gap-3">
@@ -138,36 +127,28 @@ export function Collapsible({
 }
 
 /**
- * A destructive action behind one confirmation.
- *
- * The confirm is a second click on the same button rather than a dialog: it is
- * enough to stop a mis-click and does not need a focus trap to be accessible.
+ * A destructive action behind one confirmation: `ConfirmSubmit`'s second click.
  */
 export function DangerAction({
   action,
   id,
   label = 'Delete',
   confirmLabel = 'Really delete?',
+  disabled = false,
 }: {
   action: (state: ActionState, formData: FormData) => Promise<ActionState>;
   id: string;
   label?: string;
   confirmLabel?: string;
+  /** Off while something beside it must not be undone underneath — armed or not. */
+  disabled?: boolean;
 }) {
   const [state, formAction] = useActionState(action, INITIAL);
-  const [armed, setArmed] = useState(false);
-  useRefreshOnSuccess(state);
 
   return (
     <form action={formAction} className="inline-flex flex-col items-end gap-1">
       <input type="hidden" name="id" value={id} />
-      {armed ? (
-        <SubmitButton idle={confirmLabel} variant="danger" />
-      ) : (
-        <Button type="button" variant="ghost" size="sm" onClick={() => setArmed(true)}>
-          {label}
-        </Button>
-      )}
+      <ConfirmSubmit label={label} confirmLabel={confirmLabel} disabled={disabled} />
       {state.error ? (
         <span className="max-w-xs text-end text-xs text-red-600">{state.error}</span>
       ) : null}

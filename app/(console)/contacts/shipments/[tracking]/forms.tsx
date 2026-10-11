@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { refreshShipmentDetail, setShipmentParty, type ContactActionState } from '../../actions';
 
 const INITIAL: ContactActionState = { error: null };
@@ -31,7 +30,6 @@ export function PartyField({
   current: { id: string; name: string | null; handle: string | null } | null;
   editable: boolean;
 }) {
-  const router = useRouter();
   const [value, setValue] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -47,10 +45,7 @@ export function PartyField({
     setBusy(false);
     setError(result.error);
 
-    if (!result.error) {
-      setValue('');
-      router.refresh();
-    }
+    if (!result.error) setValue('');
   }
 
   return (
@@ -127,7 +122,6 @@ export function RefreshShipmentButton({
       here would render one timezone on the server and another in the browser. */
   lastSyncedAt: string | null;
 }) {
-  const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -138,13 +132,13 @@ export function RefreshShipmentButton({
     const formData = new FormData();
     formData.set('trackingNumber', trackingNumber);
 
+    // A refusal after the sync brings the page back too: the action revalidates
+    // as soon as the sync has run, because `not_found` is written to the row and
+    // the badge beside this button has changed. The two before it — no
+    // permission, no tracking number — change nothing.
     const result = await refreshShipmentDetail(INITIAL, formData);
     setBusy(false);
     setError(result.error);
-
-    // Even on a refusal: `not_found` is written to the row by the sync, so the
-    // badge and the copy beside it have changed.
-    router.refresh();
   }
 
   return (

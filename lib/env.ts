@@ -286,6 +286,55 @@ const schema = z.object({
   WHATSAPP_WABA_ID: z.string().optional(),
 
   /**
+   * The key that seals the one WhatsApp credential the database stores — a
+   * business token minted by Embedded Signup, which no variable can name — and
+   * the key a rotation is moving away from.
+   *
+   * Its own key rather than one derived from `APP_SECRET`, which signs reply
+   * tokens sitting in customers' mailboxes and so is effectively never rotated;
+   * this one must be rotatable without breaking a single email thread. In the
+   * environment group, never in the database, which is what keeps a dump free of
+   * a usable credential. `lib/whatsapp/credential-envelope.ts` has the format.
+   *
+   * **Plain `z.string().optional()`, and no `min()` here**, for the reason
+   * `LOG_ALL_INCOMING_WEBHOOKS` below gives: `env()` parses this whole schema on
+   * every page and action, so a format rule here would turn one mistyped key
+   * into a console that does not load at all. The format is checked by
+   * `parseKeyring` at first use, where the failure is a sentence about
+   * WhatsApp.
+   *
+   * Neither name starts `WHATSAPP_TOKEN_`, and must not: an admin may type any
+   * such name into an account's token box, and it is then sent to Meta as a
+   * bearer token. A key named that way could be posted to graph.facebook.com.
+   *
+   * `_PREVIOUS` is set only during a rotation (current = new, previous = old,
+   * run `rotate_whatsapp_credentials`, then unset previous).
+   */
+  WHATSAPP_CREDENTIAL_KEY: z.string().optional(),
+  WHATSAPP_CREDENTIAL_KEY_PREVIOUS: z.string().optional(),
+
+  /**
+   * The Facebook Login for Business configuration that opens Meta's Embedded
+   * Signup for a number already on the WhatsApp Business app (coexistence).
+   *
+   * An id, not a secret — the browser hands it to Meta's SDK — but per
+   * environment, because each environment has its own Meta app and a
+   * configuration belongs to one app. Unset means the "Connect a WhatsApp
+   * number" button says what is missing instead of opening a window Meta will
+   * refuse (`coexistenceReadiness` in `lib/whatsapp/onboarding.ts`).
+   *
+   * The configuration is also what picks the Embedded Signup version, so it
+   * must be a v4 one: created new with the "WhatsApp Embedded Signup" login
+   * variation and products selected, Cloud API at least. One with no products
+   * is not v4, and v2 and v3 end on 2026-10-15. Nothing here can read which
+   * version an id names — a format rule would not know, and would only turn a
+   * typo into a console that does not load — so it stays a plain string and
+   * the App Dashboard is where it is got right (`EMBEDDED_SIGNUP_EXTRAS` in
+   * `lib/whatsapp/embedded-signup.ts` has the detail).
+   */
+  META_EMBEDDED_SIGNUP_CONFIG_ID: z.string().optional(),
+
+  /**
    * Freshdesk, for the knowledge base importer only. Unset means the import
    * job skips rather than fails, so the cron that runs it is green before the
    * migration is scheduled.
@@ -294,18 +343,24 @@ const schema = z.object({
   FRESHDESK_API_KEY: z.string().optional(),
 
   /**
-   * TypeSafe's System One API, read by two things: the hand-run shadow
-   * categorisation in `lib/categorise-ai/`, and the reply box's canned-response
-   * suggestions in `lib/canned-suggest/`.
+   * TypeSafe's System One API, read by three things, each switched on its own
+   * way: the hand-run shadow categorisation in `lib/categorise-ai/`, the
+   * priority classifier below, and the reply box's canned-response suggestions
+   * in `lib/canned-suggest/`.
    *
    * Unset is the resting state rather than a misconfiguration. For the shadow
    * run, presence of the key is what enables the job — the device
-   * `instagramLoginConfigured()` uses. For the suggestions it is only a
-   * precondition: production holds the key for the shadow run, so the decision
-   * is the admin switch in `canned_suggestion_settings`, and the composer asks
-   * nothing while that is off whatever the key says. The suggestion route is the
-   * one request path that reads the key, and it answers "no suggestion" when it
-   * is missing, so a missing key here still cannot fail a request.
+   * `instagramLoginConfigured()` uses. For the other two it is only a
+   * precondition, because production holds the key for the shadow run: the
+   * classifier also needs `PRIORITY_AI`, and the suggestions the admin switch in
+   * `canned_suggestion_settings`, and neither sends anything while its own
+   * switch is off whatever the key says.
+   *
+   * The two jobs read the key in the worker. On the request path,
+   * `/api/canned-suggestions` is the one reader that sends it anywhere, and it
+   * answers "no suggestion" when the key is missing; the ticket page,
+   * `/admin/canned` and `/reports/canned-suggestions` read only whether it is
+   * set. So a missing key here still cannot fail a request.
    *
    * `TYPESAFE_MODEL` pins a run to one Jev version. Left unset the request asks
    * for the `jev-latest` alias, and every row records the version the *response*
@@ -313,6 +368,27 @@ const schema = z.object({
    */
   TYPESAFE_API_KEY: z.string().optional(),
   TYPESAFE_MODEL: z.string().optional(),
+
+  /**
+   * The priority classifier (`lib/priority-ai/`), which asks the same TypeSafe
+   * endpoint how urgent each inbound customer message is.
+   *
+   * `PRIORITY_AI` is `off` (unset), `shadow` — ask and record in
+   * `ai_priority_runs`, change nothing — or `apply`, which also writes
+   * `conversations.priority` and so moves SLA deadlines. It needs
+   * `TYPESAFE_API_KEY` as well; the switch alone sends nothing.
+   *
+   * `PRIORITY_AI_MIN_PROBABILITY` is a number in 0..1, the winner's share below
+   * which nothing is applied (default 0.6, a guess until measured).
+   *
+   * Both read straight from `process.env` by `lib/priority-ai/settings.ts`, and
+   * both strings rather than an enum and a number, for the reason the
+   * categoriser's thresholds above give: the switch is read inside
+   * `afterMessageStored`, on every ingest path, and a typo in it must turn the
+   * feature off rather than throw for the whole application from `env()`.
+   */
+  PRIORITY_AI: z.string().optional(),
+  PRIORITY_AI_MIN_PROBABILITY: z.string().optional(),
 
   /** Worker tuning. */
   /**

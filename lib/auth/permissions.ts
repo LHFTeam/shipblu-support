@@ -170,6 +170,19 @@ export const PERMISSIONS = [
   'admin.groups',
   'admin.locations',
   'admin.channels',
+  /**
+   * Connecting a WhatsApp number through Meta's Embedded Signup, and what hangs
+   * off it: retrying the connection, copying a number's contacts and history,
+   * and forgetting the credential it stored.
+   *
+   * Separate from `admin.channels` because it is a different thing to hand out
+   * than renaming a channel. It stores a credential the business's whole
+   * WhatsApp account answers to, and it copies six months of that business's
+   * private chats into the helpdesk — once, with no undo. Granted to the same
+   * role as `admin.channels` today, and a key of its own so the two can be
+   * separated later without changing what an existing grant means.
+   */
+  'admin.channels.connect',
   'admin.automations',
   'admin.sla',
   /** Skills, and who holds them — the input to skill-based assignment. */
@@ -248,6 +261,7 @@ const ADMIN: Permission[] = [
   'admin.groups',
   'admin.locations',
   'admin.channels',
+  'admin.channels.connect',
   'admin.automations',
   'admin.sla',
   'admin.skills',

@@ -1,13 +1,10 @@
 'use client';
 
-import { useActionState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useActionState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Button } from '@/components/ui';
-import type { ActionState } from '../../action-state';
 import { claimThreadControl } from '../../meta-actions';
-
-const INITIAL: ActionState = { error: null };
+import { INITIAL } from './form-state';
 
 /**
  * Takes the thread off whichever app is answering it, so this one can reply.
@@ -17,22 +14,20 @@ const INITIAL: ActionState = { error: null };
  * cannot be answered and the remedy is the next thing under it. Anywhere else
  * and the paragraph still ends in "go and use the other tool".
  *
- * The outcome is rendered here and left on screen, exactly as `ProfileRefresh`
+ * A refusal is rendered here and left on screen, exactly as `ProfileRefresh`
  * does and for the same reason. The refusal that matters — this app is not the
  * primary receiver — is a sentence the agent has to hand to whoever holds the
  * Meta dashboard, and a toast would take it away before they had read it twice.
+ *
+ * A success has nothing to say here, because this component does not survive
+ * it. The action writes the event that reopens the composer and revalidates the
+ * ticket, the re-read page comes back with the action's answer, and the
+ * composer puts the reply box where this was. Measured, the answer was never
+ * painted (§6.89). The reply box is the answer, and the ticket's activity
+ * records who took control.
  */
 export function ThreadControl({ conversationId }: { conversationId: string }) {
   const [state, formAction] = useActionState(claimThreadControl, INITIAL);
-  const router = useRouter();
-
-  // The composer is server-computed from the ticket's newest facts, and taking
-  // control adds one. Nothing on this page can open the reply box on its own —
-  // only the route being re-read can — so a success that did not refresh would
-  // report itself and change nothing an agent could see.
-  useEffect(() => {
-    if (state.ok) router.refresh();
-  }, [state.ok, state.nonce, router]);
 
   return (
     <div className="mt-3">
@@ -41,14 +36,8 @@ export function ThreadControl({ conversationId }: { conversationId: string }) {
         <Submit />
       </form>
 
-      {state.error || state.message ? (
-        <p
-          className={`mt-2 whitespace-pre-line text-xs ${
-            state.error ? 'text-red-600' : 'text-[var(--muted-foreground)]'
-          }`}
-        >
-          {plain(state.error ?? state.message ?? '')}
-        </p>
+      {state.error ? (
+        <p className="mt-2 whitespace-pre-line text-xs text-red-600">{plain(state.error)}</p>
       ) : null}
     </div>
   );

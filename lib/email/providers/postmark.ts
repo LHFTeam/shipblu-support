@@ -108,7 +108,8 @@ export class PostmarkEmailProvider implements EmailProvider {
 
     // Every send runs in a job, so it gets the write deadline Graph sends get:
     // long enough not to give up on an email Postmark is still accepting, short
-    // enough that a deploy cannot reclaim the job mid-send and send it twice.
+    // enough to end inside the stalled window, which is the margin the queue
+    // has if the worker's heartbeat fails (`WRITE_TIMEOUT_MS`).
     let response: Response;
     try {
       response = await fetch(API_URL, {

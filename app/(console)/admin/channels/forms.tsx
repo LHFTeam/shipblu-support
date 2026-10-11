@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Badge, Button, ErrorText, Field, Input, Select } from '@/components/ui';
+import { parseCoexistence } from '@/lib/whatsapp/coexistence';
 import type { AdminState } from '../settings-shared';
 import { saveChannel } from './actions';
 import { SubmitButton } from '@/components/submit-button';
@@ -129,6 +130,7 @@ export function ChannelEditor({
   // `faqFolder_*` fields, and this form has none, so saving the name from here
   // would silently clear the folders the widget lists.
   if (!type || type === 'webchat') return null;
+  const connectedThroughMeta = type === 'whatsapp' && parseCoexistence(channel.config) !== null;
 
   if (!open) {
     return (
@@ -154,8 +156,29 @@ export function ChannelEditor({
         {/* Rendered whenever there is an account at all, unlike the add form
             above: with one connected, an older row can still be pointed at
             nothing, and this is the only screen that can say which one it
-            belongs to. `saveChannel` refuses to save it blank anyway. */}
-        {isWhatsAppType(type) && whatsappAccounts.length > 0 ? (
+            belongs to. `saveChannel` refuses to save it blank anyway.
+
+            Not for a number connected through Meta: it sends with the
+            credential stored for the account it was connected to, and
+            `saveChannel` refuses to move it. Shown as text, as its phone
+            number id is, with the stored id submitted so the save's check
+            that it is unchanged passes. */}
+        {connectedThroughMeta ? (
+          <Field
+            label="Business account"
+            className="sm:w-44"
+            hint="Connected through Meta; reconnect the number to move it to another account."
+          >
+            <input type="hidden" name="whatsappAccountId" value={channel.whatsappAccountId ?? ''} />
+            <Input
+              value={
+                whatsappAccounts.find((account) => account.id === channel.whatsappAccountId)
+                  ?.name ?? 'none — reconnect to set it'
+              }
+              readOnly
+            />
+          </Field>
+        ) : isWhatsAppType(type) && whatsappAccounts.length > 0 ? (
           <AccountField accounts={whatsappAccounts} defaultValue={channel.whatsappAccountId} />
         ) : null}
 
@@ -193,6 +216,21 @@ function AddressField({ type, config }: { type: ChannelType; config?: Record<str
       <p className="text-xs text-[var(--muted-foreground)] sm:flex-1 sm:pt-6">
         The widget needs no address — only a default group.
       </p>
+    );
+  }
+
+  // A number connected through Meta's window has its id from Meta, not from a
+  // form, and `saveChannel` keeps the stored one whatever is submitted. Shown
+  // as text rather than as a box that would appear to accept a change.
+  if (type === 'whatsapp' && config && parseCoexistence(config)) {
+    return (
+      <Field
+        label="Phone number ID"
+        className="sm:flex-1"
+        hint="Reported by Meta when the number was connected; it is not edited here."
+      >
+        <Input name="phoneNumberId" value={(config.phoneNumberId as string) ?? ''} readOnly />
+      </Field>
     );
   }
 

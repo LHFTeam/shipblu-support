@@ -22,6 +22,7 @@ import { checkDbJobs } from './rules/db-jobs.mjs';
 import { checkPostMigrationSql } from './rules/db-sql.mjs';
 import { checkNoForceRls } from './rules/force-rls.mjs';
 import { checkShipmentPayloadConfinement } from './rules/shipment-payload.mjs';
+import { checkCredentialConfinement } from './rules/credential-confinement.mjs';
 import { checkServerActions } from './rules/server-actions.mjs';
 import { checkSanitiserConfinement } from './rules/sanitiser.mjs';
 import { checkArticleNormalisation } from './rules/article-normalisation.mjs';
@@ -40,7 +41,9 @@ import { checkAutomatedRepliesDoNotCountAsAgentReplies } from './rules/automated
 import { checkClientBundleStaysOutOfTheDatabase } from './rules/client-bundle.mjs';
 import { checkNoDeadExports } from './rules/dead-exports.mjs';
 import { checkPagesDoNotImportTheDatabase } from './rules/page-db.mjs';
-import { checkConsoleFormsDoNotReset } from './rules/form-reset.mjs';
+import { checkFormsDoNotReset } from './rules/form-reset.mjs';
+import { checkActionsRevalidate } from './rules/action-revalidates.mjs';
+import { checkButtonTypeIsFixed } from './rules/button-type.mjs';
 
 export const RULES = [
   ['env-parity', checkEnvParity],
@@ -61,6 +64,7 @@ export const RULES = [
   ['db-sql', checkPostMigrationSql],
   ['force-rls', checkNoForceRls],
   ['shipment-payload', checkShipmentPayloadConfinement],
+  ['credential-confinement', checkCredentialConfinement],
   // ---------------------------------------------------------------------------
   // Source conventions that are one grep away from being enforced
   // ---------------------------------------------------------------------------
@@ -71,7 +75,9 @@ export const RULES = [
   ['dom-title', checkNoDomTitleAttribute],
   ['like-patterns', checkLikePatternsUseTheBuilder],
   ['console-scroll', checkConsolePagesScroll],
-  ['form-reset', checkConsoleFormsDoNotReset],
+  ['form-reset', checkFormsDoNotReset],
+  ['action-revalidates', checkActionsRevalidate],
+  ['button-type', checkButtonTypeIsFixed],
   ['page-db', checkPagesDoNotImportTheDatabase],
   ['light-only', checkLightOnly],
   ['framing', checkFramingHeaders],

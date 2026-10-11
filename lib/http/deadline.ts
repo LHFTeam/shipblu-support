@@ -32,9 +32,10 @@ export function isTimeout(error: unknown): boolean {
  * should still be noticed in a minute. 110 seconds at 100 MB.
  *
  * One formula for the download and the upload of the same file, because both
- * halves have to fit inside the queue's reclaim window together. The WhatsApp
- * client's test adds the whole job up from the real functions — lookup,
- * largest download, and this upload of the same bytes — against
+ * halves have to fit inside the queue's reclaim window together — the margin
+ * the queue has if the worker's lock heartbeat fails (`WRITE_TIMEOUT_MS`).
+ * The WhatsApp client's test adds the whole job up from the real functions —
+ * lookup, largest download, and this upload of the same bytes — against
  * `STALLED_AFTER_MS`.
  */
 export function sizedTimeout(bytes: number): number {
@@ -50,13 +51,18 @@ export const READ_TIMEOUT_MS = 15_000;
  *
  * The deadline sits in a window with two edges. Below about a minute, a send
  * the provider was still accepting is given up on and retried — a duplicate
- * message. Past `STALLED_AFTER_MS`, the job can be reclaimed while the send is
- * still waiting — by a deploy's new worker, which cannot tell a slow job from an
- * orphaned one — and run again: the same duplicate by another route.
+ * message. The upper edge, `STALLED_AFTER_MS`, is now only a margin: the worker
+ * refreshes a running job's lock, so a live send is reclaimed and run again
+ * only if that heartbeat fails for the whole window. A deploy is a separate
+ * matter that no deadline governs: a send still waiting when Render's shutdown
+ * window runs out (`render.yaml` sets none, so its default) dies with the
+ * process, and the sweep runs it again once its lock goes stale.
  *
- * And there has to be one. The worker claims nothing new until every job in its
- * batch is done, and `fetch` with no signal gives up only after five minutes
- * without a response — never, on a body that keeps trickling in — so one slow
- * request held every queued job behind it for the length of the reclaim window.
+ * And there has to be one. `fetch` with no signal gives up only after five
+ * minutes without a response — never, on a body that keeps trickling in — and
+ * the worker refreshes the lock of every job it is running, so nothing else
+ * ends it: a request with no deadline holds its worker slot for good, and a
+ * handful of them stop the queue. Before the worker refilled slots one at a
+ * time, the same request held every queued job behind it.
  */
 export const WRITE_TIMEOUT_MS = 90_000;

@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import { metaAppSecret, metaVerifyToken } from '@/lib/env';
-import { boundedDeliveryKey } from '@/lib/webhooks/delivery-key';
 import { queueDelivery, readDelivery, storeDelivery, storedHeaders } from '@/lib/webhooks/receive';
 import { SIGNATURE_HEADER, verifyChallenge, verifySignature } from '@/lib/whatsapp/verify';
+import { deliveryId } from '@/lib/whatsapp/delivery-id';
 import type { WhatsAppWebhookPayload } from '@/lib/whatsapp/types';
 import { logger } from '@/lib/log';
 
@@ -85,36 +85,4 @@ export async function POST(request: Request) {
   await queueDelivery(eventId);
 
   return NextResponse.json({ status: 'queued' }, { status: 200 });
-}
-
-/**
- * Delivery-level idempotency key.
- *
- * Meta sends no event id of its own, so one is derived from the batch contents:
- * the wamids of every message, echo and status in it, which is stable across
- * redeliveries of the same batch and differs between distinct ones. Returning
- * null for an empty batch is deliberate — the unique index treats nulls as
- * distinct, so contentless deliveries are stored rather than colliding. A
- * batch too long for the column is hashed whole rather than truncated — see
- * `boundedDeliveryKey`.
- */
-function deliveryId(payload: WhatsAppWebhookPayload): string | null {
-  const parts: string[] = [];
-
-  for (const entry of payload.entry ?? []) {
-    for (const change of entry.changes ?? []) {
-      for (const message of change.value?.messages ?? []) {
-        if (message.id) parts.push(`m:${message.id}`);
-      }
-      for (const echo of change.value?.message_echoes ?? []) {
-        if (echo.id) parts.push(`e:${echo.id}`);
-      }
-      for (const status of change.value?.statuses ?? []) {
-        if (status.id) parts.push(`s:${status.id}:${status.status}`);
-      }
-    }
-  }
-
-  if (parts.length === 0) return null;
-  return boundedDeliveryKey(parts.sort().join('|'));
 }

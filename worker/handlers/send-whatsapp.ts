@@ -4,10 +4,12 @@ import { contactIdentities, conversations, messages } from '@/db/schema';
 import type { ClaimedJob } from '@/lib/queue';
 import { parseJobPayload } from '@/lib/queue/payloads';
 import { alreadySent } from './already-sent';
+import { recordRefusalIfStored } from './stored-refusal';
 import { subjectGone } from './subject-gone';
-import { credentialsForPhoneNumberId } from '@/lib/whatsapp/accounts';
+import { credentialsForPhoneNumberId, type WhatsAppCredentials } from '@/lib/whatsapp/accounts';
 import { sendingNumberFor } from '@/lib/whatsapp/conversation';
 import { WhatsAppApiError, sendTemplate, sendText } from '@/lib/whatsapp/client';
+import { explainAuthError } from '@/lib/whatsapp/errors';
 import type { WhatsAppTemplateComponent } from '@/lib/whatsapp/templates';
 import { windowState } from '@/lib/whatsapp/window';
 import { errorMessage } from '@/lib/errors';
@@ -59,7 +61,20 @@ export async function sendWhatsApp(job: ClaimedJob): Promise<void> {
   // The token belongs to the business account that owns `from`, not to the
   // installation: with two WABAs connected, sending with the wrong one is
   // rejected as a number the credential has no access to.
-  const credentials = await credentialsForPhoneNumberId(from);
+  //
+  // A credential that cannot be resolved — a stored one whose key is wrong or
+  // unset, a named variable missing from the group — fails every attempt the
+  // same way until a person fixes it, so the reason goes on the message where
+  // the agent is looking, rather than leaving it "sending" for good. Rethrown
+  // so the queue retries: `alreadySent` reads `failed` as unsent, and the
+  // attempt after the fix still delivers.
+  let credentials: WhatsAppCredentials;
+  try {
+    credentials = await credentialsForPhoneNumberId(from);
+  } catch (error) {
+    await markFailed(messageId, row.message.meta, errorMessage(error));
+    throw error;
+  }
 
   const meta = row.message.meta as SendMeta & Record<string, unknown>;
   const kind = meta.sendKind ?? 'text';
@@ -136,7 +151,23 @@ export async function sendWhatsApp(job: ClaimedJob): Promise<void> {
       `${messageId} sent as ${result.wamid ?? 'an unknown wamid: Meta accepted it and its answer was lost'}`,
     );
   } catch (error) {
-    await markFailed(messageId, row.message.meta, errorMessage(error));
+    // An expired credential is explained on the message, naming the one this
+    // send used — a stored credential is fixed by reconnecting the number, a
+    // named variable on Render, and the agent reading this needs to know which.
+    await markFailed(
+      messageId,
+      row.message.meta,
+      error instanceof WhatsAppApiError
+        ? explainAuthError(error.code, error.message, {
+            source: credentials.source,
+            tokenEnvVar: credentials.tokenEnvVar,
+          })
+        : errorMessage(error),
+    );
+
+    // On the credential too, while it is still the one stored — what sends an
+    // admin to Reconnect (`./stored-refusal`).
+    await recordRefusalIfStored(log, messageId, from, credentials, error);
 
     // Only retry what a retry could fix. A rejected template or an invalid
     // number fails identically every time, and retrying it four more times just

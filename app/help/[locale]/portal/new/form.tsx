@@ -1,8 +1,8 @@
 'use client';
 
-import { useActionState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Button, ErrorText, Input, Label, Textarea } from '@/components/ui';
+import { useActionForm } from '@/components/use-action-form';
 import { t, type Locale } from '@/lib/kb/locale';
 import type { TicketFieldDef } from '@/lib/tickets/custom-fields';
 import { createPortalTicket, type PortalTicketState } from '../actions';
@@ -19,10 +19,10 @@ export function NewTicketForm({
   /** Seeded from the query string; see the comment on the page above. */
   subject?: string;
 }) {
-  const [state, action] = useActionState(createPortalTicket, INITIAL);
+  const { state, form } = useActionForm(createPortalTicket, INITIAL, { lost: 'errorNoAnswer' });
 
   return (
-    <form action={action} className="flex flex-col gap-4">
+    <form {...form} className="flex flex-col gap-4">
       <input type="hidden" name="locale" value={locale} />
 
       <div>

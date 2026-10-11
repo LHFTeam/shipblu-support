@@ -7,6 +7,7 @@ import { buildAttachmentPath, removeObjects, uploadObject } from '@/lib/storage'
 import { downloadAttachment, MetaApiError } from '@/lib/meta/client';
 import { credentialsForPhoneNumberId } from '@/lib/whatsapp/accounts';
 import { WhatsAppApiError, downloadMedia, getMediaUrl } from '@/lib/whatsapp/client';
+import { recordRefusalIfStored } from './stored-refusal';
 import { subjectGone } from './subject-gone';
 import { logger } from '@/lib/log';
 
@@ -77,9 +78,9 @@ export async function downloadMediaJob(job: ClaimedJob): Promise<void> {
   // the ingest — with two WABAs connected, the other account's token answers
   // this lookup with "unsupported get request", which reads like a deleted file
   // rather than the wrong credential.
-  const { token } = await credentialsForPhoneNumberId(
-    typeof meta.phoneNumberId === 'string' ? meta.phoneNumberId : null,
-  );
+  const phoneNumberId = typeof meta.phoneNumberId === 'string' ? meta.phoneNumberId : null;
+  const credentials = await credentialsForPhoneNumberId(phoneNumberId);
+  const { token } = credentials;
 
   let content: Buffer;
   let contentType: string;
@@ -93,6 +94,12 @@ export async function downloadMediaJob(job: ClaimedJob): Promise<void> {
     content = downloaded.content;
     contentType = metadata.mimeType ?? downloaded.contentType;
   } catch (error) {
+    // A stored credential Meta refused is recorded on it, so the console
+    // badges it before the hourly sync would (`./stored-refusal`). A 190 is
+    // transient, so it is rethrown below and the file still downloads on the
+    // attempt after a reconnect.
+    await recordRefusalIfStored(log, mediaId, phoneNumberId, credentials, error);
+
     // An expired URL, a deleted file — retrying cannot bring it back, so record
     // the reason on the message and stop rather than burning five attempts.
     if (error instanceof WhatsAppApiError && !error.isTransient) {

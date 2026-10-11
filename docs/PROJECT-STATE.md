@@ -535,6 +535,16 @@ removed; unrelated jobs and work already held by a worker remain. The database
 CI job exercises that distinction against Postgres with transaction-rolled-back
 fixtures.
 
+And now **WhatsApp coexistence**: a number that lives on the WhatsApp Business
+_app_ on a phone can be connected from Admin → Channels in one button, through
+Meta's Embedded Signup — the business token Meta mints is stored sealed, the
+number subscribes itself, six months of the phone's chats and its address book
+are copied in as resolved tickets and contacts, and a reply typed on the phone
+lands on the ticket as the team's. It is the first credential the database has
+ever held — one, sealed, opened only by the worker (§2, §8) — and **none of it
+has run live**: the whole flow is proven by the unit and database tiers (§7) and
+waits on Meta-side preconditions nobody has checked yet (§5.2).
+
 So: **the system still cannot take a real human support ticket**, and the
 remaining work is mostly not code — it is configuration, live-provider
 verification, and cutover. But the team has started arriving: **11 agents** as of
@@ -563,15 +573,15 @@ That split has been real on Render since the services were created; `render.yaml
 only started describing it in the env-group change below, and before that
 declared all seven services as one flat list.
 
-| Service                          | Type                          | Id                         | Branch                       |
-| -------------------------------- | ----------------------------- | -------------------------- | ---------------------------- |
-| `shipblu-support`                | web (standard, autoscale 1→3) | `srv-da1jgtg1ne8s73ciqulg` | `main`                       |
-| `shipblu-support-worker`         | worker (starter)              | `srv-da1jgtg1ne8s73ciqujg` | `main`                       |
-| `shipblu-support-staging`        | web (starter)                 | `srv-da1jgtg1ne8s73ciqul0` | a feature branch — see below |
-| `shipblu-sla-sweep`¹             | cron `*/5 * * * *`            | `crn-da1jgtg1ne8s73ciqup0` | `main`                       |
-| `shipblu-time-automations`       | cron `*/15 * * * *`           | `crn-da1jgtg1ne8s73ciquog` | `main`                       |
-| `shipblu-whatsapp-template-sync` | cron `0 * * * *`              | `crn-da1jgtg1ne8s73ciquk0` | `main`                       |
-| `shipblu-nightly`                | cron `0 0 * * *`              | `crn-da1jgtg1ne8s73ciqumg` | `main`                       |
+| Service                          | Type                          | Id                         | Branch                             |
+| -------------------------------- | ----------------------------- | -------------------------- | ---------------------------------- |
+| `shipblu-support`                | web (standard, autoscale 1→3) | `srv-da1jgtg1ne8s73ciqulg` | `main`                             |
+| `shipblu-support-worker`         | worker (starter)              | `srv-da1jgtg1ne8s73ciqujg` | `main`                             |
+| `shipblu-support-staging`        | web (starter)                 | `srv-da1jgtg1ne8s73ciqul0` | `main`, deploys itself — see below |
+| `shipblu-sla-sweep`¹             | cron `*/5 * * * *`            | `crn-da1jgtg1ne8s73ciqup0` | `main`                             |
+| `shipblu-time-automations`       | cron `*/15 * * * *`           | `crn-da1jgtg1ne8s73ciquog` | `main`                             |
+| `shipblu-whatsapp-template-sync` | cron `0 * * * *`              | `crn-da1jgtg1ne8s73ciquk0` | `main`                             |
+| `shipblu-nightly`                | cron `0 0 * * *`              | `crn-da1jgtg1ne8s73ciqumg` | `main`                             |
 
 ¹ `shipblu-sla-sweep` runs **three** jobs,
 `sla_sweep && presence_sweep && assign_sweep`. For an unknown period up to
@@ -607,6 +617,15 @@ used to pin a deleted feature branch, which failed every Blueprint sync:
 the next commit, against staging's own database. Before resuming it, read
 staging's `EMAIL_PROVIDER` in the dashboard: it should be `local`, the blueprint
 no longer sets it, and staging holds a Postmark `EMAIL_API_KEY` of its own.
+
+**Staging is a web service and nothing else** — no worker and no crons. Its
+web service enqueues jobs that nothing takes: every inbound delivery it
+receives is stored in `webhook_events` and never processed, and a job an action
+queues waits for good. For WhatsApp coexistence that means `complete_coexistence_onboarding`
+never runs there and the `history`, `smb_message_echoes` and `account_update`
+deliveries a connected number sends are stored and never ingested, so "staging
+first" needs `npm run worker` run by hand against staging's environment, or the
+first live test is on production with a test number (§5.2).
 
 ### Supabase — org `ihngokrzwjmgpogkecug`
 
@@ -696,6 +715,41 @@ and a free-text variable name would be a way to exfiltrate any secret in the
 process. The value goes in the environment's group; the key is listed in
 `render.yaml` without it, in the same commit that names it on the account.
 Staging's `WHATSAPP_ACCESS_TOKEN` is not such a name and nothing reads it.
+
+Three keys arrived with WhatsApp coexistence on 2026-10-08, each in the
+environment group and never the shared one. `WHATSAPP_CREDENTIAL_KEY` seals the
+business tokens Embedded Signup stores in `whatsapp_account_credentials`:
+`openssl rand -base64 32`, its own value per environment — an envelope sealed on
+staging must not open on production — never derived from `APP_SECRET`, and
+never named `WHATSAPP_TOKEN_*`, because that prefix is what an admin may name
+as a bearer token. `WHATSAPP_CREDENTIAL_KEY_PREVIOUS` is set only during a
+rotation: previous = the old key, current = the new, `npm run job --
+rotate_whatsapp_credentials dryRun=true`, then without, then unset.
+`META_EMBEDDED_SIGNUP_CONFIG_ID` is the Facebook Login for Business
+configuration on that environment's own Meta app — an id the browser hands to
+Meta's SDK, not a secret, but a configuration belongs to one app — and it must
+be a v4 one, created new with the WhatsApp Embedded Signup login variation and
+products selected (Cloud API at least). A configuration with no products is not
+v4, v2 and v3 end on 2026-10-15, and nothing in the repo can check which
+version the id names. Whether any of
+the three is set is a dashboard question the repo cannot answer: `render.yaml`
+lists them as dashboard-owned, nothing could have needed them before
+2026-10-08, and the first live onboarding needs the first and third (§5.2) —
+the page names what is missing before the button opens anything.
+
+**Losing the key loses every stored credential, by design.** There is no
+recovery but reconnecting each number through Meta's window, one popup each;
+the console says so per account (the credential's `keyState` reads `unknown`,
+naming the key id and the variable) rather than failing the page. The key
+variables are plain `z.string().optional()` in `lib/env.ts` for the reason
+`LOG_ALL_INCOMING_WEBHOOKS` is (below): a format rule there would take the
+console down on a mistyped key instead of failing one WhatsApp connection with
+a sentence. And a service-level copy of the key would silently shadow the
+group's — the same precedence trap as `DATABASE_URL` above. The `keyState`
+badge is drawn by the web service from the key it holds, so it sees only a copy
+there, as `unknown` on a credential sealed under the group's key; a copy on the
+worker alone leaves the badge reading `current` and shows instead as a
+`CredentialKeyError` on the onboarding row or on a send.
 
 When you add a variable, add it to `render.yaml` in the same commit. The
 blueprint is meant to describe the running system; it is not documentation that
@@ -989,7 +1043,10 @@ is code:
   this app the whole time**, across all 395,391 deliveries, without ever firing
   once. That is the evidence that this number is not operated that way: it is
   sent on through the Cloud API, where the sender already knows what it sent and
-  Meta offers no echo to a third-party app.
+  Meta offers no echo to a third-party app. _Partly superseded 2026-10-08:_ the
+  silence proved that about this number and nothing about the field, and a
+  number connected through coexistence is operated from the phone — the field
+  is required and ingested now; §6.87.
 
   So the bot's half is **not reachable by webhook at all**, and the remaining
   routes are outside this system: the service that operates the number hands the
@@ -1064,10 +1121,16 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   is `on delete set null` and would quietly strip the hub from a real thread,
   leaving only the address in `to_addresses`. That check is the SQL's to make by
   hand; the Delete button on `/admin/locations` makes it itself. `deleteLocation`
-  goes through `removeLocation` (`lib/locations/remove.ts`), which locks the row,
-  counts the threads, and marks a hub any thread has used not operating instead
-  of deleting it — the rule `deleteInternalRecipient` already applied to the
-  picker's other register.
+  goes through `removeEntry` (`lib/side-conversations/directory.ts`), which
+  locks the row, counts the threads, and marks a hub any thread has used not
+  operating instead of deleting it — the same function, and so the same rule,
+  `deleteInternalRecipient` applies to the picker's other register. Starting a
+  thread reads its hub or recipient when Send is pressed, which already refused
+  one removed while the agent wrote, and now reads it again under a share lock
+  (`holdEntry`) inside the insert's transaction. That second read covers the
+  moment between the first and the insert: before it, a hub deleted there died
+  on the foreign key and the composer said the send "may or may not have been
+  sent" when nothing was written, and one retired there was sent to anyway.
 
 - ~~**SLA policies and automation rules are both empty.**~~ `sla_policies` holds
   **4** rows and `automation_rules` **1** as of 2026-09-20, so neither cron runs
@@ -1317,6 +1380,32 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
 Everything below passes unit tests. Each is a round trip, or the half of one
 nobody has run, that somebody has to actually watch against the real provider:
 
+- **The priority classifier, in shadow first** (`plans/priority-through-typesafe.md`).
+  It ships off. Set `PRIORITY_AI=shadow` in the `shipblu-support-production`
+  env group, beside `TYPESAFE_API_KEY` — never on a service, which would
+  silently win over the group — let a day of inbound traffic through, and read
+  the rows back by hand before `apply` — no real Jev response has been parsed
+  by this code. Per channel, since one channel is most of the volume:
+
+  ```sql
+  select c.channel, r.outcome, r.predicted, count(*),
+         round(avg(r.probability)::numeric, 2) as avg_p
+  from ai_priority_runs r join conversations c on c.id = r.conversation_id
+  group by 1, 2, 3 order by 1, 2, 3;
+  ```
+
+  Once it is on `apply`, the disagreements the threshold is tuned from are an
+  agent's `priority_changed` after the classifier's on the same ticket:
+
+  ```sql
+  select r.conversation_id, r.predicted, r.probability, e.data->>'to' as agent_set
+  from ai_priority_runs r
+  join conversation_events e on e.conversation_id = r.conversation_id
+   and e.type = 'priority_changed' and e.actor_agent_id is not null
+   and e.created_at > r.created_at
+  where r.outcome = 'applied';
+  ```
+
 - **Postmark, from Outlook.** The credentials are set (§5.1), and the Gmail half
   has been watched: on ticket #13777 on 2026-09-03 a Gmail message arrived, an
   agent replied through Postmark, and the Gmail answer threaded onto the same
@@ -1344,6 +1433,94 @@ shipblu.com` still serves Freshdesk, so each one took a reader out of this
   depends on them any more.
 - **A WhatsApp template send outside the 24-hour window** — the one path the
   end-to-end test in §7 could not cover.
+- **Connecting a number on the WhatsApp Business app (coexistence). Built,
+  proven against a local Postgres, and not yet run live.** Everything from
+  Meta's popup to a phone-typed reply on a ticket — the code exchange, the
+  sealed credential, `complete_coexistence_onboarding`, the copied history and
+  contacts, `smb_message_echoes`, `account_update` — has been exercised only by
+  the unit and database tiers (§7). What gates the live run is outside the
+  repo, and each item is a trap of its own:
+  - **The Meta app must be a Tech Provider** (or Solution Partner), or Embedded
+    Signup refuses to open; business verification is its prerequisite. Not
+    checked for either app.
+  - **A new v4 Facebook Login for Business configuration, before
+    2026-10-15**, when Embedded Signup v2 and v3 end with their public
+    previews; Meta does not say whether a launch on one after that is refused,
+    upgraded or broken. v4 belongs to the configuration, not to the launch: one
+    created new with the WhatsApp Embedded Signup login variation and products
+    selected — Cloud API at least, whose permissions the flow then selects by
+    itself and which Meta's v4 page says need Advanced Access. The
+    Business-app onboarding is not a product; it is the launch's `featureType`
+    (`EMBEDDED_SIGNUP_EXTRAS` in `lib/whatsapp/embedded-signup.ts`). Its id
+    goes in `META_EMBEDDED_SIGNUP_CONFIG_ID` (§2) in each environment's group,
+    then a deploy of web and worker. Nothing in the repo can read which
+    version an id names — the page checks only that it is set — and Meta's own
+    v4 pages disagree about the extras (`{}` against `{ setup: {} }`), so once
+    the configuration exists, compare the Embedded Signup Builder's snippet
+    (App Dashboard → WhatsApp → Embedded Signup Builder) with the constant.
+    The configuration also needs Client/Web OAuth login, Enforce HTTPS and
+    Login with the JavaScript SDK switched on, and
+    **the console host in Allowed Domains for the JavaScript SDK** and in Valid
+    OAuth redirect URIs — staging's host too. Missing, the popup fails inside
+    Meta's window with a sentence about the domain, and nothing here can say
+    more than that.
+  - `WHATSAPP_CREDENTIAL_KEY` in both groups (§2). `coexistenceReadiness()`
+    lists every missing variable on the page before the button does anything,
+    so a code is never spent on a store that was always going to fail.
+  - **The app-level webhook fields** `history`, `smb_app_state_sync`,
+    `smb_message_echoes` and `account_update` on `whatsapp_business_account`:
+    `npm run job -- subscribe_meta_webhooks` once per environment, **staging
+    first**, because three of the four names come from the webhooks overview
+    rather than from a subscription this app already holds, and one bad name
+    fails the whole write (§6.87). The onboarding job reads the list back and
+    records a warning per missing field; it cannot write the list itself.
+  - The phone runs WhatsApp Business 2.24.17 or later and stays open until the
+    history reaches 100%; onboarding unlinks companion devices; throughput on
+    such a number is fixed at 20 messages a second; marketing templates are
+    refused on it.
+
+  What to read back from the first run, in order: `whatsapp_onboardings.steps`
+  as the card polls it; the credential row by `select key_id, token_type,
+expires_at, inspected_at` — never `envelope`, and a null `expires_at` means
+  "never" only when `inspected_at` is set (`db/schema/config.ts`); the
+  `request_id`s in
+  `channels.config -> coexistence`; `history` deliveries in `webhook_events`
+  with the app open on the phone (`LOG_ALL_INCOMING_WEBHOOKS` for the session,
+  Meta's Webhook Debugger for field names); imported resolved tickets carrying
+  both directions; a phone-typed reply on a live ticket labelled "WhatsApp
+  Business app" with the SLA clock stopped; a console reply landing in the
+  phone's chat, and whether Meta echoes that reply back on
+  `smb_message_echoes` at all — unconfirmed, and the one case where an echo
+  can race its own send (below); and the hourly template sync reading with
+  the stored credential (`last_synced_at` moves, `last_sync_error` null). The
+  `debug_token.expires_at` that run stores is what says whether the credential
+  never expires or a Reconnect every sixty days is part of operating the
+  number, which is what the seven-day badge exists for. Reconnect — the 190
+  recovery — assumes Embedded Signup completes for an already-onboarded number
+  and returns a fresh token; confirm it before relying on it. Any of this on
+  staging needs a worker run by hand against staging's environment, because
+  staging has none (§2); without one the first live test is on production,
+  with a test number.
+
+  Known, and not built — none of it reachable until a number is live:
+  - **A conversation the business starts from the phone never gets an SLA
+    policy** — LHFTeam/shipblu-support#352.
+  - **Nothing stops an agent choosing a `MARKETING` template** on a
+    coexistence number, which Meta refuses.
+  - **An agent's hand work on an imported ticket counts in the agent metrics
+    and not in the team metrics**: the team rollups leave `import`
+    conversations out (`lib/reports/rollup.ts`), the agent rollups do not.
+  - **A history delivery can be replayed for 30 days at most**: `cleanup`
+    deletes `webhook_events` after that, so a history chunk, or the file a
+    placeholder is waiting for, can be replayed from its stored row for no
+    longer.
+  - **An echo can race the console's own send.** An `smb_message_echoes`
+    delivery processed between Graph's answer and `send_whatsapp` writing the
+    wamid inserts its own row, and the send's UPDATE then hits
+    `messages_channel_message_idx`. The window is milliseconds wide, and
+    whether Meta echoes a Cloud-API send on that field at all is unconfirmed —
+    read it on the first live run.
+
 - **A side conversation to a genuine forwarding list.** Everything below is
   verified against a local Postgres — the plus-address route, the References
   fallback, the signed-subject fallback, idempotent redelivery, and that a hub
@@ -4305,10 +4482,10 @@ null`, and argued it from write cost and 13 MB of disk. The read side turned
     as well as the status.** _2026-09-26._ Node 22's `fetch` gives up on its own
     only after five minutes without response headers, and never on a body that
     keeps trickling in (undici's `headersTimeout` and `bodyTimeout`, both
-    300 000 ms, read from Node's own source). The worker awaits a whole batch
-    before it claims the next, so one unresponsive provider held every queued
-    job — sends included — for at least that long, which is also exactly the
-    stalled-job reclaim window. And an `AbortSignal.timeout` passed to `fetch`
+    300 000 ms, read from Node's own source). The worker awaited a whole batch
+    before it claimed the next (until entry 85), so one unresponsive provider
+    held every queued job — sends included — for at least that long, which is
+    also exactly the stalled-job reclaim window. And an `AbortSignal.timeout` passed to `fetch`
     keeps running while the body is read: a deadline passing after the status
     rejects `text()`, `json()` or a stream reader with the signal's own
     `DOMException`, which names no call and is not the client's error type. A
@@ -4429,7 +4606,13 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
       it arrived, so the one processed last is not always the newest. The worker
       claims several jobs at once, and a failed attempt retries behind a later
       mail. `latest()` moves them forward only, as `interactionWindowSet`
-      already did for Meta.
+      already did for Meta. WhatsApp inbound's `last_message_at` and
+      `last_customer_message_at` now move forward only too (2026-10-09, with
+      coexistence, where a reply typed on the phone made the order matter),
+      and its next-response clock counts from the newest customer message on
+      the ticket rather than from the message being processed.
+      `onAgentReply` stops that clock only for customer messages no newer
+      than the reply, and keeps the earliest reply as the first response.
     - **The fallback Message-ID** for a payload carrying none was minted from
       `Date.now()`. A retry after the message had committed got a new id,
       missed the duplicate check, and stored the mail twice. It is now derived
@@ -4674,8 +4857,9 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
       `action` would send its fields to the page's own URL as a query string.
       That one replayed submission takes React's own path, reset included.
     - Only a success moves its `key`. A success is what `ok()` answers; one
-      without a nonce is given a fresh one, so the key and everything keyed on
-      it still move. Any other answer keeps the nonce the state already had.
+      without a nonce is given a fresh one, so the key still moves, and so
+      does the hook's `onSuccess`, keyed on it since §6.89. Any other answer
+      keeps the nonce the state already had.
     - An action that throws becomes a refusal saying no answer came back, with
       the draft kept and the page re-read in case it landed. The forms whose
       retry reaches a customer or a hub (reply, template, both side
@@ -4694,10 +4878,11 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     Its `form` is spread onto the element, `<form {...form}>`, rather than
     wired as `action` and `onSubmit`: a form given only `action` still submits,
     through React's own path, reset and all. The `form-reset` repo rule refuses
-    a console form with a function `action`, no spread and no `onSubmit`, that
-    holds a field a reset moves. Run against `main` before this change it named
-    15 of the converted forms; it cannot see a field another component renders
-    (`EditorForm`'s children, `Toggle`).
+    a form with a function `action`, no spread and no `onSubmit`, that holds a
+    field a reset moves. Run against `main` before this change it named 15 of
+    the converted forms; it cannot see a field another component renders
+    (`EditorForm`'s children, `Toggle`). It read only the console until the
+    help centre and the sign-in pages followed, below.
 
     Converted: the composer's reply, note, template and both side-conversation
     forms; the new-ticket form; `EditorForm`, and with it every admin editor
@@ -4748,8 +4933,9 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     nothing for a reset to move (`DangerAction`, thread control, profile
     refresh, comment moderation, the article status, restore and delete
     buttons, merge rows, the availability switches, the import and backfill
-    buttons, agent activate). The purge panel stays too, because its one typed
-    field is controlled and a reset leaves it alone. Those forms still get
+    buttons, agent activate, and the help centre's sign-out). The purge panel
+    stays too, because its one typed field is controlled and a reset leaves it
+    alone. Those forms still get
     React's reset, and it changes nothing in them. Nothing else in the console
     resets a form: there is no reset button and no `requestFormReset` call. So
     a converted form's controlled select cannot drift from what it submits.
@@ -4762,19 +4948,85 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     stays in the box rather than being put back, and resending it on every
     focus change repeated the refusal.
 
-    **Not changed: the help centre and the sign-in pages**, which this fix's
-    scope, the agent console, left out. Measured the same way on the same day,
-    every one of them reproduces. The ones that matter: the portal's reply box
-    empties a customer's whole reply when the ticket was closed while they
-    typed; the portal's new-ticket form wipes everything and puts an edited
-    subject back to the one it was opened with; registration empties the name,
-    email and password for an address the browser accepts and the server
-    refuses (`mona@shipblu`); both sign-in forms empty the email after a wrong
-    password; and the agent invite puts a corrected name back to the admin's
-    spelling, which a resend then writes onto the agent row. The help centre's
-    ticket form keeps its typed text, which is controlled, and loses its
-    dropdowns and ticks. The hook fits all of them: their `error` is a
-    `StringKey`, which is a string.
+    **The help centre and the sign-in pages followed on 2026-10-07.** The
+    console fix had left them out, and every one of them reproduced. The
+    portal's reply box emptied a customer's whole reply when the ticket was
+    closed while they typed. The portal's new-ticket form wiped everything and
+    put an edited subject back to the one it was opened with, so a ticket sent
+    again was stored without whichever answers the customer did not retype.
+    Registration emptied the name, email and password for an address the
+    browser accepts and the server refuses (`mona@shipblu`). Both sign-in forms
+    emptied the email after a wrong password. The agent invite put a corrected
+    name back to the admin's spelling, and the resend wrote that spelling onto
+    the agent row. Setup and the password reset emptied their fields; setup's
+    are `required`, so a refused first admin could not be resubmitted without
+    retyping them. The help centre's ticket form kept its typed text, which is
+    controlled, and lost its dropdowns, ticks and files under the state still
+    describing them. And an action that never answered took the form to the
+    error page, the draft with it, as it had the console's.
+
+    All ten now submit through `useActionForm`, spread as `<form {...form}>`,
+    the forgot-password form included: it has no realistic refusal, but
+    converting it cost nothing. None takes the key, because every success
+    leaves the form behind: a redirect, or the check-your-email panel in its
+    place.
+    - The portal reply is the one success that comes back to its own route
+      and renders the same form again (`?replied=1`); the anonymous ticket form
+      comes back to its own too (`?submitted=N`), but its page renders the
+      confirmation in place of the form. The router keeps a page mounted across
+      a change of search params, and the reply box empties anyway, and always
+      did: a server action's redirect rejects the action with a redirect error
+      marked handled, and `RedirectErrorBoundary` catches it in order to
+      remount the subtree. React's reset was never what cleared it.
+    - The two sign-in forms keep the address and still empty the password on a
+      refusal, which is what the reset did to it. A wrong password is usually
+      a near miss of the right one, and left in the box it can be revealed by
+      whoever sits down next. An effect clears it on the node rather than a key
+      remounting it, so focus stays in the box an Enter was pressed in, and
+      only on a refusal, so the initial state cannot wipe a password already
+      in the box when the form hydrates, which is where an autofill lands.
+    - A thrown action's refusal carries a `StringKey` in the help centre. The
+      hook's own sentence is English and not a key: `t()` looked it up, got
+      `undefined`, and `ErrorText` rendered nothing, so with the request
+      aborted the Arabic reply box and sign-in kept the draft and said nothing
+      at all. A form whose `error` is narrower than `string` must now pass
+      `{ lost }`, typed as that narrower key, and the help centre passes
+      `errorNoAnswer`.
+
+    `form-reset` now reads everything under `app/`, not only the console. Run
+    against the forms before this change it named nine of the ten; the tenth,
+    the help centre's ticket form, renders its fields through
+    `TicketFieldInput`, which it cannot see into. A `{`/${locale}/search`}`
+    action is a URL like a string one, so the search and tracking boxes pass.
+
+    One thing the hook costs every form it serves, and these more than the
+    console's, which needs JavaScript anyway: posting without it. To catch a
+    thrown action the hook hands React a client function rather than the server
+    action, so the server renders the form with a `javascript:` action where it
+    used to render a `POST` to the action. A submission made while the page is
+    still loading is captured and replayed once React arrives; one made with
+    JavaScript off does nothing. Keeping both would change the hook every
+    console form uses: a second `useActionState` over the server action
+    itself, handed to the form as `action` and seeding the wrapped one, would
+    let the server render the post again and still show its answer.
+
+    Measured twice. First on #338, where the conversion was written against the
+    hook as it stood before #337 (a positional third argument, not `{ lost }`):
+    a scratch harness of the ten real components on React's development and
+    production builds, 244 checks per build, the forms before failing the same
+    86 on each and the conversion none; and the real app against a local
+    Postgres under `next dev` and `next start`, with real refusals and a
+    database read after each success, 145 checks per build, the forms before
+    failing the same 54. Then again after the port onto `main`'s hook, under
+    `next start` in Chromium: setup refused and corrected, the console sign-in
+    refused and with its request aborted, the portal sign-in the same in
+    Arabic, and registration refusing `mona@shipblu` — 16 of 16. The same
+    script against `main` passed 6: setup emptied the name and email, so the
+    corrected submission could not be sent, and every console sign-in check
+    after it ran against `/setup` instead; the portal sign-in emptied the
+    email, and with the request aborted showed no message and lost the email;
+    registration emptied all three fields. The only page errors in the
+    converted run were the two aborted requests themselves.
 
     Generally: assume a native reset is a desync, not a clear. The default a
     controlled `<select>` or checkbox carries is the one it was rendered with,
@@ -4967,6 +5219,338 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     mocked client, which is how a statement Postgres never saw passed for a
     tested one.
 
+85. **The worker ran in batches, and its stalled-job sweep could not tell a
+    slow job from a dead worker's.** _2026-10-08._ `runOnce` claimed up to
+    `WORKER_CONCURRENCY` jobs and awaited the whole batch before claiming
+    again, so one slow job — a provider at its deadline, a large download, the
+    priority classifier's 15-second TypeSafe call — held back every job queued
+    behind it, sends included (entry 73 met the same barrier from the request
+    side). `worker/pool.ts` now refills a slot as each job finishes. Taking the
+    barrier away exposed two older faults, fixed with it:
+    - **Nothing refreshed a running job's lock.** The sweep returns any lock
+      older than `STALLED_AFTER_MS`, whoever holds it. It used to run only
+      between batches, when the worker held nothing, so only a deploy's new
+      worker re-ran a long job; in a pool it would run beside the worker's own.
+      The pool now refreshes every running job's lock each
+      `HEARTBEAT_EVERY_MS` (`touchJobs`), on its own timer, because the loop's
+      error backoff can outlast the window.
+    - **A late finisher overwrote whoever held the job by then, and a success
+      that could not be recorded was retried in ten seconds.** `completeJob`
+      and `failJob` now match only the attempt that holds the row (`locked_by`
+      _and_ `attempts`, since the same process can claim a reclaimed job
+      again), and `completeJob` also takes the same attempt reclaimed but not
+      yet claimed again. `worker/execute.ts` no longer sends a job whose
+      `completeJob` threw to `failJob`; it retries the write for about half a
+      minute while the job still holds its slot and its lock. That narrows the
+      duplicate rather than ending it: if the database cannot take the write
+      for that long, the row comes back from the sweep five to ten minutes
+      later and runs again.
+    - **A pool's own sweep could hand back a job the pool was still running**,
+      if its heartbeat failed for the whole window. The sweep now skips the
+      sweeping worker's running jobs, and the pool tracks each run rather than
+      each job id, so a job claimed again beside its first run is counted,
+      refreshed and drained as the separate run it is.
+
+    A request with no deadline now holds its own slot for good, since the
+    heartbeat keeps the sweep off it: per-request deadlines are what end a hung
+    job.
+
+86. **A pause was credited in wall-clock minutes, and a reopen never ended
+    one.** _2026-10-09, two pre-existing faults found in the review of #344._
+    The resume measured a pause by the clock and added it to the due dates as
+    working minutes, so a ticket parked from Thursday 16:00 to Sunday 10:00 on
+    the Cairo calendar — 3,960 minutes, two working hours — had its deadline
+    moved about ten days. And resolving pauses the clock while `reopenResolved`,
+    which the five inbound paths reopen through, never resumed it: the reopened
+    ticket's resolution clock was owed nothing for the time it sat resolved,
+    and its next trip to Pending found the clock "already paused", so the
+    resume after it credited everything since the resolve. A pause is now
+    credited in the hours its clock counts (`excusedSince` over
+    `businessMinutesBetween`), and `sla_resumed` records where the pause began
+    so a re-time rebuilds the same interval. `onCustomerReply` closes a pause
+    left on a ticket whose status no longer stops the clock, at the `reopened`
+    event's instant. Production had one such ticket on 2026-10-09, Open with a
+    pause from a reopen on 21 August; its next customer message closes it with
+    the credit it was owed.
+
+87. **`smb_message_echoes`'s silence proved only that no number was operated
+    from the phone — and coexistence is exactly what changes that.**
+    _2026-10-08; a reading corrected before it cost anything._ §5.1's
+    bot-transcript entry argued that the field had been subscribed on this app
+    across all 395,391 deliveries without firing once, and that the silence
+    was the proof the support number is not operated from the WhatsApp
+    Business app. Right about the number, wrong as a rule — and
+    `docs/meta-endpoints.md` §7 had turned it into one, listing
+    `smb_message_echoes` beside the discontinued `message_echoes` as
+    "deliberately not used", one tidy-up away from being dropped from
+    `REQUIRED_WHATSAPP_FIELDS` as dead. A number connected through coexistence
+    _is_ operated from the phone, and its replies arrive on that field and on
+    nothing else; dropping it would have silently lost every one of them while
+    the console reported the number connected. So the field is required now,
+    with `history`, `smb_app_state_sync` and `account_update`
+    (`COEXISTENCE_WHATSAPP_FIELDS` in `lib/meta/subscriptions.ts`), and each
+    is ingested — the echo by `ingestWhatsAppEcho`, which on a coexistence
+    channel files it as the team's reply (outbound, no author, moving
+    `last_agent_message_at` and never `last_customer_message_at`) and on a
+    plain support number still ignores it as our own send coming back; the
+    history and contacts by `lib/tickets/ingest-whatsapp-history.ts`, as a
+    record rather than traffic (no window, no clocks, no automations, no media
+    download, each thread one resolved `import` ticket); `account_update` by
+    `applyWhatsAppAccountUpdate`, idempotent because it is deliberately not
+    deduplicated at the door — the key is spent for good and a second
+    disconnect of the same number must not be swallowed — and applied in event
+    order: an event older than the connection or than the last one applied is
+    dropped (`coexistence.accountEventAt`). The bot number's half
+    is still unreachable: it is sent through Cloud API by another service,
+    where Meta offers no echo. The general lesson is one step out from §6.43's:
+    **a count of zero is evidence about the configuration that produced it,
+    not about the field** — change what a number is, and the figure stops
+    meaning anything. None of this has run live (§5.2), which is also why the
+    field list grows on staging first.
+
+88. **Some Graph credentials ride in a URL, and a fetch tracing span
+    records the URL whole.** _2026-10-09, found in review of the
+    coexistence change; nothing traces yet, so nothing has left the process._
+    Next 16's patched `fetch` wraps every server-side call in a span named
+    `fetch GET <url>` with `'http.url': <url>`
+    (`next/dist/server/lib/patch-fetch.js`). No `instrumentation.ts` exists,
+    so the tracer is a no-op and no span is exported. The day one is added —
+    `@vercel/otel` or any OTLP exporter, to see why a page is slow — every
+    Graph request goes to the tracing vendor with its query string: the Page
+    token on every call through `lib/meta/client.ts` (`access_token=`, line
+    209, the console's own actions in `app/(console)/meta-actions.ts` among
+    them — the largest instance, and older than coexistence); the app secret
+    and the single-use code on the Embedded Signup exchange
+    (`tokenExchangeUrl`); and the business token in `debug_token`'s
+    `input_token`. The modules' rule — a sentence names host and path, never
+    the URL — covers logs and error messages and says nothing about spans.
+    So whoever adds instrumentation keeps the `graph.facebook.com` and
+    `graph.instagram.com` query strings out of every span. With `@vercel/otel`
+    that is
+    `instrumentationConfig: { fetch: { ignoreUrls: [/^https:\/\/graph\.(facebook|instagram)\.com\//] } }`;
+    with anything else, a `SpanProcessor` that strips the query from the span
+    name, `http.url` and `url.full`. The worker needs the same if it ever
+    gains OpenTelemetry's undici instrumentation, because it calls Graph with
+    the same tokens through plain `fetch`. Three tempting fixes do not work.
+    `NEXT_OTEL_FETCH_DISABLED=1` hides only Next's span, and `@vercel/otel`
+    sets it itself and records its own span with the full URL. Setting
+    `next.internal` on a request suppresses Next's span, but it is an
+    internal flag outside Next's public types, and `NEXT_OTEL_VERBOSE=1` brings
+    the span back. And taking the credential out of the query string is
+    impossible for `debug_token`, whose `input_token` has no other shape, and
+    unproven for the exchange: Meta documents only the GET, and a wrong guess
+    spends a code that works once. Not yet a CI check. It belongs in a rule of
+    its own under `scripts/ci/rules/`, refusing an instrumentation file that
+    does not keep both hosts out, rather than in `credential-confinement`,
+    which is about the stored credential.
+
+89. **A console save's success refresh rendered its page a second time, and
+    that render went round the ticket page's backpressure.** _2026-10-09._ Forms
+    ran `router.refresh()` after a successful action, through
+    `useRefreshOnSuccess` and by hand at eleven direct-call sites. But Next 16
+    renders the current page into a server action's own response whenever the
+    action revalidated anything (`pathWasRevalidated`, `action-handler.js`),
+    and the client applies it with the answer, so by the time the refresh ran
+    the page was already fresh. Measured on a minimal app built against this
+    repo's Next 16.3.1, `next build` + `next start`, driven by Chromium:
+    - an action that revalidates its page: two full renders per submit with the
+      refresh (one inside the POST, then a `?_rsc=` GET), one without, and the
+      screen updated either way — a form's success effect already saw the new
+      value;
+    - the same counts when the action revalidates a _different_ path
+      (`revalidate.js`: "TODO: only revalidate if the path matches"), and when
+      it is awaited directly in a click handler rather than submitted by a form
+      (`callServer` dispatches in a transition either way) — though there the
+      await resolves before the new page commits, so code after it still sees
+      the old page;
+    - for a direct call, the refresh after the await also held the screen
+      back: with page renders slowed to a second, the new value appeared at
+      about 1,050–1,120 ms with it and 45–120 ms without, because the refresh's
+      update renders together with the action's;
+    - an action that revalidates nothing: no render, and the screen stays stale
+      without a refresh. That is the only case a refresh did any work;
+    - with verbatim copies of `LiveUpdates` and its scheduler, a ticket-page send
+      cost three renders with the refresh and two without, and at 800 ms per
+      render the refresh and the scheduler's were in flight together — the
+      overlap entry 23's single-flight scheduler exists to prevent.
+
+    Production is consistent with it without pinning it to one call site:
+    action POSTs on `/inbox/<n>` come back at 17–26.5 KB, a page's worth (the
+    minimal app's bare answer was about 120 B), and on 2026-09-26 one POST on
+    `/inbox/13859` was followed by two RSC GETs within a second — the action, an
+    immediate refresh, then the scheduler's. `use-field-action` refreshed the
+    same way, so either could have been the second.
+
+    So the success refresh is gone: `useRefreshOnSuccess` was deleted, what a
+    form does next is `useActionForm`'s `onSuccess`, and the direct-call sites
+    re-read nothing on a success. A refusal that returns before anything is
+    written revalidates nothing, so a control that shows no error, and whose
+    refusal means the screen is out of date — the ticket no longer the agent's
+    to see, the category gone, the permission revoked — still re-reads it then
+    (`rereadOnRefusal`). Where a refusal means the action itself found the page
+    stale, the action revalidates instead: `refreshShipment` does for a
+    shipment unlinked or gone, as it already did for `not_found`. And
+    `useActionForm` still re-reads when no answer comes back at all, since a
+    dropped connection brings no page. Forms that never refreshed — the agents
+    and channels admin, availability, the KB sidebar — were always one render.
+    Four things turned up on the way:
+    - **One success revalidated nothing.** `deleteField` answered `ok()` early
+      when the row was already gone, so the client refresh was the only thing
+      that cleared a field another admin had deleted. It revalidates now, and the
+      `action-revalidates` repo rule refuses any success an action answers —
+      `ok()`, or `{ error: null }` outside the help centre — without a
+      `revalidatePath`, a `redirect` or the shared `refresh()` before it on
+      every branch that reaches it. A helper counts only if it revalidates
+      before it can return, so `requireAgent()`, whose `redirect` is on the
+      branch that never returns, does not. The rule cannot check _which_ path:
+      everything here relies on Next re-rendering the current page whatever
+      path was named, and if that TODO is ever done, an action revalidating a
+      path other than its page's will leave that page stale.
+    - **Four of the hook's thirteen callers never ran it.** A form whose row
+      leaves the page on success — `DangerAction` on a real delete, a merge
+      row, comment moderation, thread control — unmounts in the commit that
+      delivers the answer, so its success effect never fired. The page
+      refreshed through the action all along. `DangerAction` did stay mounted,
+      and refresh, on `deleteSlaPolicy`'s deactivate branch and on
+      `deleteField`'s already-gone one.
+    - **Thread control's success message was never on screen.** The control is
+      replaced by the reply box when the re-read page arrives, and in every
+      timing the harness tried the sentence it returned was painted in zero
+      frames. The action now answers `ok()`; refusals, the case the control's
+      docblock is about, are unchanged.
+    - **The sidebar's refresh-shipment button rendered `not_found` twice.** The
+      action revalidated and the button refreshed as well. The button now
+      leaves its refusals to the action.
+
+    The real console was not exercised end to end — there is no database in the
+    session that measured this — so every call site was checked by reading which
+    path its action revalidates, against the behaviour measured above. The
+    hook's side is tested: `components/use-action-form.test.ts`, the repo's
+    first DOM test (happy-dom, for that file only), fails on each way the
+    contract has gone or could go wrong — the callback as an effect dependency,
+    keying on `ok` alone, a refresh after a success, a bare `action=`, and a
+    refusal that moves the key.
+
+90. **A button that turns into a submit inside its own click handler is
+    submitted by that click, and the platform's click count does not see every
+    double-click.** _2026-10-09 and 10, measured in Chromium 141 against `main`
+    at 4f47b15._ The contact page's merge row drew "Merge" as
+    `<Button type="button" onClick={() => setArmed(true)}>` and the armed
+    "Merge into this contact" as `<Button type="submit">`, in the two branches
+    of one ternary. Same element, same position, so React kept the DOM node and
+    changed its `type`. React commits a click's state update in the microtask
+    after the click's listeners return, which is before the browser runs the
+    click's default action, and that action reads the button's type as it is
+    by then. One click, logged:
+    `mousedown[d=1] on "Merge" → click[d=1] on "Merge" → submit(by "Merge into this contact")`.
+    So one click, one Enter, one Space or one tap merged a contact with the
+    confirm step on screen; a double-click, or holding Enter, merged twice. The
+    confirm was never disabled while the action ran, so `already_merged` in
+    `lib/contacts/merge.ts` was the only thing between a triple-click and three
+    calls.
+
+    The other three hand-written two-click controls had the other half.
+    `DangerAction` (every admin delete) and the comment strip's delete, which
+    removes a customer's public comment at Meta, rendered a different
+    component once armed. The arming click's node left the document, so it
+    submitted nothing. But the second click of a double-click, or of a
+    double-tap, landed on the confirm that had taken its place, and confirmed.
+    Arming also dropped focus to `<body>`, so a keyboard could arm either one
+    and never confirm it. The sidebar's unlink "×" (`UnlinkButton`) confirmed
+    on a double-click and on a held Enter, because each Enter keydown, repeats
+    included, produces the keypress that activates a focused button.
+
+    **The fix is `ConfirmSubmit`** (`components/confirm-submit.tsx`), with
+    `useConfirmClick` for the unlink button, which has no form. One `<button>`
+    for both steps:
+    - The arming click calls `preventDefault`, which cancels its default action,
+      so the type it flips cannot act on it.
+    - A pointer click within 500ms of the last pointer click on the button is
+      refused whatever its count, and so is any click the platform counts as a
+      second or later, armed or not. Refusing on `detail > 1` alone was the
+      first version, and real input showed what it misses (below).
+    - Keyboard activation is exempt: Enter, NumpadEnter and Space, and
+      `element.click()`, all report `detail` 0. A guard on time alone was
+      measured in the prototype and swallowed a quick Enter, Enter.
+    - A repeated Enter keydown is cancelled, which cancels its click. Only
+      Enter: the first version cancelled every repeated key, and a held arrow,
+      PageDown or Tab then stopped at the button (40px of scroll where `main`
+      gives 640).
+    - It is disabled while the form's action runs (`useFormStatus`), and
+      disarmed on the render that sees the action end, either way. A retry
+      after a refusal is two clicks again, and a press made mid-flight and
+      released after the answer only arms; while it stayed armed, that release
+      sent the action a second time.
+
+    **What the platform counts, measured with real input.** Playwright tells
+    Chromium a mouse click's count rather than letting it time the click, so
+    the mouse figures come from a headed Chromium on a private Xvfb driven
+    through XTest, where Chromium counts for itself; taps go through CDP touch
+    events, which Chromium's gesture detector times.
+    - Mouse: the second click is `detail` 2 up to about 495ms press to press
+      and 1 from about 503ms, whatever the hold. Only within 2px on each axis:
+      a second press 3px off starts again at 1. And the count wraps after
+      three: 1, 2, 3, 1, 2, 3.
+    - Touch: 2 when the second tap lands up to 400ms after the first lifts, 1
+      after; within 20px; the same 1, 2, 3, 1 wrap.
+    - So on `detail > 1` alone, a double-click whose second press drifted 3px
+      confirmed, and so did the fourth click of a fast burst, or the fourth
+      tap. The time guard closes both.
+
+    **The cost**: a deliberate pointer confirm within half a second of the
+    previous click is swallowed, and the next click confirms. For a tap, a
+    confirm counts from about 500ms lift to lift.
+
+    **How it was measured.** The method §6.80 describes: the four real
+    components bundled with esbuild against the React Next vendors, in its
+    development and production builds, `next/navigation` stubbed, and each
+    `'use server'` module replaced by a stub that counts its calls and answers
+    after a delay. Five adversarial passes, each re-run on `main`, on the first
+    version and on the fix:
+    - the original 13 gestures, 80 checks per build: `main` 43, first version
+      80, fix 80;
+    - real mouse input, 48 checks: `main` 12, first version 24, fix 44;
+    - keyboard and focus, 160 checks: `main` 127, first version 143, fix 151;
+    - touch, 144 checks: `main` 58, first version 116, fix 144;
+    - form lifecycle, 109 checks: `main` 58 of 108, first version 86, fix 92.
+
+    Development and production agreed throughout. What the fix still fails is
+    what was chosen or left alone. The four real-input misses are the
+    deliberate confirm inside half a second. The keyboard misses are focus
+    dropping to the page while the button is disabled, as it does for every
+    `SubmitButton`, and the unlink button's accessible name, which says
+    "Unlink …" in both states, as on `main`. The lifecycle misses are those
+    and checks of things this change does not touch: the comment strip's Hide
+    sending twice on a double-click when Meta answers fast, an action that
+    throws, two scripted `click()` calls in one task, and implicit
+    submission. A refusal answered inside a
+    double-click's two clicks re-armed the button by the second click until
+    the burst check moved ahead of the arming one: 24 of 40 probe rows, then 0.
+
+    Known limits, left on purpose:
+    - It guards only itself. In a form with a text field, Enter submits without
+      it, or confirms it once armed. No caller has one.
+    - On a phone-width screen, a long contact name makes the armed merge
+      button wrap 20 to 48px lower, so a second tap at the same spot misses.
+      Nothing is sent.
+    - Not measured: Firefox, Safari on any platform, and the double-click
+      settings of Windows, macOS or a desktop environment. Android Chrome's
+      long-press and tap settings come from the platform.
+
+    Two other controls have the double-click half and are not converted. The
+    WhatsApp connect card's Cancel becomes "Close anyway" while it waits on
+    Meta (`admin/channels/coexistence-forms.tsx`); read, not measured. The
+    category and root-cause rows put Retire where Cancel was, so a double-click
+    on Cancel retires the row; measured.
+
+    The `button-type` repo rule refuses the merge row's shape anywhere else: a
+    button whose `type` is an expression, one button element with two types in
+    the branches of a conditional (through nested conditionals and one-element
+    fragments), or in two `return`s of one function. Run against `main`, it
+    names the merge row and nothing else. It cannot see a confirm swapped in
+    as a different component, since a wrapper's name does not say whether it
+    submits.
+
 ## 7. Verification already done
 
 - **The knowledge-base role floor, against a real Postgres.** _2026-09-04._ The
@@ -5065,6 +5649,36 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
   which is a real undelivered customer reply and not a transient failure.
   Everything else in the job history is completed work: 43,396 rows, almost all
   `process_webhook`, which is what 1,500 bot conversations a day looks like.
+- **WhatsApp coexistence, against a local Postgres 16.** _2026-10-08._ The
+  migrations and the `db/sql/` replay applied clean onto an empty database, and
+  nine database-tier files — `lib/whatsapp/credentials`, `onboarding`,
+  `onboarding-reads` and `coexistence-state`, `lib/tickets/ingest-whatsapp` and
+  `ingest-whatsapp-history`, `worker/handlers/process-whatsapp-webhook` and
+  `sync-whatsapp-templates`, and `lib/admin/settings` — passed (106 tests), with
+  the coexistence unit tier beside them (68 files under `lib/whatsapp`,
+  `lib/meta`, `lib/tickets`, `lib/queue` and `worker/handlers`, 1,590 tests).
+  What that proves: a stored credential round-trips through `storeBusinessToken`
+  and `tokenForAccount` and resolves ahead of a variable and the shared token;
+  `credentialStatuses()` and the admin's account rows carry no `envelope`;
+  storing clears `token_env_var` and the two refused edits are refused; a
+  cascade on account delete leaves the `removed` event; a wrong key throws
+  `CredentialKeyError` and leaves the row; the reseal moves rows and writes
+  events while `dryRun` writes nothing; the partial unique index refuses a
+  second live attempt and a stale one is superseded; the job's final attempt
+  marks the row failed and a transient error lands in `last_transient_error`
+  and `next_attempt_at`; a coexistence echo moves `last_agent_message_at` and
+  the response clocks and leaves `last_customer_message_at`, while a plain
+  support echo stays ignored; two history threads become two resolved `import`
+  conversations with both directions, no `jobs` rows and placeholder media,
+  replay writes nothing, and a later live inbound opens a new ticket rather
+  than the import; progress, a decline and a contact's name land where the
+  console reads them. What it cannot prove is anything Meta answers — §5.2
+  lists the round trip, and nothing in it has run. _Corrected 2026-10-10:_ the
+  admin's account rows had no test behind them that day — the page still read
+  them with a star select, and `lib/admin/settings.db.test.ts` did not look at
+  them. Since the follow-up to #348 they are `listAccountsForAdmin()`, a named
+  column list, and that file asserts they carry exactly the eight columns the
+  page reads and nothing of a stored credential.
 - **Multiple WABA connections, against a local Postgres 16.** Migration 0011 and
   the `db/sql/` replay both applied clean, and RLS came out enabled and not
   forced on `whatsapp_accounts`. A legacy null-account template upserted onto
@@ -5176,6 +5790,18 @@ configured?" questions in one call. Outbound HTTPS goes through an agent proxy;
   compromised.** It was rotated. Never echo credentials, in any direction.
 - Secrets never enter the repo. `render.yaml` uses `sync: false` or the env
   group, always without values.
+- **The database holds exactly one credential, and a dump contains no usable
+  one without a key the dump does not contain.** `whatsapp_account_credentials`
+  is the one place to look: a WhatsApp business token Embedded Signup minted,
+  AES-256-GCM under `WHATSAPP_CREDENTIAL_KEY` from the environment group, opened
+  by the worker and by nothing on the web service (`credential-confinement`).
+  Every other credential is in the environment and named from a row — a
+  WhatsApp account's token is named, or stored sealed, never plaintext.
+- **Graph requests carry credentials in their URLs** — the Page token on every
+  call, the app secret and code on the Embedded Signup exchange, the business
+  token in `debug_token`. Nothing traces today; whoever adds an
+  `instrumentation.ts` keeps both Graph hosts' query strings out of every span
+  first (§6.88).
 - RLS: enabled, zero policies, **never FORCE** (§2).
 - Email bodies and imported KB HTML are attacker-controlled. **Sanitise on
   write, never on read** — the stored row is then safe for every consumer, and

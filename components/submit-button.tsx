@@ -19,15 +19,18 @@ export function SubmitButton({
   busy,
   variant = 'primary',
   className = '',
+  disabled = false,
 }: {
   idle: string;
   busy?: string;
   variant?: 'primary' | 'secondary' | 'danger';
   className?: string;
+  /** Off for a reason outside the form; it is off while the form submits regardless. */
+  disabled?: boolean;
 }) {
   const { pending } = useFormStatus();
   return (
-    <Button type="submit" variant={variant} disabled={pending} className={className}>
+    <Button type="submit" variant={variant} disabled={pending || disabled} className={className}>
       {pending ? (busy ?? `${idle}…`) : idle}
     </Button>
   );

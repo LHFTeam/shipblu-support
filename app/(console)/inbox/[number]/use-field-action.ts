@@ -9,16 +9,25 @@ export type LinkAction = (
 ) => Promise<{ error: string | null }>;
 
 /**
- * One sidebar control's write: build the form, call the action, then re-read
- * the server components so the timeline picks up the audit entry the action
- * just wrote.
+ * One sidebar control's write: build the form, call the action, show what it
+ * refused.
+ *
+ * A success re-reads nothing. Every action behind these controls revalidates
+ * the ticket before it succeeds, and Next sends the re-rendered page back with
+ * the action's answer, so the timeline already holds the audit entry the action
+ * wrote; a `router.refresh()` after it was a second render of the whole ticket
+ * page (§6.89).
  *
  * Nine controls on the ticket page spelled this out by hand, and they did not
  * all do it the same way, so the differences are options rather than lost:
  *
- * - `refresh: 'on-success'` (the default) shows a refusal and re-reads only on
- *   success. `'always'` re-reads either way, for a control whose refusal is
- *   itself written to the row, or one that shows no error at all.
+ * - `rereadOnRefusal` re-reads the page after a refusal, for a control that
+ *   shows no error and whose refusal means the screen is out of date: the
+ *   ticket is no longer this agent's to see, the category is gone, the
+ *   permission was revoked. Those refusals return before anything is written,
+ *   so they revalidate nothing, and without the re-read the control would just
+ *   do nothing. Acting on what another agent already removed or decided is not
+ *   a refusal: those actions succeed, and revalidate.
  * - `clearError: false` keeps the last refusal on screen while a retry is
  *   pending, which is what the link inputs have always done.
  *
@@ -28,9 +37,9 @@ export type LinkAction = (
 export function useFieldAction(
   action: LinkAction,
   {
-    refresh = 'on-success',
+    rereadOnRefusal = false,
     clearError = true,
-  }: { refresh?: 'on-success' | 'always'; clearError?: boolean } = {},
+  }: { rereadOnRefusal?: boolean; clearError?: boolean } = {},
 ) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
@@ -50,16 +59,8 @@ export function useFieldAction(
 
     const result = await action({ error: null }, formData);
     setPending(false);
-
-    if (refresh === 'always') {
-      setError(result.error);
-      router.refresh();
-    } else if (result.error) {
-      setError(result.error);
-    } else {
-      setError(null);
-      router.refresh();
-    }
+    setError(result.error);
+    if (result.error && rereadOnRefusal) router.refresh();
 
     return result;
   }

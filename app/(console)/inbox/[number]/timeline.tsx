@@ -80,6 +80,7 @@ export function Timeline({
           metaKind?: string;
           isPublic?: boolean;
           echo?: boolean;
+          echoSource?: string;
         };
         const isPublicComment = isPublicMetaMessage(meta);
         const isPrivateReply = isPrivateReplyMessage(meta, message.direction);
@@ -100,11 +101,19 @@ export function Timeline({
                 {/*
                   An echo has no author on either side: no agent wrote it and the
                   customer did not send it. "Automation" would be technically
-                  true and useless — it was the customer bot, and on a channel
-                  that mirrors two parties, saying which one matters most.
+                  true and useless — it was the customer bot, or the business
+                  typing on the WhatsApp Business app of a number connected
+                  through coexistence, and saying which one matters most. The
+                  bot's echoes predate `echoSource`, so its absence is the bot.
                 */}
                 {message.authorName ??
-                  (meta.echo ? 'Customer bot' : isInbound ? 'Customer' : 'Automation')}
+                  (meta.echo
+                    ? meta.echoSource === 'business_app'
+                      ? 'WhatsApp Business app'
+                      : 'Customer bot'
+                    : isInbound
+                      ? 'Customer'
+                      : 'Automation')}
               </span>
               {isNote ? <Badge tone="warning">private note</Badge> : null}
               {/* Whether a reply was public is the thing an agent most needs to

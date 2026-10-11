@@ -75,13 +75,13 @@ const TIMEOUT_MS = 15_000;
 /**
  * One GET and the body it answers with, under one deadline.
  *
- * The deadline is what keeps the rest of the queue moving. The importer runs as
- * a job, and the worker awaits its whole batch before it claims another — and
- * `fetch` with no signal waits five minutes for a response that is not coming,
- * so one request held every queued job, sends and syncs included, for that
- * long. The body is read inside it because the signal governs the read too: a
- * deadline passing mid-body rejected with the signal's own reason, which names
- * no path. A request that never answered fails the import rather than one
+ * The deadline is what frees the worker slot. The importer runs as a job, and
+ * `fetch` with no signal waits five minutes for a response that is not coming;
+ * the worker keeps a running job's lock fresh, so nothing else ends it. (Before
+ * the worker refilled slots one at a time, that request held every queued job,
+ * sends and syncs included.) The body is read inside it because the signal
+ * governs the read too: a deadline passing mid-body rejected with the signal's
+ * own reason, which names no path. A request that never answered fails the import rather than one
  * item of it, and the queue's backoff retries the run: carrying on would spend
  * the deadline again on every request left.
  */

@@ -1,9 +1,16 @@
 import { randomUUID } from 'node:crypto';
-import { closeDb, sessionSql } from '@/db/client';
+import { closeDb, POOL_MAX, sessionSql } from '@/db/client';
 import { env } from '@/lib/env';
-import { claimJobs, completeJob, failJob, reclaimStalledJobs } from '@/lib/queue';
+import {
+  claimJobs,
+  HEARTBEAT_EVERY_MS,
+  reclaimStalledJobs,
+  STALLED_AFTER_MS,
+  touchJobs,
+} from '@/lib/queue';
 import { backoffMs, classifyFailure } from '@/lib/queue/backoff';
-import { resolveHandler } from './handlers';
+import { executeJob } from './execute';
+import { effectiveConcurrency, startPool, type Pool } from './pool';
 import { logger } from '@/lib/log';
 
 const log = logger('worker');
@@ -18,62 +25,35 @@ const log = logger('worker');
 
 const workerId = `${process.env.RENDER_INSTANCE_ID ?? 'local'}-${randomUUID().slice(0, 8)}`;
 
-let shuttingDown = false;
-
-/** Cut short by an arriving job. Not registered during an error backoff. */
-let wakeOnJob: (() => void) | null = null;
-/** Always registered, so shutdown is prompt even mid-backoff. */
-let wakeOnShutdown: (() => void) | null = null;
-
-function jobArrived() {
-  wakeOnJob?.();
-}
+/** Set once the pool starts; a NOTIFY before then is covered by its first claim. */
+let pool: Pool | null = null;
 
 /**
- * Resolves after `ms`, or early when woken.
+ * How long the loop waits after its own query failed, by why it failed.
  *
- * `interruptibleByJobs` is false during error backoff. Otherwise a steady
- * trickle of new jobs would cut every backoff short and keep hammering a
- * database that is rejecting us — which is exactly how the auth circuit breaker
- * gets tripped, and what the backoff exists to prevent. Shutdown always
- * interrupts, so a SIGTERM during a ten-minute backoff still exits promptly.
+ * Retrying a wrong password every few seconds achieves nothing and trips
+ * Supavisor's shared auth circuit breaker, which then locks the other services
+ * out of the database too. A misconfigured worker must degrade quietly, not take
+ * the project down.
  */
-function sleep(ms: number, { interruptibleByJobs = true } = {}): Promise<void> {
-  return new Promise((resolve) => {
-    const finish = () => {
-      clearTimeout(timer);
-      wakeOnJob = null;
-      wakeOnShutdown = null;
-      resolve();
-    };
-    const timer = setTimeout(finish, ms);
-    if (interruptibleByJobs) wakeOnJob = finish;
-    wakeOnShutdown = finish;
-  });
-}
+function loopDelay(error: unknown, consecutiveFailures: number): number {
+  const kind = classifyFailure(error);
+  const delay = backoffMs(kind, consecutiveFailures);
 
-async function runOnce(): Promise<number> {
-  const claimed = await claimJobs(env().WORKER_CONCURRENCY, workerId);
-  if (claimed.length === 0) return 0;
-
-  // Jobs within a batch are independent, so run them together rather than
-  // letting one slow provider call stall the rest of the batch.
-  await Promise.all(
-    claimed.map(async (job) => {
-      const started = Date.now();
-      try {
-        const handler = resolveHandler(job.type);
-        await handler(job);
-        await completeJob(job.id);
-        log.info(`${job.type} ${job.id} ok in ${Date.now() - started}ms`);
-      } catch (error) {
-        await failJob(job, error);
-        log.error(`${job.type} ${job.id} failed (attempt ${job.attempts})`, error);
-      }
-    }),
+  log.error(
+    `loop error (${kind}, attempt ${consecutiveFailures}), ` +
+      `retrying in ${Math.round(delay / 1000)}s`,
+    error,
   );
 
-  return claimed.length;
+  if (kind === 'auth' && consecutiveFailures === 1) {
+    log.error(
+      'authentication is failing — check DATABASE_URL. Retries will ' +
+        'not fix this, so the worker will back off rather than keep trying.',
+    );
+  }
+
+  return delay;
 }
 
 async function main() {
@@ -90,7 +70,7 @@ async function main() {
   let listener: ReturnType<typeof sessionSql> | null = null;
   try {
     listener = sessionSql();
-    await listener.listen('job_enqueued', () => jobArrived());
+    await listener.listen('job_enqueued', () => pool?.jobArrived());
     log.info('listening for job_enqueued');
   } catch (error) {
     log.error('could not LISTEN (check DATABASE_URL_SESSION) — falling back to polling', error);
@@ -107,72 +87,34 @@ async function main() {
     listener = null;
   }
 
-  // A deploy kills the previous worker mid-job; return those rows to the queue.
-  //
-  // Deliberately non-fatal. This used to run unguarded, so a database that was
-  // briefly unreachable at boot took the whole process down — and because Render
-  // restarts a dead worker immediately, a transient blip became a crash loop
-  // that looked far worse than the underlying problem. The main loop below
-  // already retries with a backoff, and it re-runs this sweep every five
-  // minutes, so failing here costs nothing but a short delay.
-  try {
-    const reclaimed = await reclaimStalledJobs();
-    if (reclaimed > 0) log.info(`reclaimed ${reclaimed} stalled job(s)`);
-  } catch (error) {
-    log.error('startup reclaim failed, continuing', error);
-  }
+  // The stalled sweep runs in the pool, its first pass included. Not here and not
+  // fatal: it used to run here unguarded, so a database briefly unreachable at
+  // boot took the process down, and Render restarting a dead worker at once
+  // turned a blip into a crash loop. In the pool a failing sweep backs off like
+  // any other loop error.
+  const controller = new AbortController();
+  pool = startPool({
+    concurrency: effectiveConcurrency(env().WORKER_CONCURRENCY, POOL_MAX),
+    pollMs: env().WORKER_POLL_INTERVAL_MS,
+    heartbeatMs: HEARTBEAT_EVERY_MS,
+    reclaimEveryMs: STALLED_AFTER_MS,
+    stalledAfterMs: STALLED_AFTER_MS,
+    claim: (limit) => claimJobs(limit, workerId),
+    run: executeJob,
+    touch: (ids) => touchJobs(ids, workerId),
+    reclaim: (running) => reclaimStalledJobs(STALLED_AFTER_MS, running),
+    loopDelay,
+    signal: controller.signal,
+  });
 
   const shutdown = (signal: string) => {
-    log.info(`${signal} received, finishing current batch`);
-    shuttingDown = true;
-    wakeOnShutdown?.();
+    log.info(`${signal} received, finishing the jobs in flight`);
+    controller.abort();
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
 
-  let sinceReclaim = Date.now();
-  let consecutiveFailures = 0;
-
-  while (!shuttingDown) {
-    try {
-      const processed = await runOnce();
-      consecutiveFailures = 0;
-
-      // Only idle-wait when the queue is empty; otherwise drain it promptly.
-      if (processed === 0) await sleep(env().WORKER_POLL_INTERVAL_MS);
-
-      if (Date.now() - sinceReclaim > 5 * 60 * 1000) {
-        await reclaimStalledJobs();
-        sinceReclaim = Date.now();
-      }
-    } catch (error) {
-      // A failure here is the loop itself — the database being unreachable or
-      // refusing us — not a job.
-      //
-      // The delay depends on *why* it failed. Retrying a wrong password every
-      // few seconds achieves nothing and trips Supavisor's shared auth circuit
-      // breaker, which then locks the other services out of the database too.
-      // A misconfigured worker must degrade quietly, not take the project down.
-      consecutiveFailures += 1;
-      const kind = classifyFailure(error);
-      const delay = backoffMs(kind, consecutiveFailures);
-
-      log.error(
-        `loop error (${kind}, attempt ${consecutiveFailures}), ` +
-          `retrying in ${Math.round(delay / 1000)}s`,
-        error,
-      );
-
-      if (kind === 'auth' && consecutiveFailures === 1) {
-        log.error(
-          'authentication is failing — check DATABASE_URL. Retries will ' +
-            'not fix this, so the worker will back off rather than keep trying.',
-        );
-      }
-
-      await sleep(delay, { interruptibleByJobs: false });
-    }
-  }
+  await pool.done;
 
   log.info('shutting down');
   if (listener) await listener.end();

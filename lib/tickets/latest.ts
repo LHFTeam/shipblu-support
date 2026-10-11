@@ -21,6 +21,19 @@ export function latest(column: AnyPgColumn, at: Date): SQL {
 }
 
 /**
+ * `column` moved back to `at`, and never forward: the twin of `latest()` for a
+ * "when did this first happen" stamp that a late-processed, older event can
+ * still correct — `first_responded_at` when a reply typed on the WhatsApp
+ * Business app is processed after a later one (`onAgentReply`).
+ *
+ * `least` ignores nulls, so a column nothing has written yet takes `at`. Bound
+ * as `latest()` binds it, for its reason.
+ */
+export function earliest(column: AnyPgColumn, at: Date): SQL {
+  return sql`least(${column}, ${at.toISOString()}::timestamptz)`;
+}
+
+/**
  * `column` set to `at` the first time, and never moved after that.
  *
  * The once-only twin of `latest()`, for a "when did this first happen" stamp:

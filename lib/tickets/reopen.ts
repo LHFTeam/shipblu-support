@@ -20,6 +20,11 @@ type ReopenReason = 'customer_replied' | 'visitor_replied';
  * Returns false and changes nothing when no open status exists — the leniency
  * every copy had: the message is still stored, on the resolved ticket, rather
  * than refused.
+ *
+ * The SLA clock the resolve paused is not resumed here: this runs inside the
+ * caller's transaction, and the resume reads committed rows and the ticket's
+ * calendar. Every reopen is a customer writing, so `onCustomerReply` closes it
+ * after the commit, at this event's instant (`closeStrayPause`).
  */
 export async function reopenResolved(
   tx: typeof db,

@@ -288,6 +288,13 @@ export function Card({
  * two-line description is unusable. So an expanded action (anything marked
  * `data-expanded`) takes the whole width and drops onto its own row, which is
  * what `flex-wrap` on a full-width item does.
+ *
+ * The actions wrap among themselves for the same reason. With two of them,
+ * one expanded, a row that could not wrap shared its width between the open
+ * card and the other button, and at phone width the card — the channels
+ * page's connect card — was squeezed to a column of single words. Wrapping
+ * puts the open card on a row of its own and the button on the next, and lets
+ * plain buttons that do not fit beside each other stack rather than overflow.
  */
 export function PageHeader({
   title,
@@ -311,7 +318,7 @@ export function PageHeader({
         ) : null}
       </div>
       {actions ? (
-        <div className="ms-auto flex items-center gap-2 has-[[data-expanded]]:w-full">
+        <div className="ms-auto flex flex-wrap items-center gap-2 has-[[data-expanded]]:w-full">
           {actions}
         </div>
       ) : null}

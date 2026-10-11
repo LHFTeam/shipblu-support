@@ -8,7 +8,7 @@ import { requirePermission } from '@/lib/auth/guard';
 import { ok } from '@/lib/http/action-state';
 import { text, uuidField } from '@/lib/http/form-data';
 import { errorMessage } from '@/lib/errors';
-import { removeInternalRecipient } from '@/lib/side-conversations/remove-recipient';
+import { removeEntry } from '@/lib/side-conversations/directory';
 import { GONE, type SettingsState } from '../settings-shared';
 
 // --- Internal recipients ----------------------------------------------------
@@ -94,8 +94,8 @@ export async function deleteInternalRecipient(
   if (!id) return { error: 'Nothing to delete' };
 
   // Deactivated instead when a thread has used it, so the picker loses it and
-  // the history keeps it — checked under a lock, see `removeInternalRecipient`.
-  const removal = await removeInternalRecipient(id);
+  // the history keeps it — checked under a lock, see `removeEntry`.
+  const removal = await removeEntry('recipient', id);
 
   revalidatePath('/admin/recipients');
 

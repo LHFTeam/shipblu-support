@@ -143,9 +143,9 @@ function unanswered(what: string, error: unknown, timeoutMs: number): WhatsAppAp
 /**
  * `fetch` with a deadline.
  *
- * A deadline because every caller is a job, and the worker claims nothing new
- * until its whole batch is done — and `fetch` with no signal waits five minutes
- * for a response that is not coming. The signal governs reading the body too,
+ * A deadline because every caller is a job, and nothing else frees the worker
+ * slot a request holds — and `fetch` with no signal waits five minutes for a
+ * response that is not coming. The signal governs reading the body too,
  * so each caller reads it inside the same handling.
  */
 async function request(
@@ -185,7 +185,7 @@ async function graph<T>(
     },
     // The deadlines Messenger and Instagram use: a send's sits inside the
     // window where giving up neither retries a message Meta was still accepting
-    // nor lets the queue reclaim the job mid-send.
+    // nor outlasts the stalled window the heartbeat's margin is measured in.
     timeoutMs,
   );
 
@@ -269,6 +269,31 @@ async function graph<T>(
     );
   }
   return parsed as T;
+}
+
+/**
+ * A Graph request whose shape is written down somewhere it can be asserted
+ * against Meta's reference — `lib/whatsapp/onboarding-requests.ts` — and sent
+ * here, with this client's deadlines and its reading of Meta's refusals.
+ */
+export type GraphRequest = {
+  method: 'GET' | 'POST';
+  /** Relative to `GRAPH_BASE`, query string included. */
+  path: string;
+  body?: unknown;
+};
+
+/**
+ * Sends `request` authenticated with `token`.
+ *
+ * Null for exactly the case `graph` answers null for: a write Meta accepted
+ * whose answer was lost. The caller decides what that means, and neither caller
+ * today retries: a subscription reads itself back, and a copy request — which
+ * Meta accepts once per connection, so asking again is refused — is recorded as
+ * asked, without the id the lost answer carried.
+ */
+export async function callGraph<T>(request: GraphRequest, token: string): Promise<T | null> {
+  return graph<T>(request.path, { method: request.method, token, body: request.body });
 }
 
 export type SendResult = {
@@ -398,8 +423,9 @@ const LARGEST_MEDIA_BYTES = 100 * 1024 * 1024;
  * The largest is 110 seconds, so the lookup and the download together leave at
  * least half of `STALLED_AFTER_MS` to the storage upload that follows, which
  * `uploadObject` bounds by the same rule — 110 seconds at the largest. Both
- * halves have to fit: a job past the window is reclaimed and runs twice, and
- * the second run writes a second attachment row.
+ * halves have to fit: the worker keeps a running job's lock fresh, but if its
+ * heartbeat fails for the whole window a job still going is reclaimed and runs
+ * twice, and the second run writes a second attachment row.
  */
 export function mediaTimeout(sizeBytes: number | null | undefined): number {
   return sizedTimeout(sizeBytes ?? LARGEST_MEDIA_BYTES);

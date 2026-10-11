@@ -59,6 +59,17 @@ database dump still contains no usable credential. Null means the shared
 `META_PAGE_ACCESS_TOKEN`, which is the right answer whenever the accounts sit
 under one app.
 
+_2026-10-08:_ that rule now has exactly one exception. A business token Meta
+mints through Embedded Signup for a number on the WhatsApp Business app is held
+by no person and can be named by no variable, so it is stored — sealed, in
+`whatsapp_account_credentials` under a key that lives only in the environment
+group, and opened only by the worker. The resolution order is **stored →
+`WHATSAPP_TOKEN_*` → `META_PAGE_ACCESS_TOKEN`**, storing one clears
+`token_env_var`, and a stored credential that will not open throws rather than
+falling through. The decision, the threat table and the alternatives it turned
+down are in `plans/whatsapp-coexistence.md`; what "a dump contains no usable
+credential" now means is in AGENTS.md under Security.
+
 The name is constrained to `WHATSAPP_TOKEN_*` by `parseTokenEnvVar`, and that
 constraint is load-bearing rather than tidy: the value is sent to Meta as a
 bearer token, so an admin free to type any name could put `DATABASE_URL` in the

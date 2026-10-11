@@ -756,7 +756,7 @@ export class MetaContentTooLargeError extends Error {
 /**
  * A minute for one attachment, headers and bytes together: room for a large file
  * over a CDN link, and a deadline all the same, because this runs in a job and
- * the worker claims nothing new until its whole batch is done.
+ * nothing else frees the worker slot a stalled download holds.
  */
 const MEDIA_TIMEOUT_MS = 60_000;
 

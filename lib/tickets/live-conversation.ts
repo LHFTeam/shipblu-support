@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, type SQL } from 'drizzle-orm';
+import { and, desc, eq, isNull, ne, type SQL } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversations, ticketStatuses } from '@/db/schema';
 import type { StatusCategory } from './vocabulary';
@@ -17,10 +17,17 @@ export type LiveConversation = {
  * Which of a contact's conversations on a channel can be their live one.
  *
  * Its own export so a test can read the statement back through `toSQL()`: the
- * WhatsApp path and the widget each wrote these four conditions out, and the
- * point of sharing them is that they cannot drift apart again. Meta's direct
+ * WhatsApp path and the widget each wrote these conditions out, and the point
+ * of sharing them is that they cannot drift apart again. Meta's direct
  * messages are not here, on purpose — they must also skip comment threads, which
  * live on the same channel and are told apart by `external_id`.
+ *
+ * Never an imported conversation: a WhatsApp Business app chat copied in after
+ * a coexistence onboarding is filed resolved, and its newest message can be
+ * yesterday's — the newest of the customer's conversations, and so the one a
+ * reply would reopen. Its `created_at` is months old, so reopening it would
+ * start the team's first-response clock against a ticket from April. A live
+ * message opens its own; the import stays on the contact's record beside it.
  */
 export function liveConversationFilter(contactId: string, channel: PersonThreadedChannel): SQL {
   return and(
@@ -28,6 +35,7 @@ export function liveConversationFilter(contactId: string, channel: PersonThreade
     eq(conversations.channel, channel),
     isNull(conversations.deletedAt),
     isNull(conversations.mergedIntoId),
+    ne(conversations.sourceSystem, 'import'),
   )!;
 }
 

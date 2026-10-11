@@ -12,7 +12,7 @@ import {
   normaliseLocationCode,
   LOCATION_CODE_MAX,
 } from '@/lib/locations/format';
-import { removeLocation } from '@/lib/locations/remove';
+import { removeEntry } from '@/lib/side-conversations/directory';
 import { GONE, refresh, type SettingsState } from '../settings-shared';
 
 // --- Locations --------------------------------------------------------------
@@ -83,7 +83,7 @@ export async function saveLocation(
 
 /**
  * Deletes a location, unless a side conversation has gone to it — then it is
- * marked not operating instead, and `removeLocation` says why the delete itself
+ * marked not operating instead, and `removeEntry` says why the delete itself
  * would have been silent damage.
  *
  * The retirement comes back on the error line because that is the one line
@@ -99,19 +99,20 @@ export async function deleteLocation(
   const id = uuidField(formData, 'id');
   if (!id) return { error: 'Nothing to delete' };
 
-  const removal = await removeLocation(id);
+  const removal = await removeEntry('location', id);
   refresh('/admin/locations');
 
   if (removal.outcome === 'retired') {
+    const { entry } = removal;
     const one = removal.threads === 1;
     const threads = one ? 'a side conversation' : `${removal.threads} side conversations`;
     const record = one ? 'that thread still says' : 'those threads still say';
-    const instead = removal.wasActive
+    const instead = entry.isActive
       ? 'so it was marked not operating rather than deleted. It is gone from the picker'
       : 'so it stays, marked not operating, rather than being deleted. It is already gone from the picker';
 
     return {
-      error: `${removal.name} (${removal.code}) has ${threads}, ${instead}, and ${record} which location was asked.`,
+      error: `${entry.name} (${entry.code}) has ${threads}, ${instead}, and ${record} which location was asked.`,
     };
   }
 

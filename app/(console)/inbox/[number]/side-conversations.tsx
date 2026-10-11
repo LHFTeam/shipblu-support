@@ -12,18 +12,15 @@ import {
   trackingPrefill,
 } from '@/lib/side-conversations/format';
 import type { ConversationDetail } from '@/lib/tickets/conversation';
-import type { ActionState } from '../../action-state';
 import { SubmitButton } from '@/components/submit-button';
 import { useActionForm, type FormHandlers } from '@/components/use-action-form';
-import { LOST_SEND, useRefreshOnSuccess } from './form-state';
+import { INITIAL, LOST_SEND } from './form-state';
 import {
   replyToSideConversation,
   setSideConversationState,
   startSideConversation,
 } from '../../side-conversation-actions';
 import { AttachmentList } from './attachments';
-
-const INITIAL: ActionState = { error: null };
 
 /**
  * Side conversations in the agent console.
@@ -204,7 +201,6 @@ function SideReplyForm({ side }: { side: SideConversationView }) {
   const { state, key, form } = useActionForm(replyToSideConversation, INITIAL, {
     lost: LOST_SEND,
   });
-  useRefreshOnSuccess(state);
 
   return (
     <form key={key} {...form} className="mt-2 flex flex-col gap-1.5">
@@ -234,9 +230,12 @@ function StateButton({ side }: { side: SideConversationView }) {
     const formData = new FormData();
     formData.set('sideConversationId', side.id);
     formData.set('state', side.state === 'open' ? 'done' : 'open');
-    await setSideConversationState(INITIAL, formData);
+    const result = await setSideConversationState(INITIAL, formData);
     setBusy(false);
-    router.refresh();
+    // A success brings the re-read page with it. A refusal revalidates nothing
+    // and is not shown, and it mostly means the thread changed under the agent,
+    // so the page is re-read to say how.
+    if (result.error) router.refresh();
   }
 
   return (
@@ -284,8 +283,8 @@ export function StartSideConversationForm({
   // hub (`docs/PROJECT-STATE.md` §6.80).
   const { state, key, form } = useActionForm(startSideConversation, INITIAL, {
     lost: LOST_SEND,
+    onSuccess: onSent,
   });
-  useRefreshOnSuccess(state, onSent);
 
   return (
     <SideConversationDraft

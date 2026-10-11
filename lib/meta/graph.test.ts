@@ -6,8 +6,9 @@ import { graphTimeout } from './graph';
  * A Graph write is usually a message to a customer, so its deadline sits in a
  * window with two edges. Below sixty seconds, a send Meta was still accepting
  * is given up on and retried — a duplicate message. Past the stalled-job
- * window, a deploy's new worker can reclaim the job while the send is still
- * waiting and run it again — the same duplicate by another route.
+ * window, a send whose lock stopped being refreshed — the worker's heartbeat
+ * failing that whole time — can be reclaimed while it is still waiting and run
+ * again: the same duplicate by another route.
  */
 describe('graphTimeout', () => {
   it('gives a write long enough that giving up rarely means Meta had it', () => {

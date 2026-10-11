@@ -1,7 +1,14 @@
 import { and, asc, desc, eq, isNull, notInArray, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import type { Priority } from '@/lib/tickets/vocabulary';
-import { agents, channels, conversations, messages, ticketStatuses } from '@/db/schema';
+import {
+  agents,
+  channels,
+  conversationEvents,
+  conversations,
+  messages,
+  ticketStatuses,
+} from '@/db/schema';
 import { readOnlyChannels } from '@/lib/tickets/channel-policy';
 import { afterInboundMessage, afterMessageStored } from '@/lib/tickets/lifecycle';
 import { reopenResolved } from '@/lib/tickets/reopen';
@@ -165,6 +172,26 @@ export type NewTicket = {
   priority?: Priority | null;
   type?: string | null;
   tags?: string[];
+  /**
+   * The agent opening this ticket on the customer's behalf, and the form they
+   * used. Recorded as `opened_by_agent` inside the transaction that creates the
+   * ticket rather than by the caller afterwards: the priority classifier reads
+   * that event to leave alone a priority an agent chose, and its job is queued
+   * the moment the message commits — an event written after `createTicket`
+   * returns arrived after the classifier had already looked for it.
+   */
+  openedBy?: { agentId: string; form: string };
+  /**
+   * Who chose `priority`, recorded as its `priority_changed` in the same
+   * transaction: the agent who picked it, or the form (`form:<slug>`) for its
+   * default or a customer's answer. The priority classifier leaves alone a
+   * priority somebody chose, and a form default that wrote no event was one it
+   * could recognise only by reading the form as it is *now* — so a default an
+   * admin added later claimed every ticket the form had ever filed. An agent is
+   * named as an agent rather than as the form they used, so the timeline credits
+   * the person and a query for agent-set priorities finds the ticket.
+   */
+  priorityChosenBy?: { agentId: string } | { label: string };
 };
 
 /**
@@ -232,6 +259,26 @@ export async function createTicket(contactId: string, input: NewTicket): Promise
         createdAt: now,
       })
       .returning({ id: messages.id });
+
+    if (input.priority && input.priorityChosenBy) {
+      await tx.insert(conversationEvents).values({
+        conversationId: row.id,
+        type: 'priority_changed',
+        ...('agentId' in input.priorityChosenBy
+          ? { actorAgentId: input.priorityChosenBy.agentId }
+          : { actorLabel: input.priorityChosenBy.label }),
+        data: { to: input.priority },
+      });
+    }
+
+    if (input.openedBy) {
+      await tx.insert(conversationEvents).values({
+        conversationId: row.id,
+        type: 'opened_by_agent',
+        actorAgentId: input.openedBy.agentId,
+        data: { form: input.openedBy.form },
+      });
+    }
 
     return { id: row.id, number: row.number, messageId: insertedMessage[0]!.id };
   });

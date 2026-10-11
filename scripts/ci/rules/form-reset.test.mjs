@@ -3,10 +3,10 @@ import { many, runRule } from '../fixture.mjs';
 
 /**
  * React 19 resets a form after every function action, a refusal included
- * (§6.80). A console form with a field that reset would move submits through
- * `useActionForm`, spread as `<form {...form}>`; a form of hidden fields,
- * buttons and controlled text boxes has nothing to lose and may keep
- * `action=`.
+ * (§6.80). A form with a field that reset would move — the console's, the help
+ * centre's or a sign-in page's — submits through `useActionForm`, spread as
+ * `<form {...form}>`; a form of hidden fields, buttons and controlled text
+ * boxes has nothing to lose and may keep `action=`.
  */
 
 /** Fifteen forms with nothing a reset moves: the rule's floor. */
@@ -127,14 +127,33 @@ describe('form-reset', () => {
     expect(found).toEqual([at('app/(console)/admin/x.tsx', 2, 'input')]);
   });
 
-  it('reads only the console', async () => {
+  // The help centre's search and tracking boxes: a GET to a URL built from
+  // the locale, which React hands to the browser untouched.
+  it('passes a plain HTML form whose action is a template', async () => {
+    const found = await run({
+      'app/help/[locale]/search-box.tsx': form(
+        '<form action={`/${locale}/search`} role="search">',
+        '<input name="q" />',
+      ),
+    });
+
+    expect(found).toEqual([]);
+  });
+
+  // The portal reply box emptied a customer's reply when the ticket closed
+  // while they typed, and both sign-in forms emptied the address.
+  it('reads the help centre and the sign-in pages as well as the console', async () => {
     const found = await run({
       'app/help/[locale]/portal/reply.tsx': form(
         '<form action={action}>',
         '<textarea name="body" />',
       ),
+      'app/(auth)/login/form.tsx': form('<form action={action}>', '<Input name="email" />'),
     });
 
-    expect(found).toEqual([]);
+    expect(found).toEqual([
+      at('app/(auth)/login/form.tsx', 2, 'Input'),
+      at('app/help/[locale]/portal/reply.tsx', 2, 'textarea'),
+    ]);
   });
 });

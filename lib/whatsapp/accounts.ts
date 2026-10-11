@@ -4,6 +4,8 @@ import { db } from '@/db/client';
 import { channels, whatsappAccounts, whatsappTemplates } from '@/db/schema';
 import { env } from '@/lib/env';
 import { logger } from '@/lib/log';
+import { storedCredentialExists, storedTokenFor } from './credentials';
+import type { CredentialSource } from './errors';
 
 const log = logger('whatsapp');
 
@@ -43,11 +45,21 @@ export type WhatsAppAccount = {
   tokenEnvVar: string | null;
   isDefault: boolean;
   isActive: boolean;
+  /**
+   * Whether a sealed credential is stored for it — read in the same query, for
+   * the callers that only need to know (the template sync's skip, the console).
+   * Resolving a token does not trust it: `tokenForAccount` asks again.
+   */
+  hasStoredToken: boolean;
 };
 
 /** Everything a Graph call needs, resolved. */
 export type WhatsAppCredentials = {
   token: string;
+  /** Where `token` came from, so a refusal can say which credential to fix. */
+  source: CredentialSource;
+  /** The variable it was read from, when `source` is `variable`. */
+  tokenEnvVar: string | null;
   /** Null when the caller is addressing something other than a number. */
   phoneNumberId: string | null;
   wabaId: string | null;
@@ -55,14 +67,18 @@ export type WhatsAppCredentials = {
 };
 
 /**
- * An account's token is named, not stored — and only a name matching this may
- * be named.
+ * An account's token is named, or stored sealed — never typed in — and only a
+ * name matching this may be named.
  *
  * The indirection is what keeps the credential out of the database. The prefix
  * is what stops it being an arbitrary read of the process's environment: the
  * value is sent to Meta as a bearer token, so an admin free to type any name
  * could put `DATABASE_URL` in the box and have it posted to graph.facebook.com.
  * They never see the value, which is precisely why the leak would be silent.
+ *
+ * The one Meta credential the database does hold is a token Meta minted through
+ * Embedded Signup, which no person holds and so no variable could name; it is
+ * sealed, and `./credentials` is the only module that touches it.
  */
 const TOKEN_ENV_PREFIX = 'WHATSAPP_TOKEN_';
 const TOKEN_ENV_PATTERN = /^WHATSAPP_TOKEN_[A-Z0-9][A-Z0-9_]*$/;
@@ -124,19 +140,56 @@ export function resolveAccount<T extends { id: string; isDefault: boolean; isAct
 }
 
 /**
- * The access token for an account.
+ * Which credential an account sends with: **stored → variable → shared**.
  *
- * `process.env` directly rather than `env()`: the variable's name is data, so
- * it cannot appear in the Zod schema, and `env()` parses the whole schema on
- * first call. Same reasoning as `lib/shipments/detect.ts`.
+ * Pure, and tested on its own beside `resolveAccount`, because the order is the
+ * decision. A stored credential wins because it is the one Meta minted for this
+ * business account specifically; storing one clears the variable, so in a row
+ * written through the console the first two never both apply, and the order
+ * only matters for a row edited straight in the database.
  */
-export function tokenForAccount(account: Pick<WhatsAppAccount, 'tokenEnvVar'> | null): string {
+export function resolveCredentialSource(
+  account: Pick<WhatsAppAccount, 'tokenEnvVar'> | null,
+  hasStored: boolean,
+): CredentialSource {
+  if (hasStored) return 'stored';
+  if (account?.tokenEnvVar) return 'variable';
+  return 'shared';
+}
+
+/**
+ * The access token for an account, and which credential it is.
+ *
+ * Worker-only, with the other resolvers below: only modules under `worker/`
+ * may import them (CI, `credential-confinement`), which is what makes "the web
+ * service never decrypts a stored token" a property of the code rather than a
+ * promise.
+ *
+ * The stored credential is asked for every time rather than trusted from the
+ * row's `hasStoredToken`, so a credential stored or forgotten since the account
+ * was listed is the one that is used. **One that is stored but cannot be opened
+ * throws and never falls through** to the variable or the shared token: the
+ * send would go out authenticated as a different credential, which either
+ * fails with a sentence about the wrong thing or — worse — succeeds.
+ *
+ * `process.env` directly rather than `env()` for a named variable: the name is
+ * data, so it cannot appear in the Zod schema, and `env()` parses the whole
+ * schema on first call. Same reasoning as `lib/shipments/detect.ts`.
+ */
+export async function tokenForAccount(
+  account: Pick<WhatsAppAccount, 'id' | 'wabaId' | 'tokenEnvVar'> | null,
+): Promise<{ token: string; source: CredentialSource }> {
+  const stored = account ? await storedTokenFor(account) : null;
+  const source = resolveCredentialSource(account, stored !== null);
+
+  if (source === 'stored') return { token: stored!, source };
+
   const name = account?.tokenEnvVar;
 
   if (!name) {
     const shared = env().META_PAGE_ACCESS_TOKEN;
     if (!shared) throw new Error('META_PAGE_ACCESS_TOKEN is not configured');
-    return shared;
+    return { token: shared, source };
   }
 
   // Re-checked on read, not only on write: the row could predate the rule, or
@@ -152,7 +205,7 @@ export function tokenForAccount(account: Pick<WhatsAppAccount, 'tokenEnvVar'> | 
     );
   }
 
-  return value;
+  return { token: value, source };
 }
 
 const ACCOUNT_COLUMNS = {
@@ -162,6 +215,7 @@ const ACCOUNT_COLUMNS = {
   tokenEnvVar: whatsappAccounts.tokenEnvVar,
   isDefault: whatsappAccounts.isDefault,
   isActive: whatsappAccounts.isActive,
+  hasStoredToken: storedCredentialExists(),
 };
 
 export async function listAccounts(): Promise<WhatsAppAccount[]> {
@@ -212,9 +266,12 @@ export async function credentialsForPhoneNumberId(
   phoneNumberId: string | null,
 ): Promise<WhatsAppCredentials> {
   const account = await accountForPhoneNumberId(phoneNumberId);
+  const { token, source } = await tokenForAccount(account);
 
   return {
-    token: tokenForAccount(account),
+    token,
+    source,
+    tokenEnvVar: source === 'variable' ? (account?.tokenEnvVar ?? null) : null,
     // The environment default is only ever reached by a send with no inbound
     // history and no channel row — see `credentials` in ./client.
     phoneNumberId: phoneNumberId ?? env().WHATSAPP_PHONE_NUMBER_ID ?? null,
@@ -223,9 +280,15 @@ export async function credentialsForPhoneNumberId(
   };
 }
 
-export function credentialsForAccount(account: WhatsAppAccount): WhatsAppCredentials {
+export async function credentialsForAccount(
+  account: WhatsAppAccount,
+): Promise<WhatsAppCredentials> {
+  const { token, source } = await tokenForAccount(account);
+
   return {
-    token: tokenForAccount(account),
+    token,
+    source,
+    tokenEnvVar: source === 'variable' ? account.tokenEnvVar : null,
     phoneNumberId: null,
     wabaId: account.wabaId,
     accountId: account.id,
@@ -340,15 +403,115 @@ async function insertEnvironmentAccount(wabaId: string): Promise<WhatsAppAccount
  * that is already taken by the time this runs. The WABA id disambiguates
  * without inventing a numbering scheme, and reads as what it is in the picker.
  */
-function freeName(taken: Set<string>, wabaId: string): string {
-  if (!taken.has('WhatsApp')) return 'WhatsApp';
+function freeName(taken: Set<string>, wabaId: string, preferred = 'WhatsApp'): string {
+  if (!taken.has(preferred)) return preferred;
 
-  const withId = `WhatsApp ${wabaId}`;
+  const withId = `${preferred} ${wabaId}`;
   if (!taken.has(withId)) return withId;
 
   let n = 2;
   while (taken.has(`${withId} (${n})`)) n += 1;
   return `${withId} (${n})`;
+}
+
+/**
+ * The account row for a WABA connected through Embedded Signup: found by its
+ * WABA id, or inserted under the name Meta gave the WABA.
+ *
+ * Takes the transaction the credential is stored in, so the account and its
+ * credential commit together. A row switched off is switched back on — the
+ * admin connecting it through Meta is saying they want it — and the variable it
+ * named is reported, because storing the credential clears it and the admin
+ * should be told what it used to send with.
+ *
+ * Inserted with an untargeted `on conflict do nothing` and read back, for the
+ * reason `insertEnvironmentAccount` gives: a second connection for the same
+ * WABA racing this one, or a name another row holds, must not raise 23505.
+ */
+export async function ensureAccountForWaba(
+  tx: typeof db,
+  wabaId: string,
+  wabaName: string | null,
+): Promise<{
+  id: string;
+  created: boolean;
+  reactivated: boolean;
+  previousVariable: string | null;
+}> {
+  const found = async () =>
+    (
+      await tx
+        .select({
+          id: whatsappAccounts.id,
+          isActive: whatsappAccounts.isActive,
+          tokenEnvVar: whatsappAccounts.tokenEnvVar,
+        })
+        .from(whatsappAccounts)
+        .where(eq(whatsappAccounts.wabaId, wabaId))
+        .for('update')
+    )[0];
+
+  const existing = await found();
+  if (existing) {
+    if (!existing.isActive) {
+      await tx
+        .update(whatsappAccounts)
+        .set({ isActive: true, updatedAt: new Date() })
+        .where(eq(whatsappAccounts.id, existing.id));
+    }
+    return {
+      id: existing.id,
+      created: false,
+      reactivated: !existing.isActive,
+      previousVariable: existing.tokenEnvVar,
+    };
+  }
+
+  // Round again when the insert lost to the name index rather than to this
+  // WABA's own row: two different WABAs with the same Meta name connecting at
+  // once both read the names before either commits and both choose "Acme".
+  // This runs after the sign-in code was spent, so throwing here costs the
+  // business another pass through Meta's window, which unlinks the phone's
+  // devices again. The loser's insert waits for the winner to commit, and under
+  // READ COMMITTED the next statement reads afresh, so the second round sees
+  // "Acme" taken and chooses "Acme <wabaId>". `on conflict do nothing` leaves
+  // the transaction usable, which a 23505 would not. Bounded, because each
+  // round only loses to a commit that happened during it.
+  for (let round = 0; round < 3; round += 1) {
+    const others = await tx
+      .select({ name: whatsappAccounts.name, isDefault: whatsappAccounts.isDefault })
+      .from(whatsappAccounts);
+
+    const [inserted] = await tx
+      .insert(whatsappAccounts)
+      .values({
+        name: freeName(
+          new Set(others.map((row) => row.name)),
+          wabaId,
+          wabaName?.trim() || 'WhatsApp',
+        ),
+        wabaId,
+        tokenEnvVar: null,
+        isDefault: !others.some((row) => row.isDefault),
+      })
+      .onConflictDoNothing()
+      .returning({ id: whatsappAccounts.id });
+
+    if (inserted)
+      return { id: inserted.id, created: true, reactivated: false, previousVariable: null };
+
+    const raced = await found();
+    if (raced) {
+      return {
+        id: raced.id,
+        created: false,
+        reactivated: false,
+        previousVariable: raced.tokenEnvVar,
+      };
+    }
+  }
+
+  throw new Error(`could not create a business account row for WABA ${wabaId}`);
 }
 
 /**

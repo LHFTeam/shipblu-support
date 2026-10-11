@@ -1,5 +1,5 @@
 import { DateTime } from 'luxon';
-import { and, eq, gte, isNull, lt, notInArray, sql } from 'drizzle-orm';
+import { and, eq, gte, isNull, lt, ne, notInArray, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { conversationEvents, conversations, csatSurveys, metricsDaily } from '@/db/schema';
 import { businessMinutesBetween, type HoursConfig } from '@/lib/hours';
@@ -118,6 +118,7 @@ export async function earliestDay(zone: string): Promise<string | null> {
         isNull(conversations.deletedAt),
         eq(conversations.isSpam, false),
         notInArray(conversations.channel, readOnlyChannels()),
+        ne(conversations.sourceSystem, 'import'),
       ),
     );
 
@@ -221,8 +222,17 @@ export async function computeDay(
    * construction, so leaving it in would not add a channel row to the report —
    * it would quietly lower the response and resolution rates for every channel
    * that does have them, by counting tickets that could never have either.
+   *
+   * An imported conversation — a WhatsApp Business app chat copied in after a
+   * coexistence onboarding — is out for a sharper reason: its `created_at` is
+   * when the customer first wrote on the phone, so it would land as demand on
+   * a day already reported, and an agent answering it now would measure a
+   * first response in months.
    */
-  const worked = notInArray(conversations.channel, readOnlyChannels());
+  const worked = and(
+    notInArray(conversations.channel, readOnlyChannels()),
+    ne(conversations.sourceSystem, 'import'),
+  );
 
   // --- Created --------------------------------------------------------------
   const created = await db

@@ -40,9 +40,10 @@ export function SidebarField({
 }
 
 /**
- * Saves on change with no explicit save button, matching Freshdesk. The router
- * refresh re-reads the server components so the timeline picks up the audit
- * entry the action just wrote.
+ * Saves on change with no explicit save button, matching Freshdesk.
+ * `updateTicket` revalidates the ticket before it succeeds, so the re-rendered
+ * page comes back with its answer and the timeline already holds the audit
+ * entry it wrote (§6.89).
  */
 export function FieldSelect({
   conversationId,
@@ -77,10 +78,11 @@ export function FieldSelect({
 
 export function TagField({ conversationId, tags }: { conversationId: string; tags: string[] }) {
   const [value, setValue] = useState(tags.join(', '));
-  // Re-read on success only, like the other fields. The one refusal a tag save
-  // can meet is "Ticket not found", and the page's own read fails on the same
-  // conditions — re-reading on it would swap the page for a 404 before the
-  // line below could be read. It used to be dropped, so a save that failed on
+  // No re-read on a refusal, like the other fields; a success's page comes back
+  // with the action's answer. The one refusal a tag save can meet is "Ticket
+  // not found", and the page's own read fails on the same conditions —
+  // re-reading on it would swap the page for a 404 before the line below could
+  // be read. It used to be dropped, so a save that failed on
   // blur looked exactly like one that worked.
   const { pending: saving, error, run } = useFieldAction(updateTicket);
 

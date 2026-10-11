@@ -1,18 +1,18 @@
 'use client';
 
-import { useActionState } from 'react';
 import { ErrorText, Input, Label } from '@/components/ui';
 import { t, type Locale } from '@/lib/kb/locale';
 import { portalResetPassword, type PortalFormState } from '../../actions';
 import { SubmitButton } from '@/components/submit-button';
+import { useActionForm } from '@/components/use-action-form';
 
 const INITIAL: PortalFormState = { error: null };
 
 export function ResetForm({ locale, token }: { locale: Locale; token: string }) {
-  const [state, action] = useActionState(portalResetPassword, INITIAL);
+  const { state, form } = useActionForm(portalResetPassword, INITIAL, { lost: 'errorNoAnswer' });
 
   return (
-    <form action={action} className="flex flex-col gap-4">
+    <form {...form} className="flex flex-col gap-4">
       <input type="hidden" name="locale" value={locale} />
       <input type="hidden" name="token" value={token} />
 

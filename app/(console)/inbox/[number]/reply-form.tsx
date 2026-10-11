@@ -15,7 +15,7 @@ import {
 import { sendReply } from '../../reply-actions';
 import { KnowledgePanel } from './knowledge';
 import type { KnowledgeContext } from './types';
-import { INITIAL, LOST_SEND, useRefreshOnSuccess } from './form-state';
+import { INITIAL, LOST_SEND } from './form-state';
 import { SubmitButton } from '@/components/submit-button';
 import { useActionForm } from '@/components/use-action-form';
 import { useCannedSuggestion } from './use-canned-suggestion';
@@ -65,9 +65,11 @@ export function ReplyForm({
   anchorMessageId?: string | null;
   onSent?: () => void;
 }) {
-  const { state, key, form } = useActionForm(sendReply, INITIAL, { lost: LOST_SEND });
+  const { state, key, form } = useActionForm(sendReply, INITIAL, {
+    lost: LOST_SEND,
+    onSuccess: onSent,
+  });
   const [privately, setPrivately] = useState(false);
-  useRefreshOnSuccess(state, onSent);
 
   /*
     Which language the next canned response goes in.

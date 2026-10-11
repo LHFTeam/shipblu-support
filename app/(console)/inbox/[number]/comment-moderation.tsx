@@ -1,14 +1,12 @@
 'use client';
 
-import { useActionState, useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useActionState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Badge, Button, ErrorText } from '@/components/ui';
+import { ConfirmSubmit } from '@/components/confirm-submit';
 import { labelFor, moderatableComment, readCommentModeration } from '@/lib/meta/moderation';
-import type { ActionState } from '../../action-state';
 import { moderateComment } from '../../meta-actions';
-
-const INITIAL: ActionState = { error: null };
+import { INITIAL } from './form-state';
 
 /**
  * Hide, unhide and delete, under a customer's public comment.
@@ -66,8 +64,8 @@ export function CommentModeration({
             label="Delete"
             // Irreversible, and it removes somebody's words from a public
             // thread. One extra click is the whole guard — this codebase has no
-            // modals, and a second click on the same button is what every other
-            // destructive action in the console asks for.
+            // modals, and a second click on the same button is what every
+            // admin delete asks for too (ConfirmSubmit).
             confirmLabel="Really delete?"
           />
         </>
@@ -90,26 +88,16 @@ function ModerationForm({
   confirmLabel?: string;
 }) {
   const [state, formAction] = useActionState(moderateComment, INITIAL);
-  const [armed, setArmed] = useState(false);
-  const router = useRouter();
-
-  // The comment's own state lives on the message row, so the strip only tells
-  // the truth again once the page has re-read it.
-  useEffect(() => {
-    if (state.ok) router.refresh();
-  }, [state.ok, state.nonce, router]);
 
   return (
     <form action={formAction} className="inline-flex items-center gap-1.5">
       <input type="hidden" name="messageId" value={messageId} />
       <input type="hidden" name="action" value={action} />
 
-      {confirmLabel && !armed ? (
-        <Button type="button" variant="ghost" size="sm" onClick={() => setArmed(true)}>
-          {label}
-        </Button>
+      {confirmLabel ? (
+        <ConfirmSubmit label={label} confirmLabel={confirmLabel} busy={BUSY} />
       ) : (
-        <ModerationSubmit label={confirmLabel && armed ? confirmLabel : label} danger={armed} />
+        <ModerationSubmit label={label} />
       )}
 
       <ErrorText>{state.error}</ErrorText>
@@ -117,12 +105,14 @@ function ModerationForm({
   );
 }
 
-function ModerationSubmit({ label, danger }: { label: string; danger: boolean }) {
+const BUSY = 'Asking Meta…';
+
+function ModerationSubmit({ label }: { label: string }) {
   const { pending } = useFormStatus();
 
   return (
-    <Button type="submit" size="sm" variant={danger ? 'danger' : 'ghost'} disabled={pending}>
-      {pending ? 'Asking Meta…' : label}
+    <Button type="submit" size="sm" variant="ghost" disabled={pending}>
+      {pending ? BUSY : label}
     </Button>
   );
 }

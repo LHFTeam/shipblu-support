@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { confirmCategory, rejectCategory } from '../../../category-actions';
 
 /**
@@ -24,7 +23,6 @@ export function ReviewControls({
   categoryId: string;
   label: string;
 }) {
-  const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,7 +35,6 @@ export function ReviewControls({
     const result = await action({ error: null }, formData);
     setBusy(false);
     if (result.error) setError(result.error);
-    else router.refresh();
   }
 
   return (
