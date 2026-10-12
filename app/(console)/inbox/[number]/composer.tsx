@@ -7,6 +7,7 @@ import type { ConversationDetail } from '@/lib/tickets/conversation';
 import type { CannedResponseOption } from '@/lib/tickets/lookups';
 import type { CannedLocale } from '@/lib/tickets/canned';
 import { describeWindow, metaWindowState } from '@/lib/meta/window';
+import { consoleReplyReason } from '@/lib/tickets/channel-policy';
 import { formatRemaining, windowState } from '@/lib/whatsapp/window';
 import type { PickerEntry } from '@/lib/side-conversations/queries';
 import { StartSideConversationForm } from './side-conversations';
@@ -49,6 +50,9 @@ export function Composer({
   canSideConversation: boolean;
 }) {
   const isWhatsApp = conversation.channel === 'whatsapp';
+  // Not answered from the console at all: no reply box and no template, only
+  // the two tabs that never reach the customer. See `consoleReplyReason`.
+  const replyBlocked = consoleReplyReason(conversation.channel);
   const isMeta = conversation.channel === 'facebook' || conversation.channel === 'instagram';
   // A comment ticket carries the root comment in its external id; a direct
   // message ticket has none. That is what decides whether the agent is writing
@@ -110,7 +114,17 @@ export function Composer({
   // Derived rather than forced through an effect: when free-form is impossible
   // the composer shows templates, and it goes back to the reply tab by itself
   // the moment the customer writes again.
-  const tab: Tab = !windowOpen && requestedTab === 'reply' ? 'template' : requestedTab;
+  //
+  // A channel not answered from here has neither customer-facing tab, so it
+  // opens on the private note — without that the default 'reply' would render
+  // a reply box under a tab row that does not offer one.
+  const tab: Tab = replyBlocked
+    ? requestedTab === 'reply' || requestedTab === 'template'
+      ? 'note'
+      : requestedTab
+    : !windowOpen && requestedTab === 'reply'
+      ? 'template'
+      : requestedTab;
 
   // What the bar says it will open. The tab is the composer's whole subject, and
   // "Write a reply…" against "Write a private note…" is the difference the
@@ -125,19 +139,21 @@ export function Composer({
   // The note beside the tabs, if this channel has one to make.
   // The thread verdict outranks the clock: "3h left to reply freely" over a
   // ticket nothing can be sent on is worse than no notice at all.
-  const notice = threadBlocked
-    ? metaThread?.reason === 'standby'
-      ? 'Another app owns this inbox — this ticket can be read here but not answered'
-      : 'This ticket cannot be answered from here — see the message below'
-    : isWhatsApp && now !== null
-      ? state.isOpen
-        ? `24h window: ${formatRemaining(state.remainingMs)}`
-        : 'Window closed — approved templates only'
-      : isMeta && !isCommentThread && now !== null
-        ? describeWindow(metaState)
-        : isCommentThread
-          ? 'Public comment thread — anyone who can see the post can read your reply'
-          : null;
+  const notice = replyBlocked
+    ? 'Replies are not sent from here — notes and side conversations only'
+    : threadBlocked
+      ? metaThread?.reason === 'standby'
+        ? 'Another app owns this inbox — this ticket can be read here but not answered'
+        : 'This ticket cannot be answered from here — see the message below'
+      : isWhatsApp && now !== null
+        ? state.isOpen
+          ? `24h window: ${formatRemaining(state.remainingMs)}`
+          : 'Window closed — approved templates only'
+        : isMeta && !isCommentThread && now !== null
+          ? describeWindow(metaState)
+          : isCommentThread
+            ? 'Public comment thread — anyone who can see the post can read your reply'
+            : null;
 
   return (
     /*
@@ -186,17 +202,21 @@ export function Composer({
                 the last one ran off the edge. The negative margin lets a tab
                 scroll under the padding instead of stopping short of it. */}
             <div className="app-scroll -ms-3 flex items-center gap-1 overflow-x-auto ps-3 lg:ms-0 lg:ps-0">
-              <TabButton
-                active={tab === 'reply'}
-                onClick={() => setRequestedTab('reply')}
-                disabled={!windowOpen || !metaSendable}
-              >
-                {isCommentThread ? 'Reply publicly' : 'Reply'}
-              </TabButton>
+              {/* Left out rather than disabled: a greyed-out Reply invites the
+                  question of when it comes back, and here it does not. */}
+              {replyBlocked ? null : (
+                <TabButton
+                  active={tab === 'reply'}
+                  onClick={() => setRequestedTab('reply')}
+                  disabled={!windowOpen || !metaSendable}
+                >
+                  {isCommentThread ? 'Reply publicly' : 'Reply'}
+                </TabButton>
+              )}
               <TabButton active={tab === 'note'} onClick={() => setRequestedTab('note')}>
                 Private note
               </TabButton>
-              {isWhatsApp ? (
+              {isWhatsApp && !replyBlocked ? (
                 <TabButton active={tab === 'template'} onClick={() => setRequestedTab('template')}>
                   Template
                 </TabButton>

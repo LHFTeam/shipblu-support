@@ -132,6 +132,37 @@ export function readOnlyReason(channel: string): string | null {
 }
 
 /**
+ * Channels the team works here but does not answer from here.
+ *
+ * Narrower than read-only, and deliberately a separate list. A read-only
+ * channel is one nobody on the team works, so it leaves the queue, the SLA
+ * sweep, the categoriser and the reports. A WhatsApp ticket is still team
+ * work — it is read, assigned, categorised, noted on and timed — and only the
+ * customer-facing half of the composer is gone: the free-text reply and the
+ * approved template, the two things that put a message from this platform in
+ * front of the customer. Private notes and side conversations stay, because
+ * neither reaches the customer over the channel.
+ *
+ * Folding WhatsApp into `READ_ONLY` instead would have been one line and would
+ * have dropped every WhatsApp ticket out of the working queue and the figures.
+ *
+ * The composer, the server actions and the canned-suggestion route all ask
+ * this, so a stale tab or a hand-made POST is refused for the same reason the
+ * screen gives. Automated senders (rules, the out-of-hours acknowledgement,
+ * the CSAT survey) are not the composer and are not covered by it.
+ */
+const NO_CONSOLE_REPLY: readonly ConversationChannel[] = ['whatsapp'];
+
+/**
+ * Why an agent cannot reply to this ticket's customer from the console, or
+ * null where they can. A sentence for the same reason `readOnlyReason` is one.
+ */
+export function consoleReplyReason(channel: string): string | null {
+  if (!(NO_CONSOLE_REPLY as readonly string[]).includes(channel)) return null;
+  return 'WhatsApp customers are not answered from this platform. You can still read the conversation, leave a private note or start a side conversation.';
+}
+
+/**
  * The read-only channels, for excluding them from a query.
  *
  * Three places need this and all three need it for the same underlying reason —

@@ -5,7 +5,7 @@ import type { SessionAgent } from '@/lib/auth/session';
 import { errorMessage } from '@/lib/errors';
 import { detectLocale } from '@/lib/kb/language';
 import { logger } from '@/lib/log';
-import { readOnlyReason } from '@/lib/tickets/channel-policy';
+import { consoleReplyReason, readOnlyReason } from '@/lib/tickets/channel-policy';
 import { loadConversation } from '@/lib/tickets/console-guards';
 import { cannedVisibleTo, listCannedResponses } from '@/lib/tickets/lookups';
 import { sendsByEmail } from '@/lib/tickets/outbound';
@@ -70,7 +70,11 @@ export async function suggestFor(
   const row = await loadConversation(agent, conversationId);
   if (!row) return null;
   const { conversation } = row;
-  if (readOnlyReason(conversation.channel)) return NOTHING;
+  // No reply box on either, so nothing to suggest into — and a suggestion
+  // here would send that customer's history to the provider for nothing.
+  if (readOnlyReason(conversation.channel) || consoleReplyReason(conversation.channel)) {
+    return NOTHING;
+  }
 
   const history = await readHistory(conversationId);
   if (!history.anchorMessageId || !history.hasInbound) return NOTHING;

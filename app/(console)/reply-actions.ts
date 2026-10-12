@@ -30,6 +30,7 @@ import {
   loadConversation,
   refresh,
   refuseIfIncomplete,
+  refuseIfNoConsoleReply,
   refuseIfNoRootCause,
   refuseIfReadOnly,
 } from '@/lib/tickets/console-guards';
@@ -77,6 +78,10 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
 
   const readOnly = refuseIfReadOnly(conversation.channel);
   if (readOnly) return readOnly;
+  // The composer offers no reply box here; this is for the tab rendered before
+  // that changed, and for a POST made by hand.
+  const noReply = refuseIfNoConsoleReply(conversation.channel);
+  if (noReply) return noReply;
 
   // Checked before the reply is written rather than beside the resolve below it.
   // Refusing afterwards would send the message, leave the ticket open and clear
@@ -263,6 +268,10 @@ export async function sendTemplateReply(
   // WhatsApp number, would read as a bug.
   const readOnly = refuseIfReadOnly(row.conversation.channel);
   if (readOnly) return readOnly;
+  // Also before the channel check, for the same reason: a template on WhatsApp
+  // is refused for not being answered from here, not for the wrong channel.
+  const noReply = refuseIfNoConsoleReply(row.conversation.channel);
+  if (noReply) return noReply;
 
   if (row.conversation.channel !== 'whatsapp') return { error: 'Templates are WhatsApp only' };
 

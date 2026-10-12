@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { SessionAgent } from '@/lib/auth/session';
 import {
   canSeeChannel,
+  consoleReplyReason,
   CONVERSATION_CHANNELS,
   hasWrittenSubject,
   hiddenChannels,
@@ -44,6 +45,26 @@ describe('read-only channels', () => {
 
   it('lists itself for excluding from a query', () => {
     expect(readOnlyChannels()).toEqual(['whatsapp_bot']);
+  });
+});
+
+describe('channels not answered from the console', () => {
+  it('covers WhatsApp and no channel the team replies on', () => {
+    expect(consoleReplyReason('whatsapp')).toMatch(/whatsapp/i);
+    for (const channel of ['email', 'webchat', 'facebook', 'instagram', 'portal', 'api']) {
+      expect(consoleReplyReason(channel)).toBeNull();
+    }
+  });
+
+  it('is separate from read-only, so WhatsApp stays in the queue and the figures', () => {
+    // Folding WhatsApp into read-only would drop it from the inbox, the SLA
+    // sweep and the reports; only the composer's customer-facing half goes.
+    expect(isReadOnlyChannel('whatsapp')).toBe(false);
+    expect(readOnlyChannels()).not.toContain('whatsapp');
+  });
+
+  it('says what the agent can still do, since the refusal replaces the reply box', () => {
+    expect(consoleReplyReason('whatsapp')).toMatch(/private note/);
   });
 });
 

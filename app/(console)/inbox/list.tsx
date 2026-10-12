@@ -12,7 +12,11 @@ import { formatRelative } from '@/lib/format';
 import { DEFAULT_LOCALE } from '@/lib/kb/locale';
 import type { InboxRow } from '@/lib/tickets/inbox';
 import type { InboxFilters } from '@/lib/tickets/inbox-filters';
-import { FILTERABLE_CHANNELS, isRestrictedChannel } from '@/lib/tickets/channel-policy';
+import {
+  consoleReplyReason,
+  FILTERABLE_CHANNELS,
+  isRestrictedChannel,
+} from '@/lib/tickets/channel-policy';
 import { messageLines } from '@/lib/tickets/inbox-lines';
 import {
   inboxSignature,
@@ -234,7 +238,9 @@ export function InboxList({
                   <Badge tone={row.statusCategory}>{row.statusName}</Badge>
                   <span className="text-xs text-[var(--muted-foreground)]">#{row.number}</span>
 
-                  {row.channel === 'whatsapp' ? (
+                  {/* No window badge where nobody replies from here — the
+                      same rule the ticket header applies. */}
+                  {row.channel === 'whatsapp' && !consoleReplyReason(row.channel) ? (
                     <WhatsAppWindowBadge lastCustomerMessageAt={row.lastCustomerMessageAt} />
                   ) : null}
                   {/* A comment ticket is answered on the comment edge and has

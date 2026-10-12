@@ -13,7 +13,7 @@ import type { SessionAgent } from '@/lib/auth/session';
 import { CAUSE_REQUIRED_AREAS } from '@/lib/categorise/taxonomy';
 import type { ActionState } from '@/lib/http/action-state';
 import { isUuid } from '@/lib/http/uuid';
-import { canSeeChannel, readOnlyReason } from '@/lib/tickets/channel-policy';
+import { canSeeChannel, consoleReplyReason, readOnlyReason } from '@/lib/tickets/channel-policy';
 import { listLabels, missingRequired } from '@/lib/tickets/custom-fields';
 import { listTicketFields } from '@/lib/tickets/lookups';
 import { changeStatus } from '@/lib/tickets/status';
@@ -75,6 +75,15 @@ export async function loadConversation(agent: SessionAgent, conversationId: stri
  */
 export function refuseIfReadOnly(channel: string): ActionState | null {
   const reason = readOnlyReason(channel);
+  return reason ? { error: reason } : null;
+}
+
+/**
+ * Refuses a reply or a template on a channel the team does not answer from the
+ * console. Notes are not refused here; see `consoleReplyReason`.
+ */
+export function refuseIfNoConsoleReply(channel: string): ActionState | null {
+  const reason = consoleReplyReason(channel);
   return reason ? { error: reason } : null;
 }
 

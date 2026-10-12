@@ -7,6 +7,7 @@ import { ChannelBadge } from '@/components/channel';
 import { ChevronLeftIcon } from '@/components/icons';
 import { Badge } from '@/components/ui';
 import { formatRelative } from '@/lib/format';
+import { consoleReplyReason } from '@/lib/tickets/channel-policy';
 import type { ConversationDetail } from '@/lib/tickets/conversation';
 import { ProfileRefresh } from './profile-refresh';
 import { MetaWindowIndicator, WindowIndicator } from './window-indicator';
@@ -99,7 +100,9 @@ export function Header({
         {conversation.unverifiedSubmitter ? (
           <Badge tone="warning">not signed in — sender unverified</Badge>
         ) : null}
-        {conversation.channel === 'whatsapp' ? (
+        {/* The 24-hour window only bounds a reply sent from here, so on a
+            channel not answered from here the countdown measures nothing. */}
+        {conversation.channel === 'whatsapp' && !consoleReplyReason(conversation.channel) ? (
           <WindowIndicator lastCustomerMessageAt={conversation.lastCustomerMessageAt} />
         ) : null}
         {isMeta && !isComment ? (
