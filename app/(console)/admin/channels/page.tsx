@@ -9,6 +9,7 @@ import {
 } from '@/lib/admin/settings';
 import { requirePermission } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
+import { allLimited } from '@/lib/concurrency';
 import { env } from '@/lib/env';
 import { listFolderOptions } from '@/lib/kb/admin';
 import {
@@ -20,11 +21,16 @@ import {
 import { credentialStatuses } from '@/lib/whatsapp/credentials';
 import { coexistenceReadiness } from '@/lib/whatsapp/onboarding';
 import { listLatestOnboardings } from '@/lib/whatsapp/onboarding-reads';
-import { shownOnboardings } from '@/lib/whatsapp/onboarding-view';
+import {
+  pagePollIntervalMs,
+  progressVersion,
+  shownOnboardings,
+} from '@/lib/whatsapp/onboarding-view';
 import { offerableFaqFolders, parseWidgetConfig } from '@/lib/widget/config';
 import {
   CoexistenceBadges,
   ConnectBusinessAppNumber,
+  OnboardingPolling,
   OnboardingProgress,
   RequestSyncAgain,
 } from './coexistence-forms';
@@ -40,6 +46,12 @@ export default async function ChannelsPage() {
   // offers the button, the copy buttons and "forget" only to those who have it.
   const canConnect = can(agent, 'admin.channels.connect');
 
+  // Three at a time rather than all seven at once. The layouts' own reads run
+  // beside these, and seven together would take most of the gate's eight
+  // places from every other request for the length of a render. On 2026-10-11,
+  // before the gate, the onboarding's click set off two of these renders at
+  // once on a pool of ten that had already lost connections, and that is where
+  // the freeze's last stretch began (§6.91).
   const [
     channelList,
     groupList,
@@ -48,14 +60,14 @@ export default async function ChannelsPage() {
     folderList,
     credentials,
     onboardings,
-  ] = await Promise.all([
-    listChannelsForAdmin(),
-    listGroupNames(),
-    listAccountsForAdmin(),
-    countTemplatesByAccount(),
-    listFolderOptions(),
-    credentialStatuses(),
-    listLatestOnboardings(),
+  ] = await allLimited(3, [
+    () => listChannelsForAdmin(),
+    () => listGroupNames(),
+    () => listAccountsForAdmin(),
+    () => countTemplatesByAccount(),
+    () => listFolderOptions(),
+    () => credentialStatuses(),
+    () => listLatestOnboardings(),
   ]);
 
   // Read on the server, where the variables are. Not ready is still a page:
@@ -126,6 +138,26 @@ export default async function ChannelsPage() {
   // replaces its predecessor instead of stacking under it.
   const progressCards = shownOnboardings(onboardings, now);
 
+  // What the page asks `/api/admin/onboarding-progress` about while anything
+  // shown is moving, and how often. It renders again only when the answer
+  // differs from this one. The rows go in as the readers returned them: the
+  // endpoint calls the same four readers and hands them over the same way, so
+  // what counts as a change is decided in one place (`progressVersion`).
+  const progressVersionNow = progressVersion(
+    { onboardings, channels: channelList, accounts: accountList, credentials },
+    now,
+  );
+  const pollMs = pagePollIntervalMs(
+    progressCards,
+    (onboarding) => {
+      const channel = onboarding.channelId
+        ? channelList.find((row) => row.id === onboarding.channelId)
+        : undefined;
+      return channel ? parseCoexistence(channel.config) : null;
+    },
+    now,
+  );
+
   return (
     <div className="flex flex-col gap-8">
       <section>
@@ -181,6 +213,7 @@ export default async function ChannelsPage() {
           description="Addresses and routing only. Credentials live in the environment — or, for a number connected through Meta, sealed in the database under a key the database never sees — so a dump never contains a usable token."
         />
 
+        <OnboardingPolling intervalMs={pollMs} version={progressVersionNow} />
         {progressCards.length > 0 ? (
           <div className="mb-4 flex flex-col gap-2">
             {progressCards.map((onboarding) => {
@@ -282,6 +315,7 @@ export default async function ChannelsPage() {
                           channelId={channel.id}
                           type={type}
                           again={Boolean(slot && 'error' in slot)}
+                          version={progressVersionNow}
                         />
                       );
                     })

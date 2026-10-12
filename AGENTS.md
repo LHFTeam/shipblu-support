@@ -319,6 +319,28 @@ implicit transaction. New tables get RLS enabled by a loop in `db/sql/` — do n
 add it by hand. All three are checked, the first two by replaying the files and
 the last by asking the database which tables ended up covered.
 
+**postgres.js must never pipeline through the transaction pooler.** Once every
+connection is busy, postgres.js writes the next query onto a connection still
+waiting for its answer. Supavisor v2.9 hands that backend back at the first
+ReadyForQuery and loses the replies owed after it, and nothing can make
+postgres.js give up on a query it has sent. A loss the pooler records as idle
+costs a connection until the process restarts, and one it records as busy until
+the five-minute `transaction_timeout` kills the backend; that is the 2026-10-11
+freeze (§6.91). The admission gate in `db/client.ts` keeps postgres.js below
+that point for every query and transaction on `db`. Anything that reaches the
+pool without passing `unsafe()` — a tagged template on `getSql()` — is gated by
+hand, as `databaseProbe()` is, and the `pool-confinement` repo rule keeps
+`getSql()` and `$client` inside `db/client.ts` and tests. Nothing cancels a
+query postgres.js holds but is not running: that cancel strands a connection in
+`connecting` for up to an hour, or stops a transaction's queue for good, so the
+deadline waits for the query instead. Nor does anything report a `COMMIT` as
+failed because it is slow: its place is counted lost, and the caller waits for
+the real outcome. `max_pipeline: 0` is not the fix: it also
+breaks `begin()`. A page that reads several things at once, or re-reads itself
+while something moves, should weigh what that costs on eight places:
+`allLimited`, and a version to poll rather than the render
+(`/api/admin/onboarding-progress`).
+
 **The delivery platform.** `lib/shipments/platform.ts` is the only thing that
 knows how to read a parcel off `api.shipblu.com`, `lib/shipments/sync.ts` the
 only thing that writes what it says, and `lib/shipments/detail.ts` the only thing

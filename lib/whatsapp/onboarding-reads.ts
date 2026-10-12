@@ -1,8 +1,11 @@
 import { desc, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { ONBOARDING_STEPS, type OnboardingStatus, whatsappOnboardings } from '@/db/schema';
+import { listAccountsForAdmin, listChannelsForAdmin } from '@/lib/admin/settings';
+import { allLimited } from '@/lib/concurrency';
 import { canonicalUuid } from '@/lib/http/uuid';
-import { type OnboardingView, toOnboardingView } from './onboarding-view';
+import { credentialStatuses } from './credentials';
+import { type OnboardingView, progressVersion, toOnboardingView } from './onboarding-view';
 
 /**
  * What the admin page and its actions read of the attempts to connect WhatsApp
@@ -47,6 +50,32 @@ export async function listLatestOnboardings(): Promise<OnboardingView[]> {
   return rows
     .map((row) => toOnboardingView(row, ONBOARDING_STEPS))
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+}
+
+/**
+ * The Channels page's `progressVersion`, read again: the page polls this while
+ * an attempt is moving and renders only when it changes.
+ *
+ * Read through the page's own readers — the four of its seven that the version
+ * covers — and handed to `progressVersion` as they come back, as the page hands
+ * it what the same four returned to it. Narrow reads of its own here, beside
+ * the page's projection of the readers there, agreed only while the two
+ * happened to select the same thing; a reader that reshaped `config`, or
+ * listed fewer accounts, would have made every poll a render.
+ *
+ * Four queries over tables of a few rows each — the channels, the business
+ * accounts, their stored credentials, and every number's latest attempt — two
+ * at a time, since a poll is in no hurry and the route handlers' pool it runs
+ * on is the webhooks' too. A render of the page is about a dozen.
+ */
+export async function readProgressVersion(now: Date): Promise<string> {
+  const [onboardings, channels, accounts, credentials] = await allLimited(2, [
+    () => listLatestOnboardings(),
+    () => listChannelsForAdmin(),
+    () => listAccountsForAdmin(),
+    () => credentialStatuses(),
+  ]);
+  return progressVersion({ onboardings, channels, accounts, credentials }, now);
 }
 
 /**

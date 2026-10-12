@@ -1,8 +1,17 @@
+import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
-import { whatsappAccounts, whatsappOnboardings } from '@/db/schema';
+import { channels, whatsappAccounts, whatsappOnboardings } from '@/db/schema';
+import { listAccountsForAdmin, listChannelsForAdmin } from '@/lib/admin/settings';
 import { withCleanDatabase } from '@/lib/testing/db';
-import { copyRequestRefusal, listLatestOnboardings, runsNamedSteps } from './onboarding-reads';
+import { credentialStatuses, recordCredentialRefusal, storeBusinessToken } from './credentials';
+import { progressVersion } from './onboarding-view';
+import {
+  copyRequestRefusal,
+  listLatestOnboardings,
+  readProgressVersion,
+  runsNamedSteps,
+} from './onboarding-reads';
 
 /**
  * `distinct on` is the one thing here only Postgres can judge: an `order by`
@@ -138,5 +147,179 @@ describe('copyRequestRefusal', () => {
     expect(runsNamedSteps('connected')).toBe(true);
     expect(runsNamedSteps('exchanged')).toBe(false);
     expect(runsNamedSteps('failed')).toBe(false);
+  });
+});
+
+describe('readProgressVersion', () => {
+  /**
+   * What the Channels page computes: its own readers' rows, handed to
+   * `progressVersion` as they came back — the page's call, word for word.
+   */
+  async function versionAsThePageSeesIt(now: Date): Promise<string> {
+    const [onboardings, channelList, accountList, credentials] = await Promise.all([
+      listLatestOnboardings(),
+      listChannelsForAdmin(),
+      listAccountsForAdmin(),
+      credentialStatuses(),
+    ]);
+    return progressVersion(
+      { onboardings, channels: channelList, accounts: accountList, credentials },
+      now,
+    );
+  }
+
+  it('agrees with the page when nothing has moved, and differs once something has', async () => {
+    const accountId = await account();
+    const [channel] = await db
+      .insert(channels)
+      .values([
+        {
+          type: 'whatsapp',
+          name: 'ShipBlu',
+          whatsappAccountId: accountId,
+          config: {
+            phoneNumberId: '109876543210',
+            coexistence: {
+              onboardedAt: '2026-10-08T10:00:00Z',
+              wabaId: WABA,
+              syncs: { history: { requestId: 'r', requestedAt: '2026-10-08T10:00:05Z' } },
+            },
+          },
+        },
+        // Not a WhatsApp number: the page leaves it out, and so must the read.
+        { type: 'email', name: 'Support inbox', config: { address: 'help@example.com' } },
+      ])
+      .returning({ id: channels.id });
+    await attempt({
+      accountId,
+      phoneNumberId: '109876543210',
+      status: 'connected',
+      startedAt: new Date('2026-10-08T10:00:00Z'),
+    });
+    const now = new Date('2026-10-08T10:05:00Z');
+
+    // If these ever differ with nothing moved, the page re-renders on every
+    // poll — the cost this exists to remove.
+    const polled = await readProgressVersion(now);
+    expect(polled).toBe(await versionAsThePageSeesIt(now));
+
+    await db
+      .update(channels)
+      .set({
+        config: {
+          phoneNumberId: '109876543210',
+          coexistence: {
+            onboardedAt: '2026-10-08T10:00:00Z',
+            wabaId: WABA,
+            syncs: {
+              history: {
+                requestId: 'r',
+                requestedAt: '2026-10-08T10:00:05Z',
+                progressByPhase: { 0: 50 },
+              },
+            },
+          },
+        },
+      })
+      .where(eq(channels.id, channel!.id));
+
+    expect(await readProgressVersion(now)).not.toBe(polled);
+  });
+
+  // The onboarding only queues the template sync, so its answer lands on the
+  // account row once the attempt has stopped moving. Read here as a Date from
+  // a timestamptz, on the page through `listAccountsForAdmin`: the two have to
+  // agree on the instant, and on a second account in another name order.
+  it("agrees with the page on the accounts' sync, and moves when the sync answers", async () => {
+    const accountId = await account();
+    await db
+      .insert(whatsappAccounts)
+      .values({ name: 'Another', wabaId: '908070605040', tokenEnvVar: null, isDefault: false });
+    await attempt({
+      accountId,
+      phoneNumberId: '109876543210',
+      status: 'connected',
+      startedAt: new Date('2026-10-08T10:00:00Z'),
+    });
+    const now = new Date('2026-10-08T10:05:00Z');
+
+    const neverSynced = await readProgressVersion(now);
+    expect(neverSynced).toBe(await versionAsThePageSeesIt(now));
+
+    await db
+      .update(whatsappAccounts)
+      .set({ lastSyncedAt: new Date('2026-10-08T10:04:30.123Z') })
+      .where(eq(whatsappAccounts.id, accountId));
+    const synced = await readProgressVersion(now);
+    expect(synced).not.toBe(neverSynced);
+    expect(synced).toBe(await versionAsThePageSeesIt(now));
+
+    await db
+      .update(whatsappAccounts)
+      .set({ lastSyncError: '(#190) The access token has expired.' })
+      .where(eq(whatsappAccounts.id, accountId));
+    const failing = await readProgressVersion(now);
+    expect(failing).not.toBe(synced);
+    expect(failing).toBe(await versionAsThePageSeesIt(now));
+  });
+
+  // The account card and the connected summary draw the stored credential —
+  // its expiry, its key, whether Meta refused it — and an action is not what
+  // stores it: the onboarding's exchange does, and the template sync records a
+  // refusal. Read on both sides through `credentialStatuses`, with the agent's
+  // name joined in and the key's state worked out from this process's keyring.
+  it('agrees with the page on the stored credential, and moves when Meta refuses it', async () => {
+    const accountId = await account();
+    await attempt({
+      accountId,
+      phoneNumberId: '109876543210',
+      status: 'connected',
+      startedAt: new Date('2026-10-08T10:00:00Z'),
+    });
+    const now = new Date('2026-10-08T10:05:00Z');
+
+    const none = await readProgressVersion(now);
+    expect(none).toBe(await versionAsThePageSeesIt(now));
+
+    await db.transaction((tx) =>
+      storeBusinessToken(tx, {
+        accountId,
+        wabaId: WABA,
+        token: 'EAAGm0PX4ZCpsBAEXAMPLEstoredTokenValue123456',
+        inspection: {
+          type: 'SYSTEM_USER',
+          appId: '123',
+          isValid: true,
+          issuedAt: new Date('2026-10-08T10:00:00Z'),
+          expiresAt: new Date('2026-10-12T10:00:00Z'),
+          dataAccessExpiresAt: null,
+          scopes: ['whatsapp_business_management', 'whatsapp_business_messaging'],
+          granularScopes: [],
+          error: null,
+        },
+        businessId: '555',
+        actor: null,
+      }),
+    );
+    const stored = await readProgressVersion(now);
+    expect(stored).not.toBe(none);
+    expect(stored).toBe(await versionAsThePageSeesIt(now));
+
+    // "expires in 4 days" on the card, and a day later "3 days": the clock alone.
+    const later = new Date('2026-10-09T10:05:00Z');
+    expect(await readProgressVersion(later)).not.toBe(stored);
+    expect(await readProgressVersion(later)).toBe(await versionAsThePageSeesIt(later));
+
+    await recordCredentialRefusal(accountId, '(#190) Error validating access token');
+    const refused = await readProgressVersion(now);
+    expect(refused).not.toBe(stored);
+    expect(refused).toBe(await versionAsThePageSeesIt(now));
+
+    // The next refused send stamps the row again; the card says the same.
+    const firstRefusedAt = (await credentialStatuses()).get(accountId)?.lastRefusedAt;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await recordCredentialRefusal(accountId, '(#190) Error validating access token');
+    expect((await credentialStatuses()).get(accountId)?.lastRefusedAt).not.toEqual(firstRefusedAt);
+    expect(await readProgressVersion(now)).toBe(refused);
   });
 });

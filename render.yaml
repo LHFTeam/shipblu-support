@@ -304,20 +304,29 @@ projects:
               # this service receives inbound webhooks, so it could live here
               # alone; it is in the group because that is where the dashboard
               # has it, and declaring it here as well would shadow the group.
-              # Debug switch, normally unset. `true` prints every inbound webhook
-              # — headers and raw body — before it is verified or parsed, which
-              # is the only way to tell a delivery that was rejected from one
-              # that never arrived. Deliberately on the web service alone: it is
-              # the only service with an inbound endpoint, and scoping it here
-              # keeps it out of the group and off the worker and crons.
+              # Debug switch, `false` except for one debugging session. `true`
+              # prints every inbound webhook — headers and raw body — before it
+              # is verified or parsed, which is the only way to tell a delivery
+              # that was rejected from one that never arrived. Deliberately on
+              # the web service alone: it is the only service with an inbound
+              # endpoint, and scoping it here keeps it out of the group and off
+              # the worker and crons.
               #
-              # Turn it off again after the session. It puts customer message
-              # content into the Render log, which is a less protected place than
-              # the database; credentials are redacted regardless.
+              # A literal rather than `sync: false`, because off is the one value
+              # this file should ever restore. It was found left on in
+              # production on 2026-10-11, printing the coexistence
+              # history copy (customers' messages, up to 72 kB a delivery) into
+              # the Render log, and set to `false` in the dashboard that morning
+              # — the value written here, so a sync changes nothing live. A
+              # session sets it to `true` in the dashboard and back to `false`
+              # afterwards; a blueprint sync in between turns it off, which is
+              # the safe way for that to fail. It puts customer message content
+              # into the Render log, which is a less protected place than the
+              # database; credentials are redacted regardless.
               - key: LOG_ALL_INCOMING_WEBHOOKS
-                sync: false
-              # Re-declaring any other group key here would shadow the group and
-              # take the service value instead.
+                value: 'false'
+              # Re-declaring any group key here would shadow the group and take
+              # the service value instead.
 
           - type: worker
             name: shipblu-support-worker

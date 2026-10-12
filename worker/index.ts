@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { closeDb, POOL_MAX, sessionSql } from '@/db/client';
+import { ADMIT_MAX, closeDb, sessionSql } from '@/db/client';
 import { env } from '@/lib/env';
 import {
   claimJobs,
@@ -94,7 +94,7 @@ async function main() {
   // any other loop error.
   const controller = new AbortController();
   pool = startPool({
-    concurrency: effectiveConcurrency(env().WORKER_CONCURRENCY, POOL_MAX),
+    concurrency: effectiveConcurrency(env().WORKER_CONCURRENCY, ADMIT_MAX),
     pollMs: env().WORKER_POLL_INTERVAL_MS,
     heartbeatMs: HEARTBEAT_EVERY_MS,
     reclaimEveryMs: STALLED_AFTER_MS,

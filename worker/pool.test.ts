@@ -436,14 +436,23 @@ describe('startPool', () => {
   });
 });
 
+// Eight is `ADMIT_MAX`, the places the database gate admits, which is what
+// `worker/index.ts` passes: every query the worker sends waits at that gate, so
+// the reservation for the loop and the heartbeat is counted against it rather
+// than against the pool's ten connections.
 describe('effectiveConcurrency', () => {
-  it('runs what was asked for while the database pool can carry it', () => {
-    expect(effectiveConcurrency(5, 10)).toBe(5);
-    expect(effectiveConcurrency(8, 10)).toBe(8);
+  it('runs what was asked for while the gate can carry it', () => {
+    expect(effectiveConcurrency(5, 8)).toBe(5);
+    expect(effectiveConcurrency(6, 8)).toBe(6);
+    expect(warnings).toEqual([]);
   });
 
-  it('leaves two connections for the loop and the heartbeat, and says so', () => {
-    expect(effectiveConcurrency(20, 10)).toBe(8);
-    expect(warnings[0]).toMatch(/WORKER_CONCURRENCY=20/);
+  it('leaves two places for the loop and the heartbeat, and says so', () => {
+    expect(effectiveConcurrency(8, 8)).toBe(6);
+    expect(warnings[0]).toMatch(/WORKER_CONCURRENCY=8 .*gate's 8 places.*running 6/);
+  });
+
+  it('runs one job however small the gate', () => {
+    expect(effectiveConcurrency(4, 2)).toBe(1);
   });
 });
