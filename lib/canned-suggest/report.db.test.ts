@@ -97,6 +97,9 @@ async function suggestion(f: Fixture, values: Partial<typeof cannedSuggestions.$
     channel: 'facebook',
     customerLocale: 'ar',
     requestVersion: REQUEST_VERSION,
+    // Both responses were on the agent's list when Jev was asked, as
+    // `suggestFor` records them.
+    offeredIds: [f.where, f.refund],
     createdAt: IN_WINDOW,
     settledAt: IN_WINDOW,
     ...values,
@@ -228,6 +231,7 @@ describe('headline', () => {
       shown: 4,
       accepted: 1,
       dismissed: 1,
+      replaced: 0,
       // Precision: of the four shown and replied to, two carried Where.
       shownReplied: 4,
       shownRight: 2,
@@ -416,6 +420,7 @@ describe('byChannelAndLanguage', () => {
         requests: 9,
         suggested: 5,
         shown: 4,
+        replaced: 0,
         accepted: 1,
         shownReplied: 4,
         shownRight: 2,
@@ -426,11 +431,103 @@ describe('byChannelAndLanguage', () => {
         requests: 1,
         suggested: 0,
         shown: 0,
+        replaced: 0,
         accepted: 0,
         shownReplied: 0,
         shownRight: 0,
       },
     ]);
+  });
+});
+
+describe('replaced suggestions', () => {
+  // A customer who writes "hi" and then the question: the first suggestion was
+  // on screen, nothing was done with it, and the next message replaced it.
+  // It stays in Taken's denominator, and the page prints how many there were.
+  it('counts a shown suggestion followed by a newer one before anything was done with it', async () => {
+    const f = await fixture();
+    const later = cairo('2026-10-03T12:01');
+    const where = { choice: f.where, cannedResponseId: f.where };
+
+    // Replaced: shown, untouched, and a newer suggestion followed.
+    await suggestion(f, { ...where, shownAt: IN_WINDOW });
+    // Not replaced: waved away before the newer one came.
+    await suggestion(f, {
+      ...where,
+      shownAt: IN_WINDOW,
+      dismissedAt: IN_WINDOW,
+      anchorMessageId: await reply(f),
+    });
+    // The newer one, taken.
+    await suggestion(f, {
+      ...where,
+      shownAt: later,
+      acceptedAt: later,
+      createdAt: later,
+      anchorMessageId: await reply(f),
+    });
+
+    const head = await headline(WINDOW);
+    expect(head).toMatchObject({ shown: 3, accepted: 1, replaced: 1 });
+    expect((await byChannelAndLanguage(WINDOW))[0]).toMatchObject({ shown: 3, replaced: 1 });
+  });
+
+  it('does not count the newest suggestion, nor one shown to a different agent', async () => {
+    const f = await fixture();
+    const [other] = await db
+      .insert(agents)
+      .values({ name: 'Zeina', email: 'zeina@shipblu.test' })
+      .returning({ id: agents.id });
+
+    await suggestion(f, { choice: f.where, cannedResponseId: f.where, shownAt: IN_WINDOW });
+    await suggestion(f, {
+      agentId: other!.id,
+      choice: f.where,
+      cannedResponseId: f.where,
+      createdAt: cairo('2026-10-03T12:05'),
+    });
+
+    expect((await headline(WINDOW)).replaced).toBe(0);
+  });
+});
+
+describe('a response Jev was never offered', () => {
+  // Refund was added to the library after Jev was asked, so it could not have
+  // been the answer: sending it is neither a miss nor a pair Jev got wrong.
+  it('is not counted as a miss, a disagreement, or a none that was wrong', async () => {
+    const f = await fixture();
+    const sentRefund = {
+      repliedAt: IN_WINDOW,
+      sentChoice: f.refund,
+      sentCannedResponseId: f.refund,
+      sentCannedTitle: 'Refund',
+      sentMatches: false,
+    };
+
+    await suggestion(f, {
+      choice: f.where,
+      cannedResponseId: f.where,
+      shownAt: IN_WINDOW,
+      offeredIds: [f.where],
+      messageId: await reply(f),
+      ...sentRefund,
+    });
+    await suggestion(f, {
+      choice: NONE_KEY,
+      offeredIds: [f.where],
+      messageId: await reply(f),
+      anchorMessageId: await reply(f),
+      ...sentRefund,
+    });
+
+    expect(await headline(WINDOW)).toMatchObject({ noneReplied: 1, noneMissed: 0 });
+    expect(await confusions(WINDOW)).toEqual([]);
+    const refund = (await byResponse(WINDOW)).find((row) => row.id === f.refund);
+    expect(refund?.missed ?? 0).toBe(0);
+    // Where was still replaced by another response, from its own side.
+    expect((await byResponse(WINDOW)).find((row) => row.id === f.where)).toMatchObject({
+      replaced: 1,
+    });
   });
 });
 

@@ -108,7 +108,7 @@ are taking what they are shown rather than what fits.
 | Right                  | shown, replied to, reply carried Jev's choice | shown and replied to             |
 | Right when never shown | the same, unseen                              | unseen and replied to            |
 | Said none fits         | `none`                                        | answered                         |
-| Missed                 | `none`, then a canned response sent           | `none` and replied to            |
+| Missed                 | `none`, then an offered response sent         | `none` and replied to            |
 | Sent as it stood       | `unchanged`                                   | right replies with an edit grade |
 | Failed                 | errored                                       | asked                            |
 | Seen by suggestions    | agent replies linked to a suggestion          | agent replies                    |
@@ -117,6 +117,15 @@ Per response: suggested, shown, taken, right, Tab vs list, unchanged vs edited,
 replaced by another response, own words, and **missed** — replies that carried
 this response when Jev chose something else or none, which is how a response Jev
 never picks shows up at all. Below ten, a rate prints as "3 of 4".
+
+Missed, and the table of disagreements, count only a response Jev was offered
+(`offered_ids`): a row is cached per newest message while the picker is read
+on every render, so a response added after Jev was asked could not have been
+its answer. Taken keeps every shown suggestion in its denominator, and beside it
+the page prints how many were **replaced** — shown, nothing done with them, and
+followed by a newer suggestion on the same ticket — headline and per channel,
+because a chat customer who greets and then asks produces them and email
+rarely does.
 
 ## What was measured before building it
 

@@ -147,12 +147,17 @@ export default async function CannedSuggestionsReportPage({
             <Stat
               label="Taken"
               value={rate(head.accepted, head.shown)}
-              hint={`${head.accepted} of ${head.shown} suggestions shown`}
+              hint={`${head.accepted} of ${head.shown} suggestions shown${
+                head.replaced ? ` · ${head.replaced} of those replaced by a newer one` : ''
+              }`}
               explain={
                 <>
                   Suggestions an agent put in the box with Tab or Use, out of those that appeared in
                   an empty box. A suggestion that came back after the agent had started typing was
-                  never seen and is not counted either way.
+                  never seen and is not counted either way. One that was shown and then replaced by
+                  a newer suggestion &mdash; the customer wrote again before the agent did anything
+                  with it &mdash; stays in the count as not taken, and the second figure says how
+                  many there were.
                 </>
               }
             />
@@ -175,7 +180,9 @@ export default async function CannedSuggestionsReportPage({
               explain={
                 <>
                   How often Jev answered that no canned response fits. The second figure is the
-                  misses: tickets where it said none and the agent used one after all.
+                  misses: tickets where it said none and the agent used one after all &mdash; one
+                  Jev had been offered, so a response added after it was asked is not counted
+                  against it.
                 </>
               }
             />
@@ -238,7 +245,9 @@ export default async function CannedSuggestionsReportPage({
               <b>Right</b> is the reply carrying the suggested response, out of the suggestions
               shown and replied to. <b>Missed</b> counts replies that carried this response when Jev
               had suggested something else or none &mdash; the column that shows a response Jev
-              never picks. A response deleted since keeps the title it had.
+              never picks &mdash; and only when Jev was offered it, so a response added after the
+              suggestion was asked for is not counted against it. A response deleted since keeps the
+              title it had.
             </InfoTip>
           </h2>
           <div className="mb-8">
@@ -324,10 +333,27 @@ export default async function CannedSuggestionsReportPage({
             </Table>
           </div>
 
-          <h2 className="mb-2 text-sm font-semibold">
+          <h2 className="mb-2 flex items-center gap-1 text-sm font-semibold">
             By channel and the customer&rsquo;s language
+            <InfoTip label="By channel and the customer's language">
+              <b>Replaced</b> counts suggestions shown and then replaced by a newer one before the
+              agent did anything with them: the customer wrote again while the agent was in the box.
+              They are in <b>Shown</b> and count as not taken, and chat channels, where a customer
+              often sends a greeting and then the question, produce far more of them than email.
+            </InfoTip>
           </h2>
-          <Table head={['Channel', 'Language', 'Asked', 'Suggested', 'Shown', 'Taken', 'Right']}>
+          <Table
+            head={[
+              'Channel',
+              'Language',
+              'Asked',
+              'Suggested',
+              'Shown',
+              'Replaced',
+              'Taken',
+              'Right',
+            ]}
+          >
             {slices.map((slice) => (
               <Row key={`${slice.channel}:${slice.locale}`}>
                 <Cell>{channelLabel(slice.channel)}</Cell>
@@ -335,6 +361,7 @@ export default async function CannedSuggestionsReportPage({
                 <Cell>{slice.requests}</Cell>
                 <Cell>{slice.suggested}</Cell>
                 <Cell>{slice.shown}</Cell>
+                <Cell>{slice.replaced}</Cell>
                 <Cell>{rate(slice.accepted, slice.shown)}</Cell>
                 <Cell>{rate(slice.shownRight, slice.shownReplied)}</Cell>
               </Row>

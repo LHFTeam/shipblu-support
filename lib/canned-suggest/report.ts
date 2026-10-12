@@ -33,6 +33,35 @@ function within(column: SQL, window: ReportWindow): SQL {
 
 const SUGGESTED = sql`cs.choice is not null and cs.choice <> ${NONE_KEY}`;
 
+/**
+ * The response the reply carried was one Jev was offered. A row is cached for
+ * as long as its newest message stands while the picker is read again on every
+ * render, so a response added after Jev was asked can be sent against a choice
+ * that could not have named it — and counting that as a miss, or as a pair Jev
+ * got wrong, charges it with a response it never saw. Compared as text, because
+ * `sent_choice` holds `none` as well as ids, and Postgres does not promise to
+ * evaluate a guard on `none` before a `::uuid` cast in the same predicate.
+ */
+const SENT_WAS_OFFERED = sql`cs.sent_choice = any(cs.offered_ids::text[])`;
+
+/**
+ * Shown, nothing done with it — not taken, not waved away, no reply linked —
+ * and followed by a newer suggestion for the same agent on the same ticket.
+ * That is a customer writing again while the agent sat in the box: on a chat
+ * channel the first message is often a greeting and the second the question.
+ * Taken keeps every shown suggestion in its denominator, as its definition
+ * says; this is printed beside it, because the channels it is compared across
+ * produce it at very different rates.
+ */
+const REPLACED = sql`cs.shown_at is not null
+  and cs.accepted_at is null and cs.dismissed_at is null and cs.replied_at is null
+  and exists (
+    select 1 from canned_suggestions newer
+    where newer.conversation_id = cs.conversation_id
+      and newer.agent_id = cs.agent_id
+      and newer.created_at > cs.created_at
+  )`;
+
 export type Headline = {
   requests: number;
   errored: number;
@@ -43,6 +72,8 @@ export type Headline = {
   shown: number;
   accepted: number;
   dismissed: number;
+  /** Shown, and followed by a newer suggestion before anything was done with it. */
+  replaced: number;
   /** Shown, and the ticket was then replied to — the denominator of precision. */
   shownReplied: number;
   /** …and the reply carried the suggested response: Jev was right. */
@@ -52,7 +83,7 @@ export type Headline = {
   blindRight: number;
   /** Jev said `none` and the ticket was replied to. */
   noneReplied: number;
-  /** …but the agent used a canned response after all. */
+  /** …but the agent used a canned response Jev had been offered after all. */
   noneMissed: number;
   /** Shown and right, by how the reply came to carry it — the two add up to `shownRight`. */
   rightViaTab: number;
@@ -79,12 +110,13 @@ export async function headline(window: ReportWindow): Promise<Headline> {
       count(*) filter (where cs.shown_at is not null)::int as "shown",
       count(*) filter (where cs.accepted_at is not null)::int as "accepted",
       count(*) filter (where cs.dismissed_at is not null)::int as "dismissed",
+      count(*) filter (where ${REPLACED})::int as "replaced",
       count(*) filter (where cs.shown_at is not null and cs.replied_at is not null)::int as "shownReplied",
       count(*) filter (where cs.shown_at is not null and cs.replied_at is not null and cs.sent_matches)::int as "shownRight",
       count(*) filter (where ${SUGGESTED} and cs.shown_at is null and cs.replied_at is not null)::int as "blindReplied",
       count(*) filter (where ${SUGGESTED} and cs.shown_at is null and cs.replied_at is not null and cs.sent_matches)::int as "blindRight",
       count(*) filter (where cs.choice = ${NONE_KEY} and cs.replied_at is not null)::int as "noneReplied",
-      count(*) filter (where cs.choice = ${NONE_KEY} and cs.replied_at is not null and cs.sent_choice <> ${NONE_KEY})::int as "noneMissed",
+      count(*) filter (where cs.choice = ${NONE_KEY} and cs.replied_at is not null and ${SENT_WAS_OFFERED})::int as "noneMissed",
       count(*) filter (where ${SUGGESTED} and cs.shown_at is not null and cs.sent_matches and cs.accepted_at is not null)::int as "rightViaTab",
       count(*) filter (where ${SUGGESTED} and cs.shown_at is not null and cs.sent_matches and cs.accepted_at is null)::int as "rightViaPicker",
       count(*) filter (where cs.sent_edit = 'unchanged')::int as "unchanged",
@@ -112,6 +144,7 @@ export async function headline(window: ReportWindow): Promise<Headline> {
     shown: count('shown'),
     accepted: count('accepted'),
     dismissed: count('dismissed'),
+    replaced: count('replaced'),
     shownReplied: count('shownReplied'),
     shownRight: count('shownRight'),
     blindReplied: count('blindReplied'),
@@ -211,7 +244,7 @@ export async function byResponse(window: ReportWindow): Promise<ResponseRow[]> {
              count(*)::int as missed
       from windowed cs
       where cs.replied_at is not null
-        and cs.sent_choice <> ${NONE_KEY}
+        and ${SENT_WAS_OFFERED}
         and not cs.sent_matches
       group by cs.sent_choice
     )
@@ -292,7 +325,7 @@ export async function confusions(window: ReportWindow, limit = 10): Promise<Conf
     left join canned_responses rc on rc.id::text = cs.sent_choice
     where ${within(sql`cs.created_at`, window)}
       and cs.replied_at is not null
-      and cs.sent_choice <> ${NONE_KEY}
+      and ${SENT_WAS_OFFERED}
       and not cs.sent_matches
     group by cs.choice, sc.title, cs.sent_choice, rc.title
     order by count desc, suggested, sent
@@ -395,6 +428,8 @@ export type SliceRow = {
   requests: number;
   suggested: number;
   shown: number;
+  /** Of `shown`, followed by a newer suggestion before anything was done with it. */
+  replaced: number;
   accepted: number;
   shownReplied: number;
   shownRight: number;
@@ -413,6 +448,7 @@ export async function byChannelAndLanguage(window: ReportWindow): Promise<SliceR
     requests: number;
     suggested: number;
     shown: number;
+    replaced: number;
     accepted: number;
     shown_replied: number;
     shown_right: number;
@@ -422,6 +458,7 @@ export async function byChannelAndLanguage(window: ReportWindow): Promise<SliceR
            count(*)::int as requests,
            count(*) filter (where ${SUGGESTED})::int as suggested,
            count(*) filter (where cs.shown_at is not null)::int as shown,
+           count(*) filter (where ${REPLACED})::int as replaced,
            count(*) filter (where cs.accepted_at is not null)::int as accepted,
            count(*) filter (where cs.shown_at is not null and cs.replied_at is not null)::int as shown_replied,
            count(*) filter (where cs.shown_at is not null and cs.replied_at is not null and cs.sent_matches)::int as shown_right
@@ -436,6 +473,7 @@ export async function byChannelAndLanguage(window: ReportWindow): Promise<SliceR
     requests: Number(row.requests),
     suggested: Number(row.suggested),
     shown: Number(row.shown),
+    replaced: Number(row.replaced),
     accepted: Number(row.accepted),
     shownReplied: Number(row.shown_replied),
     shownRight: Number(row.shown_right),
