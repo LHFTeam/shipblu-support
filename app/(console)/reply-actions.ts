@@ -5,12 +5,14 @@ import { db } from '@/db/client';
 import { messages, whatsappTemplates } from '@/db/schema';
 import { requireAgent } from '@/lib/auth/guard';
 import { text, uuidField } from '@/lib/http/form-data';
+import { canonicalUuid } from '@/lib/http/uuid';
 import { ok } from '@/lib/http/action-state';
 import { can } from '@/lib/auth/permissions';
 import { sendsByEmail } from '@/lib/tickets/outbound';
 import { htmlToText, sanitiseEmailHtml, textToHtml } from '@/lib/html/sanitize';
 import { afterMessageStored } from '@/lib/tickets/lifecycle';
 import { recordCannedUse } from '@/lib/tickets/canned-usage';
+import { recordSuggestionOutcome } from '@/lib/canned-suggest/outcome';
 import { isLocale } from '@/lib/kb/locale';
 import { storeAgentReply } from '@/lib/tickets/agent-reply';
 import {
@@ -52,6 +54,19 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
   const cannedResponseId = uuidField(formData, 'cannedResponseId');
   const cannedLocaleField = text(formData, 'cannedLocale');
   const cannedLocale = isLocale(cannedLocaleField) ? cannedLocaleField : null;
+  // The suggestion Jev made for this reply box, if the composer was showing
+  // one — posted whether or not the agent took it, so the report can grade Jev
+  // against what was sent either way. Also only a claim: the row is matched on
+  // this agent and this ticket before anything is written to it.
+  const cannedSuggestionId = uuidField(formData, 'cannedSuggestionId');
+  // Every canned response inserted since the box was last empty, for grading
+  // that suggestion; `cannedResponseId` above is only the last of them. Capped,
+  // and each one a uuid or nothing, since it is a claim like the rest.
+  const cannedInsertedIds = text(formData, 'cannedInsertedIds')
+    .split(',')
+    .slice(0, 20)
+    .map(canonicalUuid)
+    .filter((id): id is string => id !== null);
 
   if (!body) return { error: 'Write something first' };
 
@@ -132,7 +147,7 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
 
   const parentMessageId = await lastInboundChannelMessageId(conversationId);
 
-  await storeAgentReply(conversationId, conversation.channel, {
+  const messageId = await storeAgentReply(conversationId, conversation.channel, {
     authorAgentId: agent.id,
     bodyText: isEmail && html ? htmlToText(html) : body,
     bodyHtml: html,
@@ -159,7 +174,18 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
           : {},
   });
 
-  if (cannedResponseId) await recordCannedUse(agent.id, cannedResponseId, cannedLocale);
+  const used = cannedResponseId
+    ? await recordCannedUse(agent.id, cannedResponseId, cannedLocale)
+    : null;
+  if (cannedSuggestionId) {
+    await recordSuggestionOutcome(agent.id, cannedSuggestionId, {
+      conversationId,
+      messageId,
+      body,
+      used,
+      inserted: cannedInsertedIds,
+    });
+  }
 
   if (resolveAfter) {
     await applyStatusCategory(agent, conversation.id, 'resolved');

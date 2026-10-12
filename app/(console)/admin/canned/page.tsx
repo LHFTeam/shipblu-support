@@ -2,7 +2,9 @@ import { Cell, PageHeader, Row, Table } from '@/components/ui';
 import { InfoTip } from '@/components/tooltip';
 import { listCannedResponses } from '@/lib/admin/settings';
 import { requirePermission } from '@/lib/auth/guard';
-import { CannedEditor, NewCanned } from './forms';
+import { loadSuggestionSettings } from '@/lib/canned-suggest/settings';
+import { typesafeConfigured } from '@/lib/typesafe/client';
+import { CannedEditor, NewCanned, SuggestionSwitchForm } from './forms';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,7 +18,7 @@ export const dynamic = 'force-dynamic';
 export default async function CannedPage() {
   await requirePermission('admin.fields');
 
-  const rows = await listCannedResponses();
+  const [rows, suggestions] = await Promise.all([listCannedResponses(), loadSuggestionSettings()]);
 
   return (
     <>
@@ -24,6 +26,13 @@ export default async function CannedPage() {
         title="Canned responses"
         description="Reusable replies. Agents can insert one while writing; automations can send one without satisfying the first-response SLA."
         actions={<NewCanned />}
+      />
+
+      <SuggestionSwitchForm
+        enabled={suggestions.enabled}
+        keyConfigured={typesafeConfigured()}
+        changedAt={suggestions.changedAt}
+        changedBy={suggestions.changedBy}
       />
 
       <Table

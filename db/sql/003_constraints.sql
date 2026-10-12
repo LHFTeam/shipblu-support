@@ -127,3 +127,55 @@ BEGIN
       );
   END IF;
 END $$;
+
+-- --------------------------------------------------------------------------
+-- canned_suggestion_settings holds exactly one row
+--
+-- The switch that decides whether the reply composer asks TypeSafe for a
+-- canned response. The presence_policy reasoning, word for word: a second row
+-- would be read or not depending on which one a query happened to order first,
+-- so half the fleet would be suggesting and half not, with no error anywhere.
+-- --------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'canned_suggestion_settings_singleton'
+  ) THEN
+    ALTER TABLE canned_suggestion_settings
+      ADD CONSTRAINT canned_suggestion_settings_singleton CHECK (id = 1);
+  END IF;
+END $$;
+
+-- --------------------------------------------------------------------------
+-- A canned suggestion is an answer or a failure, never both
+--
+-- The report's error rate and its none rate are drawn from disjoint rows; a
+-- row carrying a choice and an error would be counted in both, and which one
+-- it "really" was is not a question anything could answer afterwards.
+--
+-- And it is taken or waved away, never both. The composer cannot send both
+-- events for one suggestion — accepting hides the dismiss button and the key
+-- that sends it — but the event route is an endpoint, and this is the half
+-- that also holds for a request the composer did not make.
+-- --------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'canned_suggestions_answer_or_error'
+  ) THEN
+    ALTER TABLE canned_suggestions
+      ADD CONSTRAINT canned_suggestions_answer_or_error CHECK (error IS NULL OR choice IS NULL);
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'canned_suggestions_accept_or_dismiss'
+  ) THEN
+    ALTER TABLE canned_suggestions
+      ADD CONSTRAINT canned_suggestions_accept_or_dismiss CHECK (
+        accepted_at IS NULL OR dismissed_at IS NULL
+      );
+  END IF;
+END $$;

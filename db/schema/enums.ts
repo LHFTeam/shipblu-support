@@ -323,3 +323,15 @@ export const rootCauseOwnerEnum = pgEnum('root_cause_owner', [
   'external',
   'none',
 ]);
+
+/**
+ * How much of a suggested canned response survived into the reply that was sent.
+ *
+ * Three steps rather than a similarity score, for the reason `reply-form.tsx`
+ * gives about `usage_count`: a threshold on a diff is a number nobody can defend.
+ * `unchanged` and `extended` need none — the stored text went out exactly, or
+ * went out whole with something added round it (a greeting, a tracking number) —
+ * and everything else is `reworded`, which is a fact about the reply rather than
+ * a judgement about how far it moved.
+ */
+export const suggestionEditEnum = pgEnum('suggestion_edit', ['unchanged', 'extended', 'reworded']);

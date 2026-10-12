@@ -1,7 +1,9 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { ErrorText, Select, Textarea } from '@/components/ui';
+import { InfoTip } from '@/components/tooltip';
+import { suggestionKey } from '@/lib/canned-suggest/keyboard';
 import type { CannedResponseOption } from '@/lib/tickets/lookups';
 import {
   availableLocales,
@@ -16,6 +18,7 @@ import type { KnowledgeContext } from './types';
 import { INITIAL, LOST_SEND } from './form-state';
 import { SubmitButton } from '@/components/submit-button';
 import { useActionForm } from '@/components/use-action-form';
+import { useCannedSuggestion } from './use-canned-suggestion';
 
 /**
  * The language toggle's two buttons, each written in its own script.
@@ -47,6 +50,8 @@ export function ReplyForm({
   canned,
   customerLocale,
   knowledge,
+  suggest = false,
+  anchorMessageId = null,
   onSent,
 }: {
   conversationId: string;
@@ -54,6 +59,10 @@ export function ReplyForm({
   canned: CannedResponseOption[];
   customerLocale: CannedLocale;
   knowledge: KnowledgeContext | null;
+  /** Whether to ask Jev for a canned response when the box takes focus. */
+  suggest?: boolean;
+  /** The newest reply on the ticket — what a suggestion answers. See `CannedSuggestion`. */
+  anchorMessageId?: string | null;
   onSent?: () => void;
 }) {
   const { state, key, form } = useActionForm(sendReply, INITIAL, {
@@ -86,12 +95,15 @@ export function ReplyForm({
       />
 
       <ReplyBody
+        conversationId={conversationId}
         isCommentThread={isCommentThread}
         privately={privately}
         canned={canned}
         locale={cannedLocale}
         onLocaleChange={setCannedLocale}
         knowledge={knowledge}
+        suggest={suggest}
+        anchorMessageId={anchorMessageId}
       />
 
       {isCommentThread ? (
@@ -144,13 +156,17 @@ export function ReplyForm({
  * goes.
  */
 function ReplyBody({
+  conversationId,
   isCommentThread,
   privately,
   canned,
   locale,
   onLocaleChange,
   knowledge,
+  suggest,
+  anchorMessageId,
 }: {
+  conversationId: string;
   isCommentThread: boolean;
   privately: boolean;
   canned: CannedResponseOption[];
@@ -158,6 +174,8 @@ function ReplyBody({
   locale: CannedLocale;
   onLocaleChange: (locale: CannedLocale) => void;
   knowledge: KnowledgeContext | null;
+  suggest: boolean;
+  anchorMessageId: string | null;
 }) {
   const bodyRef = useRef<HTMLTextAreaElement>(null);
 
@@ -186,6 +204,15 @@ function ReplyBody({
   const [used, setUsed] = useState<{ id: string; locale: CannedLocale } | null>(null);
 
   /*
+    Every canned response inserted since the box was last empty, for grading a
+    canned suggestion — not for `usage_count`, which stays last-one-wins above.
+    A suggestion taken with Tab and then followed by a closing from the list
+    went out in the reply, and a grade read off `used` alone would call Jev
+    wrong for it. Forgotten with `used`, on the same empty box.
+  */
+  const [inserted, setInserted] = useState<string[]>([]);
+
+  /*
     An empty box carries no canned response, whatever was picked into it
     earlier: the agent cleared it to write their own, which is the "never mind"
     this column is meant not to score.
@@ -206,7 +233,17 @@ function ReplyBody({
     the whole text in one gesture without passing through empty still counts,
     as rewording does.
   */
-  const forget = useCallback(() => setUsed(null), []);
+  const forget = useCallback(() => {
+    setUsed(null);
+    setInserted([]);
+  }, []);
+
+  /*
+    Whether the box is empty — the one condition every part of the suggestion
+    turns on. The text lives in the DOM, so this mirrors it: told by `onInput`
+    when the agent types, and by `insertText` when a pick or a link goes in.
+  */
+  const [empty, setEmpty] = useState(true);
 
   /*
     Two things insert into this box now — a canned response and an article link
@@ -228,6 +265,9 @@ function ReplyBody({
     box.value = text;
     box.focus();
     box.setSelectionRange(caret, caret);
+    // A value set from code fires no `input`, so the box's emptiness — which
+    // decides whether a suggestion shows — is told here.
+    setEmpty(!text.trim());
   }, []);
 
   const insertCannedResponse = useCallback(
@@ -242,31 +282,171 @@ function ReplyBody({
 
       insertText(bodies[chosen]);
       setUsed({ id: response.id, locale: chosen });
+      setInserted((ids) => (ids.includes(response.id) ? ids : [...ids, response.id]));
     },
     [insertText],
   );
+
+  const suggestion = useCannedSuggestion({
+    conversationId,
+    suggest,
+    anchorMessageId,
+    bodyRef,
+    inserted,
+  });
+
+  // The suggested response as it would go in: in the language the toggle names,
+  // or the one it was written in — exactly what Tab will insert.
+  const suggested = suggestion.showable
+    ? (canned.find((response) => response.id === suggestion.showable?.cannedResponseId) ?? null)
+    : null;
+  const suggestedLocale = suggested ? resolveLocale(bodiesOf(suggested), locale) : null;
+  const ghost = suggested && suggestedLocale ? bodiesOf(suggested)[suggestedLocale] : null;
+  const showing = Boolean(ghost && empty);
+  const hintId = useId();
+
+  const { markShown } = suggestion;
+  useEffect(() => {
+    if (showing) markShown();
+  }, [showing, markShown]);
+
+  /*
+    Since when the suggestion now showing has been in front of the agent in the
+    focused box — what Tab's wait in `suggestionKey` is measured from. Started
+    again whenever a different suggestion shows, the box empties back into
+    showing one, or focus comes back, so a Tab-Tab through the composer always
+    lands inside the wait however long the ghost sat there unfocused.
+  */
+  const seenSince = useRef<number | null>(null);
+  const showingId = showing ? (suggestion.showable?.id ?? null) : null;
+  useEffect(() => {
+    const box = bodyRef.current;
+    seenSince.current =
+      showingId && box && document.activeElement === box ? performance.now() : null;
+  }, [showingId]);
+
+  const acceptSuggestion = () => {
+    if (!suggested) return;
+    insertCannedResponse(suggested, locale);
+    suggestion.accept();
+  };
 
   return (
     <>
       <input type="hidden" name="cannedResponseId" value={used?.id ?? ''} />
       <input type="hidden" name="cannedLocale" value={used?.locale ?? ''} />
+      <input type="hidden" name="cannedSuggestionId" value={suggestion.linkId ?? ''} />
+      <input type="hidden" name="cannedInsertedIds" value={inserted.join(',')} />
 
       <Textarea
         ref={bodyRef}
         name="body"
         rows={4}
+        // The suggestion is the placeholder: grey, gone the moment the agent
+        // types, and never sent by accident — the box is still empty and still
+        // `required`, so Send refuses it until Tab or Use has put the text in.
         placeholder={
-          isCommentThread
+          ghost ??
+          (isCommentThread
             ? privately
               ? 'Send this privately to the commenter — one chance per comment.'
               : 'Reply under the comment, where everyone can see it…'
-            : 'Write a reply to the customer…'
+            : 'Write a reply to the customer…')
         }
         required
+        aria-describedby={showing ? hintId : undefined}
+        onFocus={(event) => {
+          seenSince.current = showing ? performance.now() : null;
+          if (!event.currentTarget.value.trim()) suggestion.ask();
+        }}
+        onBlur={() => {
+          seenSince.current = null;
+        }}
+        onKeyDown={(event) => {
+          if (!showing) return;
+          const since = seenSince.current;
+          const action = suggestionKey(
+            {
+              key: event.key,
+              shiftKey: event.shiftKey,
+              altKey: event.altKey,
+              ctrlKey: event.ctrlKey,
+              metaKey: event.metaKey,
+              isComposing: event.nativeEvent.isComposing,
+              keyCode: event.keyCode,
+            },
+            since === null ? 0 : performance.now() - since,
+          );
+          if (!action) return;
+          event.preventDefault();
+          if (action === 'accept') acceptSuggestion();
+          else suggestion.dismiss();
+        }}
         onInput={(event) => {
-          if (!event.currentTarget.value.trim()) forget();
+          const isEmpty = !event.currentTarget.value.trim();
+          setEmpty(isEmpty);
+          if (isEmpty) forget();
         }}
       />
+
+      {/*
+        Always rendered while suggestions are on, so a screen reader is already
+        listening to the region when a suggestion arrives in it — a live region
+        added together with its content is not announced.
+
+        Use and × are buttons as well as keys because the console is read on
+        phones, which have no Tab key.
+      */}
+      {suggest ? (
+        // `relative` because the key hint below can be `sr-only`, which is
+        // `position: absolute` — unpositioned, it is placed against the page
+        // and lengthens it (PROJECT-STATE §6.81). `empty:-mt-2` because, empty,
+        // it is still a flex item of the form's `gap-2` column, and the gap on
+        // both sides of a zero-height item pushed the picker down by one gap
+        // whenever nothing was suggested.
+        <div
+          id={hintId}
+          aria-live="polite"
+          className="relative text-xs text-[var(--muted-foreground)] empty:-mt-2"
+        >
+          {showing && suggested ? (
+            <div className="flex items-center gap-2">
+              <span className="min-w-0 truncate">
+                Suggested: <span className="font-medium">{suggested.title}</span>
+              </span>
+              <InfoTip label="the suggested response">
+                Picked by TypeSafe&rsquo;s Jev model from your canned responses, after reading the
+                last messages on this ticket (never the private notes). Use it as it stands or edit
+                it first &mdash; nothing is sent until you press Send.
+              </InfoTip>
+              {/*
+                Said wherever a keyboard can press it: on screen with any fine
+                pointer — a laptop zoomed past the breakpoint still has a Tab
+                key — and always to a screen reader through aria-describedby.
+                Hidden only on screen on a touch-only phone, which has no Tab.
+              */}
+              <span className="sr-only shrink-0 any-pointer-fine:not-sr-only">
+                Tab to use · Esc to dismiss
+              </span>
+              <button
+                type="button"
+                onClick={acceptSuggestion}
+                className="ms-auto shrink-0 rounded-md border border-[var(--border)] px-2 py-0.5 font-medium text-[var(--foreground)] hover:bg-[var(--muted)]"
+              >
+                Use
+              </button>
+              <button
+                type="button"
+                onClick={suggestion.dismiss}
+                aria-label="Dismiss the suggested response"
+                className="shrink-0 rounded-md px-1.5 py-0.5 hover:bg-[var(--muted)]"
+              >
+                ×
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       <CannedPicker
         responses={canned}

@@ -181,9 +181,11 @@ projects:
             #   WHATSAPP_TOKEN_SHIPBLU     a connected WABA's own credential,
             #                              named on its `whatsapp_accounts` row
             #
-            #   TYPESAFE_API_KEY           TypeSafe System One, read by the
-            #                              shadow categorisation job and the
-            #                              priority classifier
+            #   TYPESAFE_API_KEY           TypeSafe System One: the shadow
+            #                              categorisation job, the priority
+            #                              classifier (with PRIORITY_AI), and the
+            #                              reply box's suggestions while the admin
+            #                              switch is on (canned_suggestion_settings)
             #
             # Present, and read by nothing in this repo:
             #
@@ -205,7 +207,9 @@ projects:
             #   KB_NOTICE_AR             service notice, Arabic
             #   KB_NOTICE_HREF           optional "read the update" link
             #   KB_NOTICE_TONE           info | warning | danger
-            #   TYPESAFE_MODEL           pins a shadow run to one Jev version
+            #   TYPESAFE_MODEL           pins the shadow run, the priority
+            #                            classifier and the reply box's
+            #                            suggestions to one Jev version
             #                            instead of the moving `jev-latest`
             #   WHATSAPP_CREDENTIAL_KEY  seals the WhatsApp business tokens
             #                            Embedded Signup stores in the database
@@ -539,7 +543,10 @@ projects:
             #   WHATSAPP_WABA_ID
             #
             #   TYPESAFE_API_KEY           sends real customer text to a third
-            #                              party if a shadow run is started here
+            #                              party if a shadow run is started here,
+            #                              if PRIORITY_AI is set here, or if the
+            #                              suggestion switch is turned on in
+            #                              staging's own database
             #
             # NODE_VERSION and EMAIL_FROM_NAME come from shipblu-support-shared;
             # the staging copies were deleted on 2026-09-26.

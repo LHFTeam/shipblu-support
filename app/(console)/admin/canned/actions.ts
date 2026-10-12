@@ -7,6 +7,7 @@ import { requirePermission } from '@/lib/auth/guard';
 import { ok } from '@/lib/http/action-state';
 import { text, uuidField } from '@/lib/http/form-data';
 import { cannedBodyColumns } from '@/lib/tickets/canned-write';
+import { saveSuggestionSettings } from '@/lib/canned-suggest/settings';
 import { GONE, refresh, type SettingsState } from '../settings-shared';
 
 // --- Canned responses -------------------------------------------------------
@@ -56,6 +57,27 @@ export async function deleteCannedResponse(
   const id = uuidField(formData, 'id');
   if (!id) return { error: 'Nothing to delete' };
   await db.delete(cannedResponses).where(eq(cannedResponses.id, id));
+  refresh('/admin/canned');
+  return ok();
+}
+
+// --- Suggestions in the reply box --------------------------------------------
+
+/**
+ * The switch for Jev's canned-response suggestions in the reply composer.
+ *
+ * `admin.fields`, the page's own gate: whoever decides what the canned
+ * responses say decides whether the composer offers them unasked. Saving is
+ * allowed in an environment with no TypeSafe key — the form says plainly that
+ * nothing will happen there — because refusing would make the switch's state
+ * depend on a secret the admin cannot see from this page.
+ */
+export async function saveCannedSuggestionSettings(
+  _state: SettingsState,
+  formData: FormData,
+): Promise<SettingsState> {
+  const agent = await requirePermission('admin.fields');
+  await saveSuggestionSettings(formData.get('enabled') === 'on', agent.id);
   refresh('/admin/canned');
   return ok();
 }

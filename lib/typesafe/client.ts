@@ -17,9 +17,12 @@ import { isTimeout } from '@/lib/http/deadline';
  * Shaped after `lib/shipments/platform.ts`, which is the house template for an
  * outbound provider: the round trip owns the timeout and the error taxonomy, the
  * response is validated with zod rather than cast, and **nothing here retries**.
- * Backoff belongs to the queue (`lib/queue/index.ts`), and a dead job is the
- * visible record of a call that never succeeded; a retry loop in here would hide
- * that inside a worker slot instead.
+ * Whether to ask again is the caller's. The two jobs ask again later — the
+ * priority classifier through the queue's backoff (`lib/queue/index.ts`), the
+ * shadow categoriser on its next run over the corpus — where a failure stays
+ * visible; the reply box's suggestion records the failure on its row and never
+ * asks again. A retry loop in here would hide any of those answers inside a
+ * slot instead.
  *
  * `@typesafe-ai/sdk` exists and is deliberately not used. It retries internally,
  * which is the one behaviour this repo puts somewhere else, and it brings its own
@@ -39,7 +42,11 @@ export const TYPESAFE_API_URL = 'https://api.typesafe.ai';
  */
 export const DEFAULT_TYPESAFE_MODEL = 'jev-latest';
 
-/** A classification is not a page render; it can afford to wait, but not forever. */
+/**
+ * A classification is not a page render; it can afford to wait, but not forever.
+ * The reply box's suggestion is closer to a page render and passes its own,
+ * shorter `timeoutMs` (`SUGGEST_TIMEOUT_MS`).
+ */
 export const DEFAULT_TIMEOUT_MS = 15_000;
 
 /**
@@ -137,7 +144,15 @@ function issuesOf(error: z.ZodError): string {
     .join('; ');
 }
 
-/** Whether a call can be made at all. Presence of the credential is the feature flag. */
+/**
+ * Whether a call can be made at all.
+ *
+ * For the shadow categoriser, presence of the credential is the feature flag.
+ * For the reply box's suggestions it is only half of one — `suggestionsLive()`
+ * in `lib/canned-suggest/settings.ts` also needs the admin switch, because
+ * production holds this key for the shadow run and a key-as-flag would have
+ * turned suggestions on for every agent the day they deployed.
+ */
 export function typesafeConfigured(): boolean {
   return Boolean(env().TYPESAFE_API_KEY);
 }
@@ -154,13 +169,17 @@ export type FetchOptions = {
 };
 
 /**
- * One request, with the error taxonomy the queue reads.
+ * One request, with the error taxonomy its callers read.
  *
- * The split between transient and permanent is the whole contract with the
- * handler above: transient means the same call could answer differently later,
- * so the row is left unwritten and the job re-runs. Permanent means it could not
- * — a wrong key, a malformed question — and a job that keeps asking only delays
- * somebody noticing.
+ * The split between transient and permanent is the whole contract with the two
+ * jobs: transient means the same call could answer differently later, so they
+ * ask again — the classifier by throwing back to the queue, the categoriser by
+ * recording the gap for its next run. Permanent means it could not — a wrong
+ * key, a malformed question — and a job that keeps asking only delays somebody
+ * noticing. The suggestion route reads neither half: it writes every failure to
+ * `canned_suggestions.error` and that message gets no suggestion, because an
+ * answer that arrives after a retry has arrived after the agent started typing
+ * (the AGENTS.md exception it lives under).
  */
 export async function systemOne(
   request: SystemOneRequest,
