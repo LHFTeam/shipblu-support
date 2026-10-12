@@ -8,6 +8,7 @@ import {
   parseCoexistence,
   SYNC_TYPES,
 } from './coexistence';
+import { credentialBadges, type CredentialStatus } from './credential-status';
 
 /**
  * What the admin page shows of an attempt to connect a WhatsApp Business-app
@@ -249,9 +250,24 @@ export function recoveryFor(
 }
 
 /**
+ * One line the card prints under the step list: a sentence, or the queue's
+ * backoff — the transient error and the instant its retry is due, with the
+ * countdown between them left to `lineText` and whichever clock reads it.
+ *
+ * Split so the countdown stays out of `progressVersion`. Under ninety seconds
+ * it counts whole seconds, and by the minute before that, so in the version it
+ * moved on most polls of a pending retry, each a full render of the page with
+ * nothing in the rows moved. The card draws it in the browser instead, from
+ * `retryAt`, and the version hashes the line without it.
+ */
+export type OnboardingLine =
+  { kind: 'sentence'; text: string } | { kind: 'backoff'; error: string; retryAt: string | null };
+
+/**
  * The lines the card prints under the step list while the attempt runs: the
  * queue's backoff, the stall sentence, or — past `LIVE_ATTEMPT_MS` with nothing
- * scheduled — what to press. Empty when there is nothing to say.
+ * scheduled — what to press. Empty when there is nothing to say. `lineText`
+ * spells each one.
  *
  * The backoff line reads `last_transient_error`, which the job writes before
  * it rethrows (`./onboarding-complete`): without it the card would show a
@@ -260,34 +276,51 @@ export function recoveryFor(
  * None of them promises the attempt "will continue": that holds only while a
  * job for it exists, which the page cannot see.
  */
-export function describeOnboarding(view: OnboardingView, now: Date): string[] {
+export function describeOnboarding(view: OnboardingView, now: Date): OnboardingLine[] {
   if (view.status !== 'exchanged') return [];
 
   if (retryable(view, now)) {
     return [
-      ...(view.lastTransientError ? [`The last try ended with: ${view.lastTransientError}.`] : []),
-      'This connection has not finished in fifteen minutes and nothing is scheduled to carry it ' +
-        'on. Press Retry connection: it runs the remaining steps with the credential saved at ' +
-        "sign-in, without Meta's window. If a job for it is still queued, Retry says so, and the " +
-        'worker is what needs looking at.',
+      ...(view.lastTransientError
+        ? [sentence(`The last try ended with: ${view.lastTransientError}.`)]
+        : []),
+      sentence(
+        'This connection has not finished in fifteen minutes and nothing is scheduled to carry it ' +
+          'on. Press Retry connection: it runs the remaining steps with the credential saved at ' +
+          "sign-in, without Meta's window. If a job for it is still queued, Retry says so, and the " +
+          'worker is what needs looking at.',
+      ),
     ];
   }
 
   if (view.lastTransientError) {
-    const retryAt = view.nextAttemptAt ? Date.parse(view.nextAttemptAt) : NaN;
-    const wait = Number.isFinite(retryAt) ? retryAt - now.getTime() : 0;
-    return [`${view.lastTransientError} — retrying ${waitLabel(wait)}`];
+    return [{ kind: 'backoff', error: view.lastTransientError, retryAt: view.nextAttemptAt }];
   }
 
   if (stalled(view, now)) {
     return [
-      "No worker has picked this up yet. The sign-in and its credential are saved, so Meta's " +
-        'window is not needed again: if nothing moves within fifteen minutes of the start, Retry ' +
-        'connection appears on this card.',
+      sentence(
+        "No worker has picked this up yet. The sign-in and its credential are saved, so Meta's " +
+          'window is not needed again: if nothing moves within fifteen minutes of the start, Retry ' +
+          'connection appears on this card.',
+      ),
     ];
   }
 
   return [];
+}
+
+const sentence = (text: string): OnboardingLine => ({ kind: 'sentence', text });
+
+/**
+ * A line as the card prints it, with the backoff's countdown measured against
+ * `now` — the one spelling of the sentence, whichever clock is reading it.
+ */
+export function lineText(line: OnboardingLine, now: Date): string {
+  if (line.kind === 'sentence') return line.text;
+  const retryAt = line.retryAt ? Date.parse(line.retryAt) : NaN;
+  const wait = Number.isFinite(retryAt) ? retryAt - now.getTime() : 0;
+  return `${line.error} — retrying ${waitLabel(wait)}`;
 }
 
 function waitLabel(ms: number): string {
@@ -578,63 +611,95 @@ export function pagePollIntervalMs(
 }
 
 /**
+ * What `progressVersion` is computed from: the rows the Channels page's own
+ * readers return, handed over as they came back. The page passes what it
+ * rendered from and `readProgressVersion` what the same readers return to it,
+ * so neither side shapes the inputs, and the two can differ only when a row
+ * did — never because one of them read or projected a row its own way.
+ */
+export type ProgressRows = {
+  /** `listLatestOnboardings()`. */
+  onboardings: readonly OnboardingView[];
+  /** `listChannelsForAdmin()`: every channel, of which only the `whatsapp` ones are read. */
+  channels: readonly { id: string; type: string; config: Record<string, unknown> }[];
+  /** `listAccountsForAdmin()`. */
+  accounts: readonly { id: string; lastSyncedAt: Date | null; lastSyncError: string | null }[];
+  /** `credentialStatuses()`, by account. */
+  credentials: ReadonlyMap<string, CredentialStatus>;
+};
+
+/**
  * A short string that changes whenever anything the onboarding parts of the
- * Channels page, or its accounts' template sync, would draw differently — so
- * the page polls this and renders only when it moves, instead of re-rendering
- * itself on a timer.
+ * Channels page, its accounts' template sync or their stored credentials would
+ * draw differently — so the page polls this and renders only when it moves,
+ * instead of re-rendering itself on a timer. Anything the page draws that it
+ * leaves out stands still, while the page polls, at whatever the last render
+ * said.
  *
  * Computed by the page from what it already read, and by
- * `/api/admin/onboarding-progress` from the same three reads, through this one
- * function, so the two cannot disagree about what counts as a change. It takes
- * in the rows the cards and the coexistence parts of the channel rows are drawn
- * from, and every sentence and switch those draw from the clock — the stall
- * sentence, the backoff's countdown, when Retry appears, the poll interval, the
- * badges and copy buttons — so time passing moves it when it would move the
- * page, and only then.
+ * `/api/admin/onboarding-progress` from the same readers, through this one
+ * function and nothing in front of it (`ProgressRows`). What it covers:
  *
- * The accounts are in it because the onboarding's last step only queues the
- * template sync, and `finish` connects the attempt a moment later: the sync's
- * outcome lands on the account row after the last write the onboarding parts
- * see. Without it an account row said "never synced" for as long as the page
- * polled, and never said "sync failing" — the failure of the first sync on a
- * newly stored credential being what that row is there to show. The sync
- * writes the templates before it stamps `last_synced_at`, so the stamp moving
- * brings the template count along.
+ * - The cards and the coexistence parts of the WhatsApp channel rows: every
+ *   number's latest attempt, each channel's `config`, and every sentence and
+ *   switch those draw from the clock — the stall sentence, when Retry appears,
+ *   the poll interval, the badges and copy buttons — so time passing moves it
+ *   when it would move the page, and only then.
+ * - Each account's last template sync. The onboarding's last step only queues
+ *   the sync, and `finish` connects the attempt a moment later, so the sync's
+ *   outcome lands after the last write the onboarding parts see: without it an
+ *   account row said "never synced" for as long as the page polled, and never
+ *   said "sync failing". The template counts are not read: the sync writes the
+ *   templates before it stamps `last_synced_at`, so the stamp brings them along.
+ * - Each stored credential, as the account card and the connected summary draw
+ *   it: where it came from, its token type, expiry and key, Meta's refusal, and
+ *   its badges with the clock in them — "expires in 3 days", "expired". Not
+ *   `last_verified_at` or `last_refused_at` themselves: every successful sync
+ *   and every refused send stamps them again, and the page shows only whether
+ *   the credential stands refused, which the badges carry.
  *
- * The backoff's countdown moves it on purpose. Under ninety seconds the card
- * counts in whole seconds, so every poll in the last ninety seconds of a
- * backoff re-renders the page — most of a real one, since the queue waits 10,
- * 40, 90 and then 160 s (`retryDelaySeconds`). The countdown is what the card
- * shows, drawn from the server's `now`: left out of the version, it would stand
- * still at whatever the last render said. Drawing it on the client from
- * `nextAttemptAt` is what would take those renders away.
+ * Left out on purpose:
+ *
+ * - What only an admin's action writes — a channel's name and group, an
+ *   account's name, variable and default flag — because the action revalidates
+ *   the page by itself. A channel's account and active flag change otherwise
+ *   only beside a write that is in here: the job's channel step writes them in
+ *   the transaction that writes the coexistence object, and the sync adopts an
+ *   unassigned number before it stamps `last_synced_at`.
+ * - The backoff's countdown. In here it moved the version on most polls while
+ *   a retry was pending — every second of the last ninety, every minute before
+ *   — and each move was a full render with no row moved. The card draws it in
+ *   the browser from `nextAttemptAt` (`OnboardingLine`); the retry's state
+ *   still moves the version — scheduled, rescheduled, cleared, near enough to
+ *   ask every three seconds, and lapsed into Retry.
+ *
+ * So a new sentence the clock changes on any of these parts goes into this
+ * version, or is drawn on the client the way the countdown is.
  *
  * Pure and synchronous on both sides of the wire: a 32-bit FNV-1a over the
  * JSON, which is plenty for telling "changed" from "did not" and needs no
  * `node:crypto` in a module the browser also loads.
  */
-export function progressVersion(
-  rows: {
-    onboardings: OnboardingView[];
-    channels: { id: string; config: Record<string, unknown> }[];
-    accounts: { id: string; lastSyncedAt: Date | string | null; lastSyncError: string | null }[];
-  },
-  now: Date,
-): string {
+export function progressVersion(rows: ProgressRows, now: Date): string {
   // By id, so the page and the endpoint may read the rows in any order. The
   // order the cards are drawn in moves only with `startedAt`, which is in the
-  // rows already; the account rows are drawn by name, which only an action
-  // changes, and an action re-renders the page by itself.
-  const byId = <T extends { id: string }>(list: T[]) =>
+  // rows already; the rows below the cards are drawn by name, which only an
+  // action changes, and an action re-renders the page by itself.
+  const byId = <T extends { id: string }>(list: readonly T[]) =>
     [...list].sort((a, b) => a.id.localeCompare(b.id));
   const coexistenceById = new Map(
-    byId(rows.channels).map((channel) => [channel.id, parseCoexistence(channel.config)] as const),
+    byId(rows.channels.filter((channel) => channel.type === 'whatsapp')).map(
+      (channel) => [channel.id, parseCoexistence(channel.config)] as const,
+    ),
   );
   const coexistenceFor = (view: OnboardingView) =>
     view.channelId ? (coexistenceById.get(view.channelId) ?? null) : null;
+  const onboardings = byId(rows.onboardings);
 
+  // Named fields throughout rather than the rows, so what the version covers
+  // is this list and not whatever columns a reader grows next.
   const drawn = {
-    cards: shownOnboardings(byId(rows.onboardings), now).map((view) => ({
+    cards: shownOnboardings(onboardings, now).map((view) => ({
       view,
       lines: describeOnboarding(view, now),
       retry: retryable(view, now),
@@ -642,7 +707,7 @@ export function progressVersion(
     })),
     // The channel rows read every number's latest attempt, shown or not, to
     // decide whether its copy buttons wait for it.
-    attempts: byId(rows.onboardings).map((view) => [view.id, view.status]),
+    attempts: onboardings.map((view) => [view.id, view.status]),
     channels: [...coexistenceById].map(([id, coexistence]) =>
       coexistence
         ? {
@@ -654,29 +719,30 @@ export function progressVersion(
           }
         : { id },
     ),
-    // Named fields rather than the row, so a caller handing over its whole
-    // account row cannot put a column into the page's version that the
-    // endpoint's narrow read does not have.
-    accounts: byId(rows.accounts).map((account) => ({
-      id: account.id,
-      lastSyncedAt: isoInstant(account.lastSyncedAt),
-      lastSyncError: account.lastSyncError,
+    accounts: byId(rows.accounts).map(({ id, lastSyncedAt, lastSyncError }) => ({
+      id,
+      lastSyncedAt,
+      lastSyncError,
     })),
+    credentials: [...rows.credentials.values()]
+      .sort((a, b) => a.accountId.localeCompare(b.accountId))
+      .map((status) => ({
+        accountId: status.accountId,
+        keyId: status.keyId,
+        keyProblem: status.keyProblem,
+        source: status.source,
+        storedAt: status.storedAt,
+        obtainedByName: status.obtainedByName,
+        tokenType: status.tokenType,
+        inspectedAt: status.inspectedAt,
+        expiresAt: status.expiresAt,
+        lastRefusal: status.lastRefusal,
+        badges: credentialBadges(status, now).map((badge) => badge.label),
+      })),
   };
 
+  // A `Date` in `drawn` serialises through `toISOString`.
   return fnv1a(JSON.stringify(drawn));
-}
-
-/**
- * One spelling for an instant, whichever way it was read: a `Date` serialises
- * through `toISOString`, but a string from a raw read keeps Postgres's
- * `2026-10-08 10:00:00+00`, and the same moment hashing two ways is a page that
- * re-renders on every poll.
- */
-function isoInstant(value: Date | string | null): string | null {
-  if (value === null) return null;
-  const at = new Date(value);
-  return Number.isNaN(at.getTime()) ? String(value) : at.toISOString();
 }
 
 function fnv1a(text: string): string {

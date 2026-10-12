@@ -466,15 +466,22 @@ stored credential and calls Graph`.
 
 The page runs one poller, `OnboardingPolling`, for every progress card on it. It
 asks `/api/admin/onboarding-progress` for `progressVersion` (the session lookup
-and three narrow reads, on the route handlers' pool) and calls
-`router.refresh()` only when the answer differs from the version the page was
-rendered with, one question at a time and only while the tab is visible. Until
+and the page's own four readers — attempts, channels, accounts, credentials —
+two at a time, on the route handlers' pool) and calls `router.refresh()` only
+when the answer differs from the version the page was rendered with, one
+question at a time and only while the tab is visible. An answer a render
+overtook while it was out is dropped rather than read as a change. Until
 2026-10-11 each card re-rendered the whole page, about a dozen queries, on its
 own timer at the intervals below. The page's share of that freeze is in
-`docs/PROJECT-STATE.md` §6.91. The version takes in the rows, each WhatsApp
-account's last template sync (`last_synced_at`, `last_sync_error`) and every
-sentence the clock changes, so a stall sentence, a backoff countdown or a
-failing first sync still appears without an onboarding row moving. Every history
+`docs/PROJECT-STATE.md` §6.91. The page and the route pass the same reader
+outputs to `progressVersion`, which does all the picking itself, so the two
+cannot drift apart. It takes in the rows, each WhatsApp account's last template
+sync (`last_synced_at`, `last_sync_error`), each stored credential and its
+badges, and every sentence the clock changes, so a stall sentence or a failing
+first sync still appears without an onboarding row moving. The backoff
+countdown is the exception: it is drawn in the browser from `next_attempt_at`
+against the server's clock, and kept out of the version, which otherwise moved
+on every poll for the last minute and a half of each backoff. Every history
 chunk moves it too, so while a copy is arriving most polls still render; the
 saving is in the stretches where nothing arrives. A poll answered with a
 redirect to `/login` (the session cookie is gone), a 401 or a 403 re-renders the

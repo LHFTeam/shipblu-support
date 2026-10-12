@@ -2,13 +2,17 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { OnboardingView } from '@/lib/whatsapp/onboarding-view';
 
 /**
  * The Channels page's poller, in a DOM: it asks the progress endpoint and
  * refreshes the page only for an answer that means the page is out of date.
  * Each case is a way it went wrong or could: a signed-out poll redirected to
- * /login and swallowed, so the tab polled the login page for ever; and two
- * pollers on one page each refreshing for the same change (§6.91).
+ * /login and swallowed, so the tab polled the login page for ever; two pollers
+ * on one page each refreshing for the same change; and an answer a render
+ * overtook, refreshing the page back towards what it already showed (§6.91).
+ * Then the one part of a progress card that moves without a render: the
+ * backoff's countdown.
  *
  * Rendered through `OnboardingPolling`, the hook's own component — two of them
  * stand for the page's poller and a "Copy again" burst, which run the same
@@ -24,7 +28,7 @@ vi.mock('./actions', () => ({
   retryCoexistenceOnboarding: vi.fn(),
 }));
 
-const { OnboardingPolling } = await import('./coexistence-forms');
+const { OnboardingPolling, OnboardingProgress } = await import('./coexistence-forms');
 
 const fetchMock = vi.fn<(input: string, init?: RequestInit) => Promise<Response>>();
 
@@ -233,6 +237,57 @@ describe('useProgressPolling', () => {
     expect(router.refresh).toHaveBeenCalledTimes(2);
   });
 
+  // A poll that left before a render — an action's revalidation, or the other
+  // poller's refresh — answers with what the rows said before it. Compared
+  // with the version that render brought, that read as a change, and the page
+  // rendered again for "v3 -> v2" while it already showed v3.
+  it('drops an answer a render overtook while it was out', async () => {
+    let answerWith: (response: Response) => void = () => {};
+    fetchMock
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            answerWith = resolve;
+          }),
+      )
+      .mockResolvedValue(versionIs('v3'));
+    const page = mount({ intervalMs: 3_000, version: 'v1' });
+
+    await wait(3_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    page.rerender({ intervalMs: 3_000, version: 'v3' });
+    await act(async () => answerWith(versionIs('v2')));
+    expect(router.refresh).not.toHaveBeenCalled();
+
+    // The next tick asks against v3, and v3 is what the server says.
+    await wait(3_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(router.refresh).not.toHaveBeenCalled();
+  });
+
+  it('drops an answer a render overtook while its body was read', async () => {
+    let bodyWith: (body: unknown) => void = () => {};
+    fetchMock
+      .mockResolvedValueOnce({
+        type: 'basic',
+        status: 200,
+        ok: true,
+        json: () =>
+          new Promise((resolve) => {
+            bodyWith = resolve;
+          }),
+      } as Response)
+      .mockResolvedValue(versionIs('v3'));
+    const page = mount({ intervalMs: 3_000, version: 'v1' });
+
+    await wait(3_000);
+    page.rerender({ intervalMs: 3_000, version: 'v3' });
+    await act(async () => bodyWith({ version: 'v2' }));
+    await wait(3_000);
+
+    expect(router.refresh).not.toHaveBeenCalled();
+  });
+
   it('stops asking when the interval is null', async () => {
     fetchMock.mockResolvedValue(versionIs('v2'));
     mount({ intervalMs: null, version: 'v1' });
@@ -241,5 +296,98 @@ describe('useProgressPolling', () => {
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(router.refresh).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The backoff's countdown, which the card draws for itself: `progressVersion`
+ * leaves it out, so no render arrives to move it. It counts from the server's
+ * clock, carried forward by the browser's — this file's fake browser clock is
+ * days away from the server's `now` below, as a laptop's can be minutes away.
+ */
+describe('OnboardingProgress', () => {
+  const SERVER_NOW = Date.parse('2026-10-08T10:00:00.000Z');
+  const serverAt = (ms: number) => new Date(SERVER_NOW + ms);
+
+  const attempt = (overrides: Partial<OnboardingView> = {}): OnboardingView => ({
+    id: 'o-1',
+    status: 'exchanged',
+    steps: [],
+    attempts: 1,
+    nextAttemptAt: serverAt(30_000).toISOString(),
+    lastTransientError: 'Graph timed out',
+    error: null,
+    channelId: null,
+    phoneNumberId: '109876543210',
+    wabaId: '102030405060',
+    startedAt: serverAt(-60_000).toISOString(),
+    finishedAt: null,
+    startedByLabel: null,
+    ...overrides,
+  });
+
+  function card(onboarding: OnboardingView, now: Date) {
+    return createElement(OnboardingProgress, {
+      onboarding,
+      coexistence: null,
+      channelName: null,
+      accountName: null,
+      credential: null,
+      canConnect: true,
+      connect: { readiness: { ready: false, missing: [] }, groups: [], suggestedGroupId: null },
+      now,
+    });
+  }
+
+  function show(onboarding: OnboardingView, now: Date) {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    act(() => root.render(card(onboarding, now)));
+    return {
+      countdown: () => /retrying (in \d+ (s|min)|now)/.exec(container.textContent ?? '')?.[0],
+      rerender: (next: OnboardingView, nextNow: Date) =>
+        act(() => root.render(card(next, nextNow))),
+    };
+  }
+
+  it('counts a pending retry down once a second, from the server’s clock', async () => {
+    expect(Math.abs(Date.now() - SERVER_NOW)).toBeGreaterThan(24 * 60 * 60 * 1000);
+    const shown = show(attempt(), serverAt(0));
+    expect(shown.countdown()).toBe('retrying in 30 s');
+
+    await wait(1_000);
+    expect(shown.countdown()).toBe('retrying in 29 s');
+    await wait(10_000);
+    expect(shown.countdown()).toBe('retrying in 19 s');
+    await wait(19_000);
+    expect(shown.countdown()).toBe('retrying now');
+
+    // Due: nothing left to count, so nothing ticks until the next render.
+    await wait(2_000);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('starts again from the clock each render brings', async () => {
+    const shown = show(attempt(), serverAt(0));
+    await wait(5_000);
+    expect(shown.countdown()).toBe('retrying in 25 s');
+
+    // The retry failed again and was put off: the render brings the server's
+    // clock and the new instant, and the count starts from those.
+    shown.rerender(
+      attempt({ attempts: 2, nextAttemptAt: serverAt(100_000).toISOString() }),
+      serverAt(60_000),
+    );
+    expect(shown.countdown()).toBe('retrying in 40 s');
+    await wait(3_000);
+    expect(shown.countdown()).toBe('retrying in 37 s');
+  });
+
+  it('runs no clock when nothing is counting down', () => {
+    show(attempt({ lastTransientError: null, nextAttemptAt: null }), serverAt(0));
+
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

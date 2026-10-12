@@ -1,13 +1,10 @@
 import { desc, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
-import {
-  channels,
-  ONBOARDING_STEPS,
-  type OnboardingStatus,
-  whatsappAccounts,
-  whatsappOnboardings,
-} from '@/db/schema';
+import { ONBOARDING_STEPS, type OnboardingStatus, whatsappOnboardings } from '@/db/schema';
+import { listAccountsForAdmin, listChannelsForAdmin } from '@/lib/admin/settings';
+import { allLimited } from '@/lib/concurrency';
 import { canonicalUuid } from '@/lib/http/uuid';
+import { credentialStatuses } from './credentials';
 import { type OnboardingView, progressVersion, toOnboardingView } from './onboarding-view';
 
 /**
@@ -56,34 +53,29 @@ export async function listLatestOnboardings(): Promise<OnboardingView[]> {
 }
 
 /**
- * What the Channels page's onboarding parts and its accounts' template sync
- * are drawn from, as one short string (`progressVersion`): three narrow reads,
- * where a render of the page is about a dozen. The page polls this while an
- * attempt is moving and renders only when it changes.
+ * The Channels page's `progressVersion`, read again: the page polls this while
+ * an attempt is moving and renders only when it changes.
  *
- * The same three inputs the page hands `progressVersion` — every number's
- * latest attempt, the `whatsapp` channels' configuration, which is where their
- * coexistence state lives, and each account's last sync — so a version the
- * page computed and one read here differ only when something did. The account
- * read names its three columns rather than reusing `listAccountsForAdmin`: the
- * poll needs the sync's outcome, not the row the editor draws.
+ * Read through the page's own readers — the four of its seven that the version
+ * covers — and handed to `progressVersion` as they come back, as the page hands
+ * it what the same four returned to it. Narrow reads of its own here, beside
+ * the page's projection of the readers there, agreed only while the two
+ * happened to select the same thing; a reader that reshaped `config`, or
+ * listed fewer accounts, would have made every poll a render.
+ *
+ * Four queries over tables of a few rows each — the channels, the business
+ * accounts, their stored credentials, and every number's latest attempt — two
+ * at a time, since a poll is in no hurry and the route handlers' pool it runs
+ * on is the webhooks' too. A render of the page is about a dozen.
  */
 export async function readProgressVersion(now: Date): Promise<string> {
-  const [onboardings, whatsappChannels, accounts] = await Promise.all([
-    listLatestOnboardings(),
-    db
-      .select({ id: channels.id, config: channels.config })
-      .from(channels)
-      .where(eq(channels.type, 'whatsapp')),
-    db
-      .select({
-        id: whatsappAccounts.id,
-        lastSyncedAt: whatsappAccounts.lastSyncedAt,
-        lastSyncError: whatsappAccounts.lastSyncError,
-      })
-      .from(whatsappAccounts),
+  const [onboardings, channels, accounts, credentials] = await allLimited(2, [
+    () => listLatestOnboardings(),
+    () => listChannelsForAdmin(),
+    () => listAccountsForAdmin(),
+    () => credentialStatuses(),
   ]);
-  return progressVersion({ onboardings, channels: whatsappChannels, accounts }, now);
+  return progressVersion({ onboardings, channels, accounts, credentials }, now);
 }
 
 /**

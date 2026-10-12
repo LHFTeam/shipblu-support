@@ -5758,16 +5758,23 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
       `lib/concurrency.ts`).
     - While an onboarding moves, the page asks `/api/admin/onboarding-progress`
       for `progressVersion` and re-renders only when the answer differs. That
-      is the session lookup and three narrow reads, on the route handlers'
-      pool beside the webhooks, where a render is about a dozen queries. Each
+      is the session lookup and the page's own four readers, two at a time,
+      on the route handlers' pool beside the webhooks, where a render is about
+      a dozen queries. The page and the route hand `progressVersion` the same
+      reader outputs, and it does all the picking, so they cannot drift apart. Each
       progress card used to render the whole page on its own timer: every 3 s
       while its job was stepping, which takes minutes, and every 15 s while a
       history or contacts copy arrived, which takes hours. Every history chunk
       still moves the version, so during a copy most polls still render; the
       saving is in the stretches where nothing arrives.
-    - The version takes in the rows, each account's last template sync, and
-      every sentence the clock changes, so the stall sentence, the backoff
-      countdown, Retry and a failing first sync still appear on time.
+    - The version takes in the rows, each account's last template sync, each
+      stored credential and its badges, and every sentence the clock changes,
+      so the stall sentence, Retry and a failing first sync still appear on
+      time. The backoff countdown is drawn in the browser from
+      `next_attempt_at` instead, against the server's clock: in the version it
+      re-rendered the page on every poll of a backoff's last 90 s.
+    - A poll answer a render overtook while it was out is dropped, rather than
+      read as a change back to an older version.
     - One poller for the page, at the shortest interval any card asks for. A
       "Copy again" button runs a minute's burst of its own beside it, and the
       two ask for one refresh between them for a change both see.

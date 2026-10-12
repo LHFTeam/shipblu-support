@@ -49,6 +49,7 @@ import {
 import {
   connectedFollowUps,
   describeOnboarding,
+  lineText,
   type OnboardingView,
   phoneRepliesUnconfirmed,
   recoveryFor,
@@ -801,14 +802,20 @@ function firstToAsk(reason: string, at: number): boolean {
  * shows of an onboarding has moved, and re-renders the page only when it has.
  * Null stops it.
  *
- * The question is `progressVersion` — the session lookup and three narrow
- * reads, on the route handlers' pool — compared with the version the page was
- * rendered with. This used to be the render itself, about a dozen queries,
- * once per progress card: every three seconds while the job was stepping,
- * which takes minutes, and every fifteen while a history or contacts copy
- * arrived, which takes hours (§6.91). One question in flight at a time, none
- * while the render it set off is still running, and one at once when the tab
- * comes back into view.
+ * The question is `progressVersion` — the session lookup and four reads of a
+ * few rows each, on the route handlers' pool — compared with the version the
+ * page was rendered with. This used to be the render itself, about a dozen
+ * queries, once per progress card: every three seconds while the job was
+ * stepping, which takes minutes, and every fifteen while a history or contacts
+ * copy arrived, which takes hours (§6.91). One question in flight at a time,
+ * none while the render it set off is still running, and one at once when the
+ * tab comes back into view.
+ *
+ * An answer counts only against the version it was asked against. A poll that
+ * left before a render — an action's revalidation, or the other poller's
+ * refresh — and answers after it carries what the rows said before that
+ * render: compared with the version the render brought, it reads as a change,
+ * and refreshed the page for "C -> B" when the page already showed C.
  *
  * A refresh is asked for once per change across every poller on the page
  * (`firstToAsk`). A poll the server would not answer — redirected to /login,
@@ -848,6 +855,7 @@ function useProgressPolling(intervalMs: number | null, version: string) {
     const ask = async () => {
       if (asking || pendingRef.current || document.visibilityState !== 'visible') return;
       asking = true;
+      const askedAgainst = versionRef.current;
       try {
         // Not followed: `proxy.ts` answers a request with no session cookie —
         // signed out in another tab, or the cookie's age run out — with a
@@ -855,6 +863,10 @@ function useProgressPolling(intervalMs: number | null, version: string) {
         // the login page's 200, whose HTML `json()` threw on, so the tab sat
         // on a stale page polling /login for as long as it stayed open.
         const response = await fetch(PROGRESS_URL, { cache: 'no-store', redirect: 'manual' });
+        // A render landed while this was out, and it is newer than the answer:
+        // the next tick asks against what it brought. That render also ran the
+        // page's own permission check, so a refusal is no news either.
+        if (versionRef.current !== askedAgainst) return;
         if (
           response.type === 'opaqueredirect' ||
           response.status === 401 ||
@@ -864,10 +876,12 @@ function useProgressPolling(intervalMs: number | null, version: string) {
         }
         if (!response.ok) return;
         const { version: latest } = (await response.json()) as { version?: unknown };
+        // Asked again after the body: a render can land while it is read.
+        if (versionRef.current !== askedAgainst) return;
         // Filed under the change rather than the new version alone, so a page
         // that moved away and back is not refused the second refresh.
-        if (typeof latest === 'string' && latest !== versionRef.current) {
-          rerender(`${versionRef.current} -> ${latest}`);
+        if (typeof latest === 'string' && latest !== askedAgainst) {
+          rerender(`${askedAgainst} -> ${latest}`);
         }
       } catch {
         // A dropped connection: the next tick asks again.
@@ -910,6 +924,40 @@ export function OnboardingPolling({
 const STEP_GLYPH = { pending: '◌', running: '…', done: '✓', failed: '✗' } as const;
 
 /**
+ * The server's clock carried forward in the browser, once a second, until
+ * `until` — for the backoff's countdown, which the card draws here because
+ * `progressVersion` leaves it out (`OnboardingLine`). Stands still when there
+ * is nothing to count down to, and once the instant is reached.
+ *
+ * Anchored to the `now` the page was rendered with rather than read off the
+ * browser's clock: the instant counted down to is the server's, and a laptop's
+ * clock can be minutes off it. What moves is the time the browser has seen
+ * pass since that render, added to the server's reading — the offset between
+ * the two clocks is taken once, as the render carrying `now` lands, and taken
+ * again with every render after it.
+ */
+function useServerClock(now: Date, until: string | null): Date {
+  const renderedAt = now.getTime();
+  const untilMs = until === null ? NaN : Date.parse(until);
+  // Which render a tick belongs to travels with it, so a tick from before the
+  // latest render is not drawn over the newer reading that render brought.
+  const [tick, setTick] = useState({ renderedAt, at: renderedAt });
+
+  useEffect(() => {
+    if (!Number.isFinite(untilMs) || untilMs <= renderedAt) return;
+    const offset = renderedAt - Date.now();
+    const timer = setInterval(() => {
+      const at = Date.now() + offset;
+      setTick({ renderedAt, at });
+      if (at >= untilMs) clearInterval(timer);
+    }, 1_000);
+    return () => clearInterval(timer);
+  }, [renderedAt, untilMs]);
+
+  return new Date(tick.renderedAt === renderedAt ? tick.at : renderedAt);
+}
+
+/**
  * One attempt, as the page polls it: each step as it lands, the queue's
  * backoff, the stall sentence, the recovery, and the summary once it connected.
  *
@@ -943,7 +991,10 @@ export function OnboardingProgress({
    * a call site that leaves it out.
    */
   connect: { readiness: ConnectReadiness; groups: Choice[]; suggestedGroupId: string | null };
-  /** The server's clock at render, so the page and this card agree on the sentences. */
+  /**
+   * The server's clock at render, so the page and this card agree on the
+   * sentences. The backoff's countdown carries it forward in the browser.
+   */
   now: Date;
 }) {
   // Retry is off while the sign-in beside it waits on Meta: a retry that starts
@@ -953,6 +1004,10 @@ export function OnboardingProgress({
   const [signingIn, setSigningIn] = useState(false);
 
   const lines = describeOnboarding(onboarding, now);
+  // Only the backoff's countdown reads the browser's clock; everything else on
+  // the card, which lines it shows included, is the render's.
+  const backoff = lines.find((line) => line.kind === 'backoff');
+  const countdownNow = useServerClock(now, backoff?.retryAt ?? null);
   const recovery = recoveryFor(onboarding, now, credential !== null);
   const number = coexistence?.displayPhoneNumber ?? onboarding.phoneNumberId;
   const title =
@@ -1010,8 +1065,11 @@ export function OnboardingProgress({
       </ol>
 
       {lines.map((line) => (
-        <p key={line} className="text-xs text-amber-600">
-          {line}
+        <p
+          key={line.kind === 'sentence' ? line.text : `backoff ${line.error}`}
+          className="text-xs text-amber-600"
+        >
+          {lineText(line, countdownNow)}
         </p>
       ))}
 

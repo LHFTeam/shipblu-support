@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { ONBOARDING_STEPS, type OnboardingStepRecord } from '@/db/schema';
 import { parseCoexistence } from './coexistence';
+import { type CredentialStatus, EXPIRY_WARNING_MS } from './credential-status';
 import {
   connectedFollowUps,
   describeOnboarding,
   isOnboardingShown,
+  lineText,
   LIVE_ATTEMPT_MS,
   NUMBER_NOT_ON_ACCOUNT,
   pagePollIntervalMs,
@@ -13,6 +15,7 @@ import {
   type OnboardingView,
   phoneRepliesUnconfirmed,
   pollIntervalMs,
+  type ProgressRows,
   recoveryFor,
   retryable,
   SHOW_CONNECTED_FOR_MS,
@@ -144,6 +147,10 @@ describe('toOnboardingView', () => {
   });
 });
 
+/** The lines as the card prints them, with the countdown read at the same moment. */
+const printed = (subject: OnboardingView, now: Date) =>
+  describeOnboarding(subject, now).map((line) => lineText(line, now));
+
 describe('describeOnboarding', () => {
   it('reads the queue’s backoff off the row instead of showing a spinner', () => {
     const backing = view({
@@ -152,27 +159,50 @@ describe('describeOnboarding', () => {
       nextAttemptAt: at(130_000),
       attempts: 1,
     });
-    expect(describeOnboarding(backing, at(10_000))).toEqual([
+    expect(printed(backing, at(10_000))).toEqual([
       'Meta answered 503: Service unavailable on subscribe — retrying in 2 min',
     ]);
-    expect(describeOnboarding(backing, at(100_000))).toEqual([
+    expect(printed(backing, at(100_000))).toEqual([
       'Meta answered 503: Service unavailable on subscribe — retrying in 30 s',
     ]);
-    expect(describeOnboarding(backing, at(200_000))[0]).toMatch(/retrying now$/);
+    expect(printed(backing, at(200_000))[0]).toMatch(/retrying now$/);
+  });
+
+  // The countdown is the one part of a line that moves with every second, so
+  // the line carries the instant and leaves the counting to whoever draws it:
+  // the card, on a clock of its own, and not the version the page polls.
+  it('hands over the backoff as its error and retry instant, the countdown left out', () => {
+    const backing = view({
+      steps: { number: ok(1_000) },
+      lastTransientError: 'Graph timed out',
+      nextAttemptAt: at(130_000),
+    });
+
+    expect(describeOnboarding(backing, at(10_000))).toEqual([
+      { kind: 'backoff', error: 'Graph timed out', retryAt: iso(130_000) },
+    ]);
+    expect(describeOnboarding(backing, at(100_000))).toEqual(
+      describeOnboarding(backing, at(10_000)),
+    );
+    // Read against a later clock, the same line counts down.
+    const [line] = describeOnboarding(backing, at(10_000));
+    expect(lineText(line!, at(125_000))).toBe('Graph timed out — retrying in 5 s');
+    // No instant to count to is a retry the queue may already be running.
+    expect(lineText({ kind: 'backoff', error: 'Graph timed out', retryAt: null }, at(0))).toBe(
+      'Graph timed out — retrying now',
+    );
   });
 
   it('says a worker has not picked the attempt up after a minute of nothing', () => {
-    expect(describeOnboarding(view(), at(STALL_AFTER_MS))).toEqual([]);
-    const [stall] = describeOnboarding(view(), at(STALL_AFTER_MS + 1));
+    expect(printed(view(), at(STALL_AFTER_MS))).toEqual([]);
+    const [stall] = printed(view(), at(STALL_AFTER_MS + 1));
     expect(stall).toMatch(/^No worker has picked this up yet\./);
     expect(stall).toMatch(/Retry connection appears on this card/);
     // A job may not exist at all — its enqueue can fail after the row commits —
     // so the card must not promise the attempt carries on by itself.
     expect(stall).not.toMatch(/will continue/);
     // A step that landed since the start is a worker at work, however slow.
-    expect(
-      describeOnboarding(view({ steps: { number: ok(5_000) } }), at(STALL_AFTER_MS + 1)),
-    ).toEqual([]);
+    expect(printed(view({ steps: { number: ok(5_000) } }), at(STALL_AFTER_MS + 1))).toEqual([]);
   });
 
   /** Past the live window with nothing scheduled, the card says what to press. */
@@ -181,10 +211,8 @@ describe('describeOnboarding', () => {
 
     // Moved, then stopped: no backoff line, no stall line, but no job either.
     const moved = view({ steps: { number: ok(5_000) } });
-    expect(describeOnboarding(moved, at(LIVE_ATTEMPT_MS))).toEqual([]);
-    expect(describeOnboarding(moved, at(LIVE_ATTEMPT_MS + 1))).toEqual([
-      expect.stringMatching(overdue),
-    ]);
+    expect(printed(moved, at(LIVE_ATTEMPT_MS))).toEqual([]);
+    expect(printed(moved, at(LIVE_ATTEMPT_MS + 1))).toEqual([expect.stringMatching(overdue)]);
 
     // A retry that fell due long ago: "retrying now" would have been printed for ever.
     const backedOff = view({
@@ -192,7 +220,7 @@ describe('describeOnboarding', () => {
       lastTransientError: 'Meta answered 503: Service unavailable on subscribe',
       nextAttemptAt: at(130_000),
     });
-    expect(describeOnboarding(backedOff, at(LIVE_ATTEMPT_MS + 1))).toEqual([
+    expect(printed(backedOff, at(LIVE_ATTEMPT_MS + 1))).toEqual([
       'The last try ended with: Meta answered 503: Service unavailable on subscribe.',
       expect.stringMatching(overdue),
     ]);
@@ -203,7 +231,7 @@ describe('describeOnboarding', () => {
       lastTransientError: 'Meta answered 503: Service unavailable on subscribe',
       nextAttemptAt: at(LIVE_ATTEMPT_MS + 120_000),
     });
-    expect(describeOnboarding(scheduled, at(LIVE_ATTEMPT_MS + 1))).toEqual([
+    expect(printed(scheduled, at(LIVE_ATTEMPT_MS + 1))).toEqual([
       'Meta answered 503: Service unavailable on subscribe — retrying in 2 min',
     ]);
   });
@@ -214,13 +242,13 @@ describe('describeOnboarding', () => {
       startedAt: at(600_000),
       steps: { number: ok(1_000), subscribe: failed(2_000, 'Meta refused') },
     });
-    expect(describeOnboarding(retried, at(600_000 + STALL_AFTER_MS + 1))).toHaveLength(1);
+    expect(printed(retried, at(600_000 + STALL_AFTER_MS + 1))).toHaveLength(1);
   });
 
   it('says nothing once the attempt is final', () => {
-    expect(describeOnboarding(view({ status: 'failed', error: 'x' }), at(999_999))).toEqual([]);
+    expect(printed(view({ status: 'failed', error: 'x' }), at(999_999))).toEqual([]);
     expect(
-      describeOnboarding(
+      printed(
         view({ status: 'connected', lastTransientError: 'stale', nextAttemptAt: at(1) }),
         at(999_999),
       ),
@@ -629,36 +657,68 @@ describe('progressVersion', () => {
   });
   const channel = (id: string, syncs: Record<string, unknown> = {}) => ({
     id,
+    type: 'whatsapp',
     config: channelConfig(syncs),
   });
-  type Account = { id: string; lastSyncedAt: Date | string | null; lastSyncError: string | null };
+  type Account = { id: string; lastSyncedAt: Date | null; lastSyncError: string | null };
   const account = (id: string, overrides: Partial<Account> = {}): Account => ({
     id,
     lastSyncedAt: null,
     lastSyncError: null,
     ...overrides,
   });
+  /** A credential as `credentialStatuses()` reads it: stored at the start, never expiring. */
+  const credential = (
+    accountId: string,
+    overrides: Partial<CredentialStatus> = {},
+  ): CredentialStatus => ({
+    accountId,
+    keyId: '0a1b2c3d',
+    keyState: 'current',
+    keyProblem: null,
+    source: 'embedded_signup',
+    tokenType: 'SYSTEM_USER',
+    scopes: ['whatsapp_business_management', 'whatsapp_business_messaging'],
+    businessId: '555',
+    issuedAt: STARTED,
+    expiresAt: null,
+    dataAccessExpiresAt: null,
+    inspectedAt: STARTED,
+    obtainedByAgentId: 'agent-1',
+    obtainedByName: 'Mona Admin',
+    lastVerifiedAt: null,
+    lastRefusedAt: null,
+    lastRefusal: null,
+    storedAt: STARTED,
+    ...overrides,
+  });
+  const byAccount = (...statuses: CredentialStatus[]) =>
+    new Map(statuses.map((status) => [status.accountId, status]));
   /** The version of these rows, with whatever the case does not name left empty. */
-  const version = (
-    rows: {
-      onboardings?: OnboardingView[];
-      channels?: ReturnType<typeof channel>[];
-      accounts?: Account[];
-    },
-    now: Date,
-  ) => progressVersion({ onboardings: [], channels: [], accounts: [], ...rows }, now);
+  const version = (rows: Partial<ProgressRows>, now: Date) =>
+    progressVersion(
+      { onboardings: [], channels: [], accounts: [], credentials: new Map(), ...rows },
+      now,
+    );
 
   it('is the same for the same rows at the same moment, read in any order', () => {
     const onboardings = [view({ id: 'o-1' }), view({ id: 'o-2', phoneNumberId: '1098' })];
     const channels = [channel('c-1'), channel('c-2')];
     const accounts = [account('a-1'), account('a-2', { lastSyncError: 'expired' })];
+    const credentials = [credential('a-1'), credential('a-2', { tokenType: 'USER' })];
 
-    expect(version({ onboardings, channels, accounts }, at(5_000))).toBe(
+    expect(
+      version(
+        { onboardings, channels, accounts, credentials: byAccount(...credentials) },
+        at(5_000),
+      ),
+    ).toBe(
       version(
         {
           onboardings: [...onboardings].reverse(),
           channels: [...channels].reverse(),
           accounts: [...accounts].reverse(),
+          credentials: byAccount(...[...credentials].reverse()),
         },
         at(5_000),
       ),
@@ -695,6 +755,17 @@ describe('progressVersion', () => {
     );
   });
 
+  // The page hands over `listChannelsForAdmin()` whole; only a WhatsApp
+  // number's row draws anything this covers.
+  it('reads only the WhatsApp channels of the list it is handed', () => {
+    const whatsapp = [channel('c-1')];
+    const email = { id: 'c-mail', type: 'email', config: { address: 'help@example.com' } };
+
+    expect(version({ channels: [...whatsapp, email] }, at(5_000))).toBe(
+      version({ channels: whatsapp }, at(5_000)),
+    );
+  });
+
   it('moves when the clock alone changes what the card says, and not otherwise', () => {
     const onboardings = [view()];
 
@@ -707,9 +778,10 @@ describe('progressVersion', () => {
     );
   });
 
-  // Deliberate, and the one place a poll re-renders the page with nothing in
-  // the rows moved: the countdown is what the card shows, from the server's clock.
-  it('moves with every second of the last ninety of a backoff, and by the minute before', () => {
+  // The card counts the backoff down on its own clock. In the version, every
+  // poll in a backoff's last ninety seconds, and every minute before, was a
+  // full render of the page with nothing in the rows moved.
+  it('stands still while a retry is pending and nothing else moves', () => {
     const onboardings = [
       view({
         attempts: 2,
@@ -719,12 +791,38 @@ describe('progressVersion', () => {
       }),
     ];
 
-    expect(version({ onboardings }, at(300_000 - 60_000))).not.toBe(
-      version({ onboardings }, at(300_000 - 45_000)),
-    );
-    expect(version({ onboardings }, at(300_000 - 200_000))).toBe(
-      version({ onboardings }, at(300_000 - 195_000)),
-    );
+    // Two polls five seconds apart: "in 60 s", then "in 55 s" on the card.
+    expect(version({ onboardings }, at(240_000))).toBe(version({ onboardings }, at(245_000)));
+    // A minute apart, further out: "in 3 min", then "in 2 min".
+    expect(version({ onboardings }, at(100_000))).toBe(version({ onboardings }, at(160_000)));
+  });
+
+  it('moves when the retry itself changes: scheduled, rescheduled, due soon, lapsed, cleared', () => {
+    const steps = { number: ok(1_000) };
+    const running = view({ steps });
+    const scheduled = view({
+      steps,
+      attempts: 1,
+      lastTransientError: 'Graph timed out',
+      nextAttemptAt: at(300_000),
+    });
+    const rescheduled = view({
+      steps,
+      attempts: 2,
+      lastTransientError: 'Graph timed out',
+      nextAttemptAt: at(400_000),
+    });
+    const of = (subject: OnboardingView, now: Date) => version({ onboardings: [subject] }, now);
+
+    // Scheduled where nothing was, scheduled again after another failure, and
+    // cleared — `finish` empties both columns — back to the running card.
+    expect(
+      new Set([running, scheduled, rescheduled].map((subject) => of(subject, at(250_000)))).size,
+    ).toBe(3);
+    // Fifteen seconds from due, the card starts asking every three.
+    expect(of(scheduled, at(280_000))).not.toBe(of(scheduled, at(290_000)));
+    // Long past due with nothing run, past the live window: Retry appears.
+    expect(of(scheduled, at(LIVE_ATTEMPT_MS + 1))).not.toBe(of(scheduled, at(LIVE_ATTEMPT_MS)));
   });
 
   // The onboarding only queues the template sync; its answer lands on the
@@ -741,23 +839,76 @@ describe('progressVersion', () => {
     expect(new Set([never, synced, failing]).size).toBe(3);
   });
 
-  it('hashes an instant the same whether it was read as a Date or as a string', () => {
-    const asDate = version({ accounts: [account('a-1', { lastSyncedAt: at(4_000) })] }, at(5_000));
-
-    for (const spelling of [iso(4_000), '2026-10-08 10:00:04+00']) {
-      expect(version({ accounts: [account('a-1', { lastSyncedAt: spelling })] }, at(5_000))).toBe(
-        asDate,
-      );
-    }
-  });
-
-  it('takes only the sync fields of an account, whatever else the caller hands over', () => {
+  // The page hands over `listAccountsForAdmin()` whole. A rename is an
+  // action's, and the action re-renders the page itself.
+  it('takes only the sync fields of an account, whatever else the row carries', () => {
     const narrow = account('a-1', { lastSyncedAt: at(4_000) });
     const whole = { ...narrow, name: 'ShipBlu', wabaId: '102030405060', isActive: true };
 
     expect(version({ accounts: [whole] }, at(5_000))).toBe(
       version({ accounts: [narrow] }, at(5_000)),
     );
+  });
+
+  // The account card and the connected summary both draw it: "credential
+  // stored", its expiry, and the badges that say whether it still works.
+  it('moves when a credential is stored, refused, or replaced', () => {
+    const none = version({}, at(5_000));
+    const stored = version({ credentials: byAccount(credential('a-1')) }, at(5_000));
+    const refused = version(
+      {
+        credentials: byAccount(
+          credential('a-1', {
+            lastRefusedAt: at(4_000),
+            lastRefusal: '(#190) Error validating access token',
+          }),
+        ),
+      },
+      at(5_000),
+    );
+    const replaced = version(
+      { credentials: byAccount(credential('a-1', { storedAt: at(4_000), keyId: '9f8e7d6c' })) },
+      at(5_000),
+    );
+
+    expect(new Set([none, stored, refused, replaced]).size).toBe(4);
+  });
+
+  it('moves when the clock changes what a credential badge says, and not otherwise', () => {
+    const DAY = 24 * 60 * 60 * 1000;
+    const credentials = byAccount(credential('a-1', { expiresAt: at(10 * DAY) }));
+    const of = (now: Date) => version({ credentials }, now);
+
+    // Eight days out: no badge yet. Seven: "expires in 7 days".
+    expect(of(at(2 * DAY))).not.toBe(of(at(10 * DAY - EXPIRY_WARNING_MS)));
+    // Within one day's count: the same badge, the same version.
+    expect(of(at(4 * DAY))).toBe(of(at(4 * DAY + 60 * 60 * 1000)));
+    // The next day's count, and then "expired".
+    expect(of(at(4 * DAY))).not.toBe(of(at(5 * DAY)));
+    expect(of(at(10 * DAY - 1))).not.toBe(of(at(10 * DAY)));
+  });
+
+  // Every successful hourly sync stamps `last_verified_at`, and every refused
+  // send `last_refused_at`; the page shows neither instant, only whether the
+  // credential stands refused — which a badge carries.
+  it('does not move when a credential is only stamped again by a sync or a send', () => {
+    const verified = (stamp: Date) =>
+      version({ credentials: byAccount(credential('a-1', { lastVerifiedAt: stamp })) }, at(9_000));
+    expect(verified(at(4_000))).toBe(verified(at(8_000)));
+
+    const refused = (stamp: Date) =>
+      version(
+        {
+          credentials: byAccount(
+            credential('a-1', {
+              lastRefusedAt: stamp,
+              lastRefusal: '(#190) Error validating access token',
+            }),
+          ),
+        },
+        at(9_000),
+      );
+    expect(refused(at(4_000))).toBe(refused(at(8_000)));
   });
 });
 

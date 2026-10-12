@@ -140,22 +140,11 @@ export default async function ChannelsPage() {
 
   // What the page asks `/api/admin/onboarding-progress` about while anything
   // shown is moving, and how often. It renders again only when the answer
-  // differs from this one: the same function over the same three reads, so the
-  // two agree on what counts as a change. The accounts' sync outcome is in it
-  // because the onboarding only queues the template sync, whose answer lands
-  // on the account row after the attempt has stopped moving.
+  // differs from this one. The rows go in as the readers returned them: the
+  // endpoint calls the same four readers and hands them over the same way, so
+  // what counts as a change is decided in one place (`progressVersion`).
   const progressVersionNow = progressVersion(
-    {
-      onboardings,
-      channels: channelList
-        .filter((channel) => channel.type === 'whatsapp')
-        .map(({ id, config }) => ({ id, config })),
-      accounts: accountList.map(({ id, lastSyncedAt, lastSyncError }) => ({
-        id,
-        lastSyncedAt,
-        lastSyncError,
-      })),
-    },
+    { onboardings, channels: channelList, accounts: accountList, credentials },
     now,
   );
   const pollMs = pagePollIntervalMs(

@@ -13,9 +13,12 @@ export const dynamic = 'force-dynamic';
  * dozen queries, and each progress card used to run one every three seconds
  * while its job was stepping (minutes) and every fifteen while a history or
  * contacts copy arrived (hours, for six months of history). This is the session
- * lookup and three narrow reads, and the page renders only when the answer
- * changes — which, while history chunks are still arriving, is still most
- * polls: the saving is in the stretches where nothing moves (§6.91).
+ * lookup and four reads — the page's own readers of the onboardings, the
+ * channels, the business accounts and their stored credentials, each a table
+ * of a few rows, two at a time (`readProgressVersion`) — and the page renders
+ * only when the answer changes. While history chunks are still arriving that
+ * is still most polls; the saving is in the stretches where nothing moves, a
+ * pending retry's countdown among them (§6.91).
  *
  * A route handler, so those reads queue for the route handlers' places beside
  * the webhooks rather than the pages'. Each poller on a page has at most one
