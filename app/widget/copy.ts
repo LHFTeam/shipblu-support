@@ -53,7 +53,7 @@ export const COPY = {
     opensAt: 'نرد ابتداءً من',
     placeholder: 'اكتب رسالتك…',
     send: 'إرسال',
-    starter: 'اسألنا أي شيء عن شحناتك.',
+    starter: 'نحن هنا لأي سؤال عن شحنات حضرتك.',
     suggested: 'قد تساعدك هذه المقالات',
     automated: 'رد آلي',
 
@@ -71,7 +71,7 @@ export const COPY = {
     phonePlaceholder: 'رقم الهاتف',
     detailsHint: 'بريد إلكتروني أو رقم هاتف — أيهما يكفي.',
     detailsSaved: 'شكرًا — سنعاود التواصل مع حضرتك.',
-    detailsMissing: 'اترك بريدًا إلكترونيًا أو رقم هاتف حتى نتمكن من الرد.',
+    detailsMissing: 'البريد الإلكتروني أو رقم الهاتف مطلوب حتى نتمكن من الرد.',
     detailsInvalid: 'هذا لا يبدو بريدًا إلكترونيًا أو رقم هاتف صحيحًا.',
   },
 } as const;
