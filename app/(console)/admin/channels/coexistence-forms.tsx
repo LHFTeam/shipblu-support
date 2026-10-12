@@ -1180,7 +1180,8 @@ function ConnectedSummary({
       {phoneRepliesUnconfirmed(onboarding) ? null : (
         <p>
           Replies typed on the phone appear on tickets as &ldquo;WhatsApp Business app&rdquo;.
-          Console replies go out over Cloud API.
+          WhatsApp customers are not answered from the console, so the phone is where this number is
+          replied to.
         </p>
       )}
       {/* Pointed at rather than repeated: the step above already prints the

@@ -70,7 +70,7 @@ async function signedIn(
 }
 
 async function ticket(
-  channel: 'facebook' | 'email' | 'whatsapp_bot' = 'facebook',
+  channel: 'facebook' | 'email' | 'whatsapp' | 'whatsapp_bot' = 'facebook',
   values: Partial<typeof conversations.$inferInsert> = {},
 ) {
   const [contact] = await db.insert(contacts).values({ name: 'Amira' }).returning();
@@ -401,6 +401,20 @@ describe('suggestFor', () => {
     const agent = await signedIn();
     await switchOn(agent);
     const id = await ticket('whatsapp_bot');
+    await say(id, 'فين الشحنة');
+    await canned();
+    const fetch = jev('r1');
+
+    expect(await suggestFor(agent, id)).toEqual({ state: 'none' });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('asks nothing about a channel not answered from the console', async () => {
+    // WhatsApp is worked here but replied to elsewhere, so there is no reply
+    // box to suggest into and no reason to send the history to Jev.
+    const agent = await signedIn();
+    await switchOn(agent);
+    const id = await ticket('whatsapp');
     await say(id, 'فين الشحنة');
     await canned();
     const fetch = jev('r1');

@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { SessionAgent } from '@/lib/auth/session';
 import {
+  answeredFromConsole,
   canSeeChannel,
+  consoleReplyNotice,
+  consoleReplyReason,
   CONVERSATION_CHANNELS,
   hasWrittenSubject,
   hiddenChannels,
@@ -44,6 +47,47 @@ describe('read-only channels', () => {
 
   it('lists itself for excluding from a query', () => {
     expect(readOnlyChannels()).toEqual(['whatsapp_bot']);
+  });
+});
+
+describe('channels not answered from the console', () => {
+  it('covers WhatsApp and no channel the team replies on', () => {
+    expect(consoleReplyReason('whatsapp')).toMatch(/whatsapp/i);
+    for (const channel of ['email', 'webchat', 'facebook', 'instagram', 'portal', 'api']) {
+      expect(consoleReplyReason(channel)).toBeNull();
+    }
+  });
+
+  it('is separate from read-only, so WhatsApp stays in the queue and the figures', () => {
+    // Folding WhatsApp into read-only would drop it from the inbox, the SLA
+    // sweep and the reports; only the composer's customer-facing half goes.
+    expect(isReadOnlyChannel('whatsapp')).toBe(false);
+    expect(readOnlyChannels()).not.toContain('whatsapp');
+  });
+
+  it('answers from the console exactly where neither rule refuses', () => {
+    // The one predicate the page, the suggestion route and the window badges
+    // ask; it must agree with both refusals for every channel there is.
+    for (const channel of CONVERSATION_CHANNELS) {
+      expect(answeredFromConsole(channel)).toBe(
+        !readOnlyReason(channel) && !consoleReplyReason(channel),
+      );
+    }
+    expect(answeredFromConsole('email')).toBe(true);
+    expect(answeredFromConsole('whatsapp')).toBe(false);
+    expect(answeredFromConsole('whatsapp_bot')).toBe(false);
+  });
+
+  it('gives the notice and the refusal for the same channels', () => {
+    for (const channel of CONVERSATION_CHANNELS) {
+      expect(consoleReplyNotice(channel) === null).toBe(consoleReplyReason(channel) === null);
+    }
+    // Not a prototype key read off the table as if it were a channel.
+    expect(consoleReplyReason('toString')).toBeNull();
+  });
+
+  it('says what the agent can still do, since a stale reply box is refused with it', () => {
+    expect(consoleReplyReason('whatsapp')).toMatch(/private notes/);
   });
 });
 

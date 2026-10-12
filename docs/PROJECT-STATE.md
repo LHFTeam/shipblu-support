@@ -1451,8 +1451,10 @@ shipblu.com` still serves Freshdesk, so each one took a reader out of this
   help centre and into the old portal. They are now `/{locale}/a/{slug}`
   (§6.50). The redirects still matter for inbound traffic; nothing we publish
   depends on them any more.
-- **A WhatsApp template send outside the 24-hour window** — the one path the
-  end-to-end test in §7 could not cover.
+- ~~**A WhatsApp template send outside the 24-hour window**~~ — moot: the
+  console no longer replies on WhatsApp at all, template or free text
+  (`consoleReplyReason` in `lib/tickets/channel-policy.ts`), and nothing else
+  sends a template.
 - **Connecting a number on the WhatsApp Business app (coexistence). Built,
   proven against a local Postgres, and not yet run live.** Everything from
   Meta's popup to a phone-typed reply on a ticket — the code exchange, the
@@ -1508,8 +1510,9 @@ expires_at, inspected_at` — never `envelope`, and a null `expires_at` means
   with the app open on the phone (`LOG_ALL_INCOMING_WEBHOOKS` for the session,
   Meta's Webhook Debugger for field names); imported resolved tickets carrying
   both directions; a phone-typed reply on a live ticket labelled "WhatsApp
-  Business app" with the SLA clock stopped; a console reply landing in the
-  phone's chat, and whether Meta echoes that reply back on
+  Business app" with the SLA clock stopped; an automated send (a rule, the
+  out-of-hours acknowledgement or the survey — the console no longer replies
+  on WhatsApp) landing in the phone's chat, and whether Meta echoes it back on
   `smb_message_echoes` at all — unconfirmed, and the one case where an echo
   can race its own send (below); and the hourly template sync reading with
   the stored credential (`last_synced_at` moves, `last_sync_error` null). The
@@ -1525,8 +1528,9 @@ expires_at, inspected_at` — never `envelope`, and a null `expires_at` means
   Known, and not built — none of it reachable until a number is live:
   - **A conversation the business starts from the phone never gets an SLA
     policy** — LHFTeam/shipblu-support#352.
-  - **Nothing stops an agent choosing a `MARKETING` template** on a
-    coexistence number, which Meta refuses.
+  - ~~**Nothing stops an agent choosing a `MARKETING` template**~~ — gone
+    with the console's WhatsApp replies; `sendTemplateReply` refuses every
+    WhatsApp ticket.
   - **An agent's hand work on an imported ticket counts in the agent metrics
     and not in the team metrics**: the team rollups leave `import`
     conversations out (`lib/reports/rollup.ts`), the agent rollups do not.
@@ -1534,7 +1538,8 @@ expires_at, inspected_at` — never `envelope`, and a null `expires_at` means
     deletes `webhook_events` after that, so a history chunk, or the file a
     placeholder is waiting for, can be replayed from its stored row for no
     longer.
-  - **An echo can race the console's own send.** An `smb_message_echoes`
+  - **An echo can race our own send** — now only an automated one, since the
+    console does not reply on WhatsApp. An `smb_message_echoes`
     delivery processed between Graph's answer and `send_whatsapp` writing the
     wamid inserts its own row, and the send's UPDATE then hits
     `messages_channel_message_idx`. The window is milliseconds wide, and
@@ -1957,6 +1962,20 @@ Whatever it returns should stay conversation _summaries_ and a deep link, never
 message bodies — the same reasoning as the deliberately tiny `pg_notify` payload.
 
 ### 5.5 Loose ends
+
+- **"WhatsApp Support" has no reply path at all, by decision.** The console
+  stopped replying on every WhatsApp number (LHFTeam/shipblu-support#357,
+  `consoleReplyReason`), and that number is plain Cloud API, not linked to the
+  Business app, so it cannot be answered from a phone either. On 2026-10-12
+  the last 30 days held 4 tickets there and one console reply (2026-09-26);
+  "Nayera Mohamed", the coexistence number, held 77 tickets, 382 phone
+  replies and none from the console. The owner chose to block every WhatsApp
+  number anyway, over blocking only coexistence numbers. Two consequences:
+  those tickets are answered by nobody but automations, and their first- and
+  next-response clocks never stop, since only an outbound reply stops them
+  and an ordinary number's echoes are ignored (`ingest-whatsapp.ts`) — so
+  every one breaches, and fires whatever breach rules exist. Linking the
+  number to the Business app, or retiring it, closes both.
 
 - **The dead-letter queue has 57 rows in it and, until 2026-09-21, nobody had
   read them.** `/api/health` reported `dead: 56` unchanged for eleven days; the

@@ -19,7 +19,7 @@ import {
   listStatuses,
   listTicketFields,
 } from '@/lib/tickets/lookups';
-import { readOnlyReason } from '@/lib/tickets/channel-policy';
+import { answeredFromConsole } from '@/lib/tickets/channel-policy';
 import { suggestionsLive } from '@/lib/canned-suggest/settings';
 import { accountIdForConversation } from '@/lib/whatsapp/conversation';
 import { InboxShell } from '../shell';
@@ -95,7 +95,10 @@ export default async function ConversationPage({
     .reverse()
     .find((message) => message.direction === 'inbound' && message.kind === 'reply');
 
-  const wantsKnowledge = can(agent, 'kb.view') && !readOnlyReason(conversation.channel);
+  // The panel lives in the reply form, so a ticket with no reply box (read-only,
+  // or a channel not answered from here) has nowhere to show it.
+  const answersHere = answeredFromConsole(conversation.channel);
+  const wantsKnowledge = can(agent, 'kb.view') && answersHere;
   const kbLocale = detectLocale(lastInbound?.bodyText, conversation.subject);
   const terms = wantsKnowledge ? seedTerms(conversation.subject, lastInbound?.bodyText) : [];
 
@@ -108,7 +111,7 @@ export default async function ConversationPage({
   // reply box, for an agent who may reply, and while the admin switch is on and
   // this environment holds a key. The switch is memoised, so this is not a query
   // on most renders.
-  const mayReply = can(agent, 'ticket.reply') && !readOnlyReason(conversation.channel);
+  const mayReply = can(agent, 'ticket.reply') && answersHere;
 
   const [statuses, agentList, groupList, fields, canned, templates, recipients, suggestions, live] =
     await Promise.all([
@@ -116,7 +119,8 @@ export default async function ConversationPage({
       listActiveAgents(),
       listGroups(),
       listTicketFields(),
-      listCannedResponses(agent),
+      // Only the reply form inserts one, so no reply box, no list.
+      answersHere ? listCannedResponses(agent) : Promise.resolve([]),
       // Only fetched for WhatsApp tickets: an email ticket has no use for them
       // and the table is synced hourly, so this is a needless query otherwise.
       //
@@ -125,7 +129,7 @@ export default async function ConversationPage({
       // costs three round trips of its own. Chained inside the batch rather than
       // awaited above it: resolved first, it held the rest of the batch either
       // side of it, on the page the console spends most of its time on.
-      conversation.channel === 'whatsapp'
+      conversation.channel === 'whatsapp' && answersHere
         ? accountIdForConversation(conversation.id).then((id) => listApprovedTemplates(id))
         : Promise.resolve([]),
       // Same reasoning: an agent who cannot start one has no picker to fill.

@@ -30,6 +30,7 @@ import {
   loadConversation,
   refresh,
   refuseIfIncomplete,
+  refuseIfNoConsoleReply,
   refuseIfNoRootCause,
   refuseIfReadOnly,
 } from '@/lib/tickets/console-guards';
@@ -68,15 +69,22 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
     .map(canonicalUuid)
     .filter((id): id is string => id !== null);
 
-  if (!body) return { error: 'Write something first' };
-
   const row = await loadConversation(agent, conversationId);
   if (!row) return { error: 'Ticket not found' };
 
   const conversation = row.conversation;
 
+  // Both before the empty-body check, so a reply box that should not exist is
+  // refused for the real reason on the first press, not told to write something
+  // first and refused only once it has.
   const readOnly = refuseIfReadOnly(conversation.channel);
   if (readOnly) return readOnly;
+  // The composer offers no reply box here; this is for the tab rendered before
+  // that changed, and for a POST made by hand.
+  const noReply = refuseIfNoConsoleReply(conversation.channel);
+  if (noReply) return noReply;
+
+  if (!body) return { error: 'Write something first' };
 
   // Checked before the reply is written rather than beside the resolve below it.
   // Refusing afterwards would send the message, leave the ticket open and clear
@@ -263,6 +271,10 @@ export async function sendTemplateReply(
   // WhatsApp number, would read as a bug.
   const readOnly = refuseIfReadOnly(row.conversation.channel);
   if (readOnly) return readOnly;
+  // Also before the channel check, for the same reason: a template on WhatsApp
+  // is refused for not being answered from here, not for the wrong channel.
+  const noReply = refuseIfNoConsoleReply(row.conversation.channel);
+  if (noReply) return noReply;
 
   if (row.conversation.channel !== 'whatsapp') return { error: 'Templates are WhatsApp only' };
 
