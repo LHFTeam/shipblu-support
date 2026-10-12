@@ -48,7 +48,10 @@ export default async function ShippingAccountPage({
         title={account.name ?? `SBID ${account.sbid}`}
         description={account.name ? `SBID ${account.sbid}` : undefined}
         actions={
-          <Link href="/contacts" className="text-sm hover:underline">
+          <Link
+            href="/contacts"
+            className="text-sm text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"
+          >
             All contacts
           </Link>
         }
@@ -56,11 +59,11 @@ export default async function ShippingAccountPage({
 
       <div className="mb-6 grid gap-4 lg:grid-cols-3">
         <Card>
-          <h2 className="mb-2 text-sm font-medium">Account</h2>
+          <h2 className="mb-2 text-sm font-semibold">Account</h2>
           <div className="flex flex-col gap-2 text-xs">
             <SyncBadge state={account.syncState} />
             {account.syncState === 'stub' ? (
-              <p className="text-[var(--muted-foreground)]">
+              <p className="text-(--color-text-secondary)">
                 This account exists because its number appeared in a conversation. Nothing has
                 confirmed it against the shipping platform yet.
               </p>
@@ -70,19 +73,21 @@ export default async function ShippingAccountPage({
         </Card>
 
         <Card className="lg:col-span-2">
-          <h2 className="mb-2 text-sm font-medium">People who can speak for it</h2>
+          <h2 className="mb-2 text-sm font-semibold">People who can speak for it</h2>
           <ul className="flex flex-col gap-1.5 text-sm">
             {people.map((person) => (
               <li key={person.id} className="flex flex-wrap items-center gap-2">
                 <Link href={`/contacts/${person.id}`} className="font-medium hover:underline">
                   {person.name ?? person.email ?? person.phone ?? 'Unnamed'}
                 </Link>
-                <span className="text-xs opacity-60">{person.email ?? person.phone ?? ''}</span>
-                {person.linkSource === 'platform' ? <Badge>platform</Badge> : null}
+                <span className="text-xs text-(--color-text-secondary)">
+                  {person.email ?? person.phone ?? ''}
+                </span>
+                {person.linkSource === 'platform' ? <Badge>Platform</Badge> : null}
               </li>
             ))}
             {people.length === 0 ? (
-              <li className="text-xs opacity-50">
+              <li className="text-xs text-(--color-text-tertiary)">
                 Nobody yet. Membership is only ever recorded by an agent or by a platform sync —
                 quoting an account number in a chat does not make it yours.
               </li>
@@ -92,7 +97,7 @@ export default async function ShippingAccountPage({
       </div>
 
       <section className="mb-6">
-        <h2 className="mb-2 text-sm font-medium">Recent shipments</h2>
+        <h2 className="mb-2 text-sm font-semibold">Recent shipments</h2>
         <Card>
           <ul className="flex flex-col gap-2 text-sm">
             {parcels.map((parcel) => (
@@ -104,11 +109,13 @@ export default async function ShippingAccountPage({
                   {parcel.trackingNumber}
                 </Link>
                 <SyncBadge state={parcel.syncState} />
-                <span className="text-xs opacity-60">{parcel.statusLabel ?? ''}</span>
+                <span className="text-xs text-(--color-text-secondary)">
+                  {parcel.statusLabel ?? ''}
+                </span>
               </li>
             ))}
             {parcels.length === 0 ? (
-              <li className="text-xs opacity-50">
+              <li className="text-xs text-(--color-text-tertiary)">
                 None. A shipment is only attributed to an account by a platform sync.
               </li>
             ) : null}
@@ -117,8 +124,8 @@ export default async function ShippingAccountPage({
       </section>
 
       <section>
-        <h2 className="mb-2 text-sm font-medium">Conversations</h2>
-        <p className="mb-2 text-xs text-[var(--muted-foreground)]">
+        <h2 className="mb-2 text-sm font-semibold">Conversations</h2>
+        <p className="mb-2 text-xs text-(--color-text-secondary)">
           Tickets that name this account, and tickets opened by anyone who can speak for it.
         </p>
         <ConversationTable

@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { ChevronDownIcon, ChevronUpIcon } from '@/components/icons';
+import { useState, type ReactNode } from 'react';
+import { ChevronDownIcon, ChevronUpIcon, GlobeIcon, LockIcon } from '@/components/icons';
 import { useNow } from '@/components/use-now';
 import type { ConversationDetail } from '@/lib/tickets/conversation';
 import type { CannedResponseOption } from '@/lib/tickets/lookups';
@@ -167,7 +167,16 @@ export function Composer({
       thirds of the pane and scrolls within it, which also leaves the last
       messages of the conversation on screen while writing.
     */
-    <div className="flex max-h-[65%] min-h-0 flex-col border-t border-[var(--border)]">
+    /*
+      The whole composer turns to amber paper on the note tab, not just the box:
+      a note and a reply must look nothing alike at the moment the agent presses
+      the button, because only one of them reaches the customer.
+    */
+    <div
+      className={`flex max-h-[65%] min-h-0 flex-col border-t border-(--color-border-subtle) transition-colors ${
+        tab === 'note' ? 'bg-(--color-message-note-bg)' : 'bg-(--color-background-surface)'
+      }`}
+    >
       {/* Shaped like the field it opens, because that is what an agent reaching
           for the bottom of the screen expects to be able to tap. */}
       {collapsed ? (
@@ -176,12 +185,12 @@ export function Composer({
           onClick={() => setCollapsed(false)}
           aria-expanded={false}
           aria-controls={PANEL_ID}
-          className="flex items-center gap-2 px-3 py-2.5 text-[var(--muted-foreground)] lg:hidden"
+          className="flex items-center gap-2 px-3 py-2.5 text-(--color-text-secondary) lg:hidden"
         >
-          <span className="min-w-0 flex-1 truncate rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-start text-base">
+          <span className="min-w-0 flex-1 truncate rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) px-3 py-2 text-start text-base">
             {prompt}
           </span>
-          <ChevronUpIcon size={18} className="shrink-0 opacity-70" />
+          <ChevronUpIcon size={18} className="shrink-0" />
         </button>
       ) : null}
 
@@ -195,7 +204,12 @@ export function Composer({
         id={PANEL_ID}
         className={`${collapsed ? 'hidden' : 'flex'} min-h-0 flex-1 flex-col lg:flex`}
       >
-        <div className="flex shrink-0 flex-col gap-1 px-3 pt-2 lg:flex-row lg:items-center lg:gap-2">
+        {/* Wraps at lg rather than squeezing: with the views panel and the
+            details column open the thread pane is under 500px at 1440, and a
+            channel notice that may not shrink (it is the warning an agent needs
+            before posting publicly) took the whole row, leaving the tabs a
+            20px strip. Wrapping drops the notice to its own line instead. */}
+        <div className="flex shrink-0 flex-col gap-1 px-3 pt-2 lg:flex-row lg:flex-wrap lg:items-center lg:gap-2">
           <div className="flex min-w-0 items-center gap-1">
             {/* One row that scrolls sideways rather than four tabs squeezed into
                 a phone's width — at 390px they wrapped onto two lines each and
@@ -209,11 +223,17 @@ export function Composer({
                   active={tab === 'reply'}
                   onClick={() => setRequestedTab('reply')}
                   disabled={!windowOpen || !metaSendable}
+                  icon={isCommentThread ? <GlobeIcon size={14} /> : null}
                 >
                   {isCommentThread ? 'Reply publicly' : 'Reply'}
                 </TabButton>
               )}
-              <TabButton active={tab === 'note'} onClick={() => setRequestedTab('note')}>
+              <TabButton
+                active={tab === 'note'}
+                onClick={() => setRequestedTab('note')}
+                icon={<LockIcon size={14} />}
+                note
+              >
                 Private note
               </TabButton>
               {isWhatsApp && !replyBlocked ? (
@@ -237,7 +257,7 @@ export function Composer({
               aria-expanded
               aria-controls={PANEL_ID}
               aria-label="Hide the composer"
-              className="ms-auto shrink-0 rounded-md p-1.5 text-[var(--muted-foreground)] hover:bg-[var(--muted)] lg:hidden"
+              className="ms-auto shrink-0 rounded-md p-1.5 text-(--color-text-secondary) hover:bg-(--color-background-hover) lg:hidden"
             >
               <ChevronDownIcon size={18} />
             </button>
@@ -246,7 +266,9 @@ export function Composer({
           {/* Its own line on a phone. Sharing the tab row left it four characters
               wide and clipped; there is no width to spare down there. */}
           {notice ? (
-            <span className="text-xs opacity-60 lg:ms-auto lg:shrink-0">{notice}</span>
+            <span className="text-xs text-(--color-text-secondary) lg:ms-auto lg:shrink-0">
+              {notice}
+            </span>
           ) : null}
         </div>
 
@@ -260,7 +282,7 @@ export function Composer({
               front costs them the paragraph they would otherwise lose.
             */
             threadBlocked ? (
-              <div className="rounded-md border border-[var(--border)] bg-[var(--muted)] p-3 text-sm text-[var(--muted-foreground)]">
+              <div className="rounded-md border border-(--color-border-subtle) bg-(--color-background-surface-sunken) p-3 text-sm text-(--color-text-secondary)">
                 <p className="whitespace-pre-line">{metaThread?.explanation}</p>
                 {/*
                   Only under the standby refusal. The other two the thread state
@@ -307,22 +329,35 @@ function TabButton({
   active,
   disabled,
   onClick,
+  icon,
+  note = false,
   children,
 }: {
   active: boolean;
   disabled?: boolean;
   onClick: () => void;
-  children: React.ReactNode;
+  /** The globe on a public reply, the lock on a note: who will read it, not just the colour. */
+  icon?: ReactNode;
+  /** The note tab, which goes amber when chosen. */
+  note?: boolean;
+  children: ReactNode;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`shrink-0 rounded-t-md px-3 py-1.5 text-sm whitespace-nowrap ${
-        active ? 'bg-[var(--muted)] font-medium' : 'opacity-60 hover:opacity-100'
-      } disabled:cursor-not-allowed disabled:opacity-30`}
+      // amber-100 is the design system's own value for the chosen note tab;
+      // there is no role token for it, and the panel under it is note paper.
+      className={`flex shrink-0 items-center gap-1.5 rounded-t-md px-3 py-1.5 text-sm whitespace-nowrap transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+        active
+          ? note
+            ? 'bg-amber-100 font-semibold text-(--color-message-note-fg)'
+            : 'bg-(--color-background-hover) font-semibold text-(--color-text-primary)'
+          : 'text-(--color-text-secondary) hover:text-(--color-text-primary)'
+      }`}
     >
+      {icon}
       {children}
     </button>
   );

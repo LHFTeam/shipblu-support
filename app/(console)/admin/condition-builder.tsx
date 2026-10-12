@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Select } from '@/components/ui';
+import { PlusIcon } from '@/components/icons';
+import { Button, Select } from '@/components/ui';
 import type { Operator } from '@/lib/rules/conditions';
 
 /**
@@ -99,17 +100,17 @@ export function ConditionBuilder({
       {raw === null ? (
         <>
           <div className="flex items-center gap-2 text-sm">
-            <span className="text-[var(--muted-foreground)]">Match</span>
+            <span className="text-(--color-text-secondary)">Match</span>
             <Select
               value={match}
               onChange={(event) => setMatch(event.target.value as 'all' | 'any')}
-              className="w-32"
+              className="w-32!"
             >
               <option value="all">all of these</option>
               <option value="any">any of these</option>
             </Select>
             {rows.length === 0 ? (
-              <span className="text-xs text-[var(--muted-foreground)]">
+              <span className="text-xs text-(--color-text-secondary)">
                 No conditions — this applies to every ticket.
               </span>
             ) : null}
@@ -127,7 +128,7 @@ export function ConditionBuilder({
                 <Select
                   value={row.field}
                   onChange={(event) => update(index, rowForField(row, event.target.value, fields))}
-                  className="w-48"
+                  className="w-48!"
                 >
                   {fields.map((option) => (
                     <option key={option.value} value={option.value}>
@@ -142,7 +143,7 @@ export function ConditionBuilder({
                     const op = event.target.value as Operator;
                     update(index, { ...row, op, value: valueForOperator(row.value, op, field) });
                   }}
-                  className="w-40"
+                  className="w-40!"
                 >
                   {operators.map((option) => (
                     <option key={option.value} value={option.value}>
@@ -159,10 +160,10 @@ export function ConditionBuilder({
                   <div
                     role="group"
                     aria-label={`${field.label} options`}
-                    className="flex max-h-40 w-48 flex-col gap-1.5 overflow-y-auto rounded-md border border-[var(--border)] bg-[var(--surface)] p-2"
+                    className="flex max-h-40 w-48 flex-col gap-1.5 overflow-y-auto rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) p-2"
                   >
                     {field.choices.length === 0 ? (
-                      <span className="text-xs text-[var(--muted-foreground)]">
+                      <span className="text-xs text-(--color-text-secondary)">
                         No options available
                       </span>
                     ) : (
@@ -171,7 +172,7 @@ export function ConditionBuilder({
                           <input
                             type="checkbox"
                             value={choice.value}
-                            className="size-4"
+                            className="size-4 accent-blu-500"
                             checked={selectedChoices.includes(choice.value)}
                             onChange={(event) =>
                               update(index, {
@@ -191,7 +192,7 @@ export function ConditionBuilder({
                   <Select
                     value={scalarValue(row.value)}
                     onChange={(event) => update(index, { ...row, value: event.target.value })}
-                    className="w-48"
+                    className="w-48!"
                   >
                     <option value="">Choose…</option>
                     {field.choices.map((choice) => (
@@ -205,33 +206,34 @@ export function ConditionBuilder({
                     value={textValue(row.value)}
                     onChange={(event) => update(index, { ...row, value: event.target.value })}
                     placeholder={listOperator ? 'comma, separated, values' : 'value'}
-                    className="w-48 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm"
+                    className="w-48 rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) px-2 py-1.5 text-base outline-none transition-colors hover:border-(--color-border-default) focus:border-(--color-border-focus) focus:ring-2 focus:ring-(--color-border-focus)/20 sm:text-sm"
                   />
                 )}
 
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={() => setRows(rows.filter((_, i) => i !== index))}
-                  className="text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
                 >
                   Remove
-                </button>
+                </Button>
               </div>
             );
           })}
 
           <div className="flex items-center gap-3">
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<PlusIcon size={14} />}
               onClick={() => setRows([...rows, { field: fields[0]!.value, op: 'eq', value: '' }])}
-              className="text-xs font-medium text-brand-600 hover:underline"
             >
-              + Add condition
-            </button>
+              Add condition
+            </Button>
             <button
               type="button"
               onClick={() => setRaw(json)}
-              className="text-xs text-[var(--muted-foreground)] hover:underline"
+              className="text-xs text-(--color-text-secondary) hover:underline"
             >
               Edit as JSON
             </button>
@@ -244,7 +246,7 @@ export function ConditionBuilder({
             onChange={(event) => setRaw(event.target.value)}
             rows={6}
             spellCheck={false}
-            className="w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 font-mono text-xs"
+            className="w-full rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) p-2 font-mono text-base outline-none transition-colors hover:border-(--color-border-default) focus:border-(--color-border-focus) focus:ring-2 focus:ring-(--color-border-focus)/20 sm:text-xs"
           />
           <button
             type="button"
@@ -255,7 +257,7 @@ export function ConditionBuilder({
               setRows(back.rows);
               setRaw(null);
             }}
-            className="self-start text-xs text-[var(--muted-foreground)] hover:underline"
+            className="self-start text-xs text-(--color-text-secondary) hover:underline"
           >
             Back to the builder (only if these conditions fit it)
           </button>

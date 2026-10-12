@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { Select } from '@/components/ui';
+import { PlusIcon } from '@/components/icons';
+import { Button, Select } from '@/components/ui';
 import { PRIORITY_CHOICES } from '@/lib/tickets/vocabulary';
 
 /**
@@ -93,7 +94,7 @@ export function ActionBuilder({
             onChange={(event) =>
               update(index, { type: event.target.value as ActionKind, value: '' })
             }
-            className="w-52"
+            className="w-52!"
           >
             {KINDS.map((kind) => (
               <option key={kind.value} value={kind.value}>
@@ -111,23 +112,25 @@ export function ActionBuilder({
             onChangeExtra={(extra) => update(index, { ...item, extra })}
           />
 
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => setItems(items.filter((_, i) => i !== index))}
-            className="text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
           >
             Remove
-          </button>
+          </Button>
         </div>
       ))}
 
-      <button
-        type="button"
+      <Button
+        variant="ghost"
+        size="sm"
+        icon={<PlusIcon size={14} />}
         onClick={() => setItems([...items, { type: 'set_priority', value: 'high' }])}
-        className="self-start text-xs font-medium text-brand-600 hover:underline"
+        className="self-start"
       >
-        + Add action
-      </button>
+        Add action
+      </Button>
     </div>
   );
 
@@ -152,7 +155,7 @@ function ValueInput({
   onChangeExtra: (value: string) => void;
 }) {
   const select = (choices: Choice[], placeholder: string) => (
-    <Select value={item.value} onChange={(event) => onChange(event.target.value)} className="w-56">
+    <Select value={item.value} onChange={(event) => onChange(event.target.value)} className="w-56!">
       <option value="">{placeholder}</option>
       {choices.map((choice) => (
         <option key={choice.value} value={choice.value}>
@@ -175,11 +178,11 @@ function ValueInput({
       return (
         <>
           {select(groups, "The ticket's current group")}
-          <span className="text-xs text-[var(--muted-foreground)]">using</span>
+          <span className="text-xs text-(--color-text-secondary)">using</span>
           <Select
             value={item.extra ?? 'group_default'}
             onChange={(event) => onChangeExtra(event.target.value)}
-            className="w-52"
+            className="w-52!"
           >
             {STRATEGIES.map((strategy) => (
               <option key={strategy.value} value={strategy.value}>
@@ -194,14 +197,14 @@ function ValueInput({
     case 'add_watchers':
       return select(agents, 'Choose an agent…');
     case 'mark_spam':
-      return <span className="text-xs text-[var(--muted-foreground)]">No settings</span>;
+      return <span className="text-xs text-(--color-text-secondary)">No settings</span>;
     default:
       return (
         <input
           value={item.value}
           onChange={(event) => onChange(event.target.value)}
           placeholder="tag, another tag"
-          className="w-56 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm"
+          className="w-56 rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) px-2 py-1.5 text-base outline-none transition-colors hover:border-(--color-border-default) focus:border-(--color-border-focus) focus:ring-2 focus:ring-(--color-border-focus)/20 sm:text-sm"
         />
       );
   }

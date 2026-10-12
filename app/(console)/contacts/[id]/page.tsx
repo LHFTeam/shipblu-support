@@ -103,7 +103,10 @@ export default async function ContactPage({
           />
         }
         actions={
-          <Link href="/contacts" className="text-sm hover:underline">
+          <Link
+            href="/contacts"
+            className="text-sm text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"
+          >
             All contacts
           </Link>
         }
@@ -111,7 +114,7 @@ export default async function ContactPage({
 
       <div className="mb-6 grid gap-4 lg:grid-cols-3">
         <Card>
-          <h2 className="mb-2 text-sm font-medium">Roles</h2>
+          <h2 className="mb-2 text-sm font-semibold">Roles</h2>
           {editable ? (
             <RoleToggles
               contactId={contact.id}
@@ -123,11 +126,11 @@ export default async function ContactPage({
               {contact.isShipper ? <Badge tone="brand">Shipper</Badge> : null}
               {contact.isRecipient ? <Badge>Recipient</Badge> : null}
               {!contact.isShipper && !contact.isRecipient ? (
-                <span className="text-xs opacity-50">Neither, so far.</span>
+                <span className="text-xs text-(--color-text-tertiary)">Neither, so far.</span>
               ) : null}
             </div>
           )}
-          <p className="mt-3 text-xs text-[var(--muted-foreground)]">
+          <p className="mt-3 text-xs text-(--color-text-secondary)">
             Set automatically when we learn one — holding a shipping account makes someone a
             shipper, being named on a parcel makes them a recipient — and never unset automatically,
             so a designation made here survives the next sync.
@@ -135,29 +138,33 @@ export default async function ContactPage({
         </Card>
 
         <Card>
-          <h2 className="mb-2 text-sm font-medium">Reachable on</h2>
+          <h2 className="mb-2 text-sm font-semibold">Reachable on</h2>
           <ul className="flex flex-col gap-1 text-xs">
             {contact.identities.map((identity) => (
               <li key={identity.id} className="flex items-center gap-2">
-                <span className="w-20 shrink-0 opacity-60">{identity.channel}</span>
+                <span className="w-20 shrink-0 text-(--color-text-secondary)">
+                  {identity.channel}
+                </span>
                 <span className="min-w-0 break-all">{identity.identifier}</span>
-                {identity.isVerified ? <Badge tone="success">verified</Badge> : null}
+                {identity.isVerified ? <Badge tone="success">Verified</Badge> : null}
                 {/* What the channel itself reported, which can be more specific
                     than the language above — `en_GB` where we only store 'en'. */}
                 {identity.profileLocale ? <Badge>{identity.profileLocale}</Badge> : null}
               </li>
             ))}
-            {contact.identities.length === 0 ? <li className="opacity-50">None.</li> : null}
+            {contact.identities.length === 0 ? (
+              <li className="text-(--color-text-tertiary)">None.</li>
+            ) : null}
           </ul>
           {contact.companyName ? (
-            <p className="mt-3 text-xs text-[var(--muted-foreground)]">
+            <p className="mt-3 text-xs text-(--color-text-secondary)">
               Company: {contact.companyName}
             </p>
           ) : null}
 
           <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-xs">
             <div className="flex gap-2">
-              <dt className="opacity-60">Language</dt>
+              <dt className="text-(--color-text-secondary)">Language</dt>
               <dd>
                 {LOCALE_NAMES[contact.locale as Locale] ?? contact.locale}
                 {/*
@@ -179,7 +186,7 @@ export default async function ContactPage({
             </div>
             {contact.gender ? (
               <div className="flex gap-2">
-                <dt className="opacity-60">Gender</dt>
+                <dt className="text-(--color-text-secondary)">Gender</dt>
                 <dd>{contact.gender}</dd>
               </div>
             ) : null}
@@ -187,16 +194,16 @@ export default async function ContactPage({
         </Card>
 
         <Card>
-          <h2 className="mb-2 text-sm font-medium">Shipping accounts</h2>
+          <h2 className="mb-2 text-sm font-semibold">Shipping accounts</h2>
           <AccountLinks contactId={contact.id} accounts={accounts} editable={editable} />
         </Card>
       </div>
 
       <section className="mb-6">
-        <h2 className="mb-2 text-sm font-medium">Shipments</h2>
+        <h2 className="mb-2 text-sm font-semibold">Shipments</h2>
         {parcels.length === 0 ? (
           <Card>
-            <p className="text-xs text-[var(--muted-foreground)]">
+            <p className="text-xs text-(--color-text-secondary)">
               This person is not named on any shipment yet. Nothing names them until a platform sync
               or an agent says which end of a parcel they are on.
             </p>
@@ -212,10 +219,12 @@ export default async function ContactPage({
                   >
                     {parcel.trackingNumber}
                   </Link>
-                  {parcel.isShipper ? <Badge tone="brand">shipper</Badge> : null}
-                  {parcel.isRecipient ? <Badge>recipient</Badge> : null}
+                  {parcel.isShipper ? <Badge tone="brand">Shipper</Badge> : null}
+                  {parcel.isRecipient ? <Badge>Recipient</Badge> : null}
                   <SyncBadge state={parcel.syncState} />
-                  <span className="text-xs opacity-60">{parcel.statusLabel ?? ''}</span>
+                  <span className="text-xs text-(--color-text-secondary)">
+                    {parcel.statusLabel ?? ''}
+                  </span>
                 </li>
               ))}
             </ul>
@@ -224,7 +233,7 @@ export default async function ContactPage({
       </section>
 
       <section className="mb-6">
-        <h2 className="mb-2 text-sm font-medium">Conversations</h2>
+        <h2 className="mb-2 text-sm font-semibold">Conversations</h2>
         <ConversationTable
           conversations={conversations}
           emptyTitle="No conversations"
@@ -233,7 +242,7 @@ export default async function ContactPage({
       </section>
 
       <section>
-        <h2 className="mb-2 text-sm font-medium">Duplicates</h2>
+        <h2 className="mb-2 text-sm font-semibold">Duplicates</h2>
         <Card>
           {merges.length > 0 ? (
             <ul className="mb-4 flex flex-col gap-1 text-xs">
@@ -245,7 +254,7 @@ export default async function ContactPage({
                   >
                     {merge.name ?? merge.email ?? merge.phone ?? 'Unnamed contact'}
                   </Link>
-                  <span className="text-[var(--muted-foreground)]">
+                  <span className="text-(--color-text-secondary)">
                     merged in by {merge.agentName ?? 'a deleted agent'} on{' '}
                     {formatDateTime(merge.createdAt)} — {merge.moved.conversations} ticket
                     {merge.moved.conversations === 1 ? '' : 's'}, {merge.moved.identities} identit
@@ -257,14 +266,14 @@ export default async function ContactPage({
           ) : null}
 
           {!mayMerge ? (
-            <p className="text-xs text-[var(--muted-foreground)]">
+            <p className="text-xs text-(--color-text-secondary)">
               {merges.length > 0
                 ? 'Merging contacts needs the contact.merge permission.'
                 : 'Nothing has been merged into this contact. Merging needs the contact.merge permission.'}
             </p>
           ) : (
             <>
-              <p className="mb-3 text-xs text-[var(--muted-foreground)]">
+              <p className="mb-3 text-xs text-(--color-text-secondary)">
                 Folds another contact into this one: its tickets, addresses, numbers, account
                 memberships and parcel roles move here, and it becomes a redirect to this page. This
                 contact&rsquo;s own name, company and language are kept — a merge fills blanks and
@@ -278,7 +287,7 @@ export default async function ContactPage({
               </p>
 
               {duplicates.length === 0 ? (
-                <p className="text-xs text-[var(--muted-foreground)]">
+                <p className="text-xs text-(--color-text-secondary)">
                   {mergeQuery
                     ? 'No other contact matches that.'
                     : 'Nobody else shares this contact’s email, phone or name. Search above if you know of a duplicate.'}
@@ -305,9 +314,9 @@ export default async function ContactPage({
           for the wrong one to solve the same problem. */}
       {purgePreview ? (
         <section className="mt-6">
-          <h2 className="mb-2 text-sm font-medium">Danger zone</h2>
-          <Card>
-            <p className="mb-3 text-xs text-[var(--muted-foreground)]">
+          <h2 className="mb-2 text-sm font-semibold">Danger zone</h2>
+          <Card className="border-(--color-feedback-danger-border)!">
+            <p className="mb-3 text-xs text-(--color-text-secondary)">
               Deletes this customer — every address and number they write in on, their portal
               sign-in, and <span className="font-medium">every ticket they ever raised</span>,
               because a ticket cannot exist without a requester. If this is a duplicate of somebody

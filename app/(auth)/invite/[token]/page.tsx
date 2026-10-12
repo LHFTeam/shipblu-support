@@ -10,9 +10,9 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
 
   if (!invite) {
     return (
-      <div className="rounded-lg border border-[var(--border)] p-6 text-sm">
+      <div className="text-sm">
         <p className="font-medium">This invite is no longer valid.</p>
-        <p className="mt-2 opacity-70">
+        <p className="mt-2 text-(--color-text-secondary)">
           It has expired or has already been used. Ask an administrator to send a new one.
         </p>
       </div>

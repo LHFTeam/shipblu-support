@@ -1,8 +1,11 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { DocumentIcon, SearchIcon } from '@/components/icons';
+import { Button } from '@/components/ui';
 import { t, type Locale } from '@/lib/kb/locale';
 import type { WidgetCopy } from './copy';
+import { WIDGET_FIELD } from './field';
 import type { ArticleLink } from '@/lib/widget/types';
 
 /**
@@ -101,29 +104,35 @@ export function WidgetHome({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-        <input
-          type="search"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder={t(locale, 'searchPlaceholder')}
-          /* 16px for the same reason as the composer: Safari zooms the page in
-             on any focused field smaller than that, and a zoomed page is a
-             scrolled one. */
-          className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-base outline-none focus:border-brand-500"
-        />
+        <div className="relative">
+          <SearchIcon
+            size={16}
+            className="pointer-events-none absolute inset-y-0 start-2.5 my-auto text-(--color-text-tertiary)"
+          />
+          <input
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={t(locale, 'searchPlaceholder')}
+            aria-label={t(locale, 'searchPlaceholder')}
+            /* 16px for the same reason as the composer (see ./field). */
+            className={`${WIDGET_FIELD} py-2 ps-8 pe-3`}
+          />
+        </div>
 
         {showing.length > 0 ? (
           <>
-            <p className="mt-4 mb-1 text-xs opacity-50">{heading}</p>
+            <p className="mt-4 mb-1 text-xs text-(--color-text-secondary)">{heading}</p>
             <ul className="flex flex-col">
               {showing.map((article) => (
                 <li key={article.slug}>
                   <button
                     type="button"
                     onClick={() => onOpenArticle(article)}
-                    className="w-full rounded-md px-2 py-2 text-start text-sm hover:bg-[var(--muted)]"
+                    className="flex w-full items-center gap-3 rounded-md p-2 text-start text-sm transition-colors hover:bg-(--color-background-hover)"
                   >
-                    {article.title}
+                    <DocumentIcon size={16} className="shrink-0 text-(--color-text-tertiary)" />
+                    <span className="min-w-0 flex-1">{article.title}</span>
                   </button>
                 </li>
               ))}
@@ -132,26 +141,28 @@ export function WidgetHome({
         ) : null}
 
         {empty ? (
-          <p className="mt-6 text-center text-sm opacity-50">{t(locale, 'noResults')}</p>
+          <p className="mt-6 text-center text-sm text-(--color-text-secondary)">
+            {t(locale, 'noResults')}
+          </p>
         ) : null}
 
         {/* A knowledge base with nothing published in this locale, and a search
             that has not run yet, look the same from here — so say the one thing
             that is true either way rather than an empty heading. */}
         {!searchable && faqs.length === 0 ? (
-          <p className="mt-8 text-center text-sm opacity-50">{copy.starter}</p>
+          <p className="mt-8 text-center text-sm text-(--color-text-secondary)">{copy.starter}</p>
         ) : null}
       </div>
 
-      <div className="shrink-0 border-t border-[var(--border)] p-3">
-        <p className="mb-2 text-center text-xs opacity-60">{t(locale, 'contactPrompt')}</p>
-        <button
-          type="button"
-          onClick={onTalkToAgent}
-          className="w-full rounded-md bg-brand-600 px-3 py-2.5 text-sm font-medium text-white"
-        >
+      <div className="shrink-0 border-t border-(--color-border-subtle) p-3">
+        <p className="mb-2 text-center text-xs text-(--color-text-secondary)">
+          {t(locale, 'contactPrompt')}
+        </p>
+        {/* `!` because the button's own height is a minimum too, and which of two
+            utilities on one property wins is Tailwind's call, not the order here. */}
+        <Button onClick={onTalkToAgent} className="min-h-(--tap-min)! w-full">
           {online ? copy.talkToAgent : copy.leaveMessage}
-        </button>
+        </Button>
       </div>
     </div>
   );

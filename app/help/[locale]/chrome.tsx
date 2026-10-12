@@ -61,13 +61,13 @@ export function Breadcrumbs({ locale, items }: { locale: Locale; items: Crumb[] 
         {items.map((item, index) => (
           <li key={item.href} className="flex items-center gap-x-2">
             {index > 0 ? (
-              <span aria-hidden className="text-[var(--kb-border-strong)]">
+              <span aria-hidden className="text-(--color-border-default)">
                 /
               </span>
             ) : null}
             <Link
               href={item.href}
-              className="text-[var(--kb-muted)] underline-offset-4 hover:text-[var(--kb-link)] hover:underline"
+              className="text-(--color-text-secondary) underline-offset-4 hover:text-(--color-text-link-hover) hover:underline"
             >
               {item.label}
             </Link>
@@ -105,55 +105,24 @@ function BreadcrumbSchema({ items }: { items: Crumb[] }) {
 }
 
 /**
- * The band behind the title of every page below the front door.
- *
- * `container-fluid` in Freshdesk's markup, and the same idea here: the colour
- * runs the full width of the viewport while the text inside stays on the
- * content column.
- *
- * Two tones, and the split is a migration rather than a choice a page gets to
- * make on taste. `solid` is the saturated blue this site has always worn.
- * `subtle` is the design system's answer, and the system is explicit that blue
- * is the action colour and never a page background outside an auth or marketing
- * panel — a full-bleed blu-500 slab with a title on it is the loudest thing on
- * the page and says nothing.
- *
- * The redesign that brought the system's palette in covered the front page and
- * the tracking page, so those two are on `subtle`; the front page does not use
- * this at all, having its own hero. Everything else still wears the band, and
- * moving it is a change to those pages' layout rather than to their colours —
- * which is the work this is waiting for, not an argument against it.
- */
-type BandTone = 'solid' | 'subtle';
-
-const BAND_TONE: Record<BandTone, string> = {
-  solid: 'bg-[var(--kb-band)] text-[var(--kb-band-text)]',
-  subtle: 'bg-[var(--kb-band-soft)] text-[var(--kb-heading)] border-b border-[var(--kb-border)]',
-};
-
-function Band({
-  tone = 'solid',
-  className = '',
-  children,
-}: {
-  tone?: BandTone;
-  className?: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className={`${BAND_TONE[tone]} ${className}`}>
-      <Container>{children}</Container>
-    </div>
-  );
-}
-
-/**
  * The header of every page below the front door: the trail and a search field
- * on the page's own surface, then the title on the band.
+ * on the page's own surface, then the title on a pale band.
  *
  * Search is repeated here rather than living only on the home page because a
  * customer who has opened the wrong article should not have to go back to the
  * front door to try a different phrase.
+ *
+ * The band is the brand's palest tint with a hairline under it, and nothing
+ * else. It used to be a full-bleed blue slab, and blue is the action colour —
+ * a title painted in it is the loudest thing on the page and says nothing, and
+ * it teaches a reader that blue means "here" when everywhere else it means
+ * "press". Not no band at all, either: on the grey canvas the hairline is what
+ * separates the search chrome from the title, and without it the trail reads
+ * as the first line of the page.
+ *
+ * `container-fluid` in Freshdesk's markup, and the same idea here: the colour
+ * runs the full width of the viewport while the text inside stays on the
+ * content column.
  */
 export function PageHeader({
   locale,
@@ -164,7 +133,6 @@ export function PageHeader({
   meta,
   search = true,
   searchInitial,
-  tone = 'solid',
 }: {
   locale: Locale;
   /** Ancestors, nearest last. The current page is added for structured data. */
@@ -178,14 +146,12 @@ export function PageHeader({
   /** Pre-fills the field. The results page seeds it so a near miss can be edited
       rather than retyped. */
   searchInitial?: string;
-  /** See `Band`: `subtle` is the design system's, `solid` is what is still here. */
-  tone?: BandTone;
 }) {
   return (
     <>
       <BreadcrumbSchema items={[...crumbs, { label: title, href: selfPath }]} />
 
-      <div className="kb-noprint border-b border-[var(--kb-border)] bg-[var(--kb-surface)]">
+      <div className="kb-noprint border-b border-(--color-border-subtle) bg-(--color-background-surface)">
         <Container className="flex flex-wrap items-center gap-3 py-2.5">
           <Breadcrumbs locale={locale} items={crumbs} />
           {search ? (
@@ -196,27 +162,23 @@ export function PageHeader({
         </Container>
       </div>
 
-      <Band tone={tone} className={tone === 'subtle' ? 'py-8 lg:py-10' : 'py-7 lg:py-12'}>
-        <div className="flex items-start gap-3">
-          {icon ? (
-            <span
-              className={`mt-0.5 shrink-0 ${tone === 'subtle' ? 'text-[var(--kb-band-ink)]' : 'opacity-90'}`}
-            >
-              {icon}
-            </span>
-          ) : null}
+      <div className="border-b border-(--color-border-subtle) bg-(--color-background-brand-subtle) text-(--color-text-primary)">
+        <Container className="flex items-start gap-3 py-8">
+          {icon ? <span className="mt-1 shrink-0 text-(--color-text-brand)">{icon}</span> : null}
           <div className="min-w-0">
-            <h1 className="text-2xl font-bold break-words sm:text-3xl">{title}</h1>
+            <h1
+              className={`text-read-h1 font-bold break-words sm:text-read-h1-md ${
+                locale === 'ar' ? 'leading-read-heading-ar' : ''
+              }`}
+            >
+              {title}
+            </h1>
             {meta ? (
-              <div
-                className={`mt-1.5 text-sm ${tone === 'subtle' ? 'text-[var(--kb-muted)]' : 'opacity-80'}`}
-              >
-                {meta}
-              </div>
+              <div className="mt-1.5 text-sm text-(--color-text-secondary)">{meta}</div>
             ) : null}
           </div>
-        </div>
-      </Band>
+        </Container>
+      </div>
     </>
   );
 }
@@ -264,16 +226,16 @@ export function ArticleRow({
   level?: 'h2' | 'h3';
 }) {
   return (
-    <li className="border-b border-[var(--kb-border)] last:border-0">
+    <li className="border-b border-(--color-border-subtle) last:border-0">
       <Link
         href={href}
-        className="flex items-start gap-3 px-4 py-3.5 transition-colors hover:bg-[var(--kb-surface-2)]"
+        className="flex items-start gap-3 px-4 py-3.5 transition-colors hover:bg-(--color-background-surface-sunken)"
       >
-        <DocumentIcon size={18} className="mt-0.5 shrink-0 text-[var(--kb-muted)]" />
+        <DocumentIcon size={18} className="mt-0.5 shrink-0 text-(--color-text-secondary)" />
         <div className="min-w-0">
-          <Heading className="font-medium text-[var(--kb-heading)]">{title}</Heading>
+          <Heading className="text-base font-bold text-(--color-text-primary)">{title}</Heading>
           {excerpt ? (
-            <p className="mt-0.5 line-clamp-2 text-sm text-[var(--kb-muted)]">{excerpt}</p>
+            <p className="mt-0.5 line-clamp-2 text-sm text-(--color-text-secondary)">{excerpt}</p>
           ) : null}
         </div>
       </Link>
@@ -299,13 +261,13 @@ export function ArticleList({ children }: { children: ReactNode }) {
  */
 export function SectionHeading({ children, meta }: { children: ReactNode; meta?: ReactNode }) {
   if (!meta) {
-    return <h2 className="mb-4 text-lg font-semibold text-[var(--kb-heading)]">{children}</h2>;
+    return <h2 className="mb-4 text-lg font-bold text-(--color-text-primary)">{children}</h2>;
   }
 
   return (
     <div className="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-      <h2 className="text-lg font-semibold text-[var(--kb-heading)]">{children}</h2>
-      <span className="text-sm text-[var(--kb-muted)]">{meta}</span>
+      <h2 className="text-lg font-bold text-(--color-text-primary)">{children}</h2>
+      <span className="text-sm text-(--color-text-secondary)">{meta}</span>
     </div>
   );
 }
@@ -313,7 +275,7 @@ export function SectionHeading({ children, meta }: { children: ReactNode; meta?:
 /** Nothing here yet — said once, in a card, so the page still looks finished. */
 export function EmptyNote({ children }: { children: ReactNode }) {
   return (
-    <Panel className="p-8 text-center text-sm text-[var(--kb-muted)]">
+    <Panel className="p-8 text-center text-sm text-(--color-text-secondary)">
       <p>{children}</p>
     </Panel>
   );

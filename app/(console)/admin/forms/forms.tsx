@@ -257,17 +257,17 @@ export function FormEditor({
           onClick={() => setEditing(true)}
           className="flex flex-wrap items-center gap-2 text-start hover:underline"
         >
-          <span className="text-[var(--muted-foreground)]">{form.position}.</span>
+          <span className="text-(--color-text-secondary)">{form.position}.</span>
           <span className="font-medium">{form.nameEn || form.nameAr || form.slug}</span>
         </button>
 
-        <code className="text-xs text-[var(--muted-foreground)]">/{form.slug}</code>
-        <span className="text-xs text-[var(--muted-foreground)]">
+        <code className="text-xs text-(--color-text-secondary)">/{form.slug}</code>
+        <span className="text-xs text-(--color-text-secondary)">
           {questionCount} question{questionCount === 1 ? '' : 's'}
         </span>
-        {!form.isActive ? <Badge tone="neutral">inactive</Badge> : null}
-        {!form.requiresSignIn ? <Badge tone="warning">open to anybody</Badge> : null}
-        {!form.showOnHelpCentre ? <Badge tone="neutral">agents only</Badge> : null}
+        {!form.isActive ? <Badge tone="neutral">Inactive</Badge> : null}
+        {!form.requiresSignIn ? <Badge tone="warning">Open to anybody</Badge> : null}
+        {!form.showOnHelpCentre ? <Badge tone="neutral">Agents only</Badge> : null}
 
         <span className="ms-auto">
           <DangerAction action={deleteTicketForm} id={form.id} />

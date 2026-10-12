@@ -9,9 +9,9 @@ import { PageBody, Panel } from '../chrome';
  * apart visually, which on a page that asks for a password reads as a phishing
  * copy of the real one.
  *
- * No blue band here, unlike the knowledge-base pages. These are four short
- * forms, and a full-width coloured header above a 24rem column looks like the
- * page failed to load the rest of itself.
+ * No page band here, unlike the knowledge-base pages. These are four short
+ * forms, and a full-width header above a 24rem column looks like the page
+ * failed to load the rest of itself.
  */
 export function AccountShell({
   title,
@@ -27,12 +27,12 @@ export function AccountShell({
   return (
     <PageBody>
       <div className="mx-auto w-full max-w-sm">
-        <h1 className="text-xl font-semibold text-[var(--kb-heading)]">{title}</h1>
-        {intro ? <p className="mt-1.5 text-sm text-[var(--kb-muted)]">{intro}</p> : null}
+        <h1 className="text-2xl font-bold text-(--color-text-primary)">{title}</h1>
+        {intro ? <p className="mt-1.5 text-sm text-(--color-text-secondary)">{intro}</p> : null}
 
         <Panel className="mt-6 p-6">{children}</Panel>
 
-        {footer ? <div className="mt-4 text-sm text-[var(--kb-muted)]">{footer}</div> : null}
+        {footer ? <div className="mt-4 text-sm text-(--color-text-secondary)">{footer}</div> : null}
       </div>
     </PageBody>
   );
@@ -50,7 +50,7 @@ export function AccountLink({
   return (
     <Link
       href={`/${locale}/account/${path}`}
-      className="text-[var(--kb-link)] underline underline-offset-4"
+      className="text-(--color-text-link) underline underline-offset-4 hover:text-(--color-text-link-hover)"
     >
       {children}
     </Link>

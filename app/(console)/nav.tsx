@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState, type ReactNode } from 'react';
 import { BookIcon, ChartIcon, ContactsIcon, InboxIcon, SettingsIcon } from '@/components/icons';
+import { CountBadge } from '@/components/ui';
 import { RefreshScheduler } from '@/lib/realtime/refresh-scheduler';
 
 /**
@@ -17,11 +18,18 @@ import { RefreshScheduler } from '@/lib/realtime/refresh-scheduler';
  * `usePathname` rather than a prop, because the layout is a server component
  * and threading the current path through it would make every page pass
  * something it does not otherwise care about.
+ *
+ * The one colour on the rail that is not navy or white is coral, and it only
+ * ever means attention: the 2px bar on the start edge of the current section,
+ * and the inbox count. The count is the shared `CountBadge`, so it is 11px
+ * like every other count, not a smaller private size for the bar.
  */
 
 export type NavItem = {
   href: string;
   label: string;
+  /** The bottom bar's label, where a fifth of a phone's width is all a word gets. */
+  short?: string;
   icon: 'inbox' | 'contacts' | 'kb' | 'reports' | 'admin';
   badge?: number;
 };
@@ -133,7 +141,7 @@ export function Rail({ items, brand }: { items: NavItem[]; brand: ReactNode }) {
       {/* Desktop: a vertical rail. */}
       <nav
         aria-label="Sections"
-        className="hidden w-16 shrink-0 flex-col items-center gap-1 bg-[var(--rail)] py-3 text-[var(--rail-foreground)] md:flex"
+        className="hidden w-(--rail-width) shrink-0 flex-col items-center gap-1 bg-(--color-background-rail) py-3 text-(--color-text-rail) md:flex"
       >
         <div className="mb-3">{brand}</div>
         {liveItems.map((item) => (
@@ -144,7 +152,7 @@ export function Rail({ items, brand }: { items: NavItem[]; brand: ReactNode }) {
       {/* Mobile: the same destinations along the bottom. */}
       <nav
         aria-label="Sections"
-        className="fixed inset-x-0 bottom-0 z-30 flex items-stretch justify-around border-t border-[var(--border)] bg-[var(--surface)] pb-[env(safe-area-inset-bottom)] md:hidden"
+        className="fixed inset-x-0 bottom-0 z-30 flex items-stretch justify-around border-t border-(--color-border-subtle) bg-(--color-background-surface) pb-[env(safe-area-inset-bottom)] md:hidden"
       >
         {liveItems.map((item) => {
           const Icon = ICONS[item.icon];
@@ -154,19 +162,20 @@ export function Rail({ items, brand }: { items: NavItem[]; brand: ReactNode }) {
               key={item.href}
               href={item.href}
               aria-current={active ? 'page' : undefined}
-              className={`flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-medium ${
-                active ? 'text-brand-600' : 'text-[var(--muted-foreground)]'
-              }`}
+              // The full name, because the visible word may be the short one.
+              aria-label={linkName(item)}
+              className="flex min-h-(--bottom-bar-height) flex-1 flex-col items-center gap-0.5 py-2 text-2xs font-medium text-(--color-text-secondary) aria-[current=page]:text-(--color-text-brand)"
             >
-              <span className="relative">
+              <span className="relative flex">
                 <Icon size={20} />
-                {item.badge ? (
-                  <span className="absolute -end-2 -top-1 rounded-full bg-accent-600 px-1 text-[9px] leading-4 text-white">
-                    {item.badge > 99 ? '99+' : item.badge}
-                  </span>
-                ) : null}
+                <CountBadge
+                  count={item.badge ?? 0}
+                  label="open"
+                  ring="surface"
+                  className="absolute -end-2.5 -top-1"
+                />
               </span>
-              {item.label}
+              {item.short ?? item.label}
             </Link>
           );
         })}
@@ -182,30 +191,45 @@ function RailLink({ item, active }: { item: NavItem; active: boolean }) {
     <Link
       href={item.href}
       aria-current={active ? 'page' : undefined}
-      className="group relative flex size-11 items-center justify-center rounded-lg transition-colors hover:bg-white/10"
+      // The label below is `display: none` until hover, which takes it out of
+      // the accessibility tree too — without this the link was named only by
+      // its count, or by nothing at all.
+      aria-label={linkName(item)}
+      className="group relative flex size-11 items-center justify-center rounded-lg text-(--color-text-rail-muted) transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-white aria-[current=page]:bg-white/8 aria-[current=page]:text-white"
     >
-      {/* The active marker is a bar on the rail edge rather than a filled
+      {/* The active marker is a bar on the rail edge rather than only a filled
           background: it survives the hover state without the two fighting. */}
       {active ? (
-        <span className="absolute inset-y-1 start-0 w-0.5 rounded-full bg-accent-500" />
+        <span
+          aria-hidden
+          className="absolute inset-y-1 start-0 w-0.5 rounded-full bg-(--color-attention-marker)"
+        />
       ) : null}
 
-      <span className={active ? 'text-white' : 'text-white/70 group-hover:text-white'}>
-        <Icon size={21} />
-      </span>
+      <Icon size={21} />
 
-      {item.badge ? (
-        <span className="absolute end-1 top-1 min-w-4 rounded-full bg-accent-600 px-1 text-center text-[10px] leading-4 font-medium text-white">
-          {item.badge > 99 ? '99+' : item.badge}
-        </span>
-      ) : null}
+      <CountBadge
+        count={item.badge ?? 0}
+        label="open"
+        ring="rail"
+        className="absolute end-0.5 top-0.5"
+      />
 
-      {/* Label on hover, so the rail stays narrow without being a guessing game. */}
-      <span className="pointer-events-none absolute start-full z-40 ms-2 hidden rounded-md bg-[var(--rail)] px-2 py-1 text-xs whitespace-nowrap text-white shadow-lg group-hover:block">
+      {/* Label on hover and on keyboard focus, so the rail stays narrow without
+          being a guessing game. */}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute start-full z-40 ms-2 hidden rounded-md bg-(--color-background-rail) px-2 py-1 text-xs whitespace-nowrap text-white shadow-float group-hover:block group-focus-visible:block"
+      >
         {item.label}
       </span>
     </Link>
   );
+}
+
+/** "Inbox, 12 open" — the section, then what its count counts. */
+function linkName(item: NavItem): string {
+  return item.badge ? `${item.label}, ${item.badge} open` : item.label;
 }
 
 /**

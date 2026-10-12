@@ -16,8 +16,8 @@ import { bands, compact, linePath, niceCeiling, split } from '@/lib/charts/scale
  * marks, so no figure is reachable only by reading a colour.
  */
 
-const GRID = 'var(--chart-grid)';
-const INK = 'var(--muted-foreground)';
+const GRID = 'var(--color-chart-grid)';
+const INK = 'var(--color-text-secondary)';
 
 export type Series = { label: string; values: number[]; color: string };
 
@@ -28,7 +28,7 @@ export function Legend({ series }: { series: Series[] }) {
       {series.map((one) => (
         <li
           key={one.label}
-          className="flex items-center gap-1.5 text-xs text-[var(--muted-foreground)]"
+          className="flex items-center gap-1.5 text-xs text-(--color-text-secondary)"
         >
           <span aria-hidden className="size-2.5 rounded-sm" style={{ background: one.color }} />
           {one.label}
@@ -134,7 +134,7 @@ export function Columns({
       {/* The tallest value, named rather than drawn as a ladder of gridlines.
           The axis itself stops at a round number above it — labelling *that*
           would claim a peak that never happened. */}
-      <figcaption className="mt-1 flex items-center justify-between gap-3 text-xs text-[var(--muted-foreground)]">
+      <figcaption className="mt-1 flex items-center justify-between gap-3 text-xs text-(--color-text-secondary)">
         <span>peak {compact(peak)}</span>
         <Legend series={series} />
       </figcaption>
@@ -148,7 +148,7 @@ export function Columns({
  */
 export function Sparkline({
   values,
-  color = 'var(--series-1)',
+  color = 'var(--color-series-1)',
   width = 120,
   height = 28,
   label,
@@ -196,7 +196,7 @@ export function Sparkline({
         cy={lastY}
         r="3.5"
         fill={color}
-        stroke="var(--surface)"
+        stroke="var(--color-background-surface)"
         strokeWidth="2"
       />
     </svg>
@@ -230,7 +230,7 @@ export function Meter({
     good: 'var(--color-positive)',
     warning: 'var(--color-caution)',
     critical: 'var(--color-critical)',
-    neutral: 'var(--series-1)',
+    neutral: 'var(--color-series-1)',
   }[tone];
 
   return (
@@ -271,16 +271,19 @@ export function Stat({
   tone?: 'critical' | 'caution';
   children?: ReactNode;
 }) {
+  // Text reads the feedback roles rather than the meter's own --color-caution:
+  // that amber is drawn as a bar, and as 24px text it sits at about 4.2:1 on
+  // white, under what a figure somebody acts on should be read at.
   const color =
     tone === 'critical'
-      ? 'text-[var(--color-critical)]'
+      ? 'text-(--color-feedback-danger-fg)'
       : tone === 'caution'
-        ? 'text-[var(--color-caution)]'
+        ? 'text-(--color-feedback-warning-fg)'
         : '';
 
   return (
-    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
-      <p className="flex items-center gap-1 text-xs text-[var(--muted-foreground)]">
+    <div className="rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface) p-4">
+      <p className="flex items-center gap-1 text-xs text-(--color-text-secondary)">
         {label}
         {explain ? <InfoTip label={label}>{explain}</InfoTip> : null}
       </p>
@@ -292,7 +295,7 @@ export function Stat({
       >
         {value}
       </p>
-      {hint ? <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">{hint}</p> : null}
+      {hint ? <p className="mt-0.5 text-xs text-(--color-text-secondary)">{hint}</p> : null}
       {children ? <div className="mt-2">{children}</div> : null}
     </div>
   );

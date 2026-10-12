@@ -87,7 +87,7 @@ export default async function ArticlePage({
         ]}
         title={article.title}
         selfPath={`/${locale}/a/${article.slug}`}
-        icon={<DocumentIcon size={28} />}
+        icon={<DocumentIcon size={24} />}
         meta={
           <>
             {t(locale, 'updated')} {formatArticleDate(locale, article.updatedAt)}
@@ -98,7 +98,7 @@ export default async function ArticlePage({
                   href={`/${entry.locale}/a/${entry.slug}`}
                   lang={entry.locale}
                   hrefLang={entry.locale}
-                  className="underline underline-offset-4"
+                  className="text-(--color-text-link) underline underline-offset-4 hover:text-(--color-text-link-hover)"
                 >
                   {LOCALE_NAMES[entry.locale as Locale] ?? entry.locale}
                 </Link>
@@ -141,7 +141,7 @@ export default async function ArticlePage({
               */}
               <div className="kb-article" dangerouslySetInnerHTML={{ __html: article.bodyHtml }} />
 
-              <div className="mt-10 border-t border-[var(--kb-border)] pt-6">
+              <div className="mt-10 border-t border-(--color-border-subtle) pt-6">
                 <ArticleFeedback articleId={article.id} locale={locale} />
               </div>
             </Panel>
@@ -149,7 +149,7 @@ export default async function ArticlePage({
 
           {related.length > 0 ? (
             <Panel as="aside" className="kb-noprint h-fit p-5 lg:sticky lg:top-20">
-              <h2 className="text-sm font-semibold text-[var(--kb-heading)]">
+              <h2 className="text-sm font-bold text-(--color-text-secondary)">
                 {t(locale, 'inThisFolder')}
               </h2>
               <ul className="mt-3 flex flex-col gap-3 text-sm">
@@ -157,9 +157,12 @@ export default async function ArticlePage({
                   <li key={entry.id}>
                     <Link
                       href={`/${locale}/a/${entry.slug}`}
-                      className="flex items-start gap-2 text-[var(--kb-link)] underline-offset-4 hover:underline"
+                      className="flex items-start gap-2 text-(--color-text-link) underline-offset-4 hover:text-(--color-text-link-hover) hover:underline"
                     >
-                      <DocumentIcon size={17} className="mt-0.5 shrink-0 text-[var(--kb-muted)]" />
+                      <DocumentIcon
+                        size={17}
+                        className="mt-0.5 shrink-0 text-(--color-text-secondary)"
+                      />
                       <span className="min-w-0">{entry.title}</span>
                     </Link>
                   </li>

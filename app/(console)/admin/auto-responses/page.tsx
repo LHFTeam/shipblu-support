@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Card, PageHeader } from '@/components/ui';
+import { Card, Notice, PageHeader } from '@/components/ui';
 import {
   listAnyHoliday,
   listAutoResponses,
@@ -55,29 +55,35 @@ export default async function AutoResponsesPage() {
       />
 
       {!hasDefault ? (
-        <Card className="mb-4 border-amber-500/40">
-          <p className="text-sm">
+        <Notice tone="warning" icon className="mb-4">
+          <p>
             No schedule is marked as the company default, so no hour counts as out of hours and
             nothing on this page will send.{' '}
-            <Link href="/admin/hours" className="font-medium text-brand-600 hover:underline">
+            <Link
+              href="/admin/hours"
+              className="font-medium text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"
+            >
               Set one on Business hours
             </Link>
             .
           </p>
-        </Card>
+        </Notice>
       ) : null}
 
       {holidayTextWithoutHolidays ? (
-        <Card className="mb-4 border-amber-500/40">
-          <p className="text-sm">
+        <Notice tone="warning" icon className="mb-4">
+          <p>
             A holiday message is written, but no schedule has a single holiday on it — so the
             ordinary out-of-hours message is what will send on Eid.{' '}
-            <Link href="/admin/hours" className="font-medium text-brand-600 hover:underline">
+            <Link
+              href="/admin/hours"
+              className="font-medium text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"
+            >
               Add the dates on Business hours
             </Link>
             .
           </p>
-        </Card>
+        </Notice>
       ) : null}
 
       <div className="flex flex-col gap-4">
@@ -89,7 +95,7 @@ export default async function AutoResponsesPage() {
       </div>
 
       {rules.length === 0 ? (
-        <p className="text-sm text-[var(--muted-foreground)]">
+        <p className="text-sm text-(--color-text-secondary)">
           No out-of-hours reply yet. A customer who writes in at 22:00 hears nothing back until
           somebody opens the ticket in the morning.
         </p>

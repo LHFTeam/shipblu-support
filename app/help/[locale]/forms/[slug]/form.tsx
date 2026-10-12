@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { useFormStatus } from 'react-dom';
-import { Button, ErrorText, Input, Label, Textarea } from '@/components/ui';
+import { PaperclipIcon } from '@/components/icons';
+import { SubmitButton } from '@/components/submit-button';
+import { ErrorText, Input, Label, Textarea } from '@/components/ui';
 import { TicketFieldInput } from '@/components/ticket-field-input';
 import { useActionForm } from '@/components/use-action-form';
 import { ACCEPT_ATTRIBUTE, MAX_FORM_FILES } from '@/lib/forms/files';
@@ -87,7 +88,7 @@ export function TicketForm({
       {visible.map((element, index) => {
         if (element.kind === 'heading') {
           return (
-            <h2 key={`h${index}`} className="mt-2 text-base font-semibold text-[var(--kb-heading)]">
+            <h2 key={`h${index}`} className="mt-2 text-base font-bold text-(--color-text-primary)">
               {elementText(element, locale)}
             </h2>
           );
@@ -95,7 +96,7 @@ export function TicketForm({
 
         if (element.kind === 'note') {
           return (
-            <p key={`n${index}`} className="text-sm text-[var(--kb-muted)]">
+            <p key={`n${index}`} className="text-sm text-(--color-text-secondary)">
               {elementText(element, locale)}
             </p>
           );
@@ -123,7 +124,11 @@ export function TicketForm({
 
       <ErrorText>{state.error ? errorText(locale, state.error) : null}</ErrorText>
 
-      <Submit locale={locale} />
+      <SubmitButton
+        className="self-start"
+        idle={t(locale, 'createTicket')}
+        busy={t(locale, 'submitting')}
+      />
     </form>
   );
 }
@@ -212,7 +217,6 @@ function Question({
             required={required}
             invalid={missing || invalid}
             onChange={onCustom}
-            surface="help"
           />
           {label}
         </label>
@@ -226,12 +230,15 @@ function Question({
           required={required}
           invalid={missing || invalid}
           onChange={onCustom}
-          surface="help"
         />
       )}
 
-      {help ? <p className="mt-1 text-xs text-[var(--kb-muted)]">{help}</p> : null}
-      {message ? <p className="mt-1 text-xs text-red-700">{message}</p> : null}
+      {help ? <p className="mt-1 text-xs text-(--color-text-secondary)">{help}</p> : null}
+      {message ? (
+        <p className="mt-1">
+          <ErrorText inline>{message}</ErrorText>
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -276,16 +283,24 @@ function SystemInput({
   if (element.key === 'attachments') {
     return (
       <>
-        <input
-          id={id}
-          name="attachments"
-          type="file"
-          multiple
-          accept={ACCEPT_ATTRIBUTE}
-          onChange={(event) => onFiles(event.target.files?.length ?? 0)}
-          className="w-full text-sm"
-        />
-        <p className="mt-1 text-xs text-[var(--kb-muted)]">
+        {/*
+          The native input stays visible inside the dashed zone rather than
+          hidden behind it: the browser then lists the chosen files itself,
+          which a hidden input would need state of its own to show.
+        */}
+        <div className="flex items-center gap-2.5 rounded-lg border border-dashed border-(--color-border-default) bg-(--color-background-canvas) p-4 text-sm text-(--color-text-secondary)">
+          <PaperclipIcon size={18} className="shrink-0" />
+          <input
+            id={id}
+            name="attachments"
+            type="file"
+            multiple
+            accept={ACCEPT_ATTRIBUTE}
+            onChange={(event) => onFiles(event.target.files?.length ?? 0)}
+            className="w-full min-w-0 text-sm file:me-3 file:rounded-md file:border file:border-(--color-border-default) file:bg-(--color-background-surface) file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-(--color-text-primary) hover:file:bg-(--color-background-hover)"
+          />
+        </div>
+        <p className="mt-1 text-xs text-(--color-text-secondary)">
           {tCount(locale, 'attachmentsHint', MAX_FORM_FILES)}
         </p>
       </>
@@ -316,14 +331,5 @@ function SystemInput({
       value={value}
       onChange={(event) => onChange(event.target.value)}
     />
-  );
-}
-
-function Submit({ locale }: { locale: Locale }) {
-  const { pending } = useFormStatus();
-  return (
-    <Button type="submit" variant="accent" disabled={pending} className="self-start">
-      {pending ? t(locale, 'submitting') : t(locale, 'createTicket')}
-    </Button>
   );
 }

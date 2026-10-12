@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
+import { useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Button } from '@/components/ui';
 
@@ -111,12 +111,20 @@ export function ConfirmSubmit({
   confirmLabel,
   busy,
   disabled = false,
+  'aria-label': ariaLabel,
 }: {
-  label: string;
+  /** What the idle button shows: a word, or a glyph such as a cross given an `aria-label`. */
+  label: ReactNode;
   confirmLabel: string;
   busy?: string;
   /** Off for a reason outside the form, as `SubmitButton`'s is; off while the form submits regardless. */
   disabled?: boolean;
+  /**
+   * The idle button's name when `label` is a glyph. Only while idle: once armed
+   * or busy the visible words are the name, and a fixed label would hide the
+   * "Really delete?" the second click is there to confirm.
+   */
+  'aria-label'?: string;
 }) {
   const { armed, disarm, onClick, onKeyDown } = useConfirmClick();
   const { pending } = useFormStatus();
@@ -134,7 +142,9 @@ export function ConfirmSubmit({
       type={armed ? 'submit' : 'button'}
       variant={armed ? 'danger' : 'ghost'}
       size="sm"
+      loading={pending}
       disabled={pending || disabled}
+      aria-label={armed || pending ? undefined : ariaLabel}
       onClick={onClick}
       onKeyDown={onKeyDown}
     >

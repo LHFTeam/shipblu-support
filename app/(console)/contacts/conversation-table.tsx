@@ -41,10 +41,10 @@ export function ConversationTable({
           <Cell>
             <Badge tone={conversation.statusCategory}>{conversation.statusName}</Badge>
           </Cell>
-          <Cell className="text-xs text-[var(--muted-foreground)]">
+          <Cell className="text-xs text-(--color-text-secondary)">
             {conversation.assigneeName ?? 'Unassigned'}
           </Cell>
-          <Cell className="text-xs whitespace-nowrap text-[var(--muted-foreground)]">
+          <Cell className="text-xs whitespace-nowrap text-(--color-text-tertiary)">
             {formatRelative(conversation.lastMessageAt)}
           </Cell>
         </Row>

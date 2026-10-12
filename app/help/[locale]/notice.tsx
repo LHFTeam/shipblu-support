@@ -16,11 +16,11 @@ import { Container } from './chrome';
  * for where it comes from and why it is an environment variable for now.
  */
 const TONE_CLASS: Record<NoticeTone, string> = {
-  info: 'bg-[var(--color-feedback-info-bg)] border-[var(--color-feedback-info-border)] text-[var(--color-feedback-info-fg)]',
+  info: 'border-(--color-feedback-info-border) bg-(--color-feedback-info-bg) text-(--color-feedback-info-fg)',
   warning:
-    'bg-[var(--color-feedback-warning-bg)] border-[var(--color-feedback-warning-border)] text-[var(--color-feedback-warning-fg)]',
+    'border-(--color-feedback-warning-border) bg-(--color-feedback-warning-bg) text-(--color-feedback-warning-fg)',
   danger:
-    'bg-[var(--color-feedback-danger-bg)] border-[var(--color-feedback-danger-border)] text-[var(--color-feedback-danger-fg)]',
+    'border-(--color-feedback-danger-border) bg-(--color-feedback-danger-bg) text-(--color-feedback-danger-fg)',
 };
 
 export function ServiceNoticeBanner({ locale }: { locale: Locale }) {
@@ -36,7 +36,7 @@ export function ServiceNoticeBanner({ locale }: { locale: Locale }) {
     */
     <div role="status" className={`kb-noprint border-b ${TONE_CLASS[notice.tone]}`}>
       <Container className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 py-2.5 text-sm">
-        <span className="flex items-center gap-2 font-semibold">
+        <span className="flex items-center gap-2 font-bold">
           <WarningIcon size={16} className="shrink-0 self-center" />
           {t(locale, 'noticeLabel')}
         </span>
@@ -48,14 +48,14 @@ export function ServiceNoticeBanner({ locale }: { locale: Locale }) {
           Arabic sentence inside an English page needs its own direction to lay
           out at all.
         */}
-        <span lang={notice.lang} dir={notice.dir} className="text-[var(--kb-muted)]">
+        <span lang={notice.lang} dir={notice.dir} className="text-(--color-text-secondary)">
           {notice.body}
         </span>
 
         {notice.href ? (
           <a
             href={notice.href}
-            className="font-medium whitespace-nowrap underline-offset-4 hover:underline sm:ms-auto"
+            className="ms-auto font-bold whitespace-nowrap underline-offset-4 hover:underline"
           >
             {t(locale, 'noticeMore')}
           </a>

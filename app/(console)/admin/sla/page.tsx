@@ -65,13 +65,13 @@ export default async function SlaPage() {
 
       {policies.length === 0 ? (
         <Card>
-          <p className="text-sm text-[var(--muted-foreground)]">
+          <p className="text-sm text-(--color-text-secondary)">
             No policies yet, so no ticket has a due date and the breach sweep has nothing to find.
             Start with one default policy covering every ticket.
           </p>
         </Card>
       ) : (
-        <p className="mt-4 text-xs text-[var(--muted-foreground)]">
+        <p className="mt-4 text-xs text-(--color-text-secondary)">
           {policies.some((policy) => policy.isDefault) ? null : (
             <Badge tone="warning">
               No default policy — tickets matching nothing get no targets at all

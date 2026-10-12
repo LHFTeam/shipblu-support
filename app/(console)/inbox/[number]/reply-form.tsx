@@ -1,33 +1,25 @@
 'use client';
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { ErrorText, Select, Textarea } from '@/components/ui';
+import { GlobeIcon, SendIcon, XIcon } from '@/components/icons';
+import { Button, ErrorText, Select, Textarea } from '@/components/ui';
 import { InfoTip } from '@/components/tooltip';
 import { suggestionKey } from '@/lib/canned-suggest/keyboard';
 import type { CannedResponseOption } from '@/lib/tickets/lookups';
 import {
   availableLocales,
-  CANNED_LOCALES,
   insertCanned,
   resolveLocale,
   type CannedLocale,
 } from '@/lib/tickets/canned';
 import { sendReply } from '../../reply-actions';
-import { KnowledgePanel } from './knowledge';
+import { KnowledgeButton, KnowledgePanel } from './knowledge';
+import { LocaleToggle } from './locale-toggle';
 import type { KnowledgeContext } from './types';
 import { INITIAL, LOST_SEND } from './form-state';
 import { SubmitButton } from '@/components/submit-button';
 import { useActionForm } from '@/components/use-action-form';
 import { useCannedSuggestion } from './use-canned-suggestion';
-
-/**
- * The language toggle's two buttons, each written in its own script.
- *
- * "العربية" is what an Arabic reply looks like, which is the thing the agent is
- * choosing; "AR" beside "EN" is two Latin abbreviations that have to be decoded
- * first.
- */
-const LOCALE_LABELS: Record<CannedLocale, string> = { ar: 'العربية', en: 'English' };
 
 /**
  * The same two languages, named in English for the middle of a sentence.
@@ -70,6 +62,10 @@ export function ReplyForm({
     onSuccess: onSent,
   });
   const [privately, setPrivately] = useState(false);
+  // Said on the button as well as in the notice above the tabs: the press is
+  // the moment the agent commits, and "Send" under a public comment does not
+  // say that everyone who can see the post will read it.
+  const inPublic = isCommentThread && !privately;
 
   /*
     Which language the next canned response goes in.
@@ -107,16 +103,16 @@ export function ReplyForm({
       />
 
       {isCommentThread ? (
-        <label className="flex items-start gap-2 rounded-md border border-[var(--border)] p-2 text-xs">
+        <label className="flex items-start gap-2 rounded-md border border-(--color-border-subtle) p-2 text-xs">
           <input
             type="checkbox"
             checked={privately}
             onChange={(event) => setPrivately(event.target.checked)}
-            className="mt-0.5"
+            className="mt-0.5 size-4 shrink-0 accent-blu-500"
           />
           <span>
             <span className="font-medium">Reply privately instead</span>
-            <span className="block opacity-60">
+            <span className="block text-(--color-text-secondary)">
               Moves the conversation into the direct message inbox. Meta allows this once per
               comment, so it cannot be undone or repeated.
             </span>
@@ -127,11 +123,16 @@ export function ReplyForm({
       <ErrorText>{state.error}</ErrorText>
 
       <div className="flex items-center gap-3">
-        <label className="flex items-center gap-1.5 text-xs opacity-70">
-          <input type="checkbox" name="resolveAfter" />
+        <label className="flex items-center gap-1.5 text-xs text-(--color-text-secondary)">
+          <input type="checkbox" name="resolveAfter" className="size-4 accent-blu-500" />
           Resolve after sending
         </label>
-        <SubmitButton className="ml-auto" idle="Send reply" busy="Sending…" />
+        <SubmitButton
+          className="ms-auto"
+          icon={inPublic ? <GlobeIcon size={15} /> : <SendIcon size={15} />}
+          idle={inPublic ? 'Post publicly' : 'Send reply'}
+          busy="Sending…"
+        />
       </div>
     </form>
   );
@@ -178,6 +179,13 @@ function ReplyBody({
   anchorMessageId: string | null;
 }) {
   const bodyRef = useRef<HTMLTextAreaElement>(null);
+
+  // Here rather than in the panel, because its button sits in the toolbar row
+  // beside the canned picker and the panel opens under that row. Under the
+  // form's key like the rest of this component, so a send closes it as it
+  // always has.
+  const [knowledgeOpen, setKnowledgeOpen] = useState(false);
+  const knowledgeId = useId();
 
   /*
     Which canned response went into this reply, and in which language, for
@@ -342,6 +350,7 @@ function ReplyBody({
         ref={bodyRef}
         name="body"
         rows={4}
+        dir="auto"
         // The suggestion is the placeholder: grey, gone the moment the agent
         // types, and never sent by accident — the box is still empty and still
         // `required`, so Send refuses it until Tab or Use has put the text in.
@@ -407,7 +416,7 @@ function ReplyBody({
         <div
           id={hintId}
           aria-live="polite"
-          className="relative text-xs text-[var(--muted-foreground)] empty:-mt-2"
+          className="relative text-xs text-(--color-text-secondary) empty:-mt-2"
         >
           {showing && suggested ? (
             <div className="flex items-center gap-2">
@@ -428,35 +437,53 @@ function ReplyBody({
               <span className="sr-only shrink-0 any-pointer-fine:not-sr-only">
                 Tab to use · Esc to dismiss
               </span>
-              <button
-                type="button"
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={acceptSuggestion}
-                className="ms-auto shrink-0 rounded-md border border-[var(--border)] px-2 py-0.5 font-medium text-[var(--foreground)] hover:bg-[var(--muted)]"
+                className="ms-auto shrink-0"
               >
                 Use
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={suggestion.dismiss}
                 aria-label="Dismiss the suggested response"
-                className="shrink-0 rounded-md px-1.5 py-0.5 hover:bg-[var(--muted)]"
+                className="shrink-0 px-1.5!"
               >
-                ×
-              </button>
+                <XIcon size={14} />
+              </Button>
             </div>
           ) : null}
         </div>
       ) : null}
 
-      <CannedPicker
-        responses={canned}
-        locale={locale}
-        onLocaleChange={onLocaleChange}
-        onPick={insertCannedResponse}
-      />
+      {/* Only when either control exists: an empty row is still a flex item
+          of the form's column, and would add a second gap under the box. */}
+      {canned.length > 0 || knowledge ? (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <CannedPicker
+            responses={canned}
+            locale={locale}
+            onLocaleChange={onLocaleChange}
+            onPick={insertCannedResponse}
+          />
+          {knowledge ? (
+            <KnowledgeButton
+              open={knowledgeOpen}
+              onToggle={() => setKnowledgeOpen((was) => !was)}
+              panelId={knowledgeId}
+              suggested={knowledge.suggestions.length}
+            />
+          ) : null}
+        </div>
+      ) : null}
 
       {knowledge ? (
         <KnowledgePanel
+          id={knowledgeId}
+          open={knowledgeOpen}
           suggestions={knowledge.suggestions}
           locale={knowledge.locale}
           onInsert={insertText}
@@ -523,7 +550,7 @@ function CannedPicker({
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--muted-foreground)]">
+    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-xs text-(--color-text-secondary)">
       <label className="flex min-w-0 flex-1 items-center gap-2">
         <span className="shrink-0">Canned reply</span>
         <Select
@@ -562,30 +589,7 @@ function CannedPicker({
         </Select>
       </label>
 
-      <div
-        role="group"
-        aria-label="Canned reply language"
-        className="flex shrink-0 overflow-hidden rounded-md border border-[var(--border)]"
-      >
-        {CANNED_LOCALES.map((option) => (
-          <button
-            key={option}
-            type="button"
-            // The pressed state, not a radio: this changes what the next pick
-            // inserts and nothing about the reply being submitted, so it must
-            // not travel with the form.
-            aria-pressed={option === locale}
-            onClick={() => onLocaleChange(option)}
-            className={
-              option === locale
-                ? 'bg-brand-600 px-2 py-1 font-medium text-white'
-                : 'px-2 py-1 hover:bg-[var(--muted)]'
-            }
-          >
-            {LOCALE_LABELS[option]}
-          </button>
-        ))}
-      </div>
+      <LocaleToggle value={locale} onChange={onLocaleChange} label="Canned reply language" />
     </div>
   );
 }

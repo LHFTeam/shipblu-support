@@ -79,8 +79,8 @@ export function RecipientEditor({ recipient }: { recipient: InternalRecipient })
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <h2 className="text-sm font-semibold">{recipient.name}</h2>
         <Badge>{recipient.kind}</Badge>
-        {recipient.isActive ? null : <Badge tone="closed">retired</Badge>}
-        <span className="text-xs text-[var(--muted-foreground)]">{recipient.email}</span>
+        {recipient.isActive ? null : <Badge tone="neutral">Retired</Badge>}
+        <span className="text-xs text-(--color-text-secondary)">{recipient.email}</span>
         <div className="ms-auto">
           <DangerAction action={deleteInternalRecipient} id={recipient.id} />
         </div>

@@ -48,7 +48,7 @@ export default async function CategoryPage({
         crumbs={[{ label: t(locale, 'home'), href: `/${locale}` }]}
         title={category.name}
         selfPath={`/${locale}/c/${category.slug}`}
-        icon={<CategoryIcon size={28} />}
+        icon={<CategoryIcon size={24} />}
         meta={category.description}
       />
 
@@ -97,16 +97,16 @@ function FolderPanel({
   return (
     <Panel as="section" className="flex flex-col p-5">
       <div className="flex items-start gap-3">
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-[var(--kb-band-soft)] text-[var(--kb-band-ink)]">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-(--color-background-brand-subtle) text-(--color-text-brand)">
           <FolderIcon size={20} />
         </span>
         <div className="min-w-0">
-          <h2 className="font-semibold text-[var(--kb-heading)]">
+          <h2 className="text-base font-bold text-(--color-text-primary)">
             <Link href={href} className="underline-offset-4 hover:underline">
               {folder.name}
             </Link>
           </h2>
-          <p className="mt-0.5 text-xs text-[var(--kb-muted)]">
+          <p className="mt-0.5 text-xs text-(--color-text-secondary)">
             {articleCount(locale, folder.articleCount)}
           </p>
         </div>
@@ -117,9 +117,9 @@ function FolderPanel({
           <li key={article.id}>
             <Link
               href={`/${locale}/a/${article.slug}`}
-              className="flex items-start gap-2 text-[var(--kb-link)] underline-offset-4 hover:underline"
+              className="flex items-start gap-2 text-(--color-text-link) underline-offset-4 hover:text-(--color-text-link-hover) hover:underline"
             >
-              <DocumentIcon size={17} className="mt-0.5 shrink-0 text-[var(--kb-muted)]" />
+              <DocumentIcon size={17} className="mt-0.5 shrink-0 text-(--color-text-secondary)" />
               <span className="min-w-0">{article.title}</span>
             </Link>
           </li>
@@ -129,7 +129,7 @@ function FolderPanel({
       {folder.articleCount > folder.preview.length ? (
         <Link
           href={href}
-          className="pt-4 text-sm font-medium text-[var(--kb-link)] underline-offset-4 hover:underline"
+          className="pt-4 text-sm font-bold text-(--color-text-link) underline-offset-4 hover:text-(--color-text-link-hover) hover:underline"
         >
           {t(locale, 'viewAll')} {formatCount(locale, folder.articleCount)}
         </Link>

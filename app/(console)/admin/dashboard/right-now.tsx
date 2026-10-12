@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { Stat } from '@/components/charts';
+import { Card } from '@/components/ui';
 import { formatDateTime } from '@/lib/format';
 import type { agentLoad, queueSnapshot } from '@/lib/reports/live';
 import { formatDuration } from '@/lib/reports/queries';
@@ -23,12 +24,12 @@ export function RightNow({
       hint="Open and pending tickets, read live. Resolved and closed work is not counted."
     >
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:col-span-2">
-          <p className="text-xs text-[var(--muted-foreground)]">Open right now</p>
+        <Card padded={false} className="p-4 sm:col-span-2">
+          <p className="text-xs text-(--color-text-secondary)">Open right now</p>
           <p className="mt-1 text-5xl font-semibold [font-variant-numeric:proportional-nums]">
             {(queue.open + queue.pending).toLocaleString('en-GB')}
           </p>
-          <p className="mt-2 text-xs text-[var(--muted-foreground)]">
+          <p className="mt-2 text-xs text-(--color-text-secondary)">
             {queue.open.toLocaleString('en-GB')} open · {queue.pending.toLocaleString('en-GB')}{' '}
             pending
             {queue.onHold > 0
@@ -38,12 +39,12 @@ export function RightNow({
           <p className="mt-3">
             <Link
               href="/inbox?status=unresolved"
-              className="text-xs text-brand-600 hover:underline"
+              className="text-xs text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"
             >
               Open the inbox →
             </Link>
           </p>
-        </div>
+        </Card>
 
         <Stat
           label="Waiting on us"

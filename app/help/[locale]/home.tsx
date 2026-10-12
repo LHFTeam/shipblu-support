@@ -4,6 +4,7 @@ import {
   CategoryIcon,
   DocumentIcon,
   ListIcon,
+  MailIcon,
   PackageIcon,
   PackagePlusIcon,
   PackageSearchIcon,
@@ -16,7 +17,7 @@ import type { SupportAvailability } from '@/lib/kb/availability';
 import { formatOpening } from '@/lib/hours';
 import { formatArticleDate, t, tCount, type Locale } from '@/lib/kb/locale';
 import type { CategoryPreview, DatedArticle, RankedArticle } from '@/lib/kb/queries';
-import { Container, Panel } from './chrome';
+import { Container, Panel, SectionHeading } from './chrome';
 import { SearchBox } from './search-box';
 import { TrackForm } from './track/form';
 
@@ -28,13 +29,11 @@ import { TrackForm } from './track/form';
  * the two is how a "shared" component ends up with a `variant` prop that only
  * one caller ever passes.
  *
- * The layout follows the redesign; the colours do not come from it. The design
- * was drawn against a proposed ShipBlu design system whose own readme says to
- * treat a real implementation as ground truth where one exists — and one does:
- * `.kb-shell` in `globals.css` carries the live portal's palette verbatim, so
- * that this site and the one customers already use do not look subtly unlike
- * each other during the cutover. So the structure is the design's and the tokens
- * are this codebase's.
+ * The layout and the colours are both the design system's now. The colours
+ * once came from the live portal instead, so this site and the one customers
+ * already used would not look subtly unlike each other during the cutover;
+ * that palette has since become the system's own roles, which the console reads
+ * too, so there is one set of colours rather than two that agree.
  */
 
 /**
@@ -55,18 +54,30 @@ export function HomeHero({
   tags: string[];
 }) {
   return (
-    <div className="border-b border-[var(--kb-border)] bg-[var(--kb-band-soft)]">
+    <div className="border-b border-(--color-border-subtle) bg-(--color-background-brand-subtle)">
       <Container className="grid gap-8 py-10 sm:py-14 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] lg:gap-12">
         <div>
-          <p className="text-xs font-semibold tracking-[0.08em] text-[var(--kb-band-ink)] uppercase">
+          {/* Capitals and letter-spacing in Latin only: Arabic has no case, and
+              tracking pulls its joined letters apart. */}
+          <p
+            className={`text-xs font-bold text-(--color-text-brand) ${
+              locale === 'ar' ? '' : 'tracking-eyebrow uppercase'
+            }`}
+          >
             {t(locale, 'heroEyebrow')}
           </p>
 
-          <h1 className="mt-2.5 text-3xl font-bold text-balance text-[var(--kb-heading)] sm:text-4xl">
+          <h1
+            className={`mt-2.5 text-read-display text-balance text-(--color-text-primary) md:text-read-display-md ${
+              locale === 'ar' ? 'leading-read-heading-ar font-bold' : 'font-black'
+            }`}
+          >
             {t(locale, 'heroHeading')}
           </h1>
 
-          <p className="mt-3 max-w-prose text-[var(--kb-muted)]">{t(locale, 'heroIntro')}</p>
+          <p className="mt-3 max-w-[62ch] text-read-body text-(--color-text-secondary)">
+            {t(locale, 'heroIntro')}
+          </p>
 
           <div className="mt-6 max-w-xl">
             <SearchBox locale={locale} size="hero" placeholderKey="searchPlaceholderHero" />
@@ -74,12 +85,12 @@ export function HomeHero({
 
           {tags.length > 0 ? (
             <div className="mt-4 flex flex-wrap items-center gap-2 text-sm">
-              <span className="text-[var(--kb-muted)]">{t(locale, 'commonSearches')}</span>
+              <span className="text-(--color-text-secondary)">{t(locale, 'commonSearches')}</span>
               {tags.map((tag) => (
                 <Link
                   key={tag}
                   href={`/${locale}/search?q=${encodeURIComponent(tag)}`}
-                  className="rounded-full border border-[var(--kb-border-strong)] bg-[var(--kb-surface)] px-3 py-1 text-xs font-medium text-[var(--kb-muted)] transition-colors hover:text-[var(--kb-heading)]"
+                  className="rounded-full border border-(--color-border-default) bg-(--color-background-surface) px-3 py-1 text-xs font-medium text-(--color-text-secondary) transition-colors hover:border-(--color-border-strong) hover:text-(--color-text-primary)"
                 >
                   {tag}
                 </Link>
@@ -89,15 +100,17 @@ export function HomeHero({
         </div>
 
         <Panel className="self-start p-5">
-          <h2 className="flex items-center gap-2 font-semibold text-[var(--kb-heading)]">
-            <PackageSearchIcon size={20} className="text-[var(--kb-band-ink)]" />
+          <h2 className="flex items-center gap-2 text-base font-bold text-(--color-text-primary)">
+            <PackageSearchIcon size={20} className="text-(--color-text-brand)" />
             {t(locale, 'trackTitle')}
           </h2>
-          <p className="mt-2 text-sm text-[var(--kb-muted)]">{t(locale, 'trackIntro')}</p>
+          <p className="mt-2 text-sm leading-relaxed text-(--color-text-secondary)">
+            {t(locale, 'trackIntro')}
+          </p>
           <div className="mt-4">
             <TrackForm locale={locale} id="home-tracking" />
           </div>
-          <p className="mt-3 text-xs text-[var(--kb-muted)]">{t(locale, 'trackHint')}</p>
+          <p className="mt-3 text-xs text-(--color-text-secondary)">{t(locale, 'trackHint')}</p>
         </Panel>
       </Container>
     </div>
@@ -116,27 +129,32 @@ export function TopicCard({ locale, category }: { locale: Locale; category: Cate
     <li>
       <Panel className="flex h-full flex-col p-5">
         <div className="flex items-center gap-3">
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[var(--kb-band-soft)] text-[var(--kb-band-ink)]">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-(--color-background-brand-subtle) text-(--color-text-brand)">
             <TopicIcon name={category.name} slug={category.slug} />
           </span>
-          <h3 className="font-semibold text-[var(--kb-heading)]">
-            <Link href={`/${locale}/c/${category.slug}`} className="hover:underline">
+          <h3 className="text-base font-bold text-(--color-text-primary)">
+            <Link
+              href={`/${locale}/c/${category.slug}`}
+              className="underline-offset-4 hover:underline"
+            >
               {category.name}
             </Link>
           </h3>
         </div>
 
         {category.description ? (
-          <p className="mt-3 line-clamp-2 text-sm text-[var(--kb-muted)]">{category.description}</p>
+          <p className="mt-3 line-clamp-2 text-sm text-(--color-text-secondary)">
+            {category.description}
+          </p>
         ) : null}
 
         {category.preview.length > 0 ? (
-          <ul className="mt-3.5 flex flex-col gap-2 border-t border-[var(--kb-border)] pt-3.5 text-sm">
+          <ul className="mt-3.5 flex flex-col gap-2 border-t border-(--color-border-subtle) pt-3.5 text-sm">
             {category.preview.map((article) => (
               <li key={article.id}>
                 <Link
                   href={`/${locale}/a/${article.slug}`}
-                  className="text-[var(--kb-link)] underline-offset-4 hover:underline"
+                  className="text-(--color-text-link) underline-offset-4 hover:text-(--color-text-link-hover) hover:underline"
                 >
                   {article.title}
                 </Link>
@@ -147,7 +165,7 @@ export function TopicCard({ locale, category }: { locale: Locale; category: Cate
 
         <Link
           href={`/${locale}/c/${category.slug}`}
-          className="mt-3.5 self-start text-xs font-medium text-[var(--kb-link)] underline-offset-4 hover:underline"
+          className="mt-3.5 self-start text-xs font-bold text-(--color-text-link) underline-offset-4 hover:text-(--color-text-link-hover) hover:underline"
         >
           {tCount(locale, 'allArticles', category.articleCount)}
         </Link>
@@ -209,19 +227,19 @@ export function ArticleShortlist({
 
   return (
     <section>
-      <h2 className="mb-4 text-lg font-semibold text-[var(--kb-heading)]">{title}</h2>
+      <SectionHeading>{title}</SectionHeading>
       <Panel className="overflow-hidden">
         <ul>
           {articles.map((article) => (
-            <li key={article.id} className="border-b border-[var(--kb-border)] last:border-0">
+            <li key={article.id} className="border-b border-(--color-border-subtle) last:border-0">
               <Link
                 href={`/${locale}/a/${article.slug}`}
-                className="flex items-baseline gap-3 px-4 py-3.5 transition-colors hover:bg-[var(--kb-surface-2)]"
+                className="flex items-baseline gap-3 px-4 py-3.5 transition-colors hover:bg-(--color-background-surface-sunken)"
               >
-                <span className="min-w-0 flex-1 text-sm font-medium text-[var(--kb-heading)]">
+                <span className="min-w-0 flex-1 text-base font-bold text-(--color-text-primary)">
                   {article.title}
                 </span>
-                <span className="shrink-0 text-xs whitespace-nowrap text-[var(--kb-muted)]">
+                <span className="shrink-0 text-xs whitespace-nowrap text-(--color-text-secondary)">
                   {article.meta}
                 </span>
               </Link>
@@ -268,14 +286,16 @@ export function ContactPanel({
   return (
     <Panel as="section" className="grid gap-6 p-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)]">
       <div>
-        <h2 className="text-lg font-semibold text-[var(--kb-heading)]">
+        <h2 className="text-lg font-bold text-(--color-text-primary)">
           {t(locale, 'contactPrompt')}
         </h2>
-        <p className="mt-2.5 text-sm text-[var(--kb-muted)]">{t(locale, 'contactIntro')}</p>
+        <p className="mt-2.5 text-sm leading-relaxed text-(--color-text-secondary)">
+          {t(locale, 'contactIntro')}
+        </p>
         <Availability locale={locale} availability={availability} />
       </div>
 
-      <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <ul className="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3">
         <ChannelCard
           href={`/${locale}/forms`}
           icon={<DocumentIcon size={17} />}
@@ -285,10 +305,9 @@ export function ContactPanel({
         />
         <ChannelCard
           href="mailto:support@shipblu.com"
-          icon={<MailGlyph />}
+          icon={<MailIcon size={17} />}
           name={t(locale, 'email')}
           detail="support@shipblu.com"
-          note={t(locale, 'channelEmailSla')}
         />
         {signedIn ? (
           <ChannelCard
@@ -331,7 +350,7 @@ function Availability({
 
   if (availability.open) {
     return (
-      <p className="mt-3 flex items-center gap-2 text-sm font-medium text-[var(--kb-yes)]">
+      <p className="mt-3 flex items-center gap-2 text-sm font-bold text-(--color-feedback-success-fg)">
         <span aria-hidden className="size-2 rounded-full bg-current" />
         {t(locale, 'supportOpen')}
       </p>
@@ -345,7 +364,7 @@ function Availability({
       )
     : t(locale, 'supportClosed');
 
-  return <p className="mt-3 text-sm text-[var(--kb-muted)]">{opening}</p>;
+  return <p className="mt-3 text-sm text-(--color-text-secondary)">{opening}</p>;
 }
 
 function ChannelCard({
@@ -359,22 +378,29 @@ function ChannelCard({
   icon: ReactNode;
   name: string;
   detail: string;
-  note: string;
+  /**
+   * What the route is good for, when there is something true to say. The
+   * email card has none: the line it used to carry promised a reply within a
+   * business day, which nothing here measures or enforces, and a promise a
+   * help centre cannot keep is worse than silence in front of somebody
+   * deciding whether to wait.
+   */
+  note?: string;
 }) {
   const external = href.startsWith('mailto:');
   const body = (
     <>
-      <span className="flex items-center gap-2 text-[var(--kb-band-ink)]">
+      <span className="flex items-center gap-2 text-(--color-text-brand)">
         {icon}
-        <span className="text-sm font-semibold text-[var(--kb-heading)]">{name}</span>
+        <span className="text-sm font-bold text-(--color-text-primary)">{name}</span>
       </span>
-      <span className="text-xs break-words text-[var(--kb-muted)]">{detail}</span>
-      <span className="mt-auto text-xs text-[var(--kb-muted)] opacity-80">{note}</span>
+      <span className="text-sm break-words text-(--color-text-secondary)">{detail}</span>
+      {note ? <span className="mt-auto text-xs text-(--color-text-secondary)">{note}</span> : null}
     </>
   );
 
   const className =
-    'flex h-full flex-col gap-1.5 rounded-lg border border-[var(--kb-border)] p-4 transition-colors hover:border-[var(--kb-border-strong)] hover:bg-[var(--kb-surface-2)]';
+    'flex h-full flex-col gap-1.5 rounded-lg border border-(--color-border-subtle) p-4 transition-colors hover:border-(--color-border-default) hover:bg-(--color-background-surface-sunken)';
 
   return (
     <li>
@@ -388,25 +414,5 @@ function ChannelCard({
         </Link>
       )}
     </li>
-  );
-}
-
-/** An envelope. Local to this file: nothing else in the console sends email. */
-function MailGlyph() {
-  return (
-    <svg
-      width={17}
-      height={17}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.75}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <rect x="3" y="5.5" width="18" height="13" rx="2" />
-      <path d="m3.8 7 7.2 5.4a1.7 1.7 0 0 0 2 0L20.2 7" />
-    </svg>
   );
 }

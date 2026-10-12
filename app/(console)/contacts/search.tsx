@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { SearchIcon } from '@/components/icons';
+import { SearchInput } from '@/components/search-input';
 
 /**
  * The contact search box.
@@ -38,17 +38,11 @@ export function ContactSearch({ initial }: { initial: string }) {
   }, [value, initial]);
 
   return (
-    <div className="relative">
-      <span className="pointer-events-none absolute inset-y-0 start-2 flex items-center opacity-50">
-        <SearchIcon size={15} />
-      </span>
-      <input
-        value={value}
-        onChange={(event) => setValue(event.target.value)}
-        placeholder="Name, email, phone, SBID or tracking number"
-        aria-label="Search contacts"
-        className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] py-2 pe-3 ps-8 text-sm outline-none focus:border-brand-500"
-      />
-    </div>
+    <SearchInput
+      value={value}
+      onChange={(event) => setValue(event.target.value)}
+      placeholder="Name, email, phone, SBID, tracking"
+      aria-label="Search contacts"
+    />
   );
 }

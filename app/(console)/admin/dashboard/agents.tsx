@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Badge, Cell, EmptyState, Row, Table } from '@/components/ui';
+import { Badge, buttonClass, Cell, EmptyState, Row, Table } from '@/components/ui';
 import { InfoTip } from '@/components/tooltip';
 import { formatRelative } from '@/lib/format';
 import type { agentLoad } from '@/lib/reports/live';
@@ -23,10 +23,7 @@ export function AgentLoad({
              wallboard — it answers who is loaded; setting somebody's
              availability is a decision, and it belongs with the reason for
              making it. */
-        <Link
-          href="/reports/team"
-          className="rounded-md border border-[var(--border)] px-2.5 py-1 text-xs hover:bg-[var(--muted)]"
-        >
+        <Link href="/reports/team" className={buttonClass({ variant: 'secondary', size: 'sm' })}>
           Set availability
         </Link>
       }
@@ -71,9 +68,11 @@ export function AgentLoad({
             <Row key={agent.id}>
               <Cell className="font-medium">{agent.name}</Cell>
               <Cell>
-                <Badge tone={presenceTone(agent.presence)}>{agent.presence}</Badge>
+                <Badge tone={presenceTone(agent.presence)}>
+                  {agent.presence.charAt(0).toUpperCase() + agent.presence.slice(1)}
+                </Badge>
                 {agent.lastSeenAt && agent.presence !== 'online' ? (
-                  <span className="ms-2 text-xs text-[var(--muted-foreground)]">
+                  <span className="ms-2 text-xs text-(--color-text-secondary)">
                     {formatRelative(agent.lastSeenAt)}
                   </span>
                 ) : null}
@@ -87,8 +86,8 @@ export function AgentLoad({
                   <span
                     className={
                       agent.open >= agent.maxOpen
-                        ? 'ms-1 text-xs font-medium text-amber-600'
-                        : 'ms-1 text-xs text-[var(--muted-foreground)]'
+                        ? 'ms-1 text-xs font-medium text-(--color-feedback-warning-fg)'
+                        : 'ms-1 text-xs text-(--color-text-secondary)'
                     }
                   >
                     / {agent.maxOpen}
@@ -100,10 +99,10 @@ export function AgentLoad({
                 {agent.breached > 0 ? (
                   <Badge tone="danger">{agent.breached}</Badge>
                 ) : (
-                  <span className="text-[var(--muted-foreground)]">—</span>
+                  <span className="text-(--color-text-secondary)">—</span>
                 )}
               </Cell>
-              <Cell className="text-[var(--muted-foreground)]">
+              <Cell className="text-(--color-text-secondary)">
                 {agent.oldestWaitingSince
                   ? formatDuration(
                       Math.round((now.getTime() - agent.oldestWaitingSince.getTime()) / 1000),

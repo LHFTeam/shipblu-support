@@ -1,7 +1,16 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { Stat } from '@/components/charts';
-import { Badge, Cell, EmptyState, PageHeader, Row, Table } from '@/components/ui';
+import {
+  Badge,
+  buttonClass,
+  Cell,
+  EmptyState,
+  Notice,
+  PageHeader,
+  Row,
+  Table,
+} from '@/components/ui';
 import { InfoTip } from '@/components/tooltip';
 import { requireAgent } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
@@ -17,6 +26,7 @@ import { NONE_KEY } from '@/lib/canned-suggest/request';
 import { loadSuggestionSettings } from '@/lib/canned-suggest/settings';
 import { channelLabel, formatDateTime } from '@/lib/format';
 import { rangeIn, reportingContext } from '@/lib/reports/rollup';
+import { RangeNav } from '../range-nav';
 import { typesafeConfigured } from '@/lib/typesafe/client';
 
 export const dynamic = 'force-dynamic';
@@ -79,23 +89,14 @@ export default async function CannedSuggestionsReportPage({
         description={`${range.from} to ${range.to}, in ${zone}. How often agents take the canned response Jev suggests in the reply box, and which suggestions turn out to be right.`}
         actions={
           <div className="flex flex-wrap items-center gap-3">
-            <nav className="flex gap-1 text-sm">
-              {RANGES.map((each) => (
-                <Link
-                  key={each}
-                  href={`/reports/canned-suggestions?days=${each}`}
-                  aria-current={each === days ? 'page' : undefined}
-                  className={`rounded-md px-2.5 py-1 ${
-                    each === days ? 'bg-[var(--muted)] font-medium' : 'opacity-60 hover:opacity-100'
-                  }`}
-                >
-                  {each} days
-                </Link>
-              ))}
-            </nav>
+            <RangeNav
+              ranges={RANGES}
+              current={days}
+              href={(each) => `/reports/canned-suggestions?days=${each}`}
+            />
             <Link
               href={`/reports?days=${days}`}
-              className="rounded-md border border-[var(--border)] px-2.5 py-1 text-sm hover:bg-[var(--muted)]"
+              className={buttonClass({ variant: 'secondary', size: 'sm' })}
             >
               All reports
             </Link>
@@ -104,8 +105,8 @@ export default async function CannedSuggestionsReportPage({
       />
 
       <div className="mb-6 max-w-2xl space-y-2">
-        <p className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-sm text-[var(--muted-foreground)]">
-          A suggestion counts as <b className="text-[var(--foreground)]">right</b> when the reply
+        <Notice tone="neutral">
+          A suggestion counts as <b className="text-(--color-text-primary)">right</b> when the reply
           that followed carried that canned response &mdash; taken with Tab or picked from the list,
           edited or not &mdash; and when Jev said no response fits and the agent wrote their own.{' '}
           {settings.enabled && keyConfigured
@@ -114,17 +115,17 @@ export default async function CannedSuggestionsReportPage({
               ? 'Suggestions are switched off.'
               : 'Suggestions are switched on, but this environment has no TYPESAFE_API_KEY, so none are made.'}{' '}
           {can(agent, 'admin.fields') ? (
-            <Link href="/admin/canned" className="underline">
+            <Link href="/admin/canned" className="text-(--color-text-link) underline">
               Change it on Canned responses
             </Link>
           ) : null}
-        </p>
+        </Notice>
 
         {startsLate ? (
-          <p className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+          <Notice tone="info" icon>
             This window opens on {range.from}, but the first suggestion was made on{' '}
             <b>{firstDay}</b>. A wider range cannot reach further back than that.
-          </p>
+          </Notice>
         ) : null}
       </div>
 
@@ -272,7 +273,7 @@ export default async function CannedSuggestionsReportPage({
                     {response.title}
                     {response.gone ? (
                       <span className="ms-2">
-                        <Badge>deleted</Badge>
+                        <Badge>Deleted</Badge>
                       </span>
                     ) : null}
                   </Cell>

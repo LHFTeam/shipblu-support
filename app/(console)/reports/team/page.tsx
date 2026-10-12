@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Badge, Cell, EmptyState, PageHeader, Row, Table } from '@/components/ui';
+import { Badge, buttonClass, Cell, EmptyState, PageHeader, Row, Table } from '@/components/ui';
 import { InfoTip } from '@/components/tooltip';
 import { requirePermission } from '@/lib/auth/guard';
 import { formatRelative } from '@/lib/format';
@@ -35,21 +35,21 @@ export default async function TeamAvailabilityPage() {
   const away = team.filter((agent) => agent.presence === 'away').length;
 
   return (
-    <div className="h-full overflow-y-auto p-6">
+    <div className="app-scroll h-full overflow-y-auto p-4 sm:p-6">
       <PageHeader
         title="Team availability"
         description={describePolicy(policy)}
         actions={
           <Link
             href="/reports/agents"
-            className="rounded-md border border-[var(--border)] px-2.5 py-1 text-sm hover:bg-[var(--muted)]"
+            className={buttonClass({ variant: 'secondary', size: 'sm' })}
           >
             Agent productivity
           </Link>
         }
       />
 
-      <p className="mb-4 text-sm text-[var(--muted-foreground)]">
+      <p className="mb-4 text-sm text-(--color-text-secondary)">
         {online} accepting work, {away} away, {team.length - online - away} offline.
       </p>
 
@@ -81,26 +81,28 @@ export default async function TeamAvailabilityPage() {
                           : 'neutral'
                     }
                   >
-                    {agent.presence}
+                    {agent.presence.charAt(0).toUpperCase() + agent.presence.slice(1)}
                   </Badge>
                   {/* The reason is the whole point of the column. "Away"
                       alone leaves a supervisor unable to tell somebody who
                       stepped out from somebody a timer parked from somebody
                       another supervisor parked ten minutes ago. */}
                   {agent.offReason ? (
-                    <span className="text-xs opacity-50">{reasonLabel(agent.offReason)}</span>
+                    <span className="text-xs text-(--color-text-tertiary)">
+                      {reasonLabel(agent.offReason)}
+                    </span>
                   ) : null}
                 </span>
               </Cell>
               <Cell>
-                <span className="text-xs opacity-60">
+                <span className="text-xs text-(--color-text-tertiary)">
                   {agent.lastInputAt ? formatRelative(agent.lastInputAt) : '—'}
                 </span>
               </Cell>
               <Cell>
                 {agent.open}
                 {agent.maxOpen !== null ? (
-                  <span className="opacity-40"> / {agent.maxOpen}</span>
+                  <span className="text-(--color-text-tertiary)"> / {agent.maxOpen}</span>
                 ) : null}
               </Cell>
               <Cell>{agent.awaitingReply}</Cell>
@@ -108,7 +110,7 @@ export default async function TeamAvailabilityPage() {
                 {agent.breached > 0 ? (
                   <Badge tone="danger">{agent.breached}</Badge>
                 ) : (
-                  <span className="opacity-40">0</span>
+                  <span className="text-(--color-text-tertiary)">0</span>
                 )}
               </Cell>
               <Cell>
@@ -123,7 +125,7 @@ export default async function TeamAvailabilityPage() {
         </Table>
       )}
 
-      <div className="mt-4 flex items-start gap-1.5 text-xs text-[var(--muted-foreground)]">
+      <div className="mt-4 flex items-start gap-1.5 text-xs text-(--color-text-secondary)">
         <span>
           Setting somebody to not accepting stops new tickets routing to them. It never moves the
           tickets they already hold, and it does not sign them out.

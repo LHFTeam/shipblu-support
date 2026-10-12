@@ -17,8 +17,12 @@ export default function GlobalError({
         style={{
           /* This boundary replaces the root layout, globals.css included, so the
              one line that pins the app to a light palette has to be repeated
-             here — the colours below are hard-coded light ones. */
+             here, and the colours are the design system's tokens written out
+             as literals: canvas, primary and secondary text, the default
+             border. None of the custom properties exist on this page. */
           colorScheme: 'light',
+          background: '#f6f8fa',
+          color: '#1e1e1e',
           fontFamily: 'ui-sans-serif, system-ui, sans-serif',
           display: 'flex',
           minHeight: '100vh',
@@ -29,7 +33,7 @@ export default function GlobalError({
       >
         <div style={{ textAlign: 'center', padding: '2rem' }}>
           <h1 style={{ fontSize: '1.25rem', marginBottom: '0.5rem' }}>Something went wrong</h1>
-          <p style={{ color: '#666', marginBottom: '1.5rem' }}>
+          <p style={{ color: '#515b68', marginBottom: '1.5rem' }}>
             The error has been logged. Try again, or reload the page.
           </p>
           <button
@@ -37,7 +41,7 @@ export default function GlobalError({
             style={{
               padding: '0.5rem 1rem',
               borderRadius: '0.375rem',
-              border: '1px solid #ccc',
+              border: '1px solid #c7ced7',
               background: '#fff',
               cursor: 'pointer',
             }}

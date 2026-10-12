@@ -22,7 +22,7 @@ export function MetaWindowIndicator({
   // tick — there is no first frame to get wrong.
   if (thread && !thread.canSend) {
     return (
-      <Badge tone="closed">
+      <Badge tone="window-closed">
         {thread.reason === 'standby' ? 'Another app owns this inbox' : 'Cannot reply from here'}
       </Badge>
     );
@@ -35,8 +35,12 @@ export function MetaWindowIndicator({
     now,
   );
 
+  // Outside 24 hours is amber, not the coral of a closing window: a reply
+  // still goes, tagged as a human agent's, for days yet.
   return (
-    <Badge tone={state.isOpen ? 'open' : state.needsHumanAgentTag ? 'warning' : 'closed'}>
+    <Badge
+      tone={state.isOpen ? 'window-open' : state.needsHumanAgentTag ? 'warning' : 'window-closed'}
+    >
       {describeWindow(state)}
     </Badge>
   );
@@ -63,62 +67,13 @@ export function WindowIndicator({
 
   const state = windowState(last, now);
 
+  // Coral under two hours: a window about to close is one of the few things
+  // the console is allowed to shout about.
   return state.isOpen ? (
-    <Badge tone={state.remainingMs < 2 * 60 * 60 * 1000 ? 'warning' : 'open'}>
-      window {formatRemaining(state.remainingMs)}
+    <Badge tone={state.remainingMs < 2 * 60 * 60 * 1000 ? 'window-closing' : 'window-open'}>
+      Window {formatRemaining(state.remainingMs)}
     </Badge>
   ) : (
-    <Badge tone="closed">window closed — template only</Badge>
+    <Badge tone="window-closed">Window closed — template only</Badge>
   );
-}
-
-/**
- * The 24-hour window at a glance, so agents can triage by what is expiring.
- *
- * The inbox list's compact form of `WindowIndicator`, on the same clock: it
- * used to read `new Date()` during render, so a badge never moved while the
- * list stayed open, and the server and the browser could each pick a
- * different one for the same row.
- */
-export function WhatsAppWindowBadge({
-  lastCustomerMessageAt,
-}: {
-  lastCustomerMessageAt: Date | string | null;
-}) {
-  const now = useNow();
-  if (!now) return null;
-
-  const state = windowState(lastCustomerMessageAt ? new Date(lastCustomerMessageAt) : null, now);
-
-  if (!state.isOpen) return <Badge tone="closed">window closed</Badge>;
-  // Under two hours is when it starts mattering; above that it is just noise.
-  if (state.remainingMs < 2 * 60 * 60 * 1000) {
-    return <Badge tone="warning">{formatRemaining(state.remainingMs)}</Badge>;
-  }
-  return null;
-}
-
-/**
- * The Messenger and Instagram equivalent.
- *
- * Only shown once a reply needs the human-agent tag or has become impossible —
- * the first 24 hours are unremarkable and a badge on every row would say
- * nothing.
- */
-export function MetaWindowBadge({
-  lastCustomerMessageAt,
-}: {
-  lastCustomerMessageAt: Date | string | null;
-}) {
-  const now = useNow();
-  if (!now) return null;
-
-  const state = metaWindowState(
-    lastCustomerMessageAt ? new Date(lastCustomerMessageAt) : null,
-    now,
-  );
-
-  if (state.isClosed) return <Badge tone="closed">window closed</Badge>;
-  if (state.needsHumanAgentTag) return <Badge tone="warning">outside 24h</Badge>;
-  return null;
 }

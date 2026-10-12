@@ -1,8 +1,10 @@
 'use client';
 
 import { useState } from 'react';
+import { DetailsSection } from '@/components/details-section';
+import { CheckIcon, XIcon } from '@/components/icons';
 import { InfoTip } from '@/components/tooltip';
-import { Badge } from '@/components/ui';
+import { Badge, Select } from '@/components/ui';
 import type { ConversationDetail } from '@/lib/tickets/conversation';
 import type { CategoryOption, RootCauseOption } from '@/lib/categorise/queries';
 import {
@@ -12,7 +14,7 @@ import {
   removeCategory,
   setRootCause,
 } from '../../category-actions';
-import { SidebarField } from './ticket-fields';
+import { FieldError } from './ticket-fields';
 import { UnlinkButton } from './unlink-button';
 import { type LinkAction, useFieldAction } from './use-field-action';
 
@@ -56,23 +58,21 @@ export function CategoriesField({
   const unseeded = options.length === 0 && conversation.categories.length === 0;
 
   return (
-    <SidebarField
-      label="Categories"
-      hint={unseeded ? 'No taxonomy yet — run the seed to create the categories.' : undefined}
-    >
-      {unseeded ? null : (
+    <DetailsSection collapsible={false} title="Categories">
+      {unseeded ? (
+        <p className="text-xs text-(--color-text-secondary)">
+          No taxonomy yet — run the seed to create the categories.
+        </p>
+      ) : (
         <>
-          <ul className="mb-2 flex flex-col gap-1">
+          <ul className="mb-3 flex flex-col gap-2">
             {applied.map((category) => (
-              <li key={category.categoryId} className="text-xs">
+              <li key={category.categoryId} className="text-sm">
                 <div className="flex items-start justify-between gap-2">
-                  <span className="font-medium">
+                  <span className="flex min-w-0 flex-wrap items-center gap-1.5 font-medium">
                     {category.labelEn}
-                    {category.isPrimary ? (
-                      <span className="ml-1 opacity-50" aria-label="primary category">
-                        ★
-                      </span>
-                    ) : null}
+                    {/* Worded, not a star: a glyph nobody explained is a guess. */}
+                    {category.isPrimary ? <Badge>Primary</Badge> : null}
                   </span>
                   {canCategorise ? (
                     <UnlinkButton
@@ -85,21 +85,24 @@ export function CategoriesField({
                     />
                   ) : null}
                 </div>
-                <div className="mt-0.5 flex flex-wrap items-center gap-1">
-                  <span className="opacity-50">{category.area}</span>
-                  {category.source === 'detected' ? <Badge>auto</Badge> : null}
-                  {category.source === 'manual' ? <Badge tone="brand">by hand</Badge> : null}
+                <div className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-(--color-text-secondary)">
+                  <span>{category.area}</span>
+                  {/* Dashed, because a rule filed it and no person did. */}
+                  {category.source === 'detected' ? <Badge tone="automated">Auto</Badge> : null}
+                  {category.source === 'manual' ? <Badge tone="info">By hand</Badge> : null}
                 </div>
               </li>
             ))}
             {applied.length === 0 ? (
-              <li className="text-xs opacity-50">Nothing filed yet.</li>
+              <li className="text-sm text-(--color-text-tertiary)">Nothing filed yet.</li>
             ) : null}
           </ul>
 
           {suggested.length > 0 ? (
-            <div className="mb-2 rounded border border-dashed border-current/20 p-2">
-              <p className="mb-1 flex items-center gap-1 text-xs font-medium opacity-70">
+            // Dashed for the same reason as the Auto badge: nobody has looked
+            // at these yet, a keyword rule wrote them.
+            <div className="mb-3 rounded-lg border border-dashed border-(--color-border-strong) p-2.5">
+              <p className="mb-1.5 flex items-center gap-1 text-xs font-semibold text-(--color-text-secondary)">
                 Suggested
                 <InfoTip label="suggestions">
                   Found by a keyword rule rather than read outright, so it is waiting on you.
@@ -109,33 +112,31 @@ export function CategoriesField({
               </p>
               <ul className="flex flex-col gap-1">
                 {suggested.map((category) => (
-                  <li key={category.categoryId} className="text-xs">
+                  <li key={category.categoryId} className="text-sm">
                     <div className="flex items-start justify-between gap-1">
                       <span>{category.labelEn}</span>
                       {canCategorise ? (
-                        <span className="flex shrink-0 gap-1">
+                        <span className="flex shrink-0 gap-0.5">
                           <ReviewButton
                             action={confirmCategory}
                             conversationId={conversation.id}
                             categoryId={category.categoryId}
                             label={`Confirm ${category.labelEn}`}
-                            glyph="&#10003;"
+                            kind="confirm"
                           />
                           <ReviewButton
                             action={rejectCategory}
                             conversationId={conversation.id}
                             categoryId={category.categoryId}
                             label={`Reject ${category.labelEn}`}
-                            glyph="&#215;"
+                            kind="reject"
                           />
                         </span>
                       ) : null}
                     </div>
-                    {category.ruleKey ? (
-                      <p className="opacity-50">{category.ruleKey}</p>
-                    ) : (
-                      <p className="opacity-50">no rule matched this message</p>
-                    )}
+                    <p className="text-xs break-all text-(--color-text-tertiary)">
+                      {category.ruleKey ?? 'no rule matched this message'}
+                    </p>
                   </li>
                 ))}
               </ul>
@@ -148,7 +149,7 @@ export function CategoriesField({
             would know the rules had been wrong about it.
           */}
           {rejected.length > 0 ? (
-            <p className="mb-2 text-xs opacity-40">
+            <p className="mb-3 text-xs text-(--color-text-tertiary)">
               Rejected: {rejected.map((category) => category.labelEn).join(', ')}
             </p>
           ) : null}
@@ -171,7 +172,7 @@ export function CategoriesField({
           ) : null}
         </>
       )}
-    </SidebarField>
+    </DetailsSection>
   );
 }
 
@@ -181,13 +182,13 @@ function ReviewButton({
   conversationId,
   categoryId,
   label,
-  glyph,
+  kind,
 }: {
   action: LinkAction;
   conversationId: string;
   categoryId: string;
   label: string;
-  glyph: string;
+  kind: 'confirm' | 'reject';
 }) {
   const { pending: busy, run: submit } = useFieldAction(action, { rereadOnRefusal: true });
 
@@ -201,9 +202,10 @@ function ReviewButton({
       disabled={busy}
       aria-label={label}
       onClick={() => void run()}
-      className="rounded px-1 text-xs opacity-60 hover:opacity-100"
-      dangerouslySetInnerHTML={{ __html: glyph }}
-    />
+      className="rounded-md p-1 text-(--color-text-secondary) transition-colors hover:bg-(--color-background-hover) hover:text-(--color-text-primary) disabled:opacity-50"
+    >
+      {kind === 'confirm' ? <CheckIcon size={14} /> : <XIcon size={14} />}
+    </button>
   );
 }
 
@@ -273,9 +275,8 @@ function CategoryPicker({
   }
 
   return (
-    <div className="mb-2">
-      <select
-        className="app-input w-full text-xs"
+    <div>
+      <Select
         disabled={busy}
         defaultValue=""
         aria-label="Add a category"
@@ -294,8 +295,8 @@ function CategoryPicker({
             ))}
           </optgroup>
         ))}
-      </select>
-      {error ? <p className="mt-1 text-xs text-red-600">{error}</p> : null}
+      </Select>
+      <FieldError>{error}</FieldError>
     </div>
   );
 }
@@ -347,8 +348,8 @@ function RootCausePicker({
   }
 
   return (
-    <div className="mt-3 border-t border-current/10 pt-2">
-      <p className="mb-1 flex items-center gap-1 text-xs font-medium opacity-70">
+    <div className="mt-4 border-t border-(--color-border-subtle) pt-3">
+      <p className="mb-1 flex items-center gap-1 text-xs font-medium text-(--color-text-secondary)">
         Root cause
         <InfoTip label="the root cause">
           What actually went wrong, as opposed to what the customer asked about. Recorded by you
@@ -357,8 +358,7 @@ function RootCausePicker({
           ticket about a delivery, a parcel&apos;s condition, a pickup, a return or a payment.
         </InfoTip>
       </p>
-      <select
-        className="app-input w-full text-xs"
+      <Select
         disabled={disabled || busy}
         value={chosen}
         aria-label="Root cause"
@@ -376,8 +376,8 @@ function RootCausePicker({
               ))}
           </optgroup>
         ))}
-      </select>
-      {error ? <p className="mt-1 text-xs text-red-600">{error}</p> : null}
+      </Select>
+      <FieldError>{error}</FieldError>
     </div>
   );
 }

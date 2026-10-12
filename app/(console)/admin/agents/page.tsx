@@ -1,3 +1,4 @@
+import { PageHeader } from '@/components/ui';
 import { listAgentsForAdmin, listOpenInvites } from '@/lib/admin/settings';
 import { requirePermission } from '@/lib/auth/guard';
 import { unsealInviteToken } from '@/lib/auth/invite-token';
@@ -58,8 +59,8 @@ export default async function AgentsPage() {
   return (
     <div className="flex flex-col gap-8">
       <section>
-        <h1 className="mb-3 text-lg font-semibold">Agents</h1>
-        <ul className="divide-y divide-[var(--border)] rounded-lg border border-[var(--border)]">
+        <PageHeader title="Agents" />
+        <ul className="divide-y divide-(--color-border-subtle) rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface)">
           {agentList.map((agent) => (
             <AgentRow key={agent.id} agent={agent} isSelf={agent.id === admin.id} />
           ))}
@@ -71,7 +72,7 @@ export default async function AgentsPage() {
         {/* Above the invite form because it governs the list directly above it,
             and because "why is she away when she is clearly here?" is asked
             about that list rather than about anything else on this page. */}
-        <p className="mb-3 text-sm text-[var(--muted-foreground)]">
+        <p className="mb-3 text-sm text-(--color-text-secondary)">
           Measured from the last key or click in the console, not from being connected — a console
           left open on an empty desk stays connected all day. Supervisors can set anyone&rsquo;s
           availability by hand under Reports → Team availability.
@@ -89,14 +90,16 @@ export default async function AgentsPage() {
 
       {pendingInvites.length > 0 ? (
         <section>
-          <h2 className="mb-3 text-sm font-medium opacity-70">Pending invites</h2>
-          <ul className="divide-y divide-[var(--border)] rounded-lg border border-[var(--border)] text-sm">
+          <h2 className="mb-3 text-sm font-semibold text-(--color-text-secondary)">
+            Pending invites
+          </h2>
+          <ul className="divide-y divide-(--color-border-subtle) rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface) text-sm">
             {pendingInvites.map((invite) => (
-              <li key={invite.id} className="flex flex-col gap-2 px-3 py-2.5">
+              <li key={invite.id} className="flex flex-col gap-2 px-4 py-3">
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                   <span className="min-w-0 break-all">{invite.email}</span>
-                  <span className="opacity-50">{invite.role}</span>
-                  <span className="ms-auto text-xs opacity-50">
+                  <span className="text-(--color-text-tertiary)">{invite.role}</span>
+                  <span className="ms-auto text-xs text-(--color-text-tertiary)">
                     expires {formatDateTime(invite.expiresAt)}
                   </span>
                 </div>

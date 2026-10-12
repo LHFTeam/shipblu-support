@@ -12,7 +12,7 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
-import { ChevronDownIcon, ChevronUpIcon } from '@/components/icons';
+import { ChevronDownIcon, ChevronUpIcon, ImageIcon, PaperclipIcon } from '@/components/icons';
 import { isPreviewableImage, type PlayableMedia, playableMedia } from '@/lib/attachments/preview';
 import {
   initialPreviewState,
@@ -233,16 +233,25 @@ export function AttachmentList({
     // the screen (PROJECT-STATE §6.81). The timeline pane is positioned now as
     // well; this keeps the list safe wherever else it is mounted.
     <div className="relative">
-      <ul className={compact ? 'mt-1.5 flex flex-wrap gap-1.5' : 'mt-2 flex flex-wrap gap-2'}>
+      <ul className={compact ? 'mt-1.5 flex flex-wrap gap-1.5' : 'flex flex-wrap gap-1.5'}>
         {files.map((file) => (
           <li
             key={file.id}
             className={
               compact
-                ? 'rounded border border-[var(--border)] px-1.5 py-0.5 text-xs'
-                : 'rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs'
+                ? 'inline-flex items-center gap-1 rounded-md border border-(--color-border-subtle) px-1.5 py-0.5 text-xs'
+                : 'inline-flex items-center gap-2 rounded-lg border border-(--color-border-subtle) bg-(--color-background-surface) px-3 py-2 text-xs text-(--color-text-primary)'
             }
           >
+            {/* From the type alone, not `kindOf`: that waits for the browser
+                to say what it can play, and the server's first render and
+                the browser's would draw different glyphs. */}
+            {compact ? null : isPreviewableImage(file.contentType) ||
+              playableMedia(file.contentType)?.kind === 'video' ? (
+              <ImageIcon size={15} className="shrink-0 text-(--color-text-tertiary)" />
+            ) : (
+              <PaperclipIcon size={15} className="shrink-0 text-(--color-text-tertiary)" />
+            )}
             {kindOf(file) === 'image' || kindOf(file) === 'video' ? (
               <a
                 id={chipIdFor(baseId, file.id)}
@@ -268,7 +277,7 @@ export function AttachmentList({
                 {file.filename}
               </a>
             )}
-            <span className={compact ? 'ms-1 opacity-60' : 'ms-1.5 text-[var(--muted-foreground)]'}>
+            <span className="text-(--color-text-tertiary) tabular-nums">
               {formatBytes(file.sizeBytes)}
             </span>
           </li>
@@ -415,7 +424,7 @@ function Failure({
   const failureId = `${useId()}-failure`;
 
   return (
-    <p className="text-xs text-[var(--muted-foreground)]">
+    <p className="text-xs text-(--color-text-secondary)">
       <span id={failureId}>
         {name} could not be {verb} here.
       </span>{' '}
@@ -425,7 +434,12 @@ function Failure({
           rotor, an elements list — still shows two "Try again"s when two
           files fail; a name that differed from the label would be the worse
           trade. */}
-      <button type="button" onClick={onRetry} aria-describedby={failureId} className="underline">
+      <button
+        type="button"
+        onClick={onRetry}
+        aria-describedby={failureId}
+        className="text-(--color-text-link) underline"
+      >
         Try again
       </button>
       {' · '}
@@ -434,7 +448,7 @@ function Failure({
         target="_blank"
         rel="noreferrer"
         aria-describedby={failureId}
-        className="underline"
+        className="text-(--color-text-link) underline"
       >
         Open the file
       </a>
@@ -486,11 +500,11 @@ function ImagePreview({
           decoding="async"
           onLoad={() => onSettle('loaded')}
           onError={() => onSettle('failed')}
-          className="block max-h-96 max-w-full cursor-zoom-in rounded-md border border-[var(--border)] bg-[var(--surface)]"
+          className="block max-h-96 max-w-full cursor-zoom-in rounded-lg border border-(--color-border-subtle) bg-(--color-background-surface)"
         />
       </a>
       {load === 'loading' ? (
-        <p className="text-xs text-[var(--muted-foreground)]">Loading picture…</p>
+        <p className="text-xs text-(--color-text-tertiary)">Loading picture…</p>
       ) : null}
     </>
   );
@@ -637,12 +651,12 @@ function Player({
           // scrubber and its time.
           soundOnly
             ? 'block h-12 w-80 max-w-full'
-            : 'block max-h-96 max-w-full rounded-md border border-[var(--border)] bg-black'
+            : 'block max-h-96 max-w-full rounded-lg border border-(--color-border-subtle) bg-black'
         }
         {...fresh}
       />
       {load === 'loading' ? (
-        <p className="text-xs text-[var(--muted-foreground)]">Loading video…</p>
+        <p className="text-xs text-(--color-text-tertiary)">Loading video…</p>
       ) : null}
     </>
   );

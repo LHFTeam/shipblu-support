@@ -159,7 +159,7 @@ export function ArticleEditor({
       </div>
 
       {internal ? (
-        <p className="-mt-2 text-xs opacity-50">
+        <p className="-mt-2 text-xs text-(--color-text-tertiary)">
           This article is internal
           {visibility === 'agents_only' ? '' : `, because ${folder?.name} is`}. No customer can
           reach it on the help centre, signed in or not, and it cannot be linked into a reply.
@@ -176,7 +176,7 @@ export function ArticleEditor({
         wrong — a signed-in article is deliberately absent from the sitemap, and
         the folder gates the article rather than the other way round.
       */}
-      <p className="-mt-2 text-xs opacity-50">
+      <p className="-mt-2 text-xs text-(--color-text-tertiary)">
         Public articles are open to everyone. Signed-in articles appear only once a customer has
         signed in to the portal, and are kept out of the sitemap and the chat widget, so search
         engines never index them. Agents-only articles are never served on the help centre at all. A
@@ -186,13 +186,14 @@ export function ArticleEditor({
       <div>
         <div className="mb-1 flex items-center gap-3">
           <Label htmlFor="bodyHtml">Body (HTML)</Label>
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => setShowPreview((value) => !value)}
-            className="ms-auto text-xs opacity-60 hover:opacity-100"
+            className="ms-auto"
           >
             {showPreview ? 'Hide preview' : 'Show preview'}
-          </button>
+          </Button>
         </div>
 
         <div className={showPreview ? 'grid gap-3 lg:grid-cols-2' : ''}>
@@ -210,7 +211,7 @@ export function ArticleEditor({
             <div
               dir={locale === 'ar' ? 'rtl' : 'ltr'}
               lang={locale}
-              className="kb-article max-h-[34rem] overflow-y-auto rounded-md border border-[var(--border)] p-4 text-sm"
+              className="kb-article app-scroll max-h-[34rem] overflow-y-auto rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) p-4 text-sm"
               // Preview only, and it renders the author's own unsaved draft in
               // their own browser — no other user's input reaches it. What gets
               // stored is sanitised server-side, which is the boundary that
@@ -221,7 +222,7 @@ export function ArticleEditor({
         </div>
       </div>
 
-      <details className="rounded-md border border-[var(--border)] p-3">
+      <details className="rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) p-3">
         <summary className="cursor-pointer text-sm font-medium">URL, tags and SEO</summary>
 
         <div className="mt-3 flex flex-col gap-3">
@@ -242,7 +243,7 @@ export function ArticleEditor({
               defaultValue={state.slug ?? article?.slug ?? ''}
               placeholder="Left blank, generated from the title"
             />
-            <p className="mt-1 text-xs opacity-50">
+            <p className="mt-1 text-xs text-(--color-text-tertiary)">
               Changing this changes the article&apos;s public URL. The old one stops working unless
               a redirect is added.
             </p>
@@ -277,7 +278,9 @@ export function ArticleEditor({
       <ErrorText>{state.error}</ErrorText>
 
       <div className="flex items-center gap-3">
-        {state.ok ? <span className="text-xs opacity-60">Saved.</span> : null}
+        {state.ok ? (
+          <span className="text-xs text-(--color-feedback-success-fg)">Saved.</span>
+        ) : null}
         <SaveButton />
       </div>
     </form>
@@ -287,7 +290,7 @@ export function ArticleEditor({
 function SaveButton() {
   const { pending } = useFormStatus();
   return (
-    <Button type="submit" disabled={pending} className="ms-auto">
+    <Button type="submit" disabled={pending} loading={pending} className="ms-auto">
       {pending ? 'Saving…' : 'Save'}
     </Button>
   );

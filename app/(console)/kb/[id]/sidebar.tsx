@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useActionState } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Badge, Button, ErrorText, Select } from '@/components/ui';
+import { ConfirmSubmit } from '@/components/confirm-submit';
 import { useActionForm } from '@/components/use-action-form';
 import { formatRelative } from '@/lib/format';
 import type { ArticleVersion, TranslationGroup, TranslationOption } from '@/lib/kb/admin';
@@ -48,10 +49,12 @@ export function ArticleSidebar({
   return (
     <aside className="w-64 shrink-0">
       <section className="mb-5">
-        <h2 className="mb-2 text-xs font-medium opacity-60">Status</h2>
+        <h2 className="mb-2 text-xs font-semibold text-(--color-text-secondary)">Status</h2>
 
         <div className="mb-2">
-          <Badge tone={status === 'published' ? 'open' : 'neutral'}>{status}</Badge>
+          <Badge tone={status === 'published' ? 'success' : 'neutral'}>
+            {status.charAt(0).toUpperCase() + status.slice(1)}
+          </Badge>
         </div>
 
         <div className="flex flex-col gap-2">
@@ -85,36 +88,36 @@ export function ArticleSidebar({
             href={publicUrl}
             target="_blank"
             rel="noreferrer"
-            className="mt-2 block truncate text-xs underline underline-offset-4 opacity-60 hover:opacity-100"
+            className="mt-2 block truncate text-xs text-(--color-text-link) underline underline-offset-4 hover:text-(--color-text-link-hover)"
           >
             View on the help centre
           </a>
         ) : null}
       </section>
 
-      <section className="mb-5 border-t border-[var(--border)] pt-4">
-        <h2 className="mb-2 text-xs font-medium opacity-60">Readers</h2>
+      <section className="mb-5 border-t border-(--color-border-subtle) pt-4">
+        <h2 className="mb-2 text-xs font-semibold text-(--color-text-secondary)">Readers</h2>
         <dl className="flex flex-col gap-1 text-xs">
           <div className="flex justify-between">
-            <dt className="opacity-60">Views</dt>
+            <dt className="text-(--color-text-secondary)">Views</dt>
             <dd>{stats.views}</dd>
           </div>
           <div className="flex justify-between">
-            <dt className="opacity-60">Helpful</dt>
+            <dt className="text-(--color-text-secondary)">Helpful</dt>
             <dd>{stats.helpful}</dd>
           </div>
           <div className="flex justify-between">
-            <dt className="opacity-60">Not helpful</dt>
+            <dt className="text-(--color-text-secondary)">Not helpful</dt>
             <dd>{stats.unhelpful}</dd>
           </div>
         </dl>
       </section>
 
-      <section className="mb-5 border-t border-[var(--border)] pt-4">
-        <h2 className="mb-2 text-xs font-medium opacity-60">Translations</h2>
+      <section className="mb-5 border-t border-(--color-border-subtle) pt-4">
+        <h2 className="mb-2 text-xs font-semibold text-(--color-text-secondary)">Translations</h2>
 
         {translations.total === 0 ? (
-          <p className="mb-2 text-xs opacity-50">
+          <p className="mb-2 text-xs text-(--color-text-tertiary)">
             Not linked to any other language. The help centre shows a language switcher only between
             articles that are linked.
           </p>
@@ -125,7 +128,7 @@ export function ArticleSidebar({
                 <Badge>{article.locale}</Badge>
                 <Link
                   href={`/kb/${article.id}`}
-                  className="min-w-0 flex-1 truncate underline underline-offset-2 opacity-70 hover:opacity-100"
+                  className="min-w-0 flex-1 truncate text-(--color-text-link) underline underline-offset-2 hover:text-(--color-text-link-hover)"
                 >
                   {article.title}
                 </Link>
@@ -135,16 +138,20 @@ export function ArticleSidebar({
                   the same as a live one asserts a switcher that nobody sees.
                 */}
                 {article.status !== 'published' ? (
-                  <span className="shrink-0 opacity-50">{article.status}</span>
+                  <span className="shrink-0 text-(--color-text-tertiary)">{article.status}</span>
                 ) : null}
               </li>
             ))}
-            {hidden > 0 ? <li className="opacity-50">{hidden} more you cannot open</li> : null}
+            {hidden > 0 ? (
+              <li className="text-(--color-text-tertiary)">{hidden} more you cannot open</li>
+            ) : null}
           </ul>
         )}
 
         {translationCandidates.length === 0 ? (
-          <p className="text-xs opacity-50">No article in another language to link to yet.</p>
+          <p className="text-xs text-(--color-text-tertiary)">
+            No article in another language to link to yet.
+          </p>
         ) : (
           <form key={link.key} {...link.form} className="flex flex-col gap-2">
             <input type="hidden" name="id" value={articleId} />
@@ -166,7 +173,7 @@ export function ArticleSidebar({
               so it made no sense on a page where the control is absent. The
               "left behind" half only applies once there is a group to leave.
             */}
-            <p className="text-xs opacity-50">
+            <p className="text-xs text-(--color-text-tertiary)">
               {translations.total > 0
                 ? 'This article joins the one you pick, so the language it is linked to now is left behind.'
                 : 'Pick the same article in the other language. The help centre will then offer a switcher between them.'}
@@ -177,28 +184,27 @@ export function ArticleSidebar({
         <ErrorText>{link.state.error}</ErrorText>
       </section>
 
-      <section className="mb-5 border-t border-[var(--border)] pt-4">
-        <h2 className="mb-2 text-xs font-medium opacity-60">History</h2>
+      <section className="mb-5 border-t border-(--color-border-subtle) pt-4">
+        <h2 className="mb-2 text-xs font-semibold text-(--color-text-secondary)">History</h2>
 
         {versions.length === 0 ? (
-          <p className="text-xs opacity-50">No earlier versions.</p>
+          <p className="text-xs text-(--color-text-tertiary)">No earlier versions.</p>
         ) : (
           <ul className="flex flex-col gap-2 text-xs">
             {versions.map((version) => (
-              <li key={version.id} className="flex items-baseline gap-2">
-                <span className="opacity-60">v{version.version}</span>
+              <li key={version.id} className="flex items-center gap-2">
+                <span className="text-(--color-text-secondary)">v{version.version}</span>
                 <span className="min-w-0 flex-1 truncate">{version.editedBy ?? 'Unknown'}</span>
-                <span className="opacity-50">{formatRelative(version.createdAt)}</span>
+                <span className="text-(--color-text-tertiary)">
+                  {formatRelative(version.createdAt)}
+                </span>
 
                 <form action={restoreAction}>
                   <input type="hidden" name="id" value={articleId} />
                   <input type="hidden" name="versionId" value={version.id} />
-                  <button
-                    type="submit"
-                    className="underline underline-offset-2 opacity-60 hover:opacity-100"
-                  >
-                    restore
-                  </button>
+                  <Button type="submit" variant="ghost" size="sm">
+                    Restore
+                  </Button>
                 </form>
               </li>
             ))}
@@ -208,12 +214,16 @@ export function ArticleSidebar({
         <ErrorText>{restoreState.error}</ErrorText>
       </section>
 
-      <section className="border-t border-[var(--border)] pt-4">
+      <section className="border-t border-(--color-border-subtle) pt-4">
         <form action={deleteAction}>
           <input type="hidden" name="id" value={articleId} />
-          <DeleteButton />
+          {/* Two clicks rather than the browser's confirm(): deletion cascades to
+              versions and feedback and cannot be undone from the console, and
+              a native dialog is the one thing in the console that steals the
+              page. The server still checks kb.publish. */}
+          <ConfirmSubmit label="Delete article" confirmLabel="Really delete?" busy="Deleting…" />
         </form>
-        <p className="mt-1 text-xs opacity-50">
+        <p className="mt-1 text-xs text-(--color-text-tertiary)">
           Deleting removes the article and its history. Archive instead if the URL should keep
           working for anyone who has it bookmarked.
         </p>
@@ -226,7 +236,13 @@ export function ArticleSidebar({
 function LinkButton() {
   const { pending } = useFormStatus();
   return (
-    <Button type="submit" variant="secondary" disabled={pending} className="w-full">
+    <Button
+      type="submit"
+      variant="secondary"
+      disabled={pending}
+      loading={pending}
+      className="w-full"
+    >
       {pending ? 'Linking…' : 'Link translation'}
     </Button>
   );
@@ -243,29 +259,8 @@ function StatusButton({
 }) {
   const { pending } = useFormStatus();
   return (
-    <Button type="submit" variant={variant} disabled={pending} className="w-full">
+    <Button type="submit" variant={variant} disabled={pending} loading={pending} className="w-full">
       {pending ? busy : idle}
-    </Button>
-  );
-}
-
-function DeleteButton() {
-  const { pending } = useFormStatus();
-  return (
-    <Button
-      type="submit"
-      variant="danger"
-      disabled={pending}
-      className="w-full"
-      // Deletion cascades to versions and feedback and cannot be undone from
-      // the console, so it asks first. The server still checks kb.publish.
-      onClick={(event) => {
-        if (!confirm('Delete this article and its history? This cannot be undone.')) {
-          event.preventDefault();
-        }
-      }}
-    >
-      {pending ? 'Deleting…' : 'Delete article'}
     </Button>
   );
 }

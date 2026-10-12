@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Stat } from '@/components/charts';
 import { Badge, Card, PageHeader } from '@/components/ui';
 import { configurationCounts } from '@/lib/admin/overview';
 import { requirePermission } from '@/lib/auth/guard';
@@ -91,7 +92,10 @@ export default async function AdminIndexPage() {
         title="Settings"
         description="How work reaches your team, what it promises the customer, and what the customer sees."
         actions={
-          <Link href="/admin/dashboard" className="text-sm text-brand-600 hover:underline">
+          <Link
+            href="/admin/dashboard"
+            className="text-sm text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"
+          >
             Live dashboard →
           </Link>
         }
@@ -100,19 +104,19 @@ export default async function AdminIndexPage() {
       <div className="flex flex-col gap-2">
         {checks.map((check) => (
           <Link key={check.href} href={check.href}>
-            <Card className="flex items-center gap-3 transition-colors hover:border-brand-500/40">
+            <Card className="flex items-center gap-3 transition-colors hover:bg-(--color-background-hover)">
               <span className="min-w-0 flex-1">
                 <span className="block text-sm font-medium">{check.title}</span>
-                <span className="block text-xs text-[var(--muted-foreground)]">
+                <span className="block text-xs text-(--color-text-secondary)">
                   {check.ok ? check.good : check.bad}
                 </span>
               </span>
               {check.ok ? (
-                <Badge tone="success">ready</Badge>
+                <Badge tone="success">Ready</Badge>
               ) : check.optional ? (
-                <Badge tone="neutral">optional</Badge>
+                <Badge tone="neutral">Optional</Badge>
               ) : (
-                <Badge tone="warning">needs setting up</Badge>
+                <Badge tone="warning">Needs setting up</Badge>
               )}
             </Card>
           </Link>
@@ -120,18 +124,9 @@ export default async function AdminIndexPage() {
       </div>
 
       <div className="mt-6 grid gap-3 sm:grid-cols-3">
-        <Card>
-          <p className="text-xs text-[var(--muted-foreground)]">Active agents</p>
-          <p className="text-2xl font-semibold">{counts?.agents ?? 0}</p>
-        </Card>
-        <Card>
-          <p className="text-xs text-[var(--muted-foreground)]">Ticket statuses</p>
-          <p className="text-2xl font-semibold">{counts?.statuses ?? 0}</p>
-        </Card>
-        <Card>
-          <p className="text-xs text-[var(--muted-foreground)]">Automation rules</p>
-          <p className="text-2xl font-semibold">{counts?.rules ?? 0}</p>
-        </Card>
+        <Stat label="Active agents" value={String(counts?.agents ?? 0)} />
+        <Stat label="Ticket statuses" value={String(counts?.statuses ?? 0)} />
+        <Stat label="Automation rules" value={String(counts?.rules ?? 0)} />
       </div>
     </>
   );

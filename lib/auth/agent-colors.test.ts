@@ -8,6 +8,14 @@ describe('agentColorClass', () => {
     for (const cls of classes) expect(cls).toMatch(/^bg-\S+ text-white$/);
   });
 
+  it('paints each key with its own token', () => {
+    // A copy-paste that gave two keys one token, or a key its neighbour's,
+    // would still be nine distinct-looking strings to the test above.
+    for (const key of AGENT_COLORS) {
+      expect(agentColorClass(key)).toBe(`bg-(--color-agent-${key}) text-white`);
+    }
+  });
+
   it('falls back to the first colour for a row the trigger has not reached, or a retired key', () => {
     expect(agentColorClass(null)).toBe(agentColorClass(AGENT_COLORS[0]));
     expect(agentColorClass('teal')).toBe(agentColorClass(AGENT_COLORS[0]));

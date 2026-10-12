@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Select } from '@/components/ui';
+import { ErrorText, Input, Select, Textarea } from '@/components/ui';
 import type { ConversationDetail } from '@/lib/tickets/conversation';
 import { formatForInput, selectedValues, type TicketFieldDef } from '@/lib/tickets/custom-fields';
 import { updateTicket } from '../../ticket-actions';
@@ -31,11 +31,29 @@ export function SidebarField({
   children: React.ReactNode;
 }) {
   return (
-    <div className="mb-3" {...(as === 'group' ? { role: 'group', 'aria-label': label } : {})}>
-      <p className="mb-1 text-xs font-medium opacity-60">{label}</p>
+    <div {...(as === 'group' ? { role: 'group', 'aria-label': label } : {})}>
+      <p className="mb-1 flex items-center gap-1 text-xs font-medium text-(--color-text-secondary)">
+        {label}
+      </p>
       {children}
-      {hint ? <p className="mt-1 text-xs opacity-60">{hint}</p> : null}
+      {hint ? <p className="mt-1 text-xs text-(--color-text-secondary)">{hint}</p> : null}
     </div>
+  );
+}
+
+/**
+ * What a details-column control's save refused, under the control.
+ *
+ * The inline `ErrorText` rather than the banner: these sit in a 312px column
+ * under a 34px select, and a filled box per control would outweigh the control
+ * it is about.
+ */
+export function FieldError({ children }: { children: string | null }) {
+  if (!children) return null;
+  return (
+    <p className="mt-1">
+      <ErrorText inline>{children}</ErrorText>
+    </p>
   );
 }
 
@@ -48,11 +66,17 @@ export function SidebarField({
 export function FieldSelect({
   conversationId,
   field,
+  label,
   value,
   options,
 }: {
   conversationId: string;
   field: string;
+  /**
+   * The control's accessible name. `SidebarField`'s label is a paragraph, not a
+   * `<label>`, so without this the select is announced as an unnamed combobox.
+   */
+  label: string;
   value: string;
   options: { value: string; label: string }[];
 }) {
@@ -64,14 +88,19 @@ export function FieldSelect({
 
   return (
     <>
-      <Select value={value} disabled={saving} onChange={(e) => save(e.target.value)}>
+      <Select
+        value={value}
+        disabled={saving}
+        aria-label={label}
+        onChange={(e) => save(e.target.value)}
+      >
         {options.map((option) => (
           <option key={option.value} value={option.value}>
             {option.label}
           </option>
         ))}
       </Select>
-      {error ? <p className="mt-1 text-xs text-red-600">{error}</p> : null}
+      <FieldError>{error}</FieldError>
     </>
   );
 }
@@ -93,15 +122,15 @@ export function TagField({ conversationId, tags }: { conversationId: string; tag
 
   return (
     <>
-      <input
+      <Input
         value={value}
         disabled={saving}
         onChange={(e) => setValue(e.target.value)}
         onBlur={save}
         placeholder="comma, separated"
-        className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-sm outline-none focus:border-brand-500"
+        aria-label="Tags"
       />
-      {error ? <p className="mt-1 text-xs text-red-600">{error}</p> : null}
+      <FieldError>{error}</FieldError>
     </>
   );
 }
@@ -134,11 +163,7 @@ export function CustomFields({
           key={field.key}
           label={field.label}
           as={field.type === 'multi_select' ? 'group' : 'block'}
-          hint={
-            field.requiredOnResolve ? (
-              <span className="opacity-70">Needed before this ticket can be resolved.</span>
-            ) : null
-          }
+          hint={field.requiredOnResolve ? 'Needed before this ticket can be resolved.' : null}
         >
           <CustomFieldControl
             conversationId={conversation.id}
@@ -176,7 +201,8 @@ function CustomFieldControl({
             checked={value === true}
             disabled={saving}
             onChange={(e) => save(e.target.checked ? 'on' : '')}
-            className="size-4 accent-brand-500"
+            aria-label={field.label}
+            className="size-4 accent-blu-500"
           />
         );
 
@@ -185,6 +211,7 @@ function CustomFieldControl({
           <Select
             value={String(value ?? '')}
             disabled={saving}
+            aria-label={field.label}
             onChange={(e) => save(e.target.value)}
           >
             <option value="">—</option>
@@ -201,7 +228,7 @@ function CustomFieldControl({
         return (
           <div className="flex flex-col gap-1">
             {field.options.map((option) => (
-              <label key={option.value} className="flex items-center gap-1.5 text-xs">
+              <label key={option.value} className="flex items-center gap-2 text-sm">
                 <input
                   type="checkbox"
                   checked={chosen.includes(option.value)}
@@ -213,13 +240,13 @@ function CustomFieldControl({
                         : chosen.filter((entry) => entry !== option.value),
                     )
                   }
-                  className="size-3.5 accent-brand-500"
+                  className="size-4 shrink-0 accent-blu-500"
                 />
                 {option.label}
               </label>
             ))}
             {field.options.length === 0 ? (
-              <span className="text-xs opacity-50">No options defined.</span>
+              <span className="text-xs text-(--color-text-tertiary)">No options defined.</span>
             ) : null}
           </div>
         );
@@ -227,13 +254,14 @@ function CustomFieldControl({
 
       case 'paragraph':
         return (
-          <textarea
+          <Textarea
             rows={3}
+            dir="auto"
             value={draft}
             disabled={saving}
+            aria-label={field.label}
             onChange={(e) => setDraft(e.target.value)}
             onBlur={() => draft !== formatForInput(field, value) && save(draft)}
-            className={INPUT_CLASS}
           />
         );
 
@@ -243,28 +271,28 @@ function CustomFieldControl({
       case 'date':
       case 'datetime':
         return (
-          <input
+          <Input
             type={field.type === 'date' ? 'date' : 'datetime-local'}
             value={draft}
             disabled={saving}
+            aria-label={field.label}
             onChange={(e) => {
               setDraft(e.target.value);
               void save(e.target.value);
             }}
-            className={INPUT_CLASS}
           />
         );
 
       default:
         return (
-          <input
+          <Input
             type={field.type === 'number' || field.type === 'decimal' ? 'number' : 'text'}
             step={field.type === 'decimal' ? 'any' : field.type === 'number' ? '1' : undefined}
             value={draft}
             disabled={saving}
+            aria-label={field.label}
             onChange={(e) => setDraft(e.target.value)}
             onBlur={() => draft !== formatForInput(field, value) && save(draft)}
-            className={INPUT_CLASS}
           />
         );
     }
@@ -273,10 +301,7 @@ function CustomFieldControl({
   return (
     <>
       {control()}
-      {error ? <p className="mt-1 text-xs text-red-600">{error}</p> : null}
+      <FieldError>{error}</FieldError>
     </>
   );
 }
-
-const INPUT_CLASS =
-  'w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-sm outline-none focus:border-brand-500';

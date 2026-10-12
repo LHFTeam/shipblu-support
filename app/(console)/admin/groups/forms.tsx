@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Card, Cell, Field, Input, Row, Select, Table, Toggle } from '@/components/ui';
+import { Button, Card, Cell, Field, Input, Row, Select, Table, Toggle } from '@/components/ui';
 import { InfoTip } from '@/components/tooltip';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
 import { deleteGroup, saveGroup } from './actions';
@@ -64,8 +64,8 @@ function AssignmentFields({ group, agents }: { group?: Group; agents: Choice[] }
   const auto = strategy !== 'manual';
 
   return (
-    <div className="flex flex-col gap-3 rounded-md border border-[var(--border)] p-3">
-      <p className="text-xs font-medium text-[var(--muted-foreground)]">Assignment</p>
+    <div className="flex flex-col gap-3 rounded-md border border-(--color-border-subtle) p-3">
+      <p className="text-xs font-medium text-(--color-text-secondary)">Assignment</p>
 
       <Field
         label="How tickets reach an agent"
@@ -94,11 +94,11 @@ function AssignmentFields({ group, agents }: { group?: Group; agents: Choice[] }
               name="matchSkills"
               checked={skills}
               onChange={(event) => setSkills(event.target.checked)}
-              className="mt-0.5 size-4 accent-brand-600"
+              className="mt-0.5 size-4 accent-blu-500"
             />
             <span>
               <span className="font-medium">Match skills first</span>
-              <span className="block text-xs text-[var(--muted-foreground)]">
+              <span className="block text-xs text-(--color-text-secondary)">
                 Only offer the ticket to agents holding every skill it matches, then distribute as
                 above.
               </span>
@@ -258,16 +258,12 @@ export function GroupsTable({
         <div ref={editorRef} id="group-editor" className="mb-4">
           {/* Keyed so that opening a different group remounts the form rather
               than leaving the previous one's assignment state on screen. */}
-          <Card key={editing.id} className="w-full border-brand-500/30">
+          <Card key={editing.id} className="w-full border-(--color-border-focus)/30!">
             <div className="mb-3 flex items-center justify-between gap-3">
               <h2 className="min-w-0 truncate text-sm font-semibold">{editing.name}</h2>
-              <button
-                type="button"
-                onClick={() => setEditingId(null)}
-                className="shrink-0 text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
-              >
+              <Button variant="ghost" size="sm" onClick={() => setEditingId(null)}>
                 Cancel
-              </button>
+              </Button>
             </div>
 
             <EditorForm action={saveGroup} submitLabel="Save" onSaved={() => setEditingId(null)}>
@@ -328,21 +324,21 @@ export function GroupsTable({
             {/* On the list rather than only in the editor: a group set to manual
                 while every other team routes is the kind of thing you want to
                 notice by reading down a column. */}
-            <Cell className="text-[var(--muted-foreground)]">
+            <Cell className="text-(--color-text-secondary)">
               {STRATEGY_LABELS[group.assignmentStrategy]}
               {group.assignmentStrategy !== 'manual' && group.matchSkills ? (
                 <span className="block text-xs">by skill</span>
               ) : null}
             </Cell>
-            <Cell className="text-[var(--muted-foreground)]">
+            <Cell className="text-(--color-text-secondary)">
               {scheduleName ?? (
                 <span className="text-xs">
                   {defaultScheduleName ? `${defaultScheduleName} (default)` : '—'}
                 </span>
               )}
             </Cell>
-            <Cell className="text-[var(--muted-foreground)]">{members}</Cell>
-            <Cell className="text-[var(--muted-foreground)]">{tickets}</Cell>
+            <Cell className="text-(--color-text-secondary)">{members}</Cell>
+            <Cell className="text-(--color-text-secondary)">{tickets}</Cell>
             <Cell className="text-end">
               <DangerAction action={deleteGroup} id={group.id} />
             </Cell>

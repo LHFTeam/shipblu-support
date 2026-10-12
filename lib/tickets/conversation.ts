@@ -40,6 +40,17 @@ export type TimelineMessage = {
   bodyText: string;
   authorName: string | null;
   authorIsAgent: boolean;
+  /**
+   * The contact who wrote it, when a contact did — not the requester. An
+   * inbound email on a ticket can be a CC'd stranger, and the requester's
+   * picture on their words would be a claim about who wrote them.
+   */
+  authorContactId: string | null;
+  /** Whether that contact has a picture on file, so the tile can skip a 404. */
+  authorContactHasAvatar: boolean;
+  /** The writing agent's tile colour and picture, as the inbox list draws them. */
+  authorAgentColor: string | null;
+  authorAgentAvatarUrl: string | null;
   deliveryStatus: string;
   deliveryError: string | null;
   createdAt: Date;
@@ -217,7 +228,11 @@ export async function getConversation(
         .select({
           message: messages,
           agentName: agents.name,
+          agentColor: agents.avatarColor,
+          agentAvatarUrl: agents.avatarUrl,
           contactName: contacts.name,
+          contactAvatarPath: contacts.avatarPath,
+          contactDeletedAt: contacts.deletedAt,
         })
         .from(messages)
         .leftJoin(agents, eq(agents.id, messages.authorAgentId))
@@ -357,6 +372,12 @@ export async function getConversation(
       bodyText: entry.message.bodyText,
       authorName: entry.agentName ?? entry.contactName,
       authorIsAgent: entry.message.authorAgentId !== null,
+      authorContactId: entry.message.authorContactId,
+      // The avatar route answers 404 for a deleted contact, so a picture left
+      // on its row is not one the tile can show.
+      authorContactHasAvatar: entry.contactAvatarPath !== null && entry.contactDeletedAt === null,
+      authorAgentColor: entry.agentColor,
+      authorAgentAvatarUrl: entry.agentAvatarUrl,
       deliveryStatus: entry.message.deliveryStatus,
       deliveryError: entry.message.deliveryError,
       createdAt: entry.message.createdAt,

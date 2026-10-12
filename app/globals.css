@@ -1007,6 +1007,9 @@ body {
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+.widget-article a:hover {
+  color: var(--color-text-link-hover);
+}
 
 .widget-article :is(ul, ol) {
   padding-inline-start: 1.4em;
@@ -1032,7 +1035,7 @@ body {
 .widget-article :is(img, video, iframe) {
   max-width: 100%;
   height: auto;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
 }
 .widget-article :is(pre, table) {
   display: block;
@@ -1044,7 +1047,7 @@ body {
 }
 .widget-article pre {
   background: var(--color-background-hover);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   padding: 0.6em 0.75em;
 }
 

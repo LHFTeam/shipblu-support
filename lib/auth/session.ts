@@ -42,6 +42,12 @@ export type SessionAgent = {
    */
   isAcceptingTickets: boolean;
   /**
+   * Why the switch is off, null while it is on. The header says it under the
+   * switch, because an agent parked by the idle timer or by a supervisor
+   * otherwise finds it off with nothing to say that they did not do it.
+   */
+  acceptingOffReason: (typeof agents.$inferSelect)['acceptingOffReason'];
+  /**
    * How long this session has been idle *as the server measures it*, in
    * milliseconds — the gap the inactivity sign-out is actually decided on.
    *
@@ -114,6 +120,7 @@ export async function getSessionAgent(): Promise<SessionAgent | null> {
         avatarUrl: agents.avatarUrl,
         avatarColor: agents.avatarColor,
         isAcceptingTickets: agents.isAcceptingTickets,
+        acceptingOffReason: agents.acceptingOffReason,
         isActive: agents.isActive,
         lastUsedAt: sessions.lastUsedAt,
         lastActivityAt: sessions.lastActivityAt,
@@ -155,6 +162,7 @@ export async function getSessionAgent(): Promise<SessionAgent | null> {
     avatarUrl: row.avatarUrl,
     avatarColor: row.avatarColor,
     isAcceptingTickets: row.isAcceptingTickets,
+    acceptingOffReason: row.acceptingOffReason,
     // Never negative. A row written by an instance whose clock runs ahead of
     // this one's would otherwise read as idle for minus three minutes, and the
     // browser would subtract that into the future and never warn at all.

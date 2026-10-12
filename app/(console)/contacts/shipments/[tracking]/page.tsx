@@ -81,23 +81,23 @@ export default async function ShipmentPage({ params }: { params: Promise<{ track
 
       <div className="mb-6 grid gap-4 lg:grid-cols-3">
         <Card>
-          <h2 className="mb-2 text-sm font-medium">Shipment</h2>
+          <h2 className="mb-2 text-sm font-semibold">Shipment</h2>
           <div className="flex flex-col gap-2 text-xs">
             <SyncBadge state={shipment.syncState} />
             {shipment.syncState === 'stub' ? (
-              <p className="text-[var(--muted-foreground)]">
+              <p className="text-(--color-text-secondary)">
                 Created from a number somebody wrote in a message. Nothing has confirmed this is a
                 real shipment, which is why both ends are blank rather than empty.
               </p>
             ) : null}
             {shipment.syncState === 'not_found' ? (
-              <p className="text-[var(--muted-foreground)]">
+              <p className="text-(--color-text-secondary)">
                 The shipping platform does not recognise this number. It is most likely a typo, or
                 something the detector picked up that was never a tracking number.
               </p>
             ) : null}
             {returning ? (
-              <p className="rounded-md border border-[var(--border)] bg-[var(--muted)] px-2 py-1.5">
+              <p className="rounded-md bg-(--color-status-returned-bg) px-2 py-1.5 text-(--color-status-returned-fg)">
                 <span className="font-medium">{returnStepLabel('en', returning.step)}</span> — step{' '}
                 {returning.step + 1} of {RETURN_STEPS.length} of the journey back. This parcel is
                 going to the merchant, not to the customer, and will not be delivered.
@@ -128,7 +128,7 @@ export default async function ShipmentPage({ params }: { params: Promise<{ track
         </Card>
 
         <Card>
-          <h2 className="mb-2 text-sm font-medium">Shipper</h2>
+          <h2 className="mb-2 text-sm font-semibold">Shipper</h2>
           <PartyField
             trackingNumber={shipment.trackingNumber}
             party="shipper"
@@ -138,7 +138,7 @@ export default async function ShipmentPage({ params }: { params: Promise<{ track
         </Card>
 
         <Card>
-          <h2 className="mb-2 text-sm font-medium">Recipient</h2>
+          <h2 className="mb-2 text-sm font-semibold">Recipient</h2>
           <PartyField
             trackingNumber={shipment.trackingNumber}
             party="recipient"
@@ -150,11 +150,11 @@ export default async function ShipmentPage({ params }: { params: Promise<{ track
 
       {detail ? (
         <section className="mb-6">
-          <h2 className="mb-2 text-sm font-medium">From the shipping platform</h2>
+          <h2 className="mb-2 text-sm font-semibold">From the shipping platform</h2>
 
           <div className="grid gap-4 lg:grid-cols-3">
             <Card>
-              <h3 className="mb-2 text-xs font-medium opacity-60">Delivery</h3>
+              <h3 className="mb-2 text-xs font-semibold text-(--color-text-secondary)">Delivery</h3>
               <dl className="flex flex-col gap-1.5 text-xs">
                 <Row
                   label="Status"
@@ -203,7 +203,7 @@ export default async function ShipmentPage({ params }: { params: Promise<{ track
             </Card>
 
             <Card>
-              <h3 className="mb-2 text-xs font-medium opacity-60">Parties</h3>
+              <h3 className="mb-2 text-xs font-semibold text-(--color-text-secondary)">Parties</h3>
               <dl className="flex flex-col gap-1.5 text-xs">
                 <Row label="Platform order id" value={detail.platformId} />
                 <Row label="Merchant" value={detail.merchantName} />
@@ -225,18 +225,18 @@ export default async function ShipmentPage({ params }: { params: Promise<{ track
                   `recipient_contact_id` above are set by an agent on purpose —
                   the sync never guesses them from a phone number, for the reason
                   plans/shipment-customer-tracking.md §9 gives. */}
-              <p className="mt-2 text-[11px] opacity-50">
+              <p className="mt-2 text-xs text-(--color-text-tertiary)">
                 Read from the platform. Naming a contact as shipper or recipient is the pair of
                 fields above, and is never inferred from these.
               </p>
             </Card>
 
             <Card>
-              <h3 className="mb-2 text-xs font-medium opacity-60">
+              <h3 className="mb-2 text-xs font-semibold text-(--color-text-secondary)">
                 History ({detail.events.length})
               </h3>
               {detail.events.length === 0 ? (
-                <p className="text-xs opacity-50">No events recorded.</p>
+                <p className="text-xs text-(--color-text-tertiary)">No events recorded.</p>
               ) : (
                 <ol className="flex flex-col gap-1.5 text-xs">
                   {/* Newest first. `mapDeliveryOrder` sorted these oldest-first
@@ -262,10 +262,10 @@ export default async function ShipmentPage({ params }: { params: Promise<{ track
                           <span>
                             {humaniseStatus(event.status)}
                             {onReturnLeg ? (
-                              <span className="ms-1.5 opacity-50">· return</span>
+                              <span className="ms-1.5 text-(--color-text-tertiary)">· return</span>
                             ) : null}
                           </span>
-                          <span className="shrink-0 tabular-nums opacity-60">
+                          <span className="shrink-0 text-(--color-text-tertiary) tabular-nums">
                             {formatDateTime(event.at)}
                           </span>
                         </li>
@@ -279,7 +279,7 @@ export default async function ShipmentPage({ params }: { params: Promise<{ track
       ) : null}
 
       <section>
-        <h2 className="mb-2 text-sm font-medium">Conversations</h2>
+        <h2 className="mb-2 text-sm font-semibold">Conversations</h2>
         <ConversationTable
           conversations={conversations}
           emptyTitle="No conversations"
@@ -303,7 +303,7 @@ function Row({ label, value }: { label: string; value: string | null | undefined
 
   return (
     <div className="flex justify-between gap-3">
-      <dt className="shrink-0 opacity-60">{label}</dt>
+      <dt className="shrink-0 text-(--color-text-secondary)">{label}</dt>
       <dd className="text-end break-all">{value}</dd>
     </div>
   );

@@ -11,6 +11,7 @@ import {
   sql,
   type SQL,
 } from 'drizzle-orm';
+import { cache } from 'react';
 import { db } from '@/db/client';
 import { agents, conversations, contacts, messages, ticketStatuses } from '@/db/schema';
 import type { SessionAgent } from '@/lib/auth/session';
@@ -40,6 +41,14 @@ export type InboxRow = {
   statusCategory: 'open' | 'pending' | 'resolved' | 'closed';
   requesterName: string | null;
   requesterHandle: string | null;
+  /** For the row's avatar, which the avatar route serves by contact id. */
+  requesterContactId: string;
+  /**
+   * Whether `contacts.avatar_path` is set — the flag rather than the path, so
+   * the storage key never reaches the browser, and a row without a picture
+   * costs no request that would only 404.
+   */
+  requesterHasAvatar: boolean;
   assigneeId: string | null;
   assigneeName: string | null;
   assigneeAvatarUrl: string | null;
@@ -95,6 +104,8 @@ function selectInboxRows(where: SQL | undefined) {
       statusName: ticketStatuses.name,
       statusCategory: ticketStatuses.category,
       requesterName: contacts.name,
+      requesterContactId: contacts.id,
+      requesterAvatarPath: contacts.avatarPath,
       requesterEmail: contacts.primaryEmail,
       requesterPhone: contacts.primaryPhone,
       assigneeId: agents.id,
@@ -304,6 +315,8 @@ export async function listInbox(
       statusCategory: row.statusCategory,
       requesterName: row.requesterName,
       requesterHandle: row.requesterEmail ?? row.requesterPhone,
+      requesterContactId: row.requesterContactId,
+      requesterHasAvatar: row.requesterAvatarPath !== null,
       assigneeId: row.assigneeId,
       assigneeName: row.assigneeName,
       assigneeAvatarUrl: row.assigneeAvatarUrl,
@@ -358,10 +371,24 @@ function lastVisibleMessage() {
     .as('last_message');
 }
 
+/**
+ * Open and pending tickets: the agent's, nobody's, and all of them.
+ *
+ * Asked twice by one inbox render — the console layout for the rail's badge,
+ * the inbox frame for its views — so the work is memoised for the request. The
+ * key is the agent's id and the one permission the count depends on rather than
+ * the agent, because every `requireAgent()` returns a fresh object and a cache
+ * keyed on it would never hit. Outside a server render (`/api/inbox-counts`)
+ * `cache` memoises nothing, which is the behaviour that route already had.
+ */
 export async function inboxCounts(agent: SessionAgent) {
+  return countsFor(agent.id, can(agent, 'ticket.view.all'));
+}
+
+const countsFor = cache(async (agentId: string, viewAll: boolean) => {
   const base = [isNull(conversations.deletedAt), isNull(conversations.mergedIntoId)];
-  if (!can(agent, 'ticket.view.all')) {
-    base.push(eq(conversations.assigneeAgentId, agent.id));
+  if (!viewAll) {
+    base.push(eq(conversations.assigneeAgentId, agentId));
   }
 
   // The nav badge counts what is waiting on the team, so a restricted channel is
@@ -371,7 +398,7 @@ export async function inboxCounts(agent: SessionAgent) {
 
   const rows = await db
     .select({
-      mine: sql<number>`count(*) FILTER (WHERE ${conversations.assigneeAgentId} = ${agent.id})::int`,
+      mine: sql<number>`count(*) FILTER (WHERE ${conversations.assigneeAgentId} = ${agentId})::int`,
       unassigned: sql<number>`count(*) FILTER (WHERE ${conversations.assigneeAgentId} IS NULL)::int`,
       all: sql<number>`count(*)::int`,
     })
@@ -380,4 +407,4 @@ export async function inboxCounts(agent: SessionAgent) {
     .where(and(...base, inArray(ticketStatuses.category, ['open', 'pending'])));
 
   return rows[0] ?? { mine: 0, unassigned: 0, all: 0 };
-}
+});

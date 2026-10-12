@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Badge, ErrorText } from '@/components/ui';
 import { ConfirmSubmit } from '@/components/confirm-submit';
-import { SearchIcon } from '@/components/icons';
+import { SearchInput } from '@/components/search-input';
 import type { MergeCandidate } from '@/lib/contacts/merge';
 import { mergeContactInto, type ContactActionState } from '../actions';
 
@@ -46,25 +46,20 @@ export function MergeSearch({ initial }: { initial: string }) {
   }, [value, initial]);
 
   return (
-    <div className="relative max-w-sm">
-      <span className="pointer-events-none absolute inset-y-0 start-2 flex items-center opacity-50">
-        <SearchIcon size={14} />
-      </span>
-      <input
-        value={value}
-        onChange={(event) => setValue(event.target.value)}
-        placeholder="Find a duplicate by name, email or phone"
-        aria-label="Search for a duplicate contact"
-        className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] py-1.5 pe-3 ps-7 text-xs outline-none focus:border-brand-500"
-      />
-    </div>
+    <SearchInput
+      className="max-w-sm"
+      value={value}
+      onChange={(event) => setValue(event.target.value)}
+      placeholder="Find by name, email or phone"
+      aria-label="Search for a duplicate contact"
+    />
   );
 }
 
 const REASONS: Record<NonNullable<MergeCandidate['reason']>, string> = {
-  email: 'same email',
-  phone: 'same phone',
-  name: 'same name',
+  email: 'Same email',
+  phone: 'Same phone',
+  name: 'Same name',
 };
 
 /**
@@ -89,13 +84,15 @@ export function MergeCandidateRow({
   const handle = [candidate.email, candidate.phone].filter(Boolean).join(' · ');
 
   return (
-    <li className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-[var(--border)] py-2 first:border-t-0">
+    <li className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-(--color-border-subtle) py-2 first:border-t-0">
       <div className="min-w-0 flex-1">
         <Link href={`/contacts/${candidate.id}`} className="text-sm font-medium hover:underline">
           {label}
         </Link>
-        {handle ? <span className="ms-2 text-xs opacity-60">{handle}</span> : null}
-        <p className="text-xs text-[var(--muted-foreground)]">
+        {handle ? (
+          <span className="ms-2 text-xs text-(--color-text-secondary)">{handle}</span>
+        ) : null}
+        <p className="text-xs text-(--color-text-secondary)">
           {candidate.conversations} ticket{candidate.conversations === 1 ? '' : 's'} ·{' '}
           {candidate.identities} identit{candidate.identities === 1 ? 'y' : 'ies'} would move here
         </p>

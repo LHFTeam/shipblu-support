@@ -177,7 +177,7 @@ export default async function ChannelsPage() {
             and then every inbound message from it is answered 403 by the webhook
             and stored unverified, which reads as a forgery rather than as a
             second app secret nobody can configure. */}
-        <p className="mb-3 text-xs text-[var(--muted-foreground)]">
+        <p className="mb-3 text-xs text-(--color-text-secondary)">
           Every account here must sit under the same Meta app: one app secret verifies every inbound
           webhook and one verify token answers every handshake. A number connected through
           Meta&rsquo;s window is under this app by construction — the window is opened as it, and
@@ -199,7 +199,7 @@ export default async function ChannelsPage() {
         </div>
 
         {accounts.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-[var(--border)] px-3 py-6 text-center text-xs text-[var(--muted-foreground)]">
+          <p className="rounded-xl border border-dashed border-(--color-border-default) px-4 py-6 text-center text-xs text-(--color-text-secondary)">
             {unadopted
               ? `None connected yet. WHATSAPP_WABA_ID names ${unadopted}; connect it above, or leave it and the hourly template sync will.`
               : 'None connected. WhatsApp numbers fall back to META_PAGE_ACCESS_TOKEN and WHATSAPP_WABA_ID from the environment.'}
@@ -245,9 +245,9 @@ export default async function ChannelsPage() {
           </div>
         ) : null}
 
-        <ul className="mb-4 divide-y divide-[var(--border)] rounded-xl border border-[var(--border)] bg-[var(--surface)] text-sm">
+        <ul className="mb-4 divide-y divide-(--color-border-subtle) rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface) text-sm">
           {channelList.length === 0 ? (
-            <li className="px-3 py-2.5 text-[var(--muted-foreground)]">
+            <li className="px-4 py-3 text-(--color-text-secondary)">
               No channels configured yet. Tickets still arrive; they just have no default group.
             </li>
           ) : null}
@@ -276,10 +276,10 @@ export default async function ChannelsPage() {
             const stillConnecting = attempt?.status === 'exchanged';
 
             return (
-              <li key={channel.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
+              <li key={channel.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
                 <ChannelBadge channel={channel.type} />
                 <span className="font-medium">{channel.name}</span>
-                {!channel.isActive ? <Badge tone="neutral">inactive</Badge> : null}
+                {!channel.isActive ? <Badge tone="neutral">Inactive</Badge> : null}
                 {coexistence ? <CoexistenceBadges config={channel.config} now={now} /> : null}
                 {/* A number with no account sends with the default one's
                     credential. Fine while there is exactly one account, and a
@@ -288,9 +288,9 @@ export default async function ChannelsPage() {
                     is what clears it: the badge used to name a problem the
                     console had no way to fix. */}
                 {isWhatsApp && !account && accounts.length > 1 ? (
-                  <Badge tone="warning">no business account</Badge>
+                  <Badge tone="warning">No business account</Badge>
                 ) : null}
-                <span className="ms-auto text-xs text-[var(--muted-foreground)]">
+                <span className="ms-auto text-xs text-(--color-text-secondary)">
                   {coexistence
                     ? `${coexistence.displayPhoneNumber ?? (channel.config.phoneNumberId as string)}${
                         coexistence.verifiedName ? ` · ${coexistence.verifiedName}` : ''
@@ -366,16 +366,19 @@ export default async function ChannelsPage() {
       <section>
         <div className="mb-3 flex items-center gap-3">
           <h2 className="text-lg font-semibold">Groups</h2>
-          <Link href="/admin/groups" className="ms-auto text-sm text-brand-600 hover:underline">
+          <Link
+            href="/admin/groups"
+            className="ms-auto text-sm text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"
+          >
             Manage groups
           </Link>
         </div>
-        <ul className="divide-y divide-[var(--border)] rounded-lg border border-[var(--border)] text-sm">
+        <ul className="divide-y divide-(--color-border-subtle) rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface) text-sm">
           {groupList.length === 0 ? (
-            <li className="px-3 py-2.5 opacity-50">No groups yet.</li>
+            <li className="px-4 py-3 text-(--color-text-tertiary)">No groups yet.</li>
           ) : null}
           {groupList.map((group) => (
-            <li key={group.id} className="px-3 py-2.5">
+            <li key={group.id} className="px-4 py-3">
               {group.name}
             </li>
           ))}

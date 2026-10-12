@@ -60,20 +60,22 @@ export default async function FormPage({
         <PageBody>
           <div className="mx-auto w-full max-w-2xl">
             <Panel className="p-6">
-              <p className="font-medium text-[var(--kb-heading)]">{confirmation}</p>
+              <p className="text-base font-bold text-(--color-text-primary)">{confirmation}</p>
               <p className="mt-2 text-sm">{tCount(locale, 'formTicketNumber', submitted)}</p>
-              <p className="mt-1 text-sm text-[var(--kb-muted)]">
+              <p className="mt-1 text-sm text-(--color-text-secondary)">
                 {t(locale, 'formAnonymousNext')}
               </p>
               {query.files === 'failed' ? (
-                <p className="mt-2 text-sm text-red-700">{t(locale, 'formAttachmentFailed')}</p>
+                <p className="mt-2 text-sm text-(--color-feedback-danger-fg)">
+                  {t(locale, 'formAttachmentFailed')}
+                </p>
               ) : null}
             </Panel>
 
             <p className="mt-4 text-sm">
               <Link
                 href={`/${locale}`}
-                className="text-[var(--kb-link)] underline underline-offset-4"
+                className="text-(--color-text-link) underline underline-offset-4 hover:text-(--color-text-link-hover)"
               >
                 {t(locale, 'backToHelp')}
               </Link>
@@ -108,7 +110,7 @@ export default async function FormPage({
           {/* Before the form rather than after it: a customer who finds the
               answer here costs the team nothing, and past the Send button is too
               late to be a suggestion. */}
-          <p className="text-sm text-[var(--kb-muted)]">{t(locale, 'searchKb')}</p>
+          <p className="text-sm text-(--color-text-secondary)">{t(locale, 'searchKb')}</p>
 
           <Panel className="mt-4 p-6">
             <TicketForm

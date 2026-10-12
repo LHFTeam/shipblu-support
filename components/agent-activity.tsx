@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { ClockIcon } from '@/components/icons';
 import { Button } from '@/components/ui';
 import { idleTick } from '@/lib/presence/idle';
 
@@ -56,6 +57,11 @@ const TICK_MS = 5_000;
 
 /** Scroll is missing on purpose — it is registered on the document below. */
 const INPUT_EVENTS = ['pointerdown', 'keydown', 'wheel'] as const;
+
+/** 0:58 rather than "58 seconds": the title is read at a glance, not as a sentence. */
+function mmss(seconds: number): string {
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+}
 
 export function AgentActivity({
   accepting,
@@ -324,27 +330,34 @@ export function AgentActivity({
   const seconds = Math.ceil(remainingMs / 1000);
 
   return (
-    <div
-      role="alertdialog"
-      aria-modal="true"
-      aria-labelledby="idle-warning-title"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-    >
-      <div className="w-full max-w-sm rounded-lg border border-[var(--border)] bg-[var(--surface)] p-5 shadow-lg">
-        <h2 id="idle-warning-title" className="text-sm font-semibold">
-          Still there?
-        </h2>
-        <p aria-live="polite" className="mt-2 text-sm text-[var(--muted-foreground)]">
-          You have been inactive, so you will be signed out in {seconds}{' '}
-          {seconds === 1 ? 'second' : 'seconds'}. Anything you have typed and not sent will be lost.
-        </p>
-        <div className="mt-4 flex gap-2">
-          <Button type="button" onClick={noteInput}>
-            Stay signed in
-          </Button>
-          <Button type="button" variant="secondary" onClick={signOut}>
+    <div className="fixed inset-0 z-60 flex items-start justify-center bg-black/30 p-4 pt-[18vh]">
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="idle-warning-title"
+        aria-describedby="idle-warning-desc"
+        className="flex w-full max-w-[360px] flex-col gap-3 rounded-xl bg-(--color-background-surface) p-5 shadow-overlay"
+      >
+        <div className="flex items-start gap-2.5">
+          <ClockIcon size={20} className="shrink-0 text-(--color-attention-bg)" />
+          <div>
+            <h2 id="idle-warning-title" aria-live="polite" className="text-sm font-semibold">
+              Signing you out in <span className="tabular-nums">{mmss(seconds)}</span>
+            </h2>
+            <p id="idle-warning-desc" className="mt-0.5 text-xs text-(--color-text-secondary)">
+              You have been inactive. Anything you have typed and not sent will be lost.
+            </p>
+          </div>
+        </div>
+        {/* No `autoFocus` on "Stay signed in", although a dialog would usually
+            take it. Any key dismisses this through `noteInput`, so a focused
+            button would swallow the returning agent's first keystroke and
+            leave focus on the button instead of in the reply they were typing. */}
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={signOut}>
             Sign out now
           </Button>
+          <Button onClick={noteInput}>Stay signed in</Button>
         </div>
       </div>
     </div>

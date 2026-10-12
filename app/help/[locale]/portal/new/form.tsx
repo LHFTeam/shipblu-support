@@ -1,7 +1,7 @@
 'use client';
 
-import { useFormStatus } from 'react-dom';
-import { Button, ErrorText, Input, Label, Textarea } from '@/components/ui';
+import { SubmitButton } from '@/components/submit-button';
+import { ErrorText, Input, Label, Select, Textarea } from '@/components/ui';
 import { useActionForm } from '@/components/use-action-form';
 import { t, type Locale } from '@/lib/kb/locale';
 import type { TicketFieldDef } from '@/lib/tickets/custom-fields';
@@ -52,7 +52,11 @@ export function NewTicketForm({
 
       <ErrorText>{state.error ? t(locale, state.error) : null}</ErrorText>
 
-      <Submit locale={locale} />
+      <SubmitButton
+        className="self-start"
+        idle={t(locale, 'createTicket')}
+        busy={t(locale, 'submitting')}
+      />
     </form>
   );
 }
@@ -93,29 +97,28 @@ function CustomField({ field, missing }: { field: TicketFieldDef; missing: boole
         <Textarea id={id} name={name} rows={4} required={markRequired} aria-invalid={missing} />
       ) : field.type === 'checkbox' ? (
         <label className="flex items-center gap-2 text-sm">
-          <input id={id} type="checkbox" name={name} className="size-4" />
+          <input id={id} type="checkbox" name={name} className="size-4 shrink-0 accent-blu-500" />
           {field.label}
         </label>
       ) : field.type === 'dropdown' ? (
-        <select
-          id={id}
-          name={name}
-          required={markRequired}
-          aria-invalid={missing}
-          className="w-full rounded-md border border-[var(--kb-border)] bg-transparent px-3 py-2 text-sm"
-        >
+        <Select id={id} name={name} required={markRequired} aria-invalid={missing}>
           <option value="">—</option>
           {field.options.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
             </option>
           ))}
-        </select>
+        </Select>
       ) : field.type === 'multi_select' ? (
         <div role="group" aria-label={field.label} className="flex flex-col gap-1.5">
           {field.options.map((option) => (
             <label key={option.value} className="flex items-center gap-2 text-sm">
-              <input type="checkbox" name={name} value={option.value} className="size-4" />
+              <input
+                type="checkbox"
+                name={name}
+                value={option.value}
+                className="size-4 shrink-0 accent-blu-500"
+              />
               {option.label}
             </label>
           ))}
@@ -139,14 +142,5 @@ function CustomField({ field, missing }: { field: TicketFieldDef; missing: boole
         />
       )}
     </div>
-  );
-}
-
-function Submit({ locale }: { locale: Locale }) {
-  const { pending } = useFormStatus();
-  return (
-    <Button type="submit" variant="accent" disabled={pending} className="self-start">
-      {pending ? t(locale, 'submitting') : t(locale, 'createTicket')}
-    </Button>
   );
 }

@@ -2,12 +2,14 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { DetailsSection, Property, PropertyList } from '@/components/details-section';
+import { PlusIcon, ReturnIcon } from '@/components/icons';
+import { StatusBadge, Stepper } from '@/components/shipment-status';
 import { Tooltip } from '@/components/tooltip';
-import { Badge } from '@/components/ui';
+import { Badge, Button, Input } from '@/components/ui';
 import { formatDateTime, formatRelative } from '@/lib/format';
 import type { ConversationDetail } from '@/lib/tickets/conversation';
 import { describeRequesterRole } from '@/lib/shipments/roles';
-import { humaniseStatus, returnStepLabel, stageDisplay } from '@/lib/shipments/status';
 import {
   linkShipment,
   linkShippingAccount,
@@ -15,16 +17,23 @@ import {
   unlinkShipment,
   unlinkShippingAccount,
 } from '../../shipment-actions';
-import { SidebarField } from './ticket-fields';
+import { shipmentCard } from '@/lib/shipments/card';
+import { FieldError } from './ticket-fields';
 import { UnlinkButton } from './unlink-button';
 import { type LinkAction, useFieldAction } from './use-field-action';
 
 /**
- * The parcels a ticket is about.
+ * The parcels a ticket is about, one card each.
  *
  * An unsynced shipment says so rather than showing a row of blanks: it was
  * created from a number somebody wrote down and nothing has confirmed it exists,
  * which is a different thing from a shipment with no shipper.
+ *
+ * What the card says about the parcel — its words, its tone, which bar it walks
+ * — is decided by `shipmentCard`, which is where the rule that a return outranks
+ * the status label lives (§6.40). Only what the agent can act on is here: no
+ * merchant, COD or hub row, because those live in the platform payload and that
+ * is read only through `agentTracking()` on the shipment's own page.
  *
  * The add control is a plain input saved on Enter, matching `TagField` in
  * `ticket-fields.tsx`.
@@ -33,88 +42,98 @@ import { type LinkAction, useFieldAction } from './use-field-action';
  */
 export function ShipmentsField({ conversation }: { conversation: ConversationDetail }) {
   return (
-    <SidebarField label="Shipments">
-      <ul className="mb-2 flex flex-col gap-2">
-        {conversation.shipments.map((shipment) => (
-          <li key={shipment.shipmentId} className="text-xs">
-            <div className="flex items-start justify-between gap-2">
-              <Link
-                href={`/contacts/shipments/${encodeURIComponent(shipment.trackingNumber)}`}
-                className="font-medium break-all hover:underline"
-              >
-                {shipment.trackingNumber}
-              </Link>
-              <UnlinkButton
-                action={unlinkShipment}
-                fields={{
-                  conversationId: conversation.id,
-                  shipmentId: shipment.shipmentId,
-                  trackingNumber: shipment.trackingNumber,
-                }}
-                label={`Unlink ${shipment.trackingNumber}`}
-              />
-            </div>
+    <DetailsSection collapsible={false} title={`Shipments · ${conversation.shipments.length}`}>
+      <ul className="mb-3 grid gap-2">
+        {conversation.shipments.map((shipment) => {
+          const card = shipmentCard(shipment);
 
-            {/*
-              A returning parcel says so instead of showing its status, because
-              the platform's status is `delivery_attempted` for the whole of a
-              return — an agent reading it would tell a customer their parcel is
-              still coming (PROJECT-STATE §6.40). The return's own step is the
-              honest answer, and it is the one the customer is ringing about.
-            */}
-            <p className="mt-0.5 opacity-60">
-              {shipment.returnStep !== null
-                ? returnStepLabel('en', shipment.returnStep)
-                : shipment.syncState === 'synced'
-                  ? shipment.statusLabel
-                    ? humaniseStatus(shipment.statusLabel)
-                    : 'No status yet'
-                  : shipment.syncState === 'not_found'
-                    ? 'Not a shipment on the platform'
-                    : 'Not synced yet'}
-              {shipment.syncState === 'synced' && shipment.statusAt ? (
-                <>
-                  {' · '}
-                  <Tooltip content={formatDateTime(shipment.statusAt)}>
-                    {formatRelative(shipment.statusAt)}
-                  </Tooltip>
-                </>
-              ) : null}
-            </p>
-
-            {/*
-              The date the customer is actually asking about, and only while it
-              is still a prediction: never under a returning parcel, which is not
-              being delivered to anybody, and never under a delivered one.
-            */}
-            {shipment.returnStep === null &&
-            shipment.currentEstimatedDate &&
-            !stageDisplay(shipment.statusLabel).terminal ? (
-              <p className="opacity-60">Due {shipment.currentEstimatedDate}</p>
-            ) : null}
-
-            <p className="opacity-60">{describeRequesterRole(shipment.requesterRole)}</p>
-
-            <div className="mt-1 flex flex-wrap items-center gap-1">
-              {shipment.returnStep !== null ? <Badge tone="warning">returning</Badge> : null}
-              {shipment.sbid ? (
-                <Link href={`/contacts/accounts/${encodeURIComponent(shipment.sbid)}`}>
-                  <Badge>SBID {shipment.sbid}</Badge>
+          return (
+            <li
+              key={shipment.shipmentId}
+              className="grid gap-3 rounded-lg border border-(--color-border-subtle) bg-(--color-background-surface) p-3"
+            >
+              {/* Wraps rather than squeezing: "Not a shipment on the platform"
+                  beside a thirteen-digit number is wider than the card. */}
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <Link
+                  href={`/contacts/shipments/${encodeURIComponent(shipment.trackingNumber)}`}
+                  dir="ltr"
+                  className="min-w-0 font-mono text-xs break-all text-(--color-text-link) hover:underline"
+                >
+                  {shipment.trackingNumber}
                 </Link>
-              ) : null}
-              {shipment.linkSource === 'detected' ? <Badge>auto</Badge> : null}
-            </div>
+                <span className="ms-auto flex shrink-0 items-center gap-1">
+                  <StatusBadge size="sm" label={card.label} tone={card.tone} />
+                  <UnlinkButton
+                    action={unlinkShipment}
+                    fields={{
+                      conversationId: conversation.id,
+                      shipmentId: shipment.shipmentId,
+                      trackingNumber: shipment.trackingNumber,
+                    }}
+                    label={`Unlink ${shipment.trackingNumber}`}
+                  />
+                </span>
+              </div>
 
-            <RefreshShipmentButton
-              conversationId={conversation.id}
-              shipmentId={shipment.shipmentId}
-              trackingNumber={shipment.trackingNumber}
-              lastSyncedAt={shipment.lastSyncedAt}
-            />
-          </li>
-        ))}
+              {card.bar ? (
+                <Stepper
+                  size="sm"
+                  tone={card.bar.tone}
+                  labels={card.bar.labels}
+                  current={card.bar.step}
+                  doneLabel="done"
+                />
+              ) : null}
+
+              <PropertyList>
+                <Property
+                  label="Updated"
+                  value={
+                    shipment.syncState === 'synced' && shipment.statusAt ? (
+                      <Tooltip content={formatDateTime(shipment.statusAt)}>
+                        {formatRelative(shipment.statusAt)}
+                      </Tooltip>
+                    ) : null
+                  }
+                />
+                <Property label="Due" value={card.due} ltr />
+                <Property
+                  label="Account"
+                  ltr
+                  value={
+                    shipment.sbid ? (
+                      <Link
+                        href={`/contacts/accounts/${encodeURIComponent(shipment.sbid)}`}
+                        className="text-(--color-text-link) hover:underline"
+                      >
+                        SBID {shipment.sbid}
+                      </Link>
+                    ) : null
+                  }
+                />
+              </PropertyList>
+
+              <div className="flex flex-wrap items-center gap-1.5 text-xs text-(--color-text-secondary)">
+                <span className="me-auto">{describeRequesterRole(shipment.requesterRole)}</span>
+                {shipment.returnStep !== null ? (
+                  <Badge icon={<ReturnIcon size={12} className="shrink-0" />}>Returning</Badge>
+                ) : null}
+                {/* Dashed, because a rule linked it and no person did. */}
+                {shipment.linkSource === 'detected' ? <Badge tone="automated">Auto</Badge> : null}
+              </div>
+
+              <RefreshShipmentButton
+                conversationId={conversation.id}
+                shipmentId={shipment.shipmentId}
+                trackingNumber={shipment.trackingNumber}
+                lastSyncedAt={shipment.lastSyncedAt}
+              />
+            </li>
+          );
+        })}
         {conversation.shipments.length === 0 ? (
-          <li className="text-xs opacity-50">None linked.</li>
+          <li className="text-sm text-(--color-text-tertiary)">None linked.</li>
         ) : null}
       </ul>
 
@@ -124,7 +143,7 @@ export function ShipmentsField({ conversation }: { conversation: ConversationDet
         name="trackingNumber"
         placeholder="Add a tracking number"
       />
-    </SidebarField>
+    </DetailsSection>
   );
 }
 
@@ -137,18 +156,26 @@ export function ShipmentsField({ conversation }: { conversation: ConversationDet
  */
 export function ShippingAccountsField({ conversation }: { conversation: ConversationDetail }) {
   return (
-    <SidebarField label="Shipping accounts">
-      <ul className="mb-2 flex flex-col gap-1.5">
+    <DetailsSection
+      variant="flush"
+      collapsible={false}
+      title={`Shipping accounts · ${conversation.shippingAccounts.length}`}
+    >
+      <ul className="mb-3 flex flex-col gap-1.5">
         {conversation.shippingAccounts.map((account) => (
-          <li key={account.shippingAccountId} className="flex items-center justify-between gap-2">
+          <li
+            key={account.shippingAccountId}
+            className="flex items-center justify-between gap-2 text-sm"
+          >
             <Link
               href={`/contacts/accounts/${encodeURIComponent(account.sbid)}`}
-              className="text-xs font-medium hover:underline"
+              dir="auto"
+              className="min-w-0 truncate font-medium text-(--color-text-link) hover:underline"
             >
               {account.name ?? `SBID ${account.sbid}`}
             </Link>
-            <div className="flex items-center gap-1">
-              {account.linkSource === 'detected' ? <Badge>auto</Badge> : null}
+            <div className="flex shrink-0 items-center gap-1">
+              {account.linkSource === 'detected' ? <Badge tone="automated">Auto</Badge> : null}
               <UnlinkButton
                 action={unlinkShippingAccount}
                 fields={{
@@ -162,7 +189,7 @@ export function ShippingAccountsField({ conversation }: { conversation: Conversa
           </li>
         ))}
         {conversation.shippingAccounts.length === 0 ? (
-          <li className="text-xs opacity-50">None linked.</li>
+          <li className="text-sm text-(--color-text-tertiary)">None linked.</li>
         ) : null}
       </ul>
 
@@ -172,7 +199,7 @@ export function ShippingAccountsField({ conversation }: { conversation: Conversa
         name="sbid"
         placeholder="Add an SBID"
       />
-    </SidebarField>
+    </DetailsSection>
   );
 }
 
@@ -215,19 +242,20 @@ function RefreshShipmentButton({
   }
 
   return (
-    <div className="mt-1.5">
+    <div>
       <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
+        <Button
+          variant="secondary"
+          size="sm"
           disabled={busy}
+          loading={busy}
           onClick={() => void run()}
           aria-label={`Fetch the latest status for ${trackingNumber}`}
-          className="rounded border border-[var(--border)] px-1.5 py-0.5 text-xs hover:bg-[var(--muted)] disabled:opacity-40"
         >
           {busy ? 'Fetching…' : 'Fetch latest'}
-        </button>
+        </Button>
 
-        <span className="text-xs opacity-50">
+        <span className="text-xs text-(--color-text-tertiary)">
           {lastSyncedAt ? (
             <Tooltip content={formatDateTime(lastSyncedAt)}>
               checked {formatRelative(lastSyncedAt)} ago
@@ -238,7 +266,7 @@ function RefreshShipmentButton({
         </span>
       </div>
 
-      {error ? <p className="mt-1 text-xs text-red-600">{error}</p> : null}
+      <FieldError>{error}</FieldError>
     </div>
   );
 }
@@ -267,22 +295,30 @@ function LinkInput({
 
   return (
     <div>
-      <input
-        value={value}
-        disabled={saving}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            void save();
-          }
-        }}
-        onBlur={() => void save()}
-        placeholder={placeholder}
-        aria-label={placeholder}
-        className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-xs outline-none focus:border-brand-500"
-      />
-      {error ? <p className="mt-1 text-xs text-red-600">{error}</p> : null}
+      {/* Its own row, not a "Link" button in the section header that opens
+          one: the number is usually on the agent's clipboard already, and one
+          box is one step fewer than a button and then a box. */}
+      <div className="relative">
+        <span className="pointer-events-none absolute inset-y-0 start-2 flex items-center text-(--color-text-tertiary)">
+          <PlusIcon size={15} />
+        </span>
+        <Input
+          value={value}
+          disabled={saving}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              void save();
+            }
+          }}
+          onBlur={() => void save()}
+          placeholder={placeholder}
+          aria-label={placeholder}
+          className="ps-7"
+        />
+      </div>
+      <FieldError>{error}</FieldError>
     </div>
   );
 }

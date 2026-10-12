@@ -1,6 +1,7 @@
 'use client';
 
 import { useActionState, useState, type ReactNode } from 'react';
+import { ChevronDownIcon } from '@/components/icons';
 import { Button, Card, ErrorText } from '@/components/ui';
 import type { ActionState } from '@/lib/http/action-state';
 import { ConfirmSubmit } from '@/components/confirm-submit';
@@ -69,16 +70,12 @@ export function Disclosure({
   // `data-expanded` is what a page header keys off to give the open form the
   // whole row instead of the corner it puts the button in.
   return (
-    <Card data-expanded className="w-full border-brand-500/30">
+    <Card data-expanded className="w-full border-(--color-border-focus)/30!">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-sm font-semibold">{label}</h2>
-        <button
-          type="button"
-          onClick={() => setOpen(false)}
-          className="text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
-        >
+        <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
           Cancel
-        </button>
+        </Button>
       </div>
       {children(() => setOpen(false))}
     </Card>
@@ -110,14 +107,20 @@ export function Collapsible({
   const [open, setOpen] = useState(defaultOpen);
 
   return (
-    <div className="rounded-md border border-[var(--border)] p-3">
+    <div className="rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) p-3">
       <button
         type="button"
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        className="text-xs font-medium text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+        className="flex items-center gap-1 text-xs font-medium text-(--color-text-secondary) hover:text-(--color-text-primary)"
       >
-        {open ? '▾' : '▸'} {label}
+        {/* Down when open, toward the inline end when folded — the details
+            section's convention, so the two folds in the console agree. */}
+        <ChevronDownIcon
+          size={16}
+          className={`shrink-0 transition-transform ${open ? '' : '-rotate-90 rtl:rotate-90'}`}
+        />
+        {label}
       </button>
       <div hidden={!open} className="mt-3 flex flex-col gap-3">
         {children}
@@ -135,11 +138,14 @@ export function DangerAction({
   label = 'Delete',
   confirmLabel = 'Really delete?',
   disabled = false,
+  'aria-label': ariaLabel,
 }: {
   action: (state: ActionState, formData: FormData) => Promise<ActionState>;
   id: string;
-  label?: string;
+  /** A word, or a glyph given an `aria-label` — see `ConfirmSubmit`. */
+  label?: ReactNode;
   confirmLabel?: string;
+  'aria-label'?: string;
   /** Off while something beside it must not be undone underneath — armed or not. */
   disabled?: boolean;
 }) {
@@ -148,9 +154,16 @@ export function DangerAction({
   return (
     <form action={formAction} className="inline-flex flex-col items-end gap-1">
       <input type="hidden" name="id" value={id} />
-      <ConfirmSubmit label={label} confirmLabel={confirmLabel} disabled={disabled} />
+      <ConfirmSubmit
+        label={label}
+        confirmLabel={confirmLabel}
+        disabled={disabled}
+        aria-label={ariaLabel}
+      />
       {state.error ? (
-        <span className="max-w-xs text-end text-xs text-red-600">{state.error}</span>
+        <span className="max-w-xs text-end">
+          <ErrorText inline>{state.error}</ErrorText>
+        </span>
       ) : null}
     </form>
   );

@@ -34,7 +34,10 @@ export default async function NewTicketPage({
           title="No forms are offered to agents"
           hint="Build one under Settings → Forms, and tick “Offer it to agents”."
           action={
-            <Link href="/admin/forms" className="text-sm text-brand-600 hover:underline">
+            <Link
+              href="/admin/forms"
+              className="text-sm text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"
+            >
               Settings → Forms
             </Link>
           }
@@ -70,11 +73,7 @@ export default async function NewTicketPage({
                 key={option.id}
                 href={`/inbox/new?form=${encodeURIComponent(option.slug)}`}
                 aria-current={option.slug === slug ? 'page' : undefined}
-                className={`rounded-full px-3 py-1 text-xs ${
-                  option.slug === slug
-                    ? 'bg-brand-600 font-medium text-white'
-                    : 'bg-[var(--muted)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
-                }`}
+                className="rounded-full bg-(--color-background-surface-sunken) px-3 py-1 text-xs text-(--color-text-secondary) hover:text-(--color-text-primary) aria-[current=page]:bg-(--color-background-selected) aria-[current=page]:font-semibold aria-[current=page]:text-(--color-text-brand)"
               >
                 {formName(option, 'en')}
               </Link>

@@ -89,7 +89,7 @@ export function LocationEditor({
         <span className="font-medium">{location.name}</span>
         {!location.isActive ? (
           <span className="ms-2">
-            <Badge tone="neutral">closed</Badge>
+            <Badge tone="neutral">Closed</Badge>
           </span>
         ) : null}
       </button>

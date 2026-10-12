@@ -56,7 +56,7 @@ export default async function GroupsPage() {
       />
 
       {rows.length === 0 ? (
-        <p className="mt-3 text-sm text-[var(--muted-foreground)]">
+        <p className="mt-3 text-sm text-(--color-text-secondary)">
           No groups yet. Every ticket goes to whoever picks it up.
         </p>
       ) : null}

@@ -63,13 +63,13 @@ function Fields({ skill, fields, agents }: FormProps & { skill?: Skill }) {
                 name="agentIds"
                 value={agent.value}
                 defaultChecked={held.has(agent.value)}
-                className="size-4 accent-brand-600"
+                className="size-4 accent-blu-500"
               />
               {agent.label}
             </label>
           ))}
           {agents.length === 0 ? (
-            <p className="text-xs text-[var(--muted-foreground)]">No active agents yet.</p>
+            <p className="text-xs text-(--color-text-secondary)">No active agents yet.</p>
           ) : null}
         </div>
       </Field>
@@ -114,16 +114,16 @@ export function SkillEditor({ skill, ...props }: FormProps & { skill: Skill }) {
     <div className="flex flex-wrap items-start gap-3">
       <div className="min-w-0 flex-1">
         <h3 className="flex flex-wrap items-center gap-2 text-sm font-medium">
-          <span className="text-[var(--muted-foreground)]">{skill.position}.</span>
+          <span className="text-(--color-text-secondary)">{skill.position}.</span>
           {skill.name}
-          {!skill.isActive ? <Badge tone="neutral">off</Badge> : null}
+          {!skill.isActive ? <Badge tone="neutral">Off</Badge> : null}
           {/* The failure this screen exists to make visible. A skill nobody
               holds, matched by a group that routes on skills, is a ticket that
               waits for the skill timeout and then goes to anybody — or, with no
               timeout set, waits forever. */}
-          {holders === 0 && skill.isActive ? <Badge tone="warning">nobody holds it</Badge> : null}
+          {holders === 0 && skill.isActive ? <Badge tone="warning">Nobody holds it</Badge> : null}
         </h3>
-        <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">
+        <p className="mt-0.5 text-xs text-(--color-text-secondary)">
           {skill.description ? `${skill.description} · ` : ''}
           {holders} agent{holders === 1 ? '' : 's'}
         </p>

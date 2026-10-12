@@ -62,7 +62,7 @@ export function TodaySoFar({
           {hasHistory ? (
             <Sparkline
               values={recent.map((point) => point.resolved)}
-              color="var(--series-2)"
+              color="var(--color-series-2)"
               label={`Tickets resolved on each of the last ${recent.length} days`}
             />
           ) : null}
@@ -98,13 +98,13 @@ export function TodaySoFar({
       <Card className="mt-3">
         <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
           <h3 className="text-sm font-medium">Messages through the day</h3>
-          <p className="text-xs text-[var(--muted-foreground)]">
+          <p className="text-xs text-(--color-text-secondary)">
             Hour by hour, in {context.zone.replace('_', ' ')}. Private notes are not counted.
           </p>
         </div>
 
         {hourly.length === 0 ? (
-          <p className="py-6 text-center text-xs text-[var(--muted-foreground)]">
+          <p className="py-6 text-center text-xs text-(--color-text-secondary)">
             Nothing has come in yet today.
           </p>
         ) : (
@@ -117,12 +117,12 @@ export function TodaySoFar({
                 {
                   label: 'From customers',
                   values: hourly.map((bucket) => bucket.inbound),
-                  color: 'var(--series-1)',
+                  color: 'var(--color-series-1)',
                 },
                 {
                   label: 'From us',
                   values: hourly.map((bucket) => bucket.outbound),
-                  color: 'var(--series-2)',
+                  color: 'var(--color-series-2)',
                 },
               ]}
               height={120}

@@ -31,7 +31,7 @@ export default async function PortalResetPage({
           </AccountLink>
         }
       >
-        <p className="text-sm opacity-70">{t(locale, 'resetInvalid')}</p>
+        <p className="text-sm text-(--color-text-secondary)">{t(locale, 'resetInvalid')}</p>
       </AccountShell>
     );
   }

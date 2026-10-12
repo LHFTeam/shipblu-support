@@ -65,16 +65,18 @@ export default async function StatusesPage() {
               <StatusEditor status={status} />
             </Cell>
             <Cell>
-              <Badge tone={status.category}>{status.category}</Badge>
+              <Badge tone={status.category}>
+                {status.category.charAt(0).toUpperCase() + status.category.slice(1)}
+              </Badge>
             </Cell>
             <Cell>
               {status.stopsSlaClock ? (
-                <span className="text-xs text-[var(--muted-foreground)]">paused</span>
+                <span className="text-xs text-(--color-text-secondary)">paused</span>
               ) : (
                 <span className="text-xs">running</span>
               )}
             </Cell>
-            <Cell className="text-xs text-[var(--muted-foreground)]">
+            <Cell className="text-xs text-(--color-text-secondary)">
               {status.visibleToCustomer ? (
                 (status.customerLabel ?? <span className="italic">the category word</span>)
               ) : (

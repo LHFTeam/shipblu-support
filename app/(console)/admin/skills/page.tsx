@@ -49,7 +49,7 @@ export default async function SkillsPage() {
         actions={<NewSkill fields={fields} agents={agentChoices} />}
       />
 
-      <p className="mb-3 text-xs text-[var(--muted-foreground)]">
+      <p className="mb-3 text-xs text-(--color-text-secondary)">
         {routingGroups.length === 0
           ? 'No group matches on skills yet, so nothing here affects where a ticket goes. Turn on “Match skills first” for a group under Groups.'
           : `Used by ${routingGroups.map((group) => group.name).join(', ')}.`}

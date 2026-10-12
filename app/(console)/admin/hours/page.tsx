@@ -53,7 +53,7 @@ export default async function HoursPage() {
       </div>
 
       {schedules.length === 0 ? (
-        <p className="text-sm text-[var(--muted-foreground)]">
+        <p className="text-sm text-(--color-text-secondary)">
           No schedules yet, so nothing counts as out-of-hours: every target is counted in real time
           and reporting measures overnight silence as response time.
         </p>

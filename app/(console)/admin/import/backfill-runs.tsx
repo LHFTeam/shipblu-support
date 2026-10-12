@@ -48,29 +48,33 @@ export function useRefreshWhileRunning(runs: BackfillRun[]): void {
 export function BackfillRuns({ runs, empty }: { runs: BackfillRun[]; empty: string }) {
   return (
     <section>
-      <h2 className="mb-2 text-sm font-medium opacity-70">Recent runs</h2>
+      <h2 className="mb-2 text-sm font-semibold text-(--color-text-secondary)">Recent runs</h2>
 
       {runs.length === 0 ? (
-        <p className="text-sm opacity-50">{empty}</p>
+        <p className="text-sm text-(--color-text-tertiary)">{empty}</p>
       ) : (
-        <ul className="divide-y divide-[var(--border)] rounded-lg border border-[var(--border)] text-sm">
+        <ul className="divide-y divide-(--color-border-subtle) rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface) text-sm">
           {runs.map((run) => (
-            <li key={run.id} className="px-3 py-2.5">
+            <li key={run.id} className="px-4 py-3">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge tone={toneFor(run.status)}>{labelFor(run.status)}</Badge>
-                <span className="opacity-60">{formatDateTime(run.createdAt)}</span>
+                <span className="text-(--color-text-tertiary)">
+                  {formatDateTime(run.createdAt)}
+                </span>
                 {run.attempts > 1 ? (
-                  <span className="text-xs opacity-50">attempt {run.attempts}</span>
+                  <span className="text-xs text-(--color-text-tertiary)">
+                    attempt {run.attempts}
+                  </span>
                 ) : null}
                 {run.completedAt ? (
-                  <span className="ms-auto text-xs opacity-50">
+                  <span className="ms-auto text-xs text-(--color-text-tertiary)">
                     finished {formatRelative(run.completedAt)}
                   </span>
                 ) : null}
               </div>
 
               {run.lastError ? (
-                <pre className="mt-1.5 overflow-x-auto rounded bg-red-500/10 p-2 text-xs whitespace-pre-wrap text-red-700">
+                <pre className="mt-1.5 overflow-x-auto rounded-md bg-(--color-feedback-danger-bg) p-2 text-xs whitespace-pre-wrap text-(--color-feedback-danger-fg)">
                   {run.lastError.split('\n').slice(0, 6).join('\n')}
                 </pre>
               ) : null}
@@ -83,9 +87,9 @@ export function BackfillRuns({ runs, empty }: { runs: BackfillRun[]; empty: stri
 }
 
 function toneFor(status: string) {
-  if (status === 'completed') return 'open' as const;
+  if (status === 'completed') return 'success' as const;
   if (status === 'dead' || status === 'failed') return 'danger' as const;
-  if (status === 'processing') return 'warning' as const;
+  if (status === 'processing') return 'info' as const;
   return 'neutral' as const;
 }
 
@@ -97,8 +101,8 @@ function toneFor(status: string) {
  */
 function labelFor(status: string): string {
   return (
-    { completed: 'succeeded', dead: 'failed', processing: 'running', pending: 'queued' }[status] ??
-    status
+    { completed: 'Succeeded', dead: 'Failed', processing: 'Running', pending: 'Queued' }[status] ??
+    status.charAt(0).toUpperCase() + status.slice(1)
   );
 }
 

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { PlusIcon, XIcon } from '@/components/icons';
 import { Badge, Button, Field, Input, Toggle } from '@/components/ui';
 import type { WeeklySchedule } from '@/db/schema/config';
 import { DangerAction, Disclosure, EditorForm } from '../forms-shared';
@@ -44,21 +45,21 @@ function Fields({ schedule }: { schedule?: Schedule }) {
           const range = schedule?.schedule?.[day.key]?.[0];
           return (
             <div key={day.key} className="flex flex-wrap items-center gap-2 text-sm">
-              <span className="w-24 text-[var(--muted-foreground)]">{day.label}</span>
+              <span className="w-24 text-(--color-text-secondary)">{day.label}</span>
               <input
                 type="time"
                 name={`${day.key}_start`}
                 defaultValue={range?.start ?? ''}
-                className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-sm"
+                className="rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) px-2 py-1 text-base outline-none transition-colors hover:border-(--color-border-default) focus:border-(--color-border-focus) focus:ring-2 focus:ring-(--color-border-focus)/20 sm:text-sm"
               />
-              <span className="text-xs text-[var(--muted-foreground)]">to</span>
+              <span className="text-xs text-(--color-text-secondary)">to</span>
               <input
                 type="time"
                 name={`${day.key}_end`}
                 defaultValue={range?.end ?? ''}
-                className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-sm"
+                className="rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) px-2 py-1 text-base outline-none transition-colors hover:border-(--color-border-default) focus:border-(--color-border-focus) focus:ring-2 focus:ring-(--color-border-focus)/20 sm:text-sm"
               />
-              <label className="flex items-center gap-1.5 text-xs text-[var(--muted-foreground)]">
+              <label className="flex items-center gap-1.5 text-xs text-(--color-text-secondary)">
                 <input
                   type="checkbox"
                   name={`${day.key}_closed`}
@@ -67,7 +68,7 @@ function Fields({ schedule }: { schedule?: Schedule }) {
                       ? (schedule.schedule?.[day.key]?.length ?? 0) === 0
                       : day.key === 'fri' || day.key === 'sat'
                   }
-                  className="accent-brand-600"
+                  className="accent-blu-500"
                 />
                 Closed
               </label>
@@ -121,12 +122,12 @@ export function HoursEditor({
       <div className="min-w-0">
         <h2 className="flex items-center gap-2 text-sm font-semibold">
           {schedule.name}
-          {schedule.isDefault ? <Badge tone="brand">default</Badge> : null}
-          <span className="text-xs font-normal text-[var(--muted-foreground)]">
+          {schedule.isDefault ? <Badge tone="brand">Default</Badge> : null}
+          <span className="text-xs font-normal text-(--color-text-secondary)">
             {schedule.timezone}
           </span>
         </h2>
-        <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+        <p className="mt-1 text-xs text-(--color-text-secondary)">
           {groupNames.length
             ? `Groups on this schedule: ${groupNames.join(', ')}`
             : schedule.isDefault
@@ -138,7 +139,7 @@ export function HoursEditor({
             const range = schedule.schedule?.[day.key]?.[0];
             return (
               <div key={day.key} className="contents">
-                <dt className="text-[var(--muted-foreground)]">{day.label}</dt>
+                <dt className="text-(--color-text-secondary)">{day.label}</dt>
                 <dd>{range ? `${range.start} – ${range.end}` : 'Closed'}</dd>
               </div>
             );
@@ -213,18 +214,19 @@ export function HolidayList({ scheduleId, holidays }: { scheduleId: string; holi
   };
 
   return (
-    <div className="mt-4 border-t border-[var(--border)] pt-3">
+    <div className="mt-4 border-t border-(--color-border-subtle) pt-3">
       <div className="flex items-center gap-2">
-        <h3 className="text-xs font-medium text-[var(--muted-foreground)]">
+        <h3 className="text-xs font-semibold text-(--color-text-secondary)">
           Holidays ({holidays.length})
         </h3>
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="sm"
+          icon={adding ? undefined : <PlusIcon size={14} />}
           onClick={openAdd}
-          className="text-xs font-medium text-brand-600 hover:underline"
         >
-          {adding ? 'Cancel' : '+ Add'}
-        </button>
+          {adding ? 'Cancel' : 'Add'}
+        </Button>
       </div>
 
       {adding ? (
@@ -245,7 +247,7 @@ export function HolidayList({ scheduleId, holidays }: { scheduleId: string; holi
           {holidays.map((holiday) => (
             <li
               key={holiday.id}
-              className="flex items-center gap-2 rounded-md bg-[var(--muted)] px-2 py-1 text-xs"
+              className="flex items-center gap-2 rounded-md bg-(--color-background-surface-sunken) px-2 py-1 text-xs"
             >
               <button
                 type="button"
@@ -258,14 +260,15 @@ export function HolidayList({ scheduleId, holidays }: { scheduleId: string; holi
                   Arabic one is actually there — showing one and falling back
                   would render a half-filled calendar as a complete one.
                 */}
-                <span className="text-[var(--muted-foreground)]">
+                <span className="text-(--color-text-secondary)">
                   {[holiday.nameAr, holiday.nameEn].filter(Boolean).join(' · ') || 'Unnamed'}
                 </span>
               </button>
               <DangerAction
                 action={deleteHoliday}
                 id={holiday.id}
-                label="×"
+                label={<XIcon size={14} />}
+                aria-label="Remove holiday"
                 confirmLabel="Remove"
               />
             </li>

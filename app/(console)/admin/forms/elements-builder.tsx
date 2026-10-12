@@ -1,7 +1,8 @@
 'use client';
 
-import { useId, useState } from 'react';
-import { Input, Select } from '@/components/ui';
+import { useId, useState, type ReactNode } from 'react';
+import { ChevronDownIcon, ChevronUpIcon, PlusIcon } from '@/components/icons';
+import { Button, Input, Select } from '@/components/ui';
 import { SYSTEM_KEYS, type SystemKey } from '@/lib/forms/elements';
 import { PRIORITY_CHOICES } from '@/lib/tickets/vocabulary';
 import { ConditionBuilder, type FieldOption } from '../condition-builder';
@@ -89,10 +90,10 @@ export function ElementsBuilder({
       {items.map((item, index) => (
         <div
           key={item.uid}
-          className="rounded-md border border-[var(--border)] bg-[var(--surface)] p-3"
+          className="rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) p-3"
         >
           <div className="flex flex-wrap items-center gap-2">
-            <span className="w-5 text-xs text-[var(--muted-foreground)]">{index + 1}.</span>
+            <span className="w-5 text-xs text-(--color-text-secondary)">{index + 1}.</span>
 
             <Select
               aria-label="Question type"
@@ -100,7 +101,7 @@ export function ElementsBuilder({
               onChange={(event) =>
                 update(index, { ...item, kind: event.target.value as Item['kind'], key: '' })
               }
-              className="w-44"
+              className="w-44!"
             >
               {KINDS.map((kind) => (
                 <option key={kind.value} value={kind.value}>
@@ -118,38 +119,38 @@ export function ElementsBuilder({
 
             <div className="ms-auto flex items-center gap-1">
               <Move label="Move up" disabled={index === 0} onClick={() => swap(index, index - 1)}>
-                ↑
+                <ChevronUpIcon size={16} />
               </Move>
               <Move
                 label="Move down"
                 disabled={index === items.length - 1}
                 onClick={() => swap(index, index + 1)}
               >
-                ↓
+                <ChevronDownIcon size={16} />
               </Move>
-              <button
-                type="button"
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => setOpen(open === item.uid ? null : item.uid)}
                 aria-expanded={open === item.uid}
                 aria-controls={`${prefix}-${item.uid}`}
-                className="text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
               >
                 {open === item.uid ? 'Done' : 'Wording and rules'}
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => setItems(items.filter((_, i) => i !== index))}
-                className="text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
               >
                 Remove
-              </button>
+              </Button>
             </div>
           </div>
 
           {open === item.uid ? (
             <div
               id={`${prefix}-${item.uid}`}
-              className="mt-3 flex flex-col gap-3 border-t border-[var(--border)] pt-3"
+              className="mt-3 flex flex-col gap-3 border-t border-(--color-border-subtle) pt-3"
             >
               {item.kind === 'heading' || item.kind === 'note' ? null : (
                 <>
@@ -171,13 +172,13 @@ export function ElementsBuilder({
                   />
 
                   <label className="flex flex-wrap items-center gap-2 text-sm">
-                    <span className="text-[var(--muted-foreground)]">Answering it is</span>
+                    <span className="text-(--color-text-secondary)">Answering it is</span>
                     <Select
                       value={item.required}
                       onChange={(event) =>
                         update(index, { ...item, required: event.target.value as Item['required'] })
                       }
-                      className="w-56"
+                      className="w-56!"
                     >
                       <option value="">whatever the field itself says</option>
                       <option value="yes">required on this form</option>
@@ -189,7 +190,7 @@ export function ElementsBuilder({
 
               <div className="flex flex-col gap-2">
                 <p className="text-sm font-medium">Only ask this when…</p>
-                <p className="text-xs text-[var(--muted-foreground)]">
+                <p className="text-xs text-(--color-text-secondary)">
                   Written against the questions <em>above</em> this one — a question can only depend
                   on one that has already been asked. No conditions means it is always shown.
                 </p>
@@ -204,21 +205,23 @@ export function ElementsBuilder({
         </div>
       ))}
 
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-center gap-1">
         {KINDS.map((kind) => (
-          <button
+          <Button
             key={kind.value}
-            type="button"
+            variant="ghost"
+            size="sm"
+            icon={<PlusIcon size={14} />}
             onClick={() => setItems([...items, blank(kind.value)])}
-            className="text-xs font-medium text-brand-600 hover:underline"
           >
-            + {kind.label}
-          </button>
+            <span className="sr-only">Add </span>
+            {kind.label}
+          </Button>
         ))}
       </div>
 
       {items.length === 0 ? (
-        <p className="text-xs text-[var(--muted-foreground)]">
+        <p className="text-xs text-(--color-text-secondary)">
           An empty form still opens a ticket, but it asks nothing — add the message question at
           least.
         </p>
@@ -247,7 +250,7 @@ function Move({
   label: string;
   disabled: boolean;
   onClick: () => void;
-  children: string;
+  children: ReactNode;
 }) {
   return (
     <button
@@ -255,7 +258,7 @@ function Move({
       aria-label={label}
       disabled={disabled}
       onClick={onClick}
-      className="rounded px-1.5 py-0.5 text-xs text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)] disabled:opacity-30"
+      className="flex size-7 items-center justify-center rounded-md text-(--color-text-secondary) hover:bg-(--color-background-hover) hover:text-(--color-text-primary) disabled:opacity-30 disabled:hover:bg-transparent"
     >
       {children}
     </button>
@@ -314,7 +317,7 @@ function Target({
       aria-label="Which question"
       value={item.key}
       onChange={(event) => onChange({ key: event.target.value })}
-      className="w-64"
+      className="w-64!"
     >
       <option value="">Choose…</option>
       {choices
@@ -362,7 +365,7 @@ function Pair({
           placeholder="In English"
         />
       </div>
-      <span className="text-xs text-[var(--muted-foreground)]">{hint}</span>
+      <span className="text-xs text-(--color-text-secondary)">{hint}</span>
     </div>
   );
 }
@@ -415,7 +418,7 @@ function vocabulary(before: Item[], fields: FieldChoice[]): FieldOption[] {
   }
 
   // Never empty: `ConditionBuilder` picks `fields[0]` for a new row, and an
-  // empty list would make "+ Add condition" throw on the first question.
+  // empty list would make "Add condition" throw on the first question.
   if (options.length === 0) {
     options.push({ value: 'subject', label: 'Subject', kind: 'text' });
   }

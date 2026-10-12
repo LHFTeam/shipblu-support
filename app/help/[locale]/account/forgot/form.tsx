@@ -14,8 +14,8 @@ export function ForgotForm({ locale }: { locale: Locale }) {
   if (state.done) {
     return (
       <div className="text-sm">
-        <p className="font-medium">{t(locale, 'checkYourEmail')}</p>
-        <p className="mt-1 opacity-70">{t(locale, 'resetSent')}</p>
+        <p className="font-bold text-(--color-text-primary)">{t(locale, 'checkYourEmail')}</p>
+        <p className="mt-1 text-(--color-text-secondary)">{t(locale, 'resetSent')}</p>
       </div>
     );
   }

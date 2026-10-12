@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useNow } from '@/components/use-now';
+import { Button } from '@/components/ui';
 
 /**
  * The "live" half of the live dashboard.
@@ -50,11 +51,11 @@ export function LiveTicker({ renderedAt }: { renderedAt: string }) {
   }, [live, router]);
 
   return (
-    <div className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
+    <div className="flex items-center gap-2 text-xs text-(--color-text-secondary)">
       <span
         aria-hidden
         className={`size-2 rounded-full ${
-          live ? 'animate-pulse bg-[var(--color-positive)]' : 'bg-[var(--border-strong)]'
+          live ? 'bg-(--color-positive) motion-safe:animate-pulse' : 'bg-(--color-border-default)'
         }`}
       />
       <span aria-live="off">
@@ -64,20 +65,12 @@ export function LiveTicker({ renderedAt }: { renderedAt: string }) {
             ? 'Updated just now'
             : `Updated ${secondsAgo}s ago`}
       </span>
-      <button
-        type="button"
-        onClick={() => setLive((on) => !on)}
-        className="rounded-md px-1.5 py-0.5 hover:bg-[var(--muted)] hover:text-[var(--foreground)]"
-      >
+      <Button variant="ghost" size="sm" onClick={() => setLive((on) => !on)}>
         {live ? 'Pause' : 'Resume'}
-      </button>
-      <button
-        type="button"
-        onClick={() => router.refresh()}
-        className="rounded-md px-1.5 py-0.5 hover:bg-[var(--muted)] hover:text-[var(--foreground)]"
-      >
+      </Button>
+      <Button variant="ghost" size="sm" onClick={() => router.refresh()}>
         Refresh
-      </button>
+      </Button>
     </div>
   );
 }

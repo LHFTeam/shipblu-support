@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { ExternalIcon } from '@/components/icons';
+import { Button } from '@/components/ui';
 import { t, type Locale } from '@/lib/kb/locale';
 import type { WidgetCopy } from './copy';
 import type { ArticleLink } from '@/lib/widget/types';
@@ -114,10 +116,14 @@ export function WidgetArticle({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-        <h2 className="mb-2 text-base font-semibold">{loaded?.title ?? article.title}</h2>
+        <h2 className="mb-2 text-base font-semibold text-(--color-text-primary)">
+          {loaded?.title ?? article.title}
+        </h2>
 
         {failed ? (
-          <p className="py-8 text-center text-sm opacity-50">{t(locale, 'noResults')}</p>
+          <p className="py-8 text-center text-sm text-(--color-text-secondary)">
+            {t(locale, 'noResults')}
+          </p>
         ) : loaded ? (
           <>
             <div
@@ -129,27 +135,27 @@ export function WidgetArticle({
               href={loaded.url}
               target="_blank"
               rel="noreferrer"
-              className="mt-4 inline-block text-xs text-brand-600 underline underline-offset-2"
+              className="mt-4 inline-flex items-center gap-1 text-sm text-(--color-text-link) underline-offset-4 hover:text-(--color-text-link-hover) hover:underline"
             >
               {copy.readMore}
+              <ExternalIcon size={14} className="shrink-0" />
             </a>
           </>
         ) : (
-          <p className="py-8 text-center text-sm opacity-40">…</p>
+          <p className="py-8 text-center text-sm text-(--color-text-tertiary)">…</p>
         )}
       </div>
 
       {/* The button belongs under the answer, not above it: this is where the
           visitor arrives when the article did not settle their question. */}
-      <div className="shrink-0 border-t border-[var(--border)] p-3">
-        <p className="mb-2 text-center text-xs opacity-60">{t(locale, 'contactPrompt')}</p>
-        <button
-          type="button"
-          onClick={onTalkToAgent}
-          className="w-full rounded-md bg-brand-600 px-3 py-2.5 text-sm font-medium text-white"
-        >
+      <div className="shrink-0 border-t border-(--color-border-subtle) p-3">
+        <p className="mb-2 text-center text-xs text-(--color-text-secondary)">
+          {t(locale, 'contactPrompt')}
+        </p>
+        {/* `!` for the reason the home screen's button gives. */}
+        <Button onClick={onTalkToAgent} className="min-h-(--tap-min)! w-full">
           {copy.talkToAgent}
-        </button>
+        </Button>
       </div>
     </div>
   );

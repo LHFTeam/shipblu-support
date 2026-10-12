@@ -45,11 +45,11 @@ export function ImportForm({
     <div className="flex flex-col gap-6">
       <section>
         <h1 className="mb-1 text-lg font-semibold">Freshdesk import</h1>
-        <p className="text-sm opacity-70">
+        <p className="text-sm text-(--color-text-secondary)">
           Pulls categories, folders and articles from Freshdesk into the knowledge base, and records
           redirects so existing article links keep working.
         </p>
-        <p className="mt-2 text-sm opacity-70">
+        <p className="mt-2 text-sm text-(--color-text-secondary)">
           Safe to run as many times as you like — it matches on each item&apos;s Freshdesk id, so a
           re-run updates what it imported before rather than duplicating it. Articles written here
           are never touched.
@@ -57,8 +57,10 @@ export function ImportForm({
       </section>
 
       {counts ? (
-        <section className="rounded-lg border border-[var(--border)] p-4">
-          <h2 className="mb-2 text-xs font-medium opacity-60">Knowledge base now holds</h2>
+        <section className="rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface) p-(--density-card-pad)">
+          <h2 className="mb-2 text-xs font-semibold text-(--color-text-secondary)">
+            Knowledge base now holds
+          </h2>
           <dl className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
             {[
               ['Categories', counts.categories],
@@ -67,7 +69,7 @@ export function ImportForm({
               ['Redirects', counts.redirects],
             ].map(([label, value]) => (
               <div key={String(label)}>
-                <dt className="text-xs opacity-60">{label}</dt>
+                <dt className="text-xs text-(--color-text-secondary)">{label}</dt>
                 <dd className="text-lg font-medium">{value}</dd>
               </div>
             ))}
@@ -79,18 +81,22 @@ export function ImportForm({
             at a time, so a language can be missed entirely while everything
             else succeeds. An empty language reads as an alert, not a statistic.
           */}
-          <dl className="mt-4 grid grid-cols-2 gap-2 border-t border-[var(--border)] pt-3 text-sm">
+          <dl className="mt-4 grid grid-cols-2 gap-2 border-t border-(--color-border-subtle) pt-3 text-sm">
             {[
               ['English', counts.articles_en, counts.categories_en],
               ['Arabic', counts.articles_ar, counts.categories_ar],
             ].map(([label, articles, categories]) => (
               <div key={String(label)}>
-                <dt className="text-xs opacity-60">{label}</dt>
+                <dt className="text-xs text-(--color-text-secondary)">{label}</dt>
                 <dd
-                  className={Number(articles) === 0 ? 'font-medium text-amber-600' : 'font-medium'}
+                  className={
+                    Number(articles) === 0
+                      ? 'font-medium text-(--color-feedback-warning-fg)'
+                      : 'font-medium'
+                  }
                 >
                   {articles} {Number(articles) === 1 ? 'article' : 'articles'}
-                  <span className="opacity-60">
+                  <span className="text-(--color-text-secondary)">
                     {' '}
                     in {categories} {Number(categories) === 1 ? 'category' : 'categories'}
                   </span>
@@ -100,7 +106,7 @@ export function ImportForm({
           </dl>
 
           {counts.articles_en === 0 || counts.articles_ar === 0 ? (
-            <p className="mt-3 text-xs text-amber-700">
+            <p className="mt-3 text-xs text-(--color-feedback-warning-fg)">
               One language has nothing in it. If Freshdesk does hold articles in it, the run log on
               the worker names which language codes were found and which were not.
             </p>
@@ -114,7 +120,7 @@ export function ImportForm({
         </form>
         <ErrorText>{state.error}</ErrorText>
 
-        <p className="mt-2 text-xs opacity-50">
+        <p className="mt-2 text-xs text-(--color-text-tertiary)">
           Needs FRESHDESK_DOMAIN and FRESHDESK_API_KEY set on the{' '}
           <span className="font-medium">worker</span> service. Those credentials are not readable
           from here, so if they are missing the run below will say so.
@@ -122,29 +128,33 @@ export function ImportForm({
       </section>
 
       <section>
-        <h2 className="mb-2 text-sm font-medium opacity-70">Recent runs</h2>
+        <h2 className="mb-2 text-sm font-semibold text-(--color-text-secondary)">Recent runs</h2>
 
         {runs.length === 0 ? (
-          <p className="text-sm opacity-50">No imports have been run yet.</p>
+          <p className="text-sm text-(--color-text-tertiary)">No imports have been run yet.</p>
         ) : (
-          <ul className="divide-y divide-[var(--border)] rounded-lg border border-[var(--border)] text-sm">
+          <ul className="divide-y divide-(--color-border-subtle) rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface) text-sm">
             {runs.map((run) => (
-              <li key={run.id} className="px-3 py-2.5">
+              <li key={run.id} className="px-4 py-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge tone={toneFor(run.status)}>{labelFor(run.status)}</Badge>
-                  <span className="opacity-60">{formatDateTime(run.createdAt)}</span>
+                  <span className="text-(--color-text-tertiary)">
+                    {formatDateTime(run.createdAt)}
+                  </span>
                   {run.attempts > 1 ? (
-                    <span className="text-xs opacity-50">attempt {run.attempts}</span>
+                    <span className="text-xs text-(--color-text-tertiary)">
+                      attempt {run.attempts}
+                    </span>
                   ) : null}
                   {run.completedAt ? (
-                    <span className="ms-auto text-xs opacity-50">
+                    <span className="ms-auto text-xs text-(--color-text-tertiary)">
                       finished {formatRelative(run.completedAt)}
                     </span>
                   ) : null}
                 </div>
 
                 {run.lastError ? (
-                  <pre className="mt-1.5 overflow-x-auto whitespace-pre-wrap rounded bg-red-500/10 p-2 text-xs text-red-700">
+                  <pre className="mt-1.5 overflow-x-auto whitespace-pre-wrap rounded-md bg-(--color-feedback-danger-bg) p-2 text-xs text-(--color-feedback-danger-fg)">
                     {run.lastError.split('\n').slice(0, 6).join('\n')}
                   </pre>
                 ) : null}
@@ -158,17 +168,17 @@ export function ImportForm({
 }
 
 function toneFor(status: string) {
-  if (status === 'completed') return 'open' as const;
+  if (status === 'completed') return 'success' as const;
   if (status === 'dead' || status === 'failed') return 'danger' as const;
-  if (status === 'processing') return 'warning' as const;
+  if (status === 'processing') return 'info' as const;
   return 'neutral' as const;
 }
 
 /** 'dead' is queue vocabulary; an admin reading this page wants plain words. */
 function labelFor(status: string): string {
   return (
-    { completed: 'succeeded', dead: 'failed', processing: 'running', pending: 'queued' }[status] ??
-    status
+    { completed: 'Succeeded', dead: 'Failed', processing: 'Running', pending: 'Queued' }[status] ??
+    status.charAt(0).toUpperCase() + status.slice(1)
   );
 }
 

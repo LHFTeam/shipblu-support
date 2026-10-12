@@ -9,6 +9,7 @@ import {
   type totals,
 } from '@/lib/reports/queries';
 
+import { RangeNav } from '../../reports/range-nav';
 import { Section, TableView, slaTone, type Point } from './section';
 
 export const RANGES = [7, 30, 90] as const;
@@ -31,21 +32,7 @@ export function History({
       title={`The last ${days} days`}
       hint="From the nightly rollup, which is what Reports reads. Complete days only — today is above."
       actions={
-        <nav className="flex gap-1 text-sm">
-          {RANGES.map((range) => (
-            <Link
-              key={range}
-              href={`/admin/dashboard?days=${range}`}
-              className={`rounded-md px-2.5 py-1 ${
-                range === days
-                  ? 'bg-[var(--muted)] font-medium'
-                  : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
-              }`}
-            >
-              {range} days
-            </Link>
-          ))}
-        </nav>
+        <RangeNav ranges={RANGES} current={days} href={(each) => `/admin/dashboard?days=${each}`} />
       }
     >
       {!hasHistory ? (
@@ -64,12 +51,12 @@ export function History({
                 {
                   label: 'Created',
                   values: trend.map((point) => point.created),
-                  color: 'var(--series-1)',
+                  color: 'var(--color-series-1)',
                 },
                 {
                   label: 'Resolved',
                   values: trend.map((point) => point.resolved),
-                  color: 'var(--series-2)',
+                  color: 'var(--color-series-2)',
                 },
               ]}
               tickEvery={days <= 7 ? 1 : days <= 30 ? 5 : 10}
@@ -121,9 +108,12 @@ export function History({
             />
           </div>
 
-          <p className="mt-2 text-xs text-[var(--muted-foreground)]">
+          <p className="mt-2 text-xs text-(--color-text-secondary)">
             Cuts by agent, group and channel live in{' '}
-            <Link href={`/reports?days=${days}`} className="text-brand-600 hover:underline">
+            <Link
+              href={`/reports?days=${days}`}
+              className="text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"
+            >
               Reports
             </Link>
             .

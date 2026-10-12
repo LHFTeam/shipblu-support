@@ -1,7 +1,16 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { Meter, Stat } from '@/components/charts';
-import { Badge, Cell, EmptyState, PageHeader, Row, Table } from '@/components/ui';
+import {
+  Badge,
+  buttonClass,
+  Cell,
+  EmptyState,
+  Notice,
+  PageHeader,
+  Row,
+  Table,
+} from '@/components/ui';
 import { InfoTip } from '@/components/tooltip';
 import { requireAgent } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
@@ -18,6 +27,7 @@ import {
   rolledUpRange,
 } from '@/lib/reports/category-queries';
 import { rangeIn, reportingContext } from '@/lib/reports/rollup';
+import { RangeNav } from '../range-nav';
 
 export const dynamic = 'force-dynamic';
 
@@ -112,23 +122,14 @@ export default async function CategoryReportPage({
         description={`${range.from} to ${range.to}, in ${zone}. Demand by category, and — the half that matters — why those tickets existed and who owns fixing it.`}
         actions={
           <div className="flex flex-wrap items-center gap-3">
-            <nav className="flex gap-1 text-sm">
-              {RANGES.map((each) => (
-                <Link
-                  key={each}
-                  href={`/reports/categories?days=${each}`}
-                  aria-current={each === days ? 'page' : undefined}
-                  className={`rounded-md px-2.5 py-1 ${
-                    each === days ? 'bg-[var(--muted)] font-medium' : 'opacity-60 hover:opacity-100'
-                  }`}
-                >
-                  {each} days
-                </Link>
-              ))}
-            </nav>
+            <RangeNav
+              ranges={RANGES}
+              current={days}
+              href={(each) => `/reports/categories?days=${each}`}
+            />
             <Link
               href={`/reports?days=${days}`}
-              className="rounded-md border border-[var(--border)] px-2.5 py-1 text-sm hover:bg-[var(--muted)]"
+              className={buttonClass({ variant: 'secondary', size: 'sm' })}
             >
               All reports
             </Link>
@@ -154,23 +155,23 @@ export default async function CategoryReportPage({
             is the state that makes the range control look broken.
           */}
           <div className="mb-6 max-w-2xl space-y-2">
-            <p className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-sm text-[var(--muted-foreground)]">
+            <Notice tone="neutral">
               A ticket can be about more than one thing, so{' '}
-              <b className="text-[var(--foreground)]">Mentioned</b> counts every ticket carrying a
-              category and does not add up to the number of tickets.{' '}
-              <b className="text-[var(--foreground)]">Leading</b> counts each ticket once, under
+              <b className="text-(--color-text-primary)">Mentioned</b> counts every ticket carrying
+              a category and does not add up to the number of tickets.{' '}
+              <b className="text-(--color-text-primary)">Leading</b> counts each ticket once, under
               whichever category leads it — that is the column to compare against a ticket count.
-            </p>
+            </Notice>
 
             {startsLate ? (
-              <p className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+              <Notice tone="info" icon>
                 This window opens on {range.from}, but the categorised history{' '}
                 <b>begins on {rolledUp.first}</b> — {rolledUp.days}{' '}
                 {rolledUp.days === 1 ? 'day' : 'days'} of it in this window. Categorisation records
                 forward only and there is no backfill, so a wider range cannot reach further back
                 than that: until more history accumulates, 7, 30 and 90 days will keep answering the
                 same.
-              </p>
+              </Notice>
             ) : null}
           </div>
 
@@ -232,7 +233,7 @@ export default async function CategoryReportPage({
           </section>
 
           <section className="mb-8">
-            <h2 className="mb-2 text-sm font-medium text-[var(--muted-foreground)]">By area</h2>
+            <h2 className="mb-2 text-sm font-semibold text-(--color-text-secondary)">By area</h2>
             {areas.length === 0 ? (
               <Quiet>No category was assigned in this window.</Quiet>
             ) : (
@@ -241,7 +242,7 @@ export default async function CategoryReportPage({
                   <Row key={area.area}>
                     <Cell className="font-medium">{areaLabel(area.area)}</Cell>
                     <Cell>{area.ticketsPrimary.toLocaleString()}</Cell>
-                    <Cell className="text-[var(--muted-foreground)]">
+                    <Cell className="text-(--color-text-secondary)">
                       {area.ticketsAny.toLocaleString()}
                     </Cell>
                     <Cell>
@@ -264,14 +265,17 @@ export default async function CategoryReportPage({
               somebody to work out from two columns that disagree.
             */}
             {unread > 0 ? (
-              <p className="mt-2 max-w-2xl text-xs text-[var(--muted-foreground)]">
+              <p className="mt-2 max-w-2xl text-xs text-(--color-text-secondary)">
                 Unclassified shows a share of 0% by design — it is never the category leading a
                 ticket, so it is a measurement gap rather than a slice of demand.
                 {can(agent, 'admin.categories') ? (
                   <>
                     {' '}
                     The messages behind it are in{' '}
-                    <Link href="/admin/categories/review" className="underline">
+                    <Link
+                      href="/admin/categories/review"
+                      className="text-(--color-text-link) underline"
+                    >
                       category review
                     </Link>
                     , which is where the next rule comes from.
@@ -282,7 +286,9 @@ export default async function CategoryReportPage({
           </section>
 
           <section className="mb-8">
-            <h2 className="mb-2 text-sm font-medium text-[var(--muted-foreground)]">By category</h2>
+            <h2 className="mb-2 text-sm font-semibold text-(--color-text-secondary)">
+              By category
+            </h2>
             {categories.length === 0 ? (
               <Quiet>No category was assigned in this window.</Quiet>
             ) : (
@@ -310,15 +316,15 @@ export default async function CategoryReportPage({
                   <Row key={category.categoryKey}>
                     <Cell>
                       <span className="font-medium">{category.label}</span>
-                      <p className="text-xs text-[var(--muted-foreground)]">
+                      <p className="text-xs text-(--color-text-secondary)">
                         {category.categoryKey}
                       </p>
                     </Cell>
                     <Cell>{category.ticketsPrimary.toLocaleString()}</Cell>
-                    <Cell className="text-[var(--muted-foreground)]">
+                    <Cell className="text-(--color-text-secondary)">
                       {category.ticketsAny.toLocaleString()}
                     </Cell>
-                    <Cell className="text-xs whitespace-nowrap text-[var(--muted-foreground)]">
+                    <Cell className="text-xs whitespace-nowrap text-(--color-text-secondary)">
                       {category.assignedAuto} auto · {category.assignedSuggested} suggested ·{' '}
                       {category.assignedManual > 0 ? (
                         <b>{category.assignedManual} by hand</b>
@@ -339,7 +345,7 @@ export default async function CategoryReportPage({
             rather than as one channel nobody has written a rule for.
           */}
           <section className="mb-10">
-            <h2 className="mb-2 text-sm font-medium text-[var(--muted-foreground)]">
+            <h2 className="mb-2 text-sm font-semibold text-(--color-text-secondary)">
               Where it arrived
             </h2>
             {channels.length === 0 ? (
@@ -376,7 +382,9 @@ export default async function CategoryReportPage({
                         label={`${channelLabel(channel.channel)} share of tickets`}
                       />
                     </Cell>
-                    <Cell className={channel.unread > 0 ? 'text-[var(--color-caution)]' : ''}>
+                    <Cell
+                      className={channel.unread > 0 ? 'text-(--color-feedback-warning-fg)' : ''}
+                    >
                       {channel.unread.toLocaleString()}
                     </Cell>
                   </Row>
@@ -386,7 +394,7 @@ export default async function CategoryReportPage({
           </section>
 
           <h2 className="mb-1 text-base font-semibold">Why those tickets existed</h2>
-          <p className="mb-3 max-w-2xl text-sm text-[var(--muted-foreground)]">
+          <p className="mb-3 max-w-2xl text-sm text-(--color-text-secondary)">
             Recorded by the agent who finished each ticket, counted on the day they finished it —
             the cause becomes knowable when somebody works it out, not when the ticket arrived. The
             count below is of tickets about a delivery, a parcel&apos;s condition, a pickup, a
@@ -404,12 +412,9 @@ export default async function CategoryReportPage({
             explanation, which reads as a half-finished page rather than as an
             empty one.
           */}
-          <p
-            className={`mb-4 max-w-2xl rounded-xl border p-3 text-sm ${
-              coverage.total > 0 && missing > coverage.withCause
-                ? 'border-amber-500/40 bg-amber-500/5'
-                : 'border-[var(--border)] bg-[var(--surface)]'
-            }`}
+          <Notice
+            tone={coverage.total > 0 && missing > coverage.withCause ? 'warning' : 'neutral'}
+            className="mb-4 max-w-2xl"
           >
             {coverage.total === 0 ? (
               <>
@@ -434,10 +439,12 @@ export default async function CategoryReportPage({
                 )}
               </>
             )}
-          </p>
+          </Notice>
 
           <section className="mb-8">
-            <h3 className="mb-2 text-sm font-medium text-[var(--muted-foreground)]">Who owns it</h3>
+            <h3 className="mb-2 text-sm font-semibold text-(--color-text-secondary)">
+              Who owns it
+            </h3>
             {owners.length === 0 ? (
               <Quiet>
                 No cause has been recorded in this window, so there is nothing to attribute yet.
@@ -449,7 +456,7 @@ export default async function CategoryReportPage({
                     <Row key={owner.owner}>
                       <Cell>
                         <Badge tone={owner.owner === 'platform' ? 'warning' : 'neutral'}>
-                          {owner.owner}
+                          {owner.owner.charAt(0).toUpperCase() + owner.owner.slice(1)}
                         </Badge>
                       </Cell>
                       <Cell>{owner.ticketsResolved.toLocaleString()}</Cell>
@@ -464,7 +471,7 @@ export default async function CategoryReportPage({
                     </Row>
                   ))}
                 </Table>
-                <p className="mt-2 max-w-2xl text-xs text-[var(--muted-foreground)]">
+                <p className="mt-2 max-w-2xl text-xs text-(--color-text-secondary)">
                   <code>platform</code> is us. Every ticket attributed there is one the product
                   could have prevented — a customer who tried to do it themselves and could not —
                   which makes it the most actionable row in the table rather than the most
@@ -475,7 +482,7 @@ export default async function CategoryReportPage({
           </section>
 
           <section>
-            <h3 className="mb-2 text-sm font-medium text-[var(--muted-foreground)]">By cause</h3>
+            <h3 className="mb-2 text-sm font-semibold text-(--color-text-secondary)">By cause</h3>
             {causes.length === 0 ? (
               <Quiet>
                 Nothing yet. A cause is picked from a list when an agent resolves a ticket in one of
@@ -488,11 +495,11 @@ export default async function CategoryReportPage({
                   <Row key={cause.causeKey}>
                     <Cell>
                       <span className="font-medium">{cause.label}</span>
-                      <p className="text-xs text-[var(--muted-foreground)]">{cause.causeKey}</p>
+                      <p className="text-xs text-(--color-text-secondary)">{cause.causeKey}</p>
                     </Cell>
                     <Cell>
                       <Badge tone={cause.owner === 'platform' ? 'warning' : 'neutral'}>
-                        {cause.owner}
+                        {cause.owner.charAt(0).toUpperCase() + cause.owner.slice(1)}
                       </Badge>
                     </Cell>
                     <Cell>{cause.ticketsResolved.toLocaleString()}</Cell>
@@ -517,11 +524,7 @@ export default async function CategoryReportPage({
  * problems with different answers.
  */
 function Quiet({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-sm text-[var(--muted-foreground)]">
-      {children}
-    </p>
-  );
+  return <Notice tone="neutral">{children}</Notice>;
 }
 
 /**
@@ -543,7 +546,7 @@ function Share({
   label: string;
   tone?: 'good' | 'warning' | 'critical' | 'neutral';
 }) {
-  if (of <= 0) return <span className="text-[var(--muted-foreground)]">—</span>;
+  if (of <= 0) return <span className="text-(--color-text-secondary)">—</span>;
 
   const percentage = Math.round((100 * value) / of);
 
@@ -552,7 +555,7 @@ function Share({
   // will then re-parent, which moves the bar out of its own row.
   return (
     <div className="flex items-center gap-2">
-      <span className="w-9 shrink-0 text-[var(--muted-foreground)]">{percentage}%</span>
+      <span className="w-9 shrink-0 text-(--color-text-secondary)">{percentage}%</span>
       <div className="w-24 max-w-full">
         <Meter value={percentage} tone={tone} label={label} />
       </div>

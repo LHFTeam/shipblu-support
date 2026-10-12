@@ -463,15 +463,6 @@ export function ImageIcon(props: IconProps) {
   );
 }
 
-export function PowerIcon(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <path d="M12 4v7" />
-      <path d="M7.2 6.8a7 7 0 1 0 9.6 0" />
-    </Icon>
-  );
-}
-
 export function MailIcon(props: IconProps) {
   return (
     <Icon {...props}>

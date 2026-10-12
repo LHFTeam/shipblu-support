@@ -1,9 +1,14 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { ChatBubble } from '@/components/chat';
+import { SendIcon } from '@/components/icons';
+import { Button, SuccessText } from '@/components/ui';
+import { runPositions } from '@/lib/chat/runs';
 import type { Locale } from '@/lib/kb/locale';
 import { parseVisitorDetails } from '@/lib/widget/contact';
 import type { WidgetCopy } from './copy';
+import { WIDGET_FIELD } from './field';
 import type { ArticleLink, Message } from '@/lib/widget/types';
 
 /**
@@ -44,6 +49,9 @@ export function WidgetThread({
   const [suggestions, setSuggestions] = useState<ArticleLink[]>([]);
   const [details, setDetails] = useState<OfflineDetails>({ name: '', email: '', phone: '' });
   const [detailsError, setDetailsError] = useState<'missing' | 'invalid' | null>(null);
+  // Points the email and phone boxes at the line saying what is wrong with
+  // them, so the invalid state is read out with its reason.
+  const detailsHintId = useId();
   const [savingDetails, setSavingDetails] = useState(false);
 
   const bottom = useRef<HTMLDivElement>(null);
@@ -222,26 +230,47 @@ export function WidgetThread({
     setSending(false);
   }
 
+  /*
+   * A run is one sender saying several things in a row. The author's name is
+   * part of the key, so two agents answering back to back are two blocks, each
+   * with its own name over it.
+   */
+  const runs = runPositions(messages, (message) => `${message.from}:${message.authorName ?? ''}`);
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {messages.length === 0 && !askForDetails ? (
-          <p className="py-8 text-center text-sm opacity-50">{copy.starter}</p>
+          <p className="py-8 text-center text-sm text-(--color-text-secondary)">{copy.starter}</p>
         ) : null}
 
-        <ol className="flex flex-col gap-2">
-          {messages.map((message) => (
-            <li
+        {/*
+          The visitor's own words are `out`: what they need from the layout is
+          which of these they sent. No avatars, times or receipts, because the
+          payload carries none of them — an agent's colour, a delivery state —
+          and a tick drawn without a fact behind it is a promise.
+
+          A `system` message is a reply no agent wrote, so it is dashed, and
+          labelled in words as well: the border alone says nothing to a screen
+          reader, nor to anybody who has not learned what dashes mean.
+        */}
+        <ol className="flex flex-col">
+          {messages.map((message, index) => (
+            <ChatBubble
               key={message.id}
-              className={`max-w-[85%] rounded-lg px-3 py-2 ${
-                message.from === 'visitor' ? 'ms-auto bg-brand-600 text-white' : 'bg-[var(--muted)]'
-              }`}
+              from={message.from === 'visitor' ? 'out' : 'in'}
+              kind={message.from === 'system' ? 'bot' : 'message'}
+              group={runs[index]}
+              author={
+                message.from === 'agent'
+                  ? message.authorName
+                  : message.from === 'system'
+                    ? copy.automated
+                    : undefined
+              }
             >
-              {message.from === 'agent' && message.authorName ? (
-                <p className="mb-0.5 text-xs opacity-60">{message.authorName}</p>
-              ) : null}
-              <p className="whitespace-pre-wrap break-words">{message.body}</p>
-            </li>
+              <p className="whitespace-pre-wrap">{message.body}</p>
+            </ChatBubble>
           ))}
         </ol>
 
@@ -249,8 +278,8 @@ export function WidgetThread({
       </div>
 
       {askForDetails ? (
-        <div className="shrink-0 border-t border-[var(--border)] px-4 py-3">
-          <p className="mb-2 text-xs opacity-70">{copy.detailsPrompt}</p>
+        <div className="shrink-0 border-t border-(--color-border-subtle) px-4 py-3">
+          <p className="mb-2 text-xs text-(--color-text-secondary)">{copy.detailsPrompt}</p>
           <div className="flex flex-col gap-2">
             <input
               name="name"
@@ -263,25 +292,36 @@ export function WidgetThread({
             <input
               name="email"
               type="email"
+              dir="ltr"
               value={details.email}
               onChange={(event) => setDetails({ ...details, email: event.target.value })}
               placeholder={copy.emailPlaceholder}
               autoComplete="email"
+              aria-invalid={detailsError ? true : undefined}
+              aria-describedby={detailsHintId}
               className={FIELD}
             />
             <input
               name="phone"
               type="tel"
+              dir="ltr"
               value={details.phone}
               onChange={(event) => setDetails({ ...details, phone: event.target.value })}
               placeholder={copy.phonePlaceholder}
               autoComplete="tel"
+              aria-invalid={detailsError ? true : undefined}
+              aria-describedby={detailsHintId}
               /* `tel`, not `number`: a leading zero and a '+' both matter, and a
                  spinner on a phone number is nonsense. */
               className={FIELD}
             />
           </div>
-          <p className={`mt-1.5 text-xs ${detailsError ? 'text-red-600' : 'opacity-50'}`}>
+          <p
+            id={detailsHintId}
+            className={`mt-1.5 text-xs ${
+              detailsError ? 'text-(--color-feedback-danger-fg)' : 'text-(--color-text-secondary)'
+            }`}
+          >
             {detailsError === 'invalid'
               ? copy.detailsInvalid
               : detailsError === 'missing'
@@ -290,34 +330,34 @@ export function WidgetThread({
           </p>
 
           {started ? (
-            <button
-              type="button"
+            <Button
               onClick={() => void saveDetails()}
               disabled={savingDetails}
-              className="mt-2 rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
+              loading={savingDetails}
+              className="mt-2"
             >
               {copy.send}
-            </button>
+            </Button>
           ) : null}
         </div>
       ) : null}
 
       {!online && detailsSaved ? (
-        <p className="shrink-0 border-t border-[var(--border)] px-4 py-2 text-xs opacity-70">
-          {copy.detailsSaved}
-        </p>
+        <div className="shrink-0 border-t border-(--color-border-subtle) px-4 py-2">
+          <SuccessText>{copy.detailsSaved}</SuccessText>
+        </div>
       ) : null}
 
       {visibleSuggestions.length > 0 ? (
-        <div className="shrink-0 border-t border-[var(--border)] px-4 py-2">
-          <p className="mb-1 text-xs opacity-50">{copy.suggested}</p>
+        <div className="shrink-0 border-t border-(--color-border-subtle) px-4 py-2">
+          <p className="mb-1 text-xs text-(--color-text-secondary)">{copy.suggested}</p>
           <ul className="flex flex-col gap-1">
             {visibleSuggestions.map((article) => (
               <li key={article.slug}>
                 <button
                   type="button"
                   onClick={() => onOpenArticle(article)}
-                  className="text-start text-xs text-brand-600 underline underline-offset-2"
+                  className="text-start text-xs text-(--color-text-link) underline underline-offset-2 hover:text-(--color-text-link-hover)"
                 >
                   {article.title}
                 </button>
@@ -329,7 +369,7 @@ export function WidgetThread({
 
       <form
         onSubmit={submit}
-        className="flex shrink-0 items-end gap-2 border-t border-[var(--border)] p-3"
+        className="flex shrink-0 items-end gap-2 border-t border-(--color-border-subtle) p-2.5"
       >
         <textarea
           ref={composer}
@@ -348,6 +388,7 @@ export function WidgetThread({
           rows={2}
           maxLength={5000}
           placeholder={copy.placeholder}
+          dir="auto"
           /*
             16px, not the 14px the rest of the widget reads at. Safari zooms
             the page in on any field smaller than that the moment it is
@@ -356,15 +397,23 @@ export function WidgetThread({
             up is the fix that does not also disable pinch-zoom for the
             visitor.
           */
-          className="min-w-0 flex-1 resize-none rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-base outline-none focus:border-brand-500"
+          className={`${WIDGET_FIELD} flex-1 resize-none px-3 py-2`}
         />
-        <button
+        {/*
+          The word is the button's name rather than its face: a 380px panel
+          spends its width on what the visitor is typing. `!` on the box because
+          the shared button's height and padding are set per size, and a second
+          utility on the same property wins or loses by Tailwind's order, not
+          this one's.
+        */}
+        <Button
           type="submit"
           disabled={sending || !draft.trim()}
-          className="rounded-md bg-brand-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-40"
-        >
-          {copy.send}
-        </button>
+          loading={sending}
+          aria-label={copy.send}
+          icon={<SendIcon size={18} />}
+          className="min-h-(--tap-min)! min-w-(--tap-min) px-0!"
+        />
       </form>
     </div>
   );
@@ -376,6 +425,9 @@ export type OfflineDetails = { name: string; email: string; phone: string };
    which is the half of the panel that carries the agent's answer. */
 const MAX_COMPOSER_PX = 160;
 
-/* Shared by the three fields; 16px for the same reason as the composer. */
-const FIELD =
-  'w-full min-w-0 rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-base outline-none focus:border-brand-500';
+/*
+  Shared by the three fields. A step shorter than the composer, so three of
+  them, their hint and the composer still fit a 600px panel with the
+  conversation showing above them.
+*/
+const FIELD = `${WIDGET_FIELD} px-3 py-1.5`;

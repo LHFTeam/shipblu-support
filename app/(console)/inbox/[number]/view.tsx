@@ -8,6 +8,7 @@ import type { PurgePreview } from '@/lib/admin/purge-summary';
 import { readOnlyReason } from '@/lib/tickets/channel-policy';
 import type { PickerEntry } from '@/lib/side-conversations/queries';
 import type { CannedLocale } from '@/lib/tickets/canned';
+import { BotIcon, WarningIcon } from '@/components/icons';
 import { Composer } from './composer';
 import type { KnowledgeContext, TemplateOption } from './types';
 import { Header } from './header';
@@ -24,41 +25,34 @@ import { Sidebar } from './sidebar';
  */
 function ReadOnlyNotice({ reason, oneSided }: { reason: string; oneSided: boolean }) {
   return (
-    <div className="shrink-0 border-t border-[var(--border)] bg-[var(--muted)] px-4 py-3">
-      <p className="flex items-start gap-2 text-xs text-[var(--muted-foreground)]">
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          aria-hidden="true"
-          className="mt-0.5 size-4 shrink-0"
-        >
-          <rect x="4" y="10.5" width="16" height="10" rx="2" />
-          <path d="M8 10.5V7a4 4 0 0 1 8 0v3.5" />
-        </svg>
-        <span>{reason}</span>
-      </p>
+    <div className="shrink-0 border-t border-(--color-border-subtle) p-3">
+      {/* Dashed, with the bot, because the bot is what owns this thread: the
+          dashed edge is the console's one sign for something a machine wrote. */}
+      <div className="flex gap-2.5 rounded-md border border-dashed border-(--color-border-strong) bg-(--color-background-surface-sunken) p-3 text-sm/5 text-(--color-text-secondary)">
+        <BotIcon size={18} className="mt-px shrink-0" />
+        <div className="min-w-0">
+          <p>{reason}</p>
 
-      {/*
-        Said only when the other half is genuinely absent, and it disappears by
-        itself the moment an echo lands. Without it a transcript with no replies
-        in it reads as a customer talking to nobody — which is a different and
-        much more alarming thing than a delivery setting being off.
-      */}
-      {oneSided ? (
-        <p className="mt-2 flex items-start gap-2 text-xs text-amber-700">
-          <span aria-hidden="true" className="mt-0.5">
-            ⚠
-          </span>
-          <span>
-            Only the customer&apos;s side of this conversation is here. The bot&apos;s replies reach
-            us as Meta message echoes, and none have arrived — so the{' '}
-            <span className="font-medium">message_echoes</span> field is not subscribed for this
-            WhatsApp account.
-          </span>
-        </p>
-      ) : null}
+          {/*
+            Said only when the other half is genuinely absent, and it disappears
+            by itself the moment an echo lands. Without it a transcript with no
+            replies in it reads as a customer talking to nobody — which is a
+            different and much more alarming thing than a delivery setting being
+            off.
+          */}
+          {oneSided ? (
+            <p className="mt-2 flex items-start gap-2 text-xs text-(--color-feedback-warning-fg)">
+              <WarningIcon size={14} className="mt-0.5 shrink-0" />
+              <span>
+                Only the customer&apos;s side of this conversation is here. The bot&apos;s replies
+                reach us as Meta message echoes, and none have arrived — so the{' '}
+                <span className="font-medium">message_echoes</span> field is not subscribed for this
+                WhatsApp account.
+              </span>
+            </p>
+          ) : null}
+        </div>
+      </div>
     </div>
   );
 }
@@ -85,6 +79,7 @@ export function ConversationView({
   purgePreview,
   purgeRefusal,
   currentAgentId,
+  canViewContact,
 }: {
   conversation: ConversationDetail;
   statuses: { id: string; name: string; category: string }[];
@@ -120,10 +115,15 @@ export function ConversationView({
   /** Why that admin still may not purge it; see `hiddenScopeRefusal()`. */
   purgeRefusal: string | null;
   currentAgentId: string;
+  /** Whether this agent may open the contact's page; see the sidebar's Contact tab. */
+  canViewContact: boolean;
 }) {
   return (
-    <div className="flex h-full">
-      <div className="flex min-w-0 flex-1 flex-col">
+    // From `md` the thread is a white panel on the inbox's grey, as the list
+    // beside it is; the details column paints its own. On a phone the ticket is
+    // the whole screen, so there is no canvas to float on and no corner to round.
+    <div className="flex h-full md:gap-(--console-gap)">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-(--color-thread-bg) md:rounded-(--console-panel-radius)">
         <Header conversation={conversation} canEditContact={canEditContact} />
 
         {/*
@@ -132,11 +132,12 @@ export function ConversationView({
           box is placed against the document, past every `overflow-hidden`, and
           lengthens the page under the console (PROJECT-STATE §6.81).
         */}
-        <div className="app-scroll relative min-h-0 flex-1 overflow-y-auto px-4 py-4">
+        <div className="app-scroll relative min-h-0 flex-1 overflow-y-auto bg-(--color-thread-bg) px-3 py-4 md:px-6 md:pt-6 md:pb-5">
           <Timeline
             conversation={conversation}
             canSideConversation={canSideConversation}
             canModerateComments={canModerateComments}
+            canViewContact={canViewContact}
           />
         </div>
 
@@ -172,6 +173,7 @@ export function ConversationView({
         purgePreview={purgePreview}
         purgeRefusal={purgeRefusal}
         currentAgentId={currentAgentId}
+        canViewContact={canViewContact}
       />
     </div>
   );

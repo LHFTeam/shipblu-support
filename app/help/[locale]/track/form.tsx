@@ -1,3 +1,4 @@
+import { buttonClass, Label } from '@/components/ui';
 import { t, type Locale } from '@/lib/kb/locale';
 
 /**
@@ -28,36 +29,35 @@ export function TrackForm({
   autoFocus?: boolean;
 }) {
   return (
-    <form action={`/${locale}/track`} className="flex flex-col gap-2.5">
-      <label htmlFor={id} className="text-sm font-medium text-[var(--kb-heading)]">
-        {t(locale, 'trackNumber')}
-      </label>
+    <form action={`/${locale}/track`} className="flex flex-wrap items-end gap-2">
+      <div className="flex min-w-45 flex-1 flex-col">
+        <Label htmlFor={id}>{t(locale, 'trackNumber')}</Label>
 
-      <input
-        id={id}
-        type="text"
-        name="number"
-        dir="ltr"
-        defaultValue={initial}
-        required
-        autoFocus={autoFocus}
-        maxLength={40}
-        autoComplete="off"
-        autoCapitalize="characters"
-        spellCheck={false}
-        /* A real number's shape — thirteen digits — but not a real number.
-           Putting a live one here would publish that parcel's recipient to
-           anyone who pressed enter on the example (PROJECT-STATE §6.38). */
-        placeholder="1700000000000"
-        /* 16px, like the hero search field: iOS Safari zooms into anything
-           smaller when it takes focus and never zooms back out. */
-        className="h-11 w-full rounded-lg border border-[var(--kb-border-strong)] bg-[var(--kb-surface)] px-3 text-base tabular-nums text-[var(--kb-heading)] outline-none placeholder:text-[var(--kb-muted)]/60 focus:border-[var(--kb-band)]"
-      />
+        <input
+          id={id}
+          type="text"
+          name="number"
+          dir="ltr"
+          defaultValue={initial}
+          required
+          autoFocus={autoFocus}
+          maxLength={40}
+          autoComplete="off"
+          autoCapitalize="characters"
+          spellCheck={false}
+          /* A real number's shape — thirteen digits — but not a real number.
+             Putting a live one here would publish that parcel's recipient to
+             anyone who pressed enter on the example (PROJECT-STATE §6.38). */
+          placeholder="1700000000000"
+          /* 16px, like the hero search field: iOS Safari zooms into anything
+             smaller when it takes focus and never zooms back out. Aligned to
+             the page's start edge on an Arabic page while still typed
+             left-to-right, so the number sits under its label. */
+          className="h-11 w-full rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) px-3 text-base text-(--color-text-primary) tabular-nums outline-none transition-colors placeholder:text-(--color-text-tertiary) hover:border-(--color-border-default) focus:border-(--color-border-focus) focus:ring-2 focus:ring-(--color-border-focus)/20 rtl:text-right"
+        />
+      </div>
 
-      <button
-        type="submit"
-        className="h-10 rounded-md bg-[var(--button-primary)] px-4 text-sm font-semibold text-white transition-colors hover:bg-[var(--button-primary-hover)]"
-      >
+      <button type="submit" className={`${buttonClass()} h-11`}>
         {t(locale, 'trackAction')}
       </button>
     </form>

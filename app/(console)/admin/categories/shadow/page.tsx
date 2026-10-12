@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { ChannelBadge } from '@/components/channel';
 import { Badge, Cell, PageHeader, Row, Table } from '@/components/ui';
 import { InfoTip } from '@/components/tooltip';
 import { requirePermission } from '@/lib/auth/guard';
@@ -58,17 +59,19 @@ export default async function ShadowCategorisationPage({
           title="Shadow categorisation"
           description="What TypeSafe's model says about inbound messages, recorded beside what the rules say. A measurement only — nothing here is applied to a ticket."
         />
-        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm">
+        <div className="rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface) p-(--density-card-pad) text-sm">
           <p className="font-medium">No runs recorded yet.</p>
-          <p className="mt-2 opacity-70">
+          <p className="mt-2 text-(--color-text-secondary)">
             A run is started by hand and writes one row per message. It needs{' '}
-            <code className="rounded bg-[var(--muted)] px-1">TYPESAFE_API_KEY</code> set on the
-            production environment group; without it the job reports the key is missing and does
-            nothing.
+            <code className="rounded bg-(--color-background-surface-sunken) px-1">
+              TYPESAFE_API_KEY
+            </code>{' '}
+            set on the production environment group; without it the job reports the key is missing
+            and does nothing.
           </p>
-          <p className="mt-2 opacity-70">
+          <p className="mt-2 text-(--color-text-secondary)">
             Start the smallest useful one with{' '}
-            <code className="rounded bg-[var(--muted)] px-1">
+            <code className="rounded bg-(--color-background-surface-sunken) px-1">
               npm run job -- backfill_categorise_ai runLabel=smoke limit=5
             </code>
             , read the five rows, then widen.
@@ -94,14 +97,11 @@ export default async function ShadowCategorisationPage({
             <Link
               key={run.runLabel}
               href={`/admin/categories/shadow?run=${encodeURIComponent(run.runLabel)}`}
-              className={`rounded-lg border px-3 py-1.5 text-sm ${
-                run.runLabel === selected.runLabel
-                  ? 'border-[var(--brand)] bg-[var(--muted)] font-medium'
-                  : 'border-[var(--border)] hover:bg-[var(--muted)]'
-              }`}
+              aria-current={run.runLabel === selected.runLabel ? 'page' : undefined}
+              className="rounded-lg border border-(--color-border-subtle) bg-(--color-background-surface) px-3 py-1.5 text-sm transition-colors hover:bg-(--color-background-hover) aria-[current=page]:border-transparent aria-[current=page]:bg-(--color-background-selected) aria-[current=page]:font-semibold aria-[current=page]:text-(--color-text-brand)"
             >
               {run.runLabel}{' '}
-              <span className="opacity-60">
+              <span className="text-(--color-text-secondary)">
                 {run.rows}
                 {run.failed > 0 ? ` · ${run.failed} failed` : ''}
               </span>
@@ -111,11 +111,11 @@ export default async function ShadowCategorisationPage({
       ) : null}
 
       {/* What the window holds, before any figure drawn from it. */}
-      <section className="mb-5 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm">
-        <h2 className="font-medium">
+      <section className="mb-5 rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface) p-(--density-card-pad) text-sm">
+        <h2 className="font-semibold">
           Run “{report.runLabel}” — {totals.rows} message{totals.rows === 1 ? '' : 's'}
         </h2>
-        <p className="mt-2 opacity-70">
+        <p className="mt-2 text-(--color-text-secondary)">
           {totals.rows === 0
             ? 'Nothing recorded under this label that you can see.'
             : `Measured ${dateRange(totals.firstAt, totals.lastAt)} by ${
@@ -128,7 +128,7 @@ export default async function ShadowCategorisationPage({
                   : `, ${Math.round(totals.avgLatencyMs)}ms average round trip`
               }.`}
         </p>
-        <p className="mt-2 opacity-70">
+        <p className="mt-2 text-(--color-text-secondary)">
           Read every figure below next to the channel split — this archive is overwhelmingly one
           channel, so a single number over it describes that channel rather than the product.
         </p>
@@ -136,7 +136,7 @@ export default async function ShadowCategorisationPage({
 
       {totals.rows === 0 ? null : (
         <>
-          <h2 className="mt-6 mb-2 flex items-center gap-1.5 text-sm font-medium">
+          <h2 className="mt-6 mb-2 flex items-center gap-1.5 text-sm font-semibold">
             Per channel and script
             <InfoTip label="the channel and script split">
               Split by script because the rules are weakest on short Arabic — <code>\b</code> does
@@ -176,16 +176,18 @@ export default async function ShadowCategorisationPage({
           >
             {report.slices.map((slice) => (
               <Row key={`${slice.channel}-${slice.script}`}>
-                <Cell>{slice.channel}</Cell>
+                <Cell>
+                  <ChannelBadge channel={slice.channel} />
+                </Cell>
                 <Cell>
                   <Badge tone={slice.script === 'arabic' ? 'brand' : 'neutral'}>
-                    {slice.script}
+                    {slice.script.charAt(0).toUpperCase() + slice.script.slice(1)}
                   </Badge>
                 </Cell>
                 <Cell>
                   {slice.rows}
                   {slice.failed > 0 ? (
-                    <span className="ms-2 opacity-60">{slice.failed} failed</span>
+                    <span className="ms-2 text-(--color-text-tertiary)">{slice.failed} failed</span>
                   ) : null}
                 </Cell>
                 <Cell>{slice.rulesUnclassified}</Cell>
@@ -195,7 +197,7 @@ export default async function ShadowCategorisationPage({
             ))}
           </Table>
 
-          <h2 className="mt-6 mb-2 flex items-center gap-1.5 text-sm font-medium">
+          <h2 className="mt-6 mb-2 flex items-center gap-1.5 text-sm font-semibold">
             By confidence band
             <InfoTip label="confidence here">
               <strong>
@@ -235,7 +237,7 @@ export default async function ShadowCategorisationPage({
 
           {report.disagreements.length > 0 ? (
             <>
-              <h2 className="mt-6 mb-2 flex items-center gap-1.5 text-sm font-medium">
+              <h2 className="mt-6 mb-2 flex items-center gap-1.5 text-sm font-semibold">
                 Where they differ
                 <InfoTip label="disagreements">
                   The model&rsquo;s choice against the rules&rsquo; strongest one, most common

@@ -3,7 +3,8 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Badge, ErrorText } from '@/components/ui';
+import { XIcon } from '@/components/icons';
+import { Badge, Button, ErrorText, Input } from '@/components/ui';
 import { useActionForm } from '@/components/use-action-form';
 import type { LinkedShippingAccount } from '@/lib/shipments/queries';
 import {
@@ -56,7 +57,7 @@ export function RoleToggles({
               setShipper(event.target.checked);
               void save({ shipper: event.target.checked, recipient });
             }}
-            className="size-4 accent-[var(--brand-600,#1e40af)]"
+            className="size-4 accent-blu-500"
           />
           Shipper
         </label>
@@ -68,12 +69,16 @@ export function RoleToggles({
               setRecipient(event.target.checked);
               void save({ shipper, recipient: event.target.checked });
             }}
-            className="size-4 accent-[var(--brand-600,#1e40af)]"
+            className="size-4 accent-blu-500"
           />
           Recipient
         </label>
       </div>
-      {error ? <p className="mt-2 text-xs text-red-600">{error}</p> : null}
+      {error ? (
+        <p className="mt-2">
+          <ErrorText inline>{error}</ErrorText>
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -117,24 +122,28 @@ export function AccountLinks({
               {account.sbid}
             </Link>
             <div className="flex items-center gap-1">
-              {account.name ? <span className="text-xs opacity-60">{account.name}</span> : null}
-              {account.linkSource === 'platform' ? <Badge>platform</Badge> : null}
+              {account.name ? (
+                <span className="text-xs text-(--color-text-secondary)">{account.name}</span>
+              ) : null}
+              {account.linkSource === 'platform' ? <Badge>Platform</Badge> : null}
               {editable ? (
                 <button
                   type="button"
                   disabled={removing === account.shippingAccountId}
                   onClick={() => void remove(account.shippingAccountId)}
                   aria-label={`Remove ${account.sbid}`}
-                  className="rounded px-1 text-xs opacity-50 hover:opacity-100"
+                  className="flex size-6 items-center justify-center rounded-md text-(--color-text-tertiary) hover:bg-(--color-background-hover) hover:text-(--color-text-primary) disabled:opacity-50"
                 >
-                  &times;
+                  <XIcon size={14} />
                 </button>
               ) : null}
             </div>
           </li>
         ))}
         {accounts.length === 0 ? (
-          <li className="text-xs opacity-50">None. A mention in a chat does not count.</li>
+          <li className="text-xs text-(--color-text-tertiary)">
+            None. A mention in a chat does not count.
+          </li>
         ) : null}
       </ul>
 
@@ -144,19 +153,21 @@ export function AccountLinks({
         // the submit ran before the action answered and after a refusal too.
         <form key={key} {...form} className="flex gap-2">
           <input type="hidden" name="contactId" value={contactId} />
-          <input
+          <Input
             name="sbid"
             placeholder="Add an SBID"
             aria-label="Add an SBID"
-            className="min-w-0 flex-1 rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-xs outline-none focus:border-brand-500"
+            className="min-w-0 flex-1"
           />
-          <button
+          <Button
             type="submit"
+            variant="secondary"
             disabled={pending}
-            className="shrink-0 rounded-md border border-[var(--border)] px-2 py-1.5 text-xs hover:bg-[var(--muted)]"
+            loading={pending}
+            className="shrink-0"
           >
             Add
-          </button>
+          </Button>
         </form>
       ) : null}
 

@@ -2,7 +2,7 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { ChannelBadge } from '@/components/channel';
 import { Stat } from '@/components/charts';
-import { Cell, EmptyState, Row, Table } from '@/components/ui';
+import { buttonClass, Cell, EmptyState, Notice, PageHeader, Row, Table } from '@/components/ui';
 import { requireAgent } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
 import { channelLabel } from '@/lib/format';
@@ -20,6 +20,7 @@ import {
   type Row as ReportRow,
 } from '@/lib/reports/queries';
 import { rangeIn, reportingContext } from '@/lib/reports/rollup';
+import { RangeNav } from './range-nav';
 
 export const dynamic = 'force-dynamic';
 
@@ -69,75 +70,65 @@ export default async function ReportsPage({
   const startsLate = rolledUp.first !== null && rolledUp.first > range.from;
 
   return (
-    <div className="h-full overflow-y-auto p-6">
-      <div className="mb-6 flex flex-wrap items-center gap-3">
-        <h1 className="text-lg font-semibold">Reports</h1>
-        <nav className="flex gap-1 text-sm">
-          {RANGES.map((range) => (
+    <div className="app-scroll h-full overflow-y-auto p-4 sm:p-6">
+      <PageHeader
+        title="Reports"
+        description={`${range.from} to ${range.to}, in ${zone}. Rolled up nightly — today is not included yet.`}
+        actions={
+          <>
+            <RangeNav ranges={RANGES} current={days} href={(each) => `/reports?days=${each}`} />
+            {can(agent, 'report.agents') ? (
+              <Link
+                href={`/reports/agents?days=${days}`}
+                className={buttonClass({ variant: 'secondary', size: 'sm' })}
+              >
+                Agent productivity
+              </Link>
+            ) : null}
+            {/*
+              Its own key, not `report.agents`: that one reads what people did, and
+              this one changes where the next ticket goes.
+            */}
+            {can(agent, 'agent.availability') ? (
+              <Link
+                href="/reports/team"
+                className={buttonClass({ variant: 'secondary', size: 'sm' })}
+              >
+                Team availability
+              </Link>
+            ) : null}
+            {/*
+              Behind `report.view` like this page rather than a key of its own: it
+              answers what the team is being asked about, which is the same question
+              this page answers, cut a different way.
+            */}
             <Link
-              key={range}
-              href={`/reports?days=${range}`}
-              className={`rounded-md px-2.5 py-1 ${
-                range === days ? 'bg-[var(--muted)] font-medium' : 'opacity-60 hover:opacity-100'
-              }`}
+              href={`/reports/categories?days=${days}`}
+              className={buttonClass({ variant: 'secondary', size: 'sm' })}
             >
-              {range} days
+              What tickets are about
             </Link>
-          ))}
-        </nav>
-        {can(agent, 'report.agents') ? (
-          <Link
-            href={`/reports/agents?days=${days}`}
-            className="rounded-md border border-[var(--border)] px-2.5 py-1 text-sm hover:bg-[var(--muted)]"
-          >
-            Agent productivity
-          </Link>
-        ) : null}
-        {/*
-          Its own key, not `report.agents`: that one reads what people did, and
-          this one changes where the next ticket goes.
-        */}
-        {can(agent, 'agent.availability') ? (
-          <Link
-            href="/reports/team"
-            className="rounded-md border border-[var(--border)] px-2.5 py-1 text-sm hover:bg-[var(--muted)]"
-          >
-            Team availability
-          </Link>
-        ) : null}
-        {/*
-          Behind `report.view` like this page rather than a key of its own: it
-          answers what the team is being asked about, which is the same question
-          this page answers, cut a different way.
-        */}
-        <Link
-          href={`/reports/categories?days=${days}`}
-          className="rounded-md border border-[var(--border)] px-2.5 py-1 text-sm hover:bg-[var(--muted)]"
-        >
-          What tickets are about
-        </Link>
-        {/*
-          Also `report.view`: how the reply box's suggestions are doing is a
-          question about the team's replies, the same audience as this page.
-        */}
-        <Link
-          href={`/reports/canned-suggestions?days=${days}`}
-          className="rounded-md border border-[var(--border)] px-2.5 py-1 text-sm hover:bg-[var(--muted)]"
-        >
-          Suggested responses
-        </Link>
-        <p className="ml-auto text-xs opacity-50">
-          {range.from} to {range.to}, in {zone}. Rolled up nightly — today is not included yet.
-        </p>
-      </div>
+            {/*
+              Also `report.view`: how the reply box's suggestions are doing is a
+              question about the team's replies, the same audience as this page.
+            */}
+            <Link
+              href={`/reports/canned-suggestions?days=${days}`}
+              className={buttonClass({ variant: 'secondary', size: 'sm' })}
+            >
+              Suggested responses
+            </Link>
+          </>
+        }
+      />
 
       {startsLate ? (
-        <p className="mb-6 max-w-2xl rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+        <Notice tone="info" icon className="mb-6 max-w-2xl">
           This window opens on {range.from}, but the rolled-up history{' '}
           <b>begins on {rolledUp.first}</b> — {rolledUp.days} {rolledUp.days === 1 ? 'day' : 'days'}{' '}
           of figures in this window. A wider range cannot reach further back than that until more
           history accumulates.
-        </p>
+        </Notice>
       ) : null}
 
       {!hasData ? (
@@ -200,7 +191,7 @@ export default async function ReportsPage({
           />
 
           <section className="mb-8">
-            <h2 className="mb-2 text-sm font-medium opacity-70">By day</h2>
+            <h2 className="mb-2 text-sm font-semibold text-(--color-text-secondary)">By day</h2>
             <Table head={['Day', 'Created', 'Resolved', 'First response', 'Resolution', 'CSAT']}>
               {series.map((row) => (
                 <Row key={row.day}>
@@ -246,7 +237,7 @@ function Breakdown({
 
   return (
     <section className="mb-8">
-      <h2 className="mb-2 text-sm font-medium opacity-70">{title}</h2>
+      <h2 className="mb-2 text-sm font-semibold text-(--color-text-secondary)">{title}</h2>
       <Table head={['', 'Created', 'Resolved', 'First response', 'Within SLA', 'CSAT']}>
         {/* Keyed by position, as the page always was: a label is a display name,
             and two agents can share one. */}

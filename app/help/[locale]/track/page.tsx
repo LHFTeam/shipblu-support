@@ -1,7 +1,9 @@
 import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
-import { PackageSearchIcon } from '@/components/icons';
+import { ChatIcon, PackageSearchIcon, ReturnIcon } from '@/components/icons';
+import { StatusBadge, Stepper } from '@/components/shipment-status';
+import { buttonClass } from '@/components/ui';
 import { formatCalendarDate, formatTimestamp, isLocale, t, type Locale } from '@/lib/kb/locale';
 import { popularArticles, searchArticles } from '@/lib/kb/queries';
 import { allow, clientIpFrom } from '@/lib/http/rate-limit';
@@ -17,9 +19,9 @@ import {
   statusLabel,
 } from '@/lib/shipments/status';
 import { shipmentChatPrefill } from '@/lib/shipments/support';
-import { ArticleList, ArticleRow, PageBody, PageHeader, Panel } from '../chrome';
+import { ArticleList, ArticleRow, PageBody, PageHeader, Panel, SectionHeading } from '../chrome';
 import { TrackForm } from './form';
-import { deliveryStepLabels, LastUpdate, StatusBadge, Stepper, Timeline } from './result';
+import { deliveryStepLabels, LastUpdate, Timeline, TrackFact } from './result';
 import { AskSupport } from './support';
 
 export const dynamic = 'force-dynamic';
@@ -86,9 +88,8 @@ export default async function TrackShipment({
       crumbs={[{ label: t(locale, 'home'), href: `/${locale}` }]}
       title={t(locale, 'trackTitle')}
       selfPath={`/${locale}/track`}
-      icon={<PackageSearchIcon size={28} />}
+      icon={<PackageSearchIcon size={24} />}
       search={false}
-      tone="subtle"
     />
   );
 
@@ -101,12 +102,12 @@ export default async function TrackShipment({
         {header}
         <PageBody className="flex flex-col gap-8">
           <Panel className="mx-auto w-full max-w-xl p-6">
-            <p className="text-[var(--kb-muted)]">{t(locale, 'trackPrompt')}</p>
+            <p className="text-(--color-text-secondary)">{t(locale, 'trackPrompt')}</p>
             <div className="mt-5">
               <TrackForm locale={locale} id="track-number" initial={typed} autoFocus />
             </div>
-            <p className="mt-3 text-xs text-[var(--kb-muted)]">{t(locale, 'trackHint')}</p>
-            <p className="mt-4 border-t border-[var(--kb-border)] pt-4 text-xs text-[var(--kb-muted)]">
+            <p className="mt-3 text-xs text-(--color-text-secondary)">{t(locale, 'trackHint')}</p>
+            <p className="mt-4 border-t border-(--color-border-subtle) pt-4 text-xs text-(--color-text-secondary)">
               {t(locale, 'trackPrivacyNote')}
             </p>
           </Panel>
@@ -128,12 +129,14 @@ export default async function TrackShipment({
         </div>
 
         <Panel as="aside" className="p-5">
-          <h2 className="font-semibold text-[var(--kb-heading)]">{t(locale, 'trackAnother')}</h2>
+          <h2 className="text-base font-bold text-(--color-text-primary)">
+            {t(locale, 'trackAnother')}
+          </h2>
           <div className="mt-4">
             <TrackForm locale={locale} id="track-number" />
           </div>
-          <p className="mt-3 text-xs text-[var(--kb-muted)]">{t(locale, 'trackHint')}</p>
-          <p className="mt-4 border-t border-[var(--kb-border)] pt-4 text-xs text-[var(--kb-muted)]">
+          <p className="mt-3 text-xs text-(--color-text-secondary)">{t(locale, 'trackHint')}</p>
+          <p className="mt-4 border-t border-(--color-border-subtle) pt-4 text-xs text-(--color-text-secondary)">
             {t(locale, 'trackPrivacyNote')}
           </p>
         </Panel>
@@ -155,7 +158,7 @@ async function Lookup({ locale, canonical }: { locale: Locale; canonical: string
   if (!allow(`track:${ip}`, LOOKUPS, LOOKUP_WINDOW_MS)) {
     return (
       <Panel className="p-6">
-        <p className="text-[var(--kb-muted)]">{t(locale, 'trackThrottled')}</p>
+        <p className="text-(--color-text-secondary)">{t(locale, 'trackThrottled')}</p>
       </Panel>
     );
   }
@@ -266,6 +269,10 @@ async function Lookup({ locale, canonical }: { locale: Locale; canonical: string
       ? { title: t(locale, 'trackAnswers'), articles: matched }
       : { title: t(locale, 'mostRead'), articles: await popularArticles(viewer, locale, 4) };
 
+  const showEstimate = Boolean(
+    status !== null && status.estimatedDate && !status.terminal && returning === null,
+  );
+
   const subject = `${t(locale, 'trackTitle')}: ${canonical}`;
 
   /*
@@ -282,87 +289,105 @@ async function Lookup({ locale, canonical }: { locale: Locale; canonical: string
   return (
     <>
       <Panel className="p-6">
+        {/*
+          The number first, under a visible label, and the status at the far
+          end of the same row: the number is what the reader typed and is
+          checking they typed right, the status is what they came for.
+        */}
         <div className="flex flex-wrap items-center gap-3">
-          <StatusBadge
-            label={status ? status.label : t(locale, 'trackNoStatusTitle')}
-            tone={status ? status.tone : 'unknown'}
-          />
-          <span
-            dir="ltr"
-            className="text-sm tabular-nums text-[var(--kb-muted)]"
-            aria-label={t(locale, 'trackNumber')}
-          >
-            {canonical}
+          <div>
+            <p className="mb-0.5 text-xs font-bold text-(--color-text-secondary)">
+              {t(locale, 'trackNumber')}
+            </p>
+            <p dir="ltr" className="text-lg font-bold tabular-nums rtl:text-right">
+              {canonical}
+            </p>
+          </div>
+          <span className="ms-auto">
+            <StatusBadge
+              label={status ? status.label : t(locale, 'trackNoStatusTitle')}
+              tone={status ? status.tone : 'unknown'}
+            />
           </span>
         </div>
 
         {status === null ? (
-          <p className="mt-4 text-[var(--kb-muted)]">{t(locale, 'trackNoStatus')}</p>
+          <p className="mt-4 text-(--color-text-secondary)">{t(locale, 'trackNoStatus')}</p>
         ) : null}
 
         {/*
           One bar or the other, never both, and never the outbound one during a
           return: its last step is "Delivered", which is the single thing that is
           not going to happen. The return bar is drawn in the `returned` tone so
-          the two do not read as one journey continuing.
+          the two do not read as one journey continuing, and the sentence under
+          it is in the same colour, so it reads as the explanation of that bar
+          rather than as one more line of page.
         */}
         {status !== null && returning !== null ? (
           <div className="mt-6">
-            <p className="mb-4 text-[var(--kb-heading)]">{t(locale, 'trackReturning')}</p>
             <Stepper
               tone="returning"
               current={returning.step}
               labels={RETURN_STEPS.map((_, index) => returnStepLabel(locale, index, overrides))}
+              doneLabel={t(locale, 'trackStepDone')}
             />
+            <p className="mt-4 flex gap-2 rounded-lg bg-(--color-status-returned-bg) px-3 py-2.5 text-sm leading-relaxed text-(--color-status-returned-fg)">
+              <ReturnIcon size={18} className="mt-0.5 shrink-0" />
+              {t(locale, 'trackReturning')}
+            </p>
           </div>
         ) : null}
 
         {status !== null && returning === null && status.step !== null ? (
           <div className="mt-6">
-            <Stepper current={status.step} labels={deliveryStepLabels(locale)} />
-          </div>
-        ) : null}
-
-        {/*
-          The estimated date, and only while it is still a prediction. Printing
-          "estimated delivery: Saturday" under a parcel that was delivered on
-          Sunday reads as a correction nobody asked for, and under a returned one
-          it is simply false — `terminal` is the same flag the stepper uses to
-          decide the journey is over.
-        */}
-        {status !== null && status.estimatedDate && !status.terminal && returning === null ? (
-          <p className="mt-5 text-sm text-[var(--kb-muted)]">
-            {t(locale, 'trackEstimated')}:{' '}
-            <span className="font-medium text-[var(--kb-heading)]">
-              {formatCalendarDate(locale, status.estimatedDate)}
-            </span>
-          </p>
-        ) : null}
-
-        {/*
-          One or the other, never both. The timeline's first row is the last
-          update and carries its own time, so showing `LastUpdate` above it would
-          print the same instant twice under two headings.
-        */}
-        {status !== null && status.events.length === 0 ? (
-          <div className="mt-6">
-            <LastUpdate
-              locale={locale}
-              when={
-                status.at ? (
-                  <time dateTime={status.at.toISOString()}>
-                    {formatTimestamp(locale, status.at)}
-                  </time>
-                ) : (
-                  t(locale, 'trackNoTimestamp')
-                )
-              }
+            <Stepper
+              current={status.step}
+              labels={deliveryStepLabels(locale)}
+              doneLabel={t(locale, 'trackStepDone')}
             />
           </div>
         ) : null}
 
+        {status !== null && (showEstimate || status.events.length === 0) ? (
+          <div className="mt-5 grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-4">
+            {/*
+              The estimated date, and only while it is still a prediction.
+              Printing "estimated delivery: Saturday" under a parcel that was
+              delivered on Sunday reads as a correction nobody asked for, and
+              under a returned one it is simply false — `terminal` is the same
+              flag the stepper uses to decide the journey is over.
+            */}
+            {showEstimate && status.estimatedDate ? (
+              <TrackFact label={t(locale, 'trackEstimated')}>
+                {formatCalendarDate(locale, status.estimatedDate)}
+              </TrackFact>
+            ) : null}
+
+            {/*
+              One or the other, never both. The timeline's first row is the last
+              update and carries its own time, so showing `LastUpdate` above it
+              would print the same instant twice under two headings.
+            */}
+            {status.events.length === 0 ? (
+              <LastUpdate
+                locale={locale}
+                tone={returning === null ? 'brand' : 'returning'}
+                when={
+                  status.at ? (
+                    <time dateTime={status.at.toISOString()}>
+                      {formatTimestamp(locale, status.at)}
+                    </time>
+                  ) : (
+                    t(locale, 'trackNoTimestamp')
+                  )
+                }
+              />
+            ) : null}
+          </div>
+        ) : null}
+
         {status !== null && status.events.length > 0 ? (
-          <div className="mt-6 border-t border-[var(--kb-border)] pt-5">
+          <div className="mt-6 border-t border-(--color-border-subtle) pt-5">
             <Timeline
               locale={locale}
               events={status.events}
@@ -393,18 +418,19 @@ async function Lookup({ locale, canonical }: { locale: Locale; canonical: string
           blocked snippet, or somebody who would rather have a copy of what they
           sent.
         */}
-        <div className="mt-6 border-t border-[var(--kb-border)] pt-5">
+        <div className="mt-6 border-t border-(--color-border-subtle) pt-5">
           <div className="flex flex-wrap gap-3">
             <AskSupport
               href={`/${locale}/forms?subject=${encodeURIComponent(subject)}`}
               prefill={prefill}
-              className="rounded-md bg-[var(--button-primary)] px-3.5 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--button-primary-hover)]"
+              className={buttonClass()}
             >
+              <ChatIcon size={16} className="shrink-0" />
               {t(locale, 'trackAskSupport')}
             </AskSupport>
             <a
               href={`mailto:support@shipblu.com?subject=${encodeURIComponent(subject)}`}
-              className="rounded-md border border-[var(--kb-border-strong)] px-3.5 py-2 text-sm font-semibold text-[var(--kb-heading)] transition-colors hover:bg-[var(--kb-surface-2)]"
+              className={buttonClass({ variant: 'secondary' })}
             >
               {t(locale, 'email')}
             </a>
@@ -412,7 +438,9 @@ async function Lookup({ locale, canonical }: { locale: Locale; canonical: string
           {/* Said before the click rather than after it: a button that opens a
               panel in the corner instead of a page is worth one line of warning,
               and it is also the line that promises the number travels with it. */}
-          <p className="mt-3 text-xs text-[var(--kb-muted)]">{t(locale, 'trackAskSupportHint')}</p>
+          <p className="mt-3 text-xs text-(--color-text-secondary)">
+            {t(locale, 'trackAskSupportHint')}
+          </p>
         </div>
       </Panel>
 
@@ -435,7 +463,7 @@ function Answers({
 
   return (
     <section>
-      <h2 className="mb-4 text-lg font-semibold text-[var(--kb-heading)]">{title}</h2>
+      <SectionHeading>{title}</SectionHeading>
       <ArticleList>
         {articles.map((article) => (
           <ArticleRow

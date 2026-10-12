@@ -1,6 +1,6 @@
 'use client';
 
-import { Input, Textarea } from '@/components/ui';
+import { Input, Select, Textarea } from '@/components/ui';
 import type { Locale } from '@/lib/kb/locale';
 import { optionLabel, selectedValues, type TicketFieldDef } from '@/lib/tickets/custom-fields';
 
@@ -12,19 +12,11 @@ import { optionLabel, selectedValues, type TicketFieldDef } from '@/lib/tickets/
  * decimal accepts a fraction — and the one that would drift is the console's,
  * which fewer people look at.
  *
- * `surface` is the only thing the two surfaces differ on, and it covers exactly
- * one control. Every other input here comes from `components/ui`, whose colours
- * are CSS variables the help centre re-points; a native `<select>` cannot be,
- * so it carries the palette it is standing in.
+ * Both surfaces draw it from `components/ui`, native `<select>` included. The
+ * help centre once needed its own select because its palette lived on
+ * `.kb-shell` and a native control could not be re-pointed at it; the two now
+ * read the same roles, so one set of controls serves both.
  */
-export type FieldSurface = 'console' | 'help';
-
-function selectClass(surface: FieldSurface): string {
-  return surface === 'help'
-    ? 'w-full rounded-md border border-[var(--kb-border)] bg-transparent px-3 py-2 text-sm'
-    : 'w-full rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm';
-}
-
 export function TicketFieldInput({
   id,
   def,
@@ -34,7 +26,6 @@ export function TicketFieldInput({
   required,
   invalid,
   onChange,
-  surface,
 }: {
   id: string;
   def: TicketFieldDef;
@@ -44,7 +35,6 @@ export function TicketFieldInput({
   required: boolean;
   invalid: boolean;
   onChange: (value: unknown) => void;
-  surface: FieldSurface;
 }) {
   const name = `custom.${def.key}`;
   // `required` and `pattern` are set on the input as well as checked on the
@@ -81,7 +71,7 @@ export function TicketFieldInput({
         id={id}
         type="checkbox"
         name={name}
-        className="size-4"
+        className="size-4 shrink-0 accent-blu-500"
         checked={value === true}
         onChange={(event) => onChange(event.target.checked)}
       />
@@ -90,14 +80,13 @@ export function TicketFieldInput({
 
   if (def.type === 'dropdown') {
     return (
-      <select
+      <Select
         id={id}
         name={name}
         required={mark}
         aria-invalid={invalid}
         value={text}
         onChange={(event) => onChange(event.target.value)}
-        className={selectClass(surface)}
       >
         <option value="">—</option>
         {def.options.map((option) => (
@@ -105,7 +94,7 @@ export function TicketFieldInput({
             {optionLabel(option, locale)}
           </option>
         ))}
-      </select>
+      </Select>
     );
   }
 
@@ -119,7 +108,7 @@ export function TicketFieldInput({
               type="checkbox"
               name={name}
               value={option.value}
-              className="size-4"
+              className="size-4 shrink-0 accent-blu-500"
               checked={chosen.includes(option.value)}
               onChange={(event) =>
                 onChange(

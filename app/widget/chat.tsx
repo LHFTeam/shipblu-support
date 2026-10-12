@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ShipBluLogo } from '@/components/brand';
+import { ChevronLeftIcon, XIcon } from '@/components/icons';
 import { direction, type Locale } from '@/lib/kb/locale';
 import { WIDGET_SAYS } from '@/lib/widget/protocol';
 import { WidgetArticle } from './article';
@@ -299,26 +301,44 @@ export function WidgetChat({
   const showBack = view !== 'home';
 
   return (
-    <div dir={direction(locale)} lang={locale} className="flex h-full flex-col text-sm">
-      <header className="flex shrink-0 items-center gap-2 border-b border-[var(--border)] px-4 py-3">
+    <div
+      dir={direction(locale)}
+      lang={locale}
+      className="flex h-full flex-col bg-(--color-background-surface) text-sm text-(--color-text-primary)"
+    >
+      <header className="flex shrink-0 items-center gap-2.5 border-b border-(--color-border-subtle) px-3.5 py-3">
         {showBack ? (
           <button
             type="button"
             onClick={back}
             aria-label={copy.back}
-            /* A logical arrow: `rtl` flips the glyph with the layout, so this
-               points back in both languages rather than forward in one. */
-            className="-ms-2 rounded px-2 py-1 opacity-60 hover:opacity-100 rtl:rotate-180"
+            className={`-ms-1.5 ${HEADER_BUTTON}`}
           >
-            ←
+            {/* Mirrors itself in Arabic, so it points back in both languages. */}
+            <ChevronLeftIcon size={18} />
           </button>
-        ) : null}
+        ) : (
+          <ShipBluLogo className="size-8" />
+        )}
 
-        <div className="min-w-0">
-          <p className="font-semibold">{copy.heading}</p>
-          <p className="truncate text-xs opacity-60">
-            {online ? copy.online : copy.offline}
-            {!online && opensAt ? ` · ${copy.opensAt} ${formatOpens(opensAt, locale)}` : ''}
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm leading-5 font-semibold">{copy.heading}</p>
+          {/* The word is always there, so the green is never the only thing
+              saying whether we are open. */}
+          <p
+            className={`flex items-center gap-1.5 text-xs leading-4 ${
+              online ? 'text-(--color-feedback-success-fg)' : 'text-(--color-text-secondary)'
+            }`}
+          >
+            {online ? (
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-current" />
+            ) : null}
+            {/* Wraps rather than truncates: offline, the end of this line is
+                when we reopen, which is the one thing the visitor needs. */}
+            <span>
+              {online ? copy.online : copy.offline}
+              {!online && opensAt ? ` · ${copy.opensAt} ${formatOpens(opensAt, locale)}` : ''}
+            </span>
           </p>
         </div>
 
@@ -326,9 +346,9 @@ export function WidgetChat({
           type="button"
           onClick={() => postToHost({ type: WIDGET_SAYS.close })}
           aria-label={copy.close}
-          className="ms-auto rounded px-2 py-1 opacity-50 hover:opacity-100"
+          className={HEADER_BUTTON}
         >
-          ✕
+          <XIcon size={18} />
         </button>
       </header>
 
@@ -376,6 +396,10 @@ export function WidgetChat({
     </div>
   );
 }
+
+/* The design system's small ghost button, square: 32px around an 18px glyph. */
+const HEADER_BUTTON =
+  'inline-flex size-8 shrink-0 items-center justify-center rounded-md text-(--color-text-primary) transition-colors hover:bg-(--color-background-hover) active:bg-neutral-200';
 
 function formatOpens(iso: string, locale: Locale): string {
   return new Intl.DateTimeFormat(locale === 'ar' ? 'ar-EG' : 'en-GB', {

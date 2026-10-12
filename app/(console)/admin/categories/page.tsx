@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { PageHeader, Table } from '@/components/ui';
+import { buttonClass, Notice, PageHeader, Table } from '@/components/ui';
 import { InfoTip } from '@/components/tooltip';
 import { listRootCauses, listTicketCategories } from '@/lib/admin/settings';
 import { requirePermission } from '@/lib/auth/guard';
@@ -55,13 +55,13 @@ export default async function CategoriesPage() {
           <>
             <Link
               href="/admin/categories/review"
-              className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm hover:bg-[var(--muted)]"
+              className={buttonClass({ variant: 'secondary', size: 'sm' })}
             >
               Review queue
             </Link>
             <Link
               href="/admin/categories/shadow"
-              className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm hover:bg-[var(--muted)]"
+              className={buttonClass({ variant: 'secondary', size: 'sm' })}
             >
               Shadow runs
             </Link>
@@ -70,10 +70,10 @@ export default async function CategoriesPage() {
       />
 
       {categories.length === 0 ? (
-        <p className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm opacity-70">
+        <Notice tone="neutral">
           No taxonomy yet. Run <code>npm run db:seed</code> to create it — the categories and causes
           are defined in <code>lib/categorise/taxonomy.ts</code> and seeded from there.
-        </p>
+        </Notice>
       ) : (
         <>
           {/*
@@ -83,15 +83,15 @@ export default async function CategoriesPage() {
             manual-only categories are left out of this count entirely.
           */}
           {unused.length > 0 ? (
-            <p className="mb-4 rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+            <Notice tone="info" icon className="mb-4">
               <b>{unused.length}</b> detectable categories have never been assigned:{' '}
               {unused.map((category) => category.key).join(', ')}. Either the rules for them never
               match, or nobody raises them — the review queue&rsquo;s rule table tells the two
               apart.
-            </p>
+            </Notice>
           ) : null}
 
-          <h2 className="mb-2 text-sm font-medium">What tickets are about</h2>
+          <h2 className="mb-2 text-sm font-semibold">What tickets are about</h2>
           <Table
             head={[
               'Category',
@@ -138,8 +138,8 @@ export default async function CategoriesPage() {
             ))}
           </Table>
 
-          <h2 className="mt-8 mb-2 text-sm font-medium">Why tickets happen</h2>
-          <p className="mb-3 max-w-2xl text-sm opacity-70">
+          <h2 className="mt-8 mb-2 text-sm font-semibold">Why tickets happen</h2>
+          <p className="mb-3 max-w-2xl text-sm text-(--color-text-secondary)">
             Recorded by the agent who resolves a ticket, never detected — the customer reports a
             symptom and does not know the cause. Each one names exactly one accountable party, so an
             agent answers one question and the report gets both dimensions.

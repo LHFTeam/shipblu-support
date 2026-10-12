@@ -3,20 +3,20 @@
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useId, useRef, useState, type UIEvent } from 'react';
-import { AgentAvatar } from '@/components/avatar';
+import { AgentAvatar, Avatar } from '@/components/avatar';
 import { ChannelBadge, channelInfo } from '@/components/channel';
-import { BookIcon, ReplyIcon, SearchIcon } from '@/components/icons';
-import { InfoTip } from '@/components/tooltip';
-import { Badge, Select } from '@/components/ui';
+import { ConversationRow } from '@/components/conversation-row';
+import { BookIcon, ReplyIcon } from '@/components/icons';
+import { SearchInput } from '@/components/search-input';
+import { useNow } from '@/components/use-now';
+import { Badge, Button, buttonClass, EmptyState, ErrorText, Select } from '@/components/ui';
+import type { ViewsPanelSection } from '@/components/views-panel';
 import { formatRelative } from '@/lib/format';
 import { DEFAULT_LOCALE } from '@/lib/kb/locale';
 import type { InboxRow } from '@/lib/tickets/inbox';
 import type { InboxFilters } from '@/lib/tickets/inbox-filters';
-import {
-  answeredFromConsole,
-  FILTERABLE_CHANNELS,
-  isRestrictedChannel,
-} from '@/lib/tickets/channel-policy';
+import { FILTERABLE_CHANNELS, isRestrictedChannel } from '@/lib/tickets/channel-policy';
+import { rowBadges } from '@/lib/tickets/inbox-badges';
 import { messageLines } from '@/lib/tickets/inbox-lines';
 import {
   inboxSignature,
@@ -24,30 +24,41 @@ import {
   rememberInboxPages,
   rememberInboxScroll,
 } from '@/lib/tickets/inbox-position';
-import { MetaWindowBadge, WhatsAppWindowBadge } from './[number]/window-indicator';
 
 /**
  * The ticket list.
  *
- * Modelled on Freshchat's conversation column: one line of who, one of what,
- * and a row of the things an agent triages by. Density matters more than
- * breathing room here — this is the list you scan a hundred times a day — so
- * each row is three tight lines rather than a card.
+ * Avatar-first by default: who, then the last thing said — or the subject, on
+ * the channels where somebody wrote one — then the row of things an agent
+ * triages by. `layout="ticket"` is the older three-line row, subject over
+ * message, kept for a queue where the subject leads.
+ *
+ * Its header carries the view: a title from 1366px, where the views have a
+ * column of their own beside it, and a picker of the same views below that.
  */
 export function InboxList({
   rows,
   nextCursor,
   filters,
   activeNumber,
+  views,
+  activeView,
+  layout = 'avatar',
   canSeeBot = false,
   canCreate = false,
+  canViewContacts = false,
 }: {
   rows: InboxRow[];
   nextCursor: string | null;
   filters: InboxFilters;
   activeNumber?: number;
+  views: ViewsPanelSection[];
+  activeView: string | null;
+  layout?: 'avatar' | 'ticket';
   canSeeBot?: boolean;
   canCreate?: boolean;
+  /** The avatar route answers 404 without `contact.view`, so the tile is not asked for one. */
+  canViewContacts?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -81,68 +92,96 @@ export function InboxList({
   const seen = new Set(rows.map((row) => row.id));
   const visible = [...rows, ...olderRows.filter((row) => !seen.has(row.id))];
 
+  const current = views.flatMap((section) => section.items).find((item) => item.id === activeView);
+  // The view's count is the number of open and pending tickets in it, which is
+  // this list's length only while nothing narrows it further.
+  const count = filters.q ? undefined : current?.count;
+
   return (
     <>
-      <div className="flex shrink-0 flex-col gap-2 border-b border-[var(--border)] bg-[var(--surface)] p-2">
-        {/*
-          The public help centre's front door, named, on the screen an agent
-          spends the day on.
+      <div className="flex shrink-0 flex-col gap-2.5 border-b border-(--color-border-subtle) px-3 py-2.5 md:px-4 md:pt-3.5 md:pb-3">
+        <KnowledgeBaseLink className="min-[1366px]:hidden" />
 
-          The public site rather than the console's `/kb`, which the rail still
-          links to: from the queue, the article an agent looks up is usually one
-          to send, and the help centre is the only copy of it a customer can
-          open — a console link is a sign-in page to them.
+        <div className="flex min-h-8 items-center gap-2">
+          <h2 className="hidden min-w-0 truncate text-base leading-6 font-semibold min-[1366px]:block">
+            {current?.label ?? 'Custom filter'}
+          </h2>
+          {/*
+            The views column's choices, for the widths that have no room for the
+            column. Each option navigates to the view's own link, so the picker
+            and the column cannot set different filters. A list the Status and
+            Channel selects narrowed to something no view names reads as
+            "Custom filter" rather than as the nearest view, which it is not.
+          */}
+          <Select
+            aria-label="View"
+            className="w-auto! min-w-0 min-[1366px]:hidden"
+            value={activeView ?? ''}
+            onChange={(e) => {
+              const view = views
+                .flatMap((section) => section.items)
+                .find((item) => item.id === e.target.value);
+              if (view) router.push(view.href);
+            }}
+          >
+            {activeView === null ? (
+              <option value="" disabled>
+                Custom filter
+              </option>
+            ) : null}
+            {views.map((section) =>
+              section.title ? (
+                <optgroup key={section.title} label={section.title}>
+                  {section.items.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.label}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : (
+                section.items.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                ))
+              ),
+            )}
+          </Select>
+          {count !== undefined ? (
+            <span className="text-xs text-(--color-text-secondary) tabular-nums">
+              {count}
+              <span className="sr-only"> open</span>
+            </span>
+          ) : null}
 
-          A path on whichever host served this page rather than
-          `publicBaseUrl()`, for the reason `requestBaseUrl` gives: the published
-          hostname is a 404 until the domain serves this app, and `proxy.ts`
-          rewrites a locale prefix into the help centre on every host. A new
-          tab, because leaving the console is a full navigation and the place
-          this list keeps (`lib/tickets/inbox-position`) lives in memory, so the
-          agent would come back to the top of the queue.
-
-          Behind no permission: a link to a page any stranger can open is not a
-          capability, and gating it on `kb.view` hid nothing.
-
-          Its own line rather than a third control in either row below, because
-          both of those are measured against this column's width: the search
-          box already shares its row with New and its own ⓘ (see `SearchBox`)
-          and the filters are native selects, which clip their longest option
-          rather than wrap. One line of a column that scrolls anyway is the
-          cheaper side of that trade.
-        */}
-        <a
-          href={`/${DEFAULT_LOCALE}`}
-          target="_blank"
-          rel="noreferrer"
-          className="flex items-center gap-1.5 self-start rounded-md px-1.5 py-1 text-xs font-medium text-brand-600 hover:bg-[var(--muted)]"
-        >
-          <BookIcon size={15} />
-          Knowledge base
-        </a>
-
-        <div className="flex items-center gap-2">
-          <div className="min-w-0 flex-1">
-            <SearchBox initial={filters.q} onSearch={(value) => setParam('q', value)} />
-          </div>
-          {/* Beside the search rather than floating over the list: this column
-              is scrolled constantly, and a button that moves with it is a button
+          {/* In the header rather than floating over the list: this column is
+              scrolled constantly, and a button that moves with it is a button
               that lands under a thumb mid-scroll. */}
           {canCreate ? (
             <Link
               href="/inbox/new"
-              className="shrink-0 rounded-md bg-brand-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-brand-700"
+              className={`ms-auto shrink-0 ${buttonClass({ variant: 'primary', size: 'sm' })}`}
             >
               New
             </Link>
           ) : null}
         </div>
 
+        <SearchBox initial={filters.q} onSearch={(value) => setParam('q', value)} />
+
+        {/*
+          Beside the views rather than replaced by them: these say what no view
+          does — Open alone, Closed, any status — and combine with each other.
+        */}
         <div className="flex gap-2">
+          {/* Status sizes itself to its longest option so "Open + pending"
+              never clips in the 320px column; channel takes what is left. The
+              `!` beats the field's own `w-full`, which sorts after `w-auto`. */}
           <Select
             value={filters.statusCategory}
             onChange={(e) => setParam('status', e.target.value)}
             aria-label="Status"
+            className="w-auto! shrink-0"
           >
             <option value="unresolved">Open + pending</option>
             <option value="open">Open</option>
@@ -156,6 +195,7 @@ export function InboxList({
             value={filters.channel}
             onChange={(e) => setParam('channel', e.target.value)}
             aria-label="Channel"
+            className="min-w-0 flex-1"
           >
             <option value="all">All channels</option>
             {/*
@@ -177,128 +217,47 @@ export function InboxList({
       <ol
         ref={listRef}
         onScroll={onScroll}
-        className="app-scroll min-h-0 flex-1 overflow-y-auto"
+        className="app-scroll min-h-0 flex-1 overflow-y-auto md:py-1.5"
         aria-busy={loading}
       >
         {visible.length === 0 ? (
-          <li className="p-8 text-center text-sm text-[var(--muted-foreground)]">
-            Nothing matches those filters.
+          <li>
+            <EmptyState title="Nothing matches those filters." />
           </li>
         ) : null}
 
         {visible.map((row) => {
-          const active = row.number === activeNumber;
           const { headline, secondary } = messageLines(row);
 
           return (
             <li key={row.id}>
-              <Link
+              <ConversationRow
+                layout={layout}
                 href={`/inbox/${row.number}?${params.toString()}`}
-                prefetch={false}
-                aria-current={active ? 'page' : undefined}
-                className={`relative block border-b border-[var(--border)] py-2.5 pe-3 ps-3 transition-colors ${
-                  active ? 'bg-brand-500/10' : 'bg-[var(--surface)] hover:bg-[var(--muted)]'
-                }`}
-              >
-                {/* The active row is marked on its edge, which survives the
-                    hover state and reads at a glance down a long list. */}
-                {active ? <span className="absolute inset-y-0 start-0 w-0.5 bg-brand-600" /> : null}
-
-                <div className="flex items-baseline gap-2">
-                  <span className="truncate text-sm font-medium">
-                    {row.requesterName ?? row.requesterHandle ?? 'Unknown'}
-                  </span>
-                  <span className="ms-auto shrink-0 text-xs text-[var(--muted-foreground)]">
-                    {formatRelative(row.lastMessageAt)}
-                  </span>
-                </div>
-
-                {/* `dir="auto"` because the console is LTR and most of this
-                    text is Arabic: an RTL sentence truncated in an LTR box is
-                    cut at the wrong end, so the card showed the last words of a
-                    long reply and lost the ones that say what it is about. And
-                    `text-left` so a short Arabic line still sits under the name
-                    rather than zig-zagging to the right edge: a line that
-                    overflows is laid out from its own start whatever the
-                    alignment, so it is still the sentence's end that is cut. */}
-                <p dir="auto" className="mt-0.5 truncate text-left text-sm">
-                  {headline}
-                </p>
-                {secondary ? (
-                  <p
-                    dir="auto"
-                    className="mt-0.5 truncate text-left text-xs text-[var(--muted-foreground)]"
-                  >
-                    {secondary}
-                  </p>
-                ) : null}
-
-                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                  <ChannelBadge channel={row.channel} showLabel={false} />
-                  <Badge tone={row.statusCategory}>{row.statusName}</Badge>
-                  <span className="text-xs text-[var(--muted-foreground)]">#{row.number}</span>
-
-                  {/* No window badge where nobody replies from here — the
-                      same rule the ticket header applies. */}
-                  {row.channel === 'whatsapp' && answeredFromConsole(row.channel) ? (
-                    <WhatsAppWindowBadge lastCustomerMessageAt={row.lastCustomerMessageAt} />
-                  ) : null}
-                  {/* A comment ticket is answered on the comment edge and has
-                      no messaging window, so it gets no window badge — the
-                      same rule the ticket header applies. */}
-                  {(row.channel === 'facebook' || row.channel === 'instagram') && !row.isComment ? (
-                    <MetaWindowBadge lastCustomerMessageAt={row.lastCustomerMessageAt} />
-                  ) : null}
-
-                  {row.priority === 'urgent' || row.priority === 'high' ? (
-                    <Badge tone="danger">{row.priority}</Badge>
-                  ) : null}
-
-                  {/* A ticket blocked on a hub looks identical to one nobody has
-                      picked up, and "the hub answered an hour ago and nobody
-                      noticed" is the failure this feature would otherwise
-                      introduce. Only the answered state gets a loud colour: the
-                      waiting one is a fact, the replied one is a job. */}
-                  {row.sideState === 'replied' ? (
-                    <Badge tone="success">hub replied</Badge>
-                  ) : row.sideState === 'waiting' ? (
-                    <Badge tone="neutral">awaiting hub</Badge>
-                  ) : null}
-
-                  {/* One group so the row wraps it as a unit: the arrow is about
-                      the conversation and the tile about who owns it, and a
-                      wrap that separated them would put either one on a line
-                      by itself. */}
-                  <span className="ms-auto flex shrink-0 items-center gap-1.5">
-                    {/* Ours was the last word, so the next move is the
-                        customer's. */}
-                    {row.lastFromUs ? (
-                      <span className="text-[var(--muted-foreground)]">
-                        <ReplyIcon size={15} />
-                        <span className="sr-only">Last message from ShipBlu</span>
-                      </span>
+                active={row.number === activeNumber}
+                name={row.requesterName ?? row.requesterHandle ?? 'Unknown'}
+                time={formatRelative(row.lastMessageAt)}
+                preview={headline}
+                secondary={secondary}
+                avatar={
+                  <Avatar
+                    name={row.requesterName}
+                    contactId={row.requesterContactId}
+                    hasAvatar={canViewContacts && row.requesterHasAvatar}
+                    size={40}
+                  />
+                }
+                channel={row.channel}
+                meta={
+                  <>
+                    {layout === 'ticket' ? (
+                      <ChannelBadge channel={row.channel} showLabel={false} />
                     ) : null}
-
-                    {/* The assignee as a tile rather than a name. The name
-                        still goes to assistive technology as text, but to
-                        nobody on hover: `title=` never shows on a phone, and a
-                        Tooltip is a button, which cannot sit inside this link.
-                        The ticket's header names the assignee in full. */}
-                    {row.assigneeId ? (
-                      <>
-                        <AgentAvatar
-                          name={row.assigneeName}
-                          color={row.assigneeColor}
-                          avatarUrl={row.assigneeAvatarUrl}
-                        />
-                        <span className="sr-only">Assigned to {row.assigneeName}</span>
-                      </>
-                    ) : (
-                      <span className="text-xs text-[var(--muted-foreground)]/70">unassigned</span>
-                    )}
-                  </span>
-                </div>
-              </Link>
+                    <RowBadges row={row} layout={layout} />
+                  </>
+                }
+                trailing={<RowOwner row={row} />}
+              />
             </li>
           );
         })}
@@ -310,20 +269,16 @@ export function InboxList({
           stops the list at the end.
         */}
         {canLoadMore ? (
-          <li ref={sentinelRef} className="p-3 text-center text-xs text-[var(--muted-foreground)]">
+          <li ref={sentinelRef} className="p-3 text-center text-xs text-(--color-text-tertiary)">
             {error ? (
               <span className="flex flex-col items-center gap-1.5">
                 {/* Scrolling already failed once here, so the retry is a button:
                     another scroll gesture would land on the same spot and look
                     like nothing happened. */}
-                <span className="text-[var(--danger)]">{error}</span>
-                <button
-                  type="button"
-                  onClick={loadMore}
-                  className="rounded border border-[var(--border)] px-2 py-1 hover:bg-[var(--muted)]"
-                >
+                <ErrorText inline>{error}</ErrorText>
+                <Button variant="secondary" size="sm" onClick={loadMore}>
                   Try again
-                </button>
+                </Button>
               </span>
             ) : (
               <span aria-live="polite">Loading older tickets…</span>
@@ -332,11 +287,106 @@ export function InboxList({
         ) : olderRows.length > 0 ? (
           // Only worth saying once the agent has actually been scrolling. Under
           // a first page that never filled, it would state the obvious.
-          <li className="p-3 text-center text-xs text-[var(--muted-foreground)]/70">
-            End of the list
-          </li>
+          <li className="p-3 text-center text-xs text-(--color-text-tertiary)">End of the list</li>
         ) : null}
       </ol>
+    </>
+  );
+}
+
+/**
+ * The public help centre's front door, named, on the screen an agent spends the
+ * day on: in the views column from 1366px, and on a line of its own at the top
+ * of the list below that.
+ *
+ * The public site rather than the console's `/kb`, which the rail still links
+ * to: from the queue, the article an agent looks up is usually one to send, and
+ * the help centre is the only copy of it a customer can open — a console link
+ * is a sign-in page to them.
+ *
+ * A path on whichever host served this page rather than `publicBaseUrl()`, for
+ * the reason `requestBaseUrl` gives: the published hostname is a 404 until the
+ * domain serves this app, and `proxy.ts` rewrites a locale prefix into the help
+ * centre on every host. A new tab, because leaving the console is a full
+ * navigation and the place this list keeps (`lib/tickets/inbox-position`) lives
+ * in memory, so the agent would come back to the top of the queue.
+ *
+ * Behind no permission: a link to a page any stranger can open is not a
+ * capability, and gating it on `kb.view` hid nothing.
+ *
+ * Its own line in the list rather than a third control in either row below it,
+ * because both of those are measured against the column's width: the view
+ * picker shares its row with a count and New, and the filters are native
+ * selects, which clip their longest option rather than wrap. One line of a
+ * column that scrolls anyway is the cheaper side of that trade.
+ */
+export function KnowledgeBaseLink({ className = '' }: { className?: string }) {
+  return (
+    <a
+      href={`/${DEFAULT_LOCALE}`}
+      target="_blank"
+      rel="noreferrer"
+      className={`flex items-center gap-1.5 self-start rounded-md px-1.5 py-1 text-xs font-medium text-(--color-text-link) hover:bg-(--color-background-hover) ${className}`}
+    >
+      <BookIcon size={15} />
+      Knowledge base
+    </a>
+  );
+}
+
+/**
+ * The row's number and badges. Its own component so the clock it reads — the
+ * shared half-minute one the ticket header counts down on, so a row and the
+ * open ticket cannot disagree — re-renders the badges and not the row.
+ *
+ * The number leads the avatar row's line and follows the status in the ticket
+ * row, where it always sat.
+ */
+function RowBadges({ row, layout }: { row: InboxRow; layout: 'avatar' | 'ticket' }) {
+  const now = useNow();
+  const badges = rowBadges(row, now, layout).map((badge) => (
+    <Badge key={badge.key} tone={badge.tone}>
+      {badge.label}
+    </Badge>
+  ));
+  const number = (
+    <span key="number" className="text-xs text-(--color-text-secondary) tabular-nums">
+      #{row.number}
+    </span>
+  );
+
+  return layout === 'ticket' ? [badges[0], number, ...badges.slice(1)] : [number, ...badges];
+}
+
+/** Whose move it is, and whose ticket. */
+function RowOwner({ row }: { row: InboxRow }) {
+  return (
+    <>
+      {/* Ours was the last word, so the next move is the customer's. */}
+      {row.lastFromUs ? (
+        <span>
+          <ReplyIcon size={15} />
+          <span className="sr-only">Last message from ShipBlu</span>
+        </span>
+      ) : null}
+
+      {/* The assignee as a tile rather than a name. The name still goes to
+          assistive technology as text, but to nobody on hover: `title=` never
+          shows on a phone, and a Tooltip is a button, which cannot sit inside
+          the row's link. The ticket's header names the assignee in full. */}
+      {row.assigneeId ? (
+        <>
+          <AgentAvatar
+            name={row.assigneeName}
+            color={row.assigneeColor}
+            avatarUrl={row.assigneeAvatarUrl}
+            size={20}
+          />
+          <span className="sr-only">Assigned to {row.assigneeName}</span>
+        </>
+      ) : (
+        <span>Unassigned</span>
+      )}
     </>
   );
 }
@@ -603,50 +653,32 @@ function SearchBox({ initial, onSearch }: { initial: string; onSearch: (value: s
   }, [value, initial]);
 
   return (
-    <div className="relative">
-      <span className="pointer-events-none absolute inset-y-0 start-2 flex items-center text-[var(--muted-foreground)]">
-        <SearchIcon size={15} />
-      </span>
-      {/* A claim rather than a list. The row is 327px on a phone and shares it
-          with "New", which leaves the box about 276px: the first list that sat
-          here rendered 373px and stopped at `sbid:`, and the three-item one
-          after it used the last pixel of the room and still said nothing about
-          tracking numbers, which work pasted bare.
+    <div>
+      {/* A claim rather than a list. The first list that sat here rendered
+          373px and stopped at `sbid:`, and the three-item one after it filled a
+          box shared with "New" and still said nothing about tracking numbers,
+          which work pasted bare.
 
           What "anything" stands for — what `listInbox` matches, and the three
           things it does not — is one tap away in the ⓘ at the end of the
           field, and is the input's accessible description. It used to be a
-          `title=`, which a phone never shows. The ⓘ costs the text 18px, so it
-          fits only because the placeholder is short. */}
-      <input
+          `title=`, which a phone never shows.
+
+          Enter puts the box away rather than doing nothing, as every search
+          box in the console does: the list already follows the typing. */}
+      <SearchInput
         value={value}
         onChange={(e) => setValue(e.target.value)}
         placeholder="Search for anything"
         aria-label="Search tickets and chats"
         aria-describedby={hintId}
-        className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] py-1.5 pe-7 ps-7 text-sm outline-none focus:border-brand-500"
+        explain={SEARCH_HINT}
       />
       {/* The description the `title=` used to give a screen reader. The ⓘ
           cannot stand in for it: its tip describes the ⓘ, and only while
           open. */}
       <span id={hintId} className="sr-only">
         {SEARCH_HINT}
-      </span>
-      {/* Padded so a thumb has 22px to find rather than the 14px glyph, and
-          inset by the padding so the glyph itself sits where the search icon's
-          mirror would.
-
-          A pointer pressing it leaves focus in the field. The ⓘ is a button,
-          so a tap mid-query moved focus to it, and on a phone that closed the
-          keyboard under an agent who only wanted to check the syntax. Tab
-          still reaches it, since only a pointer's default is prevented. */}
-      <span
-        className="absolute inset-y-0 end-1 flex items-center"
-        onMouseDown={(e) => e.preventDefault()}
-      >
-        <InfoTip label="search" className="p-1">
-          {SEARCH_HINT}
-        </InfoTip>
       </span>
     </div>
   );
