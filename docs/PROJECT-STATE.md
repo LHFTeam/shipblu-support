@@ -1369,11 +1369,13 @@ cannot be unsealed — APP_SECRET may have been rotated`, so some of that
   `/reports/canned-suggestions` after the first couple of hundred replies; until
   then the report has nothing to say and says so. Before turning it on, settle
   TypeSafe's data-processing terms: each suggestion sends the ticket's last ten
-  replies, both directions, and the titles and texts of every canned response
-  the agent can see. Rollback is the switch, effective within thirty seconds per
-  instance. The first call measures what has only been estimated — about 5–6k
-  input tokens and well under a second, by analogy with the 647 shadow
-  categorisation calls (p50 234 ms) — and every row stores both.
+  replies, both directions; on a ticket answered by email (email, portal, API)
+  its subject, usually the customer's own words; the channel; and the folder,
+  title and text of every canned response the agent can see. Rollback is the
+  switch, effective within thirty seconds per instance. The first call measures
+  what has only been estimated — about 5–6k input tokens and well under a
+  second, by analogy with the 647 shadow categorisation calls (p50 234 ms) — and
+  every row stores both.
 
 ### 5.2 Live-provider verification
 

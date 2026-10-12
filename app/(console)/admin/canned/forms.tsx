@@ -143,8 +143,9 @@ export function SuggestionSwitchForm({
 
       <p className="text-xs text-[var(--muted-foreground)]">
         Each suggestion sends TypeSafe the ticket&rsquo;s last ten messages, the customer&rsquo;s
-        and the team&rsquo;s (never internal notes), and the title and text of every response that
-        agent can see. It asks once per new message, not on every click.
+        and the team&rsquo;s (never internal notes); the subject, on a ticket answered by email; and
+        the title and text of every response that agent can see. It asks once per new message, not
+        on every click.
       </p>
 
       <Toggle name="enabled" label="On for every agent who can reply" defaultChecked={enabled} />
