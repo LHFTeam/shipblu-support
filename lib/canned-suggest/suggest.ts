@@ -14,6 +14,7 @@ import { readHistory } from './history';
 import { suggestionFrom } from './map';
 import { NONE_KEY, REQUEST_VERSION, SUGGESTION_QUESTION, suggestionRequest } from './request';
 import { suggestionsLive } from './settings';
+import { RETRY_AFTER_MS, SUGGEST_TIMEOUT_MS } from './timing';
 import type { CannedSuggestionAnswer } from './types';
 
 const log = logger('canned_suggest');
@@ -36,23 +37,12 @@ const log = logger('canned_suggest');
  */
 
 /**
- * How long a suggestion may take. Measured calls answer in a quarter of a
- * second (the shadow run's p90 is 274 ms); five seconds is room for a slow day
- * and still short of the point where the agent has given up and started
- * typing, after which the answer is held rather than drawn.
- */
-export const SUGGEST_TIMEOUT_MS = 5_000;
-
-/**
  * A claimed row with no answer yet is somebody else's call still in flight —
  * another tab, another instance — until this long has passed, after which it is
  * a process that died mid-call and the row is left as an unanswered request.
  * Longer than the timeout, so a slow call is never mistaken for a dead one.
  */
 const IN_FLIGHT_FOR = sql.raw(`interval '30 seconds'`);
-
-/** How soon a composer that lost the race should ask again. */
-const RETRY_AFTER_MS = 1_000;
 
 const NOTHING: CannedSuggestionAnswer = { state: 'none' };
 

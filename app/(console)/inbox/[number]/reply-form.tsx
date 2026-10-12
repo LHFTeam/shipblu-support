@@ -287,7 +287,13 @@ function ReplyBody({
     [insertText],
   );
 
-  const suggestion = useCannedSuggestion({ conversationId, suggest, anchorMessageId, bodyRef });
+  const suggestion = useCannedSuggestion({
+    conversationId,
+    suggest,
+    anchorMessageId,
+    bodyRef,
+    inserted,
+  });
 
   // The suggested response as it would go in: in the language the toggle names,
   // or the one it was written in — exactly what Tab will insert.
@@ -303,6 +309,21 @@ function ReplyBody({
   useEffect(() => {
     if (showing) markShown();
   }, [showing, markShown]);
+
+  /*
+    Since when the suggestion now showing has been in front of the agent in the
+    focused box — what Tab's wait in `suggestionKey` is measured from. Started
+    again whenever a different suggestion shows, the box empties back into
+    showing one, or focus comes back, so a Tab-Tab through the composer always
+    lands inside the wait however long the ghost sat there unfocused.
+  */
+  const seenSince = useRef<number | null>(null);
+  const showingId = showing ? (suggestion.showable?.id ?? null) : null;
+  useEffect(() => {
+    const box = bodyRef.current;
+    seenSince.current =
+      showingId && box && document.activeElement === box ? performance.now() : null;
+  }, [showingId]);
 
   const acceptSuggestion = () => {
     if (!suggested) return;
@@ -335,19 +356,27 @@ function ReplyBody({
         required
         aria-describedby={showing ? hintId : undefined}
         onFocus={(event) => {
+          seenSince.current = showing ? performance.now() : null;
           if (!event.currentTarget.value.trim()) suggestion.ask();
+        }}
+        onBlur={() => {
+          seenSince.current = null;
         }}
         onKeyDown={(event) => {
           if (!showing) return;
-          const action = suggestionKey({
-            key: event.key,
-            shiftKey: event.shiftKey,
-            altKey: event.altKey,
-            ctrlKey: event.ctrlKey,
-            metaKey: event.metaKey,
-            isComposing: event.nativeEvent.isComposing,
-            keyCode: event.keyCode,
-          });
+          const since = seenSince.current;
+          const action = suggestionKey(
+            {
+              key: event.key,
+              shiftKey: event.shiftKey,
+              altKey: event.altKey,
+              ctrlKey: event.ctrlKey,
+              metaKey: event.metaKey,
+              isComposing: event.nativeEvent.isComposing,
+              keyCode: event.keyCode,
+            },
+            since === null ? 0 : performance.now() - since,
+          );
           if (!action) return;
           event.preventDefault();
           if (action === 'accept') acceptSuggestion();
@@ -371,11 +400,14 @@ function ReplyBody({
       {suggest ? (
         // `relative` because the key hint below can be `sr-only`, which is
         // `position: absolute` — unpositioned, it is placed against the page
-        // and lengthens it (PROJECT-STATE §6.81).
+        // and lengthens it (PROJECT-STATE §6.81). `empty:-mt-2` because, empty,
+        // it is still a flex item of the form's `gap-2` column, and the gap on
+        // both sides of a zero-height item pushed the picker down by one gap
+        // whenever nothing was suggested.
         <div
           id={hintId}
           aria-live="polite"
-          className="relative text-xs text-[var(--muted-foreground)]"
+          className="relative text-xs text-[var(--muted-foreground)] empty:-mt-2"
         >
           {showing && suggested ? (
             <div className="flex items-center gap-2">

@@ -864,11 +864,14 @@ carries from the column and those events read together. See
 `plans/priority-through-typesafe.md`.
 
 The suggestion is **live**: its answer is shown to an agent, as grey text in an
-empty reply box that Tab (or Use, on a phone) puts in. It is still never
-_applied_, and that is the line it argues from — nothing reaches a customer
-without the agent taking the text and pressing Send, so `messages.author_agent_id`
-stays the agent and the `HUMAN_AGENT` rule above is untouched: it is the same act
-as picking from the list. Six rules hold:
+empty reply box that Tab (or Use, on a phone) puts in — Tab only once the text
+has been on screen in the focused box for half a second, because the ghost is
+there the moment the box takes focus and a quicker Tab is a keyboard user
+passing through (`TAB_TAKES_AFTER_MS` in `lib/canned-suggest/keyboard.ts`). It
+is still never _applied_, and that is the line it argues from — nothing reaches
+a customer without the agent taking the text and pressing Send, so
+`messages.author_agent_id` stays the agent and the `HUMAN_AGENT` rule above is
+untouched: it is the same act as picking from the list. Six rules hold:
 
 - **The admin switch is the flag; the key is a precondition.** Production holds
   `TYPESAFE_API_KEY` for the shadow run, so key-as-flag would have switched

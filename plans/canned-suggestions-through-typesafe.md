@@ -3,7 +3,10 @@
 When an agent clicks into an empty reply box, the composer asks TypeSafe's Jev
 which of the team's canned responses fits the conversation so far — or none. The
 answer appears as grey placeholder text; **Tab** (or **Use**, on a phone) puts it
-in the box to send or edit, **Esc** (or **×**) waves it away. Every suggestion,
+in the box to send or edit, **Esc** (or **×**) waves it away. Tab takes it only
+once it has been on screen in the focused box for half a second: the ghost is
+there the moment the box takes focus, so a quicker Tab is somebody passing
+through with the keyboard, and it moves focus and records nothing. Every suggestion,
 and what the reply that followed actually carried, is recorded, so
 `/reports/canned-suggestions` can say how often a suggestion is taken and which
 ones are right.

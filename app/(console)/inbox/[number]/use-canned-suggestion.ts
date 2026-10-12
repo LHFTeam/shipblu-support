@@ -4,6 +4,8 @@ import type {
   CannedSuggestionAnswer,
   SuggestionEvent,
 } from '@/lib/canned-suggest/types';
+import { suggestionLink, type AcceptedSuggestion } from '@/lib/canned-suggest/link';
+import { MAX_PENDING_RETRIES } from '@/lib/canned-suggest/timing';
 
 /**
  * Asking `/api/canned-suggestions` which canned response fits, and remembering
@@ -21,9 +23,6 @@ import type {
  * reply's Send must never wait for this.
  */
 
-/** How often a composer that lost the race to another tab asks again. */
-const MAX_RETRIES = 3;
-
 function report(id: string, event: SuggestionEvent) {
   // `keepalive`, the `/api/focus` shape: an accept followed at once by Send
   // remounts this component, and the report must still arrive.
@@ -40,15 +39,18 @@ export function useCannedSuggestion({
   suggest,
   anchorMessageId,
   bodyRef,
+  inserted,
 }: {
   conversationId: string;
   suggest: boolean;
   anchorMessageId: string | null;
   bodyRef: RefObject<HTMLTextAreaElement | null>;
+  /** The canned responses inserted since the box was last empty — `ReplyBody`'s list. */
+  inserted: readonly string[];
 }) {
   const [suggestion, setSuggestion] = useState<CannedSuggestion | null>(null);
   const [dismissedId, setDismissedId] = useState<string | null>(null);
-  const [acceptedId, setAcceptedId] = useState<string | null>(null);
+  const [accepted, setAccepted] = useState<AcceptedSuggestion | null>(null);
 
   const askedFor = useRef<string | null>(null);
   const inFlight = useRef<AbortController | null>(null);
@@ -62,7 +64,10 @@ export function useCannedSuggestion({
   // the switch is the rollback, and an open composer learns it on its next
   // refresh — a ghost left behind would still take Tab with no hint saying so.
   const showable =
-    suggest && current?.cannedResponseId && current.id !== dismissedId && current.id !== acceptedId
+    suggest &&
+    current?.cannedResponseId &&
+    current.id !== dismissedId &&
+    current.id !== accepted?.id
       ? current
       : null;
 
@@ -89,7 +94,13 @@ export function useCannedSuggestion({
         if (controller.signal.aborted) return;
 
         if (answer.state === 'ready') setSuggestion(answer.suggestion);
-        if (answer.state !== 'pending' || attempt >= MAX_RETRIES) return;
+        if (answer.state !== 'pending') return;
+        if (attempt >= MAX_PENDING_RETRIES) {
+          // Stopped waiting, not told "nothing": the winner's answer may still
+          // land, and the next focus should ask again and be served the row.
+          askedFor.current = null;
+          return;
+        }
 
         // Another tab is asking the same question; its answer will be stored.
         // Wait for it only while the agent is still sitting in an empty box.
@@ -138,10 +149,10 @@ export function useCannedSuggestion({
   }, [showableId]);
 
   const accept = useCallback(() => {
-    if (!showableId) return;
-    setAcceptedId(showableId);
-    report(showableId, 'accepted');
-  }, [showableId]);
+    if (!showable) return;
+    setAccepted({ id: showable.id, cannedResponseId: showable.cannedResponseId });
+    report(showable.id, 'accepted');
+  }, [showable]);
 
   const dismiss = useCallback(() => {
     if (!showableId) return;
@@ -155,14 +166,10 @@ export function useCannedSuggestion({
     /** The suggestion to draw, or null — nothing to show, waved away, or already taken. */
     showable,
     /**
-     * Which suggestion the reply should be graded against: the one this box was
-     * offered for the message on screen — shown or not, `none` included — or,
-     * when the conversation moved on and nothing newer was asked, the one the
-     * agent took earlier, whose text is presumably still in the box. The newer
-     * one wins, because the reply answers the newer message. Posted with Send;
-     * the server re-reads it.
+     * Which suggestion the reply should be graded against — `suggestionLink`
+     * says which and why. Posted with Send; the server re-reads it.
      */
-    linkId: current?.id ?? acceptedId ?? null,
+    linkId: suggestionLink(current, accepted, inserted),
     ask,
     accept,
     dismiss,
