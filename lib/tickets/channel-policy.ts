@@ -153,15 +153,33 @@ export function readOnlyReason(channel: string): string | null {
  * agent holding `ticket.side_conversation` has that tab. Automated senders (rules, the out-of-hours acknowledgement,
  * the CSAT survey) are not the composer and are not covered by it.
  */
-const NO_CONSOLE_REPLY: readonly ConversationChannel[] = ['whatsapp'];
+const NO_CONSOLE_REPLY: Partial<Record<ConversationChannel, { reason: string; notice: string }>> = {
+  // Keyed by channel, with its own words, so a second entry cannot inherit a
+  // sentence naming the first one's channel.
+  whatsapp: {
+    reason:
+      'WhatsApp customers are not answered from this platform. The conversation stays here to read and to keep private notes on.',
+    notice: 'WhatsApp replies are not sent from here',
+  },
+};
+
+function noConsoleReply(channel: string) {
+  return Object.hasOwn(NO_CONSOLE_REPLY, channel)
+    ? NO_CONSOLE_REPLY[channel as ConversationChannel]
+    : undefined;
+}
 
 /**
  * Why an agent cannot reply to this ticket's customer from the console, or
  * null where they can. A sentence for the same reason `readOnlyReason` is one.
  */
 export function consoleReplyReason(channel: string): string | null {
-  if (!(NO_CONSOLE_REPLY as readonly string[]).includes(channel)) return null;
-  return 'WhatsApp customers are not answered from this platform. The conversation stays here to read and to keep private notes on.';
+  return noConsoleReply(channel)?.reason ?? null;
+}
+
+/** The same rule in a few words, for the line beside the composer's tabs. */
+export function consoleReplyNotice(channel: string): string | null {
+  return noConsoleReply(channel)?.notice ?? null;
 }
 
 /**

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { SessionAgent } from '@/lib/auth/session';
 import {
   canSeeChannel,
+  consoleReplyNotice,
   consoleReplyReason,
   CONVERSATION_CHANNELS,
   hasWrittenSubject,
@@ -61,6 +62,14 @@ describe('channels not answered from the console', () => {
     // sweep and the reports; only the composer's customer-facing half goes.
     expect(isReadOnlyChannel('whatsapp')).toBe(false);
     expect(readOnlyChannels()).not.toContain('whatsapp');
+  });
+
+  it('gives the notice and the refusal for the same channels', () => {
+    for (const channel of CONVERSATION_CHANNELS) {
+      expect(consoleReplyNotice(channel) === null).toBe(consoleReplyReason(channel) === null);
+    }
+    // Not a prototype key read off the table as if it were a channel.
+    expect(consoleReplyReason('toString')).toBeNull();
   });
 
   it('says what the agent can still do, since a stale reply box is refused with it', () => {

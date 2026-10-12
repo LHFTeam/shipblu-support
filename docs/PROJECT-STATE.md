@@ -1963,6 +1963,20 @@ message bodies — the same reasoning as the deliberately tiny `pg_notify` paylo
 
 ### 5.5 Loose ends
 
+- **"WhatsApp Support" has no reply path at all, by decision.** The console
+  stopped replying on every WhatsApp number (LHFTeam/shipblu-support#357,
+  `consoleReplyReason`), and that number is plain Cloud API, not linked to the
+  Business app, so it cannot be answered from a phone either. On 2026-10-12
+  the last 30 days held 4 tickets there and one console reply (2026-09-26);
+  "Nayera Mohamed", the coexistence number, held 77 tickets, 382 phone
+  replies and none from the console. The owner chose to block every WhatsApp
+  number anyway, over blocking only coexistence numbers. Two consequences:
+  those tickets are answered by nobody but automations, and their first- and
+  next-response clocks never stop, since only an outbound reply stops them
+  and an ordinary number's echoes are ignored (`ingest-whatsapp.ts`) — so
+  every one breaches, and fires whatever breach rules exist. Linking the
+  number to the Business app, or retiring it, closes both.
+
 - **The dead-letter queue has 57 rows in it and, until 2026-09-21, nobody had
   read them.** `/api/health` reported `dead: 56` unchanged for eleven days; the
   57th was added deliberately on 2026-09-21 and is the only one anybody has

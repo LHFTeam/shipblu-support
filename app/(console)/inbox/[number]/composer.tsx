@@ -7,7 +7,7 @@ import type { ConversationDetail } from '@/lib/tickets/conversation';
 import type { CannedResponseOption } from '@/lib/tickets/lookups';
 import type { CannedLocale } from '@/lib/tickets/canned';
 import { describeWindow, metaWindowState } from '@/lib/meta/window';
-import { consoleReplyReason } from '@/lib/tickets/channel-policy';
+import { consoleReplyNotice, consoleReplyReason } from '@/lib/tickets/channel-policy';
 import { formatRemaining, windowState } from '@/lib/whatsapp/window';
 import type { PickerEntry } from '@/lib/side-conversations/queries';
 import { StartSideConversationForm } from './side-conversations';
@@ -140,7 +140,7 @@ export function Composer({
   // The thread verdict outranks the clock: "3h left to reply freely" over a
   // ticket nothing can be sent on is worse than no notice at all.
   const notice = replyBlocked
-    ? 'WhatsApp replies are not sent from here'
+    ? consoleReplyNotice(conversation.channel)
     : threadBlocked
       ? metaThread?.reason === 'standby'
         ? 'Another app owns this inbox — this ticket can be read here but not answered'
