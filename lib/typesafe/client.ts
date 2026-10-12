@@ -17,9 +17,12 @@ import { isTimeout } from '@/lib/http/deadline';
  * Shaped after `lib/shipments/platform.ts`, which is the house template for an
  * outbound provider: the round trip owns the timeout and the error taxonomy, the
  * response is validated with zod rather than cast, and **nothing here retries**.
- * Backoff belongs to the queue (`lib/queue/index.ts`), and a dead job is the
- * visible record of a call that never succeeded; a retry loop in here would hide
- * that inside a worker slot instead.
+ * Whether to ask again is the caller's. The two jobs ask again later — the
+ * priority classifier through the queue's backoff (`lib/queue/index.ts`), the
+ * shadow categoriser on its next run over the corpus — where a failure stays
+ * visible; the reply box's suggestion records the failure on its row and never
+ * asks again. A retry loop in here would hide any of those answers inside a
+ * slot instead.
  *
  * `@typesafe-ai/sdk` exists and is deliberately not used. It retries internally,
  * which is the one behaviour this repo puts somewhere else, and it brings its own
@@ -166,13 +169,17 @@ export type FetchOptions = {
 };
 
 /**
- * One request, with the error taxonomy the queue reads.
+ * One request, with the error taxonomy its callers read.
  *
- * The split between transient and permanent is the whole contract with the
- * handler above: transient means the same call could answer differently later,
- * so the row is left unwritten and the job re-runs. Permanent means it could not
- * — a wrong key, a malformed question — and a job that keeps asking only delays
- * somebody noticing.
+ * The split between transient and permanent is the whole contract with the two
+ * jobs: transient means the same call could answer differently later, so they
+ * ask again — the classifier by throwing back to the queue, the categoriser by
+ * recording the gap for its next run. Permanent means it could not — a wrong
+ * key, a malformed question — and a job that keeps asking only delays somebody
+ * noticing. The suggestion route reads neither half: it writes every failure to
+ * `canned_suggestions.error` and that message gets no suggestion, because an
+ * answer that arrives after a retry has arrived after the agent started typing
+ * (the AGENTS.md exception it lives under).
  */
 export async function systemOne(
   request: SystemOneRequest,

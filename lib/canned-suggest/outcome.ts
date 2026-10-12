@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { cannedResponses, cannedSuggestions } from '@/db/schema';
 import { logger } from '@/lib/log';
@@ -33,9 +33,9 @@ const log = logger('canned_suggest');
  * `used` is what `recordCannedUse` counted — the same read, through the same
  * visibility rule — so the usage column and this grade cannot disagree about
  * the last response a reply carried. `inserted` is the composer's list of every
- * one, and like every form field only a claim: it is only ever compared with
- * the choice the server stored, and a response it names is re-read through
- * `cannedVisibleTo` before its title or text is recorded.
+ * one, and like every form field only a claim: compared with the choice the
+ * server stored, and re-read through `cannedVisibleTo` before any id, title or
+ * text from it is recorded.
  */
 export async function recordSuggestionOutcome(
   agentId: string,
@@ -104,7 +104,7 @@ async function gradeOf(
 ): Promise<Grade> {
   // `none` is right when the reply carried no canned response at all.
   if (choice === NONE_KEY) {
-    const carried = used?.id ?? [...inserted].at(-1) ?? null;
+    const carried = used?.id ?? (await lastVisible(agentId, inserted));
     return {
       sentChoice: carried ?? NONE_KEY,
       sentMatches: carried === null,
@@ -117,7 +117,7 @@ async function gradeOf(
 
   if (!inserted.has(choice)) {
     return {
-      sentChoice: used?.id ?? [...inserted].at(-1) ?? NONE_KEY,
+      sentChoice: used?.id ?? (await lastVisible(agentId, inserted)) ?? NONE_KEY,
       sentMatches: false,
       sentCannedResponseId: used?.id ?? null,
       sentCannedTitle: used?.title ?? null,
@@ -126,32 +126,58 @@ async function gradeOf(
     };
   }
 
-  // The reply carried Jev's choice. Its title and text are read here rather
-  // than taken from `used`, which may be a closing added after it; and read
-  // through the composer's rule, so a claimed id the agent could not have
+  // The reply carried Jev's choice. When it was the last insert, `used` is the
+  // read `recordCannedUse` already made of it, through the composer's rule.
+  // Otherwise — a closing was added after it — its title and text are read
+  // here, through the same rule, so a claimed id the agent could not have
   // inserted records nothing about that response. A response deleted since
   // keeps the title frozen when it was suggested, and no edit grade.
-  const [response] = await db
-    .select({
-      title: cannedResponses.title,
-      ar: cannedResponses.bodyTextAr,
-      en: cannedResponses.bodyTextEn,
-    })
-    .from(cannedResponses)
-    .where(and(eq(cannedResponses.id, choice), cannedVisibleTo(agentId)))
-    .limit(1);
+  const response =
+    used?.id === choice
+      ? { title: used.title, ...used.bodies }
+      : (
+          await db
+            .select({
+              title: cannedResponses.title,
+              ar: cannedResponses.bodyTextAr,
+              en: cannedResponses.bodyTextEn,
+            })
+            .from(cannedResponses)
+            .where(and(eq(cannedResponses.id, choice), cannedVisibleTo(agentId)))
+            .limit(1)
+        )[0];
 
-  // The language is known only when the choice was the last insert, which is
-  // the one `recordCannedUse` resolved; otherwise both bodies are tried.
-  const locale = used?.id === choice ? used.locale : null;
   return {
     sentChoice: choice,
     sentMatches: true,
     sentCannedResponseId: response ? choice : null,
     sentCannedTitle: response?.title ?? frozenTitle,
-    sentLocale: locale,
-    sentEdit: response
-      ? editKind(body, locale ? [response[locale]] : [response.ar, response.en])
-      : null,
+    // Known only when the choice was the last insert, the one `recordCannedUse`
+    // resolved.
+    sentLocale: used?.id === choice ? used.locale : null,
+    // Both bodies, always. The language says which one went in, but the agent
+    // can flip the toggle and insert the same response again before deleting a
+    // copy, and the text that went out is this response whichever body it
+    // matches; trying the other can only find text that really is it.
+    sentEdit: response ? editKind(body, [response.ar, response.en]) : null,
   };
+}
+
+/**
+ * The last of the claimed responses the agent could actually have inserted, or
+ * null. `inserted` is a form field, so an id from it is re-read through the
+ * composer's rule before it is frozen into `sent_choice` and named by the
+ * report. Asked only when `used` is null — `recordCannedUse` found the last
+ * response deleted or out of reach — so a response deleted between render and
+ * send grades as not carried here, the same answer the usage column gives it.
+ */
+async function lastVisible(agentId: string, inserted: ReadonlySet<string>): Promise<string | null> {
+  if (inserted.size === 0) return null;
+  const claimed = [...inserted];
+  const rows = await db
+    .select({ id: cannedResponses.id })
+    .from(cannedResponses)
+    .where(and(inArray(cannedResponses.id, claimed), cannedVisibleTo(agentId)));
+  const visible = new Set(rows.map((row) => row.id));
+  return claimed.findLast((id) => visible.has(id)) ?? null;
 }

@@ -306,7 +306,7 @@ describe('recordSuggestionOutcome', () => {
       sentMatches: true,
       sentCannedResponseId: where,
       sentCannedTitle: 'Where is my parcel',
-      // Its language was not the last one recorded, so both bodies were tried.
+      // Its language was not the last one recorded, so none is claimed.
       sentLocale: null,
       sentEdit: 'extended',
     });
@@ -327,6 +327,63 @@ describe('recordSuggestionOutcome', () => {
     });
 
     expect(await row(id)).toMatchObject({ sentChoice: where, sentMatches: false });
+  });
+
+  // Taken in Arabic, picked again in English after a flip of the toggle, and
+  // the English copy deleted: the reply is the response word for word, in the
+  // language the usage column did not record. One body tried called it reworded.
+  it('grades the response sent as it stood in either language as unchanged', async () => {
+    const me = await agent();
+    const conversationId = await ticket();
+    const where = await canned();
+    const id = await suggestion(conversationId, me, where);
+
+    await recordSuggestionOutcome(me, id, {
+      conversationId,
+      messageId: await reply(conversationId, me, 'x'),
+      body: BODY_AR,
+      used: await recordCannedUse(me, where, 'en'),
+      inserted: [where],
+    });
+
+    expect(await row(id)).toMatchObject({ sentLocale: 'en', sentEdit: 'unchanged' });
+  });
+
+  // `cannedInsertedIds` is a form field. With no `cannedResponseId` beside it,
+  // nothing else re-reads what it names, so an id the agent could not have
+  // inserted — somebody else's personal response — must not be frozen into
+  // `sent_choice`, where the report would name it.
+  it('freezes no claimed response the agent could not have inserted', async () => {
+    const me = await agent();
+    const someoneElse = await agent('zeina@shipblu.test');
+    const conversationId = await ticket();
+    const where = await canned();
+    const [theirs] = await db
+      .insert(cannedResponses)
+      .values({
+        title: 'Mine only',
+        bodyTextEn: 'Zeina says hi.',
+        visibility: 'personal',
+        agentId: someoneElse,
+      })
+      .returning({ id: cannedResponses.id });
+    const afterNone = await suggestion(conversationId, me, NONE_KEY);
+    const afterWhere = await suggestion(conversationId, me, where, {
+      anchorMessageId: await reply(conversationId, me, 'earlier'),
+    });
+
+    for (const id of [afterNone, afterWhere]) {
+      await recordSuggestionOutcome(me, id, {
+        conversationId,
+        messageId: await reply(conversationId, me, `reply to ${id}`),
+        body: 'Zeina says hi.',
+        used: null,
+        inserted: [theirs!.id],
+      });
+    }
+
+    expect(await row(afterNone)).toMatchObject({ sentChoice: NONE_KEY, sentMatches: true });
+    expect(await row(afterWhere)).toMatchObject({ sentChoice: NONE_KEY, sentMatches: false });
   });
 
   it('links nothing for another agent, another ticket, or a suggestion already linked', async () => {

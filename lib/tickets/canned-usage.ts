@@ -66,8 +66,10 @@ export type CannedUse = {
  *
  * It answers with the response it counted, or null for none — so the one read
  * that decided this was a real, visible use is also what a canned suggestion's
- * outcome is scored against (`lib/canned-suggest/outcome.ts`), rather than a
- * second read that could disagree with it about the same reply.
+ * outcome is scored against (`lib/canned-suggest/outcome.ts`): which response
+ * the reply ended on, in which language, and — when that is the one Jev chose —
+ * its title and both bodies for the edit grade, rather than a second read that
+ * could disagree with this one about the same reply.
  */
 export async function recordCannedUse(
   agentId: string,
