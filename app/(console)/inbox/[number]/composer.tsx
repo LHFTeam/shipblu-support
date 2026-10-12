@@ -140,7 +140,7 @@ export function Composer({
   // The thread verdict outranks the clock: "3h left to reply freely" over a
   // ticket nothing can be sent on is worse than no notice at all.
   const notice = replyBlocked
-    ? 'Replies are not sent from here — notes and side conversations only'
+    ? 'WhatsApp replies are not sent from here'
     : threadBlocked
       ? metaThread?.reason === 'standby'
         ? 'Another app owns this inbox — this ticket can be read here but not answered'

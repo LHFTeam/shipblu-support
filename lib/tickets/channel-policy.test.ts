@@ -63,8 +63,8 @@ describe('channels not answered from the console', () => {
     expect(readOnlyChannels()).not.toContain('whatsapp');
   });
 
-  it('says what the agent can still do, since the refusal replaces the reply box', () => {
-    expect(consoleReplyReason('whatsapp')).toMatch(/private note/);
+  it('says what the agent can still do, since a stale reply box is refused with it', () => {
+    expect(consoleReplyReason('whatsapp')).toMatch(/private notes/);
   });
 });
 

@@ -147,8 +147,10 @@ export function readOnlyReason(channel: string): string | null {
  * have dropped every WhatsApp ticket out of the working queue and the figures.
  *
  * The composer, the server actions and the canned-suggestion route all ask
- * this, so a stale tab or a hand-made POST is refused for the same reason the
- * screen gives. Automated senders (rules, the out-of-hours acknowledgement,
+ * this, so a stale tab or a hand-made POST is refused for the reason the
+ * screen states — the composer in a few words beside its tabs, the action in
+ * this sentence. Neither offers side conversations by name, because only an
+ * agent holding `ticket.side_conversation` has that tab. Automated senders (rules, the out-of-hours acknowledgement,
  * the CSAT survey) are not the composer and are not covered by it.
  */
 const NO_CONSOLE_REPLY: readonly ConversationChannel[] = ['whatsapp'];
@@ -159,7 +161,7 @@ const NO_CONSOLE_REPLY: readonly ConversationChannel[] = ['whatsapp'];
  */
 export function consoleReplyReason(channel: string): string | null {
   if (!(NO_CONSOLE_REPLY as readonly string[]).includes(channel)) return null;
-  return 'WhatsApp customers are not answered from this platform. You can still read the conversation, leave a private note or start a side conversation.';
+  return 'WhatsApp customers are not answered from this platform. The conversation stays here to read and to keep private notes on.';
 }
 
 /**

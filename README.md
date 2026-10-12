@@ -392,7 +392,9 @@ they sign in.
 
 A portal reply is recorded as an **inbound** message whatever channel the ticket arrived
 on: the customer said it, so it reopens a resolved ticket and moves the SLA clock exactly
-as an emailed reply would. Agents still answer over the ticket's own channel.
+as an emailed reply would. Agents still answer over the ticket's own channel — except
+WhatsApp, which is not answered from the console at all (`consoleReplyReason` in
+`lib/tickets/channel-policy.ts`).
 
 Private notes are excluded in the query rather than filtered in the renderer, and every
 portal query is scoped by the contact id from the session cookie — a ticket number is
