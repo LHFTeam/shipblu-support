@@ -57,7 +57,7 @@ export function RoleToggles({
               setShipper(event.target.checked);
               void save({ shipper: event.target.checked, recipient });
             }}
-            className="size-4 accent-blu-500"
+            className="size-4 accent-(--color-control-accent)"
           />
           Shipper
         </label>
@@ -69,7 +69,7 @@ export function RoleToggles({
               setRecipient(event.target.checked);
               void save({ shipper, recipient: event.target.checked });
             }}
-            className="size-4 accent-blu-500"
+            className="size-4 accent-(--color-control-accent)"
           />
           Recipient
         </label>

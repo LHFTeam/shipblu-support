@@ -68,7 +68,7 @@ function Fields({ schedule }: { schedule?: Schedule }) {
                       ? (schedule.schedule?.[day.key]?.length ?? 0) === 0
                       : day.key === 'fri' || day.key === 'sat'
                   }
-                  className="accent-blu-500"
+                  className="accent-(--color-control-accent)"
                 />
                 Closed
               </label>

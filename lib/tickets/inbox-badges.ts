@@ -37,6 +37,7 @@ type BadgeRow = Pick<
   | 'lastCustomerMessageAt'
   | 'statusCategory'
   | 'statusName'
+  | 'statusIsDefault'
   | 'priority'
   | 'sideState'
 >;
@@ -79,8 +80,9 @@ function windowBadge(row: BadgeRow, now: Date | null): RowBadge | null {
  * `ticket` is the three-line row and keeps the order it always had — status,
  * window, priority, hub — with the comment marker last.
  *
- * `avatar` is ordered by urgency instead, and leaves out the status of an open
- * ticket, which most rows are: a window about to close and a hub that answered
+ * `avatar` is ordered by urgency instead, and leaves out the default open
+ * status, which most rows carry (a status an admin added to the open category,
+ * such as "Escalated", is still shown): a window about to close and a hub that answered
  * are coral and lead, a closed window follows, then priority and the hub still
  * being waited on, then any other status. It is not capped at two as the design
  * system's row is: each of these is something an agent triages by, and a row
@@ -126,7 +128,7 @@ export function rowBadges(
           window?.tone === 'window-closing' ? null : window,
           priority,
           hub?.tone === 'hub-replied' ? null : hub,
-          row.statusCategory === 'open' ? null : status,
+          row.statusCategory === 'open' && row.statusIsDefault ? null : status,
           comment,
         ];
 

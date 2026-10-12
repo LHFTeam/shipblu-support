@@ -42,3 +42,14 @@ export function formatBytes(bytes: number): string {
 export function channelLabel(channel: string): string {
   return { email: 'Email', whatsapp: 'WhatsApp', webchat: 'Web chat' }[channel] ?? channel;
 }
+
+/**
+ * An enum value as a badge or table label: "agents_only" → "Agents only". The
+ * design system's labels are sentence case, and the values come from the
+ * database in lower snake case; one helper rather than the expression inlined
+ * at every badge, so a label that forgets it is the one that stands out.
+ */
+export function sentenceCase(text: string): string {
+  const spaced = text.replaceAll('_', ' ');
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}

@@ -94,7 +94,7 @@ function AssignmentFields({ group, agents }: { group?: Group; agents: Choice[] }
               name="matchSkills"
               checked={skills}
               onChange={(event) => setSkills(event.target.checked)}
-              className="mt-0.5 size-4 accent-blu-500"
+              className="mt-0.5 size-4 accent-(--color-control-accent)"
             />
             <span>
               <span className="font-medium">Match skills first</span>

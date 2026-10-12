@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { Badge, buttonClass, Cell, EmptyState, PageHeader, Row, Table } from '@/components/ui';
 import { InfoTip } from '@/components/tooltip';
 import { requirePermission } from '@/lib/auth/guard';
-import { formatRelative } from '@/lib/format';
+import { formatRelative, sentenceCase } from '@/lib/format';
 import { loadPresencePolicy } from '@/lib/presence/policy';
 import { agentLoad } from '@/lib/reports/live';
 import { AvailabilityControl } from './forms';
@@ -81,7 +81,7 @@ export default async function TeamAvailabilityPage() {
                           : 'neutral'
                     }
                   >
-                    {agent.presence.charAt(0).toUpperCase() + agent.presence.slice(1)}
+                    {sentenceCase(agent.presence)}
                   </Badge>
                   {/* The reason is the whole point of the column. "Away"
                       alone leaves a supervisor unable to tell somebody who

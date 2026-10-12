@@ -53,9 +53,9 @@ const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
   primary:
     'border-transparent bg-(--button-primary) text-(--color-text-on-action) shadow-sm hover:bg-(--button-primary-hover) active:bg-(--button-primary-active) disabled:hover:bg-(--button-primary)',
   secondary:
-    'border-(--color-border-default) bg-(--color-background-surface) text-(--color-text-primary) hover:bg-(--color-background-hover) active:bg-neutral-200 disabled:hover:bg-(--color-background-surface)',
+    'border-(--color-border-default) bg-(--color-background-surface) text-(--color-text-primary) hover:bg-(--color-background-hover) active:bg-(--color-background-pressed) disabled:hover:bg-(--color-background-surface)',
   ghost:
-    'border-transparent text-(--color-text-primary) hover:bg-(--color-background-hover) active:bg-neutral-200 disabled:hover:bg-transparent',
+    'border-transparent text-(--color-text-primary) hover:bg-(--color-background-hover) active:bg-(--color-background-pressed) disabled:hover:bg-transparent',
   danger:
     'border-transparent bg-(--button-danger) text-(--color-text-on-action) hover:bg-(--button-danger-hover) active:bg-(--button-danger-hover) disabled:hover:bg-(--button-danger)',
   note: 'border-transparent bg-(--color-feedback-warning-fg) text-(--color-text-on-action) shadow-sm hover:bg-(--color-message-note-fg) active:bg-(--color-message-note-fg) disabled:hover:bg-(--color-feedback-warning-fg)',
@@ -751,7 +751,7 @@ export function Toggle({
         type="checkbox"
         name={name}
         defaultChecked={defaultChecked}
-        className="mt-0.5 size-4 shrink-0 accent-blu-500"
+        className="mt-0.5 size-4 shrink-0 accent-(--color-control-accent)"
       />
       {/*
         An unchecked checkbox submits nothing at all, which is invisible to a

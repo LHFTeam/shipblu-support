@@ -240,6 +240,8 @@
   --color-background-surface: var(--color-neutral-0);
   --color-background-surface-sunken: var(--color-neutral-100);
   --color-background-hover: var(--color-neutral-100);
+  /* One step darker than hover: a ghost or secondary control while pressed. */
+  --color-background-pressed: var(--color-neutral-200);
   --color-background-selected: var(--color-blu-50);
   --color-background-brand-subtle: var(--color-blu-50);
   --color-background-inverse: var(--color-neutral-900);
@@ -387,6 +389,8 @@
   --color-message-note-bg: var(--color-amber-50);
   --color-message-note-border: var(--color-amber-200);
   --color-message-note-fg: var(--color-amber-700);
+  /* The composer's Private note tab while selected. */
+  --color-message-note-active: var(--color-amber-100);
   --color-message-public-bg: var(--color-neutral-800);
   --color-message-public-fg: var(--color-neutral-0);
   --color-message-public-border: var(--color-neutral-800);
@@ -433,6 +437,18 @@
   --button-primary-active: var(--color-action-primary-active);
   --button-danger: var(--color-action-danger-default);
   --button-danger-hover: var(--color-action-danger-hover);
+
+  /* ── Component · controls. The availability switch's track, a checkbox's
+     tick, the selected row's marker, and the rail's own hover and active
+     washes: each named so a change to the role reaches it. The washes are
+     white over navy rather than a solid, so they read the same on any rail
+     colour the brand moves to. */
+  --color-switch-track-off: var(--color-neutral-300);
+  --color-switch-track-on: var(--color-green-500);
+  --color-control-accent: var(--color-action-primary-default);
+  --color-marker-selected: var(--color-blu-500);
+  --color-rail-hover: rgb(255 255 255 / 0.1);
+  --color-rail-active: rgb(255 255 255 / 0.08);
 
   /* ── Component · launcher. app/widget/embed.js/route.ts styles it inline on a
      merchant's page, where these variables do not exist. Copy the literals into

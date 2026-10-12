@@ -5,6 +5,7 @@ import { requirePermission } from '@/lib/auth/guard';
 import { listCategoriesForAdmin, listFolderOptions, type FolderOption } from '@/lib/kb/admin';
 import { FLOOR_LABELS, folderFloor } from '@/lib/kb/floors';
 import { CategoryForm, FolderForm } from './forms';
+import { sentenceCase } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
 
@@ -101,5 +102,5 @@ function audience(folder: FolderOption): string {
   if (floor) return FLOOR_LABELS[floor];
   // Sentence case, like every other badge: the level is stored as `agents_only`.
   const level = folder.visibility.replace('_', ' ');
-  return level.charAt(0).toUpperCase() + level.slice(1);
+  return sentenceCase(level);
 }

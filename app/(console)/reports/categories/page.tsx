@@ -15,7 +15,7 @@ import { InfoTip } from '@/components/tooltip';
 import { requireAgent } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
 import { areaLabel } from '@/lib/categorise/taxonomy';
-import { channelLabel } from '@/lib/format';
+import { channelLabel, sentenceCase } from '@/lib/format';
 import { ChannelBadge } from '@/components/channel';
 import {
   areaTotals,
@@ -456,7 +456,7 @@ export default async function CategoryReportPage({
                     <Row key={owner.owner}>
                       <Cell>
                         <Badge tone={owner.owner === 'platform' ? 'warning' : 'neutral'}>
-                          {owner.owner.charAt(0).toUpperCase() + owner.owner.slice(1)}
+                          {sentenceCase(owner.owner)}
                         </Badge>
                       </Cell>
                       <Cell>{owner.ticketsResolved.toLocaleString()}</Cell>
@@ -499,7 +499,7 @@ export default async function CategoryReportPage({
                     </Cell>
                     <Cell>
                       <Badge tone={cause.owner === 'platform' ? 'warning' : 'neutral'}>
-                        {cause.owner.charAt(0).toUpperCase() + cause.owner.slice(1)}
+                        {sentenceCase(cause.owner)}
                       </Badge>
                     </Cell>
                     <Cell>{cause.ticketsResolved.toLocaleString()}</Cell>

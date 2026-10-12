@@ -347,12 +347,10 @@ function TabButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      // amber-100 is the design system's own value for the chosen note tab;
-      // there is no role token for it, and the panel under it is note paper.
       className={`flex shrink-0 items-center gap-1.5 rounded-t-md px-3 py-1.5 text-sm whitespace-nowrap transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
         active
           ? note
-            ? 'bg-amber-100 font-semibold text-(--color-message-note-fg)'
+            ? 'bg-(--color-message-note-active) font-semibold text-(--color-message-note-fg)'
             : 'bg-(--color-background-hover) font-semibold text-(--color-text-primary)'
           : 'text-(--color-text-secondary) hover:text-(--color-text-primary)'
       }`}

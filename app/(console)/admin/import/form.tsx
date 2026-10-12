@@ -5,7 +5,7 @@ import { useFormStatus } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { Badge, Button, ErrorText } from '@/components/ui';
-import { formatDateTime, formatRelative } from '@/lib/format';
+import { formatDateTime, formatRelative, sentenceCase } from '@/lib/format';
 import type { AdminState } from '../settings-shared';
 import { startFreshdeskImport } from './actions';
 
@@ -178,7 +178,7 @@ function toneFor(status: string) {
 function labelFor(status: string): string {
   return (
     { completed: 'Succeeded', dead: 'Failed', processing: 'Running', pending: 'Queued' }[status] ??
-    status.charAt(0).toUpperCase() + status.slice(1)
+    sentenceCase(status)
   );
 }
 

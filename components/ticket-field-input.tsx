@@ -71,7 +71,7 @@ export function TicketFieldInput({
         id={id}
         type="checkbox"
         name={name}
-        className="size-4 shrink-0 accent-blu-500"
+        className="size-4 shrink-0 accent-(--color-control-accent)"
         checked={value === true}
         onChange={(event) => onChange(event.target.checked)}
       />
@@ -108,7 +108,7 @@ export function TicketFieldInput({
               type="checkbox"
               name={name}
               value={option.value}
-              className="size-4 shrink-0 accent-blu-500"
+              className="size-4 shrink-0 accent-(--color-control-accent)"
               checked={chosen.includes(option.value)}
               onChange={(event) =>
                 onChange(

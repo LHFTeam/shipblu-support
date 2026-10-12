@@ -195,7 +195,7 @@ function RailLink({ item, active }: { item: NavItem; active: boolean }) {
       // the accessibility tree too — without this the link was named only by
       // its count, or by nothing at all.
       aria-label={linkName(item)}
-      className="group relative flex size-11 items-center justify-center rounded-lg text-(--color-text-rail-muted) transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-white aria-[current=page]:bg-white/8 aria-[current=page]:text-white"
+      className="group relative flex size-11 items-center justify-center rounded-lg text-(--color-text-rail-muted) transition-colors hover:bg-(--color-rail-hover) hover:text-(--color-text-rail) focus-visible:outline-(--color-text-rail) aria-[current=page]:bg-(--color-rail-active) aria-[current=page]:text-(--color-text-rail)"
     >
       {/* The active marker is a bar on the rail edge rather than only a filled
           background: it survives the hover state without the two fighting. */}
@@ -219,7 +219,7 @@ function RailLink({ item, active }: { item: NavItem; active: boolean }) {
           being a guessing game. */}
       <span
         aria-hidden
-        className="pointer-events-none absolute start-full z-40 ms-2 hidden rounded-md bg-(--color-background-rail) px-2 py-1 text-xs whitespace-nowrap text-white shadow-float group-hover:block group-focus-visible:block"
+        className="pointer-events-none absolute start-full z-40 ms-2 hidden rounded-md bg-(--color-background-rail) px-2 py-1 text-xs whitespace-nowrap text-(--color-text-rail) shadow-float group-hover:block group-focus-visible:block"
       >
         {item.label}
       </span>

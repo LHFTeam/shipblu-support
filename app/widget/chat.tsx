@@ -399,7 +399,7 @@ export function WidgetChat({
 
 /* The design system's small ghost button, square: 32px around an 18px glyph. */
 const HEADER_BUTTON =
-  'inline-flex size-8 shrink-0 items-center justify-center rounded-md text-(--color-text-primary) transition-colors hover:bg-(--color-background-hover) active:bg-neutral-200';
+  'inline-flex size-8 shrink-0 items-center justify-center rounded-md text-(--color-text-primary) transition-colors hover:bg-(--color-background-hover) active:bg-(--color-background-pressed)';
 
 function formatOpens(iso: string, locale: Locale): string {
   return new Intl.DateTimeFormat(locale === 'ar' ? 'ar-EG' : 'en-GB', {

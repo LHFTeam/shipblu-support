@@ -12,7 +12,7 @@ import {
   SuccessText,
 } from '@/components/ui';
 import { InfoTip, Tooltip } from '@/components/tooltip';
-import { formatRelative } from '@/lib/format';
+import { formatRelative, sentenceCase } from '@/lib/format';
 import type { AdminState } from '../settings-shared';
 import { createInvite, savePresenceSettings, setAgentActive, setAgentCapacity } from './actions';
 import type { ActionState } from '@/lib/http/action-state';
@@ -263,9 +263,6 @@ function lastSeen(value: Date | string | null): string {
 }
 
 /** Badge words are sentence case; the role and the availability are stored lower case. */
-function sentenceCase(text: string): string {
-  return text.charAt(0).toUpperCase() + text.slice(1);
-}
 
 export function AgentRow({
   agent,
@@ -319,7 +316,7 @@ export function AgentRow({
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
-        <Badge>{sentenceCase(agent.role.replace('_', ' '))}</Badge>
+        <Badge>{sentenceCase(agent.role)}</Badge>
         {!agent.isActive ? <Badge tone="neutral">Deactivated</Badge> : null}
         <Tooltip
           label="Availability"

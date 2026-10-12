@@ -3,6 +3,7 @@ import { InfoTip } from '@/components/tooltip';
 import { listTicketStatuses } from '@/lib/admin/settings';
 import { requirePermission } from '@/lib/auth/guard';
 import { NewStatus, StatusEditor } from './forms';
+import { sentenceCase } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
 
@@ -65,9 +66,7 @@ export default async function StatusesPage() {
               <StatusEditor status={status} />
             </Cell>
             <Cell>
-              <Badge tone={status.category}>
-                {status.category.charAt(0).toUpperCase() + status.category.slice(1)}
-              </Badge>
+              <Badge tone={status.category}>{sentenceCase(status.category)}</Badge>
             </Cell>
             <Cell>
               {status.stopsSlaClock ? (

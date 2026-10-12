@@ -4,7 +4,7 @@ import { useEffect } from 'react';
 import { useFormStatus } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { Badge, Button } from '@/components/ui';
-import { formatDateTime, formatRelative } from '@/lib/format';
+import { formatDateTime, formatRelative, sentenceCase } from '@/lib/format';
 
 /**
  * The parts every backfill card shows the same way.
@@ -102,7 +102,7 @@ function toneFor(status: string) {
 function labelFor(status: string): string {
   return (
     { completed: 'Succeeded', dead: 'Failed', processing: 'Running', pending: 'Queued' }[status] ??
-    status.charAt(0).toUpperCase() + status.slice(1)
+    sentenceCase(status)
   );
 }
 

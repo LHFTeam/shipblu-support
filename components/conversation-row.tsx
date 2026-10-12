@@ -67,7 +67,10 @@ export function ConversationRow({
       {/* The open row is marked on its edge, which survives the hover state
           and reads at a glance down a long list. */}
       {marker === 'bar' && active ? (
-        <span aria-hidden className="absolute inset-y-0 start-0 w-0.5 bg-blu-500" />
+        <span
+          aria-hidden
+          className="absolute inset-y-0 start-0 w-0.5 bg-(--color-marker-selected)"
+        />
       ) : null}
 
       {layout === 'avatar' ? (

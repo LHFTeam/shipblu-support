@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { requirePermission } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
 import { Badge, buttonClass, PageHeader } from '@/components/ui';
-import { formatRelative } from '@/lib/format';
+import { formatRelative, sentenceCase } from '@/lib/format';
 import { listArticlesForAdmin, parseArticleFilters } from '@/lib/kb/admin';
 import { FLOOR_LABELS } from '@/lib/kb/floors';
 import { KbFilters } from './filters';
@@ -87,7 +87,7 @@ export default async function KbListPage({
               {article.minRole ? (
                 <Badge tone="warning">{FLOOR_LABELS[article.minRole]}</Badge>
               ) : article.visibility !== 'public' ? (
-                <Badge tone="warning">{sentenceCase(article.visibility.replace('_', ' '))}</Badge>
+                <Badge tone="warning">{sentenceCase(article.visibility)}</Badge>
               ) : null}
               <Badge>{article.locale}</Badge>
 
@@ -106,6 +106,3 @@ export default async function KbListPage({
 }
 
 /** Badge words are sentence case; the status and visibility are stored lower case. */
-function sentenceCase(text: string): string {
-  return text.charAt(0).toUpperCase() + text.slice(1);
-}

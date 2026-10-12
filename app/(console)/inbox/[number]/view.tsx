@@ -124,7 +124,11 @@ export function ConversationView({
     // the whole screen, so there is no canvas to float on and no corner to round.
     <div className="flex h-full md:gap-(--console-gap)">
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-(--color-thread-bg) md:rounded-(--console-panel-radius)">
-        <Header conversation={conversation} canEditContact={canEditContact} />
+        <Header
+          conversation={conversation}
+          canEditContact={canEditContact}
+          canViewContact={canViewContact}
+        />
 
         {/*
           Positioned so it is the containing block for anything absolutely

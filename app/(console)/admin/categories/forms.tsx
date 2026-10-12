@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Badge, Button, Cell, ErrorText, Input, Row } from '@/components/ui';
 import { saveCategory, saveRootCause, setCategoryActive, setRootCauseActive } from './actions';
+import { sentenceCase } from '@/lib/format';
 
 /**
  * One editable row each, for a category and for a cause.
@@ -307,7 +308,7 @@ export function RootCauseRow({
         control that always fails is worse than no control.
       */}
       <Cell>
-        <Badge>{cause.owner.charAt(0).toUpperCase() + cause.owner.slice(1)}</Badge>
+        <Badge>{sentenceCase(cause.owner)}</Badge>
       </Cell>
 
       <Cell>

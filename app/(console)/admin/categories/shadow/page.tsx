@@ -6,6 +6,7 @@ import { requirePermission } from '@/lib/auth/guard';
 import { reportFor, runLabels } from '@/lib/categorise-ai/report';
 import { CONVERSATION_CHANNELS, hiddenChannels } from '@/lib/tickets/channel-policy';
 import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
+import { sentenceCase } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
 
@@ -181,7 +182,7 @@ export default async function ShadowCategorisationPage({
                 </Cell>
                 <Cell>
                   <Badge tone={slice.script === 'arabic' ? 'brand' : 'neutral'}>
-                    {slice.script.charAt(0).toUpperCase() + slice.script.slice(1)}
+                    {sentenceCase(slice.script)}
                   </Badge>
                 </Cell>
                 <Cell>

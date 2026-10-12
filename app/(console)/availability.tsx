@@ -59,7 +59,7 @@ export function AvailabilitySwitch({
         >
           <span
             aria-hidden
-            className="relative h-[18px] w-8 flex-none rounded-full bg-neutral-300 transition-colors group-data-[on=true]:bg-green-500 after:absolute after:start-0.5 after:top-0.5 after:size-3.5 after:rounded-full after:bg-white after:shadow-[0_1px_2px_rgb(0_0_0/0.2)] after:transition-[inset-inline-start] group-data-[on=true]:after:start-4"
+            className="relative h-[18px] w-8 flex-none rounded-full bg-(--color-switch-track-off) transition-colors group-data-[on=true]:bg-(--color-switch-track-on) after:absolute after:start-0.5 after:top-0.5 after:size-3.5 after:rounded-full after:bg-(--color-background-surface) after:shadow-[0_1px_2px_rgb(0_0_0/0.2)] after:transition-[inset-inline-start] group-data-[on=true]:after:start-4"
           />
           <span className="font-medium">{on ? 'Accepting tickets' : 'Away'}</span>
         </button>

@@ -437,7 +437,7 @@ function SideConversationDraft({
             type="checkbox"
             name="includeAnchor"
             defaultChecked
-            className="mt-0.5 size-4 shrink-0 accent-blu-500"
+            className="mt-0.5 size-4 shrink-0 accent-(--color-control-accent)"
           />
           <span>
             <span className="font-medium">Quote the customer&apos;s last message</span>
@@ -458,7 +458,7 @@ function SideConversationDraft({
             type="checkbox"
             name="setPending"
             defaultChecked
-            className="size-4 shrink-0 accent-blu-500"
+            className="size-4 shrink-0 accent-(--color-control-accent)"
           />
           Set this ticket to Pending
         </label>

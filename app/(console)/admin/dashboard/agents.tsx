@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { Badge, buttonClass, Cell, EmptyState, Row, Table } from '@/components/ui';
 import { InfoTip } from '@/components/tooltip';
-import { formatRelative } from '@/lib/format';
+import { formatRelative, sentenceCase } from '@/lib/format';
 import type { agentLoad } from '@/lib/reports/live';
 import { formatDuration } from '@/lib/reports/queries';
 
@@ -68,9 +68,7 @@ export function AgentLoad({
             <Row key={agent.id}>
               <Cell className="font-medium">{agent.name}</Cell>
               <Cell>
-                <Badge tone={presenceTone(agent.presence)}>
-                  {agent.presence.charAt(0).toUpperCase() + agent.presence.slice(1)}
-                </Badge>
+                <Badge tone={presenceTone(agent.presence)}>{sentenceCase(agent.presence)}</Badge>
                 {agent.lastSeenAt && agent.presence !== 'online' ? (
                   <span className="ms-2 text-xs text-(--color-text-secondary)">
                     {formatRelative(agent.lastSeenAt)}

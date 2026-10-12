@@ -6,7 +6,7 @@ import { useFormStatus } from 'react-dom';
 import { Badge, Button, ErrorText, Select } from '@/components/ui';
 import { ConfirmSubmit } from '@/components/confirm-submit';
 import { useActionForm } from '@/components/use-action-form';
-import { formatRelative } from '@/lib/format';
+import { formatRelative, sentenceCase } from '@/lib/format';
 import type { ArticleVersion, TranslationGroup, TranslationOption } from '@/lib/kb/admin';
 import {
   deleteArticle,
@@ -53,7 +53,7 @@ export function ArticleSidebar({
 
         <div className="mb-2">
           <Badge tone={status === 'published' ? 'success' : 'neutral'}>
-            {status.charAt(0).toUpperCase() + status.slice(1)}
+            {sentenceCase(status)}
           </Badge>
         </div>
 

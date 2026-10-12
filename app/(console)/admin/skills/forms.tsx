@@ -63,7 +63,7 @@ function Fields({ skill, fields, agents }: FormProps & { skill?: Skill }) {
                 name="agentIds"
                 value={agent.value}
                 defaultChecked={held.has(agent.value)}
-                className="size-4 accent-blu-500"
+                className="size-4 accent-(--color-control-accent)"
               />
               {agent.label}
             </label>

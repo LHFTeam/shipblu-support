@@ -15,9 +15,11 @@ import { MetaWindowIndicator, WindowIndicator } from './window-indicator';
 export function Header({
   conversation,
   canEditContact,
+  canViewContact,
 }: {
   conversation: ConversationDetail;
   canEditContact: boolean;
+  canViewContact: boolean;
 }) {
   const isMeta = conversation.channel === 'facebook' || conversation.channel === 'instagram';
   const isComment = Boolean(conversation.externalId?.includes(':comment:'));
@@ -51,7 +53,9 @@ export function Header({
       <Avatar
         name={conversation.requester.name}
         contactId={conversation.requester.id}
-        hasAvatar={conversation.requester.hasAvatar}
+        // The avatar route answers 404 without contact.view, so asking for the
+        // picture then is a request that can only fail.
+        hasAvatar={canViewContact && conversation.requester.hasAvatar}
         size={36}
       />
 

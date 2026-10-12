@@ -172,7 +172,7 @@ export function ConditionBuilder({
                           <input
                             type="checkbox"
                             value={choice.value}
-                            className="size-4 accent-blu-500"
+                            className="size-4 accent-(--color-control-accent)"
                             checked={selectedChoices.includes(choice.value)}
                             onChange={(event) =>
                               update(index, {

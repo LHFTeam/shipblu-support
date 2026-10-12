@@ -741,7 +741,11 @@ layers: `@theme` primitives that generate utilities (`bg-blu-500`, `text-2xs`),
 the legacy names (`--muted`, `brand-*`, `--kb-*`) kept as aliases. Markup reads a
 role as `bg-(--color-feedback-danger-bg)`, never a raw palette hue, so a change to
 what "warning" looks like reaches every warning at once; a token that is not
-declared in `globals.css` renders nothing, silently. Four rules from the system
+declared in `globals.css` renders nothing, silently. A value with no role yet
+gets one in `:root` beside its kin (the switch track, the pressed surface, the
+rail's washes are there) rather than a primitive at the call site; the logo's
+white tile in `components/brand.tsx` is the one exception, because it is the
+brand's artwork rather than a state of the interface. Four rules from the system
 are easy to break by accident:
 
 - **One blue acts; coral only demands attention.** Every action is the

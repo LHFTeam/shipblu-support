@@ -39,6 +39,13 @@ export type InboxRow = {
   priority: string;
   statusName: string;
   statusCategory: 'open' | 'pending' | 'resolved' | 'closed';
+  /**
+   * Whether this is its category's default status. The avatar row leaves the
+   * plain "Open" unbadged because most rows are open, which is only true of
+   * the default: a status an admin added to the category ("Escalated") is the
+   * exception the row exists to show.
+   */
+  statusIsDefault: boolean;
   requesterName: string | null;
   requesterHandle: string | null;
   /** For the row's avatar, which the avatar route serves by contact id. */
@@ -103,6 +110,7 @@ function selectInboxRows(where: SQL | undefined) {
       priority: conversations.priority,
       statusName: ticketStatuses.name,
       statusCategory: ticketStatuses.category,
+      statusIsDefault: ticketStatuses.isDefault,
       requesterName: contacts.name,
       requesterContactId: contacts.id,
       requesterAvatarPath: contacts.avatarPath,
@@ -313,6 +321,7 @@ export async function listInbox(
       priority: row.priority,
       statusName: row.statusName,
       statusCategory: row.statusCategory,
+      statusIsDefault: row.statusIsDefault,
       requesterName: row.requesterName,
       requesterHandle: row.requesterEmail ?? row.requesterPhone,
       requesterContactId: row.requesterContactId,

@@ -149,7 +149,7 @@ export function Sidebar({
         <Avatar
           name={requester.name}
           contactId={requester.id}
-          hasAvatar={requester.hasAvatar}
+          hasAvatar={canViewContact && requester.hasAvatar}
           size={48}
         />
         <div className="min-w-0">

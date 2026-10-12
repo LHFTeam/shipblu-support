@@ -202,7 +202,7 @@ function CustomFieldControl({
             disabled={saving}
             onChange={(e) => save(e.target.checked ? 'on' : '')}
             aria-label={field.label}
-            className="size-4 accent-blu-500"
+            className="size-4 accent-(--color-control-accent)"
           />
         );
 
@@ -240,7 +240,7 @@ function CustomFieldControl({
                         : chosen.filter((entry) => entry !== option.value),
                     )
                   }
-                  className="size-4 shrink-0 accent-blu-500"
+                  className="size-4 shrink-0 accent-(--color-control-accent)"
                 />
                 {option.label}
               </label>

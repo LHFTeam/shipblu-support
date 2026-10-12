@@ -108,7 +108,7 @@ export function ReplyForm({
             type="checkbox"
             checked={privately}
             onChange={(event) => setPrivately(event.target.checked)}
-            className="mt-0.5 size-4 shrink-0 accent-blu-500"
+            className="mt-0.5 size-4 shrink-0 accent-(--color-control-accent)"
           />
           <span>
             <span className="font-medium">Reply privately instead</span>
@@ -124,7 +124,11 @@ export function ReplyForm({
 
       <div className="flex items-center gap-3">
         <label className="flex items-center gap-1.5 text-xs text-(--color-text-secondary)">
-          <input type="checkbox" name="resolveAfter" className="size-4 accent-blu-500" />
+          <input
+            type="checkbox"
+            name="resolveAfter"
+            className="size-4 accent-(--color-control-accent)"
+          />
           Resolve after sending
         </label>
         <SubmitButton

@@ -97,7 +97,12 @@ function CustomField({ field, missing }: { field: TicketFieldDef; missing: boole
         <Textarea id={id} name={name} rows={4} required={markRequired} aria-invalid={missing} />
       ) : field.type === 'checkbox' ? (
         <label className="flex items-center gap-2 text-sm">
-          <input id={id} type="checkbox" name={name} className="size-4 shrink-0 accent-blu-500" />
+          <input
+            id={id}
+            type="checkbox"
+            name={name}
+            className="size-4 shrink-0 accent-(--color-control-accent)"
+          />
           {field.label}
         </label>
       ) : field.type === 'dropdown' ? (
@@ -117,7 +122,7 @@ function CustomField({ field, missing }: { field: TicketFieldDef; missing: boole
                 type="checkbox"
                 name={name}
                 value={option.value}
-                className="size-4 shrink-0 accent-blu-500"
+                className="size-4 shrink-0 accent-(--color-control-accent)"
               />
               {option.label}
             </label>

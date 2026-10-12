@@ -18,6 +18,7 @@ const row = (overrides: Partial<Parameters<typeof rowBadges>[0]> = {}) => ({
   lastCustomerMessageAt: hoursAgo(1),
   statusCategory: 'open' as const,
   statusName: 'Open',
+  statusIsDefault: true,
   priority: 'medium',
   sideState: null,
   ...overrides,
@@ -107,5 +108,14 @@ describe('rowBadges', () => {
       sideState: 'waiting',
     });
     expect(labels(closed, NOW, 'avatar')).toEqual(['Window closed', 'Awaiting hub']);
+  });
+
+  it('badges a status an admin added to the open category', () => {
+    // Only the category's default goes unbadged; "Escalated" is open too, and
+    // without its badge it would read exactly like a plain open ticket.
+    expect(labels(row(), NOW, 'avatar')).toEqual([]);
+    expect(labels(row({ statusName: 'Escalated', statusIsDefault: false }), NOW, 'avatar')).toEqual(
+      ['Escalated'],
+    );
   });
 });
