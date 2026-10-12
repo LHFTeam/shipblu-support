@@ -451,12 +451,27 @@ describe('replaced suggestions', () => {
 
     // Replaced: shown, untouched, and a newer suggestion followed.
     await suggestion(f, { ...where, shownAt: IN_WINDOW });
-    // Not replaced: waved away before the newer one came.
+    // Not replaced: waved away, taken, or answered before the newer one came.
     await suggestion(f, {
       ...where,
       shownAt: IN_WINDOW,
       dismissedAt: IN_WINDOW,
       anchorMessageId: await reply(f),
+    });
+    await suggestion(f, {
+      ...where,
+      shownAt: IN_WINDOW,
+      acceptedAt: IN_WINDOW,
+      anchorMessageId: await reply(f),
+    });
+    await suggestion(f, {
+      ...where,
+      shownAt: IN_WINDOW,
+      anchorMessageId: await reply(f),
+      messageId: await reply(f),
+      repliedAt: IN_WINDOW,
+      sentChoice: NONE_KEY,
+      sentMatches: false,
     });
     // The newer one, taken.
     await suggestion(f, {
@@ -468,16 +483,26 @@ describe('replaced suggestions', () => {
     });
 
     const head = await headline(WINDOW);
-    expect(head).toMatchObject({ shown: 3, accepted: 1, replaced: 1 });
-    expect((await byChannelAndLanguage(WINDOW))[0]).toMatchObject({ shown: 3, replaced: 1 });
+    expect(head).toMatchObject({ shown: 5, accepted: 2, replaced: 1 });
+    expect((await byChannelAndLanguage(WINDOW))[0]).toMatchObject({ shown: 5, replaced: 1 });
   });
 
-  it('does not count the newest suggestion, nor one shown to a different agent', async () => {
+  it('does not count the newest suggestion, nor one followed only on another ticket or by another agent', async () => {
     const f = await fixture();
     const [other] = await db
       .insert(agents)
       .values({ name: 'Zeina', email: 'zeina@shipblu.test' })
       .returning({ id: agents.id });
+
+    const [open] = await db
+      .select({ id: ticketStatuses.id })
+      .from(ticketStatuses)
+      .where(eq(ticketStatuses.name, 'Open'));
+    const [contact] = await db.insert(contacts).values({ name: 'Hana' }).returning();
+    const [elsewhere] = await db
+      .insert(conversations)
+      .values({ channel: 'facebook', statusId: open!.id, requesterContactId: contact!.id })
+      .returning({ id: conversations.id });
 
     await suggestion(f, { choice: f.where, cannedResponseId: f.where, shownAt: IN_WINDOW });
     await suggestion(f, {
@@ -485,6 +510,12 @@ describe('replaced suggestions', () => {
       choice: f.where,
       cannedResponseId: f.where,
       createdAt: cairo('2026-10-03T12:05'),
+    });
+    await suggestion(f, {
+      conversationId: elsewhere!.id,
+      choice: f.where,
+      cannedResponseId: f.where,
+      createdAt: cairo('2026-10-03T12:06'),
     });
 
     expect((await headline(WINDOW)).replaced).toBe(0);

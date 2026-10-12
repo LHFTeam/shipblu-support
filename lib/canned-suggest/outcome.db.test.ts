@@ -386,6 +386,43 @@ describe('recordSuggestionOutcome', () => {
     expect(await row(afterWhere)).toMatchObject({ sentChoice: NONE_KEY, sentMatches: false });
   });
 
+  // `recordCannedUse` found the last insert out of reach, so the grade falls back
+  // to the claimed list: the last response in it the agent could have inserted
+  // is what the reply carried, and it is frozen whole — id, link and title — so
+  // the report can still name it after it is deleted.
+  it('freezes the last claimed response the agent could have inserted, with its title', async () => {
+    const me = await agent();
+    const someoneElse = await agent('zeina@shipblu.test');
+    const conversationId = await ticket();
+    const where = await canned();
+    const closing = await canned('Closing — anything else?');
+    const [theirs] = await db
+      .insert(cannedResponses)
+      .values({
+        title: 'Mine only',
+        bodyTextEn: 'Zeina says hi.',
+        visibility: 'personal',
+        agentId: someoneElse,
+      })
+      .returning({ id: cannedResponses.id });
+    const id = await suggestion(conversationId, me, NONE_KEY);
+
+    await recordSuggestionOutcome(me, id, {
+      conversationId,
+      messageId: await reply(conversationId, me, 'x'),
+      body: BODY_EN,
+      used: null,
+      inserted: [where, closing, theirs!.id],
+    });
+
+    expect(await row(id)).toMatchObject({
+      sentChoice: closing,
+      sentMatches: false,
+      sentCannedResponseId: closing,
+      sentCannedTitle: 'Closing — anything else?',
+    });
+  });
+
   it('links nothing for another agent, another ticket, or a suggestion already linked', async () => {
     const me = await agent();
     const them = await agent('nour@shipblu.test');

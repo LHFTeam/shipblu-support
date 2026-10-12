@@ -155,9 +155,10 @@ export default async function CannedSuggestionsReportPage({
                   Suggestions an agent put in the box with Tab or Use, out of those that appeared in
                   an empty box. A suggestion that came back after the agent had started typing was
                   never seen and is not counted either way. One that was shown and then replaced by
-                  a newer suggestion &mdash; the customer wrote again before the agent did anything
-                  with it &mdash; stays in the count as not taken, and the second figure says how
-                  many there were.
+                  a newer suggestion on the ticket before the agent did anything with it &mdash;
+                  usually the customer writing again, though another agent&rsquo;s reply moves it
+                  too &mdash; stays in the count as not taken, and the second figure says how many
+                  there were.
                 </>
               }
             />
@@ -336,10 +337,11 @@ export default async function CannedSuggestionsReportPage({
           <h2 className="mb-2 flex items-center gap-1 text-sm font-semibold">
             By channel and the customer&rsquo;s language
             <InfoTip label="By channel and the customer's language">
-              <b>Replaced</b> counts suggestions shown and then replaced by a newer one before the
-              agent did anything with them: the customer wrote again while the agent was in the box.
-              They are in <b>Shown</b> and count as not taken, and chat channels, where a customer
-              often sends a greeting and then the question, produce far more of them than email.
+              <b>Replaced</b> counts suggestions shown and then replaced by a newer one on the same
+              ticket before the agent did anything with them &mdash; usually the customer writing
+              again, though a reply from another agent or an automation does it too. They are in{' '}
+              <b>Shown</b> and count as not taken, and chat channels, where a customer often sends a
+              greeting and then the question, produce far more of them than email.
             </InfoTip>
           </h2>
           <Table

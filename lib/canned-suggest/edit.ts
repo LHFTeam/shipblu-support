@@ -26,8 +26,10 @@ function normalise(text: string): string {
 }
 
 /**
- * `candidates` are the bodies the response could have gone in as — normally the
- * one language the composer inserted, both when it did not say which.
+ * `candidates` are the bodies the response could have gone in as — both
+ * languages, from `outcome.ts`, whichever one the composer inserted. An empty
+ * side is dropped, so trying both can only match text that really is this
+ * response.
  */
 export function editKind(sent: string, candidates: readonly string[]): EditKind {
   const reply = normalise(sent);

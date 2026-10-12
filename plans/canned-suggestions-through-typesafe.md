@@ -11,10 +11,12 @@ and what the reply that followed actually carried, is recorded, so
 `/reports/canned-suggestions` can say how often a suggestion is taken and which
 ones are right.
 
-It is the second thing TypeSafe touches here, and the first that is shown to a
-person. The shadow categoriser (`plans/categorisation-through-typesafe.md`)
-writes only to its own table; this one puts a model's answer in front of an
-agent. What keeps that safe is the same property that made the categoriser
+It is the third thing TypeSafe touches here, and the first whose answer is put in
+front of an agent as something to take. The shadow categoriser
+(`plans/categorisation-through-typesafe.md`) writes only to its own table; the
+priority classifier (`plans/priority-through-typesafe.md`) can write
+`conversations.priority`, a level agents see but are never asked to accept; this
+one offers a model's answer to an agent, who takes it or does not. What keeps that safe is the same property that made the categoriser
 comparable to the rules: Jev answers a `choice` over options the request
 offered, so it can name a stored response or `none` and nothing else. The text
 that lands in the box is the stored body, chosen through the same code path as

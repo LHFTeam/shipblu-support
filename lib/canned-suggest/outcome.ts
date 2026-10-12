@@ -102,25 +102,15 @@ async function gradeOf(
   used: CannedUse | null,
   body: string,
 ): Promise<Grade> {
-  // `none` is right when the reply carried no canned response at all.
-  if (choice === NONE_KEY) {
-    const carried = used?.id ?? (await lastVisible(agentId, inserted));
+  // `none` is right when the reply carried no canned response at all; any other
+  // choice is wrong when the reply did not carry it.
+  if (choice === NONE_KEY || !inserted.has(choice)) {
+    const carried = used ?? (await lastVisible(agentId, inserted));
     return {
-      sentChoice: carried ?? NONE_KEY,
-      sentMatches: carried === null,
-      sentCannedResponseId: used?.id ?? null,
-      sentCannedTitle: used?.title ?? null,
-      sentLocale: used?.locale ?? null,
-      sentEdit: null,
-    };
-  }
-
-  if (!inserted.has(choice)) {
-    return {
-      sentChoice: used?.id ?? (await lastVisible(agentId, inserted)) ?? NONE_KEY,
-      sentMatches: false,
-      sentCannedResponseId: used?.id ?? null,
-      sentCannedTitle: used?.title ?? null,
+      sentChoice: carried?.id ?? NONE_KEY,
+      sentMatches: choice === NONE_KEY && carried === null,
+      sentCannedResponseId: carried?.id ?? null,
+      sentCannedTitle: carried?.title ?? null,
       sentLocale: used?.locale ?? null,
       sentEdit: null,
     };
@@ -164,20 +154,24 @@ async function gradeOf(
 }
 
 /**
- * The last of the claimed responses the agent could actually have inserted, or
- * null. `inserted` is a form field, so an id from it is re-read through the
+ * The last of the claimed responses the agent could actually have inserted —
+ * its id and its title, frozen beside `sent_choice` like any other — or null. `inserted` is a form field, so an id from it is re-read through the
  * composer's rule before it is frozen into `sent_choice` and named by the
  * report. Asked only when `used` is null — `recordCannedUse` found the last
  * response deleted or out of reach — so a response deleted between render and
  * send grades as not carried here, the same answer the usage column gives it.
  */
-async function lastVisible(agentId: string, inserted: ReadonlySet<string>): Promise<string | null> {
+async function lastVisible(
+  agentId: string,
+  inserted: ReadonlySet<string>,
+): Promise<{ id: string; title: string } | null> {
   if (inserted.size === 0) return null;
   const claimed = [...inserted];
   const rows = await db
-    .select({ id: cannedResponses.id })
+    .select({ id: cannedResponses.id, title: cannedResponses.title })
     .from(cannedResponses)
     .where(and(inArray(cannedResponses.id, claimed), cannedVisibleTo(agentId)));
-  const visible = new Set(rows.map((row) => row.id));
-  return claimed.findLast((id) => visible.has(id)) ?? null;
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const last = claimed.findLast((id) => byId.has(id));
+  return last === undefined ? null : byId.get(last)!;
 }
