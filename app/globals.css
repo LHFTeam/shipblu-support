@@ -1,102 +1,605 @@
 @import 'tailwindcss';
 
 /**
- * ShipBlu Support design tokens.
+ * ShipBlu Support design tokens — the ShipBlu Support design system, in
+ * Tailwind v4 form.
  *
- * The palette is taken from ShipBlu's own brand: a navy blue that carries the
- * identity, and a warm coral used only where the eye should land — a primary
- * action, an SLA about to breach. Coral is deliberately scarce; an interface
- * where everything is urgent has no way left to say that something is.
+ * One palette for all three surfaces. The console, the help centre and the
+ * widget used to carry three blues (#1558ad, #1c5bfe, #0b6bcb) and two
+ * neutrals; they now read one ramp anchored on the logo's #145BFE, and differ
+ * only in density and type. The design system's readme carries the decisions
+ * and their costs; the comments below carry the ones a reader of this file
+ * needs.
  *
- * Everything is oklch so that a step in lightness looks like a step in
- * lightness, which is what keeps the dark theme from turning muddy when the
- * same scale is reused at different ends.
+ * Three layers.
+ * 1. `@theme` holds primitives. Each one generates utilities (`bg-blu-500`,
+ *    `text-neutral-600`, `text-2xs`, `shadow-float`), and that is the only
+ *    reason anything belongs there.
+ * 2. `:root` holds semantic roles and component tokens. They generate no
+ *    utilities; markup reads them as `bg-(--color-background-surface)` or
+ *    `var()`. A component reads layer 2 or 3, never a primitive — so a change
+ *    to what "warning" looks like reaches every warning at once.
+ * 3. Legacy names, at the end of `@theme`, `:root` and `.kb-shell`, pointed at
+ *    the roles, so markup written against the old names keeps working while it
+ *    is moved across.
+ *
+ * Light only: no dark block, no colour-scheme media query, no dark variant.
+ * CI rejects all three (`light-only`).
  */
-@theme {
-  --color-brand-50: oklch(0.97 0.015 250);
-  --color-brand-100: oklch(0.93 0.032 250);
-  --color-brand-200: oklch(0.87 0.055 251);
-  --color-brand-300: oklch(0.78 0.085 252);
-  --color-brand-400: oklch(0.66 0.12 253);
-  --color-brand-500: oklch(0.56 0.15 255);
-  --color-brand-600: oklch(0.47 0.15 257);
-  --color-brand-700: oklch(0.39 0.13 258);
-  --color-brand-800: oklch(0.31 0.1 258);
-  --color-brand-900: oklch(0.24 0.07 258);
 
-  --color-accent-400: oklch(0.78 0.14 45);
-  --color-accent-500: oklch(0.7 0.17 42);
-  --color-accent-600: oklch(0.63 0.19 40);
-  --color-accent-700: oklch(0.55 0.18 38);
+/* `static` so every primitive is emitted even before a utility uses it: the
+   semantic roles in :root read them through var(). Tailwind's default palette is
+   deliberately not reset (--color-*: initial). Markup still uses raw hues, and a
+   reset would also remove white and black and make any hue we missed render
+   nothing, silently. Add the reset after step two, and let CI catch stragglers. */
+@theme static {
+  /* Blu. Anchored on the logo's #145BFE. The help centre's #1c5bfe, the
+     console's #1558ad and the launcher's #0b6bcb all collapse into this ramp. */
+  --color-blu-50: #eff4ff; /* oklch(0.967 0.016 266) */
+  --color-blu-100: #dce6ff; /* oklch(0.925 0.036 268) */
+  --color-blu-200: #bcceff; /* oklch(0.854 0.071 269) */
+  --color-blu-300: #8fadff; /* oklch(0.758 0.123 268) */
+  --color-blu-400: #5c86ff; /* oklch(0.651 0.185 267) */
+  --color-blu-500: #145bfe; /* oklch(0.545 0.250 263) action; white 14px text 5.31:1 */
+  --color-blu-600: #0f4ad6; /* oklch(0.476 0.221 263) hover, links; white 7.07:1 */
+  --color-blu-700: #0d3ba8; /* oklch(0.404 0.181 263) pressed, info text */
+  --color-blu-800: #0e2f80; /* oklch(0.341 0.142 264) */
+  --color-blu-900: #0c2561; /* oklch(0.289 0.111 264) */
 
-  --color-positive: oklch(0.62 0.15 150);
-  --color-caution: oklch(0.75 0.15 85);
-  --color-critical: oklch(0.58 0.2 25);
+  /* Navy. The logo's second colour, and now the rail (was #071e40). */
+  --color-navy-900: #022d65; /* oklch(0.308 0.109 258) white 13.41:1 */
+  --color-navy-950: #011b3d; /* oklch(0.226 0.073 256) */
+
+  /* Neutral. Cool charcoal. Overrides Tailwind's own neutral, which the markup
+     does not use. */
+  --color-neutral-0: #ffffff; /* oklch(1 0 0) */
+  --color-neutral-25: #fbfcfd; /* oklch(0.991 0.002 0) */
+  --color-neutral-50: #f6f8fa; /* oklch(0.978 0.003 248) */
+  --color-neutral-100: #edf0f4; /* oklch(0.954 0.006 255) */
+  --color-neutral-200: #dfe4ea; /* oklch(0.917 0.010 253) */
+  --color-neutral-300: #c7ced7; /* oklch(0.849 0.015 255) */
+  --color-neutral-400: #9ba5b2; /* oklch(0.718 0.022 255) non-text only */
+  --color-neutral-500: #667180; /* oklch(0.545 0.025 255) 4.88:1 on white */
+  --color-neutral-600: #515b68; /* oklch(0.467 0.025 255) 6.89:1 on white */
+  --color-neutral-700: #3a424d; /* oklch(0.376 0.022 256) */
+  --color-neutral-800: #282e36; /* oklch(0.299 0.017 256) */
+  --color-neutral-900: #1e1e1e; /* oklch(0.235 0 0) text, 16.67:1 */
+  --color-neutral-950: #131417; /* oklch(0.191 0.006 271) */
+
+  /* Green: done. Success, resolved, delivered, WhatsApp. */
+  --color-green-50: #e6f6ee; /* oklch(0.959 0.020 165) */
+  --color-green-100: #c7ebda; /* oklch(0.910 0.044 165) */
+  --color-green-500: #0e8a55; /* oklch(0.559 0.129 157) */
+  --color-green-600: #0a6f44; /* oklch(0.478 0.109 158) on green-50 5.57:1 */
+  --color-green-700: #075332; /* oklch(0.391 0.089 158) */
+
+  /* Amber: waiting. Pending, warning, attempted, on hold, private notes. */
+  --color-amber-50: #fff4e5; /* oklch(0.972 0.023 76) */
+  --color-amber-100: #ffe4bf; /* oklch(0.932 0.057 76) */
+  --color-amber-200: #f5c886; /* oklch(0.858 0.098 76) */
+  --color-amber-500: #b26a00; /* oklch(0.591 0.132 65) */
+  --color-amber-600: #8f5400; /* oklch(0.503 0.113 65) on amber-50 5.62:1 */
+  --color-amber-700: #6b3f00; /* oklch(0.411 0.091 67) */
+
+  /* Red: broken. Moved from hue ~25 to ~18 (crimson), 30° from coral, so the two
+     cannot be confused at badge size. */
+  --color-red-50: #fdedf0; /* oklch(0.960 0.018 5) */
+  --color-red-100: #fad1d9; /* oklch(0.898 0.047 5) */
+  --color-red-500: #d8304f; /* oklch(0.582 0.202 17) */
+  --color-red-600: #be1e3c; /* oklch(0.520 0.192 18) danger; white 6.10:1 */
+  --color-red-700: #8f1730; /* oklch(0.425 0.153 16) */
+
+  /* Violet: out for delivery, and nothing else, so it never shares blue with
+     in transit. */
+  --color-violet-50: #f1edff; /* oklch(0.954 0.024 296) */
+  --color-violet-100: #ded5ff; /* oklch(0.893 0.058 295) */
+  --color-violet-500: #5b3fd6; /* oklch(0.496 0.217 284) */
+  --color-violet-600: #4a31b4; /* oklch(0.431 0.194 283) on violet-50 7.66:1 */
+  --color-violet-700: #3b2791; /* oklch(0.371 0.164 284) */
+
+  /* Coral: attention. Only ever a solid fill with white text, never a tint and
+     never a button. Hue ~48 (was ~40). */
+  --color-coral-50: #fff2eb; /* oklch(0.969 0.017 50) */
+  --color-coral-100: #ffdfcc; /* oklch(0.925 0.044 53) */
+  --color-coral-400: #ff8a4c; /* oklch(0.751 0.161 47) */
+  --color-coral-500: #f07a30; /* oklch(0.704 0.167 49) markers on navy only */
+  --color-coral-600: #bc5300; /* oklch(0.567 0.155 48) fills, series 2; white 4.80:1 */
+  --color-coral-700: #9a4400; /* oklch(0.497 0.131 49) */
+
+  /* Cyan: web chat. Magenta: Instagram and returned. */
+  --color-cyan-50: #e7f6fa; /* oklch(0.963 0.017 215) */
+  --color-cyan-100: #c5e9f2; /* oklch(0.911 0.040 215) */
+  --color-cyan-600: #0b6680; /* oklch(0.475 0.086 224) */
+  --color-cyan-700: #0a5266; /* oklch(0.408 0.072 223) on cyan-50 7.86:1 */
+  --color-magenta-50: #fcedf6; /* oklch(0.960 0.020 341) */
+  --color-magenta-100: #f8d3e8; /* oklch(0.904 0.049 343) */
+  --color-magenta-600: #a3216b; /* oklch(0.487 0.177 351) on magenta-50 6.22:1 */
+  --color-magenta-700: #7f1a54; /* oklch(0.408 0.146 351) */
+
+  /* Type. Tajawal first is correct only because next/font loads it with
+     subsets: ['arabic'], so its face carries an Arabic unicode-range and Latin
+     falls through to the system font. Never put var(--font-tajawal) here: its
+     "Tajawal Fallback" face is Arial with no unicode-range and would take every
+     Latin letter. The console layout must apply tajawal.variable (from
+     app/help/[locale]/fonts.ts) so the face is on the page. The help centre's
+     stack stays on the .kb-shell rule in globals.css, where var(--font-lato)
+     resolves; on :root it would not exist. */
+  --font-console:
+    Tajawal, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+  --font-emoji: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif;
+
+  /* Console scale: Tailwind's own xs (12/16) and sm (14/20), plus 2xs, which
+     replaces the 9px, 10px and 11px one-offs on counts, chips and bottom-bar
+     labels. Nothing in the console is smaller. */
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+
+  /* Reading scale, help centre and articles: phone value, then the md value. */
+  --text-read-display: 1.875rem;
+  --text-read-display--line-height: 1.2;
+  --text-read-display-md: 2.25rem;
+  --text-read-display-md--line-height: 1.2;
+  --text-read-h1: 1.5rem;
+  --text-read-h1--line-height: 1.25;
+  --text-read-h1-md: 1.875rem;
+  --text-read-h1-md--line-height: 1.25;
+  --text-read-h2: 1.5rem;
+  --text-read-h2--line-height: 1.3;
+  --text-read-h3: 1.25rem;
+  --text-read-h3--line-height: 1.35;
+  --text-read-h4: 1.125rem;
+  --text-read-h4--line-height: 1.4;
+  --text-read-body: 1.0625rem;
+  --text-read-body--line-height: 1.75;
+  --text-read-body-md: 1.125rem;
+  --text-read-body-md--line-height: 1.75;
+  --text-read-ui: 1rem;
+  --text-read-ui--line-height: 1.6;
+
+  /* Arabic needs more leading than Latin at the same size. Message bodies are
+     dir="auto" and of unknown script, so they always take the Arabic value. */
+  --leading-latin-ui: 1.43;
+  --leading-arabic-ui: 1.65;
+  --leading-latin-tight: 1.25;
+  --leading-arabic-tight: 1.45;
+  --leading-read-ar: 1.85;
+  --leading-read-heading-ar: 1.5;
+  /* Latin eyebrows only. Arabic has no case, and tracking breaks its joins. */
+  --tracking-eyebrow: 0.08em;
+
+  /* Radius: Tailwind's defaults already are the scale (rounded-sm 4px badges,
+     rounded-md 6px controls, rounded-lg 8px images, rounded-xl 12px cards), so
+     only the logo tile is added. */
+  --radius-logo: 28%;
+  --radius-bubble: 20px;
+  --radius-bubble-tail: 4px;
+
+  /* Elevation. The console is flat; shadows are for things that float. */
+  --shadow-card:
+    0 1px 3px rgb(19 20 23 / 0.07), 0 1px 2px -1px rgb(19 20 23 / 0.05); /* help-centre panels */
+  --shadow-float:
+    0 10px 15px -3px rgb(19 20 23 / 0.12), 0 4px 6px -4px rgb(19 20 23 / 0.1); /* InfoTip, rail label */
+  --shadow-overlay: 0 10px 40px rgb(0 0 0 / 0.2); /* widget panel, idle warning */
+  --shadow-launcher: 0 4px 14px rgb(0 0 0 / 0.25);
+
+  /* Breakpoints, spacing, durations and easing are Tailwind's defaults and stay
+     undeclared: sm 640, md 768 (one pane and bottom bar below it), lg 1024,
+     xl 1280 (ticket sidebar). The help centre's 72rem is max-w-6xl. */
+
+  /* ── Legacy: names markup reaches as utilities today (bg-brand-600,
+     text-accent-600, bg-emerald-500/15, text-red-600). Not `@theme inline`:
+     .kb-shell re-points accent-600/700 at the action blue, and an inlined
+     utility would ignore that. */
+  --color-brand-50: var(--color-blu-50);
+  --color-brand-100: var(--color-blu-100);
+  --color-brand-200: var(--color-blu-200);
+  --color-brand-300: var(--color-blu-300);
+  --color-brand-400: var(--color-blu-400);
+  --color-brand-500: var(--color-blu-500);
+  --color-brand-600: var(--color-blu-600); /* same lightness as the old #1558ad */
+  --color-brand-700: var(--color-blu-700);
+  --color-brand-800: var(--color-blu-800);
+  --color-brand-900: var(--color-blu-900);
+  --color-accent-400: var(--color-coral-400);
+  --color-accent-500: var(--color-coral-500);
+  --color-accent-600: var(--color-coral-600);
+  --color-accent-700: var(--color-coral-700);
+  --color-positive: var(--color-green-500);
+  --color-caution: var(--color-amber-500);
+  --color-critical: var(--color-red-600);
+  /* Raw Tailwind hues. amber, red and violet need no line: the primitives above
+     own those names. The rest move to the family that carries the meaning; the
+     step-two tone names then move meaning (resolved off blue, notes off amber). */
+  --color-emerald-500: var(--color-green-500);
+  --color-emerald-600: var(--color-green-600);
+  --color-emerald-700: var(--color-green-700);
+  --color-blue-500: var(--color-blu-500);
+  --color-blue-600: var(--color-blu-600);
+  --color-blue-700: var(--color-blu-700);
+  --color-pink-500: var(--color-magenta-600);
+  --color-pink-600: var(--color-magenta-600);
+  --color-pink-700: var(--color-magenta-700);
+  --color-slate-500: var(--color-neutral-500);
+  --color-slate-600: var(--color-neutral-600);
+  --color-slate-700: var(--color-neutral-700);
 }
 
 :root {
-  /* The app is light-only, and this is the half of that decision a stylesheet
-     cannot express by simply not defining dark values. `color-scheme` is what
-     the browser paints its *own* surfaces from — a select's dropdown, a date
-     picker, the form-control chrome, the default scrollbar. Left unset it
-     follows the operating system, so a reader with the OS in dark mode gets
-     charcoal dropdowns and near-black inputs on a page that is white
-     everywhere else. Naming `light` here is what keeps the two in step. */
+  /* `color-scheme` is what the browser paints its own surfaces from: a select's
+     dropdown, a date picker, the default scrollbar. Unset, it follows the OS. */
   color-scheme: light;
 
-  --background: oklch(0.985 0.003 250);
-  --surface: oklch(1 0 0);
-  --surface-2: oklch(0.975 0.004 250);
-  --foreground: oklch(0.21 0.01 250);
-  --muted: oklch(0.96 0.005 250);
-  --muted-foreground: oklch(0.52 0.015 250);
-  --border: oklch(0.91 0.006 250);
-  --border-strong: oklch(0.84 0.01 250);
-  --ring: oklch(0.56 0.15 255);
+  /* ── Semantic · surfaces */
+  --color-background-canvas: var(--color-neutral-50);
+  --color-background-surface: var(--color-neutral-0);
+  --color-background-surface-sunken: var(--color-neutral-100);
+  --color-background-hover: var(--color-neutral-100);
+  --color-background-selected: var(--color-blu-50);
+  --color-background-brand-subtle: var(--color-blu-50);
+  --color-background-inverse: var(--color-neutral-900);
+  --color-background-rail: var(--color-navy-900);
 
-  /* One rail colour rather than a gradient: it sits behind the whole app and a
-     gradient at that size shifts perceptibly between viewport heights. */
-  --rail: oklch(0.24 0.07 258);
-  --rail-foreground: oklch(0.93 0.02 250);
+  /* ── Semantic · text. Charcoal is text; blue is actions and links. */
+  --color-text-primary: var(--color-neutral-900);
+  --color-text-secondary: var(--color-neutral-600);
+  --color-text-tertiary: var(--color-neutral-500);
+  --color-text-brand: var(--color-blu-600);
+  --color-text-link: var(--color-blu-600);
+  --color-text-link-hover: var(--color-blu-700);
+  --color-text-on-action: var(--color-neutral-0);
+  --color-text-inverse: var(--color-neutral-0);
+  --color-text-rail: var(--color-neutral-0);
+  --color-text-rail-muted: #b3c0d1; /* white at 70% on navy, as a solid: 7.27:1 */
 
-  /* Chart series, in a fixed order that never gets cycled or reassigned: series
-     one is always the brand blue, series two always the coral. A colour that
-     moves between series when a filter changes is a chart that has to be read
-     twice. Both are checked for colour-vision separation against the surface
-     they sit on. */
-  --series-1: var(--color-brand-500);
-  --series-2: var(--color-accent-600);
-  --chart-grid: var(--border);
+  /* ── Semantic · borders */
+  --color-border-subtle: var(--color-neutral-200);
+  --color-border-default: var(--color-neutral-300);
+  --color-border-strong: var(--color-neutral-400);
+  --color-border-focus: var(--color-blu-500);
 
-  /* The filled button's colour, named rather than hard-coded in `components/ui`
-     so the help centre can substitute its own without forking the component. */
-  --button-primary: var(--color-brand-600);
-  --button-primary-hover: var(--color-brand-700);
+  /* ── Semantic · actions. One blue on every surface. */
+  --color-action-primary-default: var(--color-blu-500);
+  --color-action-primary-hover: var(--color-blu-600);
+  --color-action-primary-active: var(--color-blu-700);
+  --color-action-danger-default: var(--color-red-600);
+  --color-action-danger-hover: var(--color-red-700);
+
+  /* ── Semantic · attention. Coral's one job: "this needs you now". */
+  --color-attention-bg: var(--color-coral-600);
+  --color-attention-fg: var(--color-neutral-0);
+  --color-attention-marker: var(--color-coral-500); /* active-nav bar, on navy */
+
+  /* ── Semantic · feedback */
+  --color-feedback-success-bg: var(--color-green-50);
+  --color-feedback-success-border: var(--color-green-100);
+  --color-feedback-success-fg: var(--color-green-600);
+  --color-feedback-warning-bg: var(--color-amber-50);
+  --color-feedback-warning-border: var(--color-amber-100);
+  --color-feedback-warning-fg: var(--color-amber-600);
+  --color-feedback-danger-bg: var(--color-red-50);
+  --color-feedback-danger-border: var(--color-red-100);
+  --color-feedback-danger-fg: var(--color-red-600);
+  --color-feedback-info-bg: var(--color-blu-50);
+  --color-feedback-info-border: var(--color-blu-100);
+  --color-feedback-info-fg: var(--color-blu-700);
+  --color-feedback-neutral-bg: var(--color-neutral-100);
+  --color-feedback-neutral-border: var(--color-neutral-200);
+  --color-feedback-neutral-fg: var(--color-neutral-700);
+
+  /* Chart series in a fixed order, never cycled: a colour that moves between
+     series when a filter changes is a chart that has to be read twice. */
+  --color-series-1: var(--color-blu-500);
+  --color-series-2: var(--color-coral-600);
+  --color-chart-grid: var(--color-border-subtle);
+
+  /* ── Component · ticket status. Open is an ink outline because most rows are
+     open; colour is spent on the exceptions. Resolved leaves blue. */
+  --color-ticket-open-bg: var(--color-neutral-0);
+  --color-ticket-open-border: var(--color-neutral-300);
+  --color-ticket-open-fg: var(--color-neutral-800);
+  --color-ticket-pending-bg: var(--color-feedback-warning-bg);
+  --color-ticket-pending-fg: var(--color-feedback-warning-fg);
+  --color-ticket-resolved-bg: var(--color-feedback-success-bg);
+  --color-ticket-resolved-fg: var(--color-feedback-success-fg);
+  --color-ticket-closed-bg: var(--color-feedback-neutral-bg);
+  --color-ticket-closed-fg: var(--color-neutral-600);
+
+  /* ── Component · priority (always with its bar glyph and word) */
+  --color-priority-low-bg: var(--color-feedback-neutral-bg);
+  --color-priority-low-fg: var(--color-neutral-600);
+  --color-priority-medium-bg: var(--color-feedback-neutral-bg);
+  --color-priority-medium-fg: var(--color-neutral-700);
+  --color-priority-high-bg: var(--color-feedback-warning-bg);
+  --color-priority-high-fg: var(--color-feedback-warning-fg);
+  --color-priority-urgent-bg: var(--color-feedback-danger-bg);
+  --color-priority-urgent-fg: var(--color-feedback-danger-fg);
+
+  /* ── Component · messaging window */
+  --color-window-open-bg: var(--color-feedback-neutral-bg);
+  --color-window-open-fg: var(--color-neutral-700);
+  --color-window-closing-bg: var(--color-attention-bg);
+  --color-window-closing-fg: var(--color-attention-fg);
+  --color-window-closed-bg: var(--color-feedback-neutral-bg);
+  --color-window-closed-fg: var(--color-neutral-600);
+
+  /* ── Component · channels. Platform hue at tint strength; neutral for ours.
+     The customer bot is machine-written, so it gets a dashed border. */
+  --color-channel-email-bg: var(--color-neutral-100);
+  --color-channel-email-fg: var(--color-neutral-700);
+  --color-channel-whatsapp-bg: var(--color-green-50);
+  --color-channel-whatsapp-fg: var(--color-green-700);
+  --color-channel-bot-bg: var(--color-neutral-0);
+  --color-channel-bot-fg: var(--color-neutral-700);
+  --color-channel-bot-border: var(--color-neutral-400);
+  --color-channel-webchat-bg: var(--color-cyan-50);
+  --color-channel-webchat-fg: var(--color-cyan-700);
+  --color-channel-facebook-bg: var(--color-blu-50);
+  --color-channel-facebook-fg: var(--color-blu-700);
+  --color-channel-instagram-bg: var(--color-magenta-50);
+  --color-channel-instagram-fg: var(--color-magenta-600);
+  --color-channel-portal-bg: var(--color-neutral-100);
+  --color-channel-portal-fg: var(--color-neutral-700);
+  --color-channel-api-bg: var(--color-neutral-100);
+  --color-channel-api-fg: var(--color-neutral-700);
+
+  /* ── Component · logistics status. An unrecognised status shows its label
+     alone: unknown is neutral and gets no stepper. */
+  --color-status-draft-bg: var(--color-feedback-neutral-bg);
+  --color-status-draft-fg: var(--color-feedback-neutral-fg);
+  --color-status-scheduled-bg: var(--color-feedback-neutral-bg);
+  --color-status-scheduled-fg: var(--color-feedback-neutral-fg);
+  --color-status-picked-up-bg: var(--color-feedback-info-bg);
+  --color-status-picked-up-fg: var(--color-feedback-info-fg);
+  --color-status-in-transit-bg: var(--color-feedback-info-bg);
+  --color-status-in-transit-fg: var(--color-feedback-info-fg);
+  --color-status-out-for-delivery-bg: var(--color-violet-50);
+  --color-status-out-for-delivery-fg: var(--color-violet-600);
+  --color-status-delivered-bg: var(--color-feedback-success-bg);
+  --color-status-delivered-fg: var(--color-feedback-success-fg);
+  --color-status-attempted-bg: var(--color-feedback-warning-bg);
+  --color-status-attempted-fg: var(--color-feedback-warning-fg);
+  --color-status-on-hold-bg: var(--color-feedback-warning-bg);
+  --color-status-on-hold-fg: var(--color-feedback-warning-fg);
+  --color-status-returned-bg: var(--color-magenta-50);
+  --color-status-returned-fg: var(--color-magenta-700);
+  --color-status-exception-bg: var(--color-feedback-danger-bg);
+  --color-status-exception-fg: var(--color-feedback-danger-fg);
+  --color-status-lost-bg: var(--color-feedback-danger-bg);
+  --color-status-lost-fg: var(--color-feedback-danger-fg);
+  --color-status-cancelled-bg: var(--color-feedback-neutral-bg);
+  --color-status-cancelled-fg: var(--color-feedback-neutral-fg);
+  --color-status-unknown-bg: var(--color-feedback-neutral-bg);
+  --color-status-unknown-fg: var(--color-feedback-neutral-fg);
+
+  /* ── Component · conversation. A note is amber paper with a lock and is never
+     sent; a public post is a solid ink pill with a globe. Opposite meanings,
+     opposite treatments. */
+  --color-message-inbound-bg: var(--color-background-surface);
+  --color-message-inbound-border: var(--color-border-subtle);
+  --color-message-outbound-bg: var(--color-blu-50);
+  --color-message-outbound-border: var(--color-blu-100);
+  --color-message-note-bg: var(--color-amber-50);
+  --color-message-note-border: var(--color-amber-200);
+  --color-message-note-fg: var(--color-amber-700);
+  --color-message-public-bg: var(--color-neutral-800);
+  --color-message-public-fg: var(--color-neutral-0);
+  --color-message-public-border: var(--color-neutral-800);
+  --color-message-system-bg: var(--color-neutral-50);
+  --color-message-system-border: var(--color-neutral-300);
+  --color-background-console: var(--color-neutral-100);
+  --color-thread-bg: var(--color-background-surface);
+  --color-bubble-in-bg: var(--color-neutral-100);
+  --color-bubble-in-fg: var(--color-text-primary);
+  --color-bubble-in-border: transparent;
+  --color-bubble-out-bg: var(--color-blu-500);
+  --color-bubble-out-fg: var(--color-neutral-0);
+  --color-bubble-out-border: transparent;
+  --color-bubble-note-bg: var(--color-message-note-bg);
+  --color-bubble-note-border: var(--color-message-note-border);
+  --color-bubble-bot-bg: var(--color-message-system-bg);
+  --color-bubble-bot-border: var(--color-message-system-border);
+  --color-reaction-bg: var(--color-background-surface);
+  --color-reaction-border: var(--color-border-subtle);
+  --color-reaction-fg: var(--color-text-secondary);
+  --color-reaction-mine-bg: var(--color-blu-50);
+  --color-reaction-mine-border: var(--color-blu-200);
+  --color-reaction-mine-fg: var(--color-text-brand);
+  --color-hub-replied-bg: var(--color-attention-bg);
+  --color-hub-replied-fg: var(--color-attention-fg);
+  --color-hub-waiting-bg: var(--color-feedback-neutral-bg);
+  --color-hub-waiting-fg: var(--color-neutral-600);
+
+  /* ── Component · agent tiles. The keys are stored in agents.avatar_color:
+     never rename, remove or reorder them. Solid fills; white initials >= 5:1. */
+  --color-agent-blue: var(--color-blu-500); /* 5.31 */
+  --color-agent-emerald: #047857; /* 5.48 */
+  --color-agent-violet: #6d28d9; /* 7.10 */
+  --color-agent-amber: #7a5c00; /* 6.25; yellow-gold, clear of coral */
+  --color-agent-pink: #be185d; /* 6.04 */
+  --color-agent-cyan: #0e7490; /* 5.36 */
+  --color-agent-lime: #3f6212; /* 7.08 */
+  --color-agent-fuchsia: #a21caf; /* 6.32 */
+  --color-agent-slate: #475569; /* 7.58 */
+
+  /* ── Component · buttons. Named so the help centre and console share one. */
+  --button-primary: var(--color-action-primary-default);
+  --button-primary-hover: var(--color-action-primary-hover);
+  --button-primary-active: var(--color-action-primary-active);
+  --button-danger: var(--color-action-danger-default);
+  --button-danger-hover: var(--color-action-danger-hover);
+
+  /* ── Component · launcher. app/widget/embed.js/route.ts styles it inline on a
+     merchant's page, where these variables do not exist. Copy the literals into
+     the route and keep the two in step by hand. */
+  --launcher-bg: #145bfe; /* = blu-500 (was #0b6bcb) */
+  --launcher-bg-hover: #0f4ad6; /* = blu-600 */
+  --launcher-fg: #ffffff;
+  --launcher-badge-bg: #bc5300; /* = coral-600 (was #dc2626): unread is attention */
+  --launcher-badge-fg: #ffffff;
+  --font-launcher:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; /* no webfont */
+
+  /* ── Density, focus, motion, layout */
+  --density-row-y: 12px; /* conversation and table rows: py-3 */
+  --density-row-x: 16px;
+  --density-cell-y: 10px;
+  --density-card-pad: 20px;
+  --focus-width: 2px;
+  --focus-offset: 2px;
+  --focus-color: var(--color-border-focus);
+  --duration-fast: 120ms; /* InfoTip hover intent */
+  --duration-base: 150ms; /* = Tailwind's transition default */
+  --rail-width: 64px;
+  --header-height: 56px;
+  --views-width: 208px;
+  --list-width: 320px;
+  --details-width: 312px;
+  --console-gap: 8px;
+  --console-panel-radius: 12px;
+  --bubble-pad-y: 8px;
+  --bubble-pad-x: 12px;
+  --bubble-max: 36rem;
+  --bubble-avatar: 28px;
+  --bottom-bar-height: 56px;
+  --tap-min: 44px;
+  --widget-width: 380px;
+  --launcher-size: 56px;
+  --elevation-card: var(--shadow-card);
+  --elevation-float: var(--shadow-float);
+  --elevation-overlay: var(--shadow-overlay);
+  --elevation-launcher: var(--shadow-launcher);
+
+  /* ── Legacy console names, pointed at the roles above. */
+  --background: var(--color-background-canvas);
+  --surface: var(--color-background-surface);
+  --surface-2: var(--color-background-surface-sunken);
+  --foreground: var(--color-text-primary);
+  --muted: var(--color-background-hover);
+  --muted-foreground: var(--color-text-secondary);
+  --border: var(--color-border-subtle);
+  --border-strong: var(--color-border-default);
+  --ring: var(--color-border-focus);
+  --rail: var(--color-background-rail);
+  --rail-foreground: var(--color-text-rail);
+  --series-1: var(--color-series-1);
+  --series-2: var(--color-series-2);
+  --chart-grid: var(--color-chart-grid);
+  --danger: var(--color-feedback-danger-fg); /* read in inbox/list.tsx, never defined until now */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-base: 0ms;
+  }
+}
+
+/* The help centre. Colour no longer lives here: the console and the help centre
+   share one palette and differ in density and type. What remains is density,
+   and the names app/help/ was written against, so its pages compile unchanged.
+   The roles the old block declared (--color-text-*, --color-feedback-*,
+   --color-status-*, --elevation-card) are on :root now under the same names. */
+.kb-shell {
+  --density-row-y: 14px;
+  --density-row-x: 16px;
+  --density-card-pad: 20px;
+
+  --blu-50: var(--color-blu-50);
+  --blu-100: var(--color-blu-100);
+  --blu-200: var(--color-blu-200);
+  --blu-300: var(--color-blu-300);
+  --blu-400: var(--color-blu-400);
+  --blu-500: var(--color-blu-500);
+  --blu-600: var(--color-blu-600);
+  --blu-700: var(--color-blu-700);
+  --blu-800: var(--color-blu-800);
+  --blu-900: var(--color-blu-900);
+  --blu-950: var(--color-navy-950);
+  --neutral-0: var(--color-neutral-0);
+  --neutral-25: var(--color-neutral-25);
+  --neutral-50: var(--color-neutral-50);
+  --neutral-100: var(--color-neutral-100);
+  --neutral-200: var(--color-neutral-200);
+  --neutral-300: var(--color-neutral-300);
+  --neutral-400: var(--color-neutral-400);
+  --neutral-500: var(--color-neutral-500);
+  --neutral-600: var(--color-neutral-600);
+  --neutral-700: var(--color-neutral-700);
+  --neutral-800: var(--color-neutral-800);
+  --neutral-900: var(--color-neutral-900);
+  --neutral-950: var(--color-neutral-950);
+  --green-50: var(--color-green-50);
+  --green-100: var(--color-green-100);
+  --green-500: var(--color-green-500);
+  --green-600: var(--color-green-600);
+  --green-700: var(--color-green-700);
+  --amber-50: var(--color-amber-50);
+  --amber-100: var(--color-amber-100);
+  --amber-500: var(--color-amber-500);
+  --amber-600: var(--color-amber-600);
+  --amber-700: var(--color-amber-700);
+  --red-50: var(--color-red-50);
+  --red-100: var(--color-red-100);
+  --red-500: var(--color-red-500);
+  --red-600: var(--color-red-600);
+  --red-700: var(--color-red-700);
+  --violet-50: var(--color-violet-50);
+  --violet-100: var(--color-violet-100);
+  --violet-500: var(--color-violet-500);
+  --violet-600: var(--color-violet-600);
+
+  --kb-bg: var(--color-background-canvas);
+  --kb-surface: var(--color-background-surface);
+  --kb-surface-2: var(--color-background-surface-sunken);
+  --kb-border: var(--color-border-subtle);
+  --kb-border-strong: var(--color-border-default);
+  --kb-heading: var(--color-text-primary);
+  --kb-text: var(--color-text-primary);
+  --kb-muted: var(--color-text-secondary);
+  --kb-link: var(--color-text-link);
+  --kb-link-hover: var(--color-text-link-hover);
+  /* Still the action blue: it fills the stepper and draws the blockquote rule.
+     The title band stops using it when PageHeader switches to tone="subtle". */
+  --kb-band: var(--color-action-primary-default);
+  --kb-band-text: var(--color-text-on-action);
+  --kb-band-soft: var(--color-background-brand-subtle);
+  --kb-band-ink: var(--color-text-brand);
+  /* The footer is the inverse surface and its text is the inverse text, so the
+     two move together. */
+  --kb-footer: var(--color-background-inverse);
+  --kb-footer-text: var(--color-text-inverse);
+  --kb-yes: var(--color-feedback-success-fg);
+  --kb-no: var(--color-feedback-danger-fg);
+  --kb-shadow: var(--elevation-card);
+
+  /* The ticket form's submit was coral because nobody set accent here. Accent
+     is attention, not an action, so inside the help centre it is the action
+     blue, which the help centre's own rule asks for. */
+  --color-accent-600: var(--color-action-primary-default);
+  --color-accent-700: var(--color-action-primary-hover);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family:
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    'Segoe UI',
-    Roboto,
-    'Helvetica Neue',
-    Arial,
-    'Noto Sans Arabic',
-    sans-serif;
+  background: var(--color-background-canvas);
+  color: var(--color-text-primary);
+  /* System UI for Latin, so the console keeps the 500 and 600 weights its
+     hierarchy is built from (Lato ships 400/700/900 only), and Tajawal for
+     Arabic. Tajawal can lead the stack only because `app/fonts.ts` loads it as
+     an Arabic-subset face: a full face there would set the whole console in
+     Tajawal. */
+  font-family: var(--font-console);
   /* Tabular figures in the console keep ticket numbers and counts from jittering
      as they change. */
   font-variant-numeric: tabular-nums;
 }
 
 /* A single visible focus treatment, so keyboard users get the same affordance
-   on a button, a link and a table row. */
-:where(a, button, input, select, textarea, [tabindex]):focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
+   on a button, a link, a disclosure and a table row. */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: var(--focus-offset);
   border-radius: 0.25rem;
 }
 
@@ -105,14 +608,14 @@ body {
 @media (pointer: fine) {
   .app-scroll {
     scrollbar-width: thin;
-    scrollbar-color: var(--border-strong) transparent;
+    scrollbar-color: var(--color-border-default) transparent;
   }
   .app-scroll::-webkit-scrollbar {
     width: 10px;
     height: 10px;
   }
   .app-scroll::-webkit-scrollbar-thumb {
-    background: var(--border-strong);
+    background: var(--color-border-default);
     border: 3px solid transparent;
     background-clip: content-box;
     border-radius: 999px;
@@ -123,227 +626,6 @@ body {
    directions, so let the browser resolve direction per block. */
 [dir='rtl'] {
   text-align: right;
-}
-
-/* ─────────────────────────────────────────────────────────────────────────────
-   The public help centre.
-
-   Its own palette, scoped to `.kb-shell`, rather than the console's. The two
-   surfaces are read by different people for different reasons — an agent stares
-   at the console all day and wants density, a customer arrives once with a
-   question and wants a page that reads like ShipBlu's — and a single token set
-   stretched over both ends up serving neither.
-
-   **The values are the ShipBlu design system's**, transcribed from its
-   `tokens/colors.css` and `tokens/shape.css`. They replace the hex lifted from
-   the live Freshdesk portal theme, which is what this file used to carry.
-
-   Two layers, deliberately. The design system's own primitives and semantic
-   names are declared first, verbatim, so that a token can be checked against the
-   system by reading it rather than by tracing a conversion. The `--kb-*` names
-   every page in `app/help/` already speaks are then pointed at them — so the
-   swap is one file, and a page that was written against `--kb-muted` keeps
-   working while meaning the design system's secondary text.
-
-   The design system's dark block is deliberately not transcribed. Its dark
-   theme is for "operational night shifts and hub screens", the live portal is
-   light-only, and this app renders one palette regardless of what the reader's
-   operating system asks for — see `color-scheme: light` on `:root`.
-   ────────────────────────────────────────────────────────────────────────── */
-.kb-shell {
-  /* ── Primitive · Blu (brand) ─────────────────────────────────────────── */
-  --blu-50: #eff4ff;
-  --blu-100: #dce6ff;
-  --blu-200: #bcceff;
-  --blu-300: #8fadff;
-  --blu-400: #5c86ff;
-  --blu-500: #1c5bfe;
-  --blu-600: #144ae0;
-  --blu-700: #0f3bb4;
-  --blu-800: #102f87;
-  --blu-900: #0f2a6b;
-  --blu-950: #0a1b45;
-
-  /* ── Primitive · Neutral (charcoal-based, cool) ──────────────────────── */
-  --neutral-0: #ffffff;
-  --neutral-25: #fbfcfd;
-  --neutral-50: #f6f8fa;
-  --neutral-100: #edf0f4;
-  --neutral-200: #dfe4ea;
-  --neutral-300: #c7ced7;
-  --neutral-400: #9ba5b2;
-  --neutral-500: #6e7987;
-  --neutral-600: #515b68;
-  --neutral-700: #3a424d;
-  --neutral-800: #282e36;
-  --neutral-900: #1e1e1e;
-  --neutral-950: #131417;
-
-  /* ── Primitive · Semantic hues ───────────────────────────────────────── */
-  --green-50: #e6f6ee;
-  --green-100: #c7ebda;
-  --green-500: #0e8a55;
-  --green-600: #0a6f44;
-  --green-700: #075332;
-  --amber-50: #fff4e5;
-  --amber-100: #ffe4bf;
-  --amber-500: #b26a00;
-  --amber-600: #8f5400;
-  --amber-700: #6b3f00;
-  --red-50: #fdecea;
-  --red-100: #fbd3ce;
-  --red-500: #d02b20;
-  --red-600: #aa2119;
-  --red-700: #7f1913;
-  --violet-50: #f1edff;
-  --violet-100: #ded5ff;
-  --violet-500: #5b3fd6;
-  --violet-600: #4a31b4;
-
-  /* ── Semantic ─────────────────────────────────────────────────────────
-     Only the roles this site actually renders. The system declares more —
-     pressed states, chart ramps, an overlay scrim — and copying names nothing
-     reads would make this block a place to look things up rather than the
-     description of one site's colours that it is. */
-  --color-background-canvas: var(--neutral-50);
-  --color-background-surface: var(--neutral-0);
-  --color-background-surface-sunken: var(--neutral-100);
-  --color-background-hover: var(--neutral-100);
-  --color-background-inverse: var(--neutral-900);
-  --color-background-brand-subtle: var(--blu-50);
-
-  --color-text-primary: var(--neutral-900);
-  --color-text-secondary: var(--neutral-600);
-  --color-text-tertiary: var(--neutral-500);
-  --color-text-brand: var(--blu-600);
-  --color-text-link: var(--blu-600);
-  --color-text-link-hover: var(--blu-700);
-
-  --color-border-subtle: var(--neutral-200);
-  --color-border-default: var(--neutral-300);
-  --color-border-focus: var(--blu-500);
-
-  --color-action-primary-default: var(--blu-500);
-  --color-action-primary-hover: var(--blu-600);
-
-  --color-feedback-success-bg: var(--green-50);
-  --color-feedback-success-border: var(--green-100);
-  --color-feedback-success-fg: var(--green-600);
-  --color-feedback-warning-bg: var(--amber-50);
-  --color-feedback-warning-border: var(--amber-100);
-  --color-feedback-warning-fg: var(--amber-600);
-  --color-feedback-danger-bg: var(--red-50);
-  --color-feedback-danger-border: var(--red-100);
-  --color-feedback-danger-fg: var(--red-600);
-  --color-feedback-info-bg: var(--blu-50);
-  --color-feedback-info-border: var(--blu-100);
-  --color-feedback-info-fg: var(--blu-700);
-  --color-feedback-neutral-bg: var(--neutral-100);
-  --color-feedback-neutral-border: var(--neutral-200);
-  --color-feedback-neutral-fg: var(--neutral-700);
-
-  --elevation-card: 0 1px 3px rgba(19, 20, 23, 0.07), 0 1px 2px -1px rgba(19, 20, 23, 0.05);
-
-  /* ── Semantic · Logistics status ──────────────────────────────────────
-     The design system's canonical taxonomy, and the reason the tracking page
-     is worth having its badge read from tokens at all: `out for delivery` gets
-     violet of its own rather than sharing blue with `in transit`, which is
-     precisely the distinction a recipient checking their phone cares about.
-
-     Expressed through the feedback roles above wherever the two agree, so a
-     change to what "warning" looks like reaches the attempted-delivery badge
-     rather than being made twice. Violet is the exception: the system gives
-     `out for delivery` a hue no feedback role carries. */
-  --color-status-in-transit-bg: var(--color-feedback-info-bg);
-  --color-status-in-transit-fg: var(--color-feedback-info-fg);
-  --color-status-out-for-delivery-bg: var(--violet-50);
-  --color-status-out-for-delivery-fg: var(--violet-600);
-  --color-status-delivered-bg: var(--color-feedback-success-bg);
-  --color-status-delivered-fg: var(--color-feedback-success-fg);
-  --color-status-attempted-bg: var(--color-feedback-warning-bg);
-  --color-status-attempted-fg: var(--color-feedback-warning-fg);
-  --color-status-returned-bg: var(--amber-50);
-  --color-status-returned-fg: var(--amber-700);
-  --color-status-exception-bg: var(--color-feedback-danger-bg);
-  --color-status-exception-fg: var(--color-feedback-danger-fg);
-  --color-status-unknown-bg: var(--color-feedback-neutral-bg);
-  --color-status-unknown-fg: var(--color-feedback-neutral-fg);
-
-  /* ── The names this site's pages speak ────────────────────────────────
-     Everything under `app/help/` was written against these, so they stay. What
-     changed is what they point at. */
-  --kb-bg: var(--color-background-canvas);
-  --kb-surface: var(--color-background-surface);
-  --kb-surface-2: var(--color-background-surface-sunken);
-  --kb-border: var(--color-border-subtle);
-  --kb-border-strong: var(--color-border-default);
-
-  /* One text colour where the Freshdesk theme had two. Its structural navy and
-     its deeper blue for article prose were that portal's, and the design system
-     is explicit that charcoal is text and blue is the action colour and almost
-     nothing else — so prose in a third blue would be the one thing it asks a
-     page not to do. */
-  --kb-heading: var(--color-text-primary);
-  --kb-text: var(--color-text-primary);
-  --kb-muted: var(--color-text-secondary);
-
-  --kb-link: var(--color-text-link);
-  --kb-link-hover: var(--color-text-link-hover);
-
-  /* The band behind the title on every page below the front door.
-
-     Kept, and recoloured rather than removed, which is a compromise worth
-     naming: the design system says blue is never a page background outside an
-     auth or marketing panel. The redesign that brought this palette in only
-     covered the front page, and the front page no longer wears a band — it has
-     the pale hero instead. Restyling the other four page types is a change to
-     their layout, not to their colours, and it is not this one. */
-  --kb-band: var(--color-action-primary-default);
-  /* Not the system's `--color-text-inverse`, which means "text on whatever the
-     inverse surface currently is". The band and the footer are dark surfaces on
-     a light page, so their text is white; borrowing a token that follows the
-     inverse surface would put charcoal on navy the moment it moved. */
-  --kb-band-text: var(--neutral-0);
-  /* The brand at card strength: the icon tile in front of a category name, the
-     tint behind a stepper's completed run. A flat tint rather than the band at
-     low alpha, so it reads the same over a white card and the grey page. */
-  --kb-band-soft: var(--color-background-brand-subtle);
-  --kb-band-ink: var(--color-text-brand);
-
-  --kb-footer: var(--color-background-inverse);
-  --kb-footer-text: var(--neutral-0);
-
-  /* Article feedback. Green and red carry the answer, so the two buttons stay
-     distinguishable when they are the only thing on screen. */
-  --kb-yes: var(--color-feedback-success-fg);
-  --kb-no: var(--color-feedback-danger-fg);
-
-  --kb-shadow: var(--elevation-card);
-
-  /* The system's focus colour, so the ring reads as part of this site rather
-     than of the console. */
-  --ring: var(--color-border-focus);
-
-  /* The console's own token names, re-pointed at the help centre's palette.
-     `components/ui` — the Button, Input and Badge the sign-in forms and the
-     ticket list are built from — reads these, and it is shared with the console,
-     so it cannot be given help-centre colours directly. Redefining the names
-     inside this scope gives those primitives the right palette here without a
-     second set of components to keep in step. */
-  --background: var(--kb-bg);
-  --surface: var(--kb-surface);
-  --surface-2: var(--kb-surface-2);
-  --foreground: var(--kb-text);
-  --muted: var(--kb-surface-2);
-  --muted-foreground: var(--kb-muted);
-  --border: var(--kb-border);
-  --border-strong: var(--kb-border-strong);
-
-  /* Blu-500, not the portal's navy. The design system gives the action colour
-     exactly one job and this is it, so every filled button on the site is the
-     same blue and nothing else is. */
-  --button-primary: var(--color-action-primary-default);
-  --button-primary-hover: var(--color-action-primary-hover);
 }
 
 .kb-shell {
@@ -421,6 +703,14 @@ body {
   }
 }
 
+/* Arabic needs more leading than Latin at the same size: Tajawal's dots and
+   ascenders reach further than the Latin x-height suggests, and at 1.75 the
+   lines of a long Arabic article start to touch. The help-centre wrapper
+   carries `lang`, so the locale picks the value. */
+[lang='ar'] .kb-article {
+  line-height: 1.85;
+}
+
 .kb-article > * + * {
   margin-top: 1.15em;
 }
@@ -444,7 +734,9 @@ body {
 .kb-article h5,
 .kb-article h6 {
   color: var(--kb-heading);
-  font-weight: 600;
+  /* 700, not 600: Lato ships 400/700/900, so a 600 was already rendering as
+     700 and only said otherwise. */
+  font-weight: 700;
   line-height: 1.3;
   /* A heading belongs to what follows it, so the space above is roughly twice
      the space below. Without this every section floats equidistant and the
@@ -455,6 +747,9 @@ body {
 }
 .kb-article :is(h2, h3, h4, h5, h6) + * {
   margin-top: 0.6em;
+}
+[lang='ar'] .kb-article :is(h2, h3, h4, h5, h6) {
+  line-height: 1.5;
 }
 .kb-article h2 {
   font-size: 1.5rem;
@@ -575,7 +870,7 @@ body {
 .kb-article th {
   background: var(--kb-surface-2);
   color: var(--kb-heading);
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .kb-article hr {

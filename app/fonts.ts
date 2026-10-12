@@ -1,12 +1,20 @@
 import { Lato, Tajawal } from 'next/font/google';
 
 /**
- * The help centre's two typefaces.
+ * The two typefaces.
  *
  * Lato and Tajawal, the same pairing the live Freshdesk portal loads, so the
  * new help centre reads as the same site to a returning customer. Lato covers
  * Latin, Tajawal covers Arabic; the two are declared in one stack and the
  * browser picks per glyph.
+ *
+ * The console and the widget use Tajawal alone, for Arabic only, ahead of the
+ * system font (`--font-console`), which is why this module sits at the app root
+ * rather than under `help/`: the root layout loads Tajawal for every surface.
+ * It costs a Latin-only page nothing — the face is the Arabic subset, so its
+ * `unicode-range` keeps the browser from fetching it until an Arabic letter is
+ * on screen. Lato stays the help centre's alone; the console's 500/600
+ * hierarchy has no Lato weight to land on.
  *
  * Served from our own origin via `next/font` rather than linked from Google.
  * The fonts are fetched at build time and fingerprinted, so a page load makes
