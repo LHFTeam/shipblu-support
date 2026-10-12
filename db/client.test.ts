@@ -1,13 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import postgres from 'postgres';
-import {
-  ADMIT_MAX,
-  allPoolPressures,
-  pressureOf,
-  getSql,
-  instrumentClient,
-  poolPressure,
-} from '@/db/client';
+import { ADMIT_MAX, allPoolPressures, pressureOf, getSql, instrumentClient } from '@/db/client';
 import { env } from '@/lib/env';
 import { withTestEnv } from '@/lib/testing/env';
 
@@ -78,6 +71,41 @@ describe('the postgres.js seams the query deadline depends on', () => {
     expect(settleable.canceller).toBeNull();
 
     await expect(query as unknown as Promise<unknown>).rejects.toMatchObject({ code: '57014' });
+  });
+
+  it('exposes the dispatch and the fields that say where a query is, as the gate reads them', () => {
+    const query = pendingQuery() as unknown as Record<string, unknown>;
+
+    // The gate replaces `handler` to hold a query back until a place is free,
+    // and reads `state` (set when the query is written to a connection) and
+    // `active` (set while its connection answers it) to tell a query it may
+    // cancel from one postgres.js holds unsent.
+    expect(Object.hasOwn(query, 'handler')).toBe(true);
+    expect(typeof query.handler).toBe('function');
+    expect(query.state).toBeNull();
+    expect(query.active).toBe(false);
+    expect(query.cancelled).toBeNull();
+    // Wrapped so its iterator form can be refused.
+    expect(typeof query.cursor).toBe('function');
+  });
+
+  it('issues BEGIN through unsafe(), synchronously, with the onexecute hook a transaction is found by', () => {
+    const sql = postgres('postgres://localhost/test', { max: 1 });
+    let captured: unknown[] | undefined;
+    // Stubbed so nothing is sent: the question is what begin() hands unsafe(),
+    // and that it does so before its first await — the window in which the
+    // gate lets that BEGIN past without a second place.
+    (sql as unknown as { unsafe: (...args: unknown[]) => unknown }).unsafe = (...args) => {
+      captured = args;
+      return { execute: () => new Promise(() => {}) };
+    };
+
+    void sql.begin(() => Promise.resolve(null));
+
+    expect(String(captured?.[0])).toMatch(/^begin/);
+    expect(typeof (captured?.[2] as { onexecute?: unknown } | undefined)?.onexecute).toBe(
+      'function',
+    );
   });
 
   it('gives every handle its own unsafe, so one patch cannot reach a transaction', () => {
@@ -168,24 +196,24 @@ describe('the deadline the pool actually installs', () => {
 
   it('counts a query from unsafe() to settle', () => {
     const sql = getSql();
-    const before = poolPressure().inFlight;
+    const before = pressureOf(getSql()).inFlight;
 
     const query = sql.unsafe('select 1', []) as unknown as ReturnType<typeof fakeQuery>;
 
     // Relative, not absolute: the pool is a module singleton and another test
     // in this worker may have touched it. What matters is the delta.
-    expect(poolPressure().inFlight).toBe(before + 1);
+    expect(pressureOf(getSql()).inFlight).toBe(before + 1);
 
     query.resolve(['row']);
 
-    expect(poolPressure().inFlight).toBe(before);
+    expect(pressureOf(getSql()).inFlight).toBe(before);
   });
 
   it('reports the peak with the time it happened', () => {
     const sql = getSql();
     const query = sql.unsafe('select 1', []) as unknown as ReturnType<typeof fakeQuery>;
 
-    const { peak, peakAt } = poolPressure();
+    const { peak, peakAt } = pressureOf(getSql());
 
     // A high-water mark alone cannot say whether the pressure is now or was an
     // hour ago, and one spike would pin it for the life of the instance.
@@ -200,7 +228,7 @@ describe('the deadline the pool actually installs', () => {
     vi.useFakeTimers();
 
     const sql = getSql();
-    const before = poolPressure().inFlight;
+    const before = pressureOf(getSql()).inFlight;
     const query = sql.unsafe('select 1', []);
 
     // Nothing was dispatched, so the cancel takes the queued branch and rejects
@@ -209,7 +237,7 @@ describe('the deadline the pool actually installs', () => {
     vi.advanceTimersByTime(env().DB_QUERY_TIMEOUT_MS);
 
     await expect(query as unknown as Promise<unknown>).rejects.toMatchObject({ code: '57014' });
-    expect(poolPressure().inFlight).toBe(before);
+    expect(pressureOf(getSql()).inFlight).toBe(before);
   });
 });
 
@@ -488,14 +516,17 @@ describe('the admission gate', () => {
   it('never cancels a query postgres.js holds unsent, and cancels it once it runs', async () => {
     vi.useFakeTimers();
     // The first query of a connection still connecting: handed over, not sent.
-    const { handle, unsafe } = gatedPool(1, 100, 5_000, true);
+    const { handle, unsafe } = gatedPool(1, 100, 500, true);
     const query = unsafe();
     query.start();
 
     // postgres.js's cancel would mark it and leave it in place, and the
-    // connection would stay in `connecting` until its max_lifetime.
-    vi.advanceTimersByTime(2_500);
+    // connection would stay in `connecting` until its max_lifetime. Nor is it
+    // given up on: rejected unsent, it would still be sent once a connection
+    // took it, an autocommit write its caller was told had failed.
+    vi.advanceTimersByTime(20_000);
     expect(query.cancels).toBe(0);
+    expect(query.rejectedWith).toBeNull();
     expect(pressureOf(handle)).toMatchObject({ admitted: 1, lost: 0 });
 
     // Connected: it runs, and the next look sends the cancel it was owed.
@@ -523,40 +554,71 @@ describe('the admission gate', () => {
     holder.resolve(null);
   });
 
-  it("keeps a transaction's place for good once its BEGIN went unanswered", async () => {
-    vi.useFakeTimers();
+  /**
+   * postgres.js's begin(), as far as the gate sees it: `BEGIN` through the
+   * pool's own `unsafe`, synchronously, with the `onexecute` hook that reserves
+   * a connection, then a promise that settles as `BEGIN` does.
+   */
+  function beginningPool() {
     let begin: ReturnType<typeof gatedQuery> | undefined;
-    let opening: ((outcome: 'resolved' | 'rejected', value: unknown) => void) | undefined;
+    let settledBegin: ((outcome: 'resolved' | 'rejected', value: unknown) => void) | undefined;
+    const connection = { terminate: vi.fn() };
     const handle = {
-      unsafe: () => gatedQuery([], 'statement', { settled: opening }),
-      // postgres.js's begin(): BEGIN through the pool's own `unsafe`,
-      // synchronously, then a promise that settles as BEGIN does.
+      unsafe: (..._args: unknown[]) => gatedQuery([], 'statement', { settled: settledBegin }),
       begin(_fn: (client: unknown) => Promise<unknown>) {
         return new Promise((resolve, reject) => {
-          opening = (outcome, value) => (outcome === 'resolved' ? resolve(value) : reject(value));
-          begin = handle.unsafe() as ReturnType<typeof gatedQuery>;
-          opening = undefined;
+          settledBegin = (outcome, value) =>
+            outcome === 'resolved' ? resolve(value) : reject(value);
+          const options = { onexecute: (_connection: unknown) => true };
+          begin = handle.unsafe('begin', [], options) as ReturnType<typeof gatedQuery>;
+          settledBegin = undefined;
           begin.start();
+          options.onexecute(connection);
         });
       },
     };
     instrumentClient(handle, 100, { admit: 2, lostAfterMs: 50 });
+    return { handle, connection, begin: () => begin! };
+  }
+
+  it('closes the connection a BEGIN reserved when it answers after being given up on', async () => {
+    vi.useFakeTimers();
+    const { handle, connection, begin } = beginningPool();
 
     const transaction = handle.begin(() => Promise.resolve(null));
     const outcome = expect(transaction).rejects.toMatchObject({ code: '57014' });
     await vi.advanceTimersByTimeAsync(200);
     await outcome;
-    expect(begin?.rejectedWith).toMatchObject({ code: '57014' });
+    expect(begin().rejectedWith).toMatchObject({ code: '57014' });
     expect(pressureOf(handle)).toMatchObject({ admitted: 1, lost: 1 });
 
-    // A late answer leaves postgres.js's connection reserved with a
-    // transaction open and nobody to end it: the place stays taken.
-    begin!.resolve([]);
+    // The late answer leaves postgres.js's connection reserved with a
+    // transaction open and nobody to end it: closing it ends both, and only
+    // then is the place free.
+    begin().resolve([]);
     await vi.advanceTimersByTimeAsync(0);
-    expect(pressureOf(handle)).toMatchObject({ admitted: 1, lost: 1 });
+    expect(connection.terminate).toHaveBeenCalledTimes(1);
+    expect(pressureOf(handle)).toMatchObject({ admitted: 0, lost: 0 });
   });
 
-  it('gives up on a transaction whose COMMIT never answers, and takes the place back when it does', async () => {
+  it('frees the place of a BEGIN given up on whose connection then fails', async () => {
+    vi.useFakeTimers();
+    const { handle, connection, begin } = beginningPool();
+
+    const transaction = handle.begin(() => Promise.resolve(null));
+    const outcome = expect(transaction).rejects.toMatchObject({ code: '57014' });
+    await vi.advanceTimersByTimeAsync(200);
+    await outcome;
+
+    // A closed socket: postgres.js rejects what it held, and has the
+    // connection back already.
+    begin().reject(new Error('CONNECTION_CLOSED'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(connection.terminate).not.toHaveBeenCalled();
+    expect(pressureOf(handle)).toMatchObject({ admitted: 0, lost: 0 });
+  });
+
+  it('counts a transaction whose COMMIT goes unanswered as lost, and waits for its real outcome', async () => {
     vi.useFakeTimers();
     let settleCommit: () => void = () => {};
     const handle = {
@@ -571,13 +633,23 @@ describe('the admission gate', () => {
     };
     instrumentClient(handle, 100, { admit: 2, lostAfterMs: 50 });
 
-    const transaction = handle.begin(() => Promise.resolve('done'));
-    const outcome = expect(transaction).rejects.toMatchObject({ code: '57014' });
+    let outcome: string | undefined;
+    const transaction = handle
+      .begin(() => Promise.resolve('done'))
+      .then(
+        (value) => (outcome = `resolved ${String(value)}`),
+        () => (outcome = 'rejected'),
+      );
     await vi.advanceTimersByTimeAsync(200);
-    await outcome;
+
+    // Nothing can say yet whether it committed, so nobody is told it failed;
+    // the place is counted lost meanwhile.
+    expect(outcome).toBeUndefined();
     expect(pressureOf(handle)).toMatchObject({ admitted: 1, lost: 1 });
 
     settleCommit();
+    await transaction;
+    expect(outcome).toBe('resolved done');
     await vi.advanceTimersByTimeAsync(0);
     expect(pressureOf(handle)).toMatchObject({ admitted: 0, lost: 0 });
   });
@@ -603,7 +675,7 @@ describe('the admission gate', () => {
 
   it('names the pool it reports on, beside every other pool in the process', () => {
     getSql();
-    const pressure = poolPressure();
+    const pressure = pressureOf(getSql());
 
     expect(pressure.name).toMatch(/^pool \d+$/);
     expect(pressure.admitMax).toBe(ADMIT_MAX);

@@ -333,7 +333,9 @@ hand, as `databaseProbe()` is, and the `pool-confinement` repo rule keeps
 `getSql()` and `$client` inside `db/client.ts` and tests. Nothing cancels a
 query postgres.js holds but is not running: that cancel strands a connection in
 `connecting` for up to an hour, or stops a transaction's queue for good, so the
-deadline waits for the query instead. `max_pipeline: 0` is not the fix: it also
+deadline waits for the query instead. Nor does anything report a `COMMIT` as
+failed because it is slow: its place is counted lost, and the caller waits for
+the real outcome. `max_pipeline: 0` is not the fix: it also
 breaks `begin()`. A page that reads several things at once, or re-reads itself
 while something moves, should weigh what that costs on eight places:
 `allLimited`, and a version to poll rather than the render

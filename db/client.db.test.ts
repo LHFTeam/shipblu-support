@@ -376,23 +376,79 @@ describe('the admission gate', () => {
     }
   });
 
-  it('gives up on a transaction whose COMMIT does not answer, and takes the place back late', async () => {
+  it('waits for a COMMIT that is slow to answer, counting its place lost meanwhile', async () => {
     const sql = instrumentClient(openPool(proxy.url), 200, { admit: 3, lostAfterMs: 300 });
     try {
-      const transaction = sql.begin(async (tx) => {
-        await tx.unsafe('select $1::int as n', [1]);
-        // The COMMIT postgres.js writes next, on its own, past `unsafe()`.
-        proxy.hold('commit');
-      });
+      let outcome: string | undefined;
+      const transaction = sql
+        .begin(async (tx) => {
+          await tx.unsafe('select $1::int as n', [1]);
+          // The COMMIT postgres.js writes next, on its own, past `unsafe()`.
+          proxy.hold('commit');
+          return 'committed';
+        })
+        .then(
+          (value) => (outcome = value),
+          () => (outcome = 'rejected'),
+        );
 
-      await expect(transaction).rejects.toMatchObject({ code: '57014' });
-      expect(pressureOf(sql)).toMatchObject({ admitted: 1, lost: 1 });
+      // Past the clock: counted lost, but nobody is told the write failed,
+      // because nothing here can say it did not commit.
+      await expect.poll(() => pressureOf(sql)).toMatchObject({ admitted: 1, lost: 1 });
+      expect(outcome).toBeUndefined();
 
       proxy.release();
+      await transaction;
+      expect(outcome).toBe('committed');
       await expect.poll(() => pressureOf(sql)).toMatchObject({ admitted: 0, lost: 0 });
       await burst(sql, 6);
     } finally {
       proxy.release();
+      await sql.end({ timeout: 1 });
+    }
+  });
+
+  it('closes the connection of a BEGIN that answers after being given up on', async () => {
+    const direct = postgres(databaseUrl!, { max: 1, prepare: false });
+    const sql = instrumentClient(openPool(proxy.url), 200, { admit: 3, lostAfterMs: 300 });
+    /** Backends left inside a transaction nobody will end, besides the checker's own. */
+    const stranded = async () => {
+      const [row] = await direct.unsafe(
+        `select count(*)::int as n from pg_stat_activity
+          where state like 'idle in transaction%' and pid <> pg_backend_pid()`,
+      );
+      return (row as unknown as { n: number }).n;
+    };
+    try {
+      proxy.hold('begin');
+      const transaction = sql.begin((tx) => tx.unsafe('select 1 as n'));
+      await expect(transaction).rejects.toMatchObject({ code: '57014' });
+      expect(pressureOf(sql)).toMatchObject({ admitted: 1, lost: 1 });
+
+      // The BEGIN ran at the server; its answer arrives late. postgres.js
+      // would leave that connection reserved, the backend idle in a
+      // transaction, for good: the gate closes it, and only then gives the
+      // place back.
+      proxy.release();
+      await expect.poll(() => pressureOf(sql)).toMatchObject({ admitted: 0, lost: 0 });
+      await expect.poll(stranded).toBe(0);
+      await burst(sql, 6);
+    } finally {
+      proxy.release();
+      await sql.end({ timeout: 1 });
+      await direct.end({ timeout: 1 });
+    }
+  });
+
+  it('runs the queries a transaction body returns as an array', async () => {
+    const sql = instrumentClient(openPool(proxy.url), 2_000, { admit: 3 });
+    try {
+      // postgres.js's own form: `scope()` awaits an array the body returns. Seen
+      // through an async wrapper it was an array of queries never sent, and
+      // the transaction committed empty.
+      const result = await sql.begin((tx) => [tx`select 1 as n`, tx`select 2 as n`]);
+      expect(result).toEqual([[{ n: 1 }], [{ n: 2 }]]);
+    } finally {
       await sql.end({ timeout: 1 });
     }
   });

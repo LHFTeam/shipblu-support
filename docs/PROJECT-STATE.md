@@ -5717,8 +5717,12 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
     to 60 minutes, or the transaction's queue stops for good. Three
     connections kept in `connecting` would leave the gate admitting more
     queries than postgres.js has connections to run them on. So the deadline
-    waits for that query to start, and gives it up on the same clock as any
-    other.
+    waits for that query to start, and cancels it once it runs. On the pool
+    it is not given up on before it is sent either: rejected unsent, it would
+    still be sent once a connection took it, an autocommit write its caller
+    had been told failed. Inside a transaction it is given up on the same
+    clock as any other statement, because the transaction rolls back with
+    it.
 
     **Given up on, not left hanging.** The gate keeps the pooler from losing
     replies, but a reply can still go missing some other way. So a query
@@ -5733,14 +5737,21 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
       because its `ROLLBACK` sits behind that statement.
     - `COMMIT`, `ROLLBACK`, `SAVEPOINT` and `ROLLBACK TO SAVEPOINT` carry no
       deadline of their own, so each gets a clock of the deadline plus the
-      give-up interval. Unanswered by then, the transaction is rejected and
-      its place counted lost until postgres.js settles it.
+      give-up interval. Unanswered by then, the place is counted lost and the
+      log says so, but the caller is not told anything. Nothing can cancel or
+      inspect a `COMMIT` in flight, and a slow one may still commit, so
+      rejecting would turn "not known yet" into "failed": an error for a
+      write that happened, and a retry that writes it twice. The caller waits
+      for the real outcome, as it did before the gate.
     - The place stays held until the transaction and every statement given
       up on have answered: either alone is not proof the connection is free.
-    - A transaction whose own `BEGIN` is given up on keeps its place for
-      good. postgres.js reserves the connection when it writes `BEGIN`, and a
-      late answer would leave it reserved with a transaction open and nobody
-      to end it.
+    - A `BEGIN` given up on that then answers has its connection closed.
+      postgres.js reserved the connection when it wrote `BEGIN`, and its own
+      `begin()` has already failed, so the late answer would leave the
+      connection reserved with a transaction open and nobody to end it.
+      Closing it ends the transaction at the server and hands the connection
+      back to postgres.js to reopen; then the place is freed. A late failure
+      is a connection that closed by itself, and frees the place as it is.
 
     **The Channels page.**
     - The page's seven reads run three at a time (`allLimited` in
@@ -5769,8 +5780,10 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
 
     **How to recognise it now.**
     - Every `[db]` line names its pool: `(pool N: …)`.
-      `[db] a query had no answer …` is a query given up on, and
-      `[db] a transaction's … had no answer …` a transaction.
+      `[db] a query had no answer …` is a query given up on;
+      `[db] a transaction's BEGIN had no answer` a transaction refused at its
+      start; and `[db] a transaction's COMMIT or ROLLBACK has had no answer …;
+still waiting for it` one whose outcome is not known yet.
     - `lost` in `/api/health`, which now reports `pools`, every pool in the
       process rather than only the route handlers'. `waiting` there counts
       only live waiters.
@@ -5782,6 +5795,29 @@ claude/shipblu-support-app-03p2we could not be found` — staging's pin to a
       `PARSE` is a backend that received a Parse and never its Sync. That is
       this shape at the database. It also appeared on 10-05 between 11:17 and
       12:35, seven times, and nobody noticed.
+
+    **Why not fix it below the client.** Two changes at the pooler would
+    remove the trigger rather than fence it, and neither is made here:
+    - Supabase's dedicated pooler (PgBouncer, beside the database) hands a
+      backend back only when the transaction ends and counts the Syncs it is
+      owed, so it does not lose pipelined replies. It is a change of
+      `DATABASE_URL` on every service, and per Supabase's documentation it is
+      served on the database's own address, IPv6 unless the IPv4 add-on is
+      on. Whether Render reaches it was not checked.
+    - Supavisor's session mode pins a backend to each client connection, so
+      a pipeline cannot be split. But every pool connection then holds a
+      backend for its life: two pools of ten per web instance, up to three
+      instances, plus the worker and the crons, against the session pool's
+      size, so `POOL_MAX` would have to come down.
+
+    Either is a decision about infrastructure, and the gate is worth keeping
+    after both: neither stops postgres.js's own skip of a cancelled pipelined
+    query (below), and neither bounds a reply lost some other way. The gate
+    leans on postgres.js internals (`handler`, `state`, `active`, `canceller`,
+    `resolve`, `reject`, the `onexecute` hook `begin()` passes); the version
+    is pinned in `package-lock.json`, and `db/client.test.ts` checks each of
+    them is where the gate expects, so an upgrade that moves one fails there
+    rather than in production.
 
     **When Supavisor's fixes are deployed, keep the gate.** It costs two
     connections of concurrency and a queue that was already there, and

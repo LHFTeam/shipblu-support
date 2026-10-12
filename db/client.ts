@@ -139,11 +139,24 @@ type Gate = {
   admitted: number;
   /** Of `admitted`, those given up on whose reply has not come. */
   lost: number;
+  /**
+   * The line, oldest first from `head`. A waiter that leaves is marked rather
+   * than spliced out, and `pump` steps over it: in the burst the gate exists
+   * for, hundreds of waiters reach their deadline together, and taking each
+   * out of an array would drain the line in quadratic time on the request
+   * thread.
+   */
   queue: Waiter[];
+  head: number;
+  /** Waiters still in the line. */
+  waiting: number;
 };
 
-/** A place in the line. `start` returns whether it used the place it was given. */
-type Waiter = { start: () => boolean };
+/**
+ * A place in the line. `start` returns whether it used the place it was given;
+ * `done` is set once it has been given one or has left.
+ */
+type Waiter = { start: () => boolean; done: boolean };
 
 export type PoolPressure = {
   /** `pool 1`, `pool 2`: which of the process's pools, in the order they opened. */
@@ -183,32 +196,25 @@ function pressure(state: PoolState | null): PoolPressure {
     peakAt: state?.peakAt ?? null,
     max: POOL_MAX,
     admitted: state?.gate?.admitted ?? 0,
-    waiting: state?.gate?.queue.length ?? 0,
+    waiting: state?.gate?.waiting ?? 0,
     lost: state?.gate?.lost ?? 0,
     admitMax: state?.gate?.limit ?? ADMIT_MAX,
   };
 }
 
-/** For `/api/health`: the pool `getSql()` opened in this copy of the module. */
-export function poolPressure(): PoolPressure {
-  return pressure(pool ? stateOf(pool) : null);
-}
-
 /**
- * Every pool in this process, the other bundled copy's included.
+ * Every pool in this process, the other bundled copy's included, for
+ * `/api/health`.
  *
- * `poolPressure()` alone describes whichever copy of this module answers it —
- * for `/api/health` the route handlers' pool, while the pool that froze on
- * 2026-09-08 and again on 2026-10-11 was the one pages use.
+ * One copy of this module sees only the pool it opened — for `/api/health`
+ * the route handlers' — while the pool that froze on 2026-09-08 and again on
+ * 2026-10-11 was the one pages use.
  */
 export function allPoolPressures(): PoolPressure[] {
   return [...(globalThis.__shipbluPools?.values() ?? [])].map(pressure);
 }
 
-/**
- * One instrumented handle's numbers, for the tests that drive a pool of their
- * own: `poolPressure()` describes only the pool `getSql()` opened.
- */
+/** One instrumented handle's numbers, for the tests that drive a pool of their own. */
 export function pressureOf(handle: object): PoolPressure {
   return pressure(stateOf(handle));
 }
@@ -276,24 +282,43 @@ function cancelQuietly(query: Settleable): void {
 
 // --- The gate ---------------------------------------------------------------
 
-function admit(gate: Gate, start: () => boolean): Waiter {
-  const waiter = { start };
+/** Joins the line; null when a place was free and `start` has already run. */
+function admit(gate: Gate, start: () => boolean): Waiter | null {
+  const waiter = { start, done: false };
   gate.queue.push(waiter);
+  gate.waiting += 1;
   pump(gate);
-  return waiter;
+  return waiter.done ? null : waiter;
 }
 
 /** Takes a waiter out of the line: one refused at its deadline holds nothing. */
 function leave(gate: Gate, waiter: Waiter): void {
-  const index = gate.queue.indexOf(waiter);
-  if (index >= 0) gate.queue.splice(index, 1);
+  if (waiter.done) return;
+  waiter.done = true;
+  gate.waiting -= 1;
+  // An empty line lets go of the waiters it was stepping over, and the
+  // queries they hold, rather than at the next burst.
+  if (gate.waiting === 0) {
+    gate.queue.length = 0;
+    gate.head = 0;
+  }
 }
 
 function pump(gate: Gate): void {
-  while (gate.admitted < gate.limit && gate.queue.length > 0) {
-    const waiter = gate.queue.shift()!;
+  while (gate.admitted < gate.limit && gate.head < gate.queue.length) {
+    const waiter = gate.queue[gate.head]!;
+    gate.head += 1;
+    if (waiter.done) continue;
+    waiter.done = true;
+    gate.waiting -= 1;
     gate.admitted += 1;
     if (!waiter.start()) gate.admitted -= 1;
+  }
+  // Dropped in one go once the walked part is most of the array, so the cost
+  // is spread over the waiters it passed.
+  if (gate.head === gate.queue.length || gate.head > gate.queue.length / 2) {
+    gate.queue.splice(0, gate.head);
+    gate.head = 0;
   }
 }
 
@@ -318,7 +343,7 @@ function describe(state: PoolState): string {
   const name = state.name ?? 'pool';
   const gate = state.gate;
   if (!gate) return ` (${name})`;
-  return ` (${name}: ${gate.admitted - gate.lost} running, ${gate.queue.length} waiting, ${gate.lost} lost of ${gate.limit})`;
+  return ` (${name}: ${gate.admitted - gate.lost} running, ${gate.waiting} waiting, ${gate.lost} lost of ${gate.limit})`;
 }
 
 function canceled(message = 'canceling statement due to user request'): Error {
@@ -346,18 +371,32 @@ type TrackOptions = {
  * place on its behalf.
  */
 type TransactionWatch = {
-  /** A statement was given up on: its connection is waiting for a reply. */
+  /**
+   * A statement was given up on: its connection is waiting for a reply. The
+   * caller is told now, since the statement has failed as far as the body can
+   * see, and the body's failure is a ROLLBACK.
+   */
   lost: (error: Error) => void;
-  /** The reply to a statement given up on came after all. */
-  recovered: () => void;
+  /**
+   * Something postgres.js wrote on its own has gone unanswered: the place is
+   * counted lost, but the caller is not told, because nothing failed that it
+   * could act on (`clock`).
+   */
+  held: () => void;
+  /**
+   * The answer to what was given up on or held came after all — `resolved` or
+   * `rejected` by postgres.js, which a lost BEGIN needs to know.
+   */
+  recovered: (outcome: Outcome) => void;
   /**
    * Starts a clock on a statement postgres.js writes itself — `COMMIT`,
    * `ROLLBACK`, `SAVEPOINT`, `ROLLBACK TO` — which never pass `unsafe()` and so
-   * carry no deadline. Cleared when what waits on it settles; once
-   * `timeoutMs + lostAfterMs` has gone by first, the transaction is given up on.
+   * carry no deadline. Cleared when what waits on it settles.
    */
   stall: (label: string) => Clock;
 };
+
+type Outcome = 'resolved' | 'rejected';
 
 type Clock = { clear: () => void };
 
@@ -476,10 +515,10 @@ function track<T>(query: T, options: TrackOptions): Tracked {
    * again. Once only, because postgres.js can settle a query twice — a late
    * reply to a query already rejected here, or its own cancel racing an answer.
    */
-  const answered = () => {
+  const answered = (outcome: Outcome) => {
     if (answeredOnce) return;
     answeredOnce = true;
-    if (lost) txn?.recovered();
+    if (lost) txn?.recovered(outcome);
     if (!admitted || !gate) return;
     admitted = false;
     if (lost) {
@@ -490,8 +529,8 @@ function track<T>(query: T, options: TrackOptions): Tracked {
   };
 
   const { resolve, reject } = settleable;
-  settleable.resolve = (value) => (answered(), finish(), resolve.call(settleable, value));
-  settleable.reject = (error) => (answered(), finish(), reject.call(settleable, error));
+  settleable.resolve = (value) => (answered('resolved'), finish(), resolve.call(settleable, value));
+  settleable.reject = (error) => (answered('rejected'), finish(), reject.call(settleable, error));
 
   const giveUp = () => {
     if (settled) return;
@@ -510,13 +549,18 @@ function track<T>(query: T, options: TrackOptions): Tracked {
 
   const abandon = () => {
     if (settled) return;
-    lostTimer ??= setTimeout(giveUp, lostAfterMs);
     // Held by postgres.js but not running: unsent, or pipelined behind another.
     // A query still at the gate is neither, and its cancel is the clean one.
     if (!settleable.active && (dispatched || settleable.state != null)) {
+      // Inside a transaction a statement given up on unsent is rolled back
+      // with the rest of it. On the pool one would still be sent once a
+      // connection took it — an autocommit write its caller was told had
+      // failed — so the clock to give up on it starts only once it is sent.
+      if (txn) lostTimer ??= setTimeout(giveUp, lostAfterMs);
       recheckTimer = setTimeout(abandon, RECHECK_CANCEL_MS);
       return;
     }
+    lostTimer ??= setTimeout(giveUp, lostAfterMs);
     cancelQuietly(settleable);
   };
 
@@ -570,7 +614,18 @@ type Instrumentable = {
  * place — with the gate full it would wait for itself — and it reports to the
  * transaction rather than to the gate.
  */
-let beginning: { txn: TransactionWatch | undefined } | null = null;
+let beginning: Opening | null = null;
+
+/** What a transaction knows about its own `BEGIN`. */
+type Opening = {
+  txn: TransactionWatch | undefined;
+  /**
+   * The connection postgres.js reserved for the transaction, caught from the
+   * `onexecute` hook its `begin()` hands the `BEGIN`: the one way to end a
+   * transaction whose `BEGIN` answered after it was given up on.
+   */
+  connection?: { terminate: () => void };
+};
 
 export type InstrumentOptions = {
   /** Put the handle's queries and transactions behind an admission gate of this size. */
@@ -629,7 +684,9 @@ export function instrumentClient<T>(
     peakAt: null,
     transactions: 0,
     atCeiling: false,
-    gate: options.admit ? { limit: options.admit, admitted: 0, lost: 0, queue: [] } : null,
+    gate: options.admit
+      ? { limit: options.admit, admitted: 0, lost: 0, queue: [], head: 0, waiting: 0 }
+      : null,
   };
   const limits = { timeoutMs, lostAfterMs: options.lostAfterMs ?? LOST_AFTER_CANCEL_MS };
   return instrumentWith(client, limits, marked[STATE]);
@@ -645,6 +702,7 @@ function instrumentWith<T>(client: T, limits: Limits, state: PoolState, txn?: Tr
   const native = handle.unsafe.bind(handle);
   handle.unsafe = (...args: unknown[]) => {
     const opening = beginning;
+    if (opening) catchConnection(args, opening);
     const query = native(...args);
     track(
       query,
@@ -684,21 +742,49 @@ function instrumentWith<T>(client: T, limits: Limits, state: PoolState, txn?: Tr
   return client;
 }
 
-/** A clock that gives the transaction up on firing, and reports back if cleared after. */
+/**
+ * Wraps the `onexecute` option postgres.js's `begin()` passes with its `BEGIN`
+ * — `sql.unsafe('begin', [], { onexecute })` — so the transaction learns which
+ * connection it reserved.
+ */
+function catchConnection(args: unknown[], opening: Opening): void {
+  const options = args[2] as { onexecute?: (connection: unknown) => unknown } | undefined;
+  const onexecute = options?.onexecute;
+  if (!options || typeof onexecute !== 'function') return;
+  options.onexecute = (connection) => {
+    opening.connection = connection as Opening['connection'];
+    return onexecute(connection);
+  };
+}
+
+/**
+ * A clock on a statement postgres.js writes itself. Firing counts the
+ * transaction's place lost and says so; it does not reject the caller.
+ *
+ * Nothing here can cancel or inspect a `COMMIT` in flight, so one that is
+ * only slow — a large write's fsync, a deferred constraint — may still commit
+ * after any deadline. Rejecting then would turn "not known yet" into
+ * "failed": the action reports an error for a write that happened, and a
+ * retry writes it twice. So the caller waits for the real outcome, as it did
+ * before the gate, and the place is counted lost meanwhile, which is what
+ * `/api/health` and the log need to see a connection that stopped answering.
+ */
 function clock(state: PoolState, txn: TransactionWatch, label: string, afterMs: number): Clock {
   let fired = false;
   let cleared = false;
   const timer = setTimeout(() => {
     fired = true;
-    log.warn(`a transaction's ${label} had no answer in ${afterMs}ms${describe(state)}`);
-    txn.lost(canceled(`${label} had no answer in ${afterMs}ms; its connection is treated as lost`));
+    log.warn(
+      `a transaction's ${label} has had no answer in ${afterMs}ms; still waiting for it${describe(state)}`,
+    );
+    txn.held();
   }, afterMs);
   return {
     clear: () => {
       if (cleared) return;
       cleared = true;
       clearTimeout(timer);
-      if (fired) txn.recovered();
+      if (fired) txn.recovered('resolved');
     },
   };
 }
@@ -706,19 +792,24 @@ function clock(state: PoolState, txn: TransactionWatch, label: string, afterMs: 
 /**
  * `begin()`, holding one place at the gate for the transaction's whole life.
  *
- * Bounded three ways. A transaction still waiting at the gate after `timeoutMs`
- * is refused with `57014`, as a waiting query is. One whose statement is given
- * up on is rejected then, rather than when postgres.js's own `ROLLBACK` comes
- * back: that is written onto the same connection behind the statement that
- * never answered, so it never does. And the `COMMIT` or `ROLLBACK` postgres.js
- * writes after the body, which no deadline covers, gets a clock of its own.
+ * A transaction still waiting at the gate after `timeoutMs` is refused with
+ * `57014`, as a waiting query is. One whose statement is given up on is
+ * rejected then, rather than when postgres.js's own `ROLLBACK` comes back:
+ * that is written onto the same connection behind the statement that never
+ * answered, so it never does. The `COMMIT` or `ROLLBACK` postgres.js writes
+ * after the body, which no deadline covers, gets a clock that counts the place
+ * lost without rejecting anybody (`clock` says why).
  *
  * The place itself is kept, and counted lost, until postgres.js has settled the
  * transaction *and* every statement given up on has been answered: either
- * alone is not proof the connection is free. A transaction whose own `BEGIN`
- * is given up on keeps its place for good. postgres.js reserves the connection
- * when it writes `BEGIN`, and a late answer leaves it reserved with a
- * transaction open and nobody to end it.
+ * alone is not proof the connection is free. A `BEGIN` given up on is the one
+ * statement whose late answer is not enough. postgres.js reserves the
+ * connection when it writes `BEGIN`, and its own `begin()` has already failed,
+ * so a late success leaves that connection reserved with a transaction open
+ * and nobody to end it. The connection is closed then, which ends the
+ * transaction at the server and returns the connection to postgres.js as one
+ * to reopen, and only then is the place given back. A late failure is a
+ * connection that closed by itself.
  */
 function beginBehind(
   state: PoolState,
@@ -728,8 +819,8 @@ function beginBehind(
   handle: object,
   args: unknown[],
 ): Promise<unknown> {
-  const start = (txn?: TransactionWatch, opening?: TransactionWatch, finished?: () => void) => {
-    beginning = { txn: opening };
+  const start = (txn?: TransactionWatch, opening?: Opening, finished?: () => void) => {
+    beginning = opening ?? { txn: undefined };
     try {
       return Promise.resolve(
         nativeBegin.apply(
@@ -779,15 +870,20 @@ function beginBehind(
         release(gate);
       };
 
+      const hold = () => {
+        unanswered += 1;
+        if (!countedLost) {
+          countedLost = true;
+          gate.lost += 1;
+        }
+      };
+
       const txn: TransactionWatch = {
         lost: (error) => {
-          unanswered += 1;
-          if (!countedLost) {
-            countedLost = true;
-            gate.lost += 1;
-          }
+          hold();
           settle(() => reject(error));
         },
+        held: hold,
         recovered: () => {
           unanswered -= 1;
           releaseWhenFree();
@@ -795,16 +891,29 @@ function beginBehind(
         stall: (label) => clock(state, txn, label, limits.timeoutMs + limits.lostAfterMs),
       };
 
-      // The BEGIN reports here: given up on, it is never counted answered.
-      const opening: TransactionWatch = {
-        ...txn,
-        lost: (error) => {
-          log.warn(
-            `a transaction's BEGIN had no answer; its place is kept for good${describe(state)}`,
-          );
-          txn.lost(error);
+      // The BEGIN reports here, and its late success needs its connection closed.
+      const opening: Opening = {
+        txn: {
+          ...txn,
+          lost: (error) => {
+            log.warn(`a transaction's BEGIN had no answer${describe(state)}`);
+            txn.lost(error);
+          },
+          recovered: (outcome) => {
+            if (outcome === 'resolved') {
+              const connection = opening.connection;
+              // No connection caught means none was reserved: nothing to close,
+              // and no proof the place is free either.
+              if (!connection) return;
+              log.warn(
+                `a transaction's BEGIN answered after it was given up on; closing its connection${describe(state)}`,
+              );
+              // After the ReadyForQuery being handled now, not inside it.
+              queueMicrotask(() => connection.terminate());
+            }
+            txn.recovered(outcome);
+          },
         },
-        recovered: () => {},
       };
 
       start(txn, opening, () => {
@@ -851,7 +960,11 @@ function instrumentScope(
     hooks.started();
     if (counts) state.transactions += 1;
     try {
-      return await run(instrumentWith(client, limits, state, txn));
+      const result = run(instrumentWith(client, limits, state, txn));
+      // postgres.js runs an array of queries a body returns (`scope()`'s
+      // `Array.isArray(x) ? Promise.all(x) : x`), and cannot see one through
+      // this async function: it would COMMIT with none of them sent.
+      return await (Array.isArray(result) ? Promise.all(result) : result);
     } finally {
       if (counts) state.transactions -= 1;
       hooks.finished?.();
