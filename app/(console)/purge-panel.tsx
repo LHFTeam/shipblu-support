@@ -74,7 +74,7 @@ export function PurgePanel({
   const armed = confirmationMatches(preview.confirmation, typed);
 
   if (refusal) {
-    return <p className="text-xs text-[var(--muted-foreground)]">{refusal}</p>;
+    return <p className="text-xs text-(--color-text-secondary)">{refusal}</p>;
   }
 
   if (!open) {
@@ -86,10 +86,10 @@ export function PurgePanel({
   }
 
   return (
-    <div className="rounded-md border border-[var(--color-critical)]/40 p-3">
+    <div className="rounded-md border border-(--color-feedback-danger-border) p-3">
       <p className="text-xs font-medium">Permanently delete {preview.summary}?</p>
 
-      <p className="mt-2 text-xs text-[var(--muted-foreground)]">
+      <p className="mt-2 text-xs text-(--color-text-secondary)">
         {destroyed.length > 0 ? (
           <>
             Preview: this destroys <span className="font-medium">{destroyed.join(', ')}</span>, and
@@ -101,7 +101,7 @@ export function PurgePanel({
       </p>
 
       {preview.counts.shipmentsDetached > 0 ? (
-        <p className="mt-2 text-xs text-[var(--muted-foreground)]">
+        <p className="mt-2 text-xs text-(--color-text-secondary)">
           {preview.counts.shipmentsDetached} shipment
           {preview.counts.shipmentsDetached === 1 ? '' : 's'} will be kept, with this person unset
           as the shipper or recipient — a parcel is a record of something that happened.
@@ -109,7 +109,7 @@ export function PurgePanel({
       ) : null}
 
       {preview.ticketNumbers.length > 0 ? (
-        <p className="mt-2 text-xs text-[var(--muted-foreground)]">
+        <p className="mt-2 text-xs text-(--color-text-secondary)">
           {/* The total up front: the list stops at twelve, and "and 40 more" at
               the end of a line is the number most likely to go unread. */}
           Tickets going with it ({preview.ticketNumbers.length}):{' '}
@@ -127,7 +127,7 @@ export function PurgePanel({
 
       {/* A list rather than one joined sentence: there are six of these now,
           and a run-on clause is the part of a warning that gets skimmed. */}
-      <div className="mt-2 text-xs text-[var(--muted-foreground)]">
+      <div className="mt-2 text-xs text-(--color-text-secondary)">
         <p>Not deleted:</p>
         <ul className="mt-1 list-disc ps-4">
           {RETAINED.map((item) => (
@@ -150,11 +150,17 @@ export function PurgePanel({
           onChange={(event) => setTyped(event.target.value)}
           autoComplete="off"
           disabled={pending}
-          className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-base outline-none sm:text-xs focus:border-[var(--color-critical)]"
+          className="w-full rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) px-2 py-1.5 text-base outline-none hover:border-(--color-border-default) focus:border-(--color-feedback-danger-fg) focus:ring-2 focus:ring-(--color-feedback-danger-fg)/20 sm:text-xs"
         />
 
         <div className="flex items-center gap-2">
-          <Button type="submit" variant="danger" size="sm" disabled={!armed || pending}>
+          <Button
+            type="submit"
+            variant="danger"
+            size="sm"
+            disabled={!armed || pending}
+            loading={pending}
+          >
             {pending ? 'Deleting…' : 'Delete permanently'}
           </Button>
           <Button

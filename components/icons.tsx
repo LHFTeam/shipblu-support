@@ -10,6 +10,16 @@ import type { ComponentProps } from 'react';
 
 type IconProps = ComponentProps<'svg'> & { size?: number };
 
+/**
+ * A directional icon points along the reading direction — back, reply, send,
+ * out of the page — so it mirrors in Arabic. Built into the icon rather than
+ * left to each call site: the help centre is RTL by default, and a caller that
+ * forgot would draw "back" pointing forward. The logo and charts never mirror.
+ */
+function Directional({ className = '', ...props }: IconProps) {
+  return <Icon {...props} className={`rtl:-scale-x-100 ${className}`} />;
+}
+
 function Icon({ size = 20, children, ...props }: IconProps) {
   return (
     <svg
@@ -113,9 +123,9 @@ export function CheckIcon(props: IconProps) {
 
 export function ChevronLeftIcon(props: IconProps) {
   return (
-    <Icon {...props}>
+    <Directional {...props}>
       <path d="m14.5 6-6 6 6 6" />
-    </Icon>
+    </Directional>
   );
 }
 
@@ -221,20 +231,20 @@ export function TruckIcon(props: IconProps) {
 
 export function ReturnIcon(props: IconProps) {
   return (
-    <Icon {...props}>
+    <Directional {...props}>
       <path d="M4 5.5v5h5" />
       <path d="M4.6 10.5a8 8 0 1 1 .7 5.6" />
-    </Icon>
+    </Directional>
   );
 }
 
 /** A reply arrow. Distinct from `ReturnIcon`, which is a parcel going back. */
 export function ReplyIcon(props: IconProps) {
   return (
-    <Icon {...props}>
+    <Directional {...props}>
       <path d="M9 17l-5-5 5-5" />
       <path d="M4 12h11a5 5 0 0 1 5 5v1" />
-    </Icon>
+    </Directional>
   );
 }
 
@@ -295,6 +305,169 @@ export function InfoIcon(props: IconProps) {
       <circle cx="12" cy="12" r="9" />
       <path d="M12 11v5" />
       <path d="M12 7.75h.01" />
+    </Icon>
+  );
+}
+
+/* ── Conversation, status and controls ────────────────────────────────────
+   The design system's additions, drawn on the same grid: a private note's lock
+   and a public post's globe, a messaging window's clock, the hub a side
+   conversation goes to, receipts and failures, and the controls the composer
+   and the widget need. Each replaces an emoji or a text glyph (📍, ×, ★, 💬)
+   that rendered differently on every operating system. */
+
+export function LockIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="5" y="10.5" width="14" height="9.5" rx="1.5" />
+      <path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" />
+    </Icon>
+  );
+}
+
+export function GlobeIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M3.5 12h17" />
+      <path d="M12 3.5c2.3 2.4 3.5 5.2 3.5 8.5s-1.2 6.1-3.5 8.5c-2.3-2.4-3.5-5.2-3.5-8.5S9.7 5.9 12 3.5z" />
+    </Icon>
+  );
+}
+
+export function ClockIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 7.5V12l3 2" />
+    </Icon>
+  );
+}
+
+export function HubIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M4 20V9l8-5 8 5v11" />
+      <path d="M9 20v-6h6v6" />
+    </Icon>
+  );
+}
+
+export function PinIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M12 20.5s-6.5-5.6-6.5-10.5a6.5 6.5 0 0 1 13 0c0 4.9-6.5 10.5-6.5 10.5z" />
+      <circle cx="12" cy="10" r="2.3" />
+    </Icon>
+  );
+}
+
+export function PaperclipIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="m19 11.5-7.1 7.1a4.5 4.5 0 0 1-6.4-6.4l7.4-7.4a3 3 0 0 1 4.2 4.2l-7.2 7.2a1.5 1.5 0 0 1-2.1-2.1l6.6-6.6" />
+    </Icon>
+  );
+}
+
+export function XIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M6.5 6.5l11 11M17.5 6.5l-11 11" />
+    </Icon>
+  );
+}
+
+export function PlusIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M12 5.5v13M5.5 12h13" />
+    </Icon>
+  );
+}
+
+export function SendIcon(props: IconProps) {
+  return (
+    <Directional {...props}>
+      <path d="M4.5 12 19.5 5l-4 14.5-3.5-6z" />
+      <path d="m12 13.5 7.5-8.5" />
+    </Directional>
+  );
+}
+
+export function ExternalIcon(props: IconProps) {
+  return (
+    <Directional {...props}>
+      <path d="M13.5 4.5h6v6" />
+      <path d="m19.5 4.5-8 8" />
+      <path d="M17.5 13.5V18a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 18V8A1.5 1.5 0 0 1 6 6.5h4.5" />
+    </Directional>
+  );
+}
+
+/** Delivered and read: two ticks. One tick is `CheckIcon`. */
+export function CheckDoubleIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="m2.5 12.5 4.5 4.5L16.5 7" />
+      <path d="m12.5 16 1 1L23 7.5" />
+    </Icon>
+  );
+}
+
+export function AlertCircleIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 8v4.5M12 15.8v.2" />
+    </Icon>
+  );
+}
+
+export function ChatIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M20 12.5c0 3.6-3.6 6.5-8 6.5-1 0-2-.15-2.9-.42L4 20l1.3-3.5C4.5 15.4 4 14 4 12.5 4 8.9 7.6 6 12 6s8 2.9 8 6.5z" />
+    </Icon>
+  );
+}
+
+/** Machine-written: the customer bot and automated messages. */
+export function BotIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="4" y="8" width="16" height="11" rx="3" />
+      <path d="M12 8V4.5" />
+      <circle cx="9" cy="13.5" r="1.1" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="13.5" r="1.1" fill="currentColor" stroke="none" />
+    </Icon>
+  );
+}
+
+export function UserIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <circle cx="12" cy="8.5" r="3.5" />
+      <path d="M5 19.5a7 7 0 0 1 14 0" />
+    </Icon>
+  );
+}
+
+export function ImageIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="3.5" y="5" width="17" height="14" rx="1.5" />
+      <circle cx="9" cy="10" r="1.6" />
+      <path d="m4 17 5-4.5 3.5 3 3-2.5L20 17" />
+    </Icon>
+  );
+}
+
+export function MailIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="3" y="5.5" width="18" height="13" rx="2" />
+      <path d="m3.8 7 7.2 5.4a1.7 1.7 0 0 0 2 0L20.2 7" />
     </Icon>
   );
 }

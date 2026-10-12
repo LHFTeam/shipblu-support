@@ -62,6 +62,18 @@ const SECTIONS: { title: string; links: { href: string; label: string }[] }[] = 
   },
 ];
 
+/*
+ * The design system's views-panel item: the section you are in wears the
+ * selected tint with brand text, never a filled blue, because a filled blue is
+ * what an action looks like. `aria-current` is the hook for the styling as well
+ * as the fact for a screen reader, so the two cannot disagree.
+ */
+const ITEM =
+  'flex min-h-9 items-center rounded-md px-2 text-sm text-(--color-text-primary) transition-colors hover:bg-(--color-background-hover) aria-[current=page]:bg-(--color-background-selected) aria-[current=page]:font-semibold aria-[current=page]:text-(--color-text-brand)';
+
+const CHIP =
+  'rounded-full bg-(--color-background-surface-sunken) px-3 py-1 text-xs whitespace-nowrap text-(--color-text-secondary) aria-[current=page]:bg-(--color-background-selected) aria-[current=page]:font-semibold aria-[current=page]:text-(--color-text-brand)';
+
 export function AdminNav() {
   const pathname = usePathname();
   const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
@@ -70,20 +82,19 @@ export function AdminNav() {
     <>
       <nav
         aria-label="Admin sections"
-        className="app-scroll hidden w-52 shrink-0 overflow-y-auto border-e border-[var(--border)] bg-[var(--surface)] p-3 lg:block"
+        className="app-scroll hidden w-(--views-width) shrink-0 flex-col gap-4.5 overflow-y-auto border-e border-(--color-border-subtle) bg-(--color-background-surface) px-2.5 py-4 lg:flex"
       >
         <Link
           href="/admin"
-          className={`mb-3 block rounded-md px-2 py-1.5 text-sm font-semibold ${
-            pathname === '/admin' ? 'bg-[var(--muted)]' : 'hover:bg-[var(--muted)]'
-          }`}
+          aria-current={pathname === '/admin' ? 'page' : undefined}
+          className={`${ITEM} font-semibold`}
         >
           Settings
         </Link>
 
         {SECTIONS.map((section) => (
-          <div key={section.title} className="mb-4">
-            <p className="mb-1 px-2 text-[11px] font-medium tracking-wide text-[var(--muted-foreground)] uppercase">
+          <div key={section.title}>
+            <p className="mb-1 px-2 text-xs font-semibold text-(--color-text-secondary)">
               {section.title}
             </p>
             <ul className="flex flex-col gap-0.5">
@@ -92,11 +103,7 @@ export function AdminNav() {
                   <Link
                     href={link.href}
                     aria-current={isActive(link.href) ? 'page' : undefined}
-                    className={`block rounded-md px-2 py-1.5 text-sm ${
-                      isActive(link.href)
-                        ? 'bg-brand-500/12 font-medium text-brand-700'
-                        : 'text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)]'
-                    }`}
+                    className={ITEM}
                   >
                     {link.label}
                   </Link>
@@ -107,19 +114,18 @@ export function AdminNav() {
         ))}
       </nav>
 
+      {/* Pinned under the console header, and clear of the rail from `md`,
+          where the rail appears and this strip is still showing. */}
       <nav
         aria-label="Admin sections"
-        className="app-scroll fixed inset-x-0 top-12 z-20 flex gap-1 overflow-x-auto border-b border-[var(--border)] bg-[var(--surface)] px-3 py-2 lg:hidden"
+        className="app-scroll fixed inset-x-0 top-(--header-height) z-20 flex gap-1 overflow-x-auto border-b border-(--color-border-subtle) bg-(--color-background-surface) px-3 py-2 md:start-(--rail-width) lg:hidden"
       >
         {SECTIONS.flatMap((section) => section.links).map((link) => (
           <Link
             key={link.href}
             href={link.href}
-            className={`rounded-full px-3 py-1 text-xs whitespace-nowrap ${
-              isActive(link.href)
-                ? 'bg-brand-600 font-medium text-white'
-                : 'bg-[var(--muted)] text-[var(--muted-foreground)]'
-            }`}
+            aria-current={isActive(link.href) ? 'page' : undefined}
+            className={CHIP}
           >
             {link.label}
           </Link>

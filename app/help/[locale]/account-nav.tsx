@@ -21,7 +21,7 @@ export async function AccountNav({ locale }: { locale: Locale }) {
     return (
       <Link
         href={`/${locale}/account/login`}
-        className="font-medium text-[var(--kb-heading)] underline-offset-4 hover:underline"
+        className="font-bold text-(--color-text-secondary) underline-offset-4 hover:text-(--color-text-primary) hover:underline"
       >
         {t(locale, 'signIn')}
       </Link>
@@ -32,7 +32,7 @@ export async function AccountNav({ locale }: { locale: Locale }) {
     <span className="flex items-center gap-4">
       <Link
         href={`/${locale}/portal`}
-        className="font-medium text-[var(--kb-heading)] underline-offset-4 hover:underline"
+        className="font-bold text-(--color-text-secondary) underline-offset-4 hover:text-(--color-text-primary) hover:underline"
       >
         {t(locale, 'myTickets')}
       </Link>
@@ -40,7 +40,7 @@ export async function AccountNav({ locale }: { locale: Locale }) {
         <input type="hidden" name="locale" value={locale} />
         <button
           type="submit"
-          className="text-[var(--kb-muted)] underline-offset-4 hover:text-[var(--kb-heading)] hover:underline"
+          className="text-(--color-text-secondary) underline-offset-4 hover:text-(--color-text-primary) hover:underline"
         >
           {t(locale, 'signOut')}
         </button>

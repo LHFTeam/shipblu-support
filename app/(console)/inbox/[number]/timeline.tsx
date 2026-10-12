@@ -1,7 +1,12 @@
 'use client';
 
-import { Badge } from '@/components/ui';
-import { formatDateTime } from '@/lib/format';
+import type { ReactNode } from 'react';
+import { AgentAvatar, Avatar } from '@/components/avatar';
+import { ChatBubble, ChatEvent } from '@/components/chat';
+import { BotIcon, ExternalIcon, PinIcon, UserIcon, WarningIcon } from '@/components/icons';
+import { Badge, type BadgeTone } from '@/components/ui';
+import { runPositions } from '@/lib/chat/runs';
+import { TEAM_TIME_ZONE } from '@/lib/hours/zone';
 import type { ConversationDetail } from '@/lib/tickets/conversation';
 import { isPrivateReplyMessage, isPublicMetaMessage } from '@/lib/meta/visibility';
 import {
@@ -15,6 +20,9 @@ import { readOnlyReason } from '@/lib/tickets/channel-policy';
 import { AttachmentList } from './attachments';
 import { CommentModeration } from './comment-moderation';
 import { SideConversationCard } from './side-conversations';
+
+type Message = ConversationDetail['messages'][number];
+type Side = ConversationDetail['sideConversations'][number];
 
 /**
  * Messages and side conversations, in one ordered list.
@@ -31,8 +39,7 @@ import { SideConversationCard } from './side-conversations';
  * of the ticket is "I asked the hub after she wrote in".
  */
 type TimelineEntry =
-  | { kind: 'message'; at: Date; message: ConversationDetail['messages'][number] }
-  | { kind: 'side'; at: Date; side: ConversationDetail['sideConversations'][number] };
+  { kind: 'message'; at: Date; message: Message } | { kind: 'side'; at: Date; side: Side };
 
 function timelineEntries(conversation: ConversationDetail): TimelineEntry[] {
   const entries: TimelineEntry[] = [
@@ -51,145 +58,432 @@ function timelineEntries(conversation: ConversationDetail): TimelineEntry[] {
   return entries.sort((a, b) => a.at.getTime() - b.at.getTime());
 }
 
+/*
+  A day break above the first entry of each Cairo day, and a bare time under
+  each message, in place of the full date and time every message used to carry.
+  Lossless only because the break goes in on every change of day — before a
+  side card as well as a message — and in the team's zone rather than the
+  browser's, so two agents read the same day, and the server's render and the
+  browser's agree on where the breaks fall.
+*/
+const DAY = new Intl.DateTimeFormat('en-GB', {
+  weekday: 'long',
+  day: 'numeric',
+  month: 'long',
+  year: 'numeric',
+  timeZone: TEAM_TIME_ZONE,
+});
+
+const TIME = new Intl.DateTimeFormat('en-GB', {
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+  timeZone: TEAM_TIME_ZONE,
+});
+
+function Time({ at }: { at: Date }) {
+  return <time dateTime={at.toISOString()}>{TIME.format(at)}</time>;
+}
+
 export function Timeline({
   conversation,
   canSideConversation,
   canModerateComments,
+  canViewContact,
 }: {
   conversation: ConversationDetail;
   canSideConversation: boolean;
   canModerateComments: boolean;
+  /** The avatar route answers 404 without `contact.view`, so no picture is asked for. */
+  canViewContact: boolean;
 }) {
-  return (
-    <ol className="flex flex-col gap-4">
-      {timelineEntries(conversation).map((entry) => {
-        if (entry.kind === 'side') {
-          return (
-            <SideConversationCard
-              key={entry.side.id}
-              side={entry.side}
-              canWrite={canSideConversation && !readOnlyReason(conversation.channel)}
-            />
-          );
-        }
+  const readOnly = Boolean(readOnlyReason(conversation.channel));
+  const items: ReactNode[] = [];
+  let day: string | null = null;
 
-        const message = entry.message;
-        const isNote = message.kind === 'note';
-        const isInbound = message.direction === 'inbound';
-        const meta = (message.meta ?? {}) as {
-          metaKind?: string;
-          isPublic?: boolean;
-          echo?: boolean;
-          echoSource?: string;
-        };
-        const isPublicComment = isPublicMetaMessage(meta);
-        const isPrivateReply = isPrivateReplyMessage(meta, message.direction);
+  for (const entry of timelineEntries(conversation)) {
+    const label = DAY.format(entry.at);
+    if (label !== day) {
+      items.push(
+        <ChatEvent key={`day-${label}`} variant="day">
+          {label}
+        </ChatEvent>,
+      );
+      day = label;
+    }
 
-        return (
-          <li
-            key={message.id}
-            className={`max-w-[46rem] rounded-lg border px-3.5 py-2.5 ${
-              isNote
-                ? 'border-amber-500/30 bg-amber-500/10'
-                : isInbound
-                  ? 'border-[var(--border)] bg-[var(--surface)]'
-                  : 'ms-auto border-brand-500/30 bg-brand-500/8'
-            }`}
-          >
-            <div className="mb-1.5 flex items-baseline gap-2 text-xs text-[var(--muted-foreground)]">
-              <span className="font-medium">
-                {/*
-                  An echo has no author on either side: no agent wrote it and the
-                  customer did not send it. "Automation" would be technically
-                  true and useless — it was the customer bot, or the business
-                  typing on the WhatsApp Business app of a number connected
-                  through coexistence, and saying which one matters most. The
-                  bot's echoes predate `echoSource`, so its absence is the bot.
-                */}
-                {message.authorName ??
-                  (meta.echo
-                    ? meta.echoSource === 'business_app'
-                      ? 'WhatsApp Business app'
-                      : 'Customer bot'
-                    : isInbound
-                      ? 'Customer'
-                      : 'Automation')}
-              </span>
-              {isNote ? <Badge tone="warning">private note</Badge> : null}
-              {/* Whether a reply was public is the thing an agent most needs to
-                  be sure of on a social ticket, so it is stated rather than
-                  implied by which column the bubble is in. */}
-              {isPublicComment ? (
-                <Badge tone={isInbound ? 'neutral' : 'warning'}>
-                  {isInbound ? 'public comment' : 'posted publicly'}
-                </Badge>
-              ) : null}
-              {isPrivateReply ? <Badge tone="neutral">sent privately</Badge> : null}
-              {!isInbound && !isNote && meta.metaKind === 'direct_message' ? (
-                <Badge tone="neutral">direct message</Badge>
-              ) : null}
-              <span className="ms-auto">{formatDateTime(message.createdAt)}</span>
-            </div>
+    if (entry.kind === 'side') {
+      items.push(
+        <SideConversationCard
+          key={entry.side.id}
+          side={entry.side}
+          canWrite={canSideConversation && !readOnly}
+        />,
+      );
+      continue;
+    }
 
-            <MessageBody message={message} />
+    const message = entry.message;
 
-            <AttachmentList files={message.attachments} />
+    // What the system says about the ticket — today, a form attachment that
+    // could not be kept — is nobody's message. Drawn as an inbound bubble it
+    // read as the customer's words, authored "Customer".
+    if (message.kind === 'system') {
+      items.push(
+        <ChatEvent key={message.id}>
+          <WarningIcon size={14} className="shrink-0 text-(--color-feedback-warning-fg)" />
+          <span dir="auto">
+            {message.bodyText} · <Time at={entry.at} />
+          </span>
+        </ChatEvent>,
+      );
+      continue;
+    }
 
-            {isInbound && isPublicComment ? (
-              <CommentModeration
-                messageId={message.id}
-                meta={message.meta}
-                canModerate={canModerateComments && !readOnlyReason(conversation.channel)}
-              />
-            ) : null}
+    items.push(
+      <MessageParts
+        key={message.id}
+        message={message}
+        at={entry.at}
+        canModerate={canModerateComments && !readOnly}
+        canViewContact={canViewContact}
+      />,
+    );
+  }
 
-            {!isInbound && !isNote ? <DeliveryState message={message} /> : null}
-          </li>
-        );
-      })}
-    </ol>
-  );
+  return <ol className="flex flex-col">{items}</ol>;
 }
 
-function MessageBody({ message }: { message: ConversationDetail['messages'][number] }) {
+type MessageMeta = {
+  metaKind?: string;
+  isPublic?: boolean;
+  echo?: boolean;
+  echoSource?: string;
+  media?: { downloaded?: boolean; error?: string };
+};
+
+/**
+ * Who a message is from, in the thread's terms: which side it sits on, what
+ * the bubble is, and the face and words beside it.
+ *
+ * The sides are the viewer's. Everything the team's side wrote — an agent, the
+ * customer bot, an automation, the business on its own phone — is `out`,
+ * because the bot is our half of the conversation, and the customer reading a
+ * bot's answer as one of ours is exactly what happened.
+ */
+type Voice = {
+  from: 'in' | 'out';
+  kind: 'message' | 'note' | 'bot';
+  author: string;
+  avatar: 'contact' | 'agent' | 'bot' | 'business-app';
+  badges: { tone: BadgeTone; label: string }[];
+};
+
+function voiceOf(message: Message, meta: MessageMeta): Voice {
+  const isInbound = message.direction === 'inbound';
+  const isNote = message.kind === 'note';
+  const businessApp = meta.echo === true && meta.echoSource === 'business_app';
+
+  /*
+    An echo has no author on either side: no agent wrote it and the customer
+    did not send it. "Automation" would be technically true and useless — it
+    was the customer bot, or the business typing on the WhatsApp Business app
+    of a number connected through coexistence, and saying which one matters
+    most. The bot's echoes predate `echoSource`, so its absence is the bot.
+  */
+  const author =
+    message.authorName ??
+    (meta.echo
+      ? businessApp
+        ? 'WhatsApp Business app'
+        : 'Customer bot'
+      : isInbound
+        ? 'Customer'
+        : 'Automation');
+
+  // A person typed the business-app echo, on the phone; everything else on
+  // our side with no agent behind it was written by a machine, and says so.
+  const machine = !isInbound && !isNote && !message.authorIsAgent && !businessApp;
+
+  const badges: Voice['badges'] = [];
+  if (isNote) badges.push({ tone: 'note', label: 'Private note' });
+  if (machine) badges.push({ tone: 'automated', label: 'Automated' });
+  // Whether a reply was public is the thing an agent most needs to be sure of
+  // on a social ticket, so it is stated rather than implied by which side the
+  // bubble is on.
+  if (isPublicMetaMessage(meta)) {
+    badges.push({ tone: 'public', label: isInbound ? 'Public comment' : 'Posted publicly' });
+  }
+  if (isPrivateReplyMessage(meta, message.direction)) {
+    badges.push({ tone: 'private', label: 'Sent privately' });
+  }
+  if (!isInbound && !isNote && meta.metaKind === 'direct_message') {
+    badges.push({ tone: 'private', label: 'Direct message' });
+  }
+
+  return {
+    // A note is the team's working, whichever way the row was filed.
+    from: isInbound && !isNote ? 'in' : 'out',
+    kind: isNote ? 'note' : machine ? 'bot' : 'message',
+    author,
+    avatar: message.authorIsAgent
+      ? 'agent'
+      : isNote
+        ? 'bot'
+        : isInbound
+          ? 'contact'
+          : businessApp
+            ? 'business-app'
+            : 'bot',
+    badges,
+  };
+}
+
+/*
+  The face beside a run: the writer's own, never the requester's. An inbound
+  message on an email ticket can be a CC'd stranger, and the requester's photo
+  on their words would be a claim about who wrote them — so the contact is the
+  message's author, and one with no contact row behind it keeps the initials.
+
+  A contact's picture is asked for only when this agent may fetch it: the
+  avatar route answers 404 without `contact.view`, and the tile would fall
+  back after a request per message that was never going to succeed.
+*/
+function AuthorTile({
+  voice,
+  message,
+  canViewContact,
+}: {
+  voice: Voice;
+  message: Message;
+  canViewContact: boolean;
+}) {
+  switch (voice.avatar) {
+    case 'contact':
+      return (
+        <Avatar
+          name={voice.author}
+          // Any id will do when no picture is asked for: it is never put in a URL.
+          contactId={message.authorContactId ?? message.id}
+          hasAvatar={
+            canViewContact && message.authorContactId !== null && message.authorContactHasAvatar
+          }
+          size={28}
+        />
+      );
+    case 'agent':
+      return (
+        <AgentAvatar
+          name={voice.author}
+          color={message.authorAgentColor}
+          avatarUrl={message.authorAgentAvatarUrl}
+          size={28}
+        />
+      );
+    case 'bot':
+      return (
+        <span
+          aria-hidden
+          className="inline-flex size-7 shrink-0 items-center justify-center rounded-full border border-dashed border-(--color-border-strong) bg-(--color-background-hover) text-(--color-text-secondary)"
+        >
+          <BotIcon size={16} />
+        </span>
+      );
+    case 'business-app':
+      // Neither an agent's colour nor the bot's dashed edge: somebody on the
+      // team wrote it, but not through this console, so no agent is named.
+      return (
+        <span
+          aria-hidden
+          className="inline-flex size-7 shrink-0 items-center justify-center rounded-full border border-(--color-border-default) bg-(--color-background-hover) text-(--color-text-secondary)"
+        >
+          <UserIcon size={16} />
+        </span>
+      );
+  }
+}
+
+type Part = 'text' | 'location' | 'files';
+
+/**
+ * One message, drawn as a short run of bubbles: its words, then a location it
+ * shared, then its files — each its own block, so a photo is not squeezed
+ * into the padding of a sentence. The author line opens the run and the time,
+ * the receipt and everything about the message close it.
+ *
+ * Runs never join across messages, so every message keeps its own time and
+ * receipt. Keyed per part, so a live update re-rendering the thread keeps an
+ * opened picture open and a playing voice note playing.
+ */
+function MessageParts({
+  message,
+  at,
+  canModerate,
+  canViewContact,
+}: {
+  message: Message;
+  at: Date;
+  canModerate: boolean;
+  canViewContact: boolean;
+}) {
+  const meta = (message.meta ?? {}) as MessageMeta;
+  const voice = voiceOf(message, meta);
+  const isInbound = message.direction === 'inbound';
+
+  const location = message.bodyHtml ? null : readSharedLocation(message.meta);
+  const media = message.bodyHtml ? undefined : meta.media;
+
+  const parts: Part[] = [];
+  /*
+    A pin replaces the text only when the text is the placeholder this same
+    data generated — `[location (30.03, 31.23)]` — because showing both would
+    print the coordinates twice and leave the useful one looking like a
+    duplicate.
+
+    Anything else the customer wrote is still shown above the card. No channel
+    today sends words and a pin in one message, but a support tool silently
+    dropping a customer's sentence is a much worse failure than a redundant
+    line, so the card is additive wherever there is real text.
+  */
+  const hasText = message.bodyHtml
+    ? true
+    : message.bodyText.trim() !== '' && !(location && isLocationPlaceholder(message.bodyText));
+  if (hasText) parts.push('text');
+  if (location) parts.push('location');
+  if (message.attachments.length > 0) parts.push('files');
+  // Nothing at all to draw still gets its bubble, so the message is not lost.
+  if (parts.length === 0) parts.push('text');
+
+  const groups = runPositions(parts.map(() => message.id));
+  const delivery = !isInbound && message.kind !== 'note' ? deliveryOf(message) : null;
+
+  const extra = (
+    <>
+      {media && !media.downloaded ? (
+        <p className="px-1 text-xs text-(--color-text-secondary)">
+          {media.error ? `Attachment unavailable: ${media.error}` : 'Downloading attachment…'}
+        </p>
+      ) : null}
+      {delivery?.note}
+      {isInbound && isPublicMetaMessage(meta) ? (
+        <CommentModeration messageId={message.id} meta={message.meta} canModerate={canModerate} />
+      ) : null}
+    </>
+  );
+
+  return parts.map((part, index) => {
+    const last = index === parts.length - 1;
+
+    return (
+      <ChatBubble
+        key={`${message.id}:${part}`}
+        from={voice.from}
+        kind={part === 'text' ? voice.kind : 'attachment'}
+        group={groups[index]}
+        wide={part === 'text' && Boolean(message.bodyHtml)}
+        author={voice.author}
+        badge={
+          voice.badges.length > 0
+            ? voice.badges.map((badge) => (
+                <Badge key={badge.label} tone={badge.tone}>
+                  {badge.label}
+                </Badge>
+              ))
+            : undefined
+        }
+        avatar={<AuthorTile voice={voice} message={message} canViewContact={canViewContact} />}
+        time={<Time at={at} />}
+        receipt={delivery?.receipt}
+        error={last ? delivery?.error : undefined}
+        extra={last ? extra : undefined}
+      >
+        {part === 'text' ? (
+          <MessageBody
+            message={message}
+            ownLinks={!(voice.from === 'out' && voice.kind === 'message')}
+          />
+        ) : part === 'location' && location ? (
+          <SharedLocationCard location={location} />
+        ) : (
+          <AttachmentList files={message.attachments} />
+        )}
+      </ChatBubble>
+    );
+  });
+}
+
+/**
+ * What happened to something we sent, said under it.
+ *
+ * Every outbound row that is not a note, the bot's and the automations'
+ * included: a reply that never reached the customer is the same failure
+ * whoever wrote it.
+ */
+function deliveryOf(message: Message): {
+  receipt?: 'sending' | 'sent' | 'delivered' | 'read';
+  error?: string;
+  note?: ReactNode;
+} {
+  if (message.deliveryStatus === 'failed') {
+    // A delivery error explains itself in paragraphs — what Meta said, and
+    // what it means — so the bubble keeps its line breaks.
+    return { error: `Not delivered — ${message.deliveryError ?? 'unknown error'}` };
+  }
+
+  // Replaces the bare "Sent" rather than sitting under it: that word alone is
+  // what reads as confirmed, and here it never will be.
+  const lostReceipt = lostReceiptNote(message);
+  if (lostReceipt) {
+    return {
+      note: <p className="px-1 text-xs text-(--color-feedback-warning-fg)">{lostReceipt}</p>,
+    };
+  }
+
+  switch (message.deliveryStatus) {
+    case 'pending':
+      return { receipt: 'sending' };
+    case 'sent':
+    case 'delivered':
+    case 'read':
+      return { receipt: message.deliveryStatus };
+    // The mail server refused it: a failure, said as one.
+    case 'bounced':
+      return { error: 'Bounced' };
+    default:
+      return {
+        note: (
+          <p className="px-1 text-xs text-(--color-text-secondary)">{message.deliveryStatus}</p>
+        ),
+      };
+  }
+}
+
+function MessageBody({
+  message,
+  ownLinks,
+}: {
+  message: Message;
+  /** False on our blue bubble, which makes links inherit its white. */
+  ownLinks: boolean;
+}) {
   if (message.bodyHtml) {
     // Sanitised at ingest and again on compose, never here: doing it at write
     // time means the stored row is safe for every consumer, not just this one.
+    //
+    // Normal white space, not the plain-text pre-wrap, or every newline in the
+    // mail's source becomes a line break. A newsletter laid out at 600px
+    // scrolls inside its bubble rather than pushing the thread sideways.
     return (
       <div
-        className="prose-sm max-w-none text-sm [&_a]:text-brand-600 [&_a]:underline"
+        className={`max-w-full overflow-x-auto whitespace-normal [&_img]:h-auto [&_img]:max-w-full [&_table]:max-w-full ${
+          ownLinks ? '[&_a]:text-(--color-text-link) [&_a]:underline' : ''
+        }`}
         dangerouslySetInnerHTML={{ __html: message.bodyHtml }}
       />
     );
   }
 
-  const media = (message.meta as { media?: { downloaded?: boolean; error?: string } }).media;
-  const location = readSharedLocation(message.meta);
-
-  return (
-    <>
-      {/*
-        A pin replaces the text only when the text is the placeholder this same
-        data generated — `[location (30.03, 31.23)]` — because showing both
-        would print the coordinates twice and leave the useful one looking like
-        a duplicate.
-
-        Anything else the customer wrote is still shown above the card. No
-        channel today sends words and a pin in one message, but a support tool
-        silently dropping a customer's sentence is a much worse failure than a
-        redundant line, so the card is additive wherever there is real text.
-      */}
-      {location && isLocationPlaceholder(message.bodyText) ? null : (
-        <p className="whitespace-pre-wrap text-sm">{message.bodyText}</p>
-      )}
-      {location ? <SharedLocationCard location={location} /> : null}
-      {media && !media.downloaded ? (
-        <p className="mt-1 text-xs opacity-50">
-          {media.error ? `Attachment unavailable: ${media.error}` : 'Downloading attachment…'}
-        </p>
-      ) : null}
-    </>
-  );
+  return <p className="whitespace-pre-wrap">{message.bodyText}</p>;
 }
 
 /**
@@ -220,17 +514,17 @@ function SharedLocationCard({ location }: { location: SharedLocation }) {
   const label = [location.name, location.address].filter(Boolean).join(' · ');
 
   return (
-    <div className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
-      <div className="flex items-baseline gap-2">
-        <span aria-hidden="true">📍</span>
-        <span className="text-sm font-medium">Shared location</span>
-      </div>
+    <div className="w-60 max-w-full rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface) px-3 py-2.5 text-start text-(--color-text-primary)">
+      <p className="flex items-center gap-1.5 text-sm font-semibold">
+        <PinIcon size={16} className="shrink-0" />
+        Shared location
+      </p>
 
       {/* Customer-supplied text: React escapes it, and it is never put in the
           map URL — see the note on `mapUrl`. */}
-      {label ? <p className="mt-1 whitespace-pre-wrap text-sm">{label}</p> : null}
+      {label ? <p className="mt-1 text-sm whitespace-pre-wrap">{label}</p> : null}
 
-      <p className="mt-1 font-mono text-xs text-[var(--muted-foreground)]">
+      <p dir="ltr" className="mt-0.5 text-start font-mono text-xs text-(--color-text-secondary)">
         {formatCoordinates(location)}
       </p>
 
@@ -238,35 +532,11 @@ function SharedLocationCard({ location }: { location: SharedLocation }) {
         href={mapUrl(location)}
         target="_blank"
         rel="noreferrer"
-        className="mt-1.5 inline-block text-xs text-brand-600 underline"
+        className="mt-1.5 inline-flex items-center gap-1 text-xs text-(--color-text-link) hover:underline"
       >
         Open in Google Maps
+        <ExternalIcon size={13} className="shrink-0" />
       </a>
     </div>
-  );
-}
-
-function DeliveryState({ message }: { message: ConversationDetail['messages'][number] }) {
-  if (message.deliveryStatus === 'failed') {
-    return (
-      // A delivery error explains itself in paragraphs — what Meta said, and
-      // what it means — so it is wrapped rather than run together into one line.
-      <p className="mt-1.5 whitespace-pre-wrap text-xs text-red-600">
-        Not delivered — {message.deliveryError ?? 'unknown error'}
-      </p>
-    );
-  }
-
-  // Replaces the bare "sent" rather than sitting under it: that word alone is
-  // what reads as confirmed, and here it never will be.
-  const lostReceipt = lostReceiptNote(message);
-  if (lostReceipt) {
-    return <p className="mt-1.5 text-xs text-amber-700">{lostReceipt}</p>;
-  }
-
-  return (
-    <p className="mt-1.5 text-xs text-[var(--muted-foreground)]/80">
-      {message.deliveryStatus === 'pending' ? 'sending…' : message.deliveryStatus}
-    </p>
   );
 }

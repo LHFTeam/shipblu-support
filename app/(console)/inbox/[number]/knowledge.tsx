@@ -1,21 +1,26 @@
 'use client';
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { BookIcon, ChevronDownIcon, ChevronUpIcon } from '@/components/icons';
+import { BookIcon, DocumentIcon } from '@/components/icons';
 import { InfoTip } from '@/components/tooltip';
 import { SearchInput } from '@/components/search-input';
-import { Badge } from '@/components/ui';
+import { Badge, Button } from '@/components/ui';
 import type { AgentArticleHit } from '@/lib/kb/agent-search';
+import { LocaleToggle } from './locale-toggle';
 
 /**
  * Reading the knowledge base without leaving the ticket.
  *
  * Under the textarea, beside the canned picker, for the reason the canned
  * picker gives for being there: the box is what the agent came here to type in,
- * and a panel above it pushes that down the screen on a phone. The right-hand
- * sidebar is where a helpdesk usually puts this, and it is the wrong place
- * here — it is `hidden … xl:block`, so on the laptop and the phone the console
- * is actually read on, the panel would not exist.
+ * and a panel above it pushes that down the screen on a phone. The details
+ * column is where a helpdesk usually puts this, and it is the wrong place here —
+ * it is `hidden … lg:block`, so on the phone the console is also read on, the
+ * panel would not exist.
+ *
+ * Two parts, because they sit in two places: the button in the reply box's
+ * toolbar beside the canned picker, the panel opening under that row. The reply
+ * body owns whether it is open.
  *
  * Not a command palette and not a dialog. `composer.tsx` explains why the
  * canned responses are a `<select>` and says what should replace it when the
@@ -35,23 +40,57 @@ type Locale = 'ar' | 'en';
 /** A search result set, tagged with the locale and query it answers. */
 type Answer = { key: string; hits: AgentArticleHit[]; failed: boolean };
 
+/**
+ * The toolbar button that opens the panel. While it is shut it says how many
+ * articles the ticket already suggests, so an agent knows there is something
+ * behind it before opening it.
+ */
+export function KnowledgeButton({
+  open,
+  onToggle,
+  panelId,
+  suggested,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  panelId: string;
+  suggested: number;
+}) {
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      aria-expanded={open}
+      aria-controls={panelId}
+      onClick={onToggle}
+      icon={<BookIcon size={15} className="shrink-0" />}
+    >
+      Knowledge
+      {!open && suggested > 0 ? <Badge tone="info">{suggested} suggested</Badge> : null}
+    </Button>
+  );
+}
+
 export function KnowledgePanel({
+  id,
+  open,
   suggestions,
   locale: detected,
   onInsert,
 }: {
+  /** What `KnowledgeButton`'s `aria-controls` names. */
+  id: string;
+  open: boolean;
   /** Seeded from the ticket on the server, so they are there on first paint. */
   suggestions: AgentArticleHit[];
   /** The language the customer is writing in, as far as their script says. */
   locale: Locale;
   onInsert: (text: string) => void;
 }) {
-  const [open, setOpen] = useState(false);
   const [locale, setLocale] = useState<Locale>(detected);
   const [query, setQuery] = useState('');
   const [answer, setAnswer] = useState<Answer | null>(null);
 
-  const panelId = useId();
   const trimmed = query.trim();
   const searchable = trimmed.length >= 2;
 
@@ -122,100 +161,58 @@ export function KnowledgePanel({
   const searching = searchable && !current;
 
   return (
-    <div className="rounded-md border border-[var(--border)]">
-      <button
-        type="button"
-        onClick={() => setOpen((was) => !was)}
-        aria-expanded={open}
-        aria-controls={panelId}
-        className="flex w-full items-center gap-2 px-2 py-1.5 text-xs text-[var(--muted-foreground)]"
-      >
-        <BookIcon size={14} className="shrink-0" />
-        <span className="font-medium">Knowledge</span>
-        {!open && suggestions.length > 0 ? (
-          <Badge tone="brand">{suggestions.length} suggested</Badge>
-        ) : null}
-        <span className="ms-auto">
-          {open ? <ChevronUpIcon size={16} /> : <ChevronDownIcon size={16} />}
-        </span>
-      </button>
-
-      {/*
-        Hidden rather than unmounted, so a search survives the agent collapsing
-        the panel to re-read the ticket — the same reason the composer keeps its
-        own panel mounted on mobile.
-      */}
-      <div id={panelId} hidden={!open} className="border-t border-[var(--border)] p-2">
-        <div className="flex items-center gap-2">
-          {/* Not `Input`: this panel renders inside the reply form, and Enter
+    /*
+      Hidden rather than unmounted, so a search survives the agent collapsing
+      the panel to re-read the ticket — the same reason the composer keeps its
+      own panel mounted on mobile.
+    */
+    <div
+      id={id}
+      hidden={!open}
+      className="rounded-lg border border-(--color-border-subtle) bg-(--color-background-surface) p-2.5"
+    >
+      <div className="flex items-center gap-2">
+        {/* Not `Input`: this panel renders inside the reply form, and Enter
               in a plain text box here sent the agent's half-written reply to
               the customer. */}
-          <SearchInput
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search articles…"
-            aria-label="Search knowledge base articles"
-            className="min-w-0 flex-1"
-          />
-          <LocaleToggle value={locale} onChange={setLocale} />
-        </div>
-
-        {showingSuggestions ? (
-          // Labelled rather than presented as answers. Ranks across the whole
-          // result set span a factor of two, so the top hit is a reasonable
-          // guess and not a verdict, and the search box is right above it.
-          <p className="mt-2 text-xs text-[var(--muted-foreground)]">Suggested for this ticket</p>
-        ) : null}
-
-        <div className="app-scroll mt-1 max-h-56 overflow-y-auto">
-          {shown.map((hit) => (
-            <Hit key={hit.id} hit={hit} onInsert={onInsert} />
-          ))}
-
-          {shown.length === 0 ? (
-            <p className="px-1 py-3 text-xs text-[var(--muted-foreground)]">
-              {current?.failed
-                ? 'Search is unavailable right now.'
-                : searching
-                  ? 'Searching…'
-                  : searchable
-                    ? `Nothing in ${locale === 'ar' ? 'Arabic' : 'English'} matches “${trimmed}”.`
-                    : 'Type to search the knowledge base.'}
-            </p>
-          ) : null}
-        </div>
+        <SearchInput
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Search articles…"
+          aria-label="Search knowledge base articles"
+          className="min-w-0 flex-1"
+        />
+        {/* Which language's articles to search. The ticket's own language is a
+            guess off the script of the customer's last message, and it is wrong
+            often enough to need an override — a merchant who writes in English
+            about an Arabic-only article is an ordinary Tuesday. */}
+        <LocaleToggle value={locale} onChange={setLocale} label="Article language" />
       </div>
-    </div>
-  );
-}
 
-/**
- * Which language's articles to search.
- *
- * The ticket's own language is a guess off the script of the customer's last
- * message, and it is wrong often enough to need an override — a merchant who
- * writes in English about an Arabic-only article is an ordinary Tuesday. Two
- * buttons rather than a `<select>` because there are exactly two and the whole
- * point is that switching costs one tap.
- */
-function LocaleToggle({ value, onChange }: { value: Locale; onChange: (next: Locale) => void }) {
-  return (
-    <div className="flex shrink-0 overflow-hidden rounded-md border border-[var(--border)]">
-      {(['ar', 'en'] as const).map((option) => (
-        <button
-          key={option}
-          type="button"
-          onClick={() => onChange(option)}
-          aria-pressed={value === option}
-          className={`px-2 py-1.5 text-xs sm:py-1 ${
-            value === option
-              ? 'bg-brand-500/15 font-medium text-brand-700'
-              : 'text-[var(--muted-foreground)]'
-          }`}
-        >
-          {option === 'ar' ? 'العربية' : 'English'}
-        </button>
-      ))}
+      {showingSuggestions ? (
+        // Labelled rather than presented as answers. Ranks across the whole
+        // result set span a factor of two, so the top hit is a reasonable
+        // guess and not a verdict, and the search box is right above it.
+        <p className="mt-2 text-xs text-(--color-text-secondary)">Suggested for this ticket</p>
+      ) : null}
+
+      <div className="app-scroll mt-1 max-h-56 overflow-y-auto">
+        {shown.map((hit) => (
+          <Hit key={hit.id} hit={hit} onInsert={onInsert} />
+        ))}
+
+        {shown.length === 0 ? (
+          <p className="px-1 py-3 text-xs text-(--color-text-secondary)">
+            {current?.failed
+              ? 'Search is unavailable right now.'
+              : searching
+                ? 'Searching…'
+                : searchable
+                  ? `Nothing in ${locale === 'ar' ? 'Arabic' : 'English'} matches “${trimmed}”.`
+                  : 'Type to search the knowledge base.'}
+          </p>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -233,14 +230,15 @@ function Hit({ hit, onInsert }: { hit: AgentArticleHit; onInsert: (text: string)
   }, [hit, onInsert]);
 
   return (
-    <div className="border-b border-[var(--border)] px-1 py-1.5 last:border-b-0">
+    <div className="border-t border-(--color-border-subtle) py-1.5 first:border-t-0">
       <div className="flex items-start gap-2">
+        <DocumentIcon size={16} className="mt-0.5 shrink-0 text-(--color-text-tertiary)" />
         <button
           type="button"
           onClick={() => setReading((was) => !was)}
           aria-expanded={reading}
           aria-controls={bodyId}
-          className="min-w-0 flex-1 text-start text-xs"
+          className="min-w-0 flex-1 text-start"
         >
           {/*
             `dir="auto"` rather than `direction()` from lib/kb/locale: importing
@@ -248,10 +246,10 @@ function Hit({ hit, onInsert }: { hit: AgentArticleHit; onInsert: (text: string)
             dictionary onto the busiest route in the console. The first strong
             character answers the same question for free.
           */}
-          <span dir="auto" className="block truncate font-medium">
+          <span dir="auto" className="block truncate text-sm font-medium">
             {hit.title}
           </span>
-          <span dir="auto" className="block truncate text-[var(--muted-foreground)]">
+          <span dir="auto" className="block truncate text-xs text-(--color-text-secondary)">
             {hit.categoryName} · {hit.folderName}
           </span>
         </button>
@@ -299,20 +297,19 @@ function LinkControl({ hit, onInsert }: { hit: AgentArticleHit; onInsert: () => 
           page instead of the article.
         </InfoTip>
       ) : null}
-      <button
-        type="button"
-        onClick={onInsert}
-        className="rounded border border-[var(--border)] px-1.5 py-1 text-xs whitespace-nowrap hover:bg-[var(--muted)]"
-      >
+      <Button variant="secondary" size="sm" onClick={onInsert} className="whitespace-nowrap">
         Insert link
-      </button>
+      </Button>
     </>
   );
 }
 
 function Body({ id, hit }: { id: string; hit: AgentArticleHit }) {
   return (
-    <div id={id} className="mt-1.5 rounded bg-[var(--muted)] p-2 text-xs">
+    <div
+      id={id}
+      className="mt-1.5 ms-6 rounded-md bg-(--color-background-surface-sunken) p-2 text-xs"
+    >
       {hit.bodyText ? (
         <p dir="auto" className="whitespace-pre-wrap">
           {hit.bodyText}
@@ -322,7 +319,7 @@ function Body({ id, hit }: { id: string; hit: AgentArticleHit }) {
         // Two of the imported articles are images and nothing else, so their
         // body text is empty. Saying so beats an empty grey box that reads as
         // a bug.
-        <p className="text-[var(--muted-foreground)]">
+        <p className="text-(--color-text-secondary)">
           This article is images only — open it on the help centre to see it.
         </p>
       )}
@@ -331,7 +328,7 @@ function Body({ id, hit }: { id: string; hit: AgentArticleHit }) {
         href={hit.url}
         target="_blank"
         rel="noreferrer"
-        className="mt-1.5 inline-block underline opacity-70"
+        className="mt-1.5 inline-block text-(--color-text-link) hover:underline"
       >
         {hit.bodyTruncated ? 'Read the rest on the help centre' : 'Open on the help centre'}
       </a>

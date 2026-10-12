@@ -1,10 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { t, type Locale } from '@/lib/kb/locale';
+import { Button, Textarea } from '@/components/ui';
+import { t, type Locale, type StringKey } from '@/lib/kb/locale';
 
 /**
- * Five faces and an optional sentence.
+ * Five worded ratings and an optional sentence.
  *
  * The rating posts on click rather than waiting for a submit button: most
  * people answer the number and leave, and making them press Send afterwards is
@@ -12,15 +13,18 @@ import { t, type Locale } from '@/lib/kb/locale';
  * the rating is in, and saves separately.
  */
 
-const RATINGS = [1, 2, 3, 4, 5] as const;
-
-const FACES: Record<number, string> = {
-  1: '😠',
-  2: '🙁',
-  3: '😐',
-  4: '🙂',
-  5: '😀',
-};
+/*
+  Words, not faces. The faces were emoji, which the design system does not use
+  as icons, and a face leaves the customer guessing which of two frowns is the
+  worse one. The stored value is still the number, so the reports are unchanged.
+*/
+const RATINGS: { value: 1 | 2 | 3 | 4 | 5; label: StringKey }[] = [
+  { value: 1, label: 'csatRating1' },
+  { value: 2, label: 'csatRating2' },
+  { value: 3, label: 'csatRating3' },
+  { value: 4, label: 'csatRating4' },
+  { value: 5, label: 'csatRating5' },
+];
 
 export function SurveyForm({ token, locale }: { token: string; locale: Locale }) {
   const [rating, setRating] = useState<number | null>(null);
@@ -40,65 +44,64 @@ export function SurveyForm({ token, locale }: { token: string; locale: Locale })
 
   if (saved) {
     return (
-      <div className="kb-panel mx-auto max-w-lg p-8 text-center">
-        <h1 className="text-xl font-semibold text-[var(--kb-heading)]">
+      <div className="kb-panel mx-auto max-w-[600px] p-7">
+        <h1 className="text-2xl font-bold text-(--color-text-primary)">
           {t(locale, 'csatThanks')}
         </h1>
-        <p className="mt-2 text-sm text-[var(--kb-muted)]">{t(locale, 'csatRecorded')}</p>
+        <p className="mt-2 text-sm text-(--color-text-secondary)">{t(locale, 'csatRecorded')}</p>
       </div>
     );
   }
 
   return (
-    <section className="kb-panel mx-auto max-w-lg p-8 text-center">
-      <h1 className="text-xl font-semibold text-[var(--kb-heading)]">
+    <section className="kb-panel mx-auto max-w-[600px] p-7">
+      <h1 className="text-2xl font-bold text-(--color-text-primary)">
         {t(locale, 'csatQuestion')}
       </h1>
 
-      <div className="mt-6 flex justify-center gap-2">
-        {RATINGS.map((value) => (
+      {/* Stacked on a phone, where five words side by side do not fit; one row
+          from `sm`, worst first in reading order — so right to left in Arabic. */}
+      <div className="mt-6 grid grid-cols-1 gap-2 sm:grid-cols-5">
+        {RATINGS.map(({ value, label }) => (
           <button
             key={value}
             type="button"
-            aria-label={`${value}`}
             aria-pressed={rating === value}
             onClick={() => {
               setRating(value);
               void send(value, null);
             }}
-            className={`rounded-lg border px-4 py-3 text-2xl transition-colors hover:bg-[var(--kb-surface-2)] ${
+            className={`min-h-[42px] rounded-md border px-3 py-2.5 text-sm font-medium transition-colors ${
               rating === value
-                ? 'border-[var(--kb-band)] bg-[var(--kb-band-soft)]'
-                : 'border-[var(--kb-border)]'
+                ? 'border-(--color-action-primary-default) bg-(--color-background-selected) text-(--color-text-primary)'
+                : 'border-(--color-border-default) bg-(--color-background-surface) text-(--color-text-primary) hover:bg-(--color-background-hover)'
             }`}
           >
-            {FACES[value]}
+            {t(locale, label)}
           </button>
         ))}
       </div>
 
       {rating !== null ? (
-        <div className="mt-8 text-start">
-          <label className="text-sm text-[var(--kb-muted)]" htmlFor="csat-comment">
+        <div className="mt-8 flex flex-col items-start gap-2">
+          <label className="text-sm text-(--color-text-secondary)" htmlFor="csat-comment">
             {t(locale, 'csatCommentPrompt')}
           </label>
-          <textarea
+          <Textarea
             id="csat-comment"
             value={comment}
             onChange={(event) => setComment(event.target.value)}
             rows={4}
-            className="mt-2 w-full rounded-lg border border-[var(--kb-border-strong)] bg-[var(--kb-surface)] p-3 text-base text-[var(--kb-heading)] outline-none focus:border-[var(--kb-band)] sm:text-sm"
           />
-          <button
-            type="button"
+          <Button
+            className="mt-1"
             onClick={() => {
               void send(rating, comment.trim() || null);
               setSaved(true);
             }}
-            className="mt-3 rounded-md bg-[var(--button-primary)] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--button-primary-hover)]"
           >
             {t(locale, 'send')}
-          </button>
+          </Button>
         </div>
       ) : null}
     </section>

@@ -38,6 +38,7 @@ async function signedIn(role: 'admin' | 'agent', email: string): Promise<Session
     avatarUrl: null,
     avatarColor: row!.avatarColor,
     isAcceptingTickets: true,
+    acceptingOffReason: null,
     sessionIdleForMs: 0,
   };
 }
@@ -277,6 +278,95 @@ describe('listInbox', () => {
 
     expect(row).toMatchObject({ preview: 'from them', lastFromUs: false });
     expect(shownLast).toMatchObject({ bodyText: 'from them', direction: 'inbound' });
+  });
+});
+
+describe('getConversation', () => {
+  it("draws each message with its own author's face, not the requester's", async () => {
+    const agent = await admin();
+    await db
+      .update(agents)
+      .set({ avatarUrl: 'https://example.test/omar.png', avatarColor: 'violet' })
+      .where(eq(agents.id, agent.id));
+
+    const id = await ticket('email', null);
+    // A CC'd stranger with a picture, and a contact deleted since it wrote —
+    // whose picture the avatar route would refuse, so the tile must not ask.
+    const [cc, gone] = await db
+      .insert(contacts)
+      .values([
+        { name: 'Hana', avatarPath: 'avatars/hana.jpg' },
+        { name: 'Gone', avatarPath: 'avatars/gone.jpg', deletedAt: new Date() },
+      ])
+      .returning({ id: contacts.id });
+    const [requester] = await db
+      .select({ id: conversations.requesterContactId, number: conversations.number })
+      .from(conversations)
+      .where(eq(conversations.id, id));
+
+    const at = (minute: number) => new Date(Date.UTC(2026, 8, 1, 10, minute));
+    await db.insert(messages).values([
+      {
+        conversationId: id,
+        direction: 'inbound',
+        bodyText: 'from the requester',
+        authorContactId: requester!.id,
+        createdAt: at(0),
+      },
+      {
+        conversationId: id,
+        direction: 'inbound',
+        bodyText: 'from the cc',
+        authorContactId: cc!.id,
+        createdAt: at(1),
+      },
+      {
+        conversationId: id,
+        direction: 'inbound',
+        bodyText: 'from the deleted',
+        authorContactId: gone!.id,
+        createdAt: at(2),
+      },
+      {
+        conversationId: id,
+        direction: 'outbound',
+        bodyText: 'from the agent',
+        authorAgentId: agent.id,
+        createdAt: at(3),
+      },
+      { conversationId: id, direction: 'outbound', bodyText: 'from nobody', createdAt: at(4) },
+    ]);
+
+    const detail = await getConversation(agent, requester!.number);
+    const byText = new Map(detail!.messages.map((message) => [message.bodyText, message]));
+
+    expect(byText.get('from the requester')).toMatchObject({
+      authorContactId: requester!.id,
+      authorContactHasAvatar: false,
+      authorAgentColor: null,
+      authorAgentAvatarUrl: null,
+    });
+    expect(byText.get('from the cc')).toMatchObject({
+      authorContactId: cc!.id,
+      authorContactHasAvatar: true,
+    });
+    expect(byText.get('from the deleted')).toMatchObject({
+      authorContactId: gone!.id,
+      authorContactHasAvatar: false,
+    });
+    expect(byText.get('from the agent')).toMatchObject({
+      authorIsAgent: true,
+      authorContactId: null,
+      authorContactHasAvatar: false,
+      authorAgentColor: 'violet',
+      authorAgentAvatarUrl: 'https://example.test/omar.png',
+    });
+    expect(byText.get('from nobody')).toMatchObject({
+      authorIsAgent: false,
+      authorContactId: null,
+      authorAgentColor: null,
+      authorAgentAvatarUrl: null,
+    });
   });
 });
 

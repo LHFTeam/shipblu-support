@@ -1,6 +1,7 @@
 'use client';
 
 import { useParams } from 'next/navigation';
+import { Button } from '@/components/ui';
 import { DEFAULT_LOCALE, isLocale, t } from '@/lib/kb/locale';
 import { PageBody, Panel } from './[locale]/chrome';
 
@@ -24,16 +25,12 @@ export function HelpFailed({ retry }: { retry: () => void }) {
   return (
     <PageBody>
       <Panel className="mx-auto max-w-lg p-8 text-center sm:p-10">
-        <h1 className="text-xl font-semibold text-[var(--kb-heading)]">{t(locale, 'pageError')}</h1>
-        <p className="mt-2 text-sm text-[var(--kb-muted)]">{t(locale, 'pageErrorHint')}</p>
+        <h1 className="text-xl font-bold text-(--color-text-primary)">{t(locale, 'pageError')}</h1>
+        <p className="mt-2 text-sm text-(--color-text-secondary)">{t(locale, 'pageErrorHint')}</p>
 
-        <button
-          type="button"
-          onClick={() => retry()}
-          className="mt-6 rounded-md bg-[var(--button-primary)] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--button-primary-hover)]"
-        >
+        <Button className="mt-6" onClick={() => retry()}>
           {t(locale, 'tryAgain')}
-        </button>
+        </Button>
       </Panel>
     </PageBody>
   );

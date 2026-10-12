@@ -58,7 +58,7 @@ export function ChannelForm({
     <form
       key={key}
       {...form}
-      className="flex flex-col gap-3 rounded-lg border border-[var(--border)] p-4"
+      className="flex flex-col gap-3 rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface) p-(--density-card-pad)"
     >
       {/* Stacked on a phone, one row from `sm` up. Four controls sharing a
           non-wrapping row left the name box about one character wide, and the
@@ -137,7 +137,7 @@ export function ChannelEditor({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="text-xs text-brand-600 hover:underline"
+        className="text-xs text-(--color-text-link) hover:text-(--color-text-link-hover) hover:underline"
       >
         Edit
       </button>
@@ -189,13 +189,9 @@ export function ChannelEditor({
 
       <div className="flex items-center gap-3">
         <SubmitButton idle="Save channel" busy="Saving…" />
-        <button
-          type="button"
-          onClick={() => setOpen(false)}
-          className="text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
-        >
+        <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
           Cancel
-        </button>
+        </Button>
       </div>
     </form>
   );
@@ -213,7 +209,7 @@ function NameField({ className, defaultValue }: { className?: string; defaultVal
 function AddressField({ type, config }: { type: ChannelType; config?: Record<string, unknown> }) {
   if (type === 'webchat') {
     return (
-      <p className="text-xs text-[var(--muted-foreground)] sm:flex-1 sm:pt-6">
+      <p className="text-xs text-(--color-text-secondary) sm:flex-1 sm:pt-6">
         The widget needs no address — only a default group.
       </p>
     );
@@ -261,7 +257,7 @@ function AddressField({ type, config }: { type: ChannelType; config?: Record<str
     // with a token that must never be in the database. This row is routing only:
     // which group a message from here lands in.
     return (
-      <p className="text-xs text-[var(--muted-foreground)] sm:flex-1 sm:pt-6">
+      <p className="text-xs text-(--color-text-secondary) sm:flex-1 sm:pt-6">
         Configured by {type === 'facebook' ? 'FACEBOOK_PAGE_ID' : 'INSTAGRAM_ACCOUNT_ID'} in the
         environment. This row only sets the default group.
       </p>
@@ -383,9 +379,9 @@ export function WebchatSettings({
         <div className="min-w-0 flex-1">
           <h3 className="flex flex-wrap items-center gap-2 text-sm font-medium">
             Chat widget
-            {chosen.length === 0 ? <Badge tone="warning">no questions chosen</Badge> : null}
+            {chosen.length === 0 ? <Badge tone="warning">No questions chosen</Badge> : null}
           </h3>
-          <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">
+          <p className="mt-0.5 text-xs text-(--color-text-secondary)">
             {chosen.length === 0
               ? 'The widget lists the most-read articles until a folder is chosen here.'
               : chosen.map((folder) => `${folder.categoryLocale}: ${folder.name}`).join(' · ')}

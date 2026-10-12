@@ -221,20 +221,20 @@ export function AutoResponseEditor({ rule, groups }: { rule: Rule; groups: Group
       <div className="min-w-0 flex-1">
         <h2 className="flex flex-wrap items-center gap-2 text-sm font-semibold">
           {channelLabel(rule.channel)}
-          <span className="font-normal text-[var(--muted-foreground)]">·</span>
+          <span className="font-normal text-(--color-text-secondary)">·</span>
           {group ? group.name : 'Every group'}
-          {rule.silent ? <Badge>sends nothing</Badge> : null}
-          {rule.isActive ? null : <Badge tone="warning">off</Badge>}
+          {rule.silent ? <Badge>Sends nothing</Badge> : null}
+          {rule.isActive ? null : <Badge tone="neutral">Off</Badge>}
         </h2>
 
         {rule.silent ? (
-          <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+          <p className="mt-1 text-xs text-(--color-text-secondary)">
             Nothing is sent for this scope, and no broader rule applies to it.
           </p>
         ) : (
           <>
-            <p className="mt-1 line-clamp-2 text-xs text-[var(--muted-foreground)]">{preview}</p>
-            <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+            <p className="mt-1 line-clamp-2 text-xs text-(--color-text-secondary)">{preview}</p>
+            <p className="mt-1 text-xs text-(--color-text-secondary)">
               {holiday ? 'Holidays have their own message.' : 'Holidays get the same message.'}
             </p>
           </>

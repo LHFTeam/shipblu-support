@@ -75,7 +75,7 @@ export default async function HelpCentreHome({ params }: { params: Promise<{ loc
         </section>
 
         {popular.length > 0 || recent.length > 0 ? (
-          <div className="grid gap-6 lg:grid-cols-2">
+          <div className="grid gap-8 md:grid-cols-2">
             <ArticleShortlist
               locale={locale}
               title={t(locale, 'mostRead')}

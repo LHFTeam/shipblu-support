@@ -1,6 +1,8 @@
 'use client';
 
-import type { ComponentProps, KeyboardEvent } from 'react';
+import type { ComponentProps, KeyboardEvent, ReactNode } from 'react';
+import { SearchIcon } from './icons';
+import { InfoTip } from './tooltip';
 import { Input } from './ui';
 
 /**
@@ -25,9 +27,47 @@ import { Input } from './ui';
  * so Enter has nothing of its own to do, and on a phone it is the keyboard's
  * search key: blurring is what puts the keyboard away so the results under it
  * can be read.
+ *
+ * `className` lands on the wrapper, because what a caller passes is where the
+ * box sits — `flex-1` in a toolbar — and the input fills it. Not
+ * `type="search"`: Chrome would add a clear button and Escape would start
+ * emptying the box, neither of which anybody asked for.
  */
-export function SearchInput(props: Omit<ComponentProps<typeof Input>, 'form' | 'onKeyDown'>) {
-  return <Input enterKeyHint="search" {...props} form="" onKeyDown={blurOnEnter} />;
+export function SearchInput({
+  className = '',
+  icon = true,
+  explain,
+  ...props
+}: Omit<ComponentProps<typeof Input>, 'form' | 'onKeyDown'> & {
+  /** The leading magnifier. Off where a label beside the box already says "search". */
+  icon?: boolean;
+  /** An ⓘ at the end of the box, for what the search matches. */
+  explain?: ReactNode;
+}) {
+  const padding = `${icon ? 'ps-7' : ''} ${explain ? 'pe-7' : ''}`;
+
+  return (
+    <div className={`relative ${className}`}>
+      {icon ? (
+        <span className="pointer-events-none absolute inset-y-0 start-2 flex items-center text-(--color-text-tertiary)">
+          <SearchIcon size={15} />
+        </span>
+      ) : null}
+      <Input enterKeyHint="search" {...props} form="" onKeyDown={blurOnEnter} className={padding} />
+      {explain ? (
+        // Pressing the ⓘ would otherwise blur the box first, and a phone
+        // would put its keyboard away to show the explanation.
+        <span
+          className="absolute inset-y-0 end-1 flex items-center"
+          onMouseDown={(event) => event.preventDefault()}
+        >
+          <InfoTip label="search" className="p-1">
+            {explain}
+          </InfoTip>
+        </span>
+      ) : null}
+    </div>
+  );
 }
 
 /**

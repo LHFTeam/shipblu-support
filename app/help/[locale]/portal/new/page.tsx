@@ -62,7 +62,7 @@ export default async function NewPortalTicket({
           {/* Nudged before the form rather than after it: a customer who finds the
               answer here costs the team nothing, and after the Send button is too
               late to be a suggestion. */}
-          <p className="text-sm text-[var(--kb-muted)]">{t(locale, 'searchKb')}</p>
+          <p className="text-sm text-(--color-text-secondary)">{t(locale, 'searchKb')}</p>
 
           <Panel className="mt-4 p-6">
             <NewTicketForm locale={locale} fields={fields} subject={subject} />
@@ -71,7 +71,7 @@ export default async function NewPortalTicket({
           <p className="mt-4 text-sm">
             <Link
               href={`/${locale}/portal`}
-              className="text-[var(--kb-link)] underline underline-offset-4"
+              className="text-(--color-text-link) underline underline-offset-4 hover:text-(--color-text-link-hover)"
             >
               {t(locale, 'backToTickets')}
             </Link>

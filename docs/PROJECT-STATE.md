@@ -6078,6 +6078,32 @@ still waiting for it` one whose outcome is not known yet.
   `backfill_shipment_links` was run too, since it carried the same defect, and
   now completes over the same table in 40 ms.
 
+92. **`next/font`'s Tajawal is not an Arabic-only face, whatever `subsets`
+    says.** The design system's console stack leads with Tajawal so Arabic gets
+    it and Latin falls through to the system font — which only works if every
+    face of that family carries an Arabic `unicode-range`. `next/font/google`
+    declares the Latin-range face as well (`subsets` decides what is
+    _preloaded_, not what is declared), and its variable adds a `Tajawal
+   Fallback` that is Arial with no range at all. Put on `<html>`, it would have
+    set every Latin letter in the console in Tajawal. Found by reading the built
+    CSS, not by looking at the page: in a Linux container with no Arial the
+    result looks plausible. The console therefore names its own family,
+    `'Tajawal Arabic'`, over the design system's Arabic-subset builds committed
+    in `app/fonts/` (relative `url()`, so they land under `/_next/static/media`,
+    which both hosts serve without a session — `public/` would have sent the
+    widget's and the sign-in page's requests to `/login`). The help centre keeps
+    next/font's Tajawal, where Lato answers for Latin first.
+
+93. **A `className` override on a primitive can silently lose.** Tailwind v4
+    sorts utilities that set the same property by a fixed order of its own, not
+    by their order in the `class` attribute, so `<Select className="w-56">`
+    over the field's `w-full`, or `<Card className="border-(--color-border-focus)/30">`
+    over its `border-(--color-border-subtle)`, renders the primitive's value
+    and nothing says so. Several call sites had been "overriding" this way for
+    months. Use the important suffix (`w-56!`) or a prop on the primitive
+    (`Input tone="note"`), and check the result in a browser — `tsc` and the
+    linters cannot see it.
+
 ### Tooling notes for this environment
 
 Supabase and Render MCP tools work and are the fastest way to check real state —

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { Button, ErrorText, Input } from '@/components/ui';
 import { refreshShipmentDetail, setShipmentParty, type ContactActionState } from '../../actions';
 
 const INITIAL: ContactActionState = { error: null };
@@ -56,46 +57,47 @@ export function PartyField({
             {current.name ?? 'Unnamed'}
           </Link>
           {current.handle ? (
-            <p className="text-xs text-[var(--muted-foreground)]">{current.handle}</p>
+            <p className="text-xs text-(--color-text-secondary)">{current.handle}</p>
           ) : null}
         </div>
       ) : (
-        <p className="mb-2 text-xs opacity-50">Not named.</p>
+        <p className="mb-2 text-xs text-(--color-text-tertiary)">Not named.</p>
       )}
 
       {editable ? (
         <div className="flex flex-col gap-2">
           <div className="flex gap-2">
-            <input
+            <Input
               value={value}
               disabled={busy}
               onChange={(event) => setValue(event.target.value)}
               placeholder="Contact id"
               aria-label={`Set the ${party}`}
-              className="min-w-0 flex-1 rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-xs outline-none focus:border-brand-500"
+              className="min-w-0 flex-1"
             />
-            <button
-              type="button"
+            <Button
+              variant="secondary"
               disabled={busy || !value.trim()}
               onClick={() => void save(value.trim())}
-              className="shrink-0 rounded-md border border-[var(--border)] px-2 py-1.5 text-xs hover:bg-[var(--muted)] disabled:opacity-40"
+              className="shrink-0"
             >
               Set
-            </button>
+            </Button>
           </div>
 
           {current ? (
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="sm"
               disabled={busy}
               onClick={() => void save('')}
-              className="self-start text-xs opacity-60 hover:opacity-100"
+              className="self-start"
             >
               Clear
-            </button>
+            </Button>
           ) : null}
 
-          {error ? <p className="text-xs text-red-600">{error}</p> : null}
+          {error ? <ErrorText inline>{error}</ErrorText> : null}
         </div>
       ) : null}
     </div>
@@ -144,19 +146,20 @@ export function RefreshShipmentButton({
   return (
     <div className="flex flex-col gap-1">
       <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
+        <Button
+          variant="secondary"
+          size="sm"
           disabled={busy}
+          loading={busy}
           onClick={() => void run()}
-          className="rounded-md border border-[var(--border)] px-2 py-1 text-xs hover:bg-[var(--muted)] disabled:opacity-40"
         >
           {busy ? 'Fetching…' : 'Fetch latest'}
-        </button>
-        <span className="text-xs opacity-50">
+        </Button>
+        <span className="text-xs text-(--color-text-tertiary)">
           {lastSyncedAt ? `checked ${lastSyncedAt}` : 'never checked'}
         </span>
       </div>
-      {error ? <p className="text-xs text-red-600">{error}</p> : null}
+      {error ? <ErrorText inline>{error}</ErrorText> : null}
     </div>
   );
 }

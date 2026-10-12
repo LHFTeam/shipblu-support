@@ -85,7 +85,7 @@ export function CannedEditor({
     return (
       <button type="button" onClick={() => setEditing(true)} className="text-start hover:underline">
         <span className="font-medium">{response.title}</span>
-        <span className="block max-w-md truncate text-xs text-[var(--muted-foreground)]">
+        <span className="block max-w-md truncate text-xs text-(--color-text-secondary)">
           {response.bodyTextAr || response.bodyTextEn}
         </span>
       </button>
@@ -128,7 +128,7 @@ export function SuggestionSwitchForm({
   return (
     <form
       {...form}
-      className="mb-6 flex flex-col gap-3 rounded-lg border border-[var(--border)] p-4"
+      className="mb-6 flex flex-col gap-3 rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface) p-(--density-card-pad)"
     >
       <div className="flex items-center gap-1 text-sm font-semibold">
         Suggest a response in the reply box
@@ -141,7 +141,7 @@ export function SuggestionSwitchForm({
         </InfoTip>
       </div>
 
-      <p className="text-xs text-[var(--muted-foreground)]">
+      <p className="text-xs text-(--color-text-secondary)">
         Each suggestion sends TypeSafe the ticket&rsquo;s last ten messages, the customer&rsquo;s
         and the team&rsquo;s (never internal notes); the subject, on a ticket answered by email; and
         the title and text of every response that agent can see. It asks once per new message, not
@@ -151,13 +151,13 @@ export function SuggestionSwitchForm({
       <Toggle name="enabled" label="On for every agent who can reply" defaultChecked={enabled} />
 
       {!keyConfigured ? (
-        <p className="text-xs text-[var(--muted-foreground)]">
+        <p className="text-xs text-(--color-text-secondary)">
           This environment has no <code>TYPESAFE_API_KEY</code>, so nothing is suggested here
           whatever the switch says.
         </p>
       ) : null}
 
-      <p className="text-xs text-[var(--muted-foreground)]">
+      <p className="text-xs text-(--color-text-secondary)">
         {changedAt
           ? `Last changed ${formatRelative(changedAt)}${changedBy ? ` by ${changedBy}` : ''}. `
           : 'Never switched on. '}

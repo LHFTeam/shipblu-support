@@ -39,20 +39,22 @@ export function ShipmentBackfillForm({
     <div className="flex flex-col gap-6">
       <section>
         <h1 className="mb-1 text-lg font-semibold">Shipment link backfill</h1>
-        <p className="text-sm opacity-70">
+        <p className="text-sm text-(--color-text-secondary)">
           Reads every message already in the archive and links the tracking numbers and SBIDs it
           finds. New messages are linked as they arrive; this is for everything that came before —
           and for reaching history after the detection pattern is corrected.
         </p>
-        <p className="mt-2 text-sm opacity-70">
+        <p className="mt-2 text-sm text-(--color-text-secondary)">
           Safe to run as many times as you like. Every link it writes is keyed on the pair it joins,
           so a second run over the same messages creates nothing. It never removes a link.
         </p>
       </section>
 
       {counts ? (
-        <section className="rounded-lg border border-[var(--border)] p-4">
-          <h2 className="mb-2 text-xs font-medium opacity-60">Linked so far</h2>
+        <section className="rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface) p-(--density-card-pad)">
+          <h2 className="mb-2 text-xs font-semibold text-(--color-text-secondary)">
+            Linked so far
+          </h2>
           <dl className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
             {[
               ['Shipments', counts.shipments],
@@ -61,7 +63,7 @@ export function ShipmentBackfillForm({
               ['Account mentions', counts.account_links],
             ].map(([label, value]) => (
               <div key={String(label)}>
-                <dt className="text-xs opacity-60">{label}</dt>
+                <dt className="text-xs text-(--color-text-secondary)">{label}</dt>
                 <dd className="text-lg font-medium">{value}</dd>
               </div>
             ))}
@@ -73,16 +75,18 @@ export function ShipmentBackfillForm({
             hand", and those call for opposite responses — the second means the
             pattern is wrong.
           */}
-          <dl className="mt-4 grid grid-cols-2 gap-2 border-t border-[var(--border)] pt-3 text-sm">
+          <dl className="mt-4 grid grid-cols-2 gap-2 border-t border-(--color-border-subtle) pt-3 text-sm">
             <div>
-              <dt className="text-xs opacity-60">Found automatically</dt>
+              <dt className="text-xs text-(--color-text-secondary)">Found automatically</dt>
               <dd className="font-medium">{counts.links_detected}</dd>
             </div>
             <div>
-              <dt className="text-xs opacity-60">Linked by an agent</dt>
+              <dt className="text-xs text-(--color-text-secondary)">Linked by an agent</dt>
               <dd
                 className={
-                  manual > counts.links_detected ? 'font-medium text-amber-600' : 'font-medium'
+                  manual > counts.links_detected
+                    ? 'font-medium text-(--color-feedback-warning-fg)'
+                    : 'font-medium'
                 }
               >
                 {manual}
@@ -91,7 +95,7 @@ export function ShipmentBackfillForm({
           </dl>
 
           {manual > counts.links_detected && counts.links > 0 ? (
-            <p className="mt-3 text-xs text-amber-700">
+            <p className="mt-3 text-xs text-(--color-feedback-warning-fg)">
               Agents are linking more shipments by hand than the detector finds, which usually means
               the tracking-number pattern does not match the real format. Set
               SHIPMENT_TRACKING_PATTERN on the web and worker services and run this again.
@@ -99,7 +103,7 @@ export function ShipmentBackfillForm({
           ) : null}
 
           {counts.unsynced === counts.shipments && counts.shipments > 0 ? (
-            <p className="mt-3 text-xs opacity-60">
+            <p className="mt-3 text-xs text-(--color-text-secondary)">
               Every shipment is still a stub — expected until something syncs them against the
               shipping platform, which nothing does yet.
             </p>
@@ -113,7 +117,7 @@ export function ShipmentBackfillForm({
         </form>
         <ErrorText>{state.error}</ErrorText>
 
-        <p className="mt-2 text-xs opacity-50">
+        <p className="mt-2 text-xs text-(--color-text-tertiary)">
           The run log on the worker breaks its counts down per channel. A channel with plenty of
           messages and no matches at all is the thing worth looking at — it usually means the
           pattern does not fit how that channel writes them.

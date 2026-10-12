@@ -24,10 +24,12 @@ export function InviteForm({ token, email, name }: { token: string; email: strin
   const { state, form } = useActionForm(acceptInvite, INITIAL);
 
   return (
-    <form {...form} className="flex flex-col gap-4 rounded-lg border border-[var(--border)] p-6">
+    <form {...form} className="flex flex-col gap-3.5">
       <input type="hidden" name="token" value={token} />
 
-      <p className="text-sm opacity-70">Set a password to activate your account.</p>
+      <p className="text-sm text-(--color-text-secondary)">
+        Set a password to activate your account.
+      </p>
 
       <div>
         <Label htmlFor="email">Email</Label>
@@ -66,7 +68,7 @@ export function InviteForm({ token, email, name }: { token: string; email: strin
           // told them they can leave alone.
           autoFocus
         />
-        <p className="mt-1 text-xs opacity-50">At least 12 characters.</p>
+        <p className="mt-1 text-xs text-(--color-text-secondary)">At least 12 characters.</p>
       </div>
 
       <ErrorText>{state.error}</ErrorText>

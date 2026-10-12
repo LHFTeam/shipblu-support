@@ -60,14 +60,14 @@ export default async function FieldsPage() {
               <FieldEditor field={field} />
             </Cell>
             <Cell>
-              <code className="text-xs text-[var(--muted-foreground)]">custom.{field.key}</code>
+              <code className="text-xs text-(--color-text-secondary)">custom.{field.key}</code>
             </Cell>
             <Cell className="text-xs">{field.type.replace('_', ' ')}</Cell>
             <Cell className="text-xs">
-              {field.requiredOnCreate ? <Badge tone="warning">on create</Badge> : null}
-              {field.requiredOnResolve ? <Badge tone="warning">to resolve</Badge> : null}
+              {field.requiredOnCreate ? <Badge tone="warning">On create</Badge> : null}
+              {field.requiredOnResolve ? <Badge tone="warning">To resolve</Badge> : null}
               {!field.requiredOnCreate && !field.requiredOnResolve ? (
-                <span className="text-[var(--muted-foreground)]">optional</span>
+                <span className="text-(--color-text-secondary)">optional</span>
               ) : null}
             </Cell>
             <Cell className="text-end">
@@ -78,7 +78,7 @@ export default async function FieldsPage() {
       </Table>
 
       {rows.length === 0 ? (
-        <p className="mt-3 text-sm text-[var(--muted-foreground)]">
+        <p className="mt-3 text-sm text-(--color-text-secondary)">
           No custom fields yet. Tickets still carry a subject, status, priority, group, assignee and
           tags.
         </p>

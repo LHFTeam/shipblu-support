@@ -34,7 +34,7 @@ export function Avatar({
       name={name}
       src={hasAvatar ? `/api/contacts/${contactId}/avatar` : null}
       size={size}
-      tone="bg-[var(--muted)] text-[var(--muted-foreground)]"
+      tone="bg-(--color-background-hover) text-(--color-text-secondary)"
     />
   );
 }

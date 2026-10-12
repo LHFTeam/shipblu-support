@@ -1,9 +1,11 @@
+import { ChevronLeftIcon } from '@/components/icons';
 import Link from 'next/link';
 import { Badge } from '@/components/ui';
 import { requirePermission } from '@/lib/auth/guard';
 import { listCategoriesForAdmin, listFolderOptions, type FolderOption } from '@/lib/kb/admin';
 import { FLOOR_LABELS, folderFloor } from '@/lib/kb/floors';
 import { CategoryForm, FolderForm } from './forms';
+import { sentenceCase } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,30 +15,36 @@ export default async function StructurePage() {
   const [categories, folders] = await Promise.all([listCategoriesForAdmin(), listFolderOptions()]);
 
   return (
-    <div className="mx-auto flex h-full max-w-3xl flex-col gap-8 overflow-y-auto p-6">
-      <nav className="text-sm opacity-60">
-        <Link href="/kb" className="hover:opacity-100">
-          ← Knowledge base
+    <div className="app-scroll mx-auto flex h-full max-w-3xl flex-col gap-8 overflow-y-auto p-4 sm:p-6">
+      <nav className="text-sm text-(--color-text-secondary)">
+        <Link
+          href="/kb"
+          className="inline-flex items-center gap-1 hover:text-(--color-text-primary)"
+        >
+          <ChevronLeftIcon size={16} />
+          Knowledge base
         </Link>
       </nav>
 
       <section>
         <h1 className="mb-1 text-lg font-semibold">Categories</h1>
-        <p className="mb-3 text-sm opacity-60">
+        <p className="mb-3 text-sm text-(--color-text-secondary)">
           A category belongs to one language. English and Arabic are separate trees, which is what
           lets the two versions of the help centre be organised differently.
         </p>
 
-        <ul className="mb-4 divide-y divide-[var(--border)] rounded-lg border border-[var(--border)] text-sm">
+        <ul className="mb-4 divide-y divide-(--color-border-subtle) rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface) text-sm">
           {categories.length === 0 ? (
-            <li className="px-3 py-2.5 opacity-50">No categories yet.</li>
+            <li className="px-4 py-3 text-(--color-text-tertiary)">No categories yet.</li>
           ) : null}
           {categories.map((category) => (
-            <li key={category.id} className="flex items-center gap-3 px-3 py-2.5">
+            <li key={category.id} className="flex items-center gap-3 px-4 py-3">
               <span className="font-medium">{category.name}</span>
-              <span className="opacity-50">{category.locale}</span>
-              <span className="opacity-40">/{category.slug}</span>
-              <span className="ms-auto text-xs opacity-50">{category.folderCount} folders</span>
+              <span className="text-(--color-text-tertiary)">{category.locale}</span>
+              <span className="text-(--color-text-tertiary)">/{category.slug}</span>
+              <span className="ms-auto text-xs text-(--color-text-tertiary)">
+                {category.folderCount} folders
+              </span>
             </li>
           ))}
         </ul>
@@ -46,28 +54,30 @@ export default async function StructurePage() {
 
       <section>
         <h2 className="mb-1 text-lg font-semibold">Folders</h2>
-        <p className="mb-3 text-sm opacity-60">
+        <p className="mb-3 text-sm text-(--color-text-secondary)">
           Every article lives in a folder. A folder marked anything other than public hides all of
           its articles from the help centre, whatever the articles themselves say. An internal
           folder can go further and name the most junior role on the team that may read it, which
           then holds for every article inside.
         </p>
 
-        <ul className="mb-4 divide-y divide-[var(--border)] rounded-lg border border-[var(--border)] text-sm">
+        <ul className="mb-4 divide-y divide-(--color-border-subtle) rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface) text-sm">
           {folders.length === 0 ? (
-            <li className="px-3 py-2.5 opacity-50">No folders yet.</li>
+            <li className="px-4 py-3 text-(--color-text-tertiary)">No folders yet.</li>
           ) : null}
           {folders.map((folder) => (
-            <li key={folder.id} className="flex items-center gap-3 px-3 py-2.5">
-              <span className="opacity-60">{folder.categoryName}</span>
-              <span aria-hidden className="opacity-30">
+            <li key={folder.id} className="flex items-center gap-3 px-4 py-3">
+              <span className="text-(--color-text-secondary)">{folder.categoryName}</span>
+              <span aria-hidden className="text-(--color-text-tertiary)">
                 ›
               </span>
               <span className="font-medium">{folder.name}</span>
               {folder.visibility !== 'public' ? (
                 <Badge tone="warning">{audience(folder)}</Badge>
               ) : null}
-              <span className="ms-auto text-xs opacity-50">{folder.categoryLocale}</span>
+              <span className="ms-auto text-xs text-(--color-text-tertiary)">
+                {folder.categoryLocale}
+              </span>
             </li>
           ))}
         </ul>
@@ -89,5 +99,8 @@ export default async function StructurePage() {
  */
 function audience(folder: FolderOption): string {
   const floor = folderFloor(folder);
-  return floor ? FLOOR_LABELS[floor] : folder.visibility.replace('_', ' ');
+  if (floor) return FLOOR_LABELS[floor];
+  // Sentence case, like every other badge: the level is stored as `agents_only`.
+  const level = folder.visibility.replace('_', ' ');
+  return sentenceCase(level);
 }

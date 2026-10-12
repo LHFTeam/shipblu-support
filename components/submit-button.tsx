@@ -1,5 +1,6 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Button } from '@/components/ui';
 
@@ -12,25 +13,38 @@ import { Button } from '@/components/ui';
  *
  * One copy for the console, the sign-in pages and the help centre. There were
  * nine, differing only in their labels and class names, which each caller now
- * passes. `busy` defaults to the idle label with an ellipsis.
+ * passes. `busy` defaults to the idle label with an ellipsis. The spinner is
+ * the design system's busy mark; the busy label stays beside it, because a
+ * spinning ring alone tells a screen reader, and anyone not looking at it,
+ * nothing.
  */
 export function SubmitButton({
   idle,
   busy,
   variant = 'primary',
+  icon,
   className = '',
   disabled = false,
 }: {
   idle: string;
   busy?: string;
-  variant?: 'primary' | 'secondary' | 'danger';
+  variant?: 'primary' | 'secondary' | 'danger' | 'note';
+  /** A leading glyph — the note's lock. The spinner takes its place while the form submits. */
+  icon?: ReactNode;
   className?: string;
   /** Off for a reason outside the form; it is off while the form submits regardless. */
   disabled?: boolean;
 }) {
   const { pending } = useFormStatus();
   return (
-    <Button type="submit" variant={variant} disabled={pending || disabled} className={className}>
+    <Button
+      type="submit"
+      variant={variant}
+      loading={pending}
+      icon={icon}
+      disabled={pending || disabled}
+      className={className}
+    >
       {pending ? (busy ?? `${idle}…`) : idle}
     </Button>
   );

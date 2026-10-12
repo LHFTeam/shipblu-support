@@ -92,7 +92,7 @@ export function StatusEditor({
 
   if (deleteOnly) {
     if (status.isSystem) {
-      return <span className="text-xs text-[var(--muted-foreground)]">built in</span>;
+      return <span className="text-xs text-(--color-text-secondary)">built in</span>;
     }
     return <DangerAction action={deleteStatus} id={status.id} />;
   }
@@ -103,7 +103,7 @@ export function StatusEditor({
         <span className="font-medium">{status.name}</span>
         {status.isDefault ? (
           <span className="ms-2">
-            <Badge tone="brand">default</Badge>
+            <Badge tone="brand">Default</Badge>
           </span>
         ) : null}
       </button>

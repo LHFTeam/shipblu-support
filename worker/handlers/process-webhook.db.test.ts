@@ -117,6 +117,7 @@ async function admin(): Promise<SessionAgent> {
     avatarUrl: null,
     avatarColor: row!.avatarColor,
     isAcceptingTickets: true,
+    acceptingOffReason: null,
     sessionIdleForMs: 0,
   };
 }

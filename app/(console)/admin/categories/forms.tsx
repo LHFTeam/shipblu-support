@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { Badge, Cell, Row } from '@/components/ui';
+import { Badge, Button, Cell, ErrorText, Input, Row } from '@/components/ui';
 import { saveCategory, saveRootCause, setCategoryActive, setRootCauseActive } from './actions';
+import { sentenceCase } from '@/lib/format';
 
 /**
  * One editable row each, for a category and for a cause.
@@ -98,41 +99,55 @@ export function CategoryRow({
 
   return (
     <Row>
-      <Cell className={category.isActive ? '' : 'opacity-40'}>
+      <Cell>
         {editor.editing ? (
-          <input
-            className="app-input w-full text-sm"
+          <Input
+            className="w-full"
             value={editor.draft.labelEn}
             aria-label={`English label for ${category.key}`}
             onChange={(event) => editor.setDraft({ ...editor.draft, labelEn: event.target.value })}
           />
         ) : (
           <>
-            <span className="font-medium">{category.labelEn}</span>
+            {/* A retired row's name is greyed, but not its badges: the word
+                "Retired" is what says why, and a dimmed badge would not say it. */}
+            <span
+              className={`font-medium ${category.isActive ? '' : 'text-(--color-text-tertiary)'}`}
+            >
+              {category.labelEn}
+            </span>
             {!category.isDetectable ? (
               <span className="ms-2">
-                <Badge>by hand only</Badge>
+                <Badge>By hand only</Badge>
               </span>
             ) : null}
             {!category.isActive ? (
               <span className="ms-2">
-                <Badge tone="warning">retired</Badge>
+                <Badge tone="neutral">Retired</Badge>
               </span>
             ) : null}
           </>
         )}
-        {editor.error ? <p className="mt-1 text-xs text-red-600">{editor.error}</p> : null}
-        {toggleError ? <p className="mt-1 text-xs text-red-600">{toggleError}</p> : null}
+        {editor.error ? (
+          <p className="mt-1">
+            <ErrorText inline>{editor.error}</ErrorText>
+          </p>
+        ) : null}
+        {toggleError ? (
+          <p className="mt-1">
+            <ErrorText inline>{toggleError}</ErrorText>
+          </p>
+        ) : null}
       </Cell>
 
       <Cell>
-        <code className="text-xs opacity-70">{category.key}</code>
+        <code className="text-xs text-(--color-text-secondary)">{category.key}</code>
       </Cell>
 
       <Cell>
         {editor.editing ? (
-          <input
-            className="app-input w-full text-sm"
+          <Input
+            className="w-full"
             dir="rtl"
             lang="ar"
             value={editor.draft.labelAr}
@@ -146,51 +161,43 @@ export function CategoryRow({
         )}
       </Cell>
 
-      <Cell className="text-xs opacity-70">{category.audience}</Cell>
+      <Cell className="text-xs text-(--color-text-secondary)">{category.audience}</Cell>
 
       {/*
         Zero is not an error and is not styled as one — see the page. It only
         means something next to `by hand only`, which is why that badge exists.
       */}
-      <Cell className="text-xs opacity-70">{used}</Cell>
+      <Cell className="text-xs text-(--color-text-secondary)">{used}</Cell>
 
       <Cell>
         <div className="flex items-center gap-1">
           {editor.editing ? (
             <>
-              <button
-                type="button"
+              <Button
+                variant="secondary"
+                size="sm"
                 disabled={editor.busy}
                 onClick={() => void editor.commit()}
-                className="rounded border border-[var(--border)] px-2 py-1 text-xs hover:bg-[var(--muted)]"
               >
                 Save
-              </button>
-              <button
-                type="button"
-                onClick={editor.cancel}
-                className="rounded px-2 py-1 text-xs opacity-60 hover:opacity-100"
-              >
+              </Button>
+              <Button variant="ghost" size="sm" onClick={editor.cancel}>
                 Cancel
-              </button>
+              </Button>
             </>
           ) : (
             <>
-              <button
-                type="button"
-                onClick={() => editor.setEditing(true)}
-                className="rounded border border-[var(--border)] px-2 py-1 text-xs hover:bg-[var(--muted)]"
-              >
+              <Button variant="secondary" size="sm" onClick={() => editor.setEditing(true)}>
                 Rename
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
                 disabled={togglingBusy}
                 onClick={() => void toggle()}
-                className="rounded px-2 py-1 text-xs opacity-60 hover:opacity-100"
               >
                 {category.isActive ? 'Retire' : 'Restore'}
-              </button>
+              </Button>
             </>
           )}
         </div>
@@ -239,36 +246,48 @@ export function RootCauseRow({
 
   return (
     <Row>
-      <Cell className={cause.isActive ? '' : 'opacity-40'}>
+      <Cell>
         {editor.editing ? (
-          <input
-            className="app-input w-full text-sm"
+          <Input
+            className="w-full"
             value={editor.draft.labelEn}
             aria-label={`English label for ${cause.key}`}
             onChange={(event) => editor.setDraft({ ...editor.draft, labelEn: event.target.value })}
           />
         ) : (
           <>
-            <span className="font-medium">{cause.labelEn}</span>
+            {/* A retired row's name is greyed, but not its badges: the word
+                "Retired" is what says why, and a dimmed badge would not say it. */}
+            <span className={`font-medium ${cause.isActive ? '' : 'text-(--color-text-tertiary)'}`}>
+              {cause.labelEn}
+            </span>
             {!cause.isActive ? (
               <span className="ms-2">
-                <Badge tone="warning">retired</Badge>
+                <Badge tone="neutral">Retired</Badge>
               </span>
             ) : null}
           </>
         )}
-        {editor.error ? <p className="mt-1 text-xs text-red-600">{editor.error}</p> : null}
-        {toggleError ? <p className="mt-1 text-xs text-red-600">{toggleError}</p> : null}
+        {editor.error ? (
+          <p className="mt-1">
+            <ErrorText inline>{editor.error}</ErrorText>
+          </p>
+        ) : null}
+        {toggleError ? (
+          <p className="mt-1">
+            <ErrorText inline>{toggleError}</ErrorText>
+          </p>
+        ) : null}
       </Cell>
 
       <Cell>
-        <code className="text-xs opacity-70">{cause.key}</code>
+        <code className="text-xs text-(--color-text-secondary)">{cause.key}</code>
       </Cell>
 
       <Cell>
         {editor.editing ? (
-          <input
-            className="app-input w-full text-sm"
+          <Input
+            className="w-full"
             dir="rtl"
             lang="ar"
             value={editor.draft.labelAr}
@@ -289,46 +308,38 @@ export function RootCauseRow({
         control that always fails is worse than no control.
       */}
       <Cell>
-        <Badge>{cause.owner}</Badge>
+        <Badge>{sentenceCase(cause.owner)}</Badge>
       </Cell>
 
       <Cell>
         <div className="flex items-center gap-1">
           {editor.editing ? (
             <>
-              <button
-                type="button"
+              <Button
+                variant="secondary"
+                size="sm"
                 disabled={editor.busy}
                 onClick={() => void editor.commit()}
-                className="rounded border border-[var(--border)] px-2 py-1 text-xs hover:bg-[var(--muted)]"
               >
                 Save
-              </button>
-              <button
-                type="button"
-                onClick={editor.cancel}
-                className="rounded px-2 py-1 text-xs opacity-60 hover:opacity-100"
-              >
+              </Button>
+              <Button variant="ghost" size="sm" onClick={editor.cancel}>
                 Cancel
-              </button>
+              </Button>
             </>
           ) : (
             <>
-              <button
-                type="button"
-                onClick={() => editor.setEditing(true)}
-                className="rounded border border-[var(--border)] px-2 py-1 text-xs hover:bg-[var(--muted)]"
-              >
+              <Button variant="secondary" size="sm" onClick={() => editor.setEditing(true)}>
                 Rename
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
                 disabled={togglingBusy}
                 onClick={() => void toggle()}
-                className="rounded px-2 py-1 text-xs opacity-60 hover:opacity-100"
               >
                 {cause.isActive ? 'Retire' : 'Restore'}
-              </button>
+              </Button>
             </>
           )}
         </div>

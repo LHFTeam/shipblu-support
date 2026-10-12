@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { ThumbsDownIcon, ThumbsUpIcon } from '@/components/icons';
+import { Button, Textarea } from '@/components/ui';
 import { t, type Locale } from '@/lib/kb/locale';
 
 /**
@@ -15,6 +16,8 @@ import { t, type Locale } from '@/lib/kb/locale';
  * The two buttons carry green and red, which is the live portal's treatment and
  * the right one: this is the last thing on a long page and a pair of identical
  * grey buttons reads as a form to fill in rather than a question to answer.
+ * "No", once pressed, takes its colour into the border too, so the box that
+ * opened under it is visibly the answer to that button.
  */
 export function ArticleFeedback({ articleId, locale }: { articleId: string; locale: Locale }) {
   const [answer, setAnswer] = useState<boolean | null>(null);
@@ -34,18 +37,20 @@ export function ArticleFeedback({ articleId, locale }: { articleId: string; loca
 
   if (done) {
     return (
-      <p className="text-center text-sm font-medium text-[var(--kb-muted)]" role="status">
+      <p className="text-start text-sm text-(--color-text-secondary)" role="status">
         {t(locale, 'thanks')}
       </p>
     );
   }
 
   return (
-    <section className="kb-noprint text-center">
-      <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-3">
-        <p className="font-semibold text-[var(--kb-heading)]">{t(locale, 'wasHelpful')}</p>
+    <section className="kb-noprint text-start">
+      <div className="flex flex-wrap items-center gap-2.5">
+        <p className="me-1 text-base font-bold text-(--color-text-primary)">
+          {t(locale, 'wasHelpful')}
+        </p>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
           <FeedbackButton
             tone="yes"
             label={t(locale, 'yes')}
@@ -66,7 +71,7 @@ export function ArticleFeedback({ articleId, locale }: { articleId: string; loca
 
       {answer === false ? (
         <form
-          className="mx-auto mt-5 flex max-w-md flex-col items-center gap-3"
+          className="mt-4 flex max-w-[520px] flex-col items-start gap-2"
           onSubmit={(event) => {
             event.preventDefault();
             void send(false, comment.trim() || undefined);
@@ -76,7 +81,7 @@ export function ArticleFeedback({ articleId, locale }: { articleId: string; loca
           <label htmlFor="kb-feedback-comment" className="sr-only">
             {t(locale, 'feedbackPlaceholder')}
           </label>
-          <textarea
+          <Textarea
             id="kb-feedback-comment"
             value={comment}
             onChange={(event) => setComment(event.target.value)}
@@ -84,14 +89,8 @@ export function ArticleFeedback({ articleId, locale }: { articleId: string; loca
             maxLength={2000}
             autoFocus
             placeholder={t(locale, 'feedbackPlaceholder')}
-            className="w-full rounded-lg border border-[var(--kb-border-strong)] bg-[var(--kb-surface)] px-3 py-2 text-base text-[var(--kb-heading)] outline-none focus:border-[var(--kb-band)] sm:text-sm"
           />
-          <button
-            type="submit"
-            className="rounded-md bg-[var(--button-primary)] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--button-primary-hover)]"
-          >
-            {t(locale, 'send')}
-          </button>
+          <Button type="submit">{t(locale, 'send')}</Button>
         </form>
       ) : null}
     </section>
@@ -114,9 +113,13 @@ function FeedbackButton({
       type="button"
       onClick={onClick}
       aria-pressed={pressed}
-      className={`inline-flex items-center gap-2 rounded-md border px-5 py-2 font-semibold transition-colors hover:bg-[var(--kb-surface-2)] ${
-        pressed ? 'border-[var(--kb-border-strong)]' : 'border-[var(--kb-border)]'
-      } ${tone === 'yes' ? 'text-[var(--kb-yes)]' : 'text-[var(--kb-no)]'}`}
+      className={`inline-flex min-h-[42px] items-center gap-2 rounded-md border bg-(--color-background-surface) px-3 py-1.5 text-sm font-medium transition-colors hover:bg-(--color-background-hover) sm:min-h-[34px] ${
+        tone === 'yes'
+          ? 'text-(--color-feedback-success-fg)'
+          : pressed
+            ? 'border-(--color-feedback-danger-fg) text-(--color-feedback-danger-fg)'
+            : 'text-(--color-feedback-danger-fg)'
+      } ${pressed ? '' : 'border-(--color-border-default)'}`}
     >
       {tone === 'yes' ? <ThumbsUpIcon size={18} /> : <ThumbsDownIcon size={18} />}
       {label}

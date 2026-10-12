@@ -52,7 +52,7 @@ export default async function FolderPage({
         ]}
         title={folder.name}
         selfPath={`/${locale}/c/${folder.categorySlug}/${folder.slug}`}
-        icon={<FolderIcon size={28} />}
+        icon={<FolderIcon size={24} />}
         meta={folder.description}
       />
 

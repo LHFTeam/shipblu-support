@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Badge, ErrorText, Input, Label, Select, Textarea } from '@/components/ui';
+import { HubIcon } from '@/components/icons';
+import { Badge, Button, ErrorText, Input, Label, Notice, Select, Textarea } from '@/components/ui';
 import { formatDateTime, formatRelative } from '@/lib/format';
 import type { PickerEntry, SideConversationView } from '@/lib/side-conversations/queries';
 import {
@@ -36,41 +37,38 @@ import { AttachmentList } from './attachments';
  * `ShipmentsField` in `view.tsx` — and a dialog that scrolls inside a scrolling
  * page would be the first one.
  *
- * ## Violet, and said out loud
+ * ## Told apart by form, and said out loud
  *
  * Amber is already the private note. A side conversation is a *third* kind of
  * writing on a ticket the customer cannot see, and the failure mode of confusing
  * it with the reply box is the worst one this feature has: an internal question
- * about a customer, sent to that customer. So the colour is different from both,
- * and every card and every input says "not visible to the customer" in words.
- * That label is load-bearing, not decoration.
+ * about a customer, sent to that customer. It used to be violet for that reason;
+ * violet now means one thing across the product, a parcel out for delivery, so
+ * the card is told apart by its shape instead — a full-width bordered card with
+ * the hub mark, beside the blue reply bubble and the amber note with its lock —
+ * and its state by the hub tones, coral when the other side has answered and
+ * somebody here has to read it. Every card and every input still says "Not
+ * visible to the customer" in words. That label is load-bearing, not decoration.
  */
-
-const PANEL = 'border-violet-500/30 bg-violet-500/8';
-
-function SideIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      className="size-3.5 shrink-0"
-    >
-      <path d="M17 3 21 7l-4 4" />
-      <path d="M21 7H8a4 4 0 0 0-4 4v1" />
-      <path d="M7 21 3 17l4-4" />
-      <path d="M3 17h13a4 4 0 0 0 4-4v-1" />
-    </svg>
-  );
-}
 
 /** Said on every surface an agent can type into. */
 function NotVisible() {
-  return <span className="text-[11px] text-violet-700/80">Not visible to the customer</span>;
+  return (
+    <span className="text-2xs text-(--color-text-secondary)">Not visible to the customer</span>
+  );
+}
+
+/** The thread's state in words, the same on the card and in the sidebar's index. */
+function SideState({ side, since }: { side: SideConversationView; since?: boolean }) {
+  if (side.state === 'done') return <Badge tone="resolved">Done</Badge>;
+  if (side.awaitingReply) {
+    return <Badge tone="hub-waiting">Awaiting reply · {formatRelative(side.lastMessageAt)}</Badge>;
+  }
+  return (
+    <Badge tone="hub-replied">
+      Replied{since ? ` · ${formatRelative(side.lastMessageAt)}` : ''}
+    </Badge>
+  );
 }
 
 export function SideConversationCard({
@@ -91,32 +89,28 @@ export function SideConversationCard({
   return (
     <li
       id={`side-${side.number}`}
-      className={`max-w-[46rem] scroll-mt-4 rounded-lg border ${PANEL} px-3.5 py-2.5`}
+      className="mt-3.5 scroll-mt-4 self-stretch overflow-hidden rounded-xl border border-(--color-border-default) bg-(--color-background-surface) first:mt-0 [[data-chat-event]+&]:mt-0"
     >
-      <div className="flex flex-wrap items-baseline gap-2 text-xs text-[var(--muted-foreground)]">
-        <span className="flex items-center gap-1.5 font-medium text-violet-800">
-          <SideIcon />
-          Side conversation
+      <div className="flex flex-wrap items-center gap-2 border-b border-(--color-border-subtle) bg-(--color-background-surface-sunken) px-3.5 py-2.5 text-xs">
+        <HubIcon size={15} className="shrink-0" />
+        <span className="font-semibold">Side conversation · {describeRecipient(side)}</span>
+        <SideState side={side} />
+        <span className="ms-auto flex flex-wrap items-center gap-x-1.5 text-(--color-text-secondary)">
+          <NotVisible />
+          <span aria-hidden>·</span>
+          <span>{formatDateTime(side.createdAt)}</span>
         </span>
-        <span className="font-medium">{describeRecipient(side)}</span>
-        {side.state === 'done' ? (
-          <Badge tone="resolved">done</Badge>
-        ) : side.awaitingReply ? (
-          <Badge tone="warning">awaiting reply · {formatRelative(side.lastMessageAt)}</Badge>
-        ) : (
-          <Badge tone="open">replied</Badge>
-        )}
-        <NotVisible />
-        <span className="ms-auto">{formatDateTime(side.createdAt)}</span>
       </div>
 
-      <p className="mt-1.5 text-sm font-medium">{side.subject}</p>
+      <p dir="auto" className="px-3.5 pt-2.5 text-start text-sm font-medium">
+        {side.subject}
+      </p>
 
       {!open ? (
-        <div className="mt-1.5">
+        <div className="px-3.5 pt-1 pb-3">
           {last ? (
-            <p className="line-clamp-2 text-sm opacity-70">
-              <span className="font-medium">
+            <p dir="auto" className="line-clamp-2 text-start text-sm text-(--color-text-secondary)">
+              <span className="font-medium text-(--color-text-primary)">
                 {last.direction === 'inbound' ? (last.authorName ?? 'They') : 'We'} said:
               </span>{' '}
               {last.bodyText}
@@ -125,20 +119,18 @@ export function SideConversationCard({
           <button
             type="button"
             onClick={() => setOpen(true)}
-            className="mt-1.5 text-xs font-medium text-violet-700 hover:underline"
+            className="mt-1.5 text-xs font-medium text-(--color-text-link) hover:underline"
           >
             Open thread ({count} {count === 1 ? 'message' : 'messages'})
           </button>
         </div>
       ) : (
-        <div className="mt-2">
-          <ol className="flex flex-col gap-2">
+        <div className="pb-3">
+          <ol className="px-3.5 py-1">
             {side.messages.map((message) => (
               <li
                 key={message.id}
-                className={`rounded-md border border-[var(--border)] bg-[var(--surface)] px-2.5 py-2 ${
-                  message.direction === 'outbound' ? 'ms-6' : 'me-6'
-                }`}
+                className="border-t border-(--color-border-subtle) py-2 first:border-t-0"
               >
                 {/*
                   An out-of-office is not the hub's answer. Dimmed rather than
@@ -148,32 +140,35 @@ export function SideConversationCard({
                   read.
                 */}
                 <div className={message.isAutomated ? 'opacity-60' : undefined}>
-                  <div className="mb-1 flex items-baseline gap-2 text-xs text-[var(--muted-foreground)]">
-                    <span className="font-medium">
+                  <div className="flex items-baseline gap-2 text-xs text-(--color-text-secondary)">
+                    <span className="font-semibold text-(--color-text-primary)">
                       {message.authorName ?? (message.direction === 'inbound' ? 'They' : 'We')}
                     </span>
-                    {message.isAutomated ? <Badge>auto-reply</Badge> : null}
-                    <span className="ms-auto">{formatDateTime(message.createdAt)}</span>
+                    {message.isAutomated ? <Badge tone="automated">Auto-reply</Badge> : null}
+                    <span className="ms-auto shrink-0">{formatDateTime(message.createdAt)}</span>
                   </div>
 
                   {message.bodyHtml ? (
                     <div
-                      className="prose-sm max-w-none text-sm [&_a]:text-brand-600 [&_a]:underline"
+                      dir="auto"
+                      className="mt-1 text-start text-sm/5 [&_a]:text-(--color-text-link) [&_a]:underline"
                       dangerouslySetInnerHTML={{ __html: message.bodyHtml }}
                     />
                   ) : (
-                    <p className="whitespace-pre-wrap text-sm">{message.bodyText}</p>
+                    <p dir="auto" className="mt-1 text-start text-sm/5 whitespace-pre-wrap">
+                      {message.bodyText}
+                    </p>
                   )}
                 </div>
 
                 <AttachmentList files={message.attachments} compact />
 
                 {message.direction === 'outbound' && message.deliveryStatus === 'failed' ? (
-                  <p className="mt-1 text-xs text-red-600">
+                  <p className="mt-1 text-xs text-(--color-feedback-danger-fg)">
                     Not delivered — {message.deliveryError ?? 'unknown error'}
                   </p>
                 ) : message.direction === 'outbound' && message.deliveryStatus === 'pending' ? (
-                  <p className="mt-1 text-xs opacity-50">sending…</p>
+                  <p className="mt-1 text-xs text-(--color-text-tertiary)">sending…</p>
                 ) : null}
               </li>
             ))}
@@ -181,14 +176,10 @@ export function SideConversationCard({
 
           {canWrite ? <SideReplyForm side={side} /> : null}
 
-          <div className="mt-2 flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setOpen(false)}
-              className="text-xs opacity-60 hover:opacity-100"
-            >
+          <div className="mt-2 flex items-center gap-2 px-3.5">
+            <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
               Collapse
-            </button>
+            </Button>
             {canWrite ? <StateButton side={side} /> : null}
           </div>
         </div>
@@ -203,14 +194,13 @@ function SideReplyForm({ side }: { side: SideConversationView }) {
   });
 
   return (
-    <form key={key} {...form} className="mt-2 flex flex-col gap-1.5">
+    <form key={key} {...form} className="mt-1 flex flex-col gap-1.5 px-3.5">
       <input type="hidden" name="sideConversationId" value={side.id} />
       <Textarea
         name="body"
         rows={2}
         required
         placeholder={`Write back to ${describeRecipient(side)}…`}
-        className="border-violet-500/40 bg-[var(--surface)]"
       />
       <ErrorText>{state.error}</ErrorText>
       <div className="flex items-center gap-2">
@@ -239,14 +229,16 @@ function StateButton({ side }: { side: SideConversationView }) {
   }
 
   return (
-    <button
-      type="button"
+    <Button
+      variant="secondary"
+      size="sm"
       disabled={busy}
+      loading={busy}
       onClick={() => void toggle()}
-      className="ms-auto text-xs font-medium text-violet-700 hover:underline disabled:opacity-50"
+      className="ms-auto"
     >
       {side.state === 'open' ? 'Mark done' : 'Reopen'}
-    </button>
+    </Button>
   );
 }
 
@@ -345,12 +337,12 @@ function SideConversationDraft({
       <input type="hidden" name="anchorMessageId" value={anchor?.id ?? ''} />
 
       {recipients.length === 0 ? (
-        <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
+        <Notice tone="warning" icon>
           No hubs or teams have been entered yet, so there is nobody to pick. Add ShipBlu&apos;s
           locations under <span className="font-medium">Settings → Locations</span>, and anyone who
           is not a location under <span className="font-medium">Internal recipients</span>. Until
           then you can still type an address by hand.
-        </p>
+        </Notice>
       ) : null}
 
       <div className="grid gap-2 sm:grid-cols-2">
@@ -437,19 +429,23 @@ function SideConversationDraft({
         // somebody else's parcel.
         defaultValue={trackingPrefill(trackingNumbers)}
         placeholder="Ask the hub what is actually happening with this parcel…"
-        className="border-violet-500/40 bg-violet-500/5"
       />
 
       {anchor ? (
-        <label className="flex items-start gap-2 rounded-md border border-[var(--border)] p-2 text-xs">
-          <input type="checkbox" name="includeAnchor" defaultChecked className="mt-0.5" />
+        <label className="flex items-start gap-2 rounded-md border border-(--color-border-subtle) p-2 text-xs">
+          <input
+            type="checkbox"
+            name="includeAnchor"
+            defaultChecked
+            className="mt-0.5 size-4 shrink-0 accent-(--color-control-accent)"
+          />
           <span>
             <span className="font-medium">Quote the customer&apos;s last message</span>
             {/* No `block` beside the clamp: `display: block` and the clamp's
                 own `display: -webkit-box` are the same property, and the one
                 that won left a long WhatsApp message unclamped — five lines of
                 quote that pushed the send button off a phone screen. */}
-            <span className="line-clamp-1 opacity-60">{anchor.bodyText}</span>
+            <span className="line-clamp-1 text-(--color-text-secondary)">{anchor.bodyText}</span>
           </span>
         </label>
       ) : null}
@@ -457,8 +453,13 @@ function SideConversationDraft({
       <ErrorText>{error}</ErrorText>
 
       <div className="flex flex-wrap items-center gap-3">
-        <label className="flex items-center gap-1.5 text-xs opacity-70">
-          <input type="checkbox" name="setPending" defaultChecked />
+        <label className="flex items-center gap-1.5 text-xs text-(--color-text-secondary)">
+          <input
+            type="checkbox"
+            name="setPending"
+            defaultChecked
+            className="size-4 shrink-0 accent-(--color-control-accent)"
+          />
           Set this ticket to Pending
         </label>
         <NotVisible />
@@ -477,34 +478,19 @@ function SideConversationDraft({
  */
 export function SideConversationsField({ sides }: { sides: SideConversationView[] }) {
   if (sides.length === 0) {
-    return <p className="text-xs opacity-50">None yet.</p>;
+    return <p className="text-sm text-(--color-text-tertiary)">None yet.</p>;
   }
 
   return (
-    <ul className="flex flex-col gap-1.5">
+    <ul className="flex flex-col gap-2">
       {sides.map((side) => (
-        <li key={side.id} className="text-xs">
-          <a href={`#side-${side.number}`} className="flex items-start gap-1.5 hover:underline">
-            <span
-              aria-hidden="true"
-              className={`mt-1 size-1.5 shrink-0 rounded-full ${
-                side.state === 'done'
-                  ? 'bg-[var(--muted-foreground)]'
-                  : side.awaitingReply
-                    ? 'bg-amber-500'
-                    : 'bg-emerald-500'
-              }`}
-            />
-            <span className="min-w-0">
-              <span className="block truncate font-medium">{describeRecipient(side)}</span>
-              <span className="block opacity-60">
-                {side.state === 'done'
-                  ? 'done'
-                  : side.awaitingReply
-                    ? `awaiting reply · ${formatRelative(side.lastMessageAt)}`
-                    : `replied · ${formatRelative(side.lastMessageAt)}`}
-              </span>
-            </span>
+        <li key={side.id}>
+          <a
+            href={`#side-${side.number}`}
+            className="flex min-w-0 flex-col items-start gap-0.5 rounded-md text-sm hover:underline"
+          >
+            <span className="max-w-full truncate font-medium">{describeRecipient(side)}</span>
+            <SideState side={side} since />
           </a>
         </li>
       ))}

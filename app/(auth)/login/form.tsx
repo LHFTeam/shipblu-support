@@ -19,7 +19,7 @@ export function LoginForm({ next }: { next: string }) {
   }, [state]);
 
   return (
-    <form {...form} className="flex flex-col gap-4 rounded-lg border border-[var(--border)] p-6">
+    <form {...form} className="flex flex-col gap-3.5">
       <input type="hidden" name="next" value={next} />
 
       <div>

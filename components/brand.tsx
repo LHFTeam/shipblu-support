@@ -48,7 +48,7 @@ export function ShipBluMark({ className = '', ...props }: ComponentProps<'svg'>)
 export function ShipBluLogo({ className = '' }: { className?: string }) {
   return (
     <span
-      className={`flex shrink-0 items-center justify-center rounded-[28%] bg-white shadow-sm ring-1 ring-black/5 ${className}`}
+      className={`flex shrink-0 items-center justify-center rounded-logo bg-white shadow-sm ring-1 ring-black/5 ${className}`}
     >
       <ShipBluMark className="w-[76%]" />
     </span>

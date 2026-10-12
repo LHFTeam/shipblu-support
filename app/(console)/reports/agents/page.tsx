@@ -1,6 +1,15 @@
 import Link from 'next/link';
 import { Meter, Stat } from '@/components/charts';
-import { Badge, Card, Cell, EmptyState, PageHeader, Row, Table } from '@/components/ui';
+import {
+  Badge,
+  buttonClass,
+  Card,
+  Cell,
+  EmptyState,
+  PageHeader,
+  Row,
+  Table,
+} from '@/components/ui';
 import { requirePermission } from '@/lib/auth/guard';
 import {
   adherence,
@@ -26,6 +35,7 @@ import {
   metPercentage,
 } from '@/lib/reports/queries';
 import { rangeIn, reportingContext } from '@/lib/reports/rollup';
+import { RangeNav } from '../range-nav';
 
 export const dynamic = 'force-dynamic';
 
@@ -75,30 +85,20 @@ export default async function AgentProductivityPage({
   const team = totalsOf(summaries);
 
   return (
-    <div className="app-scroll h-full overflow-y-auto p-6">
+    <div className="app-scroll h-full overflow-y-auto p-4 sm:p-6">
       <PageHeader
         title="Agent productivity"
         description={`${from} to ${to}, in ${zone}. Rolled up nightly — today is not included yet.`}
         actions={
           <div className="flex flex-wrap items-center gap-3">
-            <nav className="flex gap-1 text-sm">
-              {RANGES.map((range) => (
-                <Link
-                  key={range}
-                  href={link({ days: range, agent: selected?.agentId })}
-                  className={`rounded-md px-2.5 py-1 ${
-                    range === days
-                      ? 'bg-[var(--muted)] font-medium'
-                      : 'opacity-60 hover:opacity-100'
-                  }`}
-                >
-                  {range} days
-                </Link>
-              ))}
-            </nav>
+            <RangeNav
+              ranges={RANGES}
+              current={days}
+              href={(each) => link({ days: each, agent: selected?.agentId })}
+            />
             <Link
               href={`/reports/agents/export?days=${days}`}
-              className="rounded-md border border-[var(--border)] px-2.5 py-1 text-sm hover:bg-[var(--muted)]"
+              className={buttonClass({ variant: 'secondary', size: 'sm' })}
             >
               Export CSV
             </Link>
@@ -133,23 +133,25 @@ export default async function AgentProductivityPage({
               label="Resolved per online hour"
               value={resolvedPerHour(team)?.toFixed(1) ?? '—'}
             />
-            <Card>
+            <Card padded={false} className="p-4">
               <Meter
                 value={occupancy(team)}
                 tone={occupancyTone(occupancy(team))}
                 label="Occupancy"
               />
-              <p className="mt-1 text-xs opacity-50">
+              <p className="mt-1 text-xs text-(--color-text-tertiary)">
                 Healthy is 75–85%. Sustained above that costs quality.
               </p>
             </Card>
-            <Card>
+            <Card padded={false} className="p-4">
               <Meter
                 value={adherence(team)}
                 tone={adherence(team) !== null && adherence(team)! < 85 ? 'warning' : 'good'}
                 label="Schedule adherence"
               />
-              <p className="mt-1 text-xs opacity-50">Target is 85% of the scheduled shift.</p>
+              <p className="mt-1 text-xs text-(--color-text-tertiary)">
+                Target is 85% of the scheduled shift.
+              </p>
             </Card>
             <Stat
               label="Reopened after resolve"
@@ -231,7 +233,7 @@ export default async function AgentProductivityPage({
                       // Never "0s": the beat runs in the agent's browser and can
                       // be blocked, so an unmeasured day must not render as an
                       // idle one.
-                      <Badge tone="neutral">not measured</Badge>
+                      <Badge tone="neutral">Not measured</Badge>
                     )}
                   </Cell>
                   <Cell>
@@ -282,7 +284,9 @@ export default async function AgentProductivityPage({
                       <Cell>{row.day}</Cell>
                       <Cell>{formatClock(row.firstOnlineAt, zone)}</Cell>
                       <Cell>{formatClock(row.lastOnlineAt, zone)}</Cell>
-                      <Cell className="whitespace-nowrap opacity-60">{scheduled(row, zone)}</Cell>
+                      <Cell className="whitespace-nowrap text-(--color-text-secondary)">
+                        {scheduled(row, zone)}
+                      </Cell>
                       <Cell>
                         <Punctuality row={row} />
                       </Cell>
@@ -301,7 +305,9 @@ export default async function AgentProductivityPage({
               )}
             </Section>
           ) : (
-            <p className="text-sm opacity-50">Pick an agent above to see their days.</p>
+            <p className="text-sm text-(--color-text-tertiary)">
+              Pick an agent above to see their days.
+            </p>
           )}
         </>
       )}
@@ -344,11 +350,11 @@ function AgentLink({
  */
 function Punctuality({ row }: { row: AgentDayRow }) {
   const late = minutesLate(row);
-  if (late === null) return <span className="opacity-40">—</span>;
+  if (late === null) return <span className="text-(--color-text-tertiary)">—</span>;
 
   // A few minutes either side of the hour is not a finding, it is a browser
   // finishing its handshake.
-  if (late <= 5) return <Badge tone="success">on time</Badge>;
+  if (late <= 5) return <Badge tone="success">On time</Badge>;
   if (late <= 15) return <Badge tone="warning">{formatDrift(late)}</Badge>;
   return <Badge tone="danger">{formatDrift(late)}</Badge>;
 }
@@ -423,8 +429,8 @@ function Section({
 }) {
   return (
     <section className="mb-8">
-      <h2 className="mb-1 text-sm font-medium opacity-70">{title}</h2>
-      {hint ? <p className="mb-2 text-xs opacity-50">{hint}</p> : null}
+      <h2 className="mb-1 text-sm font-semibold text-(--color-text-secondary)">{title}</h2>
+      {hint ? <p className="mb-2 text-xs text-(--color-text-tertiary)">{hint}</p> : null}
       {children}
     </section>
   );

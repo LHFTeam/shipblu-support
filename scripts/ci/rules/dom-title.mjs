@@ -29,27 +29,8 @@ import { fail, read, requireAtLeast, scannable } from '../lib.mjs';
 export function checkNoDomTitleAttribute() {
   const rule = 'dom-title';
 
-  /**
-   * Three uses that predate this check and are not mechanical swaps.
-   *
-   * `Tooltip` renders its trigger as a real button, which is what makes it
-   * answer a tap. That is the right shape for a span of text and the wrong shape
-   * for these: `availability.tsx` would nest a button inside the submit button
-   * it describes, and the other two would turn a layout element — an avatar
-   * circle, a channel badge — into a control. Each needs a design decision about
-   * what the trigger should be, not a find and replace, so they are named here
-   * rather than silently rewritten or the rule dropped.
-   *
-   * Anything not on this list fails. Do not extend it — fix the call site.
-   */
-  const predating = new Set([
-    'app/(console)/availability.tsx',
-    'app/(console)/layout.tsx',
-    'components/channel.tsx',
-  ]);
-
   let elements = 0;
-  for (const file of scannable.filter((f) => f.endsWith('.tsx') && !predating.has(f))) {
+  for (const file of scannable.filter((f) => f.endsWith('.tsx'))) {
     const source = ts.createSourceFile(
       file,
       read(file),
@@ -81,7 +62,7 @@ export function checkNoDomTitleAttribute() {
   }
 
   // A rule that passes by finding nothing needs to know it looked. Today's
-  // tree has about 2,000 DOM elements outside the three files above.
+  // tree has about 2,000 DOM elements.
   requireAtLeast(rule, '*.tsx', elements, 500, 'DOM elements in JSX');
 }
 

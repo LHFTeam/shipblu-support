@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { ShipBluLogo } from '@/components/brand';
+import { buttonClass } from '@/components/ui';
 import { DEFAULT_LOCALE, direction, isLocale, LOCALES, LOCALE_NAMES, t } from '@/lib/kb/locale';
 import { publicBaseUrl } from '@/lib/kb/site';
 import { AccountNav } from './account-nav';
@@ -20,9 +21,10 @@ export const dynamic = 'force-dynamic';
  * (`ms-`/`me-`, `start`/`end`) rather than physical, so Arabic mirrors without
  * a second stylesheet.
  *
- * The same wrapper carries `kb-shell`, which is where the help centre's palette
- * and typefaces are scoped. Nothing in `globals.css` can reach the console from
- * inside it.
+ * The same wrapper carries `kb-shell`, which is where the help centre's
+ * typefaces and reading density are scoped. The colours are the design
+ * system's roles, the same ones the console reads, so the two cannot drift
+ * apart; what differs is how much room a page gives the words.
  */
 export default async function KbLayout({
   children,
@@ -47,18 +49,18 @@ export default async function KbLayout({
       */}
       <a
         href="#kb-main"
-        className="sr-only focus:not-sr-only focus:absolute focus:start-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-[var(--button-primary)] focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-white"
+        className="sr-only focus:not-sr-only focus:absolute focus:start-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-(--button-primary) focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-(--color-text-on-action)"
       >
         {t(locale, 'skipToContent')}
       </a>
 
-      <header className="kb-noprint sticky top-0 z-30 border-b border-[var(--kb-border)] bg-[var(--kb-surface)]">
-        <Container className="flex flex-wrap items-center gap-x-6 gap-y-3 py-3">
+      <header className="kb-noprint sticky top-0 z-30 border-b border-(--color-border-subtle) bg-(--color-background-surface)">
+        <Container className="flex min-h-15 flex-wrap items-center gap-x-6 gap-y-3 py-3">
           <Link
             href={`/${locale}`}
-            className="flex items-center gap-2.5 font-bold text-[var(--kb-heading)]"
+            className="flex items-center gap-2.5 font-bold text-(--color-text-primary)"
           >
-            <ShipBluLogo className="size-9" />
+            <ShipBluLogo className="size-8" />
             <span className="text-base">{t(locale, 'title')}</span>
           </Link>
 
@@ -80,7 +82,7 @@ export default async function KbLayout({
             */}
             <Link
               href={`/${locale}/track`}
-              className="font-medium text-[var(--kb-heading)] underline-offset-4 hover:underline"
+              className="font-bold text-(--color-text-secondary) underline-offset-4 hover:text-(--color-text-primary) hover:underline"
             >
               {t(locale, 'trackTitle')}
             </Link>
@@ -89,10 +91,7 @@ export default async function KbLayout({
 
             <AccountNav locale={locale} />
 
-            <Link
-              href={`/${locale}/forms`}
-              className="rounded-md bg-[var(--button-primary)] px-3.5 py-2 font-semibold text-white transition-colors hover:bg-[var(--button-primary-hover)]"
-            >
+            <Link href={`/${locale}/forms`} className={buttonClass()}>
               {t(locale, 'contactAction')}
             </Link>
           </nav>
@@ -114,25 +113,28 @@ export default async function KbLayout({
         {children}
       </main>
 
-      <footer className="kb-noprint bg-[var(--kb-footer)] text-[var(--kb-footer-text)]">
-        <Container className="flex flex-wrap items-center gap-x-6 gap-y-3 py-8 text-sm">
-          <span className="font-semibold">ShipBlu</span>
+      <footer className="kb-noprint bg-(--color-background-inverse) text-(--color-text-inverse)">
+        {/* Extra room under the footer on a phone: the help centre's own chat
+            launcher sits fixed over the bottom 76px and covered the support
+            email link. */}
+        <Container className="flex flex-wrap items-center gap-x-6 gap-y-3 pt-8 pb-24 text-sm sm:pb-8">
+          <span className="flex items-center gap-2.5 font-bold">
+            <ShipBluLogo className="size-7" />
+            ShipBlu
+          </span>
 
-          <Link href={`/${locale}`} className="underline-offset-4 opacity-80 hover:opacity-100">
+          <Link href={`/${locale}`} className="underline-offset-4 hover:underline">
             {t(locale, 'home')}
           </Link>
 
-          <span className="opacity-80">
+          <span>
             {t(locale, 'contactPrompt')}{' '}
-            <a
-              href="mailto:support@shipblu.com"
-              className="underline underline-offset-4 hover:opacity-100"
-            >
+            <a href="mailto:support@shipblu.com" className="underline underline-offset-4">
               support@shipblu.com
             </a>
           </span>
 
-          <span className="sm:ms-auto opacity-60">
+          <span className="sm:ms-auto">
             © {new Date().getFullYear()} ShipBlu. {t(locale, 'footerRights')}
           </span>
         </Container>
@@ -142,42 +144,32 @@ export default async function KbLayout({
 }
 
 /**
- * Two locales, so two links rather than a dropdown: a menu that has to be
- * opened to find out it holds two things is a menu that should have been the
- * two things.
+ * Two locales, so the switch is one link: to the language you are not reading.
  *
- * Both point at that locale's front page rather than at a translation of the
+ * It used to be both, with the current one filled in the action blue — a link
+ * to the page you are already on, painted in the colour that everywhere else
+ * means "press this". With two languages the only thing the control can do is
+ * take you to the other one, so that is all it offers. Labelled in its own
+ * language, because the reader who needs it is the one who cannot read the
+ * page's.
+ *
+ * It points at that locale's front page rather than at a translation of the
  * current one. There is no general path mapping — an Arabic article has its own
  * slug — and the article page offers the direct link to its own translation
  * where one exists, which is the only place the mapping is actually known.
  */
 function LocaleSwitcher({ locale }: { locale: (typeof LOCALES)[number] }) {
+  const other = LOCALES.find((option) => option !== locale) ?? DEFAULT_LOCALE;
+
   return (
-    <div
-      role="group"
-      aria-label={t(locale, 'language')}
-      className="flex items-center overflow-hidden rounded-md border border-[var(--kb-border)]"
+    <Link
+      href={`/${other}`}
+      lang={other}
+      hrefLang={other}
+      className="rounded-full border border-(--color-border-default) px-3 py-1 text-(--color-text-primary) transition-colors hover:bg-(--color-background-hover)"
     >
-      {LOCALES.map((option) => {
-        const current = option === locale;
-        return (
-          <Link
-            key={option}
-            href={`/${option}`}
-            lang={option}
-            hrefLang={option}
-            aria-current={current ? 'true' : undefined}
-            className={`px-2.5 py-1 text-xs font-medium transition-colors ${
-              current
-                ? 'bg-[var(--kb-band)] text-[var(--kb-band-text)]'
-                : 'text-[var(--kb-muted)] hover:bg-[var(--kb-surface-2)]'
-            }`}
-          >
-            {LOCALE_NAMES[option]}
-          </Link>
-        );
-      })}
-    </div>
+      {LOCALE_NAMES[other]}
+    </Link>
   );
 }
 

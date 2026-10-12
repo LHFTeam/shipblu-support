@@ -15,13 +15,19 @@ import type { Locale } from '@/lib/kb/locale';
 export const COPY = {
   en: {
     heading: 'ShipBlu Support',
-    online: 'We usually reply in a few minutes',
+    /*
+     * Shown whenever `page.tsx` finds the schedule open — not whenever an agent
+     * is present, which nothing here knows. So it says we are open and nothing
+     * more: never a response time, which is a promise the schedule cannot keep.
+     */
+    online: 'Online now',
     offline: 'We are away right now',
     opensAt: 'We reply from',
     placeholder: 'Type your message…',
     send: 'Send',
     starter: 'Ask us anything about your shipments.',
     suggested: 'These might help',
+    automated: 'Automated reply',
 
     faqHeading: 'Common questions',
     searchResults: 'Search results',
@@ -42,28 +48,29 @@ export const COPY = {
   },
   ar: {
     heading: 'دعم شيب بلو',
-    online: 'نرد عادةً خلال دقائق',
+    online: 'متاحون الآن',
     offline: 'لسنا متاحين الآن',
     opensAt: 'نرد ابتداءً من',
     placeholder: 'اكتب رسالتك…',
     send: 'إرسال',
     starter: 'اسألنا أي شيء عن شحناتك.',
     suggested: 'قد تساعدك هذه المقالات',
+    automated: 'رد آلي',
 
     faqHeading: 'الأسئلة الشائعة',
     searchResults: 'نتائج البحث',
     back: 'رجوع',
     close: 'إغلاق',
-    readMore: 'افتح المقال في مركز المساعدة',
+    readMore: 'فتح المقال في مركز المساعدة',
     talkToAgent: 'تحدث معنا',
     leaveMessage: 'اترك لنا رسالة',
 
-    detailsPrompt: 'لا يوجد أحد متاح الآن. اترك بياناتك وسنعاود التواصل معك.',
-    namePlaceholder: 'اسمك',
+    detailsPrompt: 'لا يوجد أحد متاح الآن. يمكن لحضرتك ترك البيانات وسنعاود التواصل.',
+    namePlaceholder: 'الاسم',
     emailPlaceholder: 'you@example.com',
     phonePlaceholder: 'رقم الهاتف',
     detailsHint: 'بريد إلكتروني أو رقم هاتف — أيهما يكفي.',
-    detailsSaved: 'شكرًا — سنعاود التواصل معك.',
+    detailsSaved: 'شكرًا — سنعاود التواصل مع حضرتك.',
     detailsMissing: 'اترك بريدًا إلكترونيًا أو رقم هاتف حتى نتمكن من الرد.',
     detailsInvalid: 'هذا لا يبدو بريدًا إلكترونيًا أو رقم هاتف صحيحًا.',
   },

@@ -1,4 +1,6 @@
+import { ChevronLeftIcon } from '@/components/icons';
 import Link from 'next/link';
+import { Notice } from '@/components/ui';
 import { requirePermission } from '@/lib/auth/guard';
 import { listFolderOptionsForRole } from '@/lib/kb/admin';
 import { ArticleEditor } from '../editor';
@@ -13,23 +15,27 @@ export default async function NewArticlePage() {
   const folders = await listFolderOptionsForRole(agent.role);
 
   return (
-    <div className="mx-auto h-full max-w-5xl overflow-y-auto p-6">
-      <nav className="mb-4 text-sm opacity-60">
-        <Link href="/kb" className="hover:opacity-100">
-          ← Knowledge base
+    <div className="app-scroll mx-auto h-full max-w-5xl overflow-y-auto p-4 sm:p-6">
+      <nav className="mb-4 text-sm text-(--color-text-secondary)">
+        <Link
+          href="/kb"
+          className="inline-flex items-center gap-1 hover:text-(--color-text-primary)"
+        >
+          <ChevronLeftIcon size={16} />
+          Knowledge base
         </Link>
       </nav>
 
       <h1 className="mb-4 text-lg font-semibold">New article</h1>
 
       {folders.length === 0 ? (
-        <p className="rounded-lg border border-[var(--border)] p-4 text-sm opacity-70">
+        <Notice tone="neutral">
           There are no folders yet.{' '}
-          <Link href="/kb/structure" className="underline">
+          <Link href="/kb/structure" className="text-(--color-text-link) underline">
             Create a category and folder
           </Link>{' '}
           first — every article lives in one.
-        </p>
+        </Notice>
       ) : (
         <ArticleEditor article={null} folders={folders} />
       )}

@@ -40,15 +40,19 @@ export function CommentModeration({
   if (!canModerate && !state.hidden && !state.deleted && !state.pending) return null;
 
   return (
-    <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-[var(--border)] pt-2">
+    // Under the comment's bubble, on the thread's own background: a control
+    // inside the bubble would read as part of what the customer wrote.
+    <div className="flex flex-wrap items-center gap-2 px-1">
       {state.deleted ? (
-        <Badge tone="danger">deleted from the post</Badge>
+        <Badge tone="danger">Deleted from the post</Badge>
       ) : state.hidden ? (
-        <Badge tone="warning">hidden from the public</Badge>
+        <Badge tone="warning">Hidden from the public</Badge>
       ) : null}
 
       {state.pending ? (
-        <span className="text-xs opacity-60">{labelFor(state.pending)} at Meta…</span>
+        <span className="text-xs text-(--color-text-tertiary)">
+          {labelFor(state.pending)} at Meta…
+        </span>
       ) : null}
 
       {canModerate && !state.deleted && !state.pending ? (
@@ -111,7 +115,7 @@ function ModerationSubmit({ label }: { label: string }) {
   const { pending } = useFormStatus();
 
   return (
-    <Button type="submit" size="sm" variant="ghost" disabled={pending}>
+    <Button type="submit" size="sm" variant="ghost" disabled={pending} loading={pending}>
       {pending ? BUSY : label}
     </Button>
   );
@@ -125,5 +129,5 @@ function ModerationSubmit({ label }: { label: string }) {
  * and an agent needs it while they decide what to do next, not for four seconds.
  */
 function ModerationError({ children }: { children: string }) {
-  return <span className="text-xs text-red-600">Meta refused it: {children}</span>;
+  return <ErrorText inline>Meta refused it: {children}</ErrorText>;
 }

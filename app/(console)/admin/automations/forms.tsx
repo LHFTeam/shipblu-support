@@ -125,12 +125,12 @@ export function RuleEditor({
     <div className="flex flex-wrap items-start gap-3">
       <div className="min-w-0 flex-1">
         <h3 className="flex flex-wrap items-center gap-2 text-sm font-medium">
-          <span className="text-[var(--muted-foreground)]">{rule.position}.</span>
+          <span className="text-(--color-text-secondary)">{rule.position}.</span>
           {rule.name}
-          {!rule.isActive ? <Badge tone="neutral">off</Badge> : null}
-          {rule.stopProcessing ? <Badge tone="warning">stops processing</Badge> : null}
+          {!rule.isActive ? <Badge tone="neutral">Off</Badge> : null}
+          {rule.stopProcessing ? <Badge tone="warning">Stops processing</Badge> : null}
         </h3>
-        <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">
+        <p className="mt-0.5 text-xs text-(--color-text-secondary)">
           {actionCount} action{actionCount === 1 ? '' : 's'}
           {lastRun ? ` · last matched ${lastRun}` : ' · never matched yet'}
         </p>

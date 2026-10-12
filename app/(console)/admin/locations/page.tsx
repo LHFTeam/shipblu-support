@@ -28,7 +28,7 @@ export default async function LocationsPage() {
         actions={<NewLocation />}
       />
 
-      <p className="mb-4 text-xs text-[var(--muted-foreground)]">
+      <p className="mb-4 text-xs text-(--color-text-secondary)">
         {rows.length === 0
           ? 'None entered yet.'
           : `${rows.length} entered, ${operating} operating.`}
@@ -43,7 +43,7 @@ export default async function LocationsPage() {
             <Cell>
               <LocationEditor location={location} />
             </Cell>
-            <Cell className="text-xs text-[var(--muted-foreground)]">
+            <Cell className="text-xs text-(--color-text-secondary)">
               <a href={`mailto:${location.email}`} className="hover:underline">
                 {location.email}
               </a>
@@ -56,7 +56,7 @@ export default async function LocationsPage() {
       </Table>
 
       {rows.length === 0 ? (
-        <p className="mt-3 text-sm text-[var(--muted-foreground)]">
+        <p className="mt-3 text-sm text-(--color-text-secondary)">
           A location is already how an agent reaches a hub: every row here appears in the
           side-conversation picker on a ticket, under its code, and the thread records which
           location it went to. Nothing <em>routes</em> on one yet — no agent carries a location and
@@ -65,7 +65,7 @@ export default async function LocationsPage() {
           loud.
         </p>
       ) : (
-        <p className="mt-3 text-xs text-[var(--muted-foreground)]">
+        <p className="mt-3 text-xs text-(--color-text-secondary)">
           A location that has closed is marked not operating rather than deleted, so its code still
           reads in the tickets that mention it. Deleting is for one entered by mistake — one a side
           conversation has already gone to is marked not operating instead, so the thread still
@@ -75,8 +75,8 @@ export default async function LocationsPage() {
 
       {rows.some((row) => !row.isActive) ? (
         <p className="mt-3 flex items-center gap-2 text-xs">
-          <Badge tone="neutral">closed</Badge>
-          <span className="text-[var(--muted-foreground)]">
+          <Badge tone="neutral">Closed</Badge>
+          <span className="text-(--color-text-secondary)">
             {rows.length - operating} location(s) no longer operating.
           </span>
         </p>

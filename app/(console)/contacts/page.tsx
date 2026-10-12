@@ -57,7 +57,7 @@ export default async function ContactsPage({
         <div className="flex flex-col gap-6">
           {results.contacts.length > 0 ? (
             <section>
-              <h2 className="mb-2 text-sm font-medium">People</h2>
+              <h2 className="mb-2 text-sm font-semibold">People</h2>
               <Table head={['Name', 'Email', 'Phone', 'Roles']}>
                 {results.contacts.map((contact) => (
                   <Row key={contact.id}>
@@ -76,7 +76,7 @@ export default async function ContactsPage({
                         {contact.isShipper ? <Badge tone="brand">Shipper</Badge> : null}
                         {contact.isRecipient ? <Badge>Recipient</Badge> : null}
                         {!contact.isShipper && !contact.isRecipient ? (
-                          <span className="text-xs opacity-50">—</span>
+                          <span className="text-xs text-(--color-text-tertiary)">—</span>
                         ) : null}
                       </div>
                     </Cell>
@@ -88,7 +88,7 @@ export default async function ContactsPage({
 
           {results.accounts.length > 0 ? (
             <section>
-              <h2 className="mb-2 text-sm font-medium">Shipping accounts</h2>
+              <h2 className="mb-2 text-sm font-semibold">Shipping accounts</h2>
               <Table head={['SBID', 'Name', 'Synced']}>
                 {results.accounts.map((account) => (
                   <Row key={account.id}>
@@ -112,7 +112,7 @@ export default async function ContactsPage({
 
           {results.shipments.length > 0 ? (
             <section>
-              <h2 className="mb-2 text-sm font-medium">Shipments</h2>
+              <h2 className="mb-2 text-sm font-semibold">Shipments</h2>
               <Table head={['Tracking number', 'Status', 'Synced']}>
                 {results.shipments.map((shipment) => (
                   <Row key={shipment.id}>

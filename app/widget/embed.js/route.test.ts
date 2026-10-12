@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runInNewContext } from 'node:vm';
@@ -63,6 +63,27 @@ describe('the embed snippet', () => {
     }
 
     expect(body).not.toMatch(/'shipblu-(host|widget)'/);
+  });
+
+  /**
+   * The launcher cannot read our variables on a merchant's page, so it carries
+   * copies of them, and `app/globals.css` says the two are kept in step by
+   * hand. This is the hand: restyle the token and forget the literal, and the
+   * launcher is the one blue on the page still showing the old brand.
+   */
+  it('paints the launcher with the colours app/globals.css declares for it', async () => {
+    const body = (await (await GET()).text()).toLowerCase();
+    const css = readFileSync(join(process.cwd(), 'app/globals.css'), 'utf8');
+
+    for (const token of ['--launcher-bg', '--launcher-bg-hover', '--launcher-badge-bg']) {
+      const value = new RegExp(`${token}:\\s*(#[0-9a-f]{6})`, 'i').exec(css)?.[1];
+      expect(value, token).toBeDefined();
+      expect(body).toContain(value!.toLowerCase());
+    }
+
+    // The colours they replaced, which nothing should still be drawing.
+    expect(body).not.toContain('#0b6bcb');
+    expect(body).not.toContain('#dc2626');
   });
 });
 

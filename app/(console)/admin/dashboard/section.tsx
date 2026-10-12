@@ -19,7 +19,7 @@ export function Section({
         <h2 className="text-sm font-semibold">{title}</h2>
         {actions ? <div className="ms-auto order-last sm:order-none">{actions}</div> : null}
         {hint ? (
-          <p className="w-full max-w-3xl text-xs text-[var(--muted-foreground)]">{hint}</p>
+          <p className="w-full max-w-3xl text-xs text-(--color-text-secondary)">{hint}</p>
         ) : null}
       </div>
       {children}
@@ -45,17 +45,17 @@ export function TableView({
 }) {
   return (
     <details className="mt-3">
-      <summary className="cursor-pointer text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)]">
+      <summary className="cursor-pointer text-xs text-(--color-text-secondary) hover:text-(--color-text-primary)">
         {summary}
       </summary>
       <div className="app-scroll mt-2 max-h-64 overflow-y-auto">
         <table className="w-full text-xs">
-          <thead className="sticky top-0 bg-[var(--surface)]">
-            <tr className="border-b border-[var(--border)]">
+          <thead className="sticky top-0 bg-(--color-background-surface)">
+            <tr className="border-b border-(--color-border-subtle)">
               {head.map((cell) => (
                 <th
                   key={cell}
-                  className="px-2 py-1 text-start font-medium text-[var(--muted-foreground)]"
+                  className="px-2 py-1 text-start font-medium text-(--color-text-secondary)"
                 >
                   {cell}
                 </th>
@@ -64,7 +64,7 @@ export function TableView({
           </thead>
           <tbody>
             {rows.map((row) => (
-              <tr key={row[0]} className="border-b border-[var(--border)] last:border-0">
+              <tr key={row[0]} className="border-b border-(--color-border-subtle) last:border-0">
                 {row.map((cell, index) => (
                   <td key={index} className="px-2 py-1">
                     {cell}

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { SendIcon } from '@/components/icons';
 import { ErrorText, Input, Label, Select } from '@/components/ui';
 import { renderTemplatePreview, templateShape } from '@/lib/whatsapp/templates';
 import { sendTemplateReply } from '../../reply-actions';
@@ -34,7 +35,7 @@ export function TemplateForm({
 
   if (templates.length === 0) {
     return (
-      <p className="text-sm opacity-60">
+      <p className="text-sm text-(--color-text-secondary)">
         No approved templates are synced yet. They appear here within an hour of being approved in
         Meta Business Manager.
       </p>
@@ -129,18 +130,29 @@ function TemplateDraft({
       ) : null}
 
       {shape?.bodyText ? (
-        <div className="rounded-md bg-[var(--muted)] p-2.5 text-sm">
-          <p className="mb-1 text-xs font-medium opacity-60">Preview</p>
-          <p className="whitespace-pre-wrap">{renderTemplatePreview(shape.bodyText, bodyValues)}</p>
+        <div className="rounded-md bg-(--color-background-surface-sunken) px-3 py-2 text-sm">
+          <p className="mb-1 text-xs font-medium text-(--color-text-secondary)">Preview</p>
+          {/* Arabic leading, since most templates are Arabic and their diacritics
+              collide at the Latin line height. */}
+          <p dir="auto" className="leading-arabic-ui whitespace-pre-wrap">
+            {renderTemplatePreview(shape.bodyText, bodyValues)}
+          </p>
           {shape.footerText ? (
-            <p className="mt-1.5 text-xs opacity-50">{shape.footerText}</p>
+            <p dir="auto" className="mt-1.5 text-xs text-(--color-text-tertiary)">
+              {shape.footerText}
+            </p>
           ) : null}
         </div>
       ) : null}
 
       <ErrorText>{error}</ErrorText>
 
-      <SubmitButton className="self-end" idle="Send template" busy="Sending…" />
+      <SubmitButton
+        className="self-end"
+        icon={<SendIcon size={15} />}
+        idle="Send template"
+        busy="Sending…"
+      />
     </form>
   );
 }
@@ -159,7 +171,7 @@ function VariableInputs({
   onChange: (next: Record<string, string>) => void;
 }) {
   return (
-    <div className="flex flex-col gap-2">
+    <div className="grid gap-2.5 sm:grid-cols-2">
       {Array.from({ length: count }, (_, index) => {
         const key = `${prefix}_${index + 1}`;
         return (

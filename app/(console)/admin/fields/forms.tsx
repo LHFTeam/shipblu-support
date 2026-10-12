@@ -255,7 +255,7 @@ export function FieldEditor({
       <button type="button" onClick={() => setEditing(true)} className="text-start hover:underline">
         <span className="font-medium">{field.label}</span>
         {!field.isActive ? (
-          <span className="ms-2 text-xs text-[var(--muted-foreground)]">inactive</span>
+          <span className="ms-2 text-xs text-(--color-text-secondary)">inactive</span>
         ) : null}
       </button>
     );

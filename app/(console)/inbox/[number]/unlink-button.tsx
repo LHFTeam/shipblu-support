@@ -1,6 +1,7 @@
 'use client';
 
 import { useConfirmClick } from '@/components/confirm-submit';
+import { XIcon } from '@/components/icons';
 import { type LinkAction, useFieldAction } from './use-field-action';
 
 /**
@@ -28,9 +29,15 @@ export function UnlinkButton({
       onClick={onClick}
       onKeyDown={onKeyDown}
       onBlur={disarm}
-      className="shrink-0 rounded px-1 text-xs opacity-50 hover:opacity-100"
+      // Armed, it says so in words as well as in red: the colour alone is not
+      // the warning.
+      className={`inline-flex min-h-6 shrink-0 items-center rounded-md px-1 text-xs transition-colors disabled:opacity-50 ${
+        armed
+          ? 'bg-(--color-feedback-danger-bg) font-medium text-(--color-feedback-danger-fg)'
+          : 'text-(--color-text-tertiary) hover:bg-(--color-background-hover) hover:text-(--color-text-primary)'
+      }`}
     >
-      {armed ? 'Sure?' : '×'}
+      {armed ? 'Sure?' : <XIcon size={14} />}
     </button>
   );
 }

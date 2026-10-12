@@ -1,5 +1,6 @@
 import Link from 'next/link';
-import { Badge, Cell, PageHeader, Row, Table } from '@/components/ui';
+import { ChannelBadge } from '@/components/channel';
+import { Badge, Cell, Notice, PageHeader, Row, Table } from '@/components/ui';
 import { InfoTip } from '@/components/tooltip';
 import { requirePermission } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
@@ -60,10 +61,10 @@ export default async function CategoryReviewPage() {
       />
 
       {queue.length === 0 ? (
-        <p className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm opacity-70">
+        <Notice tone="neutral">
           Nothing waiting. Either every suggestion has been answered, or no tickets have arrived on
           a channel you can see.
-        </p>
+        </Notice>
       ) : (
         <Table
           head={[
@@ -95,29 +96,29 @@ export default async function CategoryReviewPage() {
                   <Link href={`/inbox/${row.number}`} className="font-medium hover:underline">
                     #{row.number}
                   </Link>
-                  <p className="opacity-60">
-                    <Badge>{row.channel}</Badge>
+                  <p className="mt-0.5">
+                    <ChannelBadge channel={row.channel} />
                   </p>
                 </Cell>
                 <Cell>
                   <span className="font-medium">{row.labelEn}</span>
-                  <p className="text-xs opacity-50">{row.key}</p>
+                  <p className="text-xs text-(--color-text-tertiary)">{row.key}</p>
                 </Cell>
                 <Cell className="text-xs">
-                  <p className="opacity-70">{row.confidence.toFixed(2)}</p>
-                  <p className="opacity-50">{row.ruleKey ?? 'no rule matched'}</p>
+                  <p className="text-(--color-text-secondary)">{row.confidence.toFixed(2)}</p>
+                  <p className="text-(--color-text-tertiary)">{row.ruleKey ?? 'no rule matched'}</p>
                 </Cell>
                 <Cell className="max-w-xs">
                   {row.excerpt ? (
                     <p
                       dir={direction(excerptLocale)}
                       lang={excerptLocale}
-                      className="truncate text-xs opacity-70"
+                      className="truncate text-xs text-(--color-text-secondary)"
                     >
                       {row.excerpt}
                     </p>
                   ) : (
-                    <p className="text-xs opacity-40">the message is gone</p>
+                    <p className="text-xs text-(--color-text-tertiary)">the message is gone</p>
                   )}
                 </Cell>
                 <Cell>
@@ -136,8 +137,8 @@ export default async function CategoryReviewPage() {
       )}
 
       <section className="mt-8">
-        <h2 className="mb-1 text-sm font-medium">Nothing matched these</h2>
-        <p className="mb-3 max-w-2xl text-sm opacity-70">
+        <h2 className="mb-1 text-sm font-semibold">Nothing matched these</h2>
+        <p className="mb-3 max-w-2xl text-sm text-(--color-text-secondary)">
           Free text the rules could not read, newest first. There is nothing to confirm here — the
           point is to read what customers actually wrote and write the rule that was missing. A
           category climbing this list is the lexicon telling you where its gap is, and it is the
@@ -146,9 +147,7 @@ export default async function CategoryReviewPage() {
         </p>
 
         {unclassified.length === 0 ? (
-          <p className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm opacity-70">
-            Every message so far matched something.
-          </p>
+          <Notice tone="neutral">Every message so far matched something.</Notice>
         ) : (
           <Table head={['Ticket', 'When', 'What the customer wrote']}>
             {unclassified.map((row) => {
@@ -159,11 +158,11 @@ export default async function CategoryReviewPage() {
                     <Link href={`/inbox/${row.number}`} className="font-medium hover:underline">
                       #{row.number}
                     </Link>
-                    <p className="opacity-60">
-                      <Badge>{row.channel}</Badge>
+                    <p className="mt-0.5">
+                      <ChannelBadge channel={row.channel} />
                     </p>
                   </Cell>
-                  <Cell className="text-xs opacity-60">
+                  <Cell className="text-xs text-(--color-text-secondary)">
                     {row.firstSeenAt.toISOString().slice(0, 10)}
                   </Cell>
                   <Cell className="max-w-md">
@@ -171,12 +170,12 @@ export default async function CategoryReviewPage() {
                       <p
                         dir={direction(excerptLocale)}
                         lang={excerptLocale}
-                        className="text-xs opacity-70"
+                        className="text-xs text-(--color-text-secondary)"
                       >
                         {row.excerpt}
                       </p>
                     ) : (
-                      <p className="text-xs opacity-40">the message is gone</p>
+                      <p className="text-xs text-(--color-text-tertiary)">the message is gone</p>
                     )}
                   </Cell>
                 </Row>
@@ -187,8 +186,8 @@ export default async function CategoryReviewPage() {
       </section>
 
       <section className="mt-8">
-        <h2 className="mb-1 text-sm font-medium">How the rules are doing</h2>
-        <p className="mb-3 max-w-2xl text-sm opacity-70">
+        <h2 className="mb-1 text-sm font-semibold">How the rules are doing</h2>
+        <p className="mb-3 max-w-2xl text-sm text-(--color-text-secondary)">
           Every assignment keeps the rule that made it, and a rejected one is kept rather than
           deleted — so this needs no extra bookkeeping. A rule with rejections outnumbering
           agreements is matching something it should not; one with nothing but unreviewed rows is
@@ -197,9 +196,7 @@ export default async function CategoryReviewPage() {
         </p>
 
         {scores.length === 0 ? (
-          <p className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm opacity-70">
-            No rule has fired yet.
-          </p>
+          <Notice tone="neutral">No rule has fired yet.</Notice>
         ) : (
           <Table head={['Rule', 'Agreed', 'Rejected', 'Unreviewed']}>
             {scores.map((score) => (
@@ -215,7 +212,7 @@ export default async function CategoryReviewPage() {
                     score.rejected
                   )}
                 </Cell>
-                <Cell className="opacity-60">{score.unreviewed}</Cell>
+                <Cell className="text-(--color-text-secondary)">{score.unreviewed}</Cell>
               </Row>
             ))}
           </Table>

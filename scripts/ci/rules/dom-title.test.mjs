@@ -218,14 +218,6 @@ describe('dom-title', () => {
     expect(found).toEqual([]);
   });
 
-  it('leaves the files that predate the check to their own decision', async () => {
-    const found = await run({
-      'components/channel.tsx': component('<span title="WhatsApp">W</span>'),
-    });
-
-    expect(found).toEqual([]);
-  });
-
   it('fails when it finds too few DOM elements to be checking anything', async () => {
     const found = await runRule('dom-title', {
       'components/badge.tsx': component('<span>o</span>'),

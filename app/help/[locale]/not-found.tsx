@@ -19,10 +19,12 @@ export default function KbNotFound() {
   return (
     <PageBody>
       <Panel className="mx-auto max-w-lg p-8 text-center sm:p-10">
-        <h1 className="text-xl font-semibold text-[var(--kb-heading)]">
+        <h1 className="text-xl font-bold text-(--color-text-primary)">
           {t(DEFAULT_LOCALE, 'notFound')}
         </h1>
-        <p className="mt-2 text-sm text-[var(--kb-muted)]">{t(DEFAULT_LOCALE, 'notFoundHint')}</p>
+        <p className="mt-2 text-sm text-(--color-text-secondary)">
+          {t(DEFAULT_LOCALE, 'notFoundHint')}
+        </p>
 
         <div className="mt-6">
           <SearchBox locale={DEFAULT_LOCALE} size="hero" id="kb-search-404" />
@@ -30,7 +32,7 @@ export default function KbNotFound() {
 
         <Link
           href={`/${DEFAULT_LOCALE}`}
-          className="mt-6 inline-block text-sm font-medium text-[var(--kb-link)] underline underline-offset-4"
+          className="mt-6 inline-block text-sm font-bold text-(--color-text-link) underline underline-offset-4 hover:text-(--color-text-link-hover)"
         >
           {t(DEFAULT_LOCALE, 'backToHelp')}
         </Link>

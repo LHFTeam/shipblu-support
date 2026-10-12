@@ -47,10 +47,10 @@ function TargetGrid({ targets }: { targets?: SlaTargets }) {
       <table className="w-full min-w-[30rem] text-sm">
         <thead>
           <tr>
-            <th className="pb-1 text-start text-xs font-medium text-[var(--muted-foreground)]">
+            <th className="pb-1 text-start text-xs font-medium text-(--color-text-secondary)">
               Priority
             </th>
-            <th className="pb-1 text-start text-xs font-medium text-[var(--muted-foreground)]">
+            <th className="pb-1 text-start text-xs font-medium text-(--color-text-secondary)">
               First response{' '}
               <InfoTip label="First response">
                 From the ticket arriving to the first reply sent by an agent. Automated replies —
@@ -58,7 +58,7 @@ function TargetGrid({ targets }: { targets?: SlaTargets }) {
                 not stop this clock.
               </InfoTip>
             </th>
-            <th className="pb-1 text-start text-xs font-medium text-[var(--muted-foreground)]">
+            <th className="pb-1 text-start text-xs font-medium text-(--color-text-secondary)">
               Next response{' '}
               <InfoTip label="Next response">
                 Every reply after the first. It starts only once the ticket has been answered once,
@@ -67,7 +67,7 @@ function TargetGrid({ targets }: { targets?: SlaTargets }) {
                 on the same row.
               </InfoTip>
             </th>
-            <th className="pb-1 text-start text-xs font-medium text-[var(--muted-foreground)]">
+            <th className="pb-1 text-start text-xs font-medium text-(--color-text-secondary)">
               Resolution{' '}
               <InfoTip label="Resolution">
                 From arrival to the ticket reaching a resolved status. Time in a status that pauses
@@ -95,7 +95,7 @@ function TargetGrid({ targets }: { targets?: SlaTargets }) {
                       name={`${priority}_${column}`}
                       defaultValue={targets?.[priority]?.[key] ?? ''}
                       placeholder="—"
-                      className="w-24 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-sm"
+                      className="w-24 rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) px-2 py-1 text-base outline-none transition-colors hover:border-(--color-border-default) focus:border-(--color-border-focus) focus:ring-2 focus:ring-(--color-border-focus)/20 sm:text-sm"
                     />
                   </td>
                 );
@@ -104,7 +104,7 @@ function TargetGrid({ targets }: { targets?: SlaTargets }) {
           ))}
         </tbody>
       </table>
-      <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+      <p className="mt-1 text-xs text-(--color-text-secondary)">
         Minutes. Leave blank for no commitment on that target — blank means nothing is owed, not
         that it is due immediately. Next response is the exception: blank there inherits the
         first-response target rather than dropping the commitment.
@@ -203,7 +203,7 @@ function Fields({
           multiple
           defaultValue={escalationAgents}
           size={Math.min(5, Math.max(3, agents.length))}
-          className="w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm"
+          className="w-full rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) p-2 text-base outline-none transition-colors hover:border-(--color-border-default) focus:border-(--color-border-focus) focus:ring-2 focus:ring-(--color-border-focus)/20 sm:text-sm"
         >
           {agents.map((agent) => (
             <option key={agent.value} value={agent.value}>
@@ -280,17 +280,17 @@ export function PolicyEditor({
     <div className="flex flex-wrap items-start gap-3">
       <div className="min-w-0 flex-1">
         <h2 className="flex flex-wrap items-center gap-2 text-sm font-semibold">
-          <span className="text-[var(--muted-foreground)]">{policy.position}.</span>
+          <span className="text-(--color-text-secondary)">{policy.position}.</span>
           {policy.name}
-          {policy.isDefault ? <Badge tone="brand">default</Badge> : null}
-          {!policy.isActive ? <Badge tone="neutral">inactive</Badge> : null}
+          {policy.isDefault ? <Badge tone="brand">Default</Badge> : null}
+          {!policy.isActive ? <Badge tone="neutral">Inactive</Badge> : null}
         </h2>
 
         {policy.description ? (
-          <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">{policy.description}</p>
+          <p className="mt-0.5 text-xs text-(--color-text-secondary)">{policy.description}</p>
         ) : null}
 
-        <p className="mt-2 text-xs text-[var(--muted-foreground)]">
+        <p className="mt-2 text-xs text-(--color-text-secondary)">
           {describeHours(policy, scheduleName)}
         </p>
 
@@ -301,7 +301,7 @@ export function PolicyEditor({
             return (
               <li key={priority}>
                 <span className="capitalize">{priority}</span>:{' '}
-                <span className="text-[var(--muted-foreground)]">
+                <span className="text-(--color-text-secondary)">
                   {target.firstResponseMins
                     ? `${target.firstResponseMins}m reply`
                     : 'no reply target'}

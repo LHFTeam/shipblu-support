@@ -74,10 +74,10 @@ export default async function AutomationsPage() {
           return (
             <section key={trigger}>
               <h2 className="text-sm font-semibold">{TRIGGER_LABEL[trigger]}</h2>
-              <p className="mb-2 text-xs text-[var(--muted-foreground)]">{TRIGGER_HINT[trigger]}</p>
+              <p className="mb-2 text-xs text-(--color-text-secondary)">{TRIGGER_HINT[trigger]}</p>
 
               {forTrigger.length === 0 ? (
-                <p className="rounded-lg border border-dashed border-[var(--border)] p-3 text-xs text-[var(--muted-foreground)]">
+                <p className="rounded-xl border border-dashed border-(--color-border-default) p-3 text-xs text-(--color-text-secondary)">
                   No rules here yet.
                 </p>
               ) : (
@@ -98,7 +98,7 @@ export default async function AutomationsPage() {
         })}
       </div>
 
-      <p className="mt-6 text-xs text-[var(--muted-foreground)]">
+      <p className="mt-6 text-xs text-(--color-text-secondary)">
         <Badge tone="neutral">Note</Badge> Actions write to the ticket directly and never re-enter
         the engine, so a rule cannot trigger another rule.
       </p>

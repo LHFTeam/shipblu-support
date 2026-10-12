@@ -65,6 +65,7 @@ async function signedIn(
     avatarUrl: null,
     avatarColor: row!.avatarColor,
     isAcceptingTickets: true,
+    acceptingOffReason: null,
     sessionIdleForMs: 0,
   };
 }

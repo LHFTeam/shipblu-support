@@ -27,7 +27,9 @@ export function ResetForm({ locale, token }: { locale: Locale; token: string }) 
           required
           autoFocus
         />
-        <p className="mt-1 text-xs opacity-60">{t(locale, 'errorPasswordShort')}</p>
+        <p className="mt-1 text-xs text-(--color-text-secondary)">
+          {t(locale, 'errorPasswordShort')}
+        </p>
       </div>
 
       <ErrorText>{state.error ? t(locale, state.error) : null}</ErrorText>

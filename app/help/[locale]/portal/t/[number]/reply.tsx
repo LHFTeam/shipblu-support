@@ -1,7 +1,7 @@
 'use client';
 
-import { useFormStatus } from 'react-dom';
-import { Button, ErrorText, Textarea } from '@/components/ui';
+import { SubmitButton } from '@/components/submit-button';
+import { ErrorText, Textarea } from '@/components/ui';
 import { useActionForm } from '@/components/use-action-form';
 import { t, type Locale } from '@/lib/kb/locale';
 import { replyToPortalTicket, type PortalTicketState } from '../../actions';
@@ -39,16 +39,11 @@ export function ReplyBox({ locale, number }: { locale: Locale; number: number })
 
       <ErrorText>{state.error ? t(locale, state.error) : null}</ErrorText>
 
-      <Submit locale={locale} />
+      <SubmitButton
+        className="self-start"
+        idle={t(locale, 'reply')}
+        busy={t(locale, 'submitting')}
+      />
     </form>
-  );
-}
-
-function Submit({ locale }: { locale: Locale }) {
-  const { pending } = useFormStatus();
-  return (
-    <Button type="submit" disabled={pending} className="self-start">
-      {pending ? t(locale, 'submitting') : t(locale, 'reply')}
-    </Button>
   );
 }

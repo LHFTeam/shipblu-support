@@ -51,6 +51,8 @@ export default async function ConversationPage({
   const canSideConversation = can(agent, 'ticket.side_conversation');
   const canModerateComments = can(agent, 'ticket.moderate_comment');
   const canEditContact = can(agent, 'contact.edit');
+  // Whether the details column's Contact tab may link to the contact's page.
+  const canViewContact = can(agent, 'contact.view');
   const canClose = can(agent, 'ticket.close');
   const canCategorise = can(agent, 'ticket.categorise');
 
@@ -170,6 +172,7 @@ export default async function ConversationPage({
         purgePreview={purgePreview}
         purgeRefusal={purgeRefusal}
         currentAgentId={agent.id}
+        canViewContact={canViewContact}
       />
       <FocusBeat conversationId={conversation.id} />
     </InboxShell>

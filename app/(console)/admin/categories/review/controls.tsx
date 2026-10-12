@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { Button, ErrorText } from '@/components/ui';
 import { confirmCategory, rejectCategory } from '../../../category-actions';
 
 /**
@@ -39,25 +40,25 @@ export function ReviewControls({
 
   return (
     <div className="flex items-center gap-1">
-      <button
-        type="button"
+      <Button
+        variant="secondary"
+        size="sm"
         disabled={busy}
         aria-label={`Confirm ${label}`}
         onClick={() => void decide(confirmCategory)}
-        className="rounded border border-[var(--border)] px-2 py-1 text-xs hover:bg-[var(--muted)] disabled:opacity-50"
       >
         Confirm
-      </button>
-      <button
-        type="button"
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
         disabled={busy}
         aria-label={`Reject ${label}`}
         onClick={() => void decide(rejectCategory)}
-        className="rounded border border-[var(--border)] px-2 py-1 text-xs opacity-70 hover:bg-[var(--muted)] hover:opacity-100 disabled:opacity-50"
       >
         Reject
-      </button>
-      {error ? <span className="text-xs text-red-600">{error}</span> : null}
+      </Button>
+      {error ? <ErrorText inline>{error}</ErrorText> : null}
     </div>
   );
 }

@@ -61,7 +61,7 @@ export default async function TrackingWordingPage() {
       {PHRASE_GROUPS.map((group) => (
         <section key={group.kind} className="mb-8">
           <h2 className="text-sm font-semibold">{GROUPS[group.kind].title}</h2>
-          <p className="mt-1 mb-3 text-xs text-[var(--muted-foreground)]">
+          <p className="mt-1 mb-3 text-xs text-(--color-text-secondary)">
             {GROUPS[group.kind].description}
           </p>
 
@@ -85,7 +85,7 @@ export default async function TrackingWordingPage() {
                 <Cell>
                   <span className="font-medium">{phrase.keywords[0]}</span>
                   {phrase.keywords.length > 1 ? (
-                    <span className="ms-2 text-xs text-[var(--muted-foreground)]">
+                    <span className="ms-2 text-xs text-(--color-text-secondary)">
                       +{phrase.keywords.length - 1} more
                     </span>
                   ) : null}
@@ -97,7 +97,7 @@ export default async function TrackingWordingPage() {
                     saved={overrides.get(phrase.key) ?? ''}
                   />
                 </Cell>
-                <Cell className="text-end text-xs text-[var(--muted-foreground)]">
+                <Cell className="text-end text-xs text-(--color-text-secondary)">
                   {overrides.has(phrase.key) ? 'edited' : 'default'}
                 </Cell>
               </Row>

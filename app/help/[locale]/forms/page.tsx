@@ -4,7 +4,7 @@ import { getSessionCustomer } from '@/lib/auth/customer-session';
 import { formPath } from '@/lib/forms/naming';
 import { formDescription, formName, listForms } from '@/lib/forms/queries';
 import { isLocale, t } from '@/lib/kb/locale';
-import { PageBody, PageHeader } from '../chrome';
+import { PageBody, PageHeader, Panel } from '../chrome';
 
 export const dynamic = 'force-dynamic';
 
@@ -50,39 +50,44 @@ export default async function FormsIndex({
 
       <PageBody>
         <div className="mx-auto w-full max-w-2xl">
-          <ul className="flex flex-col gap-3">
-            {forms.map((form) => {
-              const description = formDescription(form, locale);
+          <Panel as="section" className="overflow-hidden">
+            <ul>
+              {forms.map((form) => {
+                const description = formDescription(form, locale);
 
-              return (
-                <li key={form.id}>
-                  <Link
-                    href={formPath(locale, form.slug, suffix)}
-                    className="kb-panel block p-4 transition-[box-shadow,border-color] hover:border-[var(--kb-border-strong)] hover:shadow-lg"
+                return (
+                  <li
+                    key={form.id}
+                    className="border-b border-(--color-border-subtle) last:border-0"
                   >
-                    <span className="font-medium text-[var(--kb-heading)]">
-                      {formName(form, locale)}
-                    </span>
-                    {description ? (
-                      <span className="mt-1 block text-sm text-[var(--kb-muted)]">
-                        {description}
+                    <Link
+                      href={formPath(locale, form.slug, suffix)}
+                      className="block px-4 py-3.5 transition-colors hover:bg-(--color-background-surface-sunken)"
+                    >
+                      <span className="text-base font-bold text-(--color-text-primary)">
+                        {formName(form, locale)}
                       </span>
-                    ) : null}
-                    {/* Said here rather than after the click: being sent to a
-                        sign-in screen by a link that promised a form is the
-                        moment a customer gives up and writes to the mailbox. */}
-                    {form.requiresSignIn && !customer ? (
-                      <span className="mt-1 block text-xs text-[var(--kb-muted)]">
-                        {t(locale, 'formSignInNeeded')}
-                      </span>
-                    ) : null}
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
+                      {description ? (
+                        <span className="mt-0.5 block text-sm text-(--color-text-secondary)">
+                          {description}
+                        </span>
+                      ) : null}
+                      {/* Said here rather than after the click: being sent to a
+                          sign-in screen by a link that promised a form is the
+                          moment a customer gives up and writes to the mailbox. */}
+                      {form.requiresSignIn && !customer ? (
+                        <span className="mt-1 block text-xs text-(--color-text-secondary)">
+                          {t(locale, 'formSignInNeeded')}
+                        </span>
+                      ) : null}
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </Panel>
 
-          <p className="mt-4 text-sm text-[var(--kb-muted)]">{t(locale, 'searchKb')}</p>
+          <p className="mt-4 text-sm text-(--color-text-secondary)">{t(locale, 'searchKb')}</p>
         </div>
       </PageBody>
     </>

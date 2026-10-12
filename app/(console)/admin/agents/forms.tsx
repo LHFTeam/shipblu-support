@@ -12,7 +12,7 @@ import {
   SuccessText,
 } from '@/components/ui';
 import { InfoTip, Tooltip } from '@/components/tooltip';
-import { formatRelative } from '@/lib/format';
+import { formatRelative, sentenceCase } from '@/lib/format';
 import type { AdminState } from '../settings-shared';
 import { createInvite, savePresenceSettings, setAgentActive, setAgentCapacity } from './actions';
 import type { ActionState } from '@/lib/http/action-state';
@@ -44,7 +44,10 @@ export function IdlePolicyForm({
   const { state, form } = useActionForm(savePresenceSettings, SETTINGS_INITIAL);
 
   return (
-    <form {...form} className="flex flex-col gap-3 rounded-lg border border-[var(--border)] p-4">
+    <form
+      {...form}
+      className="flex flex-col gap-3 rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface) p-(--density-card-pad)"
+    >
       <div className="flex flex-col gap-3 sm:flex-row">
         <Field
           className="sm:w-56"
@@ -114,7 +117,7 @@ export function InviteForm() {
     <form
       key={key}
       {...form}
-      className="flex flex-col gap-3 rounded-lg border border-[var(--border)] p-4"
+      className="flex flex-col gap-3 rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface) p-(--density-card-pad)"
     >
       {/* Stacked on a phone: three fields sharing one row leaves an email box
           about eleven characters wide. */}
@@ -150,7 +153,7 @@ export function InviteForm() {
       <ErrorText>{state.error}</ErrorText>
 
       {state.inviteUrl ? (
-        <div className="rounded-md bg-[var(--muted)] p-3 text-sm">
+        <div className="rounded-md bg-(--color-background-surface-sunken) p-3 text-sm">
           {/* Which of the two happened is the part an admin has to read. The
               link is shown either way, so without this sentence a successful
               send and a send that never left look identical — and the second
@@ -166,12 +169,14 @@ export function InviteForm() {
               exceed its parent's, so the `opacity-100` that used to be on the
               address was a no-op and the one word worth reading back for a
               typo was as faint as the rest of the sentence. */}
-          <p className="mb-1.5 text-xs font-medium text-[var(--muted-foreground)]">
+          <p className="mb-1.5 text-xs font-medium text-(--color-text-secondary)">
             {state.inviteQueuedFor ? (
               <>
                 The invitation is on its way to{' '}
-                <span className="break-all text-[var(--foreground)]">{state.inviteQueuedFor}</span>.
-                The same link is below if you need to send it another way.
+                <span className="break-all text-(--color-text-primary)">
+                  {state.inviteQueuedFor}
+                </span>
+                . The same link is below if you need to send it another way.
               </>
             ) : (
               <>
@@ -211,12 +216,12 @@ function CopyInviteLink({ inviteUrl, label }: { inviteUrl: string; label: string
       type="button"
       onClick={() => void copy()}
       aria-label={label}
-      className="flex w-full min-w-0 items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2.5 py-2 text-start transition-colors hover:bg-[var(--muted)] focus:ring-2 focus:ring-brand-500/30 focus:outline-none"
+      className="flex w-full min-w-0 items-center gap-2 rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) px-2.5 py-2 text-start transition-colors hover:bg-(--color-background-hover)"
     >
       <code className="min-w-0 flex-1 truncate text-xs">{inviteUrl}</code>
       <span
         aria-live="polite"
-        className={`shrink-0 text-xs font-medium ${copyState === 'failed' ? 'text-red-600' : 'text-brand-700'}`}
+        className={`shrink-0 text-xs font-medium ${copyState === 'failed' ? 'text-(--color-feedback-danger-fg)' : 'text-(--color-text-link)'}`}
       >
         {copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Could not copy' : 'Copy'}
       </span>
@@ -234,7 +239,11 @@ export function PendingInviteLink({
   unavailableMessage: string | null;
 }) {
   if (!inviteUrl) {
-    return <p className="text-xs opacity-50">{unavailableMessage ?? 'Link unavailable.'}</p>;
+    return (
+      <p className="text-xs text-(--color-text-tertiary)">
+        {unavailableMessage ?? 'Link unavailable.'}
+      </p>
+    );
   }
 
   return <CopyInviteLink inviteUrl={inviteUrl} label={`Copy invite link for ${email}`} />;
@@ -252,6 +261,8 @@ function lastSeen(value: Date | string | null): string {
   if (relative === 'now') return 'seen just now';
   return /^\d+[mhd]$/.test(relative) ? `seen ${relative} ago` : `seen ${relative}`;
 }
+
+/** Badge words are sentence case; the role and the availability are stored lower case. */
 
 export function AgentRow({
   agent,
@@ -296,17 +307,17 @@ export function AgentRow({
    * order (who, what state, what you can do about it) at every width.
    */
   return (
-    <li className="flex flex-col gap-2 px-3 py-3 text-sm sm:flex-row sm:items-center sm:gap-3 sm:py-2.5">
+    <li className="flex flex-col gap-2 px-4 py-3 text-sm sm:flex-row sm:items-center sm:gap-3">
       <div className="min-w-0 sm:flex-1">
         <p className="truncate font-medium">
-          {agent.name} {isSelf ? <span className="opacity-50">(you)</span> : null}
+          {agent.name} {isSelf ? <span className="text-(--color-text-tertiary)">(you)</span> : null}
         </p>
-        <p className="truncate text-xs opacity-50">{agent.email}</p>
+        <p className="truncate text-xs text-(--color-text-tertiary)">{agent.email}</p>
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
-        <Badge>{agent.role.replace('_', ' ')}</Badge>
-        {!agent.isActive ? <Badge tone="danger">deactivated</Badge> : null}
+        <Badge>{sentenceCase(agent.role)}</Badge>
+        {!agent.isActive ? <Badge tone="neutral">Deactivated</Badge> : null}
         <Tooltip
           label="Availability"
           content={
@@ -327,7 +338,7 @@ export function AgentRow({
                   : 'neutral'
             }
           >
-            {availability}
+            {sentenceCase(availability)}
           </Badge>
         </Tooltip>
       </div>
@@ -335,7 +346,7 @@ export function AgentRow({
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <form {...capacity.form} className="flex shrink-0 items-center gap-1">
           <input type="hidden" name="agentId" value={agent.id} />
-          <label className="text-xs opacity-50" htmlFor={`cap-${agent.id}`}>
+          <label className="text-xs text-(--color-text-tertiary)" htmlFor={`cap-${agent.id}`}>
             cap
           </label>
           <InfoTip label="Ticket cap">
@@ -363,11 +374,13 @@ export function AgentRow({
             onKeyDown={(event) => {
               if (event.key === 'Enter') capacitySent.current = event.currentTarget.value;
             }}
-            className="w-16 rounded-md border border-[var(--border)] bg-[var(--surface)] px-1.5 py-1 text-base sm:text-xs"
+            className="w-16 rounded-md border border-(--color-border-subtle) bg-(--color-background-surface) px-1.5 py-1 text-base outline-none hover:border-(--color-border-default) focus:border-(--color-border-focus) focus:ring-2 focus:ring-(--color-border-focus)/20 sm:text-xs"
           />
         </form>
 
-        <span className="shrink-0 text-xs opacity-50">{lastSeen(agent.lastSeenAt)}</span>
+        <span className="shrink-0 text-xs text-(--color-text-tertiary)">
+          {lastSeen(agent.lastSeenAt)}
+        </span>
 
         <form action={action} className="ms-auto sm:ms-0">
           <input type="hidden" name="agentId" value={agent.id} />
@@ -383,7 +396,7 @@ export function AgentRow({
       </div>
 
       {state.error || capacity.state.error ? (
-        <span className="text-xs text-red-600">{state.error ?? capacity.state.error}</span>
+        <ErrorText inline>{state.error ?? capacity.state.error}</ErrorText>
       ) : null}
     </li>
   );

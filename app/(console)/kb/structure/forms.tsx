@@ -16,7 +16,7 @@ export function CategoryForm() {
     <form
       key={key}
       {...form}
-      className="flex flex-wrap items-end gap-3 rounded-lg border border-[var(--border)] p-4"
+      className="flex flex-wrap items-end gap-3 rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface) p-(--density-card-pad)"
     >
       <div className="min-w-40 flex-1">
         <Label htmlFor="categoryName">Name</Label>
@@ -53,7 +53,7 @@ export function FolderForm({
     <form
       key={key}
       {...form}
-      className="flex flex-wrap items-end gap-3 rounded-lg border border-[var(--border)] p-4"
+      className="flex flex-wrap items-end gap-3 rounded-xl border border-(--color-border-subtle) bg-(--color-background-surface) p-(--density-card-pad)"
     >
       <div className="min-w-40 flex-1">
         <Label htmlFor="folderName">Name</Label>

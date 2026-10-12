@@ -3,5 +3,5 @@
  * own full-height layout rather than the console shell.
  */
 export default function WidgetLayout({ children }: { children: React.ReactNode }) {
-  return <div className="h-dvh bg-[var(--background)]">{children}</div>;
+  return <div className="h-dvh bg-(--color-background-surface)">{children}</div>;
 }

@@ -733,6 +733,46 @@ tokens stated for light surfaces. A real dark theme is a piece of work —
 re-step the tokens, decide whether the help centre follows the console, re-check
 the chart series — and `light-only` comes out in that commit.
 
+**The design system.** The console, the help centre and the widget follow the
+ShipBlu Support design system, and `app/globals.css` is its token half in three
+layers: `@theme` primitives that generate utilities (`bg-blu-500`, `text-2xs`),
+`:root` roles and component tokens (`--color-feedback-danger-fg`,
+`--color-ticket-open-border`, `--color-channel-whatsapp-bg`, `--console-gap`), and
+the legacy names (`--muted`, `brand-*`, `--kb-*`) kept as aliases. Markup reads a
+role as `bg-(--color-feedback-danger-bg)`, never a raw palette hue, so a change to
+what "warning" looks like reaches every warning at once; a token that is not
+declared in `globals.css` renders nothing, silently. A value with no role yet
+gets one in `:root` beside its kin (the switch track, the pressed surface, the
+rail's washes are there) rather than a primitive at the call site; the logo's
+white tile in `components/brand.tsx` is the one exception, because it is the
+brand's artwork rather than a state of the interface. Four rules from the system
+are easy to break by accident:
+
+- **One blue acts; coral only demands attention.** Every action is the
+  `--button-primary` blue (`Button`, or `buttonClass()` on a `Link`). Coral is a
+  solid count or a "this needs you now" badge (`CountBadge`, `window-closing`,
+  `hub-replied`) and never a button or a tint — there is no `accent` variant.
+- **Colour is never the only signal.** Every `Badge` tone carries words and, for
+  most, a glyph (a note's lock, a public post's globe, a window's clock); a
+  status pill without its label is a bug, not a compact variant.
+- **No emoji as icons.** They render differently on every platform; everything
+  is a hand-drawn icon in `components/icons.tsx`, and the directional ones
+  (`ChevronLeft`, `Reply`, `Return`, `Send`, `External`) mirror themselves in
+  RTL — never flip one again at the call site.
+- **A `className` on a primitive does not reliably override it** (§6.93). Use
+  the `!` suffix or a prop.
+
+The shared shapes live in one place each: `components/ui.tsx` (`Button`,
+`buttonClass`, fields with `tone`, `Badge`/`BadgeTone`, `CountBadge`, `Notice`,
+`ErrorText` with `inline`, `Card`, `PageHeader`, `Table`), `components/chat.tsx`
+(`ChatBubble`, `ChatEvent`; runs grouped by `lib/chat/runs.ts`) for the console
+thread, the portal and the widget, `components/shipment-status.tsx`
+(`StatusBadge`, `Stepper`) for the tracking page and the ticket sidebar,
+`components/details-section.tsx`, `components/conversation-row.tsx` and
+`components/views-panel.tsx`. The console's Arabic face is its own family,
+`'Tajawal Arabic'`, self-hosted in `app/fonts/` — not next/font's Tajawal, which
+would set Latin in Tajawal too (§6.92).
+
 **Ticket forms.** A form is a row in `ticket_forms` whose layout is one jsonb
 document, parsed on every read by `parseFormElements` against the fields that
 currently exist — an element naming a deleted or deactivated field is dropped,

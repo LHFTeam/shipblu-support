@@ -1,7 +1,7 @@
 'use client';
 
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { Select } from '@/components/ui';
+import { Input, Select } from '@/components/ui';
 import type { ArticleFilters } from '@/lib/kb/admin';
 
 export function KbFilters({ filters }: { filters: ArticleFilters }) {
@@ -18,13 +18,17 @@ export function KbFilters({ filters }: { filters: ArticleFilters }) {
 
   return (
     <div className="flex flex-wrap gap-2">
-      <input
+      {/* A plain Input, not a SearchInput: this box is in no form, and Enter
+          is how it searches — SearchInput gives Enter to the keyboard instead. */}
+      <Input
         defaultValue={filters.q}
         onKeyDown={(event) => {
           if (event.key === 'Enter') setParam('q', event.currentTarget.value.trim());
         }}
         placeholder="Search title or slug, then press Enter"
-        className="min-w-56 flex-1 rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-1.5 text-sm outline-none focus:border-brand-500"
+        // `sm:py-1.5` is the Select's own rule, so the box and the two selects
+        // beside it are one height.
+        className="min-w-56 flex-1 sm:py-1.5"
       />
 
       <div className="w-36">

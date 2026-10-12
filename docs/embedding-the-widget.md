@@ -29,6 +29,29 @@ launcher that opens an empty box. Measured 2026-08-31, production answers
 `frame-ancestors 'self';` — the variable is unset, and setting it is the first
 step of any rollout.
 
+## What it puts on your page
+
+Two elements and one stylesheet, all appended to `document.body` and
+`document.head`:
+
+- `#shipblu-chat-launcher`, a 56px button 20px from the bottom corner — the
+  right-hand one, or the left-hand one when the locale is `ar`. It is ShipBlu
+  blue (`#145bfe`, `#0f4ad6` on hover) and shaped as a speech bubble whose tail
+  points inwards, with the mark drawn inline as SVG. An unread count sits on its
+  top corner in coral (`#bc5300`) with a white ring.
+- `#shipblu-chat-frame`, created on first open: a 380 × 600px card above the
+  launcher (12px corners, a soft shadow, shorter on a short window), or the
+  whole screen below 640px wide or 480px tall.
+- A `<style>` that hides both when printing, and holds the launcher's hover and
+  `:focus-visible` rules.
+
+Both elements sit at `z-index: 2147483000`. The launcher is drawn in the
+system font stack, so until the panel is first opened nothing at all — no
+webfont, no image — is requested from your page beyond `embed.js` itself. Its
+styles are inline and its hover and focus rules are `!important`, so do not
+target the two ids from your stylesheet: the result is the launcher
+half-restyled, not yours.
+
 ## Telling the widget who is reading
 
 A signed-in dashboard already knows the merchant's name, address and account.

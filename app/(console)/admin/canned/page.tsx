@@ -65,10 +65,10 @@ export default async function CannedPage() {
             <Cell>
               <CannedEditor response={response} />
             </Cell>
-            <Cell className="text-xs text-[var(--muted-foreground)]">{response.folder ?? '—'}</Cell>
-            <Cell className="text-xs text-[var(--muted-foreground)]">{response.usageCount}</Cell>
-            <Cell className="text-xs text-[var(--muted-foreground)]">{response.usageCountAr}</Cell>
-            <Cell className="text-xs text-[var(--muted-foreground)]">{response.usageCountEn}</Cell>
+            <Cell className="text-xs text-(--color-text-secondary)">{response.folder ?? '—'}</Cell>
+            <Cell className="text-xs text-(--color-text-secondary)">{response.usageCount}</Cell>
+            <Cell className="text-xs text-(--color-text-secondary)">{response.usageCountAr}</Cell>
+            <Cell className="text-xs text-(--color-text-secondary)">{response.usageCountEn}</Cell>
             <Cell className="text-end">
               <CannedEditor response={response} deleteOnly />
             </Cell>
@@ -77,7 +77,7 @@ export default async function CannedPage() {
       </Table>
 
       {rows.length === 0 ? (
-        <p className="mt-3 text-sm text-[var(--muted-foreground)]">No canned responses yet.</p>
+        <p className="mt-3 text-sm text-(--color-text-secondary)">No canned responses yet.</p>
       ) : null}
     </>
   );

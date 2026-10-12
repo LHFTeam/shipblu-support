@@ -17,9 +17,11 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     <div className="flex h-full min-h-0">
       <AdminNav />
       <div className="app-scroll min-w-0 flex-1 overflow-y-auto">
-        {/* pt-12 clears the horizontal section strip that replaces the
-            sidebar below `lg`. */}
-        <div className="mx-auto max-w-5xl p-4 pt-14 md:p-6 lg:pt-6">{children}</div>
+        {/* The top padding clears the horizontal section strip that replaces
+            the sidebar below `lg`. It is restated at `md` because `md:p-6`
+            sets every side, top included, and on its own put the first row of
+            each page under the strip between `md` and `lg`. */}
+        <div className="mx-auto max-w-5xl p-4 pt-14 md:p-6 md:pt-16 lg:pt-6">{children}</div>
       </div>
     </div>
   );

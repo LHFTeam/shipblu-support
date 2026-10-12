@@ -32,7 +32,7 @@ export default async function PortalVerifyPage({
           </AccountLink>
         }
       >
-        <p className="text-sm opacity-70">{t(locale, 'verifyInvalid')}</p>
+        <p className="text-sm text-(--color-text-secondary)">{t(locale, 'verifyInvalid')}</p>
       </AccountShell>
     );
   }
@@ -46,7 +46,7 @@ export default async function PortalVerifyPage({
         </AccountLink>
       }
     >
-      <p className="text-sm opacity-70">{t(locale, 'verifySuccess')}</p>
+      <p className="text-sm text-(--color-text-secondary)">{t(locale, 'verifySuccess')}</p>
     </AccountShell>
   );
 }

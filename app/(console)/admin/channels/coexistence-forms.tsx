@@ -13,6 +13,7 @@ import {
 import { unstable_rethrow, useRouter } from 'next/navigation';
 import { SubmitButton } from '@/components/submit-button';
 import { useActionForm } from '@/components/use-action-form';
+import { CheckIcon, ClockIcon, XIcon } from '@/components/icons';
 import { InfoTip } from '@/components/tooltip';
 import { Badge, Button, Card, ErrorText, Field, Select, SuccessText } from '@/components/ui';
 import { formatDateTime } from '@/lib/format';
@@ -310,21 +311,21 @@ export function ConnectBusinessAppNumber({
   }
 
   return (
-    <Card data-expanded className="w-full border-brand-500/30">
+    <Card data-expanded className="w-full border-(--color-border-focus)/30!">
       <div className="mb-3 flex items-center justify-between gap-3">
         <h2 ref={headingRef} tabIndex={-1} className="text-sm font-semibold focus:outline-none">
           {label}
         </h2>
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={() => (busy && !armed ? setArmed(true) : close())}
-          className="text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
         >
           {busy && armed ? 'Close anyway' : 'Cancel'}
-        </button>
+        </Button>
       </div>
       {busy && armed ? (
-        <p className="mb-3 rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-800">
+        <p className="mb-3 rounded-md border border-(--color-feedback-warning-border) bg-(--color-feedback-warning-bg) px-3 py-2 text-xs text-(--color-feedback-warning-fg)">
           {waitingOn === 'window' ? (
             <>
               Meta&rsquo;s window is still open, and this card is what hears its answer. Close the
@@ -369,7 +370,7 @@ function NotReady({ missing }: { missing: { variable: string; why: string }[] })
           it opens the sealed credential with the same key; a web service
           redeployed alone turns this card ready while the job that follows
           fails. */}
-      <p className="text-[var(--muted-foreground)]">
+      <p className="text-(--color-text-secondary)">
         This environment cannot open Meta&rsquo;s sign-in yet. Set these on Render in this
         environment&rsquo;s own group — <code>shipblu-support-production</code> on production,
         <code> shipblu-support-staging</code> on staging, each with its own value — not in{' '}
@@ -380,7 +381,7 @@ function NotReady({ missing }: { missing: { variable: string; why: string }[] })
         {missing.map((setting) => (
           <li key={setting.variable} className="flex flex-wrap gap-x-2 text-xs">
             <code className="font-medium">{setting.variable}</code>
-            <span className="text-[var(--muted-foreground)]">{setting.why}</span>
+            <span className="text-(--color-text-secondary)">{setting.why}</span>
           </li>
         ))}
       </ul>
@@ -685,7 +686,7 @@ function ConnectCard({
     // `position: absolute` and would otherwise be placed against the document
     // (PROJECT-STATE §6.81).
     <div className="relative flex flex-col gap-3 text-sm">
-      <ul className="flex flex-col gap-1 text-xs text-[var(--muted-foreground)]">
+      <ul className="flex flex-col gap-1 text-xs text-(--color-text-secondary)">
         <li>Sign in as an admin of the Business portfolio that owns the number.</li>
         <li>
           Keep the WhatsApp Business app open on the phone until the chat history finishes copying —
@@ -722,7 +723,7 @@ function ConnectCard({
 
       {copy?.tone === 'error' ? <ErrorText>{copy.text}</ErrorText> : null}
       {mustWait ? (
-        <p className="text-xs text-[var(--muted-foreground)]">
+        <p className="text-xs text-(--color-text-secondary)">
           The button stays off until this card is closed and opened again: running Meta&rsquo;s
           window now would end the same way, and it unlinks the phone&rsquo;s linked devices each
           time.
@@ -742,7 +743,7 @@ function ConnectCard({
         </div>
       ) : null}
       {copy?.tone === 'muted' ? (
-        <p aria-hidden className="text-xs text-[var(--muted-foreground)]">
+        <p aria-hidden className="text-xs text-(--color-text-secondary)">
           {copy.text}
         </p>
       ) : null}
@@ -921,7 +922,18 @@ export function OnboardingPolling({
   return null;
 }
 
-const STEP_GLYPH = { pending: '◌', running: '…', done: '✓', failed: '✗' } as const;
+/*
+ * A step's state as a mark, beside the word a screen reader gets. Drawn from the
+ * icon set rather than typed as ✓ and ✗, which every platform's fonts draw at a
+ * different weight; a pending step is an empty ring because it has no glyph of
+ * its own to wait with.
+ */
+const STEP_GLYPH = {
+  pending: <span className="size-2.5 rounded-full border border-(--color-border-strong)" />,
+  running: <ClockIcon size={14} />,
+  done: <CheckIcon size={14} />,
+  failed: <XIcon size={14} />,
+} as const;
 
 /**
  * The server's clock carried forward in the browser, once a second, until
@@ -1021,7 +1033,7 @@ export function OnboardingProgress({
     <Card className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="text-sm font-semibold">{title}</h3>
-        <span className="text-xs text-[var(--muted-foreground)]">
+        <span className="text-xs text-(--color-text-secondary)">
           started {formatDateTime(onboarding.startedAt)}
           {onboarding.startedByLabel ? ` by ${onboarding.startedByLabel}` : ''}
         </span>
@@ -1030,35 +1042,39 @@ export function OnboardingProgress({
       <ol className="flex flex-col gap-1 text-sm">
         {onboarding.steps.map((step) => (
           <li key={step.step} className="flex flex-col">
-            <span className="flex items-baseline gap-2">
+            <span className="flex items-start gap-2">
               <span
                 aria-hidden
-                className={`w-4 text-center ${
+                className={`flex h-5 w-4 shrink-0 items-center justify-center ${
                   step.state === 'failed'
-                    ? 'text-red-600'
+                    ? 'text-(--color-feedback-danger-fg)'
                     : step.state === 'done'
-                      ? 'text-emerald-600'
-                      : 'text-[var(--muted-foreground)]'
+                      ? 'text-(--color-feedback-success-fg)'
+                      : 'text-(--color-text-secondary)'
                 }`}
               >
                 {STEP_GLYPH[step.state]}
               </span>
               <span className="sr-only">{step.state}</span>
-              <span className={step.state === 'pending' ? 'text-[var(--muted-foreground)]' : ''}>
+              <span className={step.state === 'pending' ? 'text-(--color-text-secondary)' : ''}>
                 {step.label}
               </span>
             </span>
             {step.sentence ? (
               <span
                 className={`ms-6 text-xs ${
-                  step.state === 'failed' ? 'text-red-600' : 'text-[var(--muted-foreground)]'
+                  step.state === 'failed'
+                    ? 'text-(--color-feedback-danger-fg)'
+                    : 'text-(--color-text-secondary)'
                 }`}
               >
                 {step.sentence}
               </span>
             ) : null}
             {step.warning ? (
-              <span className="ms-6 text-xs text-amber-600">{step.warning}</span>
+              <span className="ms-6 text-xs text-(--color-feedback-warning-fg)">
+                {step.warning}
+              </span>
             ) : null}
           </li>
         ))}
@@ -1067,7 +1083,7 @@ export function OnboardingProgress({
       {lines.map((line) => (
         <p
           key={line.kind === 'sentence' ? line.text : `backoff ${line.error}`}
-          className="text-xs text-amber-600"
+          className="text-xs text-(--color-feedback-warning-fg)"
         >
           {lineText(line, countdownNow)}
         </p>
@@ -1165,7 +1181,7 @@ function ConnectedSummary({
   const allClear = todo.length === 0 && credential !== null;
 
   return (
-    <div className="flex flex-col gap-1 rounded-md bg-emerald-500/10 px-3 py-2 text-sm text-emerald-800">
+    <div className="flex flex-col gap-1 rounded-md border border-(--color-feedback-success-border) bg-(--color-feedback-success-bg) px-3 py-2 text-sm text-(--color-feedback-success-fg)">
       <p>
         <strong>Connected.</strong> {number}
         {verified} is live as channel &ldquo;{channelName ?? 'unnamed'}&rdquo; under business
@@ -1202,7 +1218,7 @@ function ConnectedSummary({
       {allClear ? (
         <p>Nothing else to do.</p>
       ) : (
-        <div className="text-amber-800">
+        <div className="text-(--color-feedback-warning-fg)">
           {todo.length > 0 ? (
             <>
               <p>
@@ -1254,7 +1270,7 @@ export function RetryOnboarding({
       />
       <ErrorText>{state.error}</ErrorText>
       {state.notice ? (
-        <span className="text-xs text-[var(--muted-foreground)]">{state.notice}</span>
+        <span className="text-xs text-(--color-text-secondary)">{state.notice}</span>
       ) : null}
     </form>
   );
@@ -1335,9 +1351,13 @@ export function RequestSyncAgain({
         busy="Asking the phone…"
         variant="secondary"
       />
-      {state.error ? <span className="max-w-xs text-xs text-red-600">{state.error}</span> : null}
+      {state.error ? (
+        <span className="max-w-xs">
+          <ErrorText inline>{state.error}</ErrorText>
+        </span>
+      ) : null}
       {state.notice ? (
-        <span className="max-w-xs text-xs text-[var(--muted-foreground)]">{state.notice}</span>
+        <span className="max-w-xs text-xs text-(--color-text-secondary)">{state.notice}</span>
       ) : null}
     </form>
   );
@@ -1385,7 +1405,7 @@ function explainCredentialBadge(badge: CredentialBadge, status: CredentialStatus
 export function CredentialCard({ status, now }: { status: CredentialStatus; now: Date }) {
   return (
     <div className="flex flex-col gap-1">
-      <p className="text-xs text-[var(--muted-foreground)]">
+      <p className="text-xs text-(--color-text-secondary)">
         {credentialOrigin(status)} · {status.tokenType ?? 'token type unknown'} ·{' '}
         {expiryLabel(status)} · key {status.keyId}
       </p>

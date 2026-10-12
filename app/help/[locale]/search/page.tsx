@@ -31,7 +31,7 @@ export default async function SearchPage({
         crumbs={[{ label: t(locale, 'home'), href: `/${locale}` }]}
         title={`${t(locale, 'resultsFor')} “${query}”`}
         selfPath={`/${locale}/search`}
-        icon={<SearchIcon size={28} />}
+        icon={<SearchIcon size={24} />}
         searchInitial={query}
         /* The count, not the query — the query is already the heading, and what a
            reader wants next is whether there is anything here to read. */

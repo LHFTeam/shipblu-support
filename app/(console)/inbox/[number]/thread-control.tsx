@@ -37,7 +37,9 @@ export function ThreadControl({ conversationId }: { conversationId: string }) {
       </form>
 
       {state.error ? (
-        <p className="mt-2 whitespace-pre-line text-xs text-red-600">{plain(state.error)}</p>
+        <p className="mt-2 text-xs whitespace-pre-line text-(--color-feedback-danger-fg)">
+          {plain(state.error)}
+        </p>
       ) : null}
     </div>
   );
@@ -47,7 +49,7 @@ function Submit() {
   const { pending } = useFormStatus();
 
   return (
-    <Button type="submit" size="sm" variant="secondary" disabled={pending}>
+    <Button type="submit" size="sm" variant="secondary" disabled={pending} loading={pending}>
       {pending ? 'Asking Meta…' : 'Take thread control'}
     </Button>
   );

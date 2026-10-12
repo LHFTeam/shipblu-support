@@ -15,9 +15,11 @@ import { MetaWindowIndicator, WindowIndicator } from './window-indicator';
 export function Header({
   conversation,
   canEditContact,
+  canViewContact,
 }: {
   conversation: ConversationDetail;
   canEditContact: boolean;
+  canViewContact: boolean;
 }) {
   const isMeta = conversation.channel === 'facebook' || conversation.channel === 'instagram';
   const isComment = Boolean(conversation.externalId?.includes(':comment:'));
@@ -30,87 +32,123 @@ export function Header({
   // had just been reading.
   const search = useSearchParams().toString();
 
+  const whatsappWindow =
+    conversation.channel === 'whatsapp' && answeredFromConsole(conversation.channel);
+  const metaWindow = isMeta && !isComment;
+  const canRefreshProfile = isMeta && !isComment && canEditContact;
+  const handle = conversation.requester.email ?? conversation.requester.phone;
+
   return (
-    <header className="shrink-0 border-b border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 md:px-4">
-      <div className="flex items-center gap-2">
-        {/* On a phone the list and the ticket are separate screens, so the
-            ticket needs a way back. */}
-        <Link
-          href={search ? `/inbox?${search}` : '/inbox'}
-          aria-label="Back to the inbox"
-          className="-ms-1 rounded-md p-1 hover:bg-[var(--muted)] md:hidden"
-        >
-          <ChevronLeftIcon size={18} />
-        </Link>
+    <header className="flex min-h-(--header-height) shrink-0 items-center gap-3 border-b border-(--color-border-subtle) bg-(--color-background-surface) px-3 py-2 md:px-5 md:py-2.5">
+      {/* On a phone the list and the ticket are separate screens, so the
+          ticket needs a way back. */}
+      <Link
+        href={search ? `/inbox?${search}` : '/inbox'}
+        aria-label="Back to the inbox"
+        className="-ms-1.5 inline-flex shrink-0 rounded-md p-1.5 text-(--color-text-secondary) hover:bg-(--color-background-hover) md:hidden"
+      >
+        <ChevronLeftIcon size={20} />
+      </Link>
 
-        <h1 className="truncate text-base font-semibold">
-          {conversation.subject ?? '(no subject)'}
-        </h1>
-        <span className="shrink-0 text-sm text-[var(--muted-foreground)]">
-          #{conversation.number}
-        </span>
-      </div>
+      <Avatar
+        name={conversation.requester.name}
+        contactId={conversation.requester.id}
+        // The avatar route answers 404 without contact.view, so asking for the
+        // picture then is a request that can only fail.
+        hasAvatar={canViewContact && conversation.requester.hasAvatar}
+        size={36}
+      />
 
-      <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-[var(--muted-foreground)]">
-        <Badge tone={conversation.statusCategory}>{conversation.statusName}</Badge>
-        <ChannelBadge channel={conversation.channel} />
-        {isComment ? <Badge tone="warning">public comment</Badge> : null}
-        <span className="flex min-w-0 items-center gap-1.5">
-          <Avatar
-            name={conversation.requester.name}
-            contactId={conversation.requester.id}
-            hasAvatar={conversation.requester.hasAvatar}
-            size={20}
-          />
-          <span className="truncate">
-            {conversation.requester.name ?? 'Unknown'}{' '}
-            {conversation.requester.email ?? conversation.requester.phone ?? ''}
+      <div className="min-w-0 flex-1">
+        {/*
+          The customer is the heading and the subject sits under it, as in any
+          chat: on WhatsApp and Messenger the subject is a line we made up, and
+          the person is what an agent recognises a ticket by. It stays on every
+          width, truncated, because on an email or a portal ticket the subject is
+          what the agent is answering.
+        */}
+        <div className="flex min-w-0 items-center gap-2">
+          <h1 dir="auto" className="truncate text-base/6 font-semibold">
+            {conversation.requester.name ?? 'Unknown'}
+          </h1>
+          <span className="inline-flex shrink-0 md:hidden">
+            <ChannelBadge channel={conversation.channel} showLabel={false} />
           </span>
-        </span>
-        {/*
-          Only where there is something to ask. A Messenger or Instagram
-          customer arrives as a bare scoped id and stays unnamed until Meta
-          answers; every other channel already knows who wrote in, so a button
-          offering to find out would be a control that can only disappoint.
-          Comment tickets are excluded for a sharper reason: a comment author's
-          id is not the page-scoped id the User Profile API answers for, so the
-          call is refused in a way indistinguishable from a missing approval —
-          the one signal here that has to stay trustworthy.
-        */}
-        {isMeta && !isComment && canEditContact ? (
-          <ProfileRefresh
-            conversationId={conversation.id}
-            hasName={conversation.requester.name !== null}
-          />
-        ) : null}
-        <span aria-hidden>·</span>
-        <span>opened {formatRelative(conversation.createdAt)} ago</span>
-        {conversation.reopenCount > 0 ? (
-          <Badge tone="warning">reopened ×{conversation.reopenCount}</Badge>
-        ) : null}
-        {conversation.formName ? <Badge tone="brand">{conversation.formName}</Badge> : null}
-        {/*
-          Nobody proved who sent this. A form that anybody can submit resolves
-          the address it was given onto whatever contact already owns it — which
-          is what makes the unified inbox real, and is also why a stranger can
-          file a ticket under a real customer's name. The mail channel has SPF
-          and DKIM behind it; a web form has nothing, so the ticket says so and
-          the agent reads it differently.
-        */}
-        {conversation.unverifiedSubmitter ? (
-          <Badge tone="warning">not signed in — sender unverified</Badge>
-        ) : null}
-        {/* The 24-hour window only bounds a reply sent from here, so on a
-            channel not answered from here the countdown measures nothing. */}
-        {conversation.channel === 'whatsapp' && answeredFromConsole(conversation.channel) ? (
-          <WindowIndicator lastCustomerMessageAt={conversation.lastCustomerMessageAt} />
-        ) : null}
-        {isMeta && !isComment ? (
-          <MetaWindowIndicator
-            lastCustomerMessageAt={conversation.lastCustomerMessageAt}
-            thread={conversation.metaThread}
-          />
-        ) : null}
+          <span className="hidden shrink-0 md:inline-flex">
+            <ChannelBadge channel={conversation.channel} />
+          </span>
+          <span className="inline-flex shrink-0">
+            <Badge tone={conversation.statusCategory}>{conversation.statusName}</Badge>
+          </span>
+        </div>
+
+        <p className="flex min-w-0 items-center gap-1.5 overflow-hidden text-xs whitespace-nowrap text-(--color-text-secondary)">
+          {handle ? (
+            <>
+              {/* Weighted so a phone number (13 characters) always shows in
+                  full and only a very long email is cut, while the subject keeps
+                  at least the rest of the line — on a phone this is the one
+                  place the requester's number or address is visible. */}
+              <span dir="ltr" className="max-w-[55%] shrink-0 truncate">
+                {handle}
+              </span>
+              <span aria-hidden>·</span>
+            </>
+          ) : null}
+          <span className="shrink-0 tabular-nums">#{conversation.number}</span>
+          <span aria-hidden>·</span>
+          <span dir="auto" className="min-w-0 truncate">
+            {conversation.subject ?? '(no subject)'}
+          </span>
+        </p>
+
+        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-(--color-text-secondary)">
+          <span>Opened {formatRelative(conversation.createdAt)} ago</span>
+          {isComment ? <Badge tone="public">Public comment</Badge> : null}
+          {/*
+              Only where there is something to ask. A Messenger or Instagram
+              customer arrives as a bare scoped id and stays unnamed until Meta
+              answers; every other channel already knows who wrote in, so a
+              button offering to find out would be a control that can only
+              disappoint. Comment tickets are excluded for a sharper reason: a
+              comment author's id is not the page-scoped id the User Profile API
+              answers for, so the call is refused in a way indistinguishable from
+              a missing approval — the one signal here that has to stay
+              trustworthy.
+            */}
+          {canRefreshProfile ? (
+            <ProfileRefresh
+              conversationId={conversation.id}
+              hasName={conversation.requester.name !== null}
+            />
+          ) : null}
+          {conversation.reopenCount > 0 ? (
+            <Badge tone="warning">Reopened ×{conversation.reopenCount}</Badge>
+          ) : null}
+          {conversation.formName ? <Badge tone="brand">{conversation.formName}</Badge> : null}
+          {/*
+              Nobody proved who sent this. A form that anybody can submit
+              resolves the address it was given onto whatever contact already
+              owns it — which is what makes the unified inbox real, and is also
+              why a stranger can file a ticket under a real customer's name. The
+              mail channel has SPF and DKIM behind it; a web form has nothing, so
+              the ticket says so and the agent reads it differently.
+            */}
+          {conversation.unverifiedSubmitter ? (
+            <Badge tone="warning">Not signed in — sender unverified</Badge>
+          ) : null}
+          {/* The 24-hour window only bounds a reply sent from here, so on a
+                channel not answered from here the countdown measures nothing. */}
+          {whatsappWindow ? (
+            <WindowIndicator lastCustomerMessageAt={conversation.lastCustomerMessageAt} />
+          ) : null}
+          {metaWindow ? (
+            <MetaWindowIndicator
+              lastCustomerMessageAt={conversation.lastCustomerMessageAt}
+              thread={conversation.metaThread}
+            />
+          ) : null}
+        </div>
       </div>
     </header>
   );

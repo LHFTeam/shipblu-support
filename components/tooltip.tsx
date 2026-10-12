@@ -49,6 +49,7 @@ export function Tooltip({
   content,
   children,
   label,
+  dotted = false,
   className = '',
 }: {
   /** The explanation. */
@@ -61,6 +62,13 @@ export function Tooltip({
    * names itself.
    */
   label?: string;
+  /**
+   * Underlines the trigger with a dotted rule, for on-screen text that has an
+   * explanation behind it — a table header, a metric name. Opt-in rather than
+   * automatic: a name in the header is a trigger too, and underlining it would
+   * make it read as a link.
+   */
+  dotted?: boolean;
   className?: string;
 }) {
   const id = useId();
@@ -174,9 +182,13 @@ export function Tooltip({
           if (event.pointerType !== 'mouse') return;
           close();
         }}
-        className={`inline-flex cursor-help items-center rounded-sm align-middle text-[var(--muted-foreground)] transition-colors hover:text-[var(--foreground)] ${className}`}
+        className={`inline-flex cursor-help items-center rounded-sm align-middle text-(--color-text-secondary) transition-colors hover:text-(--color-text-primary) ${className}`}
       >
-        {children}
+        {dotted ? (
+          <span className="border-b border-dotted border-(--color-border-strong)">{children}</span>
+        ) : (
+          children
+        )}
       </button>
 
       {open
@@ -196,11 +208,12 @@ export function Tooltip({
                * always closes it. It costs text selection inside the bubble,
                * which is a fair trade for an explanation nobody needs to copy.
                *
-               * The colours are the rail's, matching the labels on the nav rail:
-               * a tooltip reads as a layer above the page rather than as another
-               * panel on it, in both themes.
+               * The colours are the rail's, matching the labels on the nav rail,
+               * and the shadow is the one kept for things that float: a tooltip
+               * reads as a layer above the page rather than as another panel
+               * on it.
                */
-              className="pointer-events-none fixed z-50 w-max max-w-[17rem] rounded-md bg-[var(--rail)] px-2.5 py-2 text-start text-xs leading-relaxed text-[var(--rail-foreground)] shadow-lg"
+              className="pointer-events-none fixed z-50 w-max max-w-[17rem] rounded-md bg-(--color-background-rail) px-2.5 py-2 text-start text-xs leading-relaxed text-(--color-text-rail) shadow-float"
             >
               {content}
             </div>,

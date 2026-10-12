@@ -10,7 +10,7 @@
  * trigger, and `agent-colors.db.test.ts` fails if the two ever differ.
  *
  * **The keys are the stored identity; the classes are only how they render.**
- * Restyling a colour is an edit to `TILE_CLASS` and moves nobody. Removing or
+ * Restyling a colour is an edit to its token and moves nobody. Removing or
  * reordering a key changes which colour the next agent gets, and removing one
  * leaves the agents holding it on `FALLBACK` — so add keys at the end.
  *
@@ -21,6 +21,13 @@
  * emerald and cyan, orange to amber, rose to pink, sky to blue and green to
  * emerald, which is why the list stops here rather than at twelve. Blue comes
  * first because it is the circle the header drew before agents had colours.
+ *
+ * The fills themselves are the `--color-agent-*` tokens in `app/globals.css`,
+ * where each one's contrast is written beside it. Blue is the brand blue, the
+ * same as the action colour. Amber is a yellow-gold rather than an orange,
+ * because an orange tile beside a coral count would read as one more thing
+ * asking for attention. Lime is darker than the Tailwind lime-700 it replaced,
+ * which carried white at 4.99:1 — just under the line drawn above.
  *
  * A plain module with no imports, because the header that uses it is a server
  * component and the inbox list a client one: a helper exported from a
@@ -42,15 +49,15 @@ export type AgentColor = (typeof AGENT_COLORS)[number];
 
 /** Written out in full so Tailwind's scanner finds every class. */
 const TILE_CLASS: Record<AgentColor, string> = {
-  blue: 'bg-brand-600 text-white',
-  emerald: 'bg-emerald-700 text-white',
-  violet: 'bg-violet-600 text-white',
-  amber: 'bg-amber-700 text-white',
-  pink: 'bg-pink-700 text-white',
-  cyan: 'bg-cyan-700 text-white',
-  lime: 'bg-lime-700 text-white',
-  fuchsia: 'bg-fuchsia-700 text-white',
-  slate: 'bg-slate-600 text-white',
+  blue: 'bg-(--color-agent-blue) text-white',
+  emerald: 'bg-(--color-agent-emerald) text-white',
+  violet: 'bg-(--color-agent-violet) text-white',
+  amber: 'bg-(--color-agent-amber) text-white',
+  pink: 'bg-(--color-agent-pink) text-white',
+  cyan: 'bg-(--color-agent-cyan) text-white',
+  lime: 'bg-(--color-agent-lime) text-white',
+  fuchsia: 'bg-(--color-agent-fuchsia) text-white',
+  slate: 'bg-(--color-agent-slate) text-white',
 };
 
 /**

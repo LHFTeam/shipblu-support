@@ -1,9 +1,12 @@
 import { requireAgent } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
+import { channelInfo } from '@/components/channel';
 import { LiveUpdates } from '@/components/live-updates';
-import { listInbox } from '@/lib/tickets/inbox';
+import { ViewsPanel, type ViewsPanelSection } from '@/components/views-panel';
+import { inboxCounts, listInbox } from '@/lib/tickets/inbox';
 import { parseFilters } from '@/lib/tickets/inbox-filters';
-import { InboxList } from './list';
+import { activeViewId, inboxViews, viewHref } from '@/lib/tickets/inbox-views';
+import { InboxList, KnowledgeBaseLink } from './list';
 
 /**
  * The inbox frame, rendered by both `/inbox` and `/inbox/[number]`.
@@ -13,10 +16,17 @@ import { InboxList } from './list';
  * shared component instead. Client-side navigation still makes moving between
  * tickets a soft transition.
  *
- * On a phone the two panes become one screen at a time — list, then ticket —
- * because 24rem of list beside a conversation on a 390px screen leaves room for
- * neither. Which pane shows is decided by whether a ticket is open, so the back
- * link out of a ticket is just a link to the inbox.
+ * From `md` the frame is white panels on the console's grey, 8px apart and
+ * rounded, with no rules between them: the views from 1366px — below that the
+ * same views are a picker in the list's header — then the list, then whatever
+ * the page puts in the last column, which paints its own panels. The canvas
+ * stops here; every other console page is full-bleed under the header.
+ *
+ * On a phone the panes become one screen at a time — list, then ticket —
+ * because a list beside a conversation on a 390px screen leaves room for
+ * neither, and the panels go full-bleed with no canvas around them. Which pane
+ * shows is decided by whether a ticket is open, so the back link out of a ticket
+ * is just a link to the inbox.
  */
 export async function InboxShell({
   searchParams,
@@ -31,16 +41,49 @@ export async function InboxShell({
 }) {
   const agent = await requireAgent();
   const filters = parseFilters(searchParams);
-  const { rows, nextCursor } = await listInbox(agent, filters);
+  // The counts are the ones the console layout already asked for on this
+  // request; `inboxCounts` memoises them, so the views cost no second query.
+  const [{ rows, nextCursor }, counts] = await Promise.all([
+    listInbox(agent, filters),
+    inboxCounts(agent),
+  ]);
 
   const viewingTicket = activeNumber !== undefined;
+  const canViewAll = can(agent, 'ticket.view.all');
+  const canSeeBot = can(agent, 'ticket.view.bot');
+
+  // A view keeps the open ticket open, as the Status and Channel selects do.
+  const base = viewingTicket ? `/inbox/${activeNumber}` : '/inbox';
+  const views = inboxViews({ canSeeBot, canViewAll });
+  const activeView = activeViewId(views, filters, { canViewAll });
+  const sections: ViewsPanelSection[] = views.map((section) => ({
+    title: section.title,
+    items: section.items.map((view) => ({
+      id: view.id,
+      label: view.label ?? channelInfo(view.channel ?? '').label,
+      href: viewHref(base, view.filters, filters.q),
+      icon: view.icon,
+      channel: view.channel,
+      count: view.count ? counts[view.count] : undefined,
+      attention: view.attention,
+    })),
+  }));
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full md:gap-(--console-gap) md:bg-(--color-background-console) md:px-(--console-gap) md:pb-(--console-gap)">
       <LiveUpdates channel={filters.channel} conversationId={activeConversationId} />
 
+      <div className="app-scroll hidden w-(--views-width) shrink-0 overflow-y-auto rounded-(--console-panel-radius) bg-(--color-background-surface) min-[1366px]:block">
+        <ViewsPanel
+          title="Inbox"
+          sections={sections}
+          active={activeView}
+          footer={<KnowledgeBaseLink className="mx-0.5" />}
+        />
+      </div>
+
       <aside
-        className={`w-full shrink-0 flex-col border-e border-[var(--border)] md:flex md:w-[22rem] lg:w-[24rem] ${
+        className={`w-full shrink-0 flex-col bg-(--color-background-surface) md:flex md:w-(--list-width) md:overflow-hidden md:rounded-(--console-panel-radius) ${
           viewingTicket ? 'hidden md:flex' : 'flex'
         }`}
       >
@@ -49,8 +92,11 @@ export async function InboxShell({
           nextCursor={nextCursor}
           filters={filters}
           activeNumber={activeNumber}
-          canSeeBot={can(agent, 'ticket.view.bot')}
+          views={sections}
+          activeView={activeView}
+          canSeeBot={canSeeBot}
           canCreate={can(agent, 'ticket.create')}
+          canViewContacts={can(agent, 'contact.view')}
         />
       </aside>
 

@@ -3,6 +3,7 @@ import { InfoTip } from '@/components/tooltip';
 import { listTicketStatuses } from '@/lib/admin/settings';
 import { requirePermission } from '@/lib/auth/guard';
 import { NewStatus, StatusEditor } from './forms';
+import { sentenceCase } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
 
@@ -65,16 +66,16 @@ export default async function StatusesPage() {
               <StatusEditor status={status} />
             </Cell>
             <Cell>
-              <Badge tone={status.category}>{status.category}</Badge>
+              <Badge tone={status.category}>{sentenceCase(status.category)}</Badge>
             </Cell>
             <Cell>
               {status.stopsSlaClock ? (
-                <span className="text-xs text-[var(--muted-foreground)]">paused</span>
+                <span className="text-xs text-(--color-text-secondary)">paused</span>
               ) : (
                 <span className="text-xs">running</span>
               )}
             </Cell>
-            <Cell className="text-xs text-[var(--muted-foreground)]">
+            <Cell className="text-xs text-(--color-text-secondary)">
               {status.visibleToCustomer ? (
                 (status.customerLabel ?? <span className="italic">the category word</span>)
               ) : (

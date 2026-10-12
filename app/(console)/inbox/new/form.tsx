@@ -95,7 +95,7 @@ export function ConsoleTicketForm({
 
         if (element.kind === 'note') {
           return (
-            <p key={`n${index}`} className="text-sm text-[var(--muted-foreground)]">
+            <p key={`n${index}`} className="text-sm text-(--color-text-secondary)">
               {elementText(element, 'en')}
             </p>
           );
@@ -137,7 +137,6 @@ export function ConsoleTicketForm({
                 required={required}
                 invalid={false}
                 onChange={(value) => setCustom({ ...custom, [def!.key]: value })}
-                surface="console"
               />
             )}
           </Field>
@@ -223,7 +222,7 @@ function SystemInput({
 function Submit() {
   const { pending } = useFormStatus();
   return (
-    <Button type="submit" variant="accent" disabled={pending} className="self-start">
+    <Button type="submit" disabled={pending} loading={pending} className="self-start">
       {pending ? 'Opening…' : 'Open ticket'}
     </Button>
   );

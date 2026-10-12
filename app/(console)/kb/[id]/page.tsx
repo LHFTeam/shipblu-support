@@ -1,7 +1,8 @@
+import { ChevronLeftIcon } from '@/components/icons';
 import Link from 'next/link';
 import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
-import { Badge } from '@/components/ui';
+import { Badge, Notice } from '@/components/ui';
 import { requirePermission } from '@/lib/auth/guard';
 import { can } from '@/lib/auth/permissions';
 import {
@@ -64,15 +65,25 @@ export default async function ArticlePage({ params }: { params: Promise<{ id: st
 
   if (!mayEdit) {
     return (
-      <div className="mx-auto flex h-full max-w-3xl flex-col gap-4 overflow-y-auto p-6">
-        <nav className="text-sm opacity-60">
-          <Link href="/kb" className="hover:opacity-100">
-            ← Knowledge base
+      <div className="app-scroll mx-auto flex h-full max-w-3xl flex-col gap-4 overflow-y-auto p-4 sm:p-6">
+        <nav className="text-sm text-(--color-text-secondary)">
+          <Link
+            href="/kb"
+            className="inline-flex items-center gap-1 hover:text-(--color-text-primary)"
+          >
+            <ChevronLeftIcon size={16} />
+            Knowledge base
           </Link>
         </nav>
 
         <header className="flex flex-wrap items-center gap-2">
-          <Badge tone={article.status === 'published' ? 'open' : 'neutral'}>{article.status}</Badge>
+          <Badge tone={article.status === 'published' ? 'success' : 'neutral'}>
+            {article.status === 'published'
+              ? 'Published'
+              : article.status === 'draft'
+                ? 'Draft'
+                : 'Archived'}
+          </Badge>
           {article.effectiveMinRole ? (
             <Badge tone="warning">{FLOOR_LABELS[article.effectiveMinRole]}</Badge>
           ) : null}
@@ -113,18 +124,21 @@ export default async function ArticlePage({ params }: { params: Promise<{ id: st
         ) : (
           <>
             <h1 className="text-2xl font-semibold">{article.title}</h1>
-            <p className="rounded-lg border border-[var(--border)] p-4 text-sm opacity-70">
+            <Notice tone="neutral">
               This article is {article.status === 'draft' ? 'still a draft' : 'archived'}. Nobody
               has approved what it says yet, so it is readable only by whoever can edit it. Ask a
               supervisor if you need it.
-            </p>
+            </Notice>
           </>
         )}
 
         {publicUrl ? (
-          <p className="text-sm opacity-60">
+          <p className="text-sm text-(--color-text-secondary)">
             Also on the help centre:{' '}
-            <a href={publicUrl} className="underline underline-offset-4">
+            <a
+              href={publicUrl}
+              className="text-(--color-text-link) underline underline-offset-4 hover:text-(--color-text-link-hover)"
+            >
               {publicUrl}
             </a>
           </p>
@@ -143,11 +157,15 @@ export default async function ArticlePage({ params }: { params: Promise<{ id: st
   ]);
 
   return (
-    <div className="mx-auto flex h-full max-w-6xl gap-6 overflow-y-auto p-6">
+    <div className="app-scroll mx-auto flex h-full max-w-6xl gap-6 overflow-y-auto p-4 sm:p-6">
       <div className="min-w-0 flex-1">
-        <nav className="mb-4 text-sm opacity-60">
-          <Link href="/kb" className="hover:opacity-100">
-            ← Knowledge base
+        <nav className="mb-4 text-sm text-(--color-text-secondary)">
+          <Link
+            href="/kb"
+            className="inline-flex items-center gap-1 hover:text-(--color-text-primary)"
+          >
+            <ChevronLeftIcon size={16} />
+            Knowledge base
           </Link>
         </nav>
 

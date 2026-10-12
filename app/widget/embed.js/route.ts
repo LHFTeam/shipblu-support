@@ -140,22 +140,35 @@ export async function GET() {
   var launcher = document.createElement('button');
   launcher.type = 'button';
   launcher.id = 'shipblu-chat-launcher';
+  /*
+   * Literal values, because this runs on a merchant's page, where none of our
+   * variables exist. They copy \`--launcher-bg\`, \`--launcher-bg-hover\`,
+   * \`--launcher-fg\`, \`--launcher-badge-bg\` and \`--font-launcher\` from
+   * app/globals.css, and route.test.ts fails when the two drift apart.
+   *
+   * The system font stack on purpose, here and on the badge: no webfont request
+   * goes out from somebody else's page, and the unread count stops inheriting
+   * whatever the host's body font is, serif shops included.
+   */
+  var LAUNCHER_FONT = '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif';
+
   launcher.style.cssText = [
     'position:fixed',
     'bottom:20px',
     'width:56px',
     'height:56px',
     'border:0',
-    'background:#0b6bcb',
+    'background:#145bfe',
     'color:#fff',
     'cursor:pointer',
     'box-shadow:0 4px 14px rgba(0,0,0,.25)',
     'z-index:2147483000',
-    'font-size:24px',
+    'font-family:' + LAUNCHER_FONT,
     'line-height:1',
     'display:flex',
     'align-items:center',
-    'justify-content:center'
+    'justify-content:center',
+    'transition:background-color .15s'
   ].join(';');
 
   /*
@@ -177,8 +190,13 @@ export async function GET() {
    *
    * One path, wound so that \`evenodd\` cuts the two lines out as holes rather
    * than painting them in a second copy of the button's blue. Restyle the
-   * button and the glyph follows it; a hard-coded #0b6bcb in here would go on
-   * showing the old colour in two slots nobody would think to look at.
+   * button and the glyph follows it, hover included; a hard-coded copy of the
+   * button's blue in here would go on showing the old colour in two slots
+   * nobody would think to look at.
+   *
+   * The close state had the same problem the emoji had: it was a '✕' drawn by
+   * the visitor's own font, and U+2715 renders as a colour emoji on some
+   * platforms. It is a path too now, the console's x at its 1.75 stroke.
    */
   var SVG_NS = 'http://www.w3.org/2000/svg';
   var mark = document.createElementNS(SVG_NS, 'svg');
@@ -208,25 +226,46 @@ export async function GET() {
   );
   mark.appendChild(markPath);
 
-  var closeGlyph = document.createElement('span');
-  closeGlyph.textContent = '✕';
-  closeGlyph.style.cssText = 'pointer-events:none';
+  var closeGlyph = document.createElementNS(SVG_NS, 'svg');
+  closeGlyph.setAttribute('viewBox', '0 0 24 24');
+  closeGlyph.setAttribute('width', '22');
+  closeGlyph.setAttribute('height', '22');
+  closeGlyph.setAttribute('fill', 'none');
+  closeGlyph.setAttribute('stroke', '#fff');
+  closeGlyph.setAttribute('stroke-width', '1.75');
+  closeGlyph.setAttribute('stroke-linecap', 'round');
+  closeGlyph.setAttribute('aria-hidden', 'true');
+  closeGlyph.setAttribute('focusable', 'false');
+  closeGlyph.style.cssText = 'display:block;pointer-events:none';
 
+  var closePath = document.createElementNS(SVG_NS, 'path');
+  closePath.setAttribute('d', 'M6.5 6.5l11 11M17.5 6.5l-11 11');
+  closeGlyph.appendChild(closePath);
+
+  /*
+   * Unread is attention, not an error, so the count is coral rather than the
+   * red it was: red now means something broke. The white ring parts it from
+   * the blue button and from whatever the host page is painted behind it.
+   */
   var badge = document.createElement('span');
   badge.style.cssText = [
     'position:absolute',
     'top:-2px',
+    'box-sizing:border-box',
     'min-width:18px',
     'height:18px',
     'border-radius:9px',
-    'background:#dc2626',
+    'background:#bc5300',
     'color:#fff',
+    'box-shadow:0 0 0 2px #fff',
+    'font-family:' + LAUNCHER_FONT,
     'font-size:11px',
     'font-weight:600',
+    'line-height:18px',
     'display:none',
     'align-items:center',
     'justify-content:center',
-    'padding:0 4px'
+    'padding:0 5px'
   ].join(';');
   /*
    * Rebuilt rather than assigned. The badge is a child of the launcher, so the
@@ -245,13 +284,23 @@ export async function GET() {
   /*
    * A button that floats over the page is the one thing on it with no business
    * being on paper, and help centre articles are printed and handed to a
-   * colleague. A stylesheet rather than inline styles because a media query
-   * cannot go in a style attribute; keyed on our two ids so it changes nothing
-   * else on the host page.
+   * colleague. A stylesheet rather than inline styles because neither a media
+   * query nor a pseudo-class can go in a style attribute; keyed on our two ids
+   * so it changes nothing else on the host page.
+   *
+   * The hover rule carries \`!important\` because that is the only way an
+   * author rule beats the inline background, and the focus ring carries it
+   * against a host stylesheet that strips the outline off every button — the
+   * one ring a keyboard user has to find the launcher by. Hover is behind
+   * \`(hover:hover)\`, or a tap on a phone leaves the button stuck on the darker
+   * blue until the visitor taps somewhere else.
    */
   var sheet = document.createElement('style');
   sheet.textContent =
-    '@media print{#shipblu-chat-launcher,#shipblu-chat-frame{display:none !important}}';
+    '@media print{#shipblu-chat-launcher,#shipblu-chat-frame{display:none !important}}' +
+    '@media (hover:hover){#shipblu-chat-launcher:hover{background:#0f4ad6 !important}}' +
+    '#shipblu-chat-launcher:focus-visible{outline:2px solid #145bfe !important;outline-offset:2px !important}' +
+    '@media (prefers-reduced-motion:reduce){#shipblu-chat-launcher{transition:none !important}}';
   document.head.appendChild(sheet);
 
   function frameSrc() {
