@@ -466,7 +466,13 @@ function disconnectedBy(initiatedBy: string | null): string {
 
 export type CoexistenceBadge = {
   label: string;
-  tone: 'brand' | 'neutral' | 'pending' | 'success' | 'warning' | 'danger';
+  /**
+   * The design system's reading of each: `info` is in motion — a copy the
+   * phone is sending — where `warning` is waiting on somebody, so a copy that
+   * stalled, or a phone that has to be reconnected, is amber and a copy that
+   * is merely not finished is not.
+   */
+  tone: 'brand' | 'neutral' | 'info' | 'success' | 'warning' | 'danger';
   /** The sentence behind the ⓘ: what the badge means and what, if anything, to do. */
   explain: string;
 };
@@ -597,7 +603,7 @@ export function coexistenceBadges(coexistence: Coexistence, now: Date): Coexiste
         history.chunks === 0
           ? 'copying history · waiting for the phone'
           : `copying history · ${history.percent}%`,
-      tone: 'pending',
+      tone: 'info',
       explain:
         'The phone is sending up to six months of chats. Keep the WhatsApp Business app open ' +
         'on the phone until it reaches 100% — it can take hours.',
@@ -625,7 +631,7 @@ export function coexistenceBadges(coexistence: Coexistence, now: Date): Coexiste
           }
         : {
             label: 'waiting for contacts',
-            tone: 'pending',
+            tone: 'info',
             explain:
               "The phone's contacts were requested and none has arrived yet. They arrive " +
               'while the WhatsApp Business app is open on the phone.',

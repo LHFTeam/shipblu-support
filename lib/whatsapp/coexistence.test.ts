@@ -348,6 +348,13 @@ describe('coexistenceBadges', () => {
     expect(labels({ history: { requestId: 'r', requestedAt: ONBOARDED } })).toContain(
       'copying history · waiting for the phone',
     );
+    // In motion, not waiting on somebody: blue, where a stall is amber.
+    expect(
+      coexistenceBadges(
+        connected({ history: { requestId: 'r', requestedAt: ONBOARDED } }),
+        at(60_000),
+      ).find((badge) => badge.label.startsWith('copying history'))?.tone,
+    ).toBe('info');
     expect(
       labels({
         history: {
@@ -576,6 +583,12 @@ describe('coexistenceBadges', () => {
     expect(labels({ contacts: { requestId: 'c', requestedAt: ONBOARDED } })).toContain(
       'waiting for contacts',
     );
+    expect(
+      coexistenceBadges(
+        connected({ contacts: { requestId: 'c', requestedAt: ONBOARDED } }),
+        at(60_000),
+      ).find((badge) => badge.label === 'waiting for contacts')?.tone,
+    ).toBe('info');
     expect(
       labels({}, at(60_000), {
         disconnected: { at: ONBOARDED, event: 'PARTNER_REMOVED', reason: 'user removed' },

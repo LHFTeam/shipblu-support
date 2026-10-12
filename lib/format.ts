@@ -16,6 +16,40 @@ export function formatDateTime(value: Date | string): string {
   }).format(new Date(value));
 }
 
+/*
+  The ticket thread's two halves of a timestamp: a day break above the first
+  entry of each Cairo day, and a bare time under each message, in place of the
+  full date and time every message used to carry. Lossless only because the
+  break goes in on every change of day — before a side card as well as a
+  message — and in the team's zone rather than the browser's, so two agents
+  read the same day, and the server's render and the browser's agree on where
+  the breaks fall. Built once: the thread formats every message with them.
+*/
+const DAY = new Intl.DateTimeFormat('en-GB', {
+  weekday: 'long',
+  day: 'numeric',
+  month: 'long',
+  year: 'numeric',
+  timeZone: TEAM_TIME_ZONE,
+});
+
+const TIME = new Intl.DateTimeFormat('en-GB', {
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+  timeZone: TEAM_TIME_ZONE,
+});
+
+/** "Saturday, 29 August 2026" — the day an instant falls on in Cairo. */
+export function formatDay(at: Date): string {
+  return DAY.format(at);
+}
+
+/** "09:05" — the Cairo wall-clock time of an instant, always two digits, never 24:00. */
+export function formatTime(at: Date): string {
+  return TIME.format(at);
+}
+
 /** "3m", "4h", "2d" — the inbox needs recency at a glance, not precision. */
 export function formatRelative(value: Date | string): string {
   const elapsed = Date.now() - new Date(value).getTime();
