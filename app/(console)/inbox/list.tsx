@@ -13,7 +13,7 @@ import { DEFAULT_LOCALE } from '@/lib/kb/locale';
 import type { InboxRow } from '@/lib/tickets/inbox';
 import type { InboxFilters } from '@/lib/tickets/inbox-filters';
 import {
-  consoleReplyReason,
+  answeredFromConsole,
   FILTERABLE_CHANNELS,
   isRestrictedChannel,
 } from '@/lib/tickets/channel-policy';
@@ -240,7 +240,7 @@ export function InboxList({
 
                   {/* No window badge where nobody replies from here — the
                       same rule the ticket header applies. */}
-                  {row.channel === 'whatsapp' && !consoleReplyReason(row.channel) ? (
+                  {row.channel === 'whatsapp' && answeredFromConsole(row.channel) ? (
                     <WhatsAppWindowBadge lastCustomerMessageAt={row.lastCustomerMessageAt} />
                   ) : null}
                   {/* A comment ticket is answered on the comment edge and has

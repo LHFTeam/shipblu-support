@@ -19,7 +19,7 @@ import {
   listStatuses,
   listTicketFields,
 } from '@/lib/tickets/lookups';
-import { consoleReplyReason, readOnlyReason } from '@/lib/tickets/channel-policy';
+import { answeredFromConsole } from '@/lib/tickets/channel-policy';
 import { suggestionsLive } from '@/lib/canned-suggest/settings';
 import { accountIdForConversation } from '@/lib/whatsapp/conversation';
 import { InboxShell } from '../shell';
@@ -97,8 +97,7 @@ export default async function ConversationPage({
 
   // The panel lives in the reply form, so a ticket with no reply box (read-only,
   // or a channel not answered from here) has nowhere to show it.
-  const answersHere =
-    !readOnlyReason(conversation.channel) && !consoleReplyReason(conversation.channel);
+  const answersHere = answeredFromConsole(conversation.channel);
   const wantsKnowledge = can(agent, 'kb.view') && answersHere;
   const kbLocale = detectLocale(lastInbound?.bodyText, conversation.subject);
   const terms = wantsKnowledge ? seedTerms(conversation.subject, lastInbound?.bodyText) : [];
@@ -120,7 +119,8 @@ export default async function ConversationPage({
       listActiveAgents(),
       listGroups(),
       listTicketFields(),
-      listCannedResponses(agent),
+      // Only the reply form inserts one, so no reply box, no list.
+      answersHere ? listCannedResponses(agent) : Promise.resolve([]),
       // Only fetched for WhatsApp tickets: an email ticket has no use for them
       // and the table is synced hourly, so this is a needless query otherwise.
       //

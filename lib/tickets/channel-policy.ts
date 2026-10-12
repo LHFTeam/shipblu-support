@@ -183,6 +183,20 @@ export function consoleReplyNotice(channel: string): string | null {
 }
 
 /**
+ * Whether this channel's customer is answered from the console: neither
+ * read-only nor in `NO_CONSOLE_REPLY`. The question every reply-box consumer
+ * asks — the page deciding what to fetch, the suggestion route, the window
+ * badges — so it is answered here once rather than combined at each of them.
+ *
+ * On WhatsApp this is false today, which leaves the window badges and the
+ * template path unreachable. They stay, behind this one predicate, because
+ * taking `whatsapp` out of `NO_CONSOLE_REPLY` is then the whole revert.
+ */
+export function answeredFromConsole(channel: string): boolean {
+  return !readOnlyReason(channel) && !consoleReplyReason(channel);
+}
+
+/**
  * The read-only channels, for excluding them from a query.
  *
  * Three places need this and all three need it for the same underlying reason —

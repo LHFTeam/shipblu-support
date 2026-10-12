@@ -69,19 +69,22 @@ export async function sendReply(_state: ActionState, formData: FormData): Promis
     .map(canonicalUuid)
     .filter((id): id is string => id !== null);
 
-  if (!body) return { error: 'Write something first' };
-
   const row = await loadConversation(agent, conversationId);
   if (!row) return { error: 'Ticket not found' };
 
   const conversation = row.conversation;
 
+  // Both before the empty-body check, so a reply box that should not exist is
+  // refused for the real reason on the first press, not told to write something
+  // first and refused only once it has.
   const readOnly = refuseIfReadOnly(conversation.channel);
   if (readOnly) return readOnly;
   // The composer offers no reply box here; this is for the tab rendered before
   // that changed, and for a POST made by hand.
   const noReply = refuseIfNoConsoleReply(conversation.channel);
   if (noReply) return noReply;
+
+  if (!body) return { error: 'Write something first' };
 
   // Checked before the reply is written rather than beside the resolve below it.
   // Refusing afterwards would send the message, leave the ticket open and clear

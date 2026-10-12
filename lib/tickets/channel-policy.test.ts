@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SessionAgent } from '@/lib/auth/session';
 import {
+  answeredFromConsole,
   canSeeChannel,
   consoleReplyNotice,
   consoleReplyReason,
@@ -62,6 +63,19 @@ describe('channels not answered from the console', () => {
     // sweep and the reports; only the composer's customer-facing half goes.
     expect(isReadOnlyChannel('whatsapp')).toBe(false);
     expect(readOnlyChannels()).not.toContain('whatsapp');
+  });
+
+  it('answers from the console exactly where neither rule refuses', () => {
+    // The one predicate the page, the suggestion route and the window badges
+    // ask; it must agree with both refusals for every channel there is.
+    for (const channel of CONVERSATION_CHANNELS) {
+      expect(answeredFromConsole(channel)).toBe(
+        !readOnlyReason(channel) && !consoleReplyReason(channel),
+      );
+    }
+    expect(answeredFromConsole('email')).toBe(true);
+    expect(answeredFromConsole('whatsapp')).toBe(false);
+    expect(answeredFromConsole('whatsapp_bot')).toBe(false);
   });
 
   it('gives the notice and the refusal for the same channels', () => {
