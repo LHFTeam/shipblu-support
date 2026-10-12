@@ -116,17 +116,21 @@
   --color-magenta-600: #a3216b; /* oklch(0.487 0.177 351) on magenta-50 6.22:1 */
   --color-magenta-700: #7f1a54; /* oklch(0.408 0.146 351) */
 
-  /* Type. Tajawal first is correct only because next/font loads it with
-     subsets: ['arabic'], so its face carries an Arabic unicode-range and Latin
-     falls through to the system font. Never put var(--font-tajawal) here: its
-     "Tajawal Fallback" face is Arial with no unicode-range and would take every
-     Latin letter. The console layout must apply tajawal.variable (from
-     app/help/[locale]/fonts.ts) so the face is on the page. The help centre's
-     stack stays on the .kb-shell rule in globals.css, where var(--font-lato)
-     resolves; on :root it would not exist. */
+  /* Type. The console's Arabic face leads the stack, and that is only correct
+     because every face of 'Tajawal Arabic' (declared below `@theme`) carries
+     an Arabic `unicode-range`, so Latin falls straight through to the system
+     font and keeps its 500/600 weights.
+
+     Its own family name, not 'Tajawal', on purpose. next/font's Tajawal — the
+     help centre's, in app/help/[locale]/fonts.ts — declares a Latin-range face
+     alongside the Arabic one whatever `subsets` says (`subsets` only picks what
+     is preloaded), and its variable carries a 'Tajawal Fallback' face that is
+     Arial with no range at all. Either one under this stack would set every
+     Latin letter in the console in Tajawal or Arial. The help centre's stack
+     stays on the .kb-shell rule, where var(--font-lato) resolves. */
   --font-console:
-    Tajawal, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
-    sans-serif;
+    'Tajawal Arabic', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue',
+    Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
   --font-emoji: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif;
 
@@ -581,14 +585,50 @@
   --color-accent-700: var(--color-action-primary-hover);
 }
 
+/* The console's Arabic typeface: Tajawal's Arabic subset (the Fontsource
+   builds the design system ships), self-hosted beside this file. The relative
+   `url()` is what puts them under /_next/static/media, the one path both the
+   console host and the help-centre host serve without a session — a file in
+   public/ would be redirected to /login by proxy.ts for the widget and the
+   sign-in page. The range is what lets the family lead --font-console: a
+   Latin page never downloads them. */
+@font-face {
+  font-family: 'Tajawal Arabic';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/tajawal-arabic-400.woff2') format('woff2');
+  unicode-range:
+    U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891, U+0897-08E1, U+08E3-08FF, U+200C-200E,
+    U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC;
+}
+@font-face {
+  font-family: 'Tajawal Arabic';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('./fonts/tajawal-arabic-500.woff2') format('woff2');
+  unicode-range:
+    U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891, U+0897-08E1, U+08E3-08FF, U+200C-200E,
+    U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC;
+}
+@font-face {
+  font-family: 'Tajawal Arabic';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('./fonts/tajawal-arabic-700.woff2') format('woff2');
+  unicode-range:
+    U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891, U+0897-08E1, U+08E3-08FF, U+200C-200E,
+    U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC;
+}
+
 body {
   background: var(--color-background-canvas);
   color: var(--color-text-primary);
   /* System UI for Latin, so the console keeps the 500 and 600 weights its
      hierarchy is built from (Lato ships 400/700/900 only), and Tajawal for
-     Arabic. Tajawal can lead the stack only because `app/fonts.ts` loads it as
-     an Arabic-subset face: a full face there would set the whole console in
-     Tajawal. */
+     Arabic — see --font-console. */
   font-family: var(--font-console);
   /* Tabular figures in the console keep ticket numbers and counts from jittering
      as they change. */
@@ -629,8 +669,8 @@ body {
 }
 
 .kb-shell {
-  background: var(--kb-bg);
-  color: var(--kb-text);
+  background: var(--color-background-canvas);
+  color: var(--color-text-primary);
   /* Lato for Latin, Tajawal for Arabic — the same pairing the live portal uses.
      Lato's own faces carry no Arabic, so Arabic falls through to Tajawal per
      glyph and no `:lang()` rule is needed.
@@ -673,10 +713,10 @@ body {
    Written here rather than repeated inline because it appears on every listing,
    every panel and both halves of the article page. */
 .kb-panel {
-  background: var(--kb-surface);
-  border: 1px solid var(--kb-border);
+  background: var(--color-background-surface);
+  border: 1px solid var(--color-border-subtle);
   border-radius: 0.75rem;
-  box-shadow: var(--kb-shadow);
+  box-shadow: var(--elevation-card);
 }
 
 /* ── Article typography ─────────────────────────────────────────────────────
@@ -684,9 +724,14 @@ body {
    arrives as plain semantic tags with no classes of its own — the styling has
    to hang off the element names. Scoped to `.kb-article` so nothing here can
    reach the agent console.
+
+   It reads the `:root` roles, not the help centre's `--kb-*` names, because
+   the console renders the same class outside `.kb-shell` — the article page
+   and the editor's preview — where those names were never declared, and
+   links, quote rules and table borders silently lost their colour.
    ────────────────────────────────────────────────────────────────────────── */
 .kb-article {
-  color: var(--kb-text);
+  color: var(--color-text-primary);
   /* 17px on a phone, 18px from tablet up — the size the live portal sets, and
      about where a support article stops feeling like interface copy and starts
      reading like a page. */
@@ -733,7 +778,7 @@ body {
 .kb-article h4,
 .kb-article h5,
 .kb-article h6 {
-  color: var(--kb-heading);
+  color: var(--color-text-primary);
   /* 700, not 600: Lato ships 400/700/900, so a 600 was already rendering as
      700 and only said otherwise. */
   font-weight: 700;
@@ -766,12 +811,12 @@ body {
 }
 
 .kb-article a {
-  color: var(--kb-link);
+  color: var(--color-text-link);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 .kb-article a:hover {
-  color: var(--kb-link-hover);
+  color: var(--color-text-link-hover);
 }
 
 .kb-article ul,
@@ -794,18 +839,18 @@ body {
   margin-top: 0.375rem;
 }
 .kb-article li::marker {
-  color: var(--kb-muted);
+  color: var(--color-text-secondary);
 }
 
 .kb-article blockquote {
-  border-inline-start: 3px solid var(--kb-band);
+  border-inline-start: 3px solid var(--color-action-primary-default);
   padding-inline-start: 1rem;
-  color: var(--kb-muted);
+  color: var(--color-text-secondary);
 }
 
 .kb-article pre {
-  background: var(--kb-surface-2);
-  border: 1px solid var(--kb-border);
+  background: var(--color-background-surface-sunken);
+  border: 1px solid var(--color-border-subtle);
   padding: 0.875rem 1rem;
   border-radius: 0.5rem;
   overflow-x: auto;
@@ -819,8 +864,8 @@ body {
   font-size: 0.9em;
 }
 .kb-article :not(pre) > code {
-  background: var(--kb-surface-2);
-  border: 1px solid var(--kb-border);
+  background: var(--color-background-surface-sunken);
+  border: 1px solid var(--color-border-subtle);
   padding: 0.1rem 0.3rem;
   border-radius: 0.25rem;
 }
@@ -831,7 +876,7 @@ body {
 .kb-article img {
   max-width: 100%;
   height: auto;
-  border: 1px solid var(--kb-border);
+  border: 1px solid var(--color-border-subtle);
   border-radius: 0.5rem;
 }
 .kb-article :is(iframe, video) {
@@ -840,7 +885,7 @@ body {
 }
 .kb-article figcaption {
   margin-top: 0.5rem;
-  color: var(--kb-muted);
+  color: var(--color-text-secondary);
   font-size: 0.875rem;
 }
 
@@ -862,20 +907,20 @@ body {
 }
 .kb-article th,
 .kb-article td {
-  border: 1px solid var(--kb-border);
+  border: 1px solid var(--color-border-subtle);
   padding: 0.5rem 0.75rem;
   text-align: start;
   vertical-align: top;
 }
 .kb-article th {
-  background: var(--kb-surface-2);
-  color: var(--kb-heading);
+  background: var(--color-background-surface-sunken);
+  color: var(--color-text-primary);
   font-weight: 700;
 }
 
 .kb-article hr {
   border: 0;
-  border-top: 1px solid var(--kb-border);
+  border-top: 1px solid var(--color-border-subtle);
   margin-block: 2em;
 }
 
@@ -927,7 +972,7 @@ body {
    glance at an answer, not a page someone settles into.
    --------------------------------------------------------------------------- */
 .widget-article {
-  color: var(--foreground);
+  color: var(--color-text-primary);
   font-size: 0.875rem;
   line-height: 1.65;
   /* Imported articles carry bare tracking URLs and support@ addresses longer
@@ -958,7 +1003,7 @@ body {
 }
 
 .widget-article a {
-  color: var(--color-brand-600);
+  color: var(--color-text-link);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -977,9 +1022,9 @@ body {
 }
 
 .widget-article blockquote {
-  border-inline-start: 3px solid var(--border);
+  border-inline-start: 3px solid var(--color-border-subtle);
   padding-inline-start: 0.8em;
-  color: var(--muted-foreground);
+  color: var(--color-text-secondary);
 }
 
 /* Anything that cannot reflow scrolls in its own box rather than widening the
@@ -998,7 +1043,7 @@ body {
   font-size: 0.8125rem;
 }
 .widget-article pre {
-  background: var(--muted);
+  background: var(--color-background-hover);
   border-radius: 6px;
   padding: 0.6em 0.75em;
 }
@@ -1007,12 +1052,12 @@ body {
   border-collapse: collapse;
 }
 .widget-article :is(th, td) {
-  border: 1px solid var(--border);
+  border: 1px solid var(--color-border-subtle);
   padding: 0.35em 0.5em;
   text-align: start;
 }
 
 .widget-article hr {
   border: 0;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--color-border-subtle);
 }

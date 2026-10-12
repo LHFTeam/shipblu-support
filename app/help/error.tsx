@@ -2,7 +2,7 @@
 
 import { useParams } from 'next/navigation';
 import { DEFAULT_LOCALE, direction, isLocale } from '@/lib/kb/locale';
-import { lato, tajawal } from '@/app/fonts';
+import { lato, tajawal } from './[locale]/fonts';
 import { HelpFailed } from './failed';
 
 /**

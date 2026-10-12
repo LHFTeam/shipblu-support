@@ -7,7 +7,7 @@ import { publicBaseUrl } from '@/lib/kb/site';
 import { AccountNav } from './account-nav';
 import { Container } from './chrome';
 import { ServiceNoticeBanner } from './notice';
-import { lato, tajawal } from '@/app/fonts';
+import { lato, tajawal } from './fonts';
 
 export const dynamic = 'force-dynamic';
 
