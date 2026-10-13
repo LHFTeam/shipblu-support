@@ -1,3 +1,4 @@
+import { isReaction } from '@/lib/whatsapp/reaction';
 import { wamidKey } from '@/lib/whatsapp/wamid';
 
 /**
@@ -8,10 +9,12 @@ import { wamidKey } from '@/lib/whatsapp/wamid';
  * every 🙏 as a bubble saying `[reacted 🙏]`, a line below whatever it was
  * answering. It belongs on that message, as it does on the customer's phone.
  *
- * The row stays a row. What it means for the ticket — a customer touching the
- * thread — is the ingest's business, and so is every consumer that reads the
- * list (the inbox preview, the canned-suggestion anchor); this only decides
- * where the console draws it.
+ * The row stays a row, and what it means for the ticket is the ingest's
+ * business: `ingestWhatsAppReaction` moves no clock and reopens nothing, and
+ * every reader of "the customer's last words" leaves it out through
+ * `isReaction` / `notReaction`. This only decides where the console draws it,
+ * and recognises a reaction by that same `isReaction`, so the thread and every
+ * other reader agree on which rows are reactions.
  *
  * What a message shows is the latest reaction from each side, the way WhatsApp
  * shows it: reacting again replaces the earlier one, and a reaction with no
@@ -129,7 +132,7 @@ export function storedReaction(
   meta: Record<string, unknown> | null,
   rawBody: string | null,
 ): StoredReaction | null {
-  if (meta?.whatsappType !== 'reaction') return null;
+  if (!isReaction(meta)) return null;
   const unreadable = { targetWamid: null, emoji: null };
   if (!rawBody) return unreadable;
 

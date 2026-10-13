@@ -668,7 +668,9 @@ clock, `last_message_at` included, no reopen, no ticket of its own, nothing
 downstream of a message — for the reasons `applyMetaInteraction` gives for a
 Facebook or Instagram reaction, though unlike that path it keeps a row. The
 row stays a `kind: 'reply'`, with the delivery in `raw_body` naming the
-message it is about, so the timeline can pair the two; and so anything that
+message it is about, so the timeline draws it on that message
+(`lib/tickets/reactions.ts`) — and as a line of its own only when that message
+is not on the ticket; and so anything that
 picks "the latest message" or "what the customer last said" for what it says
 leaves reactions out: `notReaction()`
 in a query (`lib/tickets/not-reaction.ts`), `isReaction(meta)` over rows already
@@ -710,9 +712,6 @@ reply names it from one chat, a customer's reaction to that reply from another
 delivery comes back — a redelivery's dedupe, a status update — because Meta
 repeats its own wamid there, and the unique index on `channel_message_id` is
 what serves it.
-A reaction is a stored message row and stays one; the console draws it on the
-message it names (`lib/tickets/reactions.ts`), and as a line of its own only
-when that message is not on the ticket.
 
 **Explaining a control.** A label short enough to fit a dense table is rarely
 long enough to explain itself. `InfoTip` from `components/tooltip.tsx` is the
