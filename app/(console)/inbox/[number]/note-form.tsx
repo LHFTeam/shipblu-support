@@ -32,6 +32,7 @@ export function NoteForm({
         rows={3}
         dir="auto"
         tone="note"
+        className="font-conversation"
         placeholder="Visible to agents only — never sent to the customer."
         required
       />

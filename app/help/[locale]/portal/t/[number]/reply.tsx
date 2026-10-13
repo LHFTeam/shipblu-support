@@ -33,6 +33,7 @@ export function ReplyBox({ locale, number }: { locale: Locale; number: number })
         name="body"
         rows={4}
         required
+        className="font-conversation"
         aria-label={t(locale, 'reply')}
         placeholder={t(locale, 'replyPlaceholder')}
       />

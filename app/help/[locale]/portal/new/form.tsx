@@ -39,7 +39,7 @@ export function NewTicketForm({
 
       <div>
         <Label htmlFor="body">{t(locale, 'message')}</Label>
-        <Textarea id="body" name="body" rows={8} required />
+        <Textarea id="body" name="body" rows={8} required className="font-conversation" />
       </div>
 
       {fields.map((field) => (

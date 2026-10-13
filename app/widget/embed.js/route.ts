@@ -188,7 +188,12 @@ export async function GET() {
    * request, so the face cannot fail to arrive and there is no fallback left to
    * need. That was the only thing under \`public/\`, which is now gone with it.
    *
-   * One path, wound so that \`evenodd\` cuts the two lines out as holes rather
+   * The path is the design system's \`assets/launcher-glyph.svg\`, copied
+   * without the provenance metadata the file carries: a bubble with three
+   * round corners and its tail drawn square at the bottom-left, the other
+   * corner from the button's own. The button and the glyph are the same shape
+   * turned half a circle, which is the mark; \`applyPlacement\` mirrors both
+   * together. Wound so that \`evenodd\` cuts the two lines out as holes rather
    * than painting them in a second copy of the button's blue. Restyle the
    * button and the glyph follows it, hover included; a hard-coded copy of the
    * button's blue in here would go on showing the old colour in two slots
@@ -200,19 +205,20 @@ export async function GET() {
    */
   var SVG_NS = 'http://www.w3.org/2000/svg';
   var mark = document.createElementNS(SVG_NS, 'svg');
-  // Both dimensions, in the viewBox's own 3:2. Width alone leaves the height to
-  // SVG2's intrinsic sizing, which an older browser answers with 150px — and
-  // this file is the one thing on the page that has to render on all of them.
-  mark.setAttribute('viewBox', '0 0 24 16');
-  mark.setAttribute('width', '24');
-  mark.setAttribute('height', '16');
+  // Both dimensions, in the source file's 86:62, drawn at the 28x20 the design
+  // system specifies. Width alone leaves the height to SVG2's intrinsic sizing,
+  // which an older browser answers with 150px — and this file is the one thing
+  // on the page that has to render on all of them.
+  mark.setAttribute('viewBox', '0 0 86 62');
+  mark.setAttribute('width', '28');
+  mark.setAttribute('height', '20');
   // The button already carries the label; the glyph would only repeat it. And
   // \`focusable\` because legacy Edge makes an <svg> a tab stop otherwise, which
   // would put a stop with nothing in it inside the button.
   mark.setAttribute('aria-hidden', 'true');
   mark.setAttribute('focusable', 'false');
   // \`pointer-events\` off, so every click lands on the button, never on its
-  // contents.
+  // contents. The transform is set per side in \`applyPlacement\`.
   mark.style.cssText = 'display:block;pointer-events:none';
 
   var markPath = document.createElementNS(SVG_NS, 'path');
@@ -220,9 +226,9 @@ export async function GET() {
   markPath.setAttribute('fill-rule', 'evenodd');
   markPath.setAttribute(
     'd',
-    'M4.5,0H19.5A4.5,4.5 0 0 1 24,4.5V11.5A4.5,4.5 0 0 1 19.5,16H4.5A4.5,4.5 0 0 1 0,11.5V4.5A4.5,4.5 0 0 1 4.5,0Z' +
-      'M5.2,4.9H18.8A1.2,1.2 0 0 1 18.8,7.3H5.2A1.2,1.2 0 0 1 5.2,4.9Z' +
-      'M5.2,8.7H13.8A1.2,1.2 0 0 1 13.8,11.1H5.2A1.2,1.2 0 0 1 5.2,8.7Z'
+    'M0,62V14A14,14 0 0 1 14,0H72A14,14 0 0 1 86,14V48A14,14 0 0 1 72,62Z' +
+      'M18,15H69A5,5 0 0 1 69,25H18A5,5 0 0 1 18,15Z' +
+      'M18,36H48A5,5 0 0 1 48,46H18A5,5 0 0 1 18,36Z'
   );
   mark.appendChild(markPath);
 
@@ -245,12 +251,13 @@ export async function GET() {
   /*
    * Unread is attention, not an error, so the count is coral rather than the
    * red it was: red now means something broke. The white ring parts it from
-   * the blue button and from whatever the host page is painted behind it.
+   * the blue button and from whatever the host page is painted behind it. It
+   * sits on the button's one sharp corner, which \`applyPlacement\` moves.
    */
   var badge = document.createElement('span');
   badge.style.cssText = [
     'position:absolute',
-    'top:-2px',
+    'top:-6px',
     'box-sizing:border-box',
     'min-width:18px',
     'height:18px',
@@ -328,11 +335,13 @@ export async function GET() {
    *
    * The launcher's own corners are direction-dependent for the same reason, so
    * they are set here rather than in the style attribute. It is ShipBlu's
-   * speech bubble rather than a disc: three rounded corners and one drawn
-   * almost square, which is the tail. The tail points inwards — bottom-left
-   * against a button parked bottom-right, and mirrored in Arabic — because a
-   * tail aimed at the corner of the viewport points at nothing, and the shape
-   * stops reading as a bubble at all.
+   * speech bubble rather than a disc: three round corners and the top one
+   * nearest the viewport's edge drawn almost square. The glyph inside carries
+   * its square corner diagonally opposite and is nudged a pixel toward the
+   * button's, so the pair sits optically centred; and the unread count sits on the button's
+   * square corner, where it covers no curve. Docked left in Arabic, the shape,
+   * the glyph and the badge all mirror together, so the mark reads the same
+   * from either side of the page.
    */
   function applyPlacement() {
     var rtl = locale === 'ar';
@@ -340,9 +349,10 @@ export async function GET() {
 
     launcher.style.left = rtl ? '20px' : '';
     launcher.style.right = rtl ? '' : '20px';
-    launcher.style.borderRadius = rtl ? '24px 24px 6px 24px' : '24px 24px 24px 6px';
-    badge.style.left = rtl ? '-2px' : '';
-    badge.style.right = rtl ? '' : '-2px';
+    launcher.style.borderRadius = rtl ? '6px 28px 28px 28px' : '28px 6px 28px 28px';
+    mark.style.transform = rtl ? 'translate(-1px,-1px) scaleX(-1)' : 'translate(1px,-1px)';
+    badge.style.left = rtl ? '-6px' : '';
+    badge.style.right = rtl ? '' : '-6px';
     // Nothing to return to on a full screen, and the panel carries its own
     // close button.
     launcher.style.display = fullScreen ? 'none' : 'flex';
