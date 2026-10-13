@@ -1,4 +1,8 @@
-import { isPrivateReplyMessage, isPublicMetaMessage } from '@/lib/meta/visibility';
+import {
+  isPrivateReplyMessage,
+  isPublicMetaMessage,
+  type MetaMessageMeta,
+} from '@/lib/meta/visibility';
 import { lostReceiptNote } from '@/lib/whatsapp/receipts';
 
 /**
@@ -25,9 +29,8 @@ export type ThreadMessage = {
   meta: Record<string, unknown> | null;
 };
 
-export type MessageMeta = {
-  metaKind?: string;
-  isPublic?: boolean;
+/** What the thread reads off a message's `meta`, over the Meta fields `visibility` owns. */
+export type MessageMeta = MetaMessageMeta & {
   echo?: boolean;
   echoSource?: string;
   media?: { downloaded?: boolean; error?: string };
