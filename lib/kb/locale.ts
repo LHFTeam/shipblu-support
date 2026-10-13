@@ -337,7 +337,7 @@ const STRINGS = {
     haveAccount: 'لديك حساب بالفعل؟',
     submitting: 'برجاء الانتظار…',
 
-    checkYourEmail: 'الخطوة التالية في بريد حضرتك الإلكتروني',
+    checkYourEmail: 'الخطوة التالية',
     verificationSent:
       'إذا كان هذا البريد صالحًا للتسجيل فقد أرسلنا إليه رابطًا لتأكيده. الرابط صالح لمدة ٢٤ ساعة.',
     verifySuccessTitle: 'تم تأكيد بريدك الإلكتروني',
