@@ -1,6 +1,7 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { contacts, conversations, messages } from '@/db/schema';
+import { notReaction } from './not-reaction';
 
 /**
  * Which language we answer a customer in.
@@ -64,7 +65,7 @@ export function preferredLocale(contactLocale: string, sample: string | null): '
  * on a path that sends at most one message per closed stretch is the right
  * price for that.
  *
- * Three things narrow which message decides it, and each of them is a way the
+ * Four things narrow which message decides it, and each of them is a way the
  * answer went wrong:
  *
  * - **`reply` only.** A bounce, an out-of-office or one of our own system
@@ -76,7 +77,10 @@ export function preferredLocale(contactLocale: string, sample: string | null): '
  *   to the contact locale and be answered in English. `btrim` rather than `<>
  *   ''` because `preferredLocale` treats whitespace as nothing to read, and a
  *   row it would reject should not have been the row that decided.
- * - **The most recent one that survives both.** Not the first message on the
+ * - **Not a WhatsApp reaction.** Its text is our own `[reacted 🙏]`, seven
+ *   Latin letters and an emoji, so an Arabic customer who answered the agent's
+ *   reply with a thumbs-up would be read as English from then on.
+ * - **The most recent one that survives those.** Not the first message on the
  *   ticket: somebody who opened in English and has been writing Arabic for
  *   three messages reads Arabic.
  *
@@ -100,6 +104,7 @@ export async function requesterLocale(conversationId: string): Promise<'ar' | 'e
           eq(messages.direction, 'inbound'),
           eq(messages.kind, 'reply'),
           sql`btrim(${messages.bodyText}) <> ''`,
+          notReaction(),
         ),
       )
       .orderBy(desc(messages.createdAt))

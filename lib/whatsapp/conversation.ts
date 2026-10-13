@@ -1,6 +1,7 @@
 import { and, desc, eq } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels, conversations, messages } from '@/db/schema';
+import { notReaction } from '@/lib/tickets/not-reaction';
 import { accountForPhoneNumberId, type WhatsAppAccount } from './accounts';
 
 /**
@@ -31,17 +32,8 @@ export async function sendingNumberFor(
   conversationId: string,
   channelId: string | null,
 ): Promise<string | null> {
-  const inbound = await db
-    .select({ meta: messages.meta })
-    .from(messages)
-    .where(and(eq(messages.conversationId, conversationId), eq(messages.direction, 'inbound')))
-    .orderBy(desc(messages.createdAt))
-    .limit(1);
-
-  const fromInbound = inbound[0]?.meta as { phoneNumberId?: unknown } | undefined;
-  if (typeof fromInbound?.phoneNumberId === 'string' && fromInbound.phoneNumberId) {
-    return fromInbound.phoneNumberId;
-  }
+  const fromInbound = await lastInboundPhoneNumberId(conversationId);
+  if (fromInbound) return fromInbound;
 
   if (channelId) {
     const channel = await db
@@ -55,6 +47,36 @@ export async function sendingNumberFor(
   }
 
   return null;
+}
+
+/**
+ * The business number the customer last wrote to on this ticket, or null when
+ * no message of theirs says.
+ *
+ * Shared with the explanation of a failed send (`applyWhatsAppStatus`), which
+ * compares the number a reply went out from against this one: two copies of
+ * the lookup could disagree about which inbound row is the customer's, and the
+ * explanation would then blame the wrong number.
+ *
+ * Not a reaction: the number the customer last *wrote* on is the one whose
+ * window `last_customer_message_at` measures, and a reaction moves neither.
+ */
+export async function lastInboundPhoneNumberId(conversationId: string): Promise<string | null> {
+  const [inbound] = await db
+    .select({ meta: messages.meta })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.conversationId, conversationId),
+        eq(messages.direction, 'inbound'),
+        notReaction(),
+      ),
+    )
+    .orderBy(desc(messages.createdAt))
+    .limit(1);
+
+  const { phoneNumberId } = (inbound?.meta ?? {}) as { phoneNumberId?: unknown };
+  return typeof phoneNumberId === 'string' && phoneNumberId ? phoneNumberId : null;
 }
 
 /** The business account a ticket sends on, from its id alone. */

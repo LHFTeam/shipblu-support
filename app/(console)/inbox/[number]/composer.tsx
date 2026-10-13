@@ -8,6 +8,7 @@ import type { CannedResponseOption } from '@/lib/tickets/lookups';
 import type { CannedLocale } from '@/lib/tickets/canned';
 import { describeWindow, metaWindowState } from '@/lib/meta/window';
 import { consoleReplyNotice, consoleReplyReason } from '@/lib/tickets/channel-policy';
+import { isReaction } from '@/lib/whatsapp/reaction';
 import { formatRemaining, windowState } from '@/lib/whatsapp/window';
 import type { PickerEntry } from '@/lib/side-conversations/queries';
 import { StartSideConversationForm } from './side-conversations';
@@ -88,9 +89,13 @@ export function Composer({
 
   // The newest reply either way — the message a canned suggestion answers. The
   // timeline arrives in the order the server reads it (`created_at`, then `id`),
-  // so this is the same message `lib/canned-suggest/history.ts` calls the anchor.
+  // so this is the same message `lib/canned-suggest/history.ts` calls the anchor:
+  // reactions are left out on both sides, or a 🙏 after the question would move
+  // this anchor off the one the server answered and hide its suggestion.
   const anchorMessageId =
-    conversation.messages.findLast((message) => message.kind === 'reply')?.id ?? null;
+    conversation.messages.findLast(
+      (message) => message.kind === 'reply' && !isReaction(message.meta),
+    )?.id ?? null;
 
   const [requestedTab, setRequestedTab] = useState<Tab>('reply');
 

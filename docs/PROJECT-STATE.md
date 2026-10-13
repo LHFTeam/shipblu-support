@@ -1659,6 +1659,43 @@ expires_at, inspected_at` — never `envelope`, and a null `expires_at` means
   documented as keying on "since the customer last wrote" — but it is worth
   knowing before `messaging_postbacks` starts delivering.
 
+  **A WhatsApp reaction follows the same rule, from either side of the chat, and
+  until 2026-10-13 it did not.** It arrives as a message of `type: 'reaction'`
+  and was ingested as one: it created a ticket when the customer had none,
+  reopened a resolved one, moved `last_customer_message_at` and restarted the
+  next-response clock — and from the phone on a coexistence number, it counted
+  as the team's reply and stopped the response clocks. Production that day: the
+  16 customer reactions on the support number had reopened one ticket (#53346,
+  two 👍🏻 four seconds apart and nothing else) and were the newest customer
+  message on two more, so the window and the next-response target counted from
+  a thumbs-up; 7 of the 14 reactions the business sent from the phone were the
+  newest thing the team had "said" on their ticket; and 71 of the 1,098 on the
+  bot's number were the first row of the transcript they opened.
+  `parseWebhook` now files reactions in a list of their own, as the Meta parser
+  files interactions, and `ingestWhatsAppReaction` stores the row — kept whole,
+  so the timeline can pair it with the message it names — on the person's
+  newest conversation, closed or not, and changes nothing on it: no clock,
+  `last_message_at` included, no status, no SLA, automation, assignment,
+  out-of-hours reply, categorisation or priority classification. With no
+  conversation to put it on — or when the newest is a copied phone history,
+  whose native ticket before it may be closed and months old — it is not
+  stored, and no contact is made. The
+  readers that use "the latest message" or "the customer's last words" for what
+  it says leave reaction rows out through `isReaction` /
+  `notReaction` (`lib/whatsapp/reaction.ts`, `lib/tickets/not-reaction.ts`), so
+  a 👍 is never the inbox preview or its arrow, the canned suggestion's anchor,
+  the language an automated reply is written in, the number it is sent from,
+  the customer's words quoted to a hub, a line in the portal, an hour's volume
+  on the live report, the customer's opening message to the priority
+  classifier or context sent to TypeSafe.
+
+  Meta's documentation says WhatsApp's customer service window opens when the
+  customer "messages or calls" and does not say whether a reaction is a
+  message. So the trade is the one above, unverified rather than known: if a
+  reaction does open the window, a thread whose only customer activity in 24
+  hours is a reaction is refused a free-form reply that Meta would have taken,
+  and needs a template.
+
   **There are six dead `send_meta` rows now, not one.** The Instagram
   HUMAN_AGENT one from 2026-08-20, and five Facebook DMs on 23–24 August that
   failed _inside_ the 24-hour window, on the right page, in a thread this app

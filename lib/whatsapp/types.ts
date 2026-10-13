@@ -254,6 +254,20 @@ export type NormalisedEcho = {
   raw: Record<string, unknown>;
 };
 
+/**
+ * A reaction — 🙏 on a reply, ❤️ on a photo — from either side of the chat,
+ * normalised exactly as the message or echo it arrived as.
+ *
+ * Its own list rather than an entry in `messages` or `echoes`, because those
+ * two are things somebody said and are ingested as such: a customer's message
+ * opens or reopens a ticket and starts the clocks, and the business's echo stops
+ * them. A reaction does none of it (`ingestWhatsAppReaction`). The same split
+ * as `interactions` on the Meta side, for the same reason.
+ */
+export type NormalisedReaction =
+  | { side: 'customer'; message: NormalisedInboundMessage }
+  | { side: 'business'; echo: NormalisedEcho };
+
 export type NormalisedStatus = {
   wamid: string;
   status: 'sent' | 'delivered' | 'read' | 'failed';
@@ -338,6 +352,8 @@ export type NormalisedWebhook = {
   messages: NormalisedInboundMessage[];
   /** Messages sent from our own number, by us or by another service on it. */
   echoes: NormalisedEcho[];
+  /** Reactions from either side, which are in neither list above. */
+  reactions: NormalisedReaction[];
   statuses: NormalisedStatus[];
   /** Account-level errors Meta reports outside any message. */
   errors: string[];

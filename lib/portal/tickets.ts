@@ -10,6 +10,7 @@ import {
   ticketStatuses,
 } from '@/db/schema';
 import { readOnlyChannels } from '@/lib/tickets/channel-policy';
+import { notReaction } from '@/lib/tickets/not-reaction';
 import { afterInboundMessage, afterMessageStored } from '@/lib/tickets/lifecycle';
 import { reopenResolved } from '@/lib/tickets/reopen';
 import { requireDefaultOpenStatusId } from '@/lib/tickets/statuses';
@@ -138,7 +139,16 @@ export async function getTicket(
     })
     .from(messages)
     .leftJoin(agents, eq(agents.id, messages.authorAgentId))
-    .where(and(eq(messages.conversationId, ticket.id), eq(messages.kind, 'reply')))
+    .where(
+      and(
+        eq(messages.conversationId, ticket.id),
+        eq(messages.kind, 'reply'),
+        // A reaction is the customer's own 🙏 on a message, which their phone
+        // already draws there; as a line here it would read `[reacted 🙏]`, and
+        // the business's as something "the agent" said.
+        notReaction(),
+      ),
+    )
     .orderBy(asc(messages.createdAt))
     .limit(200);
 

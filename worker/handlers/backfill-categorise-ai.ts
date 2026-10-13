@@ -13,6 +13,7 @@ import { parseJobPayload } from '@/lib/queue/payloads';
 import { scanMessagesInKeysetOrder } from '@/lib/queue/backfill';
 import { CONVERSATION_CHANNELS, readOnlyChannels } from '@/lib/tickets/channel-policy';
 import type { ConversationChannel } from '@/lib/tickets/channel-policy';
+import { notReaction } from '@/lib/tickets/not-reaction';
 import { typesafeConfigured, typesafeModel } from '@/lib/typesafe/client';
 import { logger } from '@/lib/log';
 
@@ -168,6 +169,9 @@ async function candidateFilter(payload: Payload, runLabel: string): Promise<SQL[
     // (`afterMessageStored` does not run for it), so a shadow run over it
     // would compare the model with a detector that was never asked.
     ne(messages.sourceSystem, 'import'),
+    // Nor is a reaction, for the same reason — and a thousand calls asking
+    // which category `[reacted 🙏]` is would be paid for.
+    notReaction(),
   ];
 
   const channels = requestedChannels(payload.channels);

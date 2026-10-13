@@ -45,6 +45,7 @@ export function parseWebhook(payload: unknown): NormalisedWebhook {
   const result: NormalisedWebhook = {
     messages: [],
     echoes: [],
+    reactions: [],
     statuses: [],
     errors: [],
     history: [],
@@ -107,7 +108,7 @@ export function parseWebhook(payload: unknown): NormalisedWebhook {
       // used the same array, so stored deliveries of either replay the same way.
       for (const echo of recordsIn(value.message_echoes)) {
         const normalised = normaliseEcho(echo, phoneNumberId, soleContact);
-        if (normalised) result.echoes.push(normalised);
+        if (normalised) pushEcho(result, normalised);
       }
 
       for (const message of recordsIn(value.messages)) {
@@ -121,12 +122,17 @@ export function parseWebhook(payload: unknown): NormalisedWebhook {
         // is that anything we send can come back under `messages`.
         if (businessNumber && digits(message.from) === businessNumber) {
           const normalised = normaliseEcho(message, phoneNumberId, soleContact);
-          if (normalised) result.echoes.push(normalised);
+          if (normalised) pushEcho(result, normalised);
           continue;
         }
 
         const normalised = normaliseMessage(message, phoneNumberId, profileNames);
-        if (normalised) result.messages.push(normalised);
+        if (!normalised) continue;
+        if (normalised.type === 'reaction') {
+          result.reactions.push({ side: 'customer', message: normalised });
+        } else {
+          result.messages.push(normalised);
+        }
       }
 
       for (const status of recordsIn(value.statuses)) {
@@ -330,6 +336,17 @@ function normaliseEcho(
     creationType: echo.message_creation_type ?? null,
     raw: echo as unknown as Record<string, unknown>,
   };
+}
+
+/**
+ * An echo is the business's message, or the business's reaction — which is
+ * filed apart for the reason `NormalisedReaction` gives, wherever the echo came
+ * from. Shared by both places an echo is read, so a reaction sent from the phone
+ * cannot become a reply by arriving under `messages` instead.
+ */
+function pushEcho(result: NormalisedWebhook, echo: NormalisedEcho): void {
+  if (echo.type === 'reaction') result.reactions.push({ side: 'business', echo });
+  else result.echoes.push(echo);
 }
 
 /** Phone numbers for comparison only — Meta formats them for display. */

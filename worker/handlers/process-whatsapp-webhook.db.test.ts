@@ -2,7 +2,14 @@ import { eq } from 'drizzle-orm';
 import { DateTime } from 'luxon';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '@/db/client';
-import { channels, conversations, jobs, messages, webhookEvents } from '@/db/schema';
+import {
+  channels,
+  conversations,
+  jobs,
+  messages,
+  ticketStatuses,
+  webhookEvents,
+} from '@/db/schema';
 import type { ClaimedJob } from '@/lib/queue';
 import { computeDay, earliestDay, reportingContext } from '@/lib/reports/rollup';
 import { withCleanDatabase } from '@/lib/testing/db';
@@ -109,6 +116,15 @@ async function deliver(payload: unknown, receivedAt = RECEIVED): Promise<string>
   const id = await store(payload, receivedAt);
   await run(id);
   return id;
+}
+
+async function resolvedStatusId() {
+  const [row] = await db
+    .select({ id: ticketStatuses.id })
+    .from(ticketStatuses)
+    .where(eq(ticketStatuses.category, 'resolved'))
+    .limit(1);
+  return row?.id;
 }
 
 async function coexistenceOf(channelId: string) {
@@ -452,5 +468,93 @@ describe('processWhatsAppWebhook: a number on the WhatsApp Business app', () => 
       }),
     );
     expect(await earliestDay(context.zone)).toBe(day.toISODate());
+  });
+
+  it('files both sides’ reactions on the ticket, and the ticket stays as it was', async () => {
+    await coexistenceChannel();
+    const CUSTOMER = '201001234567';
+    const BUSINESS = '15550783881';
+    const seconds = (iso: string) => String(DateTime.fromISO(iso).toSeconds());
+
+    await deliver(
+      value('messages', {
+        contacts: [{ wa_id: CUSTOMER, profile: { name: 'Amira' } }],
+        messages: [
+          {
+            from: CUSTOMER,
+            id: 'wamid.ask',
+            timestamp: seconds('2026-10-08T09:00:00Z'),
+            type: 'text',
+            text: { body: 'Where is my parcel?' },
+          },
+        ],
+      }),
+    );
+    await deliver(
+      value('smb_message_echoes', {
+        message_echoes: [
+          {
+            from: BUSINESS,
+            to: CUSTOMER,
+            id: 'wamid.answer',
+            timestamp: seconds('2026-10-08T09:30:00Z'),
+            type: 'text',
+            text: { body: 'It leaves the hub this afternoon.' },
+          },
+        ],
+      }),
+    );
+    const [ticket] = await db.select().from(conversations);
+    await db
+      .update(conversations)
+      .set({ statusId: (await resolvedStatusId())!, resolvedAt: new Date('2026-10-08T09:31:00Z') })
+      .where(eq(conversations.id, ticket!.id));
+    const [before] = await db.select().from(conversations);
+
+    // The shapes production stores: the customer's 🙏 to the phone's reply,
+    // under `messages`, and the business's ❤️ back, under the echoes.
+    await deliver(
+      value('messages', {
+        contacts: [{ wa_id: CUSTOMER, profile: { name: 'Amira' } }],
+        messages: [
+          {
+            from: CUSTOMER,
+            id: 'wamid.thanks',
+            timestamp: seconds('2026-10-08T09:40:00Z'),
+            type: 'reaction',
+            reaction: { message_id: 'wamid.answer', emoji: '🙏' },
+          },
+        ],
+      }),
+    );
+    await deliver(
+      value('smb_message_echoes', {
+        message_echoes: [
+          {
+            from: BUSINESS,
+            to: CUSTOMER,
+            id: 'wamid.heart',
+            timestamp: seconds('2026-10-08T09:41:00Z'),
+            type: 'reaction',
+            reaction: { message_id: 'wamid.ask', emoji: '❤️' },
+          },
+        ],
+      }),
+    );
+
+    // Resolved, unread by the queue, its clocks where the reply left them.
+    expect(await db.select().from(conversations)).toEqual([before]);
+    expect(
+      await db
+        .select({ id: messages.channelMessageId, direction: messages.direction })
+        .from(messages)
+        .where(eq(messages.conversationId, ticket!.id))
+        .orderBy(messages.createdAt),
+    ).toEqual([
+      { id: 'wamid.ask', direction: 'inbound' },
+      { id: 'wamid.answer', direction: 'outbound' },
+      { id: 'wamid.thanks', direction: 'inbound' },
+      { id: 'wamid.heart', direction: 'outbound' },
+    ]);
   });
 });

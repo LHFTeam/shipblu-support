@@ -17,6 +17,7 @@ import { agents, conversations, contacts, messages, ticketStatuses } from '@/db/
 import type { SessionAgent } from '@/lib/auth/session';
 import { can } from '@/lib/auth/permissions';
 import { hiddenChannels, restrictedChannels } from './channel-policy';
+import { notReaction } from './not-reaction';
 import { rootCommentId } from '@/lib/meta/comments';
 import { sbidMatches, trackingMatches } from '@/lib/shipments/queries';
 import { cleanQuery, textMatches } from '@/lib/search/text';
@@ -358,6 +359,10 @@ export async function listInbox(
  * - **Not an email autoresponder.** "Out of office until Sunday" asks nothing of
  *   the team — `afterInboundMessage` leaves the SLA clock alone for it — so it
  *   must not take the arrow off our reply either.
+ * - **Not a WhatsApp reaction.** It asks nothing of anybody, and its text is
+ *   our own placeholder, `[reacted 🙏]`, so it must neither be the card's
+ *   headline nor move the arrow: the business's ❤️ from the phone put it on
+ *   tickets whose newest real message was the customer's, which hid them.
  *
  * Ordered by `created_at` and then `id`, the same order the ticket's timeline
  * uses (`lib/tickets/conversation.ts`), so on a tie the card names the message
@@ -373,6 +378,7 @@ function lastVisibleMessage() {
         eq(messages.kind, 'reply'),
         notInArray(messages.deliveryStatus, ['failed', 'bounced']),
         sql`${messages.meta}->>'isAutoReply' IS DISTINCT FROM 'true'`,
+        notReaction(),
       ),
     )
     .orderBy(desc(messages.createdAt), desc(messages.id))

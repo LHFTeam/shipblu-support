@@ -1,6 +1,7 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { messages } from '@/db/schema';
+import { notReaction } from '@/lib/tickets/not-reaction';
 
 /**
  * The earlier messages a question about one customer message carries.
@@ -40,6 +41,8 @@ export async function earlierMessages(
         eq(messages.direction, 'inbound'),
         sql`${messages.createdAt} < ${before.toISOString()}::timestamptz`,
         sql`btrim(${messages.bodyText}) <> ''`,
+        // Our own `[reacted 🙏]`, not anything the customer wrote.
+        notReaction(),
         author ? eq(messages.authorContactId, author) : undefined,
       ),
     )

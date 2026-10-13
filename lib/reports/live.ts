@@ -14,6 +14,7 @@ import {
 } from '@/db/schema';
 import { openBacklog } from '@/lib/tickets/backlog';
 import { readOnlyChannels } from '@/lib/tickets/channel-policy';
+import { notReaction } from '@/lib/tickets/not-reaction';
 import { computeDay, todayIn, totalsOf, type Bucket, type ReportingContext } from './rollup';
 
 /**
@@ -369,6 +370,8 @@ export async function todayByHour(zone: string, now: Date = new Date()): Promise
         // A copied chat history's last day lands with today's timestamps, and
         // is not today's traffic.
         ne(messages.sourceSystem, 'import'),
+        // Nor is a 🙏 on our reply demand, or the business's ❤️ back work.
+        notReaction(),
       ),
     )
     .groupBy(sql`1`)

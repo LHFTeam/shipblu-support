@@ -10,6 +10,7 @@ import { onPriorityChanged } from '@/lib/sla';
 import { afterTicketUpdate } from '@/lib/tickets/lifecycle';
 import { PRIORITY_STAMP } from '@/lib/tickets/priority-stamp';
 import { isReadOnlyChannel } from '@/lib/tickets/channel-policy';
+import { notReaction } from '@/lib/tickets/not-reaction';
 import { PRIORITIES, isPriority, type Priority } from '@/lib/tickets/vocabulary';
 import {
   TypeSafeApiError,
@@ -474,6 +475,8 @@ async function priorityFacts(
         ne(messages.id, messageId),
         sql`${messages.createdAt} <= ${createdAt.toISOString()}::timestamptz`,
         sql`btrim(${messages.bodyText}) <> ''`,
+        // A 👍 on the business's first message was not the customer opening.
+        notReaction(),
       ),
     )
     .limit(1);

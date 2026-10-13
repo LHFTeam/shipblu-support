@@ -12,7 +12,7 @@ import {
   ticketStatuses,
 } from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
-import { appendReply, createTicket } from './tickets';
+import { appendReply, createTicket, getTicket } from './tickets';
 
 /**
  * What the portal's two ingest paths write today, quirks included, so the
@@ -176,6 +176,51 @@ describe('createTicket', () => {
       tags: ['refund'],
       customFields: { order: '5512' },
     });
+  });
+});
+
+describe('getTicket', () => {
+  it('shows a WhatsApp ticket’s messages and neither side’s reactions', async () => {
+    const contactId = await customer();
+    const [open] = await db
+      .select({ id: ticketStatuses.id })
+      .from(ticketStatuses)
+      .where(eq(ticketStatuses.name, 'Open'));
+    const [chat] = await db
+      .insert(conversations)
+      .values({ channel: 'whatsapp', statusId: open!.id, requesterContactId: contactId })
+      .returning({ id: conversations.id, number: conversations.number });
+    const at = (minute: number) => new Date(Date.UTC(2026, 9, 1, 10, minute));
+    await db.insert(messages).values([
+      {
+        conversationId: chat!.id,
+        direction: 'inbound',
+        bodyText: 'Where is it?',
+        createdAt: at(0),
+      },
+      {
+        conversationId: chat!.id,
+        direction: 'outbound',
+        bodyText: '[reacted ❤️]',
+        meta: { whatsappType: 'reaction', echo: true, echoSource: 'business_app' },
+        createdAt: at(1),
+      },
+      { conversationId: chat!.id, direction: 'outbound', bodyText: 'Today.', createdAt: at(2) },
+      {
+        conversationId: chat!.id,
+        direction: 'inbound',
+        bodyText: '[reacted 🙏]',
+        meta: { whatsappType: 'reaction' },
+        createdAt: at(3),
+      },
+    ]);
+
+    const ticket = await getTicket(contactId, chat!.number);
+
+    expect(ticket?.messages.map(({ from, body }) => ({ from, body }))).toEqual([
+      { from: 'customer', body: 'Where is it?' },
+      { from: 'agent', body: 'Today.' },
+    ]);
   });
 });
 

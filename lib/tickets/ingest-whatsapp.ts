@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels, conversations, messages } from '@/db/schema';
 import { enqueue } from '@/lib/queue';
@@ -11,17 +11,19 @@ import {
   type WhatsAppAccount,
 } from '@/lib/whatsapp/accounts';
 import { parseCoexistence } from '@/lib/whatsapp/coexistence';
+import { lastInboundPhoneNumberId } from '@/lib/whatsapp/conversation';
 import { ACCESS_TOKEN_CODE, explainDeliveryError, type TokenOrigin } from '@/lib/whatsapp/errors';
 import type {
   NormalisedEcho,
   NormalisedInboundMessage,
+  NormalisedReaction,
   NormalisedStatus,
 } from '@/lib/whatsapp/types';
 import { windowState } from '@/lib/whatsapp/window';
 import { isReadOnlyChannel } from './channel-policy';
-import { resolveContact } from './contacts';
+import { findContactByIdentity, resolveContact } from './contacts';
 import { latest } from './latest';
-import { findLiveConversation } from './live-conversation';
+import { findLiveConversation, findNewestConversation } from './live-conversation';
 import { reopenResolved } from './reopen';
 import { requireDefaultOpenStatusId, requireResolvedStatusId } from './statuses';
 
@@ -47,27 +49,8 @@ export async function ingestWhatsAppMessage(
 ): Promise<WhatsAppIngestResult> {
   // Idempotency: Meta redelivers the whole batch on any non-200, and a stored
   // payload can be replayed by hand, so the same wamid must never appear twice.
-  const seen = await db
-    .select({ id: messages.id, conversationId: messages.conversationId })
-    .from(messages)
-    .where(eq(messages.channelMessageId, message.wamid))
-    .limit(1);
-
-  if (seen[0]) {
-    const existing = await db
-      .select({ number: conversations.number })
-      .from(conversations)
-      .where(eq(conversations.id, seen[0].conversationId))
-      .limit(1);
-
-    return {
-      conversationId: seen[0].conversationId,
-      conversationNumber: existing[0]?.number ?? 0,
-      messageId: seen[0].id,
-      createdConversation: false,
-      duplicate: true,
-    };
-  }
+  const seen = await storedMessage(message.wamid);
+  if (seen) return { ...seen, createdConversation: false, duplicate: true };
 
   const { contactId } = await resolveContact({
     channel: 'whatsapp',
@@ -120,45 +103,7 @@ export async function ingestWhatsAppMessage(
 
     const insertedMessage = await tx
       .insert(messages)
-      .values({
-        conversationId,
-        direction: 'inbound',
-        kind: 'reply',
-        authorContactId: contactId,
-        bodyText: message.text,
-        // No HTML on WhatsApp; the console renders bodyText and applies
-        // WhatsApp's own *bold* / _italic_ markup at display time.
-        bodyHtml: null,
-        rawBody: JSON.stringify(message.raw),
-        channelMessageId: message.wamid,
-        inReplyTo: message.replyToWamid,
-        fromAddress: message.from,
-        deliveryStatus: 'delivered',
-        deliveredAt: message.sentAt,
-        meta: {
-          whatsappType: message.type,
-          profileName: message.profileName,
-          phoneNumberId: message.phoneNumberId,
-          ...(message.media
-            ? {
-                media: {
-                  mediaId: message.media.mediaId,
-                  mimeType: message.media.mimeType,
-                  filename: message.media.filename,
-                  isVoice: message.media.isVoice,
-                  // Flipped to true by the download_media job. Until then the
-                  // console shows the placeholder rather than a broken link.
-                  downloaded: false,
-                },
-              }
-            : {}),
-          // The pin as coordinates, so the console can offer a map link rather
-          // than the digits inside body_text. Read back through
-          // `readSharedLocation`, which validates rather than trusting this.
-          ...(message.location ? { location: message.location } : {}),
-        },
-        createdAt: message.sentAt,
-      })
+      .values(inboundRow(conversationId, contactId, message))
       .returning({ id: messages.id });
 
     const messageId = insertedMessage[0]!.id;
@@ -231,6 +176,53 @@ export async function ingestWhatsAppMessage(
   return { ...stored, duplicate: false };
 }
 
+/** The row a customer's message is stored as — and their reaction, which is the same row. */
+function inboundRow(
+  conversationId: string,
+  contactId: string,
+  message: NormalisedInboundMessage,
+): typeof messages.$inferInsert {
+  return {
+    conversationId,
+    direction: 'inbound',
+    kind: 'reply',
+    authorContactId: contactId,
+    bodyText: message.text,
+    // No HTML on WhatsApp; the console renders bodyText and applies
+    // WhatsApp's own *bold* / _italic_ markup at display time.
+    bodyHtml: null,
+    rawBody: JSON.stringify(message.raw),
+    channelMessageId: message.wamid,
+    inReplyTo: message.replyToWamid,
+    fromAddress: message.from,
+    deliveryStatus: 'delivered',
+    deliveredAt: message.sentAt,
+    meta: {
+      whatsappType: message.type,
+      profileName: message.profileName,
+      phoneNumberId: message.phoneNumberId,
+      ...(message.media
+        ? {
+            media: {
+              mediaId: message.media.mediaId,
+              mimeType: message.media.mimeType,
+              filename: message.media.filename,
+              isVoice: message.media.isVoice,
+              // Flipped to true by the download_media job. Until then the
+              // console shows the placeholder rather than a broken link.
+              downloaded: false,
+            },
+          }
+        : {}),
+      // The pin as coordinates, so the console can offer a map link rather
+      // than the digits inside body_text. Read back through
+      // `readSharedLocation`, which validates rather than trusting this.
+      ...(message.location ? { location: message.location } : {}),
+    },
+    createdAt: message.sentAt,
+  };
+}
+
 /**
  * A message sent from one of our numbers by something other than this system,
  * mirrored onto the conversation it belongs to. Two senders do that:
@@ -278,31 +270,12 @@ export async function ingestWhatsAppEcho(echo: NormalisedEcho): Promise<WhatsApp
   // webhook maintains it, so there is nothing to add. Mirroring it would double
   // every reply the team sends. A coexistence number is the exception: its
   // echoes are what the business typed on the phone, which nothing else wrote.
-  const fromBusinessApp = channel.coexistence && !isReadOnlyChannel(channel.kind);
-  if (!isReadOnlyChannel(channel.kind) && !fromBusinessApp) return IGNORED;
+  const sender = echoSender(channel);
+  if (!sender) return IGNORED;
+  const fromBusinessApp = sender === 'business_app';
 
-  const seen = await db
-    .select({ id: messages.id, conversationId: messages.conversationId })
-    .from(messages)
-    .where(eq(messages.channelMessageId, echo.wamid))
-    .limit(1);
-
-  if (seen[0]) {
-    const existing = await db
-      .select({ number: conversations.number })
-      .from(conversations)
-      .where(eq(conversations.id, seen[0].conversationId))
-      .limit(1);
-
-    return {
-      conversationId: seen[0].conversationId,
-      conversationNumber: existing[0]?.number ?? 0,
-      messageId: seen[0].id,
-      createdConversation: false,
-      duplicate: true,
-      ignored: false,
-    };
-  }
+  const seen = await storedMessage(echo.wamid);
+  if (seen) return { ...seen, createdConversation: false, duplicate: true, ignored: false };
 
   // Checked above, before any clock moves: a redelivered echo — or one of our
   // own Cloud API sends coming back, whose row already carries its wamid — is a
@@ -362,48 +335,7 @@ export async function ingestWhatsAppEcho(echo: NormalisedEcho): Promise<WhatsApp
 
     const insertedMessage = await tx
       .insert(messages)
-      .values({
-        conversationId,
-        direction: 'outbound',
-        kind: 'reply',
-        // No author on either side: no agent wrote it and the customer did not
-        // send it. The channel is what tells the timeline to label it as the bot.
-        bodyText: echo.text,
-        bodyHtml: null,
-        rawBody: JSON.stringify(echo.raw),
-        channelMessageId: echo.wamid,
-        inReplyTo: echo.replyToWamid,
-        fromAddress: echo.from,
-        toAddresses: [echo.to],
-        // Meta only echoes what it accepted for delivery, and no status webhook
-        // will follow for a message another service sent, so 'sent' is as much
-        // as can honestly be claimed.
-        deliveryStatus: 'sent',
-        meta: {
-          whatsappType: echo.type,
-          phoneNumberId: echo.phoneNumberId,
-          echo: true,
-          // Who sent it, for the timeline's label: the bot's echoes predate
-          // this field and are read as the bot when it is absent.
-          ...(fromBusinessApp ? { echoSource: 'business_app' } : {}),
-          ...(echo.creationType ? { creationType: echo.creationType } : {}),
-          ...(echo.media
-            ? {
-                media: {
-                  mediaId: echo.media.mediaId,
-                  mimeType: echo.media.mimeType,
-                  filename: echo.media.filename,
-                  isVoice: echo.media.isVoice,
-                  downloaded: false,
-                },
-              }
-            : {}),
-          // The bot sends pins too — a hub address, a pickup point — and an
-          // agent reading the transcript needs to see where it pointed.
-          ...(echo.location ? { location: echo.location } : {}),
-        },
-        createdAt: echo.sentAt,
-      })
+      .values(echoRow(conversationId, echo, fromBusinessApp))
       .returning({ id: messages.id });
 
     // lastCustomerMessageAt is deliberately untouched: neither the bot nor the
@@ -457,6 +389,197 @@ export async function ingestWhatsAppEcho(echo: NormalisedEcho): Promise<WhatsApp
   });
 
   return { ...result, duplicate: false, ignored: false };
+}
+
+/**
+ * Who wrote an echo, judged by the number it came back on — or null for one
+ * that is our own send coming back, which is not mirrored (`ingestWhatsAppEcho`
+ * says why).
+ */
+function echoSender(channel: ResolvedChannel): 'bot' | 'business_app' | null {
+  if (isReadOnlyChannel(channel.kind)) return 'bot';
+  return channel.coexistence ? 'business_app' : null;
+}
+
+/** The row an echo is stored as — and the business's reaction, which is the same row. */
+function echoRow(
+  conversationId: string,
+  echo: NormalisedEcho,
+  fromBusinessApp: boolean,
+): typeof messages.$inferInsert {
+  return {
+    conversationId,
+    direction: 'outbound',
+    kind: 'reply',
+    // No author on either side: no agent wrote it and the customer did not
+    // send it. The channel is what tells the timeline to label it as the bot.
+    bodyText: echo.text,
+    bodyHtml: null,
+    rawBody: JSON.stringify(echo.raw),
+    channelMessageId: echo.wamid,
+    inReplyTo: echo.replyToWamid,
+    fromAddress: echo.from,
+    toAddresses: [echo.to],
+    // Meta only echoes what it accepted for delivery, and no status webhook
+    // will follow for a message another service sent, so 'sent' is as much
+    // as can honestly be claimed.
+    deliveryStatus: 'sent',
+    meta: {
+      whatsappType: echo.type,
+      phoneNumberId: echo.phoneNumberId,
+      echo: true,
+      // Who sent it, for the timeline's label: the bot's echoes predate
+      // this field and are read as the bot when it is absent.
+      ...(fromBusinessApp ? { echoSource: 'business_app' } : {}),
+      ...(echo.creationType ? { creationType: echo.creationType } : {}),
+      ...(echo.media
+        ? {
+            media: {
+              mediaId: echo.media.mediaId,
+              mimeType: echo.media.mimeType,
+              filename: echo.media.filename,
+              isVoice: echo.media.isVoice,
+              downloaded: false,
+            },
+          }
+        : {}),
+      // The bot sends pins too — a hub address, a pickup point — and an
+      // agent reading the transcript needs to see where it pointed.
+      ...(echo.location ? { location: echo.location } : {}),
+    },
+    createdAt: echo.sentAt,
+  };
+}
+
+/**
+ * A reaction, from the customer or from our side of the chat: stored, and
+ * nothing else.
+ *
+ * Stored as the row its message or echo would have been — `meta.whatsappType`
+ * and the whole delivery in `raw_body`, naming the reacted-to message as
+ * `reaction.message_id` — so that the timeline can pair it with that message
+ * from rows it already reads, with no backfill. The conversation it is filed on
+ * is not otherwise touched.
+ *
+ * The first two decisions are the ones `applyMetaInteraction` makes for a
+ * Facebook or Instagram reaction, for the same reasons. The third is this
+ * path's own, and so is keeping a row at all: that function writes no row and
+ * files only on a live conversation. Here the row is what lets the timeline
+ * pair the reaction with its message, and a row on a closed ticket changes
+ * nothing about it.
+ *
+ * **It moves no clock.** Not `last_customer_message_at`, which is the 24-hour
+ * window and the next-response target — a customer answering our reply with 🙏
+ * has been served, not left waiting, and measuring an agent as late for not
+ * answering it is the worse error. Not the team's either: a ❤️ from the phone
+ * stopping the response clocks would record an answer nobody wrote. And not
+ * `last_message_at`, which orders the inbox and picks a customer's live
+ * conversation: a thumbs-up floating a finished ticket to the top of the queue
+ * asks for attention it does not need.
+ *
+ * **It reopens nothing and creates nothing.** A resolved ticket stays resolved,
+ * and nothing downstream of a message runs — no SLA, automation, assignment,
+ * out-of-hours reply, categorisation, priority classification or shipment
+ * linking, none of which has anything to read in a 👍. With no conversation to
+ * file it on — the person has no conversation on this channel, or the newest
+ * one is a copied history — it is not stored at all, and no contact is made
+ * for it: a ticket whose only content is a reaction is one nobody can answer.
+ *
+ * **It goes on the person's newest conversation, closed or not.** A reaction is
+ * nearly always to something recent, which is on that ticket, and filing it there
+ * changes nothing about it — the reason a message does not continue a closed
+ * ticket is that it would reopen it. When the message it names is on an older
+ * ticket, the reaction lands on this one with nothing here to pair it with,
+ * which is the cheap way to be wrong about something rare.
+ *
+ * Processed in no order like everything else, so a reaction handled before the
+ * message that opens the person's first conversation finds nothing and is not
+ * stored. That is a reaction lost, which is the cheap side of the trade.
+ */
+export type WhatsAppReactionResult = {
+  conversationId: string | null;
+  conversationNumber: number;
+  messageId: string | null;
+  duplicate: boolean;
+  /**
+   * Why nothing was stored: an echo from a number whose echoes are our own
+   * sends, or nowhere to file it — no conversation on the channel, or a copied
+   * history newest of all.
+   */
+  skipped: 'not_mirrored' | 'no_conversation' | null;
+};
+
+export async function ingestWhatsAppReaction(
+  reaction: NormalisedReaction,
+): Promise<WhatsAppReactionResult> {
+  const { wamid, phoneNumberId } = reaction.side === 'customer' ? reaction.message : reaction.echo;
+  const customer = reaction.side === 'customer' ? reaction.message.from : reaction.echo.to;
+  const channel = await resolveWhatsAppChannel(phoneNumberId);
+
+  // Mirrored on the numbers the business's messages are, and on no other.
+  const sender = reaction.side === 'business' ? echoSender(channel) : null;
+  if (reaction.side === 'business' && !sender) return skipped('not_mirrored');
+
+  const seen = await storedMessage(wamid);
+  if (seen) return { ...seen, duplicate: true, skipped: null };
+
+  // Looked up rather than resolved, as an interaction is: `resolveContact`
+  // writes a contact when it finds none, and there is nothing to file under it.
+  const contactId = await findContactByIdentity('whatsapp', customer);
+  if (!contactId) return skipped('no_conversation');
+
+  // A copied history newest of all is what the reaction is most likely about,
+  // and a live row does not join a record — so it is not filed on the native
+  // ticket before it either, which may be closed and months old.
+  const conversation = await findNewestConversation(contactId, channel.kind);
+  if (!conversation || conversation.imported) return skipped('no_conversation');
+
+  const [row] = await db
+    .insert(messages)
+    .values(
+      reaction.side === 'customer'
+        ? inboundRow(conversation.id, contactId, reaction.message)
+        : echoRow(conversation.id, reaction.echo, sender === 'business_app'),
+    )
+    .returning({ id: messages.id });
+
+  return {
+    conversationId: conversation.id,
+    conversationNumber: conversation.number,
+    messageId: row!.id,
+    duplicate: false,
+    skipped: null,
+  };
+}
+
+function skipped(reason: 'not_mirrored' | 'no_conversation'): WhatsAppReactionResult {
+  return {
+    conversationId: null,
+    conversationNumber: 0,
+    messageId: null,
+    duplicate: false,
+    skipped: reason,
+  };
+}
+
+/**
+ * The row already stored under a wamid, and its ticket's number — the
+ * idempotency check every path here makes before writing anything.
+ */
+async function storedMessage(
+  wamid: string,
+): Promise<{ conversationId: string; conversationNumber: number; messageId: string } | null> {
+  const [row] = await db
+    .select({
+      conversationId: messages.conversationId,
+      conversationNumber: conversations.number,
+      messageId: messages.id,
+    })
+    .from(messages)
+    .innerJoin(conversations, eq(conversations.id, messages.conversationId))
+    .where(eq(messages.channelMessageId, wamid))
+    .limit(1);
+  return row ?? null;
 }
 
 /**
@@ -539,20 +662,11 @@ async function explainFailure(
   const code = Number(status.error.split(':')[0]);
   const sentFrom = (message.meta as { phoneNumberId?: unknown }).phoneNumberId;
 
-  const inbound = await db
-    .select({ meta: messages.meta })
-    .from(messages)
-    .where(
-      and(eq(messages.conversationId, message.conversationId), eq(messages.direction, 'inbound')),
-    )
-    .orderBy(desc(messages.createdAt))
-    .limit(1);
-
-  const arrivedOn = (inbound[0]?.meta as { phoneNumberId?: unknown } | undefined)?.phoneNumberId;
+  const arrivedOn = await lastInboundPhoneNumberId(message.conversationId);
 
   return explainDeliveryError(Number.isFinite(code) ? code : null, status.error, {
     windowOpen: windowState(message.lastCustomerMessageAt, status.at).isOpen,
-    inboundPhoneNumberId: typeof arrivedOn === 'string' ? arrivedOn : null,
+    inboundPhoneNumberId: arrivedOn,
     sentFromPhoneNumberId: typeof sentFrom === 'string' ? sentFrom : null,
     // Only a 190 names a credential, so only a 190 pays to find out which.
     credential: code === ACCESS_TOKEN_CODE ? await sendingCredential(message.meta) : null,

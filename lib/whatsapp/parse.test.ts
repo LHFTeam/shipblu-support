@@ -609,6 +609,102 @@ describe('parseWebhook: echoes', () => {
 });
 
 /**
+ * A reaction is filed apart from what anybody said, from whichever array it
+ * arrives in — the shapes as production stores them (2026-10-13), where no
+ * emoji is somebody taking theirs back.
+ */
+describe('parseWebhook: reactions', () => {
+  it('files the customer’s reaction apart from their messages, profile name and all', () => {
+    const parsed = parseWebhook(
+      envelope({
+        contacts: [{ profile: { name: 'Nour' }, wa_id: '201001234567' }],
+        messages: [
+          {
+            id: 'wamid.text',
+            from: '201001234567',
+            timestamp: '1755500000',
+            type: 'text',
+            text: { body: 'thanks' },
+          },
+          {
+            id: 'wamid.react',
+            from: '201001234567',
+            timestamp: '1755500010',
+            type: 'reaction',
+            reaction: { message_id: 'wamid.ours', emoji: '🙏' },
+          },
+          {
+            id: 'wamid.unreact',
+            from: '201001234567',
+            timestamp: '1755500020',
+            type: 'reaction',
+            reaction: { message_id: 'wamid.ours' },
+          },
+        ],
+      }),
+    );
+
+    expect(parsed.messages.map((m) => m.wamid)).toEqual(['wamid.text']);
+    expect(parsed.reactions).toEqual([
+      {
+        side: 'customer',
+        message: expect.objectContaining({
+          wamid: 'wamid.react',
+          from: '201001234567',
+          profileName: 'Nour',
+          type: 'reaction',
+          text: '[reacted 🙏]',
+        }),
+      },
+      {
+        side: 'customer',
+        message: expect.objectContaining({ wamid: 'wamid.unreact', text: '[reacted]' }),
+      },
+    ]);
+  });
+
+  it('files the business’s reaction apart from its echoes, in either array', () => {
+    const parsed = parseWebhook(
+      envelope({
+        contacts: [{ wa_id: '201001234567' }],
+        message_echoes: [
+          {
+            id: 'wamid.echo-react',
+            from: '201000000000',
+            to: '201001234567',
+            timestamp: '1755500000',
+            type: 'reaction',
+            reaction: { message_id: 'wamid.theirs', emoji: '❤️' },
+          },
+        ],
+        messages: [
+          {
+            id: 'wamid.own-react',
+            from: '+20 100 000 0000',
+            timestamp: '1755500010',
+            type: 'reaction',
+            reaction: { message_id: 'wamid.theirs', emoji: '👍' },
+          },
+        ],
+      }),
+    );
+
+    expect(parsed.messages).toHaveLength(0);
+    expect(parsed.echoes).toHaveLength(0);
+    expect(parsed.reactions).toEqual([
+      {
+        side: 'business',
+        echo: expect.objectContaining({ wamid: 'wamid.echo-react', to: '201001234567' }),
+      },
+      {
+        side: 'business',
+        echo: expect.objectContaining({ wamid: 'wamid.own-react', to: '201001234567' }),
+      },
+    ]);
+  });
+});
+
+/**
  * The four fields a number connected through coexistence adds, each parsed from
  * Meta's own example payload, copied verbatim from the webhook references
  * (history, smb_app_state_sync, account_update) and the Business-app
