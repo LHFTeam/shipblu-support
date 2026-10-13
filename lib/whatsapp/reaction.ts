@@ -13,6 +13,10 @@
  * same rule for a query is `notReaction` in `lib/tickets/not-reaction.ts`, and
  * the two must agree.
  */
-export function isReaction(meta: Readonly<Record<string, unknown>> | null | undefined): boolean {
-  return meta?.whatsappType === 'reaction';
+export function isReaction(meta: unknown): boolean {
+  return (
+    typeof meta === 'object' &&
+    meta !== null &&
+    (meta as { whatsappType?: unknown }).whatsappType === 'reaction'
+  );
 }

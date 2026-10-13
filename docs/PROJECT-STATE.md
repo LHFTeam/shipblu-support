@@ -1682,8 +1682,9 @@ expires_at, inspected_at` — never `envelope`, and a null `expires_at` means
   `notReaction` (`lib/whatsapp/reaction.ts`, `lib/tickets/not-reaction.ts`), so
   a 👍 is never the inbox preview or its arrow, the canned suggestion's anchor,
   the language an automated reply is written in, the number it is sent from,
-  the customer's words quoted to a hub, a line in the portal or an hour's
-  volume on the live report.
+  the customer's words quoted to a hub, a line in the portal, an hour's volume
+  on the live report, the customer's opening message to the priority
+  classifier or context sent to TypeSafe.
 
   Meta's documentation says WhatsApp's customer service window opens when the
   customer "messages or calls" and does not say whether a reaction is a
