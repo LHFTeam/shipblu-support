@@ -359,10 +359,10 @@ export async function listInbox(
  * - **Not an email autoresponder.** "Out of office until Sunday" asks nothing of
  *   the team — `afterInboundMessage` leaves the SLA clock alone for it — so it
  *   must not take the arrow off our reply either.
- * - **Not a WhatsApp reaction.** It is drawn on the message it is about and
- *   asks nothing of anybody, so a 🙏 must neither be the card's headline nor
- *   move the arrow: the business's ❤️ from the phone put it on tickets whose
- *   newest real message was the customer's, which hid them.
+ * - **Not a WhatsApp reaction.** It asks nothing of anybody, and its text is
+ *   our own placeholder, `[reacted 🙏]`, so it must neither be the card's
+ *   headline nor move the arrow: the business's ❤️ from the phone put it on
+ *   tickets whose newest real message was the customer's, which hid them.
  *
  * Ordered by `created_at` and then `id`, the same order the ticket's timeline
  * uses (`lib/tickets/conversation.ts`), so on a tie the card names the message

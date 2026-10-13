@@ -455,10 +455,18 @@ function echoRow(
  * A reaction, from the customer or from our side of the chat: stored, and
  * nothing else.
  *
- * Stored as the row its message or echo would have been, because the console
- * reads the reaction back off it, and the conversation it is filed on is not
- * otherwise touched. The decisions are the ones `applyMetaInteraction` makes
- * for a Facebook or Instagram reaction, for the same reasons:
+ * Stored as the row its message or echo would have been — `meta.whatsappType`
+ * and the whole delivery in `raw_body`, naming the reacted-to message as
+ * `reaction.message_id` — so that the timeline can pair it with that message
+ * from rows it already reads, with no backfill. The conversation it is filed on
+ * is not otherwise touched.
+ *
+ * The first two decisions are the ones `applyMetaInteraction` makes for a
+ * Facebook or Instagram reaction, for the same reasons. The third is this
+ * path's own, and so is keeping a row at all: that function writes no row and
+ * files only on a live conversation. Here the row is what lets the timeline
+ * pair the reaction with its message, and a row on a closed ticket changes
+ * nothing about it.
  *
  * **It moves no clock.** Not `last_customer_message_at`, which is the 24-hour
  * window and the next-response target — a customer answering our reply with 🙏
@@ -480,9 +488,9 @@ function echoRow(
  * **It goes on the person's newest conversation, closed or not.** A reaction is
  * nearly always to something recent, which is on that ticket, and filing it there
  * changes nothing about it — the reason a message does not continue a closed
- * ticket is that it would reopen it. The console draws it on the message it
- * names when that message is on the ticket, and as a line of its own when it is
- * not.
+ * ticket is that it would reopen it. When the message it names is on an older
+ * ticket, the reaction lands on this one with nothing here to pair it with,
+ * which is the cheap way to be wrong about something rare.
  *
  * Processed in no order like everything else, so a reaction handled before the
  * message that opens the person's first conversation finds nothing and is not

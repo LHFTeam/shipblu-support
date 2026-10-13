@@ -3,8 +3,9 @@
  * photo — rather than something anybody said.
  *
  * A reaction is kept as a row of its own, `kind: 'reply'` like the message it
- * arrived as, because the console draws it on the message it names; and it is
- * told apart by the type WhatsApp gave it, which ingest keeps on `meta`. So
+ * arrived as, because the timeline reads it from the row — and can pair it with
+ * the message it names, which `raw_body` records; and it is told apart by the
+ * type WhatsApp gave it, which ingest keeps on `meta`. So
  * anything that picks "the latest message" or "what the customer last said" —
  * the inbox preview, the canned suggestion's anchor, the language a reply is
  * written in — asks this first, or a thumbs-up is the customer's last words.

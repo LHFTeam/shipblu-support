@@ -665,9 +665,11 @@ depends on it.
 the person's newest conversation, closed or not, and changes nothing else — no
 clock, `last_message_at` included, no reopen, no ticket of its own, nothing
 downstream of a message — for the reasons `applyMetaInteraction` gives for a
-Facebook or Instagram reaction. The row stays a `kind: 'reply'` because the
-console reads the reaction back off it, so anything that picks "the latest
-message" or "what the customer last said" leaves reactions out: `notReaction()`
+Facebook or Instagram reaction, though unlike that path it keeps a row. The
+row stays a `kind: 'reply'`, with the delivery in `raw_body` naming the
+message it is about, so the timeline can pair the two; and so anything that
+picks "the latest message" or "what the customer last said" for what it says
+leaves reactions out: `notReaction()`
 in a query (`lib/tickets/not-reaction.ts`), `isReaction(meta)` over rows already
 in hand (`lib/whatsapp/reaction.ts`). A new reader that forgets shows a 👍 as the
 customer's last words — it was the inbox preview, the canned suggestion's anchor

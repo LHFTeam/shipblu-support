@@ -1672,13 +1672,14 @@ expires_at, inspected_at` — never `envelope`, and a null `expires_at` means
   newest thing the team had "said" on their ticket; and 71 of the 1,098 on the
   bot's number were the first row of the transcript they opened.
   `parseWebhook` now files reactions in a list of their own, as the Meta parser
-  files interactions, and `ingestWhatsAppReaction` stores the row — the console
-  reads the reaction back off it — on the person's newest conversation, closed
-  or not, and changes nothing on it: no clock, `last_message_at` included, no
-  status, no SLA, automation, assignment, out-of-hours reply, categorisation or
-  priority classification. With no conversation to put it on it is not stored, and no
-  contact is made. Every reader that picks "the latest message" or "the
-  customer's last words" leaves reaction rows out through `isReaction` /
+  files interactions, and `ingestWhatsAppReaction` stores the row — kept whole,
+  so the timeline can pair it with the message it names — on the person's
+  newest conversation, closed or not, and changes nothing on it: no clock,
+  `last_message_at` included, no status, no SLA, automation, assignment,
+  out-of-hours reply, categorisation or priority classification. With no
+  conversation to put it on it is not stored, and no contact is made. The
+  readers that use "the latest message" or "the customer's last words" for what
+  it says leave reaction rows out through `isReaction` /
   `notReaction` (`lib/whatsapp/reaction.ts`, `lib/tickets/not-reaction.ts`), so
   a 👍 is never the inbox preview or its arrow, the canned suggestion's anchor,
   the language an automated reply is written in, the number it is sent from,

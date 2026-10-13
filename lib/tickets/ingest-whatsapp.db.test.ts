@@ -84,8 +84,8 @@ function echo(overrides: Partial<NormalisedEcho> = {}): NormalisedEcho {
 
 /**
  * A customer's reaction to `wamid.first`, as `parseWebhook` hands it over —
- * the delivery's own shape in `raw`, which is what the console reads the
- * reacted-to message back off. No emoji is the customer taking theirs back.
+ * the delivery's own shape in `raw`, which is where the reacted-to message is
+ * named. No emoji is the customer taking theirs back.
  */
 function customerReaction(
   emoji: string | null,
@@ -574,7 +574,7 @@ describe('ingestWhatsAppReaction', () => {
       firstResponseDueAt: expect.any(Date),
     });
 
-    // Stored as the message it arrived as, so the console can draw it on the
+    // Stored as the message it arrived as, so the timeline can pair it with the
     // message it names.
     const [, row] = await messagesOf(asked.conversationId);
     expect(row).toMatchObject({
