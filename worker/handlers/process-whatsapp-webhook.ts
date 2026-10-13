@@ -114,12 +114,16 @@ export async function processWhatsAppWebhook(event: {
     try {
       const result = await ingestWhatsAppReaction(reaction);
       if (result.skipped === 'not_mirrored') continue;
+      if (result.skipped === 'no_conversation') {
+        log.info(`reaction ${wamid} not stored: no conversation to file it on`);
+        continue;
+      }
+      // Counted only when it is on a ticket, so the summary below says what
+      // was filed rather than what arrived.
       reacted += 1;
       log.info(
-        result.skipped === 'no_conversation'
-          ? `reaction ${wamid} not stored: no conversation to file it on`
-          : `reaction ${wamid} → #${result.conversationNumber} ` +
-              `(${result.duplicate ? 'duplicate' : 'appended'})`,
+        `reaction ${wamid} → #${result.conversationNumber} ` +
+          `(${result.duplicate ? 'duplicate' : 'appended'})`,
       );
     } catch (error) {
       failures.push(`reaction ${wamid}: ${errorMessage(error)}`);

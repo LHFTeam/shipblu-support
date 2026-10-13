@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '@/db/client';
 import { channels, conversations, messages } from '@/db/schema';
 import { enqueue } from '@/lib/queue';
@@ -11,6 +11,7 @@ import {
   type WhatsAppAccount,
 } from '@/lib/whatsapp/accounts';
 import { parseCoexistence } from '@/lib/whatsapp/coexistence';
+import { lastInboundPhoneNumberId } from '@/lib/whatsapp/conversation';
 import { ACCESS_TOKEN_CODE, explainDeliveryError, type TokenOrigin } from '@/lib/whatsapp/errors';
 import type {
   NormalisedEcho,
@@ -22,8 +23,7 @@ import { windowState } from '@/lib/whatsapp/window';
 import { isReadOnlyChannel } from './channel-policy';
 import { findContactByIdentity, resolveContact } from './contacts';
 import { latest } from './latest';
-import { notReaction } from './not-reaction';
-import { findLatestConversation, findLiveConversation } from './live-conversation';
+import { findLiveConversation, findNewestConversation } from './live-conversation';
 import { reopenResolved } from './reopen';
 import { requireDefaultOpenStatusId, requireResolvedStatusId } from './statuses';
 
@@ -335,7 +335,7 @@ export async function ingestWhatsAppEcho(echo: NormalisedEcho): Promise<WhatsApp
 
     const insertedMessage = await tx
       .insert(messages)
-      .values(echoRow(conversationId, echo, sender))
+      .values(echoRow(conversationId, echo, fromBusinessApp))
       .returning({ id: messages.id });
 
     // lastCustomerMessageAt is deliberately untouched: neither the bot nor the
@@ -405,7 +405,7 @@ function echoSender(channel: ResolvedChannel): 'bot' | 'business_app' | null {
 function echoRow(
   conversationId: string,
   echo: NormalisedEcho,
-  sender: 'bot' | 'business_app',
+  fromBusinessApp: boolean,
 ): typeof messages.$inferInsert {
   return {
     conversationId,
@@ -430,7 +430,7 @@ function echoRow(
       echo: true,
       // Who sent it, for the timeline's label: the bot's echoes predate
       // this field and are read as the bot when it is absent.
-      ...(sender === 'business_app' ? { echoSource: 'business_app' } : {}),
+      ...(fromBusinessApp ? { echoSource: 'business_app' } : {}),
       ...(echo.creationType ? { creationType: echo.creationType } : {}),
       ...(echo.media
         ? {
@@ -481,9 +481,9 @@ function echoRow(
  * and nothing downstream of a message runs — no SLA, automation, assignment,
  * out-of-hours reply, categorisation, priority classification or shipment
  * linking, none of which has anything to read in a 👍. With no conversation to
- * file it on — the person has never written on this number, or only in a copied
- * history — it is not stored at all, and no contact is made for it: a ticket
- * whose only content is a reaction is one nobody can answer.
+ * file it on — the person has no conversation on this channel, or the newest
+ * one is a copied history — it is not stored at all, and no contact is made
+ * for it: a ticket whose only content is a reaction is one nobody can answer.
  *
  * **It goes on the person's newest conversation, closed or not.** A reaction is
  * nearly always to something recent, which is on that ticket, and filing it there
@@ -503,7 +503,8 @@ export type WhatsAppReactionResult = {
   duplicate: boolean;
   /**
    * Why nothing was stored: an echo from a number whose echoes are our own
-   * sends, or nobody with a conversation on this number to file it under.
+   * sends, or nowhere to file it — no conversation on the channel, or a copied
+   * history newest of all.
    */
   skipped: 'not_mirrored' | 'no_conversation' | null;
 };
@@ -512,22 +513,12 @@ export async function ingestWhatsAppReaction(
   reaction: NormalisedReaction,
 ): Promise<WhatsAppReactionResult> {
   const { wamid, phoneNumberId } = reaction.side === 'customer' ? reaction.message : reaction.echo;
+  const customer = reaction.side === 'customer' ? reaction.message.from : reaction.echo.to;
   const channel = await resolveWhatsAppChannel(phoneNumberId);
 
-  let rowOn: (conversationId: string, contactId: string) => typeof messages.$inferInsert;
-  let customer: string;
-  if (reaction.side === 'customer') {
-    const { message } = reaction;
-    rowOn = (conversationId, contactId) => inboundRow(conversationId, contactId, message);
-    customer = message.from;
-  } else {
-    const { echo } = reaction;
-    // Mirrored on the numbers the business's messages are, and on no other.
-    const sender = echoSender(channel);
-    if (!sender) return skipped('not_mirrored');
-    rowOn = (conversationId) => echoRow(conversationId, echo, sender);
-    customer = echo.to;
-  }
+  // Mirrored on the numbers the business's messages are, and on no other.
+  const sender = reaction.side === 'business' ? echoSender(channel) : null;
+  if (reaction.side === 'business' && !sender) return skipped('not_mirrored');
 
   const seen = await storedMessage(wamid);
   if (seen) return { ...seen, duplicate: true, skipped: null };
@@ -537,12 +528,19 @@ export async function ingestWhatsAppReaction(
   const contactId = await findContactByIdentity('whatsapp', customer);
   if (!contactId) return skipped('no_conversation');
 
-  const conversation = await findLatestConversation(contactId, channel.kind);
-  if (!conversation) return skipped('no_conversation');
+  // A copied history newest of all is what the reaction is most likely about,
+  // and a live row does not join a record — so it is not filed on the native
+  // ticket before it either, which may be closed and months old.
+  const conversation = await findNewestConversation(contactId, channel.kind);
+  if (!conversation || conversation.imported) return skipped('no_conversation');
 
   const [row] = await db
     .insert(messages)
-    .values(rowOn(conversation.id, contactId))
+    .values(
+      reaction.side === 'customer'
+        ? inboundRow(conversation.id, contactId, reaction.message)
+        : echoRow(conversation.id, reaction.echo, sender === 'business_app'),
+    )
     .returning({ id: messages.id });
 
   return {
@@ -664,26 +662,11 @@ async function explainFailure(
   const code = Number(status.error.split(':')[0]);
   const sentFrom = (message.meta as { phoneNumberId?: unknown }).phoneNumberId;
 
-  // The number the customer last wrote on, as `sendingNumberFor` reads it, so
-  // the explanation compares the send with the number it was meant to use.
-  const inbound = await db
-    .select({ meta: messages.meta })
-    .from(messages)
-    .where(
-      and(
-        eq(messages.conversationId, message.conversationId),
-        eq(messages.direction, 'inbound'),
-        notReaction(),
-      ),
-    )
-    .orderBy(desc(messages.createdAt))
-    .limit(1);
-
-  const arrivedOn = (inbound[0]?.meta as { phoneNumberId?: unknown } | undefined)?.phoneNumberId;
+  const arrivedOn = await lastInboundPhoneNumberId(message.conversationId);
 
   return explainDeliveryError(Number.isFinite(code) ? code : null, status.error, {
     windowOpen: windowState(message.lastCustomerMessageAt, status.at).isOpen,
-    inboundPhoneNumberId: typeof arrivedOn === 'string' ? arrivedOn : null,
+    inboundPhoneNumberId: arrivedOn,
     sentFromPhoneNumberId: typeof sentFrom === 'string' ? sentFrom : null,
     // Only a 190 names a credential, so only a 190 pays to find out which.
     credential: code === ACCESS_TOKEN_CODE ? await sendingCredential(message.meta) : null,

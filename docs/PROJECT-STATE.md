@@ -1677,7 +1677,9 @@ expires_at, inspected_at` — never `envelope`, and a null `expires_at` means
   newest conversation, closed or not, and changes nothing on it: no clock,
   `last_message_at` included, no status, no SLA, automation, assignment,
   out-of-hours reply, categorisation or priority classification. With no
-  conversation to put it on it is not stored, and no contact is made. The
+  conversation to put it on — or when the newest is a copied phone history,
+  whose native ticket before it may be closed and months old — it is not
+  stored, and no contact is made. The
   readers that use "the latest message" or "the customer's last words" for what
   it says leave reaction rows out through `isReaction` /
   `notReaction` (`lib/whatsapp/reaction.ts`, `lib/tickets/not-reaction.ts`), so

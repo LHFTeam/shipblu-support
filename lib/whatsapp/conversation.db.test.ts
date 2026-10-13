@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { db } from '@/db/client';
 import { contacts, conversations, messages, ticketStatuses } from '@/db/schema';
 import { withCleanDatabase } from '@/lib/testing/db';
-import { sendingNumberFor } from './conversation';
+import { lastInboundPhoneNumberId, sendingNumberFor } from './conversation';
 
 /**
  * The number a reply goes out from is the one the customer last wrote on —
@@ -51,6 +51,21 @@ describe('sendingNumberFor', () => {
     ]);
 
     expect(await sendingNumberFor(id, null)).toBe(NUMBER_A);
+  });
+
+  // The same lookup explains a failed send (`applyWhatsAppStatus`), so the two
+  // cannot disagree about which number the customer wrote to.
+  it('is the number a failed send is compared against, and says nothing without one', async () => {
+    const id = await chat();
+    expect(await lastInboundPhoneNumberId(id)).toBeNull();
+
+    await db.insert(messages).values({
+      conversationId: id,
+      direction: 'inbound',
+      bodyText: '[reacted 👍]',
+      meta: { whatsappType: 'reaction', phoneNumberId: NUMBER_B },
+    });
+    expect(await lastInboundPhoneNumberId(id)).toBeNull();
   });
 
   it('still reads a number off a row that is not a WhatsApp message at all', async () => {

@@ -52,23 +52,6 @@ export async function findLiveConversation(
   contactId: string,
   channel: PersonThreadedChannel,
 ): Promise<LiveConversation | null> {
-  const row = await findLatestConversation(contactId, channel);
-  if (!row || row.statusCategory === 'closed') return null;
-  return row;
-}
-
-/**
- * The contact's newest conversation on the channel, closed or not: the one
- * `findLiveConversation` reads before deciding whether it may be continued.
- *
- * For something that belongs on the customer's thread without continuing it —
- * a WhatsApp reaction, which changes nothing about the ticket it is filed on, so
- * a closed one is as good a home as any (`ingestWhatsAppReaction`).
- */
-export async function findLatestConversation(
-  contactId: string,
-  channel: PersonThreadedChannel,
-): Promise<LiveConversation | null> {
   const rows = await db
     .select({
       id: conversations.id,
@@ -82,5 +65,43 @@ export async function findLatestConversation(
     .orderBy(desc(conversations.lastMessageAt))
     .limit(1);
 
-  return rows[0] ?? null;
+  const row = rows[0];
+  if (!row || row.statusCategory === 'closed') return null;
+  return row;
+}
+
+/**
+ * The contact's newest conversation on the channel, whatever its status, and
+ * the copied histories included — so a caller can tell when the newest thing
+ * the person has with us is a record rather than a ticket.
+ *
+ * For a WhatsApp reaction, which belongs on the customer's thread without
+ * continuing it (`ingestWhatsAppReaction`). The import is the half that matters:
+ * left out, a coexistence customer reacting to a message from their copied
+ * phone history would have the reaction filed on whatever native ticket came
+ * before it — closed, and possibly months old.
+ */
+export async function findNewestConversation(
+  contactId: string,
+  channel: PersonThreadedChannel,
+): Promise<{ id: string; number: number; imported: boolean } | null> {
+  const [row] = await db
+    .select({
+      id: conversations.id,
+      number: conversations.number,
+      sourceSystem: conversations.sourceSystem,
+    })
+    .from(conversations)
+    .where(
+      and(
+        eq(conversations.requesterContactId, contactId),
+        eq(conversations.channel, channel),
+        isNull(conversations.deletedAt),
+        isNull(conversations.mergedIntoId),
+      ),
+    )
+    .orderBy(desc(conversations.lastMessageAt))
+    .limit(1);
+
+  return row ? { id: row.id, number: row.number, imported: row.sourceSystem === 'import' } : null;
 }

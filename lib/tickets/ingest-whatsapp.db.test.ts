@@ -1141,6 +1141,64 @@ describe('ingestWhatsAppEcho on a number connected through coexistence', () => {
       });
     });
 
+    // A coexistence customer's newest thread with us is often the copied phone
+    // history, and a reaction to it must not land on whatever native ticket came
+    // before — closed, and possibly months old.
+    it('files nothing when the newest conversation is a copied history', async () => {
+      await coexistenceChannel();
+      const old = await ingestWhatsAppMessage(
+        inbound({ phoneNumberId: COEX_NUMBER, sentAt: EARLIER }),
+      );
+      await setStatus(old.conversationId, 'Closed');
+      await ingestWhatsAppHistoryChunk(
+        {
+          phoneNumberId: COEX_NUMBER,
+          phase: 0,
+          chunkOrder: 1,
+          progress: 100,
+          declined: null,
+          messages: [
+            {
+              wamid: 'wamid.history-1',
+              customer: CUSTOMER,
+              direction: 'outbound',
+              sentAt: SENT,
+              type: 'text',
+              text: 'Your parcel is out for delivery.',
+              mediaPlaceholder: false,
+              location: null,
+              replyToWamid: null,
+              phoneStatus: null,
+              raw: { id: 'wamid.history-1', to: CUSTOMER },
+            },
+          ],
+        },
+        SENT,
+      );
+
+      expect(
+        await ingestWhatsAppReaction(
+          customerReaction('👍', { phoneNumberId: COEX_NUMBER, sentAt: at('10:30') }),
+        ),
+      ).toMatchObject({ skipped: 'no_conversation' });
+      expect(await messagesOf(old.conversationId)).toHaveLength(1);
+
+      // Once they write, the new ticket is the newest, and the next one lands there.
+      const next = await ingestWhatsAppMessage(
+        inbound({ wamid: 'wamid.second', phoneNumberId: COEX_NUMBER, sentAt: at('12:00') }),
+      );
+      expect(next).toMatchObject({ createdConversation: true });
+      expect(
+        await ingestWhatsAppReaction(
+          customerReaction('👍', {
+            wamid: 'wamid.reaction-2',
+            phoneNumberId: COEX_NUMBER,
+            sentAt: at('12:05'),
+          }),
+        ),
+      ).toMatchObject({ conversationId: next.conversationId, skipped: null });
+    });
+
     it('opens no conversation for the business’s reaction, beside an import or not', async () => {
       await coexistenceChannel();
       expect(await ingestWhatsAppReaction(phoneReaction('👍', '09:10'))).toMatchObject({

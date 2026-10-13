@@ -15,6 +15,7 @@ import { recordCannedUse } from '@/lib/tickets/canned-usage';
 import { recordSuggestionOutcome } from '@/lib/canned-suggest/outcome';
 import { isLocale } from '@/lib/kb/locale';
 import { storeAgentReply } from '@/lib/tickets/agent-reply';
+import { notReaction } from '@/lib/tickets/not-reaction';
 import {
   buildTemplateComponents,
   renderTemplatePreview,
@@ -341,12 +342,21 @@ export async function sendTemplateReply(
   return ok();
 }
 
-/** The parent for threading: the customer's most recent message. */
+/**
+ * The parent for threading: the customer's most recent message — not a
+ * reaction, or the reply would be recorded as answering a thumbs-up.
+ */
 async function lastInboundChannelMessageId(conversationId: string): Promise<string | null> {
   const rows = await db
     .select({ channelMessageId: messages.channelMessageId })
     .from(messages)
-    .where(and(eq(messages.conversationId, conversationId), eq(messages.direction, 'inbound')))
+    .where(
+      and(
+        eq(messages.conversationId, conversationId),
+        eq(messages.direction, 'inbound'),
+        notReaction(),
+      ),
+    )
     .orderBy(desc(messages.createdAt))
     .limit(1);
 
