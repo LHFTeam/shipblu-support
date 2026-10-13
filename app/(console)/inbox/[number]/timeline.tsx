@@ -2,8 +2,9 @@
 
 import type { ReactNode } from 'react';
 import { AgentAvatar, Avatar } from '@/components/avatar';
-import { ChatBubble, ChatEvent } from '@/components/chat';
+import { ChatBubble, ChatEvent, ChatReaction } from '@/components/chat';
 import { BotIcon, ExternalIcon, PinIcon, UserIcon, WarningIcon } from '@/components/icons';
+import { Tooltip } from '@/components/tooltip';
 import { Badge } from '@/components/ui';
 import { runPositions } from '@/lib/chat/runs';
 import { formatDay, formatTime } from '@/lib/format';
@@ -77,8 +78,14 @@ export function Timeline({
   const readOnly = Boolean(readOnlyReason(conversation.channel));
   const items: ReactNode[] = [];
   let day: string | null = null;
+  const byId = new Map(conversation.messages.map((message) => [message.id, message]));
 
   for (const entry of timelineEntries(conversation)) {
+    // A reaction is drawn on the message it is about, so its own row draws
+    // nothing — and is skipped before the day break, which would otherwise
+    // announce a day with nothing in it when the reaction came the next morning.
+    if (entry.kind === 'message' && entry.message.reaction?.targetId) continue;
+
     // A day break above the first entry of each Cairo day, before a side card
     // as well as a message — `formatDay` says why the zone is the team's.
     const label = formatDay(entry.at);
@@ -119,6 +126,11 @@ export function Timeline({
       continue;
     }
 
+    if (message.reaction) {
+      items.push(<UnplacedReaction key={message.id} message={message} at={entry.at} />);
+      continue;
+    }
+
     items.push(
       <MessageParts
         key={message.id}
@@ -126,6 +138,11 @@ export function Timeline({
         at={entry.at}
         canModerate={canModerateComments && !readOnly}
         canViewContact={canViewContact}
+        reactions={
+          message.reactions.length > 0 ? (
+            <Reactions message={message} at={entry.at} byId={byId} />
+          ) : undefined
+        }
       />,
     );
   }
@@ -214,11 +231,14 @@ function MessageParts({
   at,
   canModerate,
   canViewContact,
+  reactions,
 }: {
   message: Message;
   at: Date;
   canModerate: boolean;
   canViewContact: boolean;
+  /** On the last part: a reaction answers the message, not its caption or its photo. */
+  reactions?: ReactNode;
 }) {
   const meta = (message.meta ?? {}) as MessageMeta;
   const voice = voiceOf(message, meta);
@@ -298,6 +318,7 @@ function MessageParts({
         avatar={<AuthorTile voice={voice} message={message} canViewContact={canViewContact} />}
         time={<Time at={at} />}
         receipt={delivery?.receipt}
+        reactions={last ? reactions : undefined}
         error={last ? delivery?.error : undefined}
         extra={last ? extra : undefined}
       >
@@ -314,6 +335,81 @@ function MessageParts({
       </ChatBubble>
     );
   });
+}
+
+/**
+ * What a message carries now, as pills on its bubble.
+ *
+ * Who reacted, and when, is a tap away rather than on the pill: the pill is
+ * the size of the emoji, and the side it is drawn in (`mine` is the team's) is
+ * the one thing an agent needs at a glance. The day is added only when it is
+ * not the message's own, because "reacted · 09:12" under a message sent at
+ * 18:40 reads as a clock running backwards.
+ */
+function Reactions({
+  message,
+  at,
+  byId,
+}: {
+  message: Message;
+  at: Date;
+  byId: ReadonlyMap<string, Message>;
+}) {
+  return message.reactions.map(({ messageId, emoji }) => {
+    const source = byId.get(messageId);
+    if (!source) return null;
+
+    const voice = voiceOf(source, (source.meta ?? {}) as MessageMeta);
+    const reactedAt = new Date(source.createdAt);
+    const sameDay = formatDay(reactedAt) === formatDay(at);
+
+    return (
+      <Tooltip
+        key={messageId}
+        label={`${voice.author} reacted with ${emoji}`}
+        content={
+          <>
+            <bdi>{voice.author}</bdi> reacted
+            {' · '}
+            {sameDay ? null : `${formatDay(reactedAt)}, `}
+            <Time at={reactedAt} />
+          </>
+        }
+      >
+        <ChatReaction emoji={emoji} mine={voice.from === 'out'} />
+      </Tooltip>
+    );
+  });
+}
+
+/**
+ * A reaction with nothing on this ticket to be drawn on: the customer bot's
+ * own messages are never stored, and a customer can react to a message from an
+ * earlier ticket. A line across the thread rather than a bubble, because
+ * nobody said anything — and it says the message is elsewhere, where the bubble
+ * it replaces read `[reacted 👍]` as if that were the customer's words.
+ */
+function UnplacedReaction({ message, at }: { message: Message; at: Date }) {
+  const voice = voiceOf(message, (message.meta ?? {}) as MessageMeta);
+  const emoji = message.reaction?.emoji;
+
+  return (
+    <ChatEvent>
+      <span>
+        <bdi>{voice.author}</bdi>{' '}
+        {emoji ? (
+          <>
+            reacted <span className="font-emoji">{emoji}</span> to a message that isn’t on this
+            ticket
+          </>
+        ) : (
+          'took back a reaction to a message that isn’t on this ticket'
+        )}
+        {' · '}
+        <Time at={at} />
+      </span>
+    </ChatEvent>
+  );
 }
 
 function MessageBody({

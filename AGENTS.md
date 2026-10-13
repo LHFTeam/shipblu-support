@@ -702,6 +702,14 @@ both mean "reconnect"). And `saveChannel` carries `coexistence` and the stored
 which is how a rename used to wipe the connection while the number kept
 routing.
 
+The same message can reach us under two wamids — the business app's echo of a
+reply names it from one chat, a customer's reaction to that reply from another
+— so two WhatsApp messages are compared through `wamidKey()`
+(`lib/whatsapp/wamid.ts`), never as strings (`docs/PROJECT-STATE.md` §6.94).
+A reaction is a stored message row and stays one; the console draws it on the
+message it names (`lib/tickets/reactions.ts`), and as a line of its own only
+when that message is not on the ticket.
+
 **Explaining a control.** A label short enough to fit a dense table is rarely
 long enough to explain itself. `InfoTip` from `components/tooltip.tsx` is the
 console's answer — an ⓘ that opens on hover, focus _and_ tap, portalled to

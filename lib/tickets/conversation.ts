@@ -20,6 +20,7 @@ import { metaThreadStateFromMessage, type MetaThreadState } from '@/lib/meta/thr
 import type { CustomFieldValues } from './custom-fields';
 import { threadControlTakenAt } from './meta-thread';
 import { hiddenChannels } from './channel-policy';
+import { foldReactions, type ShownReaction, storedReaction } from './reactions';
 import {
   shipmentsForConversation,
   shippingAccountsForConversation,
@@ -56,6 +57,14 @@ export type TimelineMessage = {
   createdAt: Date;
   meta: Record<string, unknown>;
   attachments: { id: string; filename: string; contentType: string; sizeBytes: number }[];
+  /**
+   * Set when this row is a reaction rather than something anybody said — the
+   * emoji, empty when the reactor took theirs back, and the message it is
+   * about, null when that message is not on this ticket. `lib/tickets/reactions.ts`.
+   */
+  reaction: { emoji: string; targetId: string | null } | null;
+  /** The reactions this message carries now, each naming the row it came from. */
+  reactions: ShownReaction[];
 };
 
 export type ConversationDetail = {
@@ -279,6 +288,30 @@ export async function getConversation(
       threadControlTakenAt(row.conversation.id),
     ]);
 
+  // Paired here rather than in the browser: the target is only named in the
+  // stored delivery, and `raw_body` is not something to ship to the client for
+  // every message of a long ticket.
+  const reactionOf = new Map(
+    timeline.map((entry) => [
+      entry.message.id,
+      storedReaction(entry.message.meta, entry.message.rawBody),
+    ]),
+  );
+  const reactions = foldReactions(
+    timeline.map((entry) => ({
+      id: entry.message.id,
+      direction: entry.message.direction,
+      authorContactId: entry.message.authorContactId,
+      channelMessageId: entry.message.channelMessageId,
+      reaction: reactionOf.get(entry.message.id) ?? null,
+    })),
+  );
+
+  const reactionFor = (id: string): TimelineMessage['reaction'] => {
+    const stored = reactionOf.get(id);
+    return stored ? { emoji: stored.emoji, targetId: reactions.targets.get(id) ?? null } : null;
+  };
+
   const filesByMessage = new Map<string, ConversationDetail['messages'][number]['attachments']>();
   for (const file of files) {
     // `messageId` is nullable since attachments also hang off side conversation
@@ -383,6 +416,8 @@ export async function getConversation(
       createdAt: entry.message.createdAt,
       meta: entry.message.meta,
       attachments: filesByMessage.get(entry.message.id) ?? [],
+      reaction: reactionFor(entry.message.id),
+      reactions: reactions.shown.get(entry.message.id) ?? [],
     })),
     events: events.map((event) => ({
       id: event.id,

@@ -14,8 +14,7 @@ import { AlertCircleIcon, BotIcon, CheckDoubleIcon, CheckIcon, ClockIcon, LockIc
  *
  * No `'use client'`, and nothing here may need one: the portal and the console
  * render threads on the server, and a hook here would turn every message of a
- * long ticket into client JavaScript. The design system's reactions are left
- * out for the same reason as well as a better one — nothing records them yet.
+ * long ticket into client JavaScript.
  *
  * Render inside `<ol className="flex flex-col">` with no gap. Spacing comes
  * from the bubbles themselves, because it depends on who is next to whom: 14px
@@ -52,6 +51,13 @@ export type ChatBubbleProps = {
   receipt?: 'sending' | 'sent' | 'delivered' | 'read';
   /** The receipt's word in the reader's language, where it is not English. */
   receiptLabel?: ReactNode;
+  /**
+   * `ChatReaction`s, pinned to the bubble's bottom edge on the side away from
+   * the sender. On the bubble rather than under it, because a reaction is an
+   * answer to this message and nothing else: a line below reads as one more
+   * thing said, and lands beside whatever is drawn next.
+   */
+  reactions?: ReactNode;
   /** A delivery failure, in danger text under the bubble. Line breaks are kept. */
   error?: ReactNode;
   /**
@@ -131,6 +137,7 @@ export function ChatBubble({
   time,
   receipt,
   receiptLabel,
+  reactions,
   error,
   extra,
   lang,
@@ -148,6 +155,14 @@ export function ChatBubble({
       : `${BUBBLE_BOX} ${
           kind === 'note' ? BUBBLE_TONE.note : kind === 'bot' ? BUBBLE_TONE.bot : BUBBLE_TONE[from]
         } ${shape === 'tail' ? TAIL[from][group] : ''}`;
+
+  const body = (
+    <div className={bubble}>
+      <div dir="auto" lang={lang} className="text-start font-conversation">
+        {children}
+      </div>
+    </div>
+  );
 
   return (
     <li
@@ -177,11 +192,25 @@ export function ChatBubble({
           </div>
         ) : null}
 
-        <div className={bubble}>
-          <div dir="auto" lang={lang} className="text-start font-conversation">
-            {children}
+        {/*
+          The reactions overlap the bubble's foot by half their height,
+          so they read as attached to it, and sit on the side away from the
+          sender: that corner is never the tail, and on a short bubble the
+          avatar's side is where the eye already is. Wrapped so `self-*` is
+          measured against the bubble, not against a wider error or receipt.
+        */}
+        {reactions ? (
+          <div className={`flex max-w-full min-w-0 flex-col ${out ? 'items-end' : 'items-start'}`}>
+            {body}
+            <div
+              className={`relative -mt-3 flex flex-wrap gap-1 px-2.5 ${out ? 'self-start' : 'self-end'}`}
+            >
+              {reactions}
+            </div>
           </div>
-        </div>
+        ) : (
+          body
+        )}
 
         {error ? (
           <p className="flex items-start gap-1 px-1 text-start text-xs text-(--color-feedback-danger-fg)">
@@ -209,6 +238,33 @@ export function ChatBubble({
         ) : null}
       </div>
     </li>
+  );
+}
+
+/**
+ * One reaction, as the pill `ChatBubble` pins to a message.
+ *
+ * `mine` is the viewer's side — the team's in the console — in the design
+ * system's blue wash, so an agent can tell the customer's 🙏 from the one the
+ * business sent back from its phone. Colour is not the only signal, so the
+ * pill names nobody itself: the caller says who reacted, and when, to a screen
+ * reader and a gesture away — the console wraps it in a `Tooltip` whose label
+ * is that sentence.
+ *
+ * The emoji is the customer's content, not an icon, so it is drawn in the
+ * platform's emoji face rather than replaced by one of ours.
+ */
+export function ChatReaction({ emoji, mine = false }: { emoji: string; mine?: boolean }) {
+  return (
+    <span
+      className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full border px-1.5 font-emoji text-sm leading-none ${
+        mine
+          ? 'border-(--color-reaction-mine-border) bg-(--color-reaction-mine-bg) text-(--color-reaction-mine-fg)'
+          : 'border-(--color-reaction-border) bg-(--color-reaction-bg) text-(--color-reaction-fg)'
+      }`}
+    >
+      {emoji}
+    </span>
   );
 }
 
