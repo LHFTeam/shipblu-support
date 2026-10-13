@@ -151,6 +151,15 @@ export function Timeline({
 }
 
 /*
+  The glyph each of our non-person voices is drawn with — on its tile beside a
+  run, and on a reaction pill it sent — so the two cannot drift apart. A
+  contact or an agent is drawn as their own avatar, and has no entry.
+*/
+const VOICE_GLYPH = { bot: BotIcon, 'business-app': UserIcon } as const;
+const BotGlyph = VOICE_GLYPH.bot;
+const BusinessAppGlyph = VOICE_GLYPH['business-app'];
+
+/*
   The face beside a run: the writer's own, never the requester's. An inbound
   message on an email ticket can be a CC'd stranger, and the requester's photo
   on their words would be a claim about who wrote them — so the contact is the
@@ -197,7 +206,7 @@ function AuthorTile({
           aria-hidden
           className="inline-flex size-7 shrink-0 items-center justify-center rounded-full border border-dashed border-(--color-border-strong) bg-(--color-background-hover) text-(--color-text-secondary)"
         >
-          <BotIcon size={16} />
+          <BotGlyph size={16} />
         </span>
       );
     case 'business-app':
@@ -208,7 +217,7 @@ function AuthorTile({
           aria-hidden
           className="inline-flex size-7 shrink-0 items-center justify-center rounded-full border border-(--color-border-default) bg-(--color-background-hover) text-(--color-text-secondary)"
         >
-          <UserIcon size={16} />
+          <BusinessAppGlyph size={16} />
         </span>
       );
   }
@@ -363,6 +372,12 @@ function Reactions({
     if (!source) return null;
 
     const voice = voiceOf(source, (source.meta ?? {}) as MessageMeta);
+    // Only our side's machine and phone have a glyph; an agent is a person with
+    // an avatar of their own, and nothing in the console reacts on one's behalf.
+    const Glyph =
+      voice.from === 'out' && (voice.avatar === 'bot' || voice.avatar === 'business-app')
+        ? VOICE_GLYPH[voice.avatar]
+        : null;
     const reactedAt = new Date(source.createdAt);
     const sameDay = formatDay(reactedAt) === formatDay(at);
 
@@ -382,13 +397,7 @@ function Reactions({
         <ChatReaction
           emoji={emoji}
           mine={voice.from === 'out'}
-          glyph={
-            voice.from !== 'out' ? undefined : voice.avatar === 'bot' ? (
-              <BotIcon size={12} className="shrink-0" />
-            ) : (
-              <UserIcon size={12} className="shrink-0" />
-            )
-          }
+          glyph={Glyph ? <Glyph size={12} className="shrink-0" /> : undefined}
         />
       </Tooltip>
     );
@@ -415,8 +424,12 @@ function UnplacedReaction({ message, at }: { message: Message; at: Date }) {
             reacted <span className="font-emoji">{emoji}</span> to a message that isn’t on this
             ticket
           </>
-        ) : (
+        ) : emoji === '' ? (
           'took back a reaction to a message that isn’t on this ticket'
+        ) : (
+          // Tagged as a reaction, but its stored payload could not be read: say
+          // that much rather than guess at the emoji or the message.
+          'reacted to a message, but the reaction could not be read'
         )}
         {' · '}
         <Time at={at} />

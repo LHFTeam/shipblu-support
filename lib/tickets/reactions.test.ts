@@ -32,13 +32,13 @@ describe('foldReactions', () => {
       react('r1', REPLY_BY_PHONE, '🙏'),
     ]);
 
-    expect(fold.targets.get('r1')).toBe('reply');
+    expect(fold.rows.get('r1')?.targetId).toBe('reply');
     expect(fold.shown.get('reply')).toEqual([{ messageId: 'r1', emoji: '🙏' }]);
   });
 
   it('matches a wamid named the same way exactly', () => {
     const fold = foldReactions([row('m'), react('r1', 'wamid.m', '👍')]);
-    expect(fold.targets.get('r1')).toBe('m');
+    expect(fold.rows.get('r1')?.targetId).toBe('m');
   });
 
   it('shows the latest reaction from each side, and lets either side take theirs back', () => {
@@ -62,8 +62,8 @@ describe('foldReactions', () => {
     ]);
     expect(withdrawn.shown.has('m')).toBe(false);
     // Both rows are still about `m`, so neither is drawn as a line of its own.
-    expect(withdrawn.targets.get('r1')).toBe('m');
-    expect(withdrawn.targets.get('r2')).toBe('m');
+    expect(withdrawn.rows.get('r1')?.targetId).toBe('m');
+    expect(withdrawn.rows.get('r2')?.targetId).toBe('m');
   });
 
   it('keeps two customers on one thread from overwriting each other', () => {
@@ -78,13 +78,26 @@ describe('foldReactions', () => {
   it('answers null for a reaction whose message is not on the ticket', () => {
     const fold = foldReactions([row('m'), react('r1', REPLY_BY_PHONE, '👍')]);
 
-    expect(fold.targets.get('r1')).toBeNull();
+    expect(fold.rows.get('r1')?.targetId).toBeNull();
+    expect(fold.shown.size).toBe(0);
+  });
+
+  it('places an unreadable reaction nowhere, and never as a target', () => {
+    const fold = foldReactions([
+      row('m'),
+      row('broken', { reaction: { targetWamid: null, emoji: null } }),
+      react('r1', 'wamid.broken', '👍'),
+    ]);
+
+    expect(fold.rows.get('broken')).toEqual({ emoji: null, targetId: null });
+    // Its own wamid is not something another reaction can land on.
+    expect(fold.rows.get('r1')?.targetId).toBeNull();
     expect(fold.shown.size).toBe(0);
   });
 
   it('never puts a reaction on another reaction', () => {
     const fold = foldReactions([react('r1', 'wamid.x', '👍'), react('r2', 'wamid.r1', '❤️')]);
-    expect(fold.targets.get('r2')).toBeNull();
+    expect(fold.rows.get('r2')?.targetId).toBeNull();
   });
 
   it('keeps the earlier of two rows holding one message under different wamids', () => {
@@ -94,7 +107,7 @@ describe('foldReactions', () => {
       react('r1', REPLY_BY_ECHO, '👍'),
     ]);
     // The exact match wins over the key: it is the one the reactor named.
-    expect(fold.targets.get('r1')).toBe('echo');
+    expect(fold.rows.get('r1')?.targetId).toBe('echo');
 
     const byKey = foldReactions([
       row('history', { direction: 'outbound', channelMessageId: REPLY_BY_PHONE }),
@@ -105,7 +118,7 @@ describe('foldReactions', () => {
       }),
       react('r1', REPLY_BY_ECHO, '👍'),
     ]);
-    expect(byKey.targets.get('r1')).toBe('history');
+    expect(byKey.rows.get('r1')?.targetId).toBe('history');
   });
 });
 
@@ -125,13 +138,20 @@ describe('storedReaction', () => {
     expect(storedReaction(meta, raw)).toEqual({ targetWamid: 'wamid.x', emoji: '' });
   });
 
-  it('ignores anything that is not a readable WhatsApp reaction', () => {
+  it('answers null for a row that is not tagged as a reaction', () => {
     const raw = JSON.stringify({ reaction: { message_id: 'wamid.x', emoji: '🙏' } });
     expect(storedReaction({ whatsappType: 'text' }, raw)).toBeNull();
     expect(storedReaction(null, raw)).toBeNull();
-    expect(storedReaction(meta, null)).toBeNull();
-    expect(storedReaction(meta, '{not json')).toBeNull();
-    expect(storedReaction(meta, JSON.stringify({ reaction: { emoji: '🙏' } }))).toBeNull();
-    expect(storedReaction(meta, 'null')).toBeNull();
+  });
+
+  it('keeps a tagged row a reaction when its payload cannot be read', () => {
+    // Null rather than "not a reaction": the row is still not something the
+    // customer said, and must not come back as a `[reacted 👍]` bubble.
+    const unreadable = { targetWamid: null, emoji: null };
+    expect(storedReaction(meta, null)).toEqual(unreadable);
+    expect(storedReaction(meta, '{not json')).toEqual(unreadable);
+    expect(storedReaction(meta, 'null')).toEqual(unreadable);
+    expect(storedReaction(meta, JSON.stringify({ reaction: { emoji: '🙏' } }))).toEqual(unreadable);
+    expect(storedReaction(meta, JSON.stringify({ message_id: 'wamid.x' }))).toEqual(unreadable);
   });
 });

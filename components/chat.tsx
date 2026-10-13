@@ -186,7 +186,11 @@ export function ChatBubble({
 
         {/*
           The reactions overlap the bubble's foot by half their height,
-          so they read as attached to it, and sit on the side away from the
+          so they read as attached to it — onto the bubble's padding, which is
+          why a part with no bubble of its own (a file, a photo, a pin) takes
+          them just below instead: there the overlap would sit on the content,
+          and the pill's button would take the clicks meant for the file. They
+          sit on the side away from the
           sender: that corner is never the tail, and on a short bubble the
           avatar's side is where the eye already is. Wrapped so `self-*` is
           measured against the bubble, not against a wider error or receipt.
@@ -204,7 +208,9 @@ export function ChatBubble({
           </div>
           {reactions ? (
             <div
-              className={`relative -mt-3 flex flex-wrap gap-1 px-2.5 ${out ? 'self-start' : 'self-end'}`}
+              className={`relative flex flex-wrap gap-1 px-2.5 ${
+                kind === 'attachment' ? 'mt-1' : '-mt-3'
+              } ${out ? 'self-start' : 'self-end'}`}
             >
               {reactions}
             </div>

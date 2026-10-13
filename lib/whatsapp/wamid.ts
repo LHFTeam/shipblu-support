@@ -62,6 +62,12 @@ export function wamidKey(wamid: string): string | null {
 
 const PREFIX = 'wamid.';
 
+// One decoder for every wamid: the ticket loader keys each message of the
+// thread on every render, and `decode` without `stream` keeps no state between
+// calls, so sharing it is safe. Fatal, so bytes that are not UTF-8 fail the
+// key rather than becoming replacement characters another id could share.
+const UTF8 = new TextDecoder('utf-8', { fatal: true });
+
 // Thrift compact-protocol field types; the ones a wamid uses, and the scalars
 // a reader has to be able to step over if one ever appears.
 const BOOL_TRUE = 1;
@@ -106,9 +112,7 @@ class CompactReader {
   readString(): string {
     const length = this.varint();
     if (this.at + length > this.bytes.length) throw new RangeError('wamid string overruns');
-    const text = new TextDecoder('utf-8', { fatal: true }).decode(
-      this.bytes.subarray(this.at, this.at + length),
-    );
+    const text = UTF8.decode(this.bytes.subarray(this.at, this.at + length));
     this.at += length;
     return text;
   }

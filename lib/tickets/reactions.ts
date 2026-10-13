@@ -29,19 +29,33 @@ export type ReactionRow = {
 };
 
 export type StoredReaction = {
-  /** The reacted-to message's wamid, in whatever form the reactor's copy names it. */
-  targetWamid: string;
-  /** Empty when the reactor took their reaction back. */
-  emoji: string;
+  /**
+   * The reacted-to message's wamid, in whatever form the reactor's copy names
+   * it; null when the stored delivery cannot be read.
+   */
+  targetWamid: string | null;
+  /** Empty when the reactor took their reaction back; null when unreadable. */
+  emoji: string | null;
 };
 
 export type ShownReaction = { messageId: string; emoji: string };
 
+/** A reaction row as the thread draws it: what it was, and what it is about. */
+export type PlacedReaction = {
+  emoji: string | null;
+  /** The message it is drawn on; null when that message is not here. */
+  targetId: string | null;
+};
+
 export type ReactionFold = {
   /** Per reacted-to message, what it shows now, in the order it was last reacted. */
   shown: Map<string, ShownReaction[]>;
-  /** Per reaction row, the message it is about, or null when that is not here. */
-  targets: Map<string, string | null>;
+  /**
+   * Per reaction row. Answered here rather than rebuilt by the caller, so a
+   * row's own account of itself and its target's pills come from one pass and
+   * cannot disagree.
+   */
+  rows: Map<string, PlacedReaction>;
 };
 
 export function foldReactions(rows: readonly ReactionRow[]): ReactionFold {
@@ -50,7 +64,9 @@ export function foldReactions(rows: readonly ReactionRow[]): ReactionFold {
 
   for (const row of rows) {
     // A reaction is never itself reacted to, and indexing one would let a
-    // malformed target land on the reaction row rather than on nothing.
+    // malformed target land on the reaction row rather than on nothing — an
+    // unreadable one included, which is why `storedReaction` answers for every
+    // row tagged as a reaction rather than only the ones it could read.
     if (row.reaction || !row.channelMessageId) continue;
     // First writer wins: a message stored twice under two of its wamids — a
     // history copy beside the live echo — keeps its reactions on the earlier.
@@ -59,16 +75,19 @@ export function foldReactions(rows: readonly ReactionRow[]): ReactionFold {
     if (key && !byKey.has(key)) byKey.set(key, row.id);
   }
 
-  const targets = new Map<string, string | null>();
+  const placed = new Map<string, PlacedReaction>();
   const current = new Map<string, Map<string, ShownReaction>>();
 
   for (const row of rows) {
     if (!row.reaction) continue;
 
     const { targetWamid, emoji } = row.reaction;
-    const key = wamidKey(targetWamid);
-    const target = byWamid.get(targetWamid) ?? (key ? byKey.get(key) : undefined) ?? null;
-    targets.set(row.id, target);
+    const key = targetWamid ? wamidKey(targetWamid) : null;
+    const target =
+      (targetWamid ? byWamid.get(targetWamid) : undefined) ??
+      (key ? byKey.get(key) : undefined) ??
+      null;
+    placed.set(row.id, { emoji, targetId: target });
     if (!target) continue;
 
     // Each side holds one reaction per message on a one-to-one chat; the
@@ -88,7 +107,7 @@ export function foldReactions(rows: readonly ReactionRow[]): ReactionFold {
     if (onTarget.size > 0) shown.set(target, [...onTarget.values()]);
   }
 
-  return { shown, targets };
+  return { shown, rows: placed };
 }
 
 /**
@@ -100,26 +119,33 @@ export function foldReactions(rows: readonly ReactionRow[]): ReactionFold {
  * and the copied history all keep the payload whole, and each names its target
  * as `reaction.message_id`. Reading it here needs no backfill and no second
  * place for the same fact to disagree with the first.
+ *
+ * Whether a row is a reaction is the tag's answer, not the payload's: a row
+ * tagged as one whose payload cannot be read is still a reaction — drawn as a
+ * line saying so — rather than falling back to a `[reacted 👍]` bubble or
+ * being offered as something another reaction could land on.
  */
 export function storedReaction(
   meta: Record<string, unknown> | null,
   rawBody: string | null,
 ): StoredReaction | null {
-  if (meta?.whatsappType !== 'reaction' || !rawBody) return null;
+  if (meta?.whatsappType !== 'reaction') return null;
+  const unreadable = { targetWamid: null, emoji: null };
+  if (!rawBody) return unreadable;
 
   let raw: unknown;
   try {
     raw = JSON.parse(rawBody);
   } catch {
-    return null;
+    return unreadable;
   }
 
   const reaction =
     raw && typeof raw === 'object' ? (raw as { reaction?: unknown }).reaction : undefined;
-  if (!reaction || typeof reaction !== 'object') return null;
+  if (!reaction || typeof reaction !== 'object') return unreadable;
 
   const { message_id: targetWamid, emoji } = reaction as { message_id?: unknown; emoji?: unknown };
-  if (typeof targetWamid !== 'string' || !targetWamid) return null;
+  if (typeof targetWamid !== 'string' || !targetWamid) return unreadable;
 
   return { targetWamid, emoji: typeof emoji === 'string' ? emoji.trim() : '' };
 }
